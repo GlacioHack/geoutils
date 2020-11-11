@@ -50,3 +50,7 @@ class Raster():
             self.data = self.ds.read()
         else:
             self.data = self.ds.read(bands)
+
+
+class SatelliteImage(Raster):
+    pass
