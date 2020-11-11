@@ -9,7 +9,7 @@ class Raster():
     """
     Create a Raster object from a rasterio-supported raster dataset.
     """
-    def __init__(self, filename: str, saved_attrs=saved_attrs):
+    def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=True, bands=None):
 
         # Read file's metadata
         ds = rio.open(filename)
@@ -17,7 +17,12 @@ class Raster():
         
         # Copy most used attributes/methods
         for attr in saved_attrs:
-            setattr(self, attr, getattr(ds,attr)) 
+            setattr(self, attr, getattr(ds,attr))
+
+        if load_data:
+            self.load(bands)
+        else:
+            self.data = None
         
     def info(self):
         """ 
@@ -26,7 +31,7 @@ class Raster():
         print('Driver:             {}'.format(self.driver))
         #        if self.intype != 'MEM':
         print('File:               {}'.format(self.name))
-        #else:
+        # else:
         #    print('File:               {}'.format('in memory'))
         print('Size:               {}, {}'.format(self.width, self.height))
         print('Coordinate System:  EPSG:{}'.format(self.crs.to_epsg()))
@@ -34,6 +39,14 @@ class Raster():
         print('Pixel Size:         {}, {}'.format(*self.res))
         print('Upper Left Corner:  {}, {}'.format(*self.bounds[:2]))
         print('Lower Right Corner: {}, {}'.format(*self.bounds[2:]))
-        #print('[MAXIMUM]:          {}'.format(np.nanmax(self.img)))
-        #print('[MINIMUM]:          {}'.format(np.nanmin(self.img)))
+        # print('[MAXIMUM]:          {}'.format(np.nanmax(self.img)))
+        # print('[MINIMUM]:          {}'.format(np.nanmin(self.img)))
 
+    def load(self, bands=None):
+        """
+        Load specific bands of the dataset.
+        """
+        if bands is None:
+            self.data = self.ds.read()
+        else:
+            self.data = self.ds.read(bands)
