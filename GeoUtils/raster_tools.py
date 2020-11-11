@@ -1,3 +1,6 @@
+"""
+GeoUtils.raster_tools provides a toolset for working with raster data.
+"""
 import numpy as np
 import rasterio as rio
 
@@ -17,14 +20,15 @@ class Raster():
         
         # Copy most used attributes/methods
         for attr in saved_attrs:
-            setattr(self, attr, getattr(ds,attr))
+            setattr(self, attr, getattr(ds, attr))
 
         if load_data:
             self.load(bands)
         else:
             self.data = None
-        
-    def info(self):
+            self.nbands = None
+
+    def info(self, stats=False):
         """ 
         Prints information about the raster (filename, coordinate system, number of columns/rows, etc.).
         """
@@ -39,8 +43,22 @@ class Raster():
         print('Pixel Size:         {}, {}'.format(*self.res))
         print('Upper Left Corner:  {}, {}'.format(*self.bounds[:2]))
         print('Lower Right Corner: {}, {}'.format(*self.bounds[2:]))
-        # print('[MAXIMUM]:          {}'.format(np.nanmax(self.img)))
-        # print('[MINIMUM]:          {}'.format(np.nanmin(self.img)))
+        if stats:
+            if self.data is not None:
+                if self.nbands == 1:
+                    print('[MAXIMUM]:          {:.2f}'.format(np.nanmax(self.data)))
+                    print('[MINIMUM]:          {:.2f}'.format(np.nanmin(self.data)))
+                    print('[MEDIAN]:           {:.2f}'.format(np.nanmedian(self.data)))
+                    print('[MEAN]:             {:.2f}'.format(np.nanmean(self.data)))
+                    print('[STD DEV]:          {:.2f}'.format(np.nanstd(self.data)))
+                else:
+                    for b in range(self.nbands):
+                        print('Band {}:'.format(b+1))  # try to keep with rasterio convention.
+                        print('[MAXIMUM]:          {:.2f}'.format(np.nanmax(self.data[b, :, :])))
+                        print('[MINIMUM]:          {:.2f}'.format(np.nanmin(self.data[b, :, :])))
+                        print('[MEDIAN]:           {:.2f}'.format(np.nanmedian(self.data[b, :, :])))
+                        print('[MEAN]:             {:.2f}'.format(np.nanmean(self.data[b, :, :])))
+                        print('[STD DEV]:          {:.2f}'.format(np.nanstd(self.data[b, :, :])))
 
     def load(self, bands=None):
         """
@@ -50,6 +68,11 @@ class Raster():
             self.data = self.ds.read()
         else:
             self.data = self.ds.read(bands)
+
+        if self.data.ndim == 3:
+            self.nbands = self.data.shape[0]
+        else:
+            self.nbands = 1
 
 
 class SatelliteImage(Raster):
