@@ -4,6 +4,10 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 import numpy as np
 import rasterio as rio
 from rasterio.io import MemoryFile
+
+from rasterio.crs import CRS
+from affine import Affine
+
 import os
 
 # Attributes from rasterio's DatasetReader object to be kept by default
@@ -19,17 +23,17 @@ class Raster(object):
     # This only gets set if a disk-based file is read in. If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
 
-    def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=False, bands=None):
+    def __init__(self, filename, saved_attrs=saved_attrs, load_data=True, bands=None):
         """
         Load a rasterio-supported dataset, given a filename.
 
-        :param filename: The filename of the dataset.
-        :type filename: str
+        :param filename: The filename of the dataset, or a rasterio MemoryFile object.
+        :type filename: str or rio.io.MemoryFile.
         :param saved_attrs: A list of attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
              'name', 'nodata', 'res', 'shape', 'transform', 'width']
         :type saved_attrs: list of strings
-        :param load_data: Load the raster data into the object. Default is False.
+        :param load_data: Load the raster data into the object. Default is True.
         :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
@@ -37,13 +41,27 @@ class Raster(object):
         :return: A Raster object
         """
 
-        # Save the absolute on-disk filename
-        self.filename = os.path.abspath(filename)
+        # Image is a file on disk.
+        if isinstance(filename, str):
+            # Save the absolute on-disk filename
+            self.filename = os.path.abspath(filename)
+            # open the file in memory
+            self.memfile = MemoryFile(open(filename, 'rb'))
 
-        # open the file in memory
-        self.memfile = MemoryFile(open(filename, 'rb'))
+        # Or, image is already a Memory File.
+        elif isinstance(filename, rio.io.MemoryFile):
+            self.filename = None
+            self.memfile = filename
 
-        # read the file as a rasterio dataset
+        # Provide a catch in case trying to load from data array
+        elif isinstance(filename, np.array):
+            raise ValueError('np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ')
+        
+        # Don't recognise the input, so stop here.
+        else:
+            raise ValueError('filename argument not recognised.')
+
+        # Read the file as a rasterio dataset
         self.ds = self.memfile.open()
 
         # Copy most used attributes/methods
@@ -56,6 +74,70 @@ class Raster(object):
         else:
             self.data = None
             self.nbands = None
+
+
+    @classmethod
+    def from_array(cls, data, transform, crs, nodata=None):
+        """ Create a Raster from a numpy array and some geo-referencing information.
+
+        :param data:
+        :dtype data:
+        :param transform: the 2-D affine transform for the image mapping. 
+            Either a tuple(x_res, 0.0, top_left_x, 0.0, y_res, top_left_y) or 
+            an affine.Affine object.
+        :dtype transform: tuple, affine.Affine.
+        :param crs: Coordinate Reference System for image. Either a rasterio CRS, 
+            or the EPSG integer.
+        :dtype crs: rasterio.crs.CRS or int
+        :param nodata:
+        :dtype nodata:
+
+        :returns: A Raster object containing the provided data.
+        :rtype: Raster.
+
+        Example:
+        You have a data array in EPSG:32645. It has a spatial resolution of
+        30 m in x and y, and its top left corner is X=478000, Y=3108140.
+        >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+        >>> myim = Raster.from_array(data, transform, 32645)
+
+        """
+
+        if not isinstance(transform, Affine):
+            if isinstance(transform, tuple):
+                transform = Affine(*transform)
+            else:
+                raise ValueError('transform argument needs to be Affine or tuple.')
+
+        # Enable shortcut to create CRS from an EPSG ID.
+        if isinstance(crs, int):
+            crs = CRS.from_epsg(crs)
+
+        # If a 2-D ('single-band') array is passed in, give it a band dimension.
+        if len(data.shape) < 3:
+            data = np.expand_dims(data, 0)
+
+        # Open handle to new memory file
+        mfh = MemoryFile()
+
+        # Create the memory file
+        with rio.open(mfh, 'w',
+            height=data.shape[1],
+            width=data.shape[2],
+            count=data.shape[0],
+            dtype=data.dtype,
+            crs=crs,
+            transform=transform,
+            nodata=nodata, 
+            driver='GTiff') as ds:
+
+            ds.write(data)
+
+        # Initialise a Raster object created with MemoryFile.
+        # (i.e., __init__ will now be run.)
+        return cls(mfh)
+
+
 
     def __repr__(self):
         """ Convert object to formal string representation. """
