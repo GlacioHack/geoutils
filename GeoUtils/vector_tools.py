@@ -29,6 +29,31 @@ class Vector():
         self.ds = ds
         self.name = filename
 
+    def __repr__(self):
+        return self.ds.__repr__()
+
+    def __str__(self):
+        """ Provide string of information about Raster. """
+        return self.info()
+
+    def info(self):
+        """
+        Returns string of information about the vector (filename, coordinate system, number of layers, features, etc.).
+
+        :returns: text information about Vector attributes.
+        :rtype: str
+        """
+        as_str = [  # 'Driver:             {} \n'.format(self.driver),
+            'Filename:           {} \n'.format(self.name),
+            'Coordinate System:  EPSG:{}\n'.format(
+                self.ds.crs.to_epsg()),
+            'Number of features: {} \n'.format(len(self.ds)),
+            'Extent:             {} \n'.format(self.ds.total_bounds.tolist()),
+            'Attributes:         {} \n'.format(self.ds.columns.tolist()),
+            self.ds.__repr__()]
+
+        return "".join(as_str)
+
     def crop2raster(self, rst):
         """
         Update self so that features outside the extent of a raster file are cropped. Reprojection is done on the fly if both data set have different projections.
