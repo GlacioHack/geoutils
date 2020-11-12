@@ -4,15 +4,16 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 import numpy as np
 import rasterio as rio
 
-
 # Attributes from rasterio's DatasetReader object to be kept by default
-saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata', 'res', 'shape', 'transform', 'width']
+saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
+               'res', 'shape', 'transform', 'width']
 
 
 class Raster():
     """
     Create a Raster object from a rasterio-supported raster dataset.
     """
+
     def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=False, bands=None):
         """
         Load a rasterio-supported dataset, given a filename.
@@ -33,11 +34,11 @@ class Raster():
         # Read file's metadata
         ds = rio.open(filename)
         self.ds = ds
-        
+
         # Copy most used attributes/methods
         self._saved_attrs = saved_attrs
         for attr in saved_attrs:
-        	setattr(self, attr, getattr(ds, attr))
+            setattr(self, attr, getattr(ds, attr))
 
         if load_data:
             self.load(bands)
@@ -45,23 +46,19 @@ class Raster():
             self.data = None
             self.nbands = None
 
-
-
     def __repr__(self):
-    	""" Convert object to formal string representation. """
-    	L = [getattr(self, item) for item in self._saved_attrs]
-    	s = "%s.%s(%s)" % (self.__class__.__module__,
-    		self.__class__.__qualname__,
-    		", ".join(map(str, L)))
+        """ Convert object to formal string representation. """
+        L = [getattr(self, item) for item in self._saved_attrs]
+        s = "%s.%s(%s)" % (self.__class__.__module__,
+                           self.__class__.__qualname__,
+                           ", ".join(map(str, L)))
 
-    	return s
-
+        return s
 
     def __str__(self):
-    	""" Provide string of information about Raster. """
-    	return self.info()
+        """ Provide string of information about Raster. """
+        return self.info()
 
-        
     def info(self, stats=False):
         """ 
         Returns string of information about the raster (filename, coordinate system, number of columns/rows, etc.).
@@ -93,7 +90,7 @@ class Raster():
                     as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data)))
                 else:
                     for b in range(self.nbands):
-                        as_str.append('Band {}:'.format(b+1))  # \ntry to keep with rasterio convention.
+                        as_str.append('Band {}:'.format(b + 1))  # \ntry to keep with rasterio convention.
                         as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data[b, :, :])))
                         as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data[b, :, :])))
                         as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data[b, :, :])))
@@ -101,8 +98,6 @@ class Raster():
                         as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data[b, :, :])))
 
         return "".join(as_str)
-
-        
 
     def load(self, bands=None):
         """
@@ -126,7 +121,6 @@ class Raster():
 
     def clip(self):
         pass
-
 
 
 class SatelliteImage(Raster):
