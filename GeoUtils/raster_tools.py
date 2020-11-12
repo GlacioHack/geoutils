@@ -6,6 +6,15 @@ import rasterio as rio
 from rasterio.io import MemoryFile
 import os
 
+
+try:
+    import rioxarray
+except ImportError:
+    _has_rioxarray = False
+else:
+    _has_rioxarray = True
+
+
 # Attributes from rasterio's DatasetReader object to be kept by default
 saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
                'res', 'shape', 'transform', 'width']
@@ -185,6 +194,36 @@ class Raster(object):
             dst.write(save_data)
 
         return
+
+
+
+    def to_xarray(self, name=None):
+        """ Convert this Raster into an xarray DataArray using rioxarray.
+
+        This method uses rioxarray to generate a DataArray with associated
+        geo-referencing information.
+
+        See the documentation of rioxarray and xarray for more information on 
+        the methods and attributes of the resulting DataArray.
+        
+        :param name: Set the name of the DataArray.
+        :type name: str
+        :returns: xarray DataArray
+        :rtype: xr.DataArray
+
+        """
+
+        if not _has_rioxarray:
+            raise ImportError('rioxarray is required for this functionality.')
+
+        xr = rioxarray.open_rasterio(self.ds)
+        if name is not None:
+            xr.name = name
+
+        return xr
+
+
+        
 
 
 
