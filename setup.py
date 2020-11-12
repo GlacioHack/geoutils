@@ -8,6 +8,6 @@ setup(name='GeoUtils',
       author='The GlacioHack Team',
       license='BSD-3',
       packages=['GeoUtils'],
-      install_requires=['rasterio'],
+      install_requires=['rasterio', 'geopandas'],
       scripts=[],
       zip_safe=False)
