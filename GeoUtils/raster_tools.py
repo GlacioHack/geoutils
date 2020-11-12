@@ -151,12 +151,12 @@ class Raster():
 
     	with rio.open(filename, 'w', 
     		driver=driver, 
-    		height=self.height, 
-    		width=self.width, 
-    		count=self.count,
+    		height=self.ds.height, 
+    		width=self.ds.width, 
+    		count=self.ds.count,
     		dtype=dtype, 
-    		crs=self.crs, 
-    		transform=self.transform) as dst:
+    		crs=self.ds.crs, 
+    		transform=self.ds.transform) as dst:
 
     		dst.write(self.data, 1)
 
