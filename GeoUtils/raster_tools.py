@@ -8,6 +8,7 @@ import rasterio as rio
 # Attributes from rasterio's DatasetReader object to be kept by default
 saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata', 'res', 'shape', 'transform', 'width']
 
+
 class Raster():
     """
     Create a Raster object from a rasterio-supported raster dataset.
@@ -95,6 +96,12 @@ class Raster():
             self.nbands = self.data.shape[0]
         else:
             self.nbands = 1
+
+    def crop(self):
+        pass
+
+    def clip(self):
+        pass
 
 
 class SatelliteImage(Raster):
