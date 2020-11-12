@@ -122,5 +122,45 @@ class Raster():
 
 
 
+    def save(self, filename, driver='GTiff', dtype=None):
+    	""" Write the Raster to a geo-referenced file. 
+
+    	Only works if data have been loaded into memory.
+
+    	:param filename: Filename to write the file to.
+    	:type filename: str
+    	:param driver: the 'GDAL' driver to use to write the file as.
+    	:type driver: str
+    	:param dtype: Data Type to write the image as (defaults to dtype of image data)
+    	:type dtype: np.dtype
+
+    	"""
+
+    	"""
+    	NOTE: The code in this function could become deprecated very quickly.
+    	At the moment we're transiently creating a new rio object, but if 
+    	we proceed with in-memory representation plans then it would be sufficient
+    	to simply call .write() on that instead.
+    	"""
+
+    	dtype = self.data.dtype if dtype is None else dtype
+
+    	if self.data is None:
+    		raise AttributeError('No raster data loaded into memory.')
+
+
+    	with rio.open(filename, 'w', 
+    		driver=driver, 
+    		height=self.height, 
+    		width=self.width, 
+    		count=self.count,
+    		dtype=dtype, 
+    		crs=self.crs, 
+    		transform=self.transform) as dst:
+
+    		dst.write(self.data, 1)
+
+
+
 class SatelliteImage(Raster):
     pass
