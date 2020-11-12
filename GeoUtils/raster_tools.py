@@ -5,6 +5,9 @@ import os
 import numpy as np
 import rasterio as rio
 import rasterio.mask as riomask
+import rasterio.warp as riowarp
+import rasterio.windows as riowindows
+import rasterio.transform as riotransform
 from rasterio.io import MemoryFile
 from shapely.geometry.polygon import Polygon
 import GeoUtils.vector_tools as vt
@@ -176,27 +179,46 @@ class Raster(object):
 
         """
         assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
+        if isinstance(cropGeom, Raster):
+            xmin, ymin, xmax, ymax = cropGeom.bounds
+        elif isinstance(cropGeom, vt.Vector):
+            raise NotImplementedError
+        elif isinstance(cropGeom, (list, tuple)):
+            xmin, ymin, xmax, ymax = cropGeom
+        else:
+            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+
+        meta = self.ds.meta
 
         if mode == 'match_pixel':
-            if isinstance(cropGeom, Raster):
-                xmin, ymin, xmax, ymax = cropGeom.bounds
-            elif isinstance(cropGeom, vt.Vector):
-                raise NotImplementedError
-            elif isinstance(cropGeom, (list, tuple)):
-                xmin, ymin, xmax, ymax = cropGeom
-            else:
-                raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
-
             crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
-            meta = self.ds.meta
 
             crop_img, tfm = riomask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
             meta.update({'height': crop_img.shape[1],
                          'width': crop_img.shape[2],
                          'transform': tfm})
-            self._update(crop_img, meta)
+
         else:
-            raise NotImplementedError
+            window = riowindows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
+            new_height = int(window.height)
+            new_width = int(window.width)
+            new_tfm = riotransform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
+
+            if self.isLoaded:
+                new_img = np.zeros((self.nbands, new_height, new_width), dtype=self.data.dtype)
+            else:
+                new_img = np.zeros((self.count, new_height, new_width), dtype=self.data.dtype)
+
+            crop_img, tfm = riowarp.reproject(self.data, new_img,
+                                              src_transform=self.transform,
+                                              dst_transform=new_tfm,
+                                              src_crs=self.crs,
+                                              dst_crs=self.crs)
+            meta.update({'height': new_height,
+                         'width': new_width,
+                         'transform': tfm})
+
+        self._update(crop_img, meta)
 
     def clip(self):
         pass
