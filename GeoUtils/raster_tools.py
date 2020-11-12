@@ -134,5 +134,59 @@ class Raster(object):
         pass
 
 
+    def save(self, filename, driver='GTiff', dtype=None,
+        blank_value=None):
+        """ Write the Raster to a geo-referenced file. 
+
+        Given a filename to save the Raster to, create a geo-referenced file
+        on disk which contains the contents of self.data.
+
+        If blank_value is set to an integer or float, then instead of writing 
+        the contents of self.data to disk, write this provided value to every
+        pixel instead.
+
+        :param filename: Filename to write the file to.
+        :type filename: str
+        :param driver: the 'GDAL' driver to use to write the file as.
+        :type driver: str
+        :param dtype: Data Type to write the image as (defaults to dtype of image data)
+        :type dtype: np.dtype
+        :param blank_value: Use to write an image out with every pixel's value
+        corresponding to this value, instead of writing the image data to disk.
+        :type blank_value: None, int, float.
+
+        :returns: None.
+
+        """
+
+        dtype = self.data.dtype if dtype is None else dtype
+
+        if (self.data is None) & (blank_value is None):
+            return AttributeError('No data loaded, and alterative blank_value not set.')
+        elif blank_value is not None:
+            if isinstance(blank_value, int) | isinstance(blank_value, float):
+                save_data = np.zeros((self.ds.count, self.ds.height, self.ds.width))
+                save_data[:,:,:] = blank_value
+            else:
+                raise ValueError('blank_values must be one of int, float (or None).')
+        else:
+            save_data = self.data
+
+        with rio.open(filename, 'w', 
+            driver=driver, 
+            height=self.ds.height, 
+            width=self.ds.width, 
+            count=self.ds.count,
+            dtype=save_data.dtype, 
+            crs=self.ds.crs, 
+            transform=self.ds.transform,
+            nodata=self.ds.nodata) as dst:
+
+            dst.write(save_data)
+
+        return
+
+
+
 class SatelliteImage(Raster):
     pass
