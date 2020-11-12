@@ -4,7 +4,7 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 import numpy as np
 import rasterio as rio
 from rasterio.io import MemoryFile
-
+import os
 
 # Attributes from rasterio's DatasetReader object to be kept by default
 saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
@@ -37,8 +37,8 @@ class Raster(object):
         :return: A Raster object
         """
 
-        # Save the on-disk filename
-        self.filename = filename
+        # Save the absolute on-disk filename
+        self.filename = os.path.abspath(filename)
 
         # open the file in memory
         self.memfile = MemoryFile(open(filename, 'rb'))
