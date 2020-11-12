@@ -75,21 +75,24 @@ class Vector():
 
     def create_mask(self, rst=None, crs=None, xres=None, yres=None, bounds=None, in_value=255, out_value=0):
         """
-        Crop a vector file to the extent of a raster file. Reprojection is done on the fly if both data set have different projections.
+        Rasterize the vector features into a raster which has the extent/dimensions of the provided raster file.
+
+        Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs. Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
+        Vector features which fall outside the bounds of the raster file are not written to the new mask file.
 
         :param rst: A Raster object or string to filename
         :type rst: Raster object or str
-        :param crs: A pyproj or rasterio CRS object
+        :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
         :type crs: pyproj.crs.crs.CRS, rasterio.crs.CRS
-        :param xres: Output raster spatial resolution in x
+        :param xres: Output raster spatial resolution in x. Only is rst is None.
         :type xres: float
-        :param yres: Output raster spatial resolution in x
+        :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
         :type yres: float
-        :param bounds: Output raster bounds (left, bottom, right, top)
+        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
         :type bounds: tuple
-        :param in_value: Value to be burnt inside the polygons
+        :param in_value: Value to be burnt inside the polygons (Default 255)
         :type in_value: float
-        :param out_value: Value to be burnt outside the polygons
+        :param out_value: Value to be burnt outside the polygons (Default 0)
         :type out_value: float
 
         :returns: array containing the mask
