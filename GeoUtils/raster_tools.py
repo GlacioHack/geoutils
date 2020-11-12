@@ -3,15 +3,22 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 """
 import numpy as np
 import rasterio as rio
+from rasterio.io import MemoryFile
 
 
 # Attributes from rasterio's DatasetReader object to be kept by default
-saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata', 'res', 'shape', 'transform', 'width']
+saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
+               'res', 'shape', 'transform', 'width']
 
-class Raster():
+
+class Raster(object):
     """
     Create a Raster object from a rasterio-supported raster dataset.
     """
+
+    # This only gets set if a disk-based file is read in. If the Raster is created with from_array, from_mem etc, this stays as None.
+    filename = None
+
     def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=False, bands=None):
         """
         Load a rasterio-supported dataset, given a filename.
@@ -29,14 +36,20 @@ class Raster():
 
         :return: A Raster object
         """
-        # Read file's metadata
-        ds = rio.open(filename)
-        self.ds = ds
-        
+
+        # Save the on-disk filename
+        self.filename = filename
+
+        # open the file in memory
+        self.memfile = MemoryFile(open(filename, 'rb'))
+
+        # read the file as a rasterio dataset
+        self.ds = self.memfile.open()
+
         # Copy most used attributes/methods
         self._saved_attrs = saved_attrs
         for attr in saved_attrs:
-        	setattr(self, attr, getattr(ds, attr))
+            setattr(self, attr, getattr(self.ds, attr))
 
         if load_data:
             self.load(bands)
@@ -44,23 +57,19 @@ class Raster():
             self.data = None
             self.nbands = None
 
-
-
     def __repr__(self):
-    	""" Convert object to formal string representation. """
-    	L = [getattr(self, item) for item in self._saved_attrs]
-    	s = "%s.%s(%s)" % (self.__class__.__module__,
-    		self.__class__.__qualname__,
-    		", ".join(map(str, L)))
+        """ Convert object to formal string representation. """
+        L = [getattr(self, item) for item in self._saved_attrs]
+        s = "%s.%s(%s)" % (self.__class__.__module__,
+                           self.__class__.__qualname__,
+                           ", ".join(map(str, L)))
 
-    	return s
-
+        return s
 
     def __str__(self):
-    	""" Provide string of information about Raster. """
-    	return self.info()
+        """ Provide string of information about Raster. """
+        return self.info()
 
-        
     def info(self, stats=False):
         """ 
         Returns string of information about the raster (filename, coordinate system, number of columns/rows, etc.).
@@ -72,15 +81,15 @@ class Raster():
         :returns: text information about Raster attributes.
         :rtype: str
         """
-        as_str = []
-        as_str.append('Driver:             {} \n'.format(self.driver))
-        as_str.append('File:               {}\n'.format(self.name))
-        as_str.append('Size:               {}, {}\n'.format(self.width, self.height))
-        as_str.append('Coordinate System:  EPSG:{}\n'.format(self.crs.to_epsg()))
-        as_str.append('NoData Value:       {}\n'.format(self.nodata))
-        as_str.append('Pixel Size:         {}, {}\n'.format(*self.res))
-        as_str.append('Upper Left Corner:  {}, {}\n'.format(*self.bounds[:2]))
-        as_str.append('Lower Right Corner: {}, {}\n'.format(*self.bounds[2:]))
+        as_str = ['Driver:             {} \n'.format(self.driver),
+                  'File on disk:       {} \n'.format(self.filename),
+                  'RIO MemoryFile:     {}\n'.format(self.name),
+                  'Size:               {}, {}\n'.format(self.width, self.height),
+                  'Coordinate System:  EPSG:{}\n'.format(self.crs.to_epsg()),
+                  'NoData Value:       {}\n'.format(self.nodata),
+                  'Pixel Size:         {}, {}\n'.format(*self.res),
+                  'Upper Left Corner:  {}, {}\n'.format(*self.bounds[:2]),
+                  'Lower Right Corner: {}, {}\n'.format(*self.bounds[2:])]
 
         if stats:
             if self.data is not None:
@@ -92,7 +101,7 @@ class Raster():
                     as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data)))
                 else:
                     for b in range(self.nbands):
-                        as_str.append('Band {}:'.format(b+1))  # \ntry to keep with rasterio convention.
+                        as_str.append('Band {}:'.format(b + 1))  # \ntry to keep with rasterio convention.
                         as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data[b, :, :])))
                         as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data[b, :, :])))
                         as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data[b, :, :])))
@@ -100,8 +109,6 @@ class Raster():
                         as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data[b, :, :])))
 
         return "".join(as_str)
-
-        
 
     def load(self, bands=None):
         """
@@ -120,6 +127,11 @@ class Raster():
         else:
             self.nbands = 1
 
+    def crop(self):
+        pass
+
+    def clip(self):
+        pass
 
 
     def save(self, filename, driver='GTiff', dtype=None):
