@@ -1,14 +1,18 @@
 """
 GeoUtils.raster_tools provides a toolset for working with raster data.
 """
+import os
 import numpy as np
 import rasterio as rio
+import rasterio.mask as riomask
 from rasterio.io import MemoryFile
-import os
+from shapely.geometry.polygon import Polygon
+import GeoUtils.vector_tools as vt
+
 
 # Attributes from rasterio's DatasetReader object to be kept by default
-saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
-               'res', 'shape', 'transform', 'width']
+default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
+                 'res', 'shape', 'transform', 'width']
 
 
 class Raster(object):
@@ -16,10 +20,11 @@ class Raster(object):
     Create a Raster object from a rasterio-supported raster dataset.
     """
 
-    # This only gets set if a disk-based file is read in. If the Raster is created with from_array, from_mem etc, this stays as None.
+    # This only gets set if a disk-based file is read in.
+    # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
 
-    def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=False, bands=None):
+    def __init__(self, filename: str, attrs=None, load_data=False, bands=None):
         """
         Load a rasterio-supported dataset, given a filename.
 
@@ -47,8 +52,15 @@ class Raster(object):
         self.ds = self.memfile.open()
 
         # Copy most used attributes/methods
-        self._saved_attrs = saved_attrs
-        for attr in saved_attrs:
+        if attrs is None:
+            self._saved_attrs = default_attrs
+            attrs = default_attrs
+        else:
+            for attr in default_attrs:
+                if attr not in attrs:
+                    attrs.append(attr)
+
+        for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
 
         if load_data:
@@ -69,6 +81,9 @@ class Raster(object):
     def __str__(self):
         """ Provide string of information about Raster. """
         return self.info()
+
+    def _update(self):
+        pass
 
     def info(self, stats=False):
         """ 
@@ -101,7 +116,7 @@ class Raster(object):
                     as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data)))
                 else:
                     for b in range(self.nbands):
-                        as_str.append('Band {}:'.format(b + 1))  # \ntry to keep with rasterio convention.
+                        as_str.append('Band {}:'.format(b + 1))  # try to keep with rasterio convention.
                         as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data[b, :, :])))
                         as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data[b, :, :])))
                         as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data[b, :, :])))
