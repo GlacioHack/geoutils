@@ -35,8 +35,9 @@ class Raster():
         self.ds = ds
         
         # Copy most used attributes/methods
+        self._saved_attrs = saved_attrs
         for attr in saved_attrs:
-            setattr(self, attr, getattr(ds, attr))
+        	setattr(self, attr, getattr(ds, attr))
 
         if load_data:
             self.load(bands)
@@ -44,41 +45,64 @@ class Raster():
             self.data = None
             self.nbands = None
 
+
+
+    def __repr__(self):
+    	""" Convert object to formal string representation. """
+    	L = [getattr(self, item) for item in self._saved_attrs]
+    	s = "%s.%s(%s)" % (self.__class__.__module__,
+    		self.__class__.__qualname__,
+    		", ".join(map(str, L)))
+
+    	return s
+
+
+    def __str__(self):
+    	""" Provide string of information about Raster. """
+    	return self.info()
+
+        
     def info(self, stats=False):
         """ 
-        Prints information about the raster (filename, coordinate system, number of columns/rows, etc.).
+        Returns string of information about the raster (filename, coordinate system, number of columns/rows, etc.).
 
-        :param stats: Print statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
+        :param stats: Add statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
             not calculate statistics.
         :type stats: bool
+
+        :returns: text information about Raster attributes.
+        :rtype: str
         """
-        print('Driver:             {}'.format(self.driver))
-        #        if self.intype != 'MEM':
-        print('File:               {}'.format(self.name))
-        # else:
-        #    print('File:               {}'.format('in memory'))
-        print('Size:               {}, {}'.format(self.width, self.height))
-        print('Coordinate System:  EPSG:{}'.format(self.crs.to_epsg()))
-        print('NoData Value:       {}'.format(self.nodata))
-        print('Pixel Size:         {}, {}'.format(*self.res))
-        print('Upper Left Corner:  {}, {}'.format(*self.bounds[:2]))
-        print('Lower Right Corner: {}, {}'.format(*self.bounds[2:]))
+        as_str = []
+        as_str.append('Driver:             {} \n'.format(self.driver))
+        as_str.append('File:               {}\n'.format(self.name))
+        as_str.append('Size:               {}, {}\n'.format(self.width, self.height))
+        as_str.append('Coordinate System:  EPSG:{}\n'.format(self.crs.to_epsg()))
+        as_str.append('NoData Value:       {}\n'.format(self.nodata))
+        as_str.append('Pixel Size:         {}, {}\n'.format(*self.res))
+        as_str.append('Upper Left Corner:  {}, {}\n'.format(*self.bounds[:2]))
+        as_str.append('Lower Right Corner: {}, {}\n'.format(*self.bounds[2:]))
+
         if stats:
             if self.data is not None:
                 if self.nbands == 1:
-                    print('[MAXIMUM]:          {:.2f}'.format(np.nanmax(self.data)))
-                    print('[MINIMUM]:          {:.2f}'.format(np.nanmin(self.data)))
-                    print('[MEDIAN]:           {:.2f}'.format(np.nanmedian(self.data)))
-                    print('[MEAN]:             {:.2f}'.format(np.nanmean(self.data)))
-                    print('[STD DEV]:          {:.2f}'.format(np.nanstd(self.data)))
+                    as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data)))
+                    as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data)))
+                    as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data)))
+                    as_str.append('[MEAN]:             {:.2f}\n'.format(np.nanmean(self.data)))
+                    as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data)))
                 else:
                     for b in range(self.nbands):
-                        print('Band {}:'.format(b+1))  # try to keep with rasterio convention.
-                        print('[MAXIMUM]:          {:.2f}'.format(np.nanmax(self.data[b, :, :])))
-                        print('[MINIMUM]:          {:.2f}'.format(np.nanmin(self.data[b, :, :])))
-                        print('[MEDIAN]:           {:.2f}'.format(np.nanmedian(self.data[b, :, :])))
-                        print('[MEAN]:             {:.2f}'.format(np.nanmean(self.data[b, :, :])))
-                        print('[STD DEV]:          {:.2f}'.format(np.nanstd(self.data[b, :, :])))
+                        as_str.append('Band {}:'.format(b+1))  # \ntry to keep with rasterio convention.
+                        as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data[b, :, :])))
+                        as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data[b, :, :])))
+                        as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data[b, :, :])))
+                        as_str.append('[MEAN]:             {:.2f}\n'.format(np.nanmean(self.data[b, :, :])))
+                        as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data[b, :, :])))
+
+        return "".join(as_str)
+
+        
 
     def load(self, bands=None):
         """
@@ -102,6 +126,7 @@ class Raster():
 
     def clip(self):
         pass
+
 
 
 class SatelliteImage(Raster):
