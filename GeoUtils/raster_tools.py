@@ -30,10 +30,10 @@ class Raster(object):
 
         :param filename: The filename of the dataset.
         :type filename: str
-        :param saved_attrs: A list of attributes from rasterio's DataReader class to add to the Raster object.
+        :param attrs: A list of attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
              'name', 'nodata', 'res', 'shape', 'transform', 'width']
-        :type saved_attrs: list of strings
+        :type attrs: list of strings
         :param load_data: Load the raster data into the object. Default is False.
         :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
@@ -51,23 +51,15 @@ class Raster(object):
         # read the file as a rasterio dataset
         self.ds = self.memfile.open()
 
-        # Copy most used attributes/methods
-        if attrs is None:
-            self._saved_attrs = default_attrs
-            attrs = default_attrs
-        else:
-            for attr in default_attrs:
-                if attr not in attrs:
-                    attrs.append(attr)
-
-        for attr in attrs:
-            setattr(self, attr, getattr(self.ds, attr))
+        self._read_attrs(attrs)
 
         if load_data:
             self.load(bands)
+            self.isLoaded = True
         else:
             self.data = None
             self.nbands = None
+            self.isLoaded = False
 
     def __repr__(self):
         """ Convert object to formal string representation. """
@@ -82,8 +74,32 @@ class Raster(object):
         """ Provide string of information about Raster. """
         return self.info()
 
-    def _update(self):
-        pass
+    def _read_attrs(self, attrs=None):
+        # Copy most used attributes/methods
+        if attrs is None:
+            self._saved_attrs = default_attrs
+            attrs = default_attrs
+        else:
+            for attr in default_attrs:
+                if attr not in attrs:
+                    attrs.append(attr)
+
+        for attr in attrs:
+            setattr(self, attr, getattr(self.ds, attr))
+
+    def _update(self, imgdata, metadata):
+        """
+        update the object with a new image or coordinates.
+        """
+        memfile = MemoryFile()
+        with memfile.open(**metadata) as ds:
+            ds.write(imgdata)
+
+        self.memfile = memfile
+        self.ds = memfile.open()
+        self._read_attrs()
+        if self.isLoaded:
+            self.load()
 
     def info(self, stats=False):
         """ 
@@ -142,8 +158,33 @@ class Raster(object):
         else:
             self.nbands = 1
 
-    def crop(self):
-        pass
+    def crop(self, cropGeom):
+        """
+        Crop the Raster to a given extent.
+
+        :param cropGeom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
+            coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
+            Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
+            list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
+
+        """
+        if isinstance(cropGeom, Raster):
+            xmin, ymin, xmax, ymax = cropGeom.bounds
+        elif isinstance(cropGeom, vt.Vector):
+            pass
+        elif isinstance(cropGeom, list):
+            xmin, ymin, xmax, ymax = cropGeom
+        else:
+            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+
+        crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+        meta = self.ds.meta
+
+        crop_img, tfm = riomask.mask(self.ds, [crop_bbox], crop=True)
+        meta.update({'height': crop_img.shape[1],
+                     'width': crop_img.shape[2],
+                     'transform': tfm})
+        self._update(crop_img, meta)
 
     def clip(self):
         pass
