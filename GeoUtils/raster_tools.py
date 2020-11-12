@@ -30,9 +30,9 @@ class Raster(object):
 
         :param filename: The filename of the dataset.
         :type filename: str
-        :param attrs: A list of attributes from rasterio's DataReader class to add to the Raster object.
+        :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
-             'name', 'nodata', 'res', 'shape', 'transform', 'width']
+            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         :type attrs: list of strings
         :param load_data: Load the raster data into the object. Default is False.
         :type load_data: bool
@@ -161,7 +161,7 @@ class Raster(object):
         else:
             self.nbands = 1
 
-    def crop(self, cropGeom):
+    def crop(self, cropGeom, mode='match_pixel'):
         """
         Crop the Raster to a given extent.
 
@@ -169,25 +169,34 @@ class Raster(object):
             coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
             Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
+        :param mode: one of 'match_pixel' (default) or 'match_extent'. 'match_pixel' will preserve the original pixel
+            resolution, cropping to the extent that most closely aligns with the current coordinates. 'match_extent'
+            will match the extent exactly, adjusting the pixel resolution to fit the extent.
+        :type mode: str
 
         """
-        if isinstance(cropGeom, Raster):
-            xmin, ymin, xmax, ymax = cropGeom.bounds
-        elif isinstance(cropGeom, vt.Vector):
-            raise NotImplementedError
-        elif isinstance(cropGeom, list):
-            xmin, ymin, xmax, ymax = cropGeom
+        assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
+
+        if mode == 'match_pixel':
+            if isinstance(cropGeom, Raster):
+                xmin, ymin, xmax, ymax = cropGeom.bounds
+            elif isinstance(cropGeom, vt.Vector):
+                raise NotImplementedError
+            elif isinstance(cropGeom, (list, tuple)):
+                xmin, ymin, xmax, ymax = cropGeom
+            else:
+                raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+
+            crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+            meta = self.ds.meta
+
+            crop_img, tfm = riomask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
+            meta.update({'height': crop_img.shape[1],
+                         'width': crop_img.shape[2],
+                         'transform': tfm})
+            self._update(crop_img, meta)
         else:
-            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
-
-        crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
-        meta = self.ds.meta
-
-        crop_img, tfm = riomask.mask(self.ds, [crop_bbox], crop=True)
-        meta.update({'height': crop_img.shape[1],
-                     'width': crop_img.shape[2],
-                     'transform': tfm})
-        self._update(crop_img, meta)
+            raise NotImplementedError
 
     def clip(self):
         pass
