@@ -12,8 +12,23 @@ class Raster():
     """
     Create a Raster object from a rasterio-supported raster dataset.
     """
-    def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=True, bands=None):
+    def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=False, bands=None):
+        """
+        Load a rasterio-supported dataset, given a filename.
 
+        :param filename: The filename of the dataset.
+        :type filename: str
+        :param saved_attrs: A list of attributes from rasterio's DataReader class to add to the Raster object.
+            Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
+             'name', 'nodata', 'res', 'shape', 'transform', 'width']
+        :type saved_attrs: list of strings
+        :param load_data: Load the raster data into the object. Default is False.
+        :type load_data: bool
+        :param bands: The band(s) to load into the object. Default is to load all bands.
+        :type bands: int, or list of ints
+
+        :return: A Raster object
+        """
         # Read file's metadata
         ds = rio.open(filename)
         self.ds = ds
@@ -31,6 +46,10 @@ class Raster():
     def info(self, stats=False):
         """ 
         Prints information about the raster (filename, coordinate system, number of columns/rows, etc.).
+
+        :param stats: Print statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
+            not calculate statistics.
+        :type stats: bool
         """
         print('Driver:             {}'.format(self.driver))
         #        if self.intype != 'MEM':
@@ -62,7 +81,10 @@ class Raster():
 
     def load(self, bands=None):
         """
-        Load specific bands of the dataset.
+        Load specific bands of the dataset, using rasterio.read()
+
+        :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
+        :type bands: int, or list of ints
         """
         if bands is None:
             self.data = self.ds.read()
