@@ -16,6 +16,9 @@ class Raster(object):
     Create a Raster object from a rasterio-supported raster dataset.
     """
 
+    # This only gets set if a disk-based file is read in. If the Raster is created with from_array, from_mem etc, this stays as None.
+    filename = None
+
     def __init__(self, filename: str, saved_attrs=saved_attrs, load_data=False, bands=None):
         """
         Load a rasterio-supported dataset, given a filename.
@@ -33,6 +36,10 @@ class Raster(object):
 
         :return: A Raster object
         """
+
+        # Save the on-disk filename
+        self.filename = filename
+
         # open the file in memory
         self.memfile = MemoryFile(open(filename, 'rb'))
 
@@ -75,7 +82,8 @@ class Raster(object):
         :rtype: str
         """
         as_str = ['Driver:             {} \n'.format(self.driver),
-                  'File:               {}\n'.format(self.name),
+                  'File on disk:       {} \n'.format(self.filename),
+                  'RIO MemoryFile:     {}\n'.format(self.name),
                   'Size:               {}, {}\n'.format(self.width, self.height),
                   'Coordinate System:  EPSG:{}\n'.format(self.crs.to_epsg()),
                   'NoData Value:       {}\n'.format(self.nodata),
