@@ -174,7 +174,7 @@ class Raster(object):
         if isinstance(cropGeom, Raster):
             xmin, ymin, xmax, ymax = cropGeom.bounds
         elif isinstance(cropGeom, vt.Vector):
-            pass
+            raise NotImplementedError
         elif isinstance(cropGeom, list):
             xmin, ymin, xmax, ymax = cropGeom
         else:
