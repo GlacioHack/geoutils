@@ -51,7 +51,7 @@ class Raster(object):
         # read the file as a rasterio dataset
         self.ds = self.memfile.open()
 
-        self._read_attrs(attrs)
+        self._read_attrs(list(attrs))  # cast as a list to prevent iteration weirdness
 
         if load_data:
             self.load(bands)
@@ -83,6 +83,7 @@ class Raster(object):
             for attr in default_attrs:
                 if attr not in attrs:
                     attrs.append(attr)
+            self._saved_attrs = attrs
 
         for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
