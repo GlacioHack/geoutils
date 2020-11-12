@@ -3,13 +3,15 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 """
 import numpy as np
 import rasterio as rio
+from rasterio.io import MemoryFile
+
 
 # Attributes from rasterio's DatasetReader object to be kept by default
 saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
                'res', 'shape', 'transform', 'width']
 
 
-class Raster():
+class Raster(object):
     """
     Create a Raster object from a rasterio-supported raster dataset.
     """
@@ -31,14 +33,16 @@ class Raster():
 
         :return: A Raster object
         """
-        # Read file's metadata
-        ds = rio.open(filename)
-        self.ds = ds
+        # open the file in memory
+        self.memfile = MemoryFile(open(filename, 'rb'))
+
+        # read the file as a rasterio dataset
+        self.ds = self.memfile.open()
 
         # Copy most used attributes/methods
         self._saved_attrs = saved_attrs
         for attr in saved_attrs:
-            setattr(self, attr, getattr(ds, attr))
+            setattr(self, attr, getattr(self.ds, attr))
 
         if load_data:
             self.load(bands)
@@ -70,15 +74,14 @@ class Raster():
         :returns: text information about Raster attributes.
         :rtype: str
         """
-        as_str = []
-        as_str.append('Driver:             {} \n'.format(self.driver))
-        as_str.append('File:               {}\n'.format(self.name))
-        as_str.append('Size:               {}, {}\n'.format(self.width, self.height))
-        as_str.append('Coordinate System:  EPSG:{}\n'.format(self.crs.to_epsg()))
-        as_str.append('NoData Value:       {}\n'.format(self.nodata))
-        as_str.append('Pixel Size:         {}, {}\n'.format(*self.res))
-        as_str.append('Upper Left Corner:  {}, {}\n'.format(*self.bounds[:2]))
-        as_str.append('Lower Right Corner: {}, {}\n'.format(*self.bounds[2:]))
+        as_str = ['Driver:             {} \n'.format(self.driver),
+                  'File:               {}\n'.format(self.name),
+                  'Size:               {}, {}\n'.format(self.width, self.height),
+                  'Coordinate System:  EPSG:{}\n'.format(self.crs.to_epsg()),
+                  'NoData Value:       {}\n'.format(self.nodata),
+                  'Pixel Size:         {}, {}\n'.format(*self.res),
+                  'Upper Left Corner:  {}, {}\n'.format(*self.bounds[:2]),
+                  'Lower Right Corner: {}, {}\n'.format(*self.bounds[2:])]
 
         if stats:
             if self.data is not None:
