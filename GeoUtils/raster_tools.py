@@ -4,10 +4,10 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 import os
 import numpy as np
 import rasterio as rio
-import rasterio.mask as riomask
-import rasterio.warp as riowarp
-import rasterio.windows as riowindows
-import rasterio.transform as riotransform
+import rasterio.mask
+import rasterio.warp
+import rasterio.windows
+import rasterio.transform
 from rasterio.io import MemoryFile
 from rasterio.crs import CRS
 from affine import Affine
@@ -282,27 +282,27 @@ class Raster(object):
         if mode == 'match_pixel':
             crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
-            crop_img, tfm = riomask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
+            crop_img, tfm = rio.mask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
             meta.update({'height': crop_img.shape[1],
                          'width': crop_img.shape[2],
                          'transform': tfm})
 
         else:
-            window = riowindows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
+            window = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
             new_height = int(window.height)
             new_width = int(window.width)
-            new_tfm = riotransform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
+            new_tfm = rio.transform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
 
             if self.isLoaded:
                 new_img = np.zeros((self.nbands, new_height, new_width), dtype=self.data.dtype)
             else:
                 new_img = np.zeros((self.count, new_height, new_width), dtype=self.data.dtype)
 
-            crop_img, tfm = riowarp.reproject(self.data, new_img,
-                                              src_transform=self.transform,
-                                              dst_transform=new_tfm,
-                                              src_crs=self.crs,
-                                              dst_crs=self.crs)
+            crop_img, tfm = rio.warp.reproject(self.data, new_img,
+                                               src_transform=self.transform,
+                                               dst_transform=new_tfm,
+                                               src_crs=self.crs,
+                                               dst_crs=self.crs)
             meta.update({'height': new_height,
                          'width': new_width,
                          'transform': tfm})
@@ -325,8 +325,8 @@ class Raster(object):
         meta = self.ds.meta
         dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
 
-        meta.update({'transform': riotransform.Affine(dx, b, xmin+xoff,
-                                                      d, dy, ymax+yoff)})
+        meta.update({'transform': rio.transform.Affine(dx, b, xmin + xoff,
+                                                       d, dy, ymax + yoff)})
         self._update(metadata=meta)
 
     def save(self, filename, driver='GTiff', dtype=None, blank_value=None):
@@ -408,5 +408,3 @@ class Raster(object):
 
 class SatelliteImage(Raster):
     pass
-
-
