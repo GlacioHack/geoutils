@@ -9,7 +9,6 @@ from rasterio.io import MemoryFile
 from rasterio.crs import CRS
 from affine import Affine
 from shapely.geometry.polygon import Polygon
-import GeoUtils.vector_tools as vt
 
 try:
     import rioxarray
@@ -263,6 +262,8 @@ class Raster(object):
         """
         assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
 
+        import GeoUtils.vector_tools as vt
+        
         if mode == 'match_pixel':
             if isinstance(cropGeom, Raster):
                 xmin, ymin, xmax, ymax = cropGeom.bounds
