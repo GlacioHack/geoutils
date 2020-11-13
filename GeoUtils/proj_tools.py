@@ -4,6 +4,8 @@ GeoUtils.proj_tools provides a toolset for dealing with different coordinate ref
 import rasterio as rio
 from rasterio.crs import CRS
 from shapely.geometry.polygon import Polygon
+from shapely.ops import transform
+import pyproj
 
 
 def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
@@ -12,10 +14,13 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
 
     :param boundsGeom: A geometry with bounds. Can be either a list of coordinates (xmin, ymin, xmax, ymax), a rasterio/Raster object, a geoPandas/Vector object
     :type boundsGeom: list, tuple, object with attributes bounds or total_bounds
-    :param in_crs: Output CRS
+    :param in_crs: Input CRS
     :type in_crs: rasterio.crs.CRS
     :param out_crs: Output CRS
     :type out_crs: rasterio.crs.CRS
+
+    :returns: Output polygon
+    :rtype: shapely Polygon
     """
     # If boundsGeom is a rasterio or Raster object
     if hasattr(boundsGeom, 'bounds'):
@@ -39,3 +44,22 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
         raise NotImplementedError()
 
     return bbox
+
+
+def reproject_shape(inshape, in_crs, out_crs):
+    """
+    Reproject a shapely geometry from one CRS into another CRS.
+
+    :param inshape: Shapely geometry to be reprojected.
+    :type inshape: shapely geometry
+    :param in_crs: Input CRS
+    :type in_crs: rasterio.crs.CRS
+    :param out_crs: Output CRS
+    :type out_crs: rasterio.crs.CRS
+
+    :returns: Reprojected geometry
+    :rtype: shapely geometry
+    """
+    reproj = pyproj.Transformer.from_crs(
+        in_crs, out_crs, always_xy=True, skip_equivalent=True).transform
+    return transform(reproj, inshape)
