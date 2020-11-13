@@ -7,8 +7,6 @@ import geopandas as gpd
 import rasterio as rio
 from rasterio import warp, features
 
-from GeoUtils.raster_tools import Raster
-
 
 class Vector():
     """
@@ -63,6 +61,7 @@ class Vector():
         """
         # If input is string, open as Raster
         if isinstance(rst, str):
+            from GeoUtils.raster_tools import Raster
             rst = Raster(rst)
 
         # Convert raster extent into self CRS
@@ -100,6 +99,7 @@ class Vector():
         """
         # If input rst is string, open as Raster
         if isinstance(rst, str):
+            from GeoUtils.raster_tools import Raster
             rst = Raster(rst)
 
         # If no rst given, use provided dimensions
