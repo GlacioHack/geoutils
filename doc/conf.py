@@ -158,7 +158,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'GeoUtils.tex', 'GeoUtils Documentation',
-     'Johannes Marian Landmann', 'manual'),
+     [author], 'manual'),
 ]
 
 
