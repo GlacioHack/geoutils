@@ -2,6 +2,7 @@
 GeoUtils.raster_tools provides a toolset for working with raster data.
 """
 import os
+import warnings
 import numpy as np
 import rasterio as rio
 import rasterio.mask as riomask
@@ -367,6 +368,50 @@ class Raster(object):
             xr.name = name
 
         return xr
+
+    def intersection(self, rst):
+        """ 
+        Returns the bounding box of intersection between this image and another.
+
+        If the rasters have different projections, the intersection extent is given in self's projection system.
+        :param rst : path to the second image (or another Raster instance)
+        :type rst: str, Raster
+
+        :returns: extent of the intersection between the 2 images \
+        (xmin, ymin, xmax, ymax) in self's coordinate system.
+        :rtype: tuple
+        """
+        from GeoUtils import proj_tools
+        # If input rst is string, open as Raster
+        if isinstance(rst, str):
+            rst = Raster(rst, load_data=False)
+
+        # Check if both files have the same projection
+        # To be implemented
+        same_proj = True
+
+        # Find envelope of rasters' intersections
+        poly1 = proj_tools.bounds2poly(self.bounds)
+        # poly1.AssignSpatialReference(self.crs)
+
+        # Create a polygon of the envelope of the second image
+        poly2 = proj_tools.bounds2poly(rst.bounds)
+        # poly2.AssignSpatialReference(rst.srs)
+
+        # If coordinate system is different, reproject poly2 into poly1
+        if not same_proj:
+            raise NotImplementedError()
+
+        # Compute intersection envelope
+        intersect = poly1.intersection(poly2)
+        extent = intersect.envelope.bounds
+
+        # check that intersection is not void
+        if intersect.area == 0:
+            warnings.warn('Warning: Intersection is void')
+            return 0
+        else:
+            return extent
 
 
 class SatelliteImage(Raster):
