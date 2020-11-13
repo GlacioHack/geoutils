@@ -20,6 +20,7 @@ except ImportError:
 else:
     _has_rioxarray = True
 
+import pdb
 
 # Attributes from rasterio's DatasetReader object to be kept by default
 default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
@@ -36,8 +37,7 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-
-    def __init__(self, filename: str, attrs=None, load_data=False, bands=None):
+    def __init__(self, filename: str, attrs=None, load_data=True, bands=None):
         """
         Load a rasterio-supported dataset, given a filename.
 
@@ -47,7 +47,7 @@ class Raster(object):
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         :type attrs: list of strings
-        :param load_data: Load the raster data into the object. Default is False.
+        :param load_data: Load the raster data into the object. Default is True.
         :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
@@ -69,8 +69,9 @@ class Raster(object):
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename, np.array):
-            raise ValueError('np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ')
-        
+            raise ValueError(
+                'np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ')
+
         # Don't recognise the input, so stop here.
         else:
             raise ValueError('filename argument not recognised.')
@@ -88,7 +89,6 @@ class Raster(object):
             self.data = None
             self.nbands = None
             self.isLoaded = False
-
 
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
@@ -121,7 +121,8 @@ class Raster(object):
             if isinstance(transform, tuple):
                 transform = Affine(*transform)
             else:
-                raise ValueError('transform argument needs to be Affine or tuple.')
+                raise ValueError(
+                    'transform argument needs to be Affine or tuple.')
 
         # Enable shortcut to create CRS from an EPSG ID.
         if isinstance(crs, int):
@@ -136,14 +137,14 @@ class Raster(object):
 
         # Create the memory file
         with rio.open(mfh, 'w',
-            height=data.shape[1],
-            width=data.shape[2],
-            count=data.shape[0],
-            dtype=data.dtype,
-            crs=crs,
-            transform=transform,
-            nodata=nodata, 
-            driver='GTiff') as ds:
+                      height=data.shape[1],
+                      width=data.shape[2],
+                      count=data.shape[0],
+                      dtype=data.dtype,
+                      crs=crs,
+                      transform=transform,
+                      nodata=nodata,
+                      driver='GTiff') as ds:
 
             ds.write(data)
 
@@ -210,7 +211,8 @@ class Raster(object):
                   'File on disk:         {} \n'.format(self.filename),
                   'RIO MemoryFile:       {} \n'.format(self.name),
                   'Matches file on disk? {} \n'.format(self.matches_disk),
-                  'Size:                 {}, {}\n'.format(self.width, self.height),
+                  'Size:                 {}, {}\n'.format(
+                      self.width, self.height),
                   'Coordinate System:    EPSG:{}\n'.format(self.crs.to_epsg()),
                   'NoData Value:         {}\n'.format(self.nodata),
                   'Pixel Size:           {}, {}\n'.format(*self.res),
@@ -220,19 +222,30 @@ class Raster(object):
         if stats:
             if self.data is not None:
                 if self.nbands == 1:
-                    as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data)))
-                    as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data)))
-                    as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data)))
-                    as_str.append('[MEAN]:             {:.2f}\n'.format(np.nanmean(self.data)))
-                    as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data)))
+                    as_str.append('[MAXIMUM]:          {:.2f}\n'.format(
+                        np.nanmax(self.data)))
+                    as_str.append('[MINIMUM]:          {:.2f}\n'.format(
+                        np.nanmin(self.data)))
+                    as_str.append('[MEDIAN]:           {:.2f}\n'.format(
+                        np.nanmedian(self.data)))
+                    as_str.append('[MEAN]:             {:.2f}\n'.format(
+                        np.nanmean(self.data)))
+                    as_str.append('[STD DEV]:          {:.2f}\n'.format(
+                        np.nanstd(self.data)))
                 else:
                     for b in range(self.nbands):
-                        as_str.append('Band {}:'.format(b + 1))  # try to keep with rasterio convention.
-                        as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data[b, :, :])))
-                        as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data[b, :, :])))
-                        as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data[b, :, :])))
-                        as_str.append('[MEAN]:             {:.2f}\n'.format(np.nanmean(self.data[b, :, :])))
-                        as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data[b, :, :])))
+                        # try to keep with rasterio convention.
+                        as_str.append('Band {}:'.format(b + 1))
+                        as_str.append('[MAXIMUM]:          {:.2f}\n'.format(
+                            np.nanmax(self.data[b, :, :])))
+                        as_str.append('[MINIMUM]:          {:.2f}\n'.format(
+                            np.nanmin(self.data[b, :, :])))
+                        as_str.append('[MEDIAN]:           {:.2f}\n'.format(
+                            np.nanmedian(self.data[b, :, :])))
+                        as_str.append('[MEAN]:             {:.2f}\n'.format(
+                            np.nanmean(self.data[b, :, :])))
+                        as_str.append('[STD DEV]:          {:.2f}\n'.format(
+                            np.nanstd(self.data[b, :, :])))
 
         return "".join(as_str)
 
@@ -267,10 +280,11 @@ class Raster(object):
         :type mode: str
 
         """
-        assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
+        assert mode in [
+            'match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
 
         import GeoUtils.vector_tools as vt
-        
+
         if mode == 'match_pixel':
             if isinstance(cropGeom, Raster):
                 xmin, ymin, xmax, ymax = cropGeom.bounds
@@ -279,12 +293,15 @@ class Raster(object):
             elif isinstance(cropGeom, (list, tuple)):
                 xmin, ymin, xmax, ymax = cropGeom
             else:
-                raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+                raise ValueError(
+                    "cropGeom must be a Raster, Vector, or list of coordinates.")
 
-            crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+            crop_bbox = Polygon(
+                [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
             meta = self.ds.meta
 
-            crop_img, tfm = riomask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
+            crop_img, tfm = riomask.mask(
+                self.ds, [crop_bbox], crop=True, all_touched=True)
             meta.update({'height': crop_img.shape[1],
                          'width': crop_img.shape[2],
                          'transform': tfm})
@@ -295,35 +312,29 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, crs, nx=None, ny=None, src_bounds=None,
-        xres=None, yres=None,       
-        nodata=None, dtype=None, resampling=Resampling.nearest):
+    def reproject(self, dst_crs, dst_size=None, dst_bounds=None, dst_res=None,
+                  nodata=None, dtype=None, resampling=Resampling.nearest, 
+                  **kwargs):
         """ Reproject raster to specified CRS, dimensions.
 
         Currently: requires image data to have been loaded into memory.
         NOT SUITABLE for large datasets yet! This requires work...
 
+        To reproject a Raster with different source bounds, first run Raster.crop.
+
         :param crs: Specify the Coordinate Reference System to reproject to.
         :dtype crs: int, dict, str, CRS      
-        :param nx: Number of pixels in x dimension.
-        :dtype nx: int
-        :param ny: Number of pixels in y dimension.
-        :dtype ny: int
-        :param src_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the source CRS.
-        :dtype src_bounds: dict or rio.coords.BoundingBox
-        :param xres: Pixel size in x dimension, in units of target CRS.
-        :dtype xres: float
-        :param yres: Pixel size in y dimension, in units of target CRS.
-        :dtype yres: float
+        :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
+        :dtype dst_size: tuple(int, int)
+        :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the source CRS.
+        :dtype dst_bounds: dict or rio.coords.BoundingBox
+        :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
+        :dtype dst_res: float or tuple(float, float)
         :param nodata: nodata value in reprojected data.
         :dtype nodata: int, float, None
         :param resampling: A rasterio Resampling method
         :dtype resample: rio.warp.Resampling object
-
-        Valid combinations of options:
-            nx, ny, src_bounds
-            xres, yres, src_bounds
-            src_bounds
+        :param **kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.         
 
         :returns: Raster
         :rtype: Raster
@@ -331,73 +342,73 @@ class Raster(object):
         """
 
         # Check input arguments
-        opt_npx = (nx is not None) | (ny is not None)
-        opt_res = (xres is not None) | (yres is not None)
-        if opt_npx and opt_res:
-            raise ValueError('nx/ny and xres/yres both specified. Specify only one pair.')
+        if dst_size is not None and dst_res is not None:
+            raise ValueError(
+                'dst_size and dst_res both specified. Specify only one.')
 
         if dtype is None:
-            dtype = self.dtypes[0] #CHECK CORRECT IMPLEMENTATION!
+            dtype = self.dtypes[0]  # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
+
+        # Determine target CRS
+        dst_crs = CRS.from_user_input(dst_crs)
+
+        # Basic reprojection options, needed in all cases.
+        reproj_kwargs = {
+            'src_transform': self.transform,
+            'src_crs': self.crs,
+            'dst_crs': dst_crs,
+            'resampling': resampling,
+            'dst_nodata': self.nodata
+        }
 
         # Create a BoundingBox if required
-        if src_bounds is not None:
-            if not isinstance(src_bounds, rio.coords.BoundingBox):
-                src_bounds = rio.coords.BoundingBox(src_bounds['left'], src_bounds['bottom'],
-                    src_bounds['right'], src_bounds['top'])
+        if dst_bounds is not None:
+            if not isinstance(dst_bounds, rio.coords.BoundingBox):
+                dst_bounds = rio.coords.BoundingBox(dst_bounds['left'], dst_bounds['bottom'],
+                                                    dst_bounds['right'], dst_bounds['top'])
             if not opt_npx and not opt_res:
                 # Default to preserving pixel size.
                 opt_res = True
                 xres, yres = self.res
-        else:
-            src_bounds = self.bounds
 
-        # Determine target CRS
-        dst_crs = CRS.from_user_input(crs)
+        # Determine target raster size/resolution
+        dst_transform = None
+        if dst_res is not None:
+            # Let rasterio determine the maximum bounds of the new raster.
+            reproj_kwargs.update({'dst_resolution': dst_res})
 
-        # Determine target raster size
-        if opt_npx or opt_res:
-            if opt_npx:
-                dst_shape = (self.count, ny, nx)
-            elif opt_res:
-                dst_shape = (self.count, int((src_bounds.right - src_bounds.left) // xres),
-                     int((src_bounds.top - src_bounds.bottom) // yres))
-            dst_transform = rio.transform.from_bounds(*src_bounds, 
-                width=dst_shape[2], height=dst_shape[1])
+        elif dst_size is not None:
+            # Fix raster size at nx, ny; don't change extent.
+            dst_shape = (self.count, dst_size[1], dst_size[0])
 
-        # Neither raster size nor resolution have been specified, use default.
-        else:
-            dst_transform, dst_width, dst_height = rio.warp.calculate_default_transform(
-                self.crs, dst_crs, self.width, self.height, *src_bounds)
-            dst_shape = (self.count, dst_height, dst_width)
+            # Fix nx, ny *and* different destination bounds requested.
+            if dst_bounds is not None:
+                dst_transform = rio.transform.from_bounds(*dst_bounds,
+                                                          width=dst_shape[2], height=dst_shape[1])
+                reproj_kwargs.update({'dst_transform': dst_transform})
 
-        # Make an empty numpy array which will later be filled with elevation values
-        dst_data = np.ones(dst_shape, dtype) # check dtype implementation
+            dst_data = np.ones(dst_shape)
+            reproj_kwargs.update({'destination': dst_data})
 
         # Currently reprojects all in-memory bands at once.
         # This may need to be improved to allow reprojecting from-disk.
         # See rio.warp.reproject docstring for more info.
-        rio.warp.reproject(self.data,
-            dst_data,
-            src_transform=self.transform,
-            src_crs=self.crs,
-            dst_transform=dst_transform,
-            dst_crs=dst_crs,
-            resampling=resampling)
+        dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
 
-        dst_meta = self.ds.meta.copy()
-        dst_meta.update({'height': dst_data.shape[1],
-                     'width': dst_data.shape[2],
-                     'transform': dst_transform,
-                     'crs':dst_crs})
+        # Check for funny business.
+        if dst_transform is not None:
+            assert dst_transform == dst_transformed
 
-        self._update(dst_data, dst_meta)
+        # Write results to a new Raster.
+        dst_r = Raster.from_array(dst_data, dst_transformed, dst_crs, nodata)
 
-        return self
+        if dst_bounds is not None:
+            dst_r = dst_r.crop(dst_bounds)
 
-            
+        return dst_r
 
     def save(self, filename, driver='GTiff', dtype=None,
-        blank_value=None):
+             blank_value=None):
         """ Write the Raster to a geo-referenced file. 
 
         Given a filename to save the Raster to, create a geo-referenced file
@@ -427,28 +438,28 @@ class Raster(object):
             return AttributeError('No data loaded, and alterative blank_value not set.')
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
-                save_data = np.zeros((self.ds.count, self.ds.height, self.ds.width))
-                save_data[:,:,:] = blank_value
+                save_data = np.zeros(
+                    (self.ds.count, self.ds.height, self.ds.width))
+                save_data[:, :, :] = blank_value
             else:
-                raise ValueError('blank_values must be one of int, float (or None).')
+                raise ValueError(
+                    'blank_values must be one of int, float (or None).')
         else:
             save_data = self.data
 
-        with rio.open(filename, 'w', 
-            driver=driver, 
-            height=self.ds.height, 
-            width=self.ds.width, 
-            count=self.ds.count,
-            dtype=save_data.dtype, 
-            crs=self.ds.crs, 
-            transform=self.ds.transform,
-            nodata=self.ds.nodata) as dst:
+        with rio.open(filename, 'w',
+                      driver=driver,
+                      height=self.ds.height,
+                      width=self.ds.width,
+                      count=self.ds.count,
+                      dtype=save_data.dtype,
+                      crs=self.ds.crs,
+                      transform=self.ds.transform,
+                      nodata=self.ds.nodata) as dst:
 
             dst.write(save_data)
 
         return
-
-
 
     def to_xarray(self, name=None):
         """ Convert this Raster into an xarray DataArray using rioxarray.
@@ -458,7 +469,7 @@ class Raster(object):
 
         See the documentation of rioxarray and xarray for more information on 
         the methods and attributes of the resulting DataArray.
-        
+
         :param name: Set the name of the DataArray.
         :type name: str
         :returns: xarray DataArray
