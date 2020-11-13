@@ -1,6 +1,5 @@
 from setuptools import setup
 
-
 setup(name='GeoUtils',
       version='0.1',
       description='',
@@ -9,6 +8,6 @@ setup(name='GeoUtils',
       license='BSD-3',
       packages=['GeoUtils'],
       install_requires=['rasterio', 'geopandas'],
-      extras_require={'rioxarray':['rioxarray']},
+      extras_require={'rioxarray': ['rioxarray']},
       scripts=[],
       zip_safe=False)
