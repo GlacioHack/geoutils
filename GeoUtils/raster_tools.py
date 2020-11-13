@@ -1,15 +1,15 @@
 """
 GeoUtils.raster_tools provides a toolset for working with raster data.
 """
+import os
 import numpy as np
 import rasterio as rio
+import rasterio.mask as riomask
 from rasterio.io import MemoryFile
-
 from rasterio.crs import CRS
 from affine import Affine
-
-import os
-
+from shapely.geometry.polygon import Polygon
+import GeoUtils.vector_tools as vt
 
 try:
     import rioxarray
@@ -20,8 +20,8 @@ else:
 
 
 # Attributes from rasterio's DatasetReader object to be kept by default
-saved_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
-               'res', 'shape', 'transform', 'width']
+default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
+                 'res', 'shape', 'transform', 'width']
 
 
 class Raster(object):
@@ -29,20 +29,22 @@ class Raster(object):
     Create a Raster object from a rasterio-supported raster dataset.
     """
 
-    # This only gets set if a disk-based file is read in. If the Raster is created with from_array, from_mem etc, this stays as None.
+    # This only gets set if a disk-based file is read in.
+    # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
 
-    def __init__(self, filename, saved_attrs=saved_attrs, load_data=True, bands=None):
+
+    def __init__(self, filename: str, attrs=None, load_data=False, bands=None):
         """
         Load a rasterio-supported dataset, given a filename.
 
-        :param filename: The filename of the dataset, or a rasterio MemoryFile object.
-        :type filename: str or rio.io.MemoryFile.
-        :param saved_attrs: A list of attributes from rasterio's DataReader class to add to the Raster object.
+        :param filename: The filename of the dataset.
+        :type filename: str
+        :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
-             'name', 'nodata', 'res', 'shape', 'transform', 'width']
-        :type saved_attrs: list of strings
-        :param load_data: Load the raster data into the object. Default is True.
+            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
+        :type attrs: list of strings
+        :param load_data: Load the raster data into the object. Default is False.
         :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
@@ -73,16 +75,15 @@ class Raster(object):
         # Read the file as a rasterio dataset
         self.ds = self.memfile.open()
 
-        # Copy most used attributes/methods
-        self._saved_attrs = saved_attrs
-        for attr in saved_attrs:
-            setattr(self, attr, getattr(self.ds, attr))
+        self._read_attrs(attrs)
 
         if load_data:
             self.load(bands)
+            self.isLoaded = True
         else:
             self.data = None
             self.nbands = None
+            self.isLoaded = False
 
 
     @classmethod
@@ -159,6 +160,36 @@ class Raster(object):
         """ Provide string of information about Raster. """
         return self.info()
 
+    def _read_attrs(self, attrs=None):
+        # Copy most used attributes/methods
+        if attrs is None:
+            self._saved_attrs = default_attrs
+            attrs = default_attrs
+        else:
+            if isinstance(attrs, str):
+                attrs = [attrs]
+            for attr in default_attrs:
+                if attr not in attrs:
+                    attrs.append(attr)
+            self._saved_attrs = attrs
+
+        for attr in attrs:
+            setattr(self, attr, getattr(self.ds, attr))
+
+    def _update(self, imgdata, metadata):
+        """
+        update the object with a new image or coordinates.
+        """
+        memfile = MemoryFile()
+        with memfile.open(**metadata) as ds:
+            ds.write(imgdata)
+
+        self.memfile = memfile
+        self.ds = memfile.open()
+        self._read_attrs()
+        if self.isLoaded:
+            self.load()
+
     def info(self, stats=False):
         """ 
         Returns string of information about the raster (filename, coordinate system, number of columns/rows, etc.).
@@ -190,7 +221,7 @@ class Raster(object):
                     as_str.append('[STD DEV]:          {:.2f}\n'.format(np.nanstd(self.data)))
                 else:
                     for b in range(self.nbands):
-                        as_str.append('Band {}:'.format(b + 1))  # \ntry to keep with rasterio convention.
+                        as_str.append('Band {}:'.format(b + 1))  # try to keep with rasterio convention.
                         as_str.append('[MAXIMUM]:          {:.2f}\n'.format(np.nanmax(self.data[b, :, :])))
                         as_str.append('[MINIMUM]:          {:.2f}\n'.format(np.nanmin(self.data[b, :, :])))
                         as_str.append('[MEDIAN]:           {:.2f}\n'.format(np.nanmedian(self.data[b, :, :])))
@@ -216,8 +247,42 @@ class Raster(object):
         else:
             self.nbands = 1
 
-    def crop(self):
-        pass
+    def crop(self, cropGeom, mode='match_pixel'):
+        """
+        Crop the Raster to a given extent.
+
+        :param cropGeom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
+            coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
+            Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
+            list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
+        :param mode: one of 'match_pixel' (default) or 'match_extent'. 'match_pixel' will preserve the original pixel
+            resolution, cropping to the extent that most closely aligns with the current coordinates. 'match_extent'
+            will match the extent exactly, adjusting the pixel resolution to fit the extent.
+        :type mode: str
+
+        """
+        assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
+
+        if mode == 'match_pixel':
+            if isinstance(cropGeom, Raster):
+                xmin, ymin, xmax, ymax = cropGeom.bounds
+            elif isinstance(cropGeom, vt.Vector):
+                raise NotImplementedError
+            elif isinstance(cropGeom, (list, tuple)):
+                xmin, ymin, xmax, ymax = cropGeom
+            else:
+                raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+
+            crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+            meta = self.ds.meta
+
+            crop_img, tfm = riomask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
+            meta.update({'height': crop_img.shape[1],
+                         'width': crop_img.shape[2],
+                         'transform': tfm})
+            self._update(crop_img, meta)
+        else:
+            raise NotImplementedError
 
     def clip(self):
         pass
@@ -301,10 +366,6 @@ class Raster(object):
             xr.name = name
 
         return xr
-
-
-        
-
 
 
 class SatelliteImage(Raster):
