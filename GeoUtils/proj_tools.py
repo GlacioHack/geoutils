@@ -4,7 +4,7 @@ GeoUtils.proj_tools provides a toolset for dealing with different coordinate ref
 import rasterio as rio
 from rasterio.crs import CRS
 from shapely.geometry.polygon import Polygon
-from shapely.ops import transform
+import shapely.ops.transform
 import pyproj
 
 
@@ -62,4 +62,4 @@ def reproject_shape(inshape, in_crs, out_crs):
     """
     reproj = pyproj.Transformer.from_crs(
         in_crs, out_crs, always_xy=True, skip_equivalent=True).transform
-    return transform(reproj, inshape)
+    return shapely.ops.transform(reproj, inshape)
