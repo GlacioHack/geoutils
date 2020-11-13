@@ -6,7 +6,10 @@ import warnings
 import numpy as np
 
 import rasterio as rio
-import rasterio.mask as riomask
+import rasterio.mask
+import rasterio.warp
+import rasterio.windows
+import rasterio.transform
 from rasterio.io import MemoryFile
 from rasterio.crs import CRS
 from rasterio.warp import Resampling
@@ -20,8 +23,6 @@ except ImportError:
     _has_rioxarray = False
 else:
     _has_rioxarray = True
-
-import pdb
 
 # Attributes from rasterio's DatasetReader object to be kept by default
 default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
@@ -38,7 +39,8 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-    def __init__(self, filename: str, attrs=None, load_data=True, bands=None):
+    def __init__(self, filename, attrs=None, load_data=True, bands=None):
+
         """
         Load a rasterio-supported dataset, given a filename.
 
@@ -182,11 +184,16 @@ class Raster(object):
         for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
 
-    def _update(self, imgdata, metadata):
+    def _update(self, imgdata=None, metadata=None):
         """
         update the object with a new image or coordinates.
         """
         memfile = MemoryFile()
+        if imgdata is None:
+            imgdata = self.data
+        if metadata is None:
+            metadata = self.metadata
+
         with memfile.open(**metadata) as ds:
             ds.write(imgdata)
 
@@ -281,34 +288,49 @@ class Raster(object):
         :type mode: str
 
         """
-        assert mode in [
-            'match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
-
         import GeoUtils.vector_tools as vt
 
+        assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
+        if isinstance(cropGeom, Raster):
+            xmin, ymin, xmax, ymax = cropGeom.bounds
+        elif isinstance(cropGeom, vt.Vector):
+            raise NotImplementedError
+        elif isinstance(cropGeom, (list, tuple)):
+            xmin, ymin, xmax, ymax = cropGeom
+        else:
+            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+
+        meta = self.ds.meta
+
         if mode == 'match_pixel':
-            if isinstance(cropGeom, Raster):
-                xmin, ymin, xmax, ymax = cropGeom.bounds
-            elif isinstance(cropGeom, vt.Vector):
-                raise NotImplementedError
-            elif isinstance(cropGeom, (list, tuple)):
-                xmin, ymin, xmax, ymax = cropGeom
-            else:
-                raise ValueError(
-                    "cropGeom must be a Raster, Vector, or list of coordinates.")
+            crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
-            crop_bbox = Polygon(
-                [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
-            meta = self.ds.meta
-
-            crop_img, tfm = riomask.mask(
-                self.ds, [crop_bbox], crop=True, all_touched=True)
+            crop_img, tfm = rio.mask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
             meta.update({'height': crop_img.shape[1],
                          'width': crop_img.shape[2],
                          'transform': tfm})
-            self._update(crop_img, meta)
+
         else:
-            raise NotImplementedError
+            window = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
+            new_height = int(window.height)
+            new_width = int(window.width)
+            new_tfm = rio.transform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
+
+            if self.isLoaded:
+                new_img = np.zeros((self.nbands, new_height, new_width), dtype=self.data.dtype)
+            else:
+                new_img = np.zeros((self.count, new_height, new_width), dtype=self.data.dtype)
+
+            crop_img, tfm = rio.warp.reproject(self.data, new_img,
+                                               src_transform=self.transform,
+                                               dst_transform=new_tfm,
+                                               src_crs=self.crs,
+                                               dst_crs=self.crs)
+            meta.update({'height': new_height,
+                         'width': new_width,
+                         'transform': tfm})
+
+        self._update(crop_img, meta)
 
     def clip(self):
         pass
@@ -408,8 +430,24 @@ class Raster(object):
 
         return dst_r
 
-    def save(self, filename, driver='GTiff', dtype=None,
-             blank_value=None):
+    def shift(self, xoff, yoff):
+        """
+        Translate the Raster by a given x,y offset.
+
+        :param xoff: Translation x offset.
+        :type xoff: float
+        :param yoff: Translation y offset.
+        :type yoff: float
+
+        """
+        meta = self.ds.meta
+        dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
+
+        meta.update({'transform': rio.transform.Affine(dx, b, xmin + xoff,
+                                                       d, dy, ymax + yoff)})
+        self._update(metadata=meta)
+
+    def save(self, filename, driver='GTiff', dtype=None, blank_value=None):
         """ Write the Raster to a geo-referenced file. 
 
         Given a filename to save the Raster to, create a geo-referenced file
@@ -439,8 +477,7 @@ class Raster(object):
             return AttributeError('No data loaded, and alterative blank_value not set.')
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
-                save_data = np.zeros(
-                    (self.ds.count, self.ds.height, self.ds.width))
+                save_data = np.zeros((self.ds.count, self.ds.height, self.ds.width))
                 save_data[:, :, :] = blank_value
             else:
                 raise ValueError(
@@ -534,5 +571,3 @@ class Raster(object):
 
 class SatelliteImage(Raster):
     pass
-
-
