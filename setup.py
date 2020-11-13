@@ -1,4 +1,5 @@
 from setuptools import setup
+from os import path
 
 setup(name='GeoUtils',
       version='0.1',
@@ -11,3 +12,27 @@ setup(name='GeoUtils',
       extras_require={'rioxarray': ['rioxarray']},
       scripts=[],
       zip_safe=False)
+
+FULLVERSION = '0.0.1'
+VERSION = FULLVERSION
+write_version = True
+
+
+def write_version_py(filename=None):
+    cnt = """\
+version = '%s'
+short_version = '%s'
+"""
+    if not filename:
+        filename = path.join(path.dirname(__file__), 'GeoUtils',
+                             'version.py')
+
+    a = open(filename, 'w')
+    try:
+        a.write(cnt % (FULLVERSION, VERSION))
+    finally:
+        a.close()
+
+
+if write_version:
+    write_version_py()
