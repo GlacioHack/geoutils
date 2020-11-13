@@ -1,8 +1,11 @@
 from setuptools import setup
 from os import path
 
+FULLVERSION = '0.0.1'
+VERSION = FULLVERSION
+
 setup(name='GeoUtils',
-      version='0.1',
+      version=FULLVERSION,
       description='',
       url='',
       author='The GlacioHack Team',
@@ -13,8 +16,6 @@ setup(name='GeoUtils',
       scripts=[],
       zip_safe=False)
 
-FULLVERSION = '0.0.1'
-VERSION = FULLVERSION
 write_version = True
 
 
