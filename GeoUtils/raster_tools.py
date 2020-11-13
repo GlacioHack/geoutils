@@ -287,14 +287,98 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, crs=None, epsg=None, nx=None, ny=None, xmin=None,
-        nodata=None, dtype=None, interp_type=None):
+    def reproject(self, crs, nx=None, ny=None, bounds=None,
+        xres=None, yres=None,       
+        nodata=None, dtype=None, resampling=Resampling.Nearest):
+        """ Reproject raster to specified CRS, dimensions.
 
-        rio.warp.reproject()
+        Currently: requires image data to have been loaded into memory.
+        NOT SUITABLE for large datasets yet! This requires work...
 
-        # and remember to use update() method once it hits dev.
+        :param crs: Specify the Coordinate Reference System to reproject to.
+        :dtype crs: int, dict, str, CRS      
+        :param nx: Number of pixels in x dimension.
+        :dtype nx: int
+        :param ny: Number of pixels in y dimension.
+        :dtype ny: int
+        :param bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds.
+        :dtype bounds: dict or rio.coords.BoundingBox
+        :param xres: Pixel size in x dimension, in units of target CRS.
+        :dtype xres: float
+        :param yres: Pixel size in y dimension, in units of target CRS.
+        :dtype yres: float
+        :param nodata: nodata value in reprojected data.
+        :dtype nodata: int, float, None
+        :param resampling: A rasterio Resampling method
+        :dtype resample: rio.warp.Resampling object
 
+        Valid combinations of options:
+            nx, ny, bounds
+            xres, yres, bounds
+            bounds
 
+        :returns: Raster
+        :rtype: Raster
+
+        """
+
+        # Check input arguments
+        opt_npx = (nx is not None) | (ny is not None)
+        opt_res = (xres is not None) | (yres is not None)
+        if opt_npx and opt_res:
+            raise ValueError('nx/ny and xres/yres both specified. Specify only one pair.')
+
+        # Create a BoundingBox if required
+        if bounds is not None:
+            if not isinstance(bounds, rio.coords.BoundingBox):
+                bounds = rio.coords.BoundingBox(bounds['left'], bounds['bottom'],
+                    bounds['right'], bounds['top'])
+        else:
+            bounds = self.bounds
+
+        # Determine target CRS
+        dst_crs = CRS.from_user_input(crs)
+
+        # Determine target raster size
+        if opt_npx or opt_res:
+            if opt_npx:
+                dst_shape = (self.count, ny, nx)
+            elif opt_res:
+                dst_shape = (self.count, int((bounds.left - bounds.right) // xres),
+                     int((bounds.top - bounds.bottom) // yres))
+            dst_transform = rio.transform.from_bounds(**bounds, 
+                width=dst_shape[2], height=dst_shape[1])
+
+        # Neither raster size nor resolution have been specified, use default.
+        else:
+            dst_transform, dst_width, dst_height = rio.warp.calculate_default_transform(
+                self.crs, dst_crs, self.width, self.height, *self.bounds)
+            dst_shape = (self.count, dst_height, dst_width)
+
+        # Make an empty numpy array which will later be filled with elevation values
+        dst_data = np.ones(dst_shape, dtype) # check dtype implementation
+
+        # Currently reprojects all in-memory bands at once.
+        # This may need to be improved to allow reprojecting from-disk.
+        # See rio.warp.reproject docstring for more info.
+        rio.warp.reproject(self.data,
+            dst_data,
+            src_transform=self.transform,
+            src_crs=self.crs,
+            dst_transform=dst_transform,
+            dst_crs=dst_crs,
+            resampling=resampling)
+
+        dst_meta = self.ds.meta.copy()
+        dst_meta.update({'height': reproj_data.shape[1],
+                     'width': reproj_data.shape[2],
+                     'transform': new_transform})
+
+        self._update(dst_data, dst_meta)
+
+        return self #? is this necessary?
+
+            
 
     def save(self, filename, driver='GTiff', dtype=None,
         blank_value=None):
@@ -391,7 +475,3 @@ def _create_crs_from_epsg(epsg):
     if not isinstance(epsg, int):
         raise ValueError('EPSG code must be provided as int.')
     return CRS.from_epsg(epsg)
-<<<<<<< Updated upstream
-=======
-    
->>>>>>> Stashed changes
