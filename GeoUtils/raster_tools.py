@@ -10,8 +10,6 @@ from rasterio.io import MemoryFile
 from rasterio.crs import CRS
 from affine import Affine
 from shapely.geometry.polygon import Polygon
-import GeoUtils.vector_tools as vt
-from GeoUtils import proj_tools
 
 try:
     import rioxarray
@@ -123,7 +121,7 @@ class Raster(object):
 
         # Enable shortcut to create CRS from an EPSG ID.
         if isinstance(crs, int):
-            crs = _create_crs_from_epsg(crs)
+            crs = CRS.from_epsg(crs)
 
         # If a 2-D ('single-band') array is passed in, give it a band dimension.
         if len(data.shape) < 3:
@@ -265,6 +263,8 @@ class Raster(object):
         """
         assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
 
+        import GeoUtils.vector_tools as vt
+        
         if mode == 'match_pixel':
             if isinstance(cropGeom, Raster):
                 xmin, ymin, xmax, ymax = cropGeom.bounds
@@ -381,6 +381,7 @@ class Raster(object):
         (xmin, ymin, xmax, ymax) in self's coordinate system.
         :rtype: tuple
         """
+        from GeoUtils import proj_tools
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             rst = Raster(rst, load_data=False)
@@ -417,14 +418,3 @@ class SatelliteImage(Raster):
     pass
 
 
-def _create_crs_from_epsg(epsg):
-    """ Given an EPSG code, generate a rasterio CRS object.
-
-    :param epsg: the EPSG code for which to generate a CRS.
-    :dtype epsg: int
-    :returns: the CRS object
-    :rtype: rasterio.crs.CRS
-    """
-    if not isinstance(epsg, int):
-        raise ValueError('EPSG code must be provided as int.')
-    return CRS.from_epsg(epsg)
