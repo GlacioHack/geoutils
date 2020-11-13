@@ -2,6 +2,7 @@
 GeoUtils.proj_tools provides a toolset for dealing with different coordinate reference systems (CRS)
 """
 import rasterio as rio
+import pyproj
 from rasterio.crs import CRS
 from shapely.geometry.polygon import Polygon
 
@@ -39,3 +40,22 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
         raise NotImplementedError()
 
     return bbox
+
+
+def compare_proj(proj1, proj2):
+    """
+    Compare two projections to see if they are the same, using pyproj.CRS.is_exact_same.
+
+    :param proj1: The first projection to compare.
+    :type proj1: pyproj.CRS, rasterio.crs.CRS
+    :param proj2: The first projection to compare.
+    :type proj2: pyproj.CRS, rasterio.crs.CRS
+
+    :returns: True if the two projections are the same.
+    """
+    assert all([isinstance(proj1, (pyproj.CRS,CRS)), isinstance(proj2, (pyproj.CRS, CRS))]), \
+        'proj1 and proj2 must be rasterio.crs.CRS objects.'
+    proj1 = pyproj.CRS(proj1.to_string())
+    proj2 = pyproj.CRS(proj2.to_string())
+
+    return proj1.is_exact_same(proj2)
