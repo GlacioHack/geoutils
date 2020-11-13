@@ -287,6 +287,14 @@ class Raster(object):
     def clip(self):
         pass
 
+    def reproject(self, crs=None, epsg=None, nx=None, ny=None, xmin=None,
+        nodata=None, dtype=None, interp_type=None):
+
+        rio.warp.reproject()
+
+        # and remember to use update() method once it hits dev.
+
+
 
     def save(self, filename, driver='GTiff', dtype=None,
         blank_value=None):
@@ -383,3 +391,7 @@ def _create_crs_from_epsg(epsg):
     if not isinstance(epsg, int):
         raise ValueError('EPSG code must be provided as int.')
     return CRS.from_epsg(epsg)
+<<<<<<< Updated upstream
+=======
+    
+>>>>>>> Stashed changes
