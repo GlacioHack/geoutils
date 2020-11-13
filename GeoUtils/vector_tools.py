@@ -8,7 +8,7 @@ import rasterio as rio
 from rasterio import warp, features
 
 
-class Vector():
+class Vector(object):
     """
     Create a Vector object from a fiona-supported vector dataset.
     """
@@ -17,15 +17,21 @@ class Vector():
         """
         Load a fiona-supported dataset, given a filename.
 
-        :param filename: The filename of the dataset.
-        :type filename: str
+        :param filename: The filename or GeoDataFrame of the dataset.
+        :type filename: str or gpd.GeoDataFrame
 
         :return: A Vector object
         """
 
-        ds = gpd.read_file(filename)
-        self.ds = ds
-        self.name = filename
+        if isinstance(filename,str):
+            ds = gpd.read_file(filename)
+            self.ds = ds
+            self.name = filename
+        elif isinstance(filename,gpd.GeoDataFrame):
+            self.ds = filename
+            self.name = None
+        else:
+            raise ValueError('filename argument not recognised.')
 
     def __repr__(self):
         return self.ds.__repr__()
