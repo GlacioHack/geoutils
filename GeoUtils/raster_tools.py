@@ -417,15 +417,3 @@ class Raster(object):
 class SatelliteImage(Raster):
     pass
 
-
-def _create_crs_from_epsg(epsg):
-    """ Given an EPSG code, generate a rasterio CRS object.
-
-    :param epsg: the EPSG code for which to generate a CRS.
-    :dtype epsg: int
-    :returns: the CRS object
-    :rtype: rasterio.crs.CRS
-    """
-    if not isinstance(epsg, int):
-        raise ValueError('EPSG code must be provided as int.')
-    return CRS.from_epsg(epsg)
