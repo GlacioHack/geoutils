@@ -3,10 +3,13 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 """
 import os
 import numpy as np
+
 import rasterio as rio
 import rasterio.mask as riomask
 from rasterio.io import MemoryFile
 from rasterio.crs import CRS
+from rasterio.warp import Resampling
+
 from affine import Affine
 from shapely.geometry.polygon import Polygon
 
@@ -31,6 +34,7 @@ class Raster(object):
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
+    matches_disk = None
 
 
     def __init__(self, filename: str, attrs=None, load_data=False, bands=None):
@@ -79,6 +83,7 @@ class Raster(object):
         if load_data:
             self.load(bands)
             self.isLoaded = True
+            self.matches_disk = True
         else:
             self.data = None
             self.nbands = None
@@ -186,6 +191,7 @@ class Raster(object):
         self.memfile = memfile
         self.ds = memfile.open()
         self._read_attrs()
+        self.matches_disk = False
         if self.isLoaded:
             self.load()
 
@@ -200,15 +206,16 @@ class Raster(object):
         :returns: text information about Raster attributes.
         :rtype: str
         """
-        as_str = ['Driver:             {} \n'.format(self.driver),
-                  'File on disk:       {} \n'.format(self.filename),
-                  'RIO MemoryFile:     {}\n'.format(self.name),
-                  'Size:               {}, {}\n'.format(self.width, self.height),
-                  'Coordinate System:  EPSG:{}\n'.format(self.crs.to_epsg()),
-                  'NoData Value:       {}\n'.format(self.nodata),
-                  'Pixel Size:         {}, {}\n'.format(*self.res),
-                  'Upper Left Corner:  {}, {}\n'.format(*self.bounds[:2]),
-                  'Lower Right Corner: {}, {}\n'.format(*self.bounds[2:])]
+        as_str = ['Driver:               {} \n'.format(self.driver),
+                  'File on disk:         {} \n'.format(self.filename),
+                  'RIO MemoryFile:       {} \n'.format(self.name),
+                  'Matches file on disk? {} \n'.format(self.matches_disk),
+                  'Size:                 {}, {}\n'.format(self.width, self.height),
+                  'Coordinate System:    EPSG:{}\n'.format(self.crs.to_epsg()),
+                  'NoData Value:         {}\n'.format(self.nodata),
+                  'Pixel Size:           {}, {}\n'.format(*self.res),
+                  'Upper Left Corner:    {}, {}\n'.format(*self.bounds[:2]),
+                  'Lower Right Corner:   {}, {}\n'.format(*self.bounds[2:])]
 
         if stats:
             if self.data is not None:
@@ -288,9 +295,9 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, crs, nx=None, ny=None, bounds=None,
+    def reproject(self, crs, nx=None, ny=None, src_bounds=None,
         xres=None, yres=None,       
-        nodata=None, dtype=None, resampling=Resampling.Nearest):
+        nodata=None, dtype=None, resampling=Resampling.nearest):
         """ Reproject raster to specified CRS, dimensions.
 
         Currently: requires image data to have been loaded into memory.
@@ -302,8 +309,8 @@ class Raster(object):
         :dtype nx: int
         :param ny: Number of pixels in y dimension.
         :dtype ny: int
-        :param bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds.
-        :dtype bounds: dict or rio.coords.BoundingBox
+        :param src_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the source CRS.
+        :dtype src_bounds: dict or rio.coords.BoundingBox
         :param xres: Pixel size in x dimension, in units of target CRS.
         :dtype xres: float
         :param yres: Pixel size in y dimension, in units of target CRS.
@@ -314,9 +321,9 @@ class Raster(object):
         :dtype resample: rio.warp.Resampling object
 
         Valid combinations of options:
-            nx, ny, bounds
-            xres, yres, bounds
-            bounds
+            nx, ny, src_bounds
+            xres, yres, src_bounds
+            src_bounds
 
         :returns: Raster
         :rtype: Raster
@@ -329,13 +336,20 @@ class Raster(object):
         if opt_npx and opt_res:
             raise ValueError('nx/ny and xres/yres both specified. Specify only one pair.')
 
+        if dtype is None:
+            dtype = self.dtypes[0] #CHECK CORRECT IMPLEMENTATION!
+
         # Create a BoundingBox if required
-        if bounds is not None:
-            if not isinstance(bounds, rio.coords.BoundingBox):
-                bounds = rio.coords.BoundingBox(bounds['left'], bounds['bottom'],
-                    bounds['right'], bounds['top'])
+        if src_bounds is not None:
+            if not isinstance(src_bounds, rio.coords.BoundingBox):
+                src_bounds = rio.coords.BoundingBox(src_bounds['left'], src_bounds['bottom'],
+                    src_bounds['right'], src_bounds['top'])
+            if not opt_npx and not opt_res:
+                # Default to preserving pixel size.
+                opt_res = True
+                xres, yres = self.res
         else:
-            bounds = self.bounds
+            src_bounds = self.bounds
 
         # Determine target CRS
         dst_crs = CRS.from_user_input(crs)
@@ -345,15 +359,15 @@ class Raster(object):
             if opt_npx:
                 dst_shape = (self.count, ny, nx)
             elif opt_res:
-                dst_shape = (self.count, int((bounds.left - bounds.right) // xres),
-                     int((bounds.top - bounds.bottom) // yres))
-            dst_transform = rio.transform.from_bounds(**bounds, 
+                dst_shape = (self.count, int((src_bounds.right - src_bounds.left) // xres),
+                     int((src_bounds.top - src_bounds.bottom) // yres))
+            dst_transform = rio.transform.from_bounds(*src_bounds, 
                 width=dst_shape[2], height=dst_shape[1])
 
         # Neither raster size nor resolution have been specified, use default.
         else:
             dst_transform, dst_width, dst_height = rio.warp.calculate_default_transform(
-                self.crs, dst_crs, self.width, self.height, *self.bounds)
+                self.crs, dst_crs, self.width, self.height, *src_bounds)
             dst_shape = (self.count, dst_height, dst_width)
 
         # Make an empty numpy array which will later be filled with elevation values
@@ -371,13 +385,14 @@ class Raster(object):
             resampling=resampling)
 
         dst_meta = self.ds.meta.copy()
-        dst_meta.update({'height': reproj_data.shape[1],
-                     'width': reproj_data.shape[2],
-                     'transform': new_transform})
+        dst_meta.update({'height': dst_data.shape[1],
+                     'width': dst_data.shape[2],
+                     'transform': dst_transform,
+                     'crs':dst_crs})
 
         self._update(dst_data, dst_meta)
 
-        return self #? is this necessary?
+        return self
 
             
 
