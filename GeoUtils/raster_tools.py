@@ -21,7 +21,6 @@ except ImportError:
 else:
     _has_rioxarray = True
 
-
 # Attributes from rasterio's DatasetReader object to be kept by default
 default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
                  'res', 'shape', 'transform', 'width']
@@ -35,7 +34,6 @@ class Raster(object):
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
-
 
     def __init__(self, filename: str, attrs=None, load_data=False, bands=None):
         """
@@ -70,7 +68,7 @@ class Raster(object):
         # Provide a catch in case trying to load from data array
         elif isinstance(filename, np.array):
             raise ValueError('np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ')
-        
+
         # Don't recognise the input, so stop here.
         else:
             raise ValueError('filename argument not recognised.')
@@ -87,7 +85,6 @@ class Raster(object):
             self.data = None
             self.nbands = None
             self.isLoaded = False
-
 
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
@@ -135,14 +132,14 @@ class Raster(object):
 
         # Create the memory file
         with rio.open(mfh, 'w',
-            height=data.shape[1],
-            width=data.shape[2],
-            count=data.shape[0],
-            dtype=data.dtype,
-            crs=crs,
-            transform=transform,
-            nodata=nodata, 
-            driver='GTiff') as ds:
+                      height=data.shape[1],
+                      width=data.shape[2],
+                      count=data.shape[0],
+                      dtype=data.dtype,
+                      crs=crs,
+                      transform=transform,
+                      nodata=nodata,
+                      driver='GTiff') as ds:
 
             ds.write(data)
 
@@ -179,11 +176,16 @@ class Raster(object):
         for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
 
-    def _update(self, imgdata, metadata):
+    def _update(self, imgdata=None, metadata=None):
         """
         update the object with a new image or coordinates.
         """
         memfile = MemoryFile()
+        if imgdata is None:
+            imgdata = self.data
+        if metadata is None:
+            metadata = self.metadata
+
         with memfile.open(**metadata) as ds:
             ds.write(imgdata)
 
@@ -309,9 +311,24 @@ class Raster(object):
     def clip(self):
         pass
 
+    def shift(self, xoff, yoff):
+        """
+        Translate the Raster by a given x,y offset.
 
-    def save(self, filename, driver='GTiff', dtype=None,
-        blank_value=None):
+        :param xoff: Translation x offset.
+        :type xoff: float
+        :param yoff: Translation y offset.
+        :type yoff: float
+
+        """
+        meta = self.ds.meta
+        dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
+
+        meta.update({'transform': riotransform.Affine(dx, b, xmin+xoff,
+                                                      d, dy, ymax+yoff)})
+        self._update(metadata=meta)
+
+    def save(self, filename, driver='GTiff', dtype=None, blank_value=None):
         """ Write the Raster to a geo-referenced file. 
 
         Given a filename to save the Raster to, create a geo-referenced file
@@ -342,27 +359,25 @@ class Raster(object):
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
                 save_data = np.zeros((self.ds.count, self.ds.height, self.ds.width))
-                save_data[:,:,:] = blank_value
+                save_data[:, :, :] = blank_value
             else:
                 raise ValueError('blank_values must be one of int, float (or None).')
         else:
             save_data = self.data
 
-        with rio.open(filename, 'w', 
-            driver=driver, 
-            height=self.ds.height, 
-            width=self.ds.width, 
-            count=self.ds.count,
-            dtype=save_data.dtype, 
-            crs=self.ds.crs, 
-            transform=self.ds.transform,
-            nodata=self.ds.nodata) as dst:
+        with rio.open(filename, 'w',
+                      driver=driver,
+                      height=self.ds.height,
+                      width=self.ds.width,
+                      count=self.ds.count,
+                      dtype=save_data.dtype,
+                      crs=self.ds.crs,
+                      transform=self.ds.transform,
+                      nodata=self.ds.nodata) as dst:
 
             dst.write(save_data)
 
         return
-
-
 
     def to_xarray(self, name=None):
         """ Convert this Raster into an xarray DataArray using rioxarray.
