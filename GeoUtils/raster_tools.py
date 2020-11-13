@@ -369,6 +369,28 @@ class Raster(object):
 
         return xr
 
+    def get_bounds_projected(self, out_crs, densify_pts_max:int=5000):
+        """
+        Return self's bounds in the given CRS.
+
+        :param out_crs: Output CRS
+        :type out_crs: rasterio.crs.CRS
+        :param densify_pts_max: Maximum points to be added between image corners to account for non linear edges (Default 5000)
+        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        :type densify_pts_max: int
+        """
+        # Max points to be added between image corners to account for non linear edges
+        # rasterio's default is a bit low for very large images
+        # instead, use image dimensions, with a maximum of 50000
+        densify_pts = min( max(self.width, self.height), densify_pts_max)
+
+        # Calculate new bounds
+        left, bottom, right, top = self.bounds
+        new_bounds = rio.warp.transform_bounds(self.crs, out_crs, left, bottom, right, top, densify_pts)
+
+        return new_bounds
+    
+    
     def intersection(self, rst):
         """ 
         Returns the bounding box of intersection between this image and another.
@@ -413,7 +435,7 @@ class Raster(object):
         else:
             return extent
 
-
+    
 class SatelliteImage(Raster):
     pass
 
