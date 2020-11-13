@@ -10,7 +10,6 @@ from rasterio.io import MemoryFile
 from rasterio.crs import CRS
 from affine import Affine
 from shapely.geometry.polygon import Polygon
-import GeoUtils.vector_tools as vt
 from GeoUtils import proj_tools
 
 try:
@@ -123,7 +122,7 @@ class Raster(object):
 
         # Enable shortcut to create CRS from an EPSG ID.
         if isinstance(crs, int):
-            crs = _create_crs_from_epsg(crs)
+            crs = CRS.from_epsg(crs)
 
         # If a 2-D ('single-band') array is passed in, give it a band dimension.
         if len(data.shape) < 3:
@@ -265,6 +264,8 @@ class Raster(object):
         """
         assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
 
+        import GeoUtils.vector_tools as vt
+        
         if mode == 'match_pixel':
             if isinstance(cropGeom, Raster):
                 xmin, ymin, xmax, ymax = cropGeom.bounds
@@ -381,6 +382,7 @@ class Raster(object):
         (xmin, ymin, xmax, ymax) in self's coordinate system.
         :rtype: tuple
         """
+        from GeoUtils import proj_tools
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             rst = Raster(rst, load_data=False)
