@@ -10,7 +10,7 @@ from rasterio import warp, features
 from GeoUtils.raster_tools import Raster
 
 
-class Vector():
+class Vector(object):
     """
     Create a Vector object from a fiona-supported vector dataset.
     """
@@ -25,9 +25,15 @@ class Vector():
         :return: A Vector object
         """
 
-        ds = gpd.read_file(filename)
-        self.ds = ds
-        self.name = filename
+        if isinstance(filename,str):
+            ds = gpd.read_file(filename)
+            self.ds = ds
+            self.name = filename
+        elif isinstance(filename,gpd.GeoDataFrame):
+            self.ds = filename
+            self.name = None
+        else:
+            raise ValueError('filename argument not recognised.')
 
     def __repr__(self):
         return self.ds.__repr__()
