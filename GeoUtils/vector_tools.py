@@ -19,8 +19,8 @@ class Vector(object):
         """
         Load a fiona-supported dataset, given a filename.
 
-        :param filename: The filename of the dataset.
-        :type filename: str
+        :param filename: The filename or GeoDataFrame of the dataset.
+        :type filename: str or gpd.GeoDataFrame
 
         :return: A Vector object
         """
