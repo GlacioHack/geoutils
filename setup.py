@@ -4,14 +4,14 @@ from os import path
 FULLVERSION = '0.0.1'
 VERSION = FULLVERSION
 
-setup(name='GeoUtils',
+setup(name='geoutils',
       version=FULLVERSION,
       description='',
       url='',
       author='The GlacioHack Team',
       license='BSD-3',
-      packages=['GeoUtils'],
-      install_requires=['rasterio', 'geopandas'],
+      packages=['geoutils'],
+      install_requires=['rasterio', 'geopandas', 'pyproj'],
       extras_require={'rioxarray': ['rioxarray']},
       scripts=[],
       zip_safe=False)
@@ -25,7 +25,7 @@ version = '%s'
 short_version = '%s'
 """
     if not filename:
-        filename = path.join(path.dirname(__file__), 'GeoUtils',
+        filename = path.join(path.dirname(__file__), 'geoutils',
                              'version.py')
 
     a = open(filename, 'w')

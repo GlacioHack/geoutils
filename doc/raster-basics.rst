@@ -3,8 +3,8 @@
 Opening a raster file
 ---------------------
 
-	from GeoUtils import raster_tools
-	image = raster_tools.Raster('file.tif')
+	from geoutils import georaster
+	image = georaster.Raster('file.tif')
 
 
 Basic information about a Raster

@@ -1,5 +1,5 @@
 """
-GeoUtils.proj_tools provides a toolset for dealing with different coordinate reference systems (CRS)
+GeoUtils.projtools provides a toolset for dealing with different coordinate reference systems (CRS).
 """
 import rasterio as rio
 import pyproj
