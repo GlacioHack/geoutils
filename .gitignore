@@ -135,4 +135,7 @@ dmypy.json
 # Emacs backup files
 *~
 
+# version file
+GeoUtils/version.py
+
 # End of https://www.gitignore.io/api/python
