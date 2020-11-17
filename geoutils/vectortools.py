@@ -67,7 +67,7 @@ class Vector(object):
         """
         # If input is string, open as Raster
         if isinstance(rst, str):
-            from GeoUtils.raster_tools import Raster
+            from GeoUtils.georaster import Raster
             rst = Raster(rst)
 
         # Convert raster extent into self CRS
@@ -105,7 +105,7 @@ class Vector(object):
         """
         # If input rst is string, open as Raster
         if isinstance(rst, str):
-            from geoutils.rastertools import Raster
+            from geoutils.georaster import Raster
             rst = Raster(rst)
 
         # If no rst given, use provided dimensions

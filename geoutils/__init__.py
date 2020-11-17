@@ -2,8 +2,8 @@
 GeoUtils is a python package of raster and vector tools.
 """
 
-from . import rastertools
-from . import vectortools
+from . import georaster
+from . import geovector
 
 try:
     from geoutils.version import version as __version__
