@@ -266,7 +266,7 @@ class Raster(object):
         :type mode: str
 
         """
-        import GeoUtils.vector_tools as vt
+        import geoutils.vectortools as vt
 
         assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
         if isinstance(cropGeom, Raster):
@@ -418,7 +418,7 @@ class Raster(object):
         (xmin, ymin, xmax, ymax) in self's coordinate system.
         :rtype: tuple
         """
-        from GeoUtils import proj_tools
+        from geoutils import projtools
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             rst = Raster(rst, load_data=False)
@@ -428,11 +428,11 @@ class Raster(object):
         same_proj = True
 
         # Find envelope of rasters' intersections
-        poly1 = proj_tools.bounds2poly(self.bounds)
+        poly1 = projtools.bounds2poly(self.bounds)
         # poly1.AssignSpatialReference(self.crs)
 
         # Create a polygon of the envelope of the second image
-        poly2 = proj_tools.bounds2poly(rst.bounds)
+        poly2 = projtools.bounds2poly(rst.bounds)
         # poly2.AssignSpatialReference(rst.srs)
 
         # If coordinate system is different, reproject poly2 into poly1

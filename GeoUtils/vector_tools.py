@@ -1,5 +1,5 @@
 """
-GeoUtils.vector_tools provides a toolset for working with vector data.
+GeoUtils.vectortools provides a toolset for working with vector data.
 """
 import warnings
 import numpy as np
@@ -105,7 +105,7 @@ class Vector(object):
         """
         # If input rst is string, open as Raster
         if isinstance(rst, str):
-            from GeoUtils.raster_tools import Raster
+            from geoutils.rastertools import Raster
             rst = Raster(rst)
 
         # If no rst given, use provided dimensions
