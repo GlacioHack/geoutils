@@ -1,0 +1,9 @@
+name: geoutils
+dependencies:
+  - python>=3.7
+  - numpy
+  - rasterio
+  - shapely
+  - rioxarray
+channels:
+  - conda-forge
