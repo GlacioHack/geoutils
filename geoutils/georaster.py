@@ -289,7 +289,7 @@ class Raster(object):
         :type mode: str
 
         """
-        import geoutils.vectortools as vt
+        import geoutils.geovector as vt
 
         assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
         if isinstance(cropGeom, Raster):
