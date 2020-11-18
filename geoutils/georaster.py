@@ -393,14 +393,38 @@ class Raster(object):
         # Determine target raster size/resolution
         dst_transform = None
         if dst_res is not None:
-            # Let rasterio determine the maximum bounds of the new raster.
-            reproj_kwargs.update({'dst_resolution': dst_res})
+            if dst_bounds is None:
+                # Let rasterio determine the maximum bounds of the new raster.
+                reproj_kwargs.update({'dst_resolution': dst_res})
+            else:
+                
+                # Bounds specified. First check if xres and yres are different.
+                if isinstance(dst_res, tuple):
+                    xres = dst_res[0]
+                    yres = dst_res[1]
+                else:
+                    xres = dst_res
+                    yres = dst_res
 
-        elif dst_size is not None:
-            # Fix raster size at nx, ny; don't change extent.
+                # Calculate new raster size which ensures that pixels have 
+                # precisely the resolution specified.
+                dst_width = np.ceil((dst_bounds.right - dst_bounds.left) / xres)
+                dst_height = np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres)
+                dst_size = (int(dst_width), int(dst_height))
+                
+                # As a result of precise pixel size, the destination bounds may
+                # have to be adjusted.
+                x1 = dst_bounds.left + (xres*dst_width)
+                y1 = dst_bounds.top - (yres*dst_height)
+                dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top, 
+                    left=dst_bounds.left, bottom=y1, right=x1)
+                
+
+        if dst_size is not None:
+            # Fix raster size at nx, ny.
             dst_shape = (self.count, dst_size[1], dst_size[0])
 
-            # Fix nx,ny *and* different destination bounds requested.
+            # Fix nx,ny with destination bounds requested.
             if dst_bounds is not None:
                 dst_transform = rio.transform.from_bounds(*dst_bounds,
                                                           width=dst_shape[2], height=dst_shape[1])
@@ -420,9 +444,6 @@ class Raster(object):
 
         # Write results to a new Raster.
         dst_r = Raster.from_array(dst_data, dst_transformed, dst_crs, nodata)
-
-        if dst_bounds is not None:
-            dst_r = dst_r.crop(dst_bounds)
 
         return dst_r
 
