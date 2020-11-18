@@ -586,6 +586,143 @@ class Raster(object):
         else:
             return extent
 
+    def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
+                        window=None, return_window=False, boundless=True,
+                        reducer_function=np.ma.mean):
+        """ Extract the pixel value(s) at the specified coordinates.
+
+        Extract pixel value of each band in dataset at the specified
+        coordinates. Alternatively, if band is specified, return only that
+        band's pixel value.
+
+        Optionally, return mean of pixels within a square window.
+
+        :param x: x (or longitude) coordinate.
+        :type x: float
+        :param y: y (or latitude) coordinate.
+        :type y: float
+        :param latlon: Set to True if coordinates provided as longitude/latitude.
+        :type latlon: boolean
+        :param band: the band number to extract from.
+        :type band: int
+        :param masked: If `masked` is `True` the return value will be a masked
+        array. Otherwise (the default) the return value will be a
+        regular array.
+        :type masked: bool, optional (default False)
+        :param window: expand area around coordinate to dimensions \
+                  window * window. window must be odd.
+        :type window: None, int
+        :param return_window: If True when window=int, returns (mean,array) \
+        where array is the dataset extracted via the specified window size.
+        :type return_window: boolean
+        :param boundless: If `True`, windows that extend beyond the dataset's extent
+        are permitted and partially or completely filled arrays (with self.nodata) will
+        be returned as appropriate.
+        :type boundless: bool, optional (default False)
+        :param reducer_function: a function to apply to the values in window.
+        :type reducer_function: function, optional (Default is np.ma.mean)
+
+        :returns: When called on a Raster or with a specific band \
+        set, return value of pixel.
+        :rtype: float
+        :returns: If mutiple band Raster and the band is not specified, a \
+        dictionary containing the value of the pixel in each band.
+        :rtype: dict
+        :returns: In addition, if return_window=True, return tuple of \
+        (values, arrays)
+        :rtype: tuple
+
+        :examples:
+
+        >>> self.value_at_coords(-48.125,67.8901,window=3)
+        Returns mean of a 3*3 window:
+            v v v \
+            v c v  | = float(mean)
+            v v v /
+        (c = provided coordinate, v= value of surrounding coordinate)
+
+        """
+
+        if window is not None:
+            if window % 2 != 1:
+                raise ValueError('Window must be an odd number.')
+
+        def format_value(value):
+            """ Check if valid value has been extracted """
+            if type(value) in [np.ndarray, np.ma.core.MaskedArray]:
+                if window != None:
+                    value = reducer_function(value.flatten())
+                else:
+                    value = value[0, 0]
+            else:
+                value = None
+            return value
+
+        # Need to implement latlon option later
+        if latlon:
+            raise NotImplementedError()
+
+        # Convert coordinates to pixel space
+        row, col = self.ds.index(x, y)
+
+        # Decide what pixel coordinates to read:
+        if window != None:
+            half_win = (window - 1) / 2
+            # Subtract start coordinates back to top left of window
+            col = col - half_win
+            row = row - half_win
+            # Offset to read to == window
+            width = window
+            height = window
+        else:
+            # Start reading at col,row and read 1px each way
+            width = 1
+            height = 1
+
+        # Make sure coordinates are int
+        col = int(col)
+        row = int(row)
+
+        # Create rasterio's window for reading
+        window = rio.windows.Window(col, row, width, height)
+
+        # Get values for all bands
+        if band is None:
+
+            # Deal with single band case
+            if self.nbands == 1:
+                data = self.ds.read(
+                    window=window, fill_value=self.nodata, boundless=boundless, masked=masked)
+                value = format_value(data)
+                win = data
+
+            # Deal with multiband case
+            else:
+                value = {}
+                win = {}
+
+                for b in self.indexes:
+                    data = self.ds.read(
+                        window=window, fill_value=self.nodata, boundless=boundless, indexes=b, masked=masked)
+                    val = format_value(data)
+                    # Store according to GDAL band numbers
+                    value[b] = val
+                    win[b] = data
+
+        # Or just for specified band in multiband case
+        elif isinstance(band, int):
+            data = self.ds.read(
+                window=window, fill_value=self.nodata, boundless=boundless, indexes=band, masked=masked)
+            value = format_value(data)
+        else:
+            raise ValueError(
+                'Value provided for band was not int or None.')
+
+        if return_window == True:
+            return (value, win)
+        else:
+            return value
+
     
 class SatelliteImage(Raster):
     pass
