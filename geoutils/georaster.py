@@ -87,7 +87,8 @@ class Raster(object):
         if load_data:
             self.load(bands)
             self.isLoaded = True
-            self.matches_disk = True
+            if isinstance(filename, str):
+                self.matches_disk = True
         else:
             self.data = None
             self.nbands = None
