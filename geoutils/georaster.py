@@ -389,10 +389,6 @@ class Raster(object):
             if not isinstance(dst_bounds, rio.coords.BoundingBox):
                 dst_bounds = rio.coords.BoundingBox(dst_bounds['left'], dst_bounds['bottom'],
                                                     dst_bounds['right'], dst_bounds['top'])
-            if not opt_npx and not opt_res:
-                # Default to preserving pixel size.
-                opt_res = True
-                xres, yres = self.res
 
         # Determine target raster size/resolution
         dst_transform = None
@@ -404,7 +400,7 @@ class Raster(object):
             # Fix raster size at nx, ny; don't change extent.
             dst_shape = (self.count, dst_size[1], dst_size[0])
 
-            # Fix nx, ny *and* different destination bounds requested.
+            # Fix nx,ny *and* different destination bounds requested.
             if dst_bounds is not None:
                 dst_transform = rio.transform.from_bounds(*dst_bounds,
                                                           width=dst_shape[2], height=dst_shape[1])
