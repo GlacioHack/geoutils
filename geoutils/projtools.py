@@ -5,7 +5,7 @@ import rasterio as rio
 import pyproj
 from rasterio.crs import CRS
 from shapely.geometry.polygon import Polygon
-import shapely.ops.transform
+import shapely.ops
 import pyproj
 
 
