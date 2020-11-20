@@ -385,15 +385,15 @@ class Raster(object):
         if dst_ref is not None:
 
             # Check that dst_ref type is either str, Raster or rasterio data set
+            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
             if isinstance(dst_ref, Raster):
-                ds_ref = dst_ref.ds
+                ds_ref = dst_ref
             elif isinstance(dst_ref, rio.io.MemoryFile) or isinstance(dst_ref, rasterio.io.DatasetReader):
                 ds_ref = dst_ref
             elif isinstance(dst_ref, str):
                 assert os.path.exists(
                     dst_ref), "Reference raster does not exist"
-                rst = Raster(dst_ref, load_data=False)
-                ds_ref = rst.ds
+                ds_ref = Raster(dst_ref, load_data=False)
             else:
                 raise ValueError(
                     "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set")
