@@ -39,7 +39,8 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-    def __init__(self, filename, attrs=None, load_data=True, bands=None):
+    def __init__(self, filename, attrs=None, load_data=True, bands=None, 
+        as_memfile=False):
 
         """
         Load a rasterio-supported dataset, given a filename.
@@ -54,6 +55,8 @@ class Raster(object):
         :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
+        :param as_memfile: open the dataset via a rio.MemoryFile.
+        :type as_memfile: bool
 
         :return: A Raster object
         """
@@ -62,13 +65,20 @@ class Raster(object):
         if isinstance(filename, str):
             # Save the absolute on-disk filename
             self.filename = os.path.abspath(filename)
-            # open the file in memory
-            self.memfile = MemoryFile(open(filename, 'rb'))
+            if as_memfile:
+                # open the file in memory
+                self.memfile = MemoryFile(open(filename, 'rb'))
+                # Read the file as a rasterio dataset
+                self.ds = self.memfile.open()
+            else:
+                self.memfile = None
+                self.ds = rio.open(filename, 'r')
 
         # Or, image is already a Memory File.
         elif isinstance(filename, rio.io.MemoryFile):
             self.filename = None
             self.memfile = filename
+            self.ds = self.memfile.open()
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename, np.array):
@@ -79,8 +89,7 @@ class Raster(object):
         else:
             raise ValueError('filename argument not recognised.')
 
-        # Read the file as a rasterio dataset
-        self.ds = self.memfile.open()
+
 
         self._read_attrs(attrs)
 
@@ -185,15 +194,26 @@ class Raster(object):
         for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
 
-    def _update(self, imgdata=None, metadata=None):
+    def _update(self, imgdata=None, metadata=None, vrt_to_driver='GTiff'):
         """
-        update the object with a new image or coordinates.
+        Update the object with a new image or metadata.
+
+        :param imgdata: image data to update with.
+        :type imgdata: None or np.array
+        :param metadata: metadata to update with.
+        :type metadata: dict
+        :param vrt_to_driver: name of driver to coerce a VRT to. This is required
+        because rasterio does not support writing to to a VRTSourcedRasterBand.
+        :type vrt_to_driver: str
         """
         memfile = MemoryFile()
         if imgdata is None:
             imgdata = self.data
         if metadata is None:
             metadata = self.metadata
+
+        if metadata['driver'] == 'VRT':
+            metadata['driver'] = vrt_to_driver
 
         with memfile.open(**metadata) as ds:
             ds.write(imgdata)
