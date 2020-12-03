@@ -13,6 +13,7 @@ import rasterio.transform
 from rasterio.io import MemoryFile
 from rasterio.crs import CRS
 from rasterio.warp import Resampling
+from rasterio.plot import show as rshow
 
 from affine import Affine
 from shapely.geometry.polygon import Polygon
@@ -668,6 +669,27 @@ class Raster(object):
         else:
             return extent
 
+    def show(self, **kwargs):
+        """ Show/display the image, with axes in projection of image.
+
+        This method is a wrapper to rasterio.plot.show. Any **kwargs which you give
+        this method will be passed to rasterio.plot.show.
+
+        You can also pass in **kwargs to be used by the underlying imshow or 
+        contour methods of matplotlib. The example below shows provision of
+        a kwarg for rasterio.plot.show, and a kwarg for matplotlib as well::
+
+            import matplotlib.pyplot as plt
+            ax1 = plt.subplot(111)
+            mpl_kws = {'cmap':'seismic'}
+            myimage.show(ax=ax1, mpl_kws)
+
+        :returns: None
+        :rtype: None
+
+        """
+        rshow(self.ds, **kwargs)
+
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,
                         reducer_function=np.ma.mean):
@@ -804,7 +826,6 @@ class Raster(object):
             return (value, win)
         else:
             return value
-
     
 class SatelliteImage(Raster):
     pass
