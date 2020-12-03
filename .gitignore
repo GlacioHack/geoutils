@@ -136,6 +136,6 @@ dmypy.json
 *~
 
 # version file
-GeoUtils/version.py
+geoutils/version.py
 
 # End of https://www.gitignore.io/api/python

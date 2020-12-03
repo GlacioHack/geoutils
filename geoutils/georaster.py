@@ -40,7 +40,8 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-    def __init__(self, filename, attrs=None, load_data=True, bands=None):
+    def __init__(self, filename, attrs=None, load_data=True, bands=None, 
+        as_memfile=False):
 
         """
         Load a rasterio-supported dataset, given a filename.
@@ -55,6 +56,8 @@ class Raster(object):
         :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
+        :param as_memfile: open the dataset via a rio.MemoryFile.
+        :type as_memfile: bool
 
         :return: A Raster object
         """
@@ -63,13 +66,20 @@ class Raster(object):
         if isinstance(filename, str):
             # Save the absolute on-disk filename
             self.filename = os.path.abspath(filename)
-            # open the file in memory
-            self.memfile = MemoryFile(open(filename, 'rb'))
+            if as_memfile:
+                # open the file in memory
+                self.memfile = MemoryFile(open(filename, 'rb'))
+                # Read the file as a rasterio dataset
+                self.ds = self.memfile.open()
+            else:
+                self.memfile = None
+                self.ds = rio.open(filename, 'r')
 
         # Or, image is already a Memory File.
         elif isinstance(filename, rio.io.MemoryFile):
             self.filename = None
             self.memfile = filename
+            self.ds = self.memfile.open()
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename, np.array):
@@ -80,15 +90,15 @@ class Raster(object):
         else:
             raise ValueError('filename argument not recognised.')
 
-        # Read the file as a rasterio dataset
-        self.ds = self.memfile.open()
+
 
         self._read_attrs(attrs)
 
         if load_data:
             self.load(bands)
             self.isLoaded = True
-            self.matches_disk = True
+            if isinstance(filename, str):
+                self.matches_disk = True
         else:
             self.data = None
             self.nbands = None
@@ -185,15 +195,26 @@ class Raster(object):
         for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
 
-    def _update(self, imgdata=None, metadata=None):
+    def _update(self, imgdata=None, metadata=None, vrt_to_driver='GTiff'):
         """
-        update the object with a new image or coordinates.
+        Update the object with a new image or metadata.
+
+        :param imgdata: image data to update with.
+        :type imgdata: None or np.array
+        :param metadata: metadata to update with.
+        :type metadata: dict
+        :param vrt_to_driver: name of driver to coerce a VRT to. This is required
+        because rasterio does not support writing to to a VRTSourcedRasterBand.
+        :type vrt_to_driver: str
         """
         memfile = MemoryFile()
         if imgdata is None:
             imgdata = self.data
         if metadata is None:
             metadata = self.metadata
+
+        if metadata['driver'] == 'VRT':
+            metadata['driver'] = vrt_to_driver
 
         with memfile.open(**metadata) as ds:
             ds.write(imgdata)
@@ -336,16 +357,25 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, dst_crs, dst_size=None, dst_bounds=None, dst_res=None,
-                  nodata=None, dtype=None, resampling=Resampling.nearest, 
+    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None, dst_bounds=None, dst_res=None,
+                  nodata=None, dtype=None, resampling=Resampling.nearest,
                   **kwargs):
-        """ Reproject raster to specified CRS, dimensions.
+        """ 
+        Reproject raster to a specified grid.
+
+        The output grid can either be given by a reference Raster (using `dst_ref`),
+        or by manually providing the output CRS (`dst_crs`), dimensions (`dst_size`),
+        resolution (with `dst_size`) and/or bounds (`dst_bounds`).
+        Any resampling algorithm implemented in rasterio can be used.
 
         Currently: requires image data to have been loaded into memory.
         NOT SUITABLE for large datasets yet! This requires work...
 
         To reproject a Raster with different source bounds, first run Raster.crop.
 
+        :param dst_ref: a reference raster. If set will use the attributes of this raster for the output grid.
+        Can be provided as Raster/rasterio data set or as path to the file.
+        :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to.
         :dtype crs: int, dict, str, CRS      
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
@@ -358,23 +388,54 @@ class Raster(object):
         :dtype nodata: int, float, None
         :param resampling: A rasterio Resampling method
         :dtype resample: rio.warp.Resampling object
-        :param **kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.         
+        :param **kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
 
         :returns: Raster
         :rtype: Raster
-
         """
 
-        # Check input arguments
+        # Check that either dst_ref or dst_crs is provided
+        if dst_ref is not None:
+            if dst_crs is not None:
+                raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
+        else:
+            if dst_crs is None:
+                raise ValueError("One of `dst_ref` or `dst_crs` must be set.")
+            
+        # Case a raster is provided as reference
+        if dst_ref is not None:
+
+            # Check that dst_ref type is either str, Raster or rasterio data set
+            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
+            if isinstance(dst_ref, Raster):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, rio.io.MemoryFile) or isinstance(dst_ref, rasterio.io.DatasetReader):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, str):
+                assert os.path.exists(
+                    dst_ref), "Reference raster does not exist"
+                ds_ref = Raster(dst_ref, load_data=False)
+            else:
+                raise ValueError(
+                    "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set")
+
+            # Read reprojecting params from ref raster
+            dst_crs = ds_ref.crs
+            dst_size = (ds_ref.width, ds_ref.height)
+            dst_res = None
+            dst_bounds = ds_ref.bounds
+        else:
+            # Determine target CRS
+            dst_crs = CRS.from_user_input(dst_crs)
+
+        # If dst_ref is None, check other input arguments
         if dst_size is not None and dst_res is not None:
             raise ValueError(
                 'dst_size and dst_res both specified. Specify only one.')
 
         if dtype is None:
-            dtype = self.dtypes[0]  # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
-
-        # Determine target CRS
-        dst_crs = CRS.from_user_input(dst_crs)
+            # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
+            dtype = self.dtypes[0]
 
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
@@ -390,22 +451,42 @@ class Raster(object):
             if not isinstance(dst_bounds, rio.coords.BoundingBox):
                 dst_bounds = rio.coords.BoundingBox(dst_bounds['left'], dst_bounds['bottom'],
                                                     dst_bounds['right'], dst_bounds['top'])
-            if not opt_npx and not opt_res:
-                # Default to preserving pixel size.
-                opt_res = True
-                xres, yres = self.res
 
         # Determine target raster size/resolution
         dst_transform = None
         if dst_res is not None:
-            # Let rasterio determine the maximum bounds of the new raster.
-            reproj_kwargs.update({'dst_resolution': dst_res})
+            if dst_bounds is None:
+                # Let rasterio determine the maximum bounds of the new raster.
+                reproj_kwargs.update({'dst_resolution': dst_res})
+            else:
+                
+                # Bounds specified. First check if xres and yres are different.
+                if isinstance(dst_res, tuple):
+                    xres = dst_res[0]
+                    yres = dst_res[1]
+                else:
+                    xres = dst_res
+                    yres = dst_res
 
-        elif dst_size is not None:
-            # Fix raster size at nx, ny; don't change extent.
+                # Calculate new raster size which ensures that pixels have 
+                # precisely the resolution specified.
+                dst_width = np.ceil((dst_bounds.right - dst_bounds.left) / xres)
+                dst_height = np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres)
+                dst_size = (int(dst_width), int(dst_height))
+                
+                # As a result of precise pixel size, the destination bounds may
+                # have to be adjusted.
+                x1 = dst_bounds.left + (xres*dst_width)
+                y1 = dst_bounds.top - (yres*dst_height)
+                dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top, 
+                    left=dst_bounds.left, bottom=y1, right=x1)
+                
+
+        if dst_size is not None:
+            # Fix raster size at nx, ny.
             dst_shape = (self.count, dst_size[1], dst_size[0])
 
-            # Fix nx, ny *and* different destination bounds requested.
+            # Fix nx,ny with destination bounds requested.
             if dst_bounds is not None:
                 dst_transform = rio.transform.from_bounds(*dst_bounds,
                                                           width=dst_shape[2], height=dst_shape[1])
@@ -425,9 +506,6 @@ class Raster(object):
 
         # Write results to a new Raster.
         dst_r = Raster.from_array(dst_data, dst_transformed, dst_crs, nodata)
-
-        if dst_bounds is not None:
-            dst_r = dst_r.crop(dst_bounds)
 
         return dst_r
 
@@ -612,7 +690,142 @@ class Raster(object):
         """
         rshow(self.ds, **kwargs)
 
+    def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
+                        window=None, return_window=False, boundless=True,
+                        reducer_function=np.ma.mean):
+        """ Extract the pixel value(s) at the specified coordinates.
 
+        Extract pixel value of each band in dataset at the specified
+        coordinates. Alternatively, if band is specified, return only that
+        band's pixel value.
+
+        Optionally, return mean of pixels within a square window.
+
+        :param x: x (or longitude) coordinate.
+        :type x: float
+        :param y: y (or latitude) coordinate.
+        :type y: float
+        :param latlon: Set to True if coordinates provided as longitude/latitude.
+        :type latlon: boolean
+        :param band: the band number to extract from.
+        :type band: int
+        :param masked: If `masked` is `True` the return value will be a masked
+        array. Otherwise (the default) the return value will be a
+        regular array.
+        :type masked: bool, optional (default False)
+        :param window: expand area around coordinate to dimensions \
+                  window * window. window must be odd.
+        :type window: None, int
+        :param return_window: If True when window=int, returns (mean,array) \
+        where array is the dataset extracted via the specified window size.
+        :type return_window: boolean
+        :param boundless: If `True`, windows that extend beyond the dataset's extent
+        are permitted and partially or completely filled arrays (with self.nodata) will
+        be returned as appropriate.
+        :type boundless: bool, optional (default False)
+        :param reducer_function: a function to apply to the values in window.
+        :type reducer_function: function, optional (Default is np.ma.mean)
+
+        :returns: When called on a Raster or with a specific band \
+        set, return value of pixel.
+        :rtype: float
+        :returns: If mutiple band Raster and the band is not specified, a \
+        dictionary containing the value of the pixel in each band.
+        :rtype: dict
+        :returns: In addition, if return_window=True, return tuple of \
+        (values, arrays)
+        :rtype: tuple
+
+        :examples:
+
+        >>> self.value_at_coords(-48.125,67.8901,window=3)
+        Returns mean of a 3*3 window:
+            v v v \
+            v c v  | = float(mean)
+            v v v /
+        (c = provided coordinate, v= value of surrounding coordinate)
+
+        """
+
+        if window is not None:
+            if window % 2 != 1:
+                raise ValueError('Window must be an odd number.')
+
+        def format_value(value):
+            """ Check if valid value has been extracted """
+            if type(value) in [np.ndarray, np.ma.core.MaskedArray]:
+                if window != None:
+                    value = reducer_function(value.flatten())
+                else:
+                    value = value[0, 0]
+            else:
+                value = None
+            return value
+
+        # Need to implement latlon option later
+        if latlon:
+            raise NotImplementedError()
+
+        # Convert coordinates to pixel space
+        row, col = self.ds.index(x, y)
+
+        # Decide what pixel coordinates to read:
+        if window != None:
+            half_win = (window - 1) / 2
+            # Subtract start coordinates back to top left of window
+            col = col - half_win
+            row = row - half_win
+            # Offset to read to == window
+            width = window
+            height = window
+        else:
+            # Start reading at col,row and read 1px each way
+            width = 1
+            height = 1
+
+        # Make sure coordinates are int
+        col = int(col)
+        row = int(row)
+
+        # Create rasterio's window for reading
+        window = rio.windows.Window(col, row, width, height)
+
+        # Get values for all bands
+        if band is None:
+
+            # Deal with single band case
+            if self.nbands == 1:
+                data = self.ds.read(
+                    window=window, fill_value=self.nodata, boundless=boundless, masked=masked)
+                value = format_value(data)
+                win = data
+
+            # Deal with multiband case
+            else:
+                value = {}
+                win = {}
+
+                for b in self.indexes:
+                    data = self.ds.read(
+                        window=window, fill_value=self.nodata, boundless=boundless, indexes=b, masked=masked)
+                    val = format_value(data)
+                    # Store according to GDAL band numbers
+                    value[b] = val
+                    win[b] = data
+
+        # Or just for specified band in multiband case
+        elif isinstance(band, int):
+            data = self.ds.read(
+                window=window, fill_value=self.nodata, boundless=boundless, indexes=band, masked=masked)
+            value = format_value(data)
+        else:
+            raise ValueError(
+                'Value provided for band was not int or None.')
+
+        if return_window == True:
+            return (value, win)
+        else:
+            return value
     
 class SatelliteImage(Raster):
     pass
