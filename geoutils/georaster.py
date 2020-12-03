@@ -356,16 +356,25 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, dst_crs, dst_size=None, dst_bounds=None, dst_res=None,
-                  nodata=None, dtype=None, resampling=Resampling.nearest, 
+    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None, dst_bounds=None, dst_res=None,
+                  nodata=None, dtype=None, resampling=Resampling.nearest,
                   **kwargs):
-        """ Reproject raster to specified CRS, dimensions.
+        """ 
+        Reproject raster to a specified grid.
+
+        The output grid can either be given by a reference Raster (using `dst_ref`),
+        or by manually providing the output CRS (`dst_crs`), dimensions (`dst_size`),
+        resolution (with `dst_size`) and/or bounds (`dst_bounds`).
+        Any resampling algorithm implemented in rasterio can be used.
 
         Currently: requires image data to have been loaded into memory.
         NOT SUITABLE for large datasets yet! This requires work...
 
         To reproject a Raster with different source bounds, first run Raster.crop.
 
+        :param dst_ref: a reference raster. If set will use the attributes of this raster for the output grid.
+        Can be provided as Raster/rasterio data set or as path to the file.
+        :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to.
         :dtype crs: int, dict, str, CRS      
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
@@ -378,23 +387,54 @@ class Raster(object):
         :dtype nodata: int, float, None
         :param resampling: A rasterio Resampling method
         :dtype resample: rio.warp.Resampling object
-        :param **kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.         
+        :param **kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
 
         :returns: Raster
         :rtype: Raster
-
         """
 
-        # Check input arguments
+        # Check that either dst_ref or dst_crs is provided
+        if dst_ref is not None:
+            if dst_crs is not None:
+                raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
+        else:
+            if dst_crs is None:
+                raise ValueError("One of `dst_ref` or `dst_crs` must be set.")
+            
+        # Case a raster is provided as reference
+        if dst_ref is not None:
+
+            # Check that dst_ref type is either str, Raster or rasterio data set
+            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
+            if isinstance(dst_ref, Raster):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, rio.io.MemoryFile) or isinstance(dst_ref, rasterio.io.DatasetReader):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, str):
+                assert os.path.exists(
+                    dst_ref), "Reference raster does not exist"
+                ds_ref = Raster(dst_ref, load_data=False)
+            else:
+                raise ValueError(
+                    "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set")
+
+            # Read reprojecting params from ref raster
+            dst_crs = ds_ref.crs
+            dst_size = (ds_ref.width, ds_ref.height)
+            dst_res = None
+            dst_bounds = ds_ref.bounds
+        else:
+            # Determine target CRS
+            dst_crs = CRS.from_user_input(dst_crs)
+
+        # If dst_ref is None, check other input arguments
         if dst_size is not None and dst_res is not None:
             raise ValueError(
                 'dst_size and dst_res both specified. Specify only one.')
 
         if dtype is None:
-            dtype = self.dtypes[0]  # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
-
-        # Determine target CRS
-        dst_crs = CRS.from_user_input(dst_crs)
+            # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
+            dtype = self.dtypes[0]
 
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
