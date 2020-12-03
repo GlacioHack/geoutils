@@ -8,13 +8,19 @@ More documentation to come!
 
 ## Installation ##
 
-* Summary of set up
-
-`pip install -e .` or `python setup.py install`
-
 * Main dependencies
 
 rasterio, geopandas, pyproj
+
+* Rapidly install dependencies (can be tricky because of gdal)
+
+`conda install -c conda-forge rasterio geopandas pyproj`
+
+* Package set up (once conda environment is create)
+
+`pip install -e .` or `python setup.py install`
+
+
 
 
 ## Structure 
