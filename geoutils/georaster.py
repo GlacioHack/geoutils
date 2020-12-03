@@ -17,6 +17,7 @@ from rasterio.plot import show as rshow
 
 from affine import Affine
 from shapely.geometry.polygon import Polygon
+from scipy.interpolate import griddata
 
 try:
     import rioxarray
@@ -28,7 +29,6 @@ else:
 # Attributes from rasterio's DatasetReader object to be kept by default
 default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
                  'res', 'shape', 'transform', 'width']
-
 
 class Raster(object):
     """
@@ -95,7 +95,8 @@ class Raster(object):
         self._read_attrs(attrs)
 
         if load_data:
-            self.load(bands)
+            self.data = self.ds.load(bands)
+            self.nbands = self.data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
                 self.matches_disk = True
@@ -526,6 +527,67 @@ class Raster(object):
                                                        d, dy, ymax + yoff)})
         self._update(metadata=meta)
 
+    def set_ndv(self, ndv, update_array=False):
+        """
+        Set new nodata values for bands (and possibly update arrays)
+
+        :param ndv: nodata values
+        :type ndv: float, int
+        :param update_array: change the existing nodata in array
+        :type update_array: bool
+        """
+        meta = self.ds.meta
+        imgdata = self.data
+        pre_ndv = self.nodata
+
+        meta.update({'nodata': ndv})
+
+        if not (isinstance(ndv, float) or isinstance(ndv, int)):
+            raise ValueError(
+                "Type of ndv not understood, must be float or int")
+
+        if update_array and pre_ndv is not None:
+            #nodata values are specific to each band
+            imgdata[imgdata==np.squeeze(np.array([pre_ndv]))[:,None,None]*np.ones((self.ds.height,self.ds.width))[None,:,:]]\
+                = np.squeeze(np.array([ndv]))[:,None,None]*np.ones((self.ds.height,self.ds.width))[None,:,:]
+        else:
+            imgdata = None
+
+        self._update(metadata=meta,imgdata=imgdata)
+
+    def set_dtypes(self,dtypes,update_array=False):
+
+        """
+        Set new dtypes for bands (and possibly update arrays)
+
+        :param dtypes: data types
+        :type dtypes: np.dtype or str
+        :param update_array: change the existing dtype in arrays
+        :type: update_array: bool
+        """
+        meta = self.ds.meta
+        imgdata = self.data
+
+        meta.update({'dtypes': dtypes})
+
+        if not (isinstance(dtypes, np.dtype) or isinstance(dtypes, str)):
+            raise ValueError(
+                "Type of dtypes not understood, must be np.dtype or str")
+
+        if update_array:
+            if imgdata.shape[0]==1:
+                imgdata = imgdata.astype(dtypes)
+            else:
+                # not sure _update supports multiple datatypes anyway (in terms of RAM usage?)
+                imgdata = imgdata.astype(np.float64)
+                for i in imgdata.shape[0]:
+                    imgdata[i,:] = imgdata[i,:].astype(dtypes[i])
+        else:
+            imgdata = None
+
+        self._update(metadata=meta, imgdata=imgdata)
+
+
     def save(self, filename, driver='GTiff', dtype=None, blank_value=None):
         """ Write the Raster to a geo-referenced file. 
 
@@ -822,10 +884,162 @@ class Raster(object):
             raise ValueError(
                 'Value provided for band was not int or None.')
 
-        if return_window == True:
+        if return_window:
             return (value, win)
         else:
             return value
-    
+
+    def xxyy(self, offset='corner', grid=True):
+        """
+        Get x,y coordinates of all pixels in the raster.
+
+        :param offset: coordinate type. If 'corner', returns corner coordinates of pixels.
+            If 'center', returns center coordinates. Default is corner.
+        :param grid: Return gridded coordinates. Default is True.
+        :type offset: str
+        :type grid: bool
+        :returns x,y: numpy arrays corresponding to the x,y coordinates of each pixel.
+        """
+        assert offset in ['corner', 'center'], "ctype is not one of 'corner', 'center': {}".format(offset)
+
+        xmin, ymin, xmax, ymax = self.ds.bounds
+        _, dx, _, _, dy, _ = self.ds.transform
+        npix_x = self.ds.width
+        npix_y = self.ds.height
+
+        if dx < 0:
+            xx = np.linspace(xmax, xmin, npix_x + 1)
+        else:
+            xx = np.linspace(xmin, xmax, npix_x + 1)
+
+        if dy < 0:
+            yy = np.linspace(ymax, ymin, npix_y + 1)
+        else:
+            yy = np.linspace(ymin, ymax, npix_y + 1)
+
+        #TODO: make this change robust to non-gridded data?
+        if offset == 'center':
+            xx += dx / 2  # shift by half a pixel
+            yy += dy / 2
+        if grid:
+            return np.meshgrid(xx[:-1], yy[:-1])  # drop the last element
+        else:
+            return xx[:-1], yy[:-1]
+
+    def xy2ij(self,x,y):
+        """
+        Return row, column indices for a given x,y coordinate pair.
+
+        :param x: x coordinates
+        :type x: array-like
+        :param y: y coordinates
+        :type y: array-like
+
+        :returns i, j: indices of x,y in the image.
+        :rtype i, j: array-like
+
+        """
+        i, j = self.ds.index(x,y)
+
+        return i, j
+
+    def ij2xy(self,i,j,offset='center'):
+
+        """
+        Return x,y coordinates for a given row, column index pair.
+
+        :param i: row (i) index of pixel.
+        :type i: array-like
+        :param j: column (j) index of pixel.
+        :type j: array-like
+        :param offset: return coordinates as "corner" or "center" of pixel
+        :param offset: str
+
+        :returns x, y: x,y coordinates of i,j in reference system.
+        """
+
+        x,y = self.ds.xy(i,j,offset=offset)
+
+        return x, y
+
+    def outside_image(self, xi,yj, index=True):
+        """
+        #TODO: calculate matricially for all points instead of doing for only one?
+        Check whether a given point falls outside of the raster.
+
+        :param xi: Indices (or coordinates) of x direction to check.
+        :param yj: Indices (or coordinates) of y direction to check.
+        :param index: Interpret ij as raster indices (default is True). If False, assumes ij is coordinates.
+        :type xi: array-like
+        :type yj: array-like
+        :type index: bool
+
+        :returns is_outside: True if ij is outside of the image.
+        """
+        if not index:
+            xi,xj = self.xy2ij(xi,yj)
+
+        if np.any(np.array((xi,yj)) < 0):
+            return True
+        elif xi > self.ds.width or yj > self.ds.height:
+            return True
+        else:
+            return False
+
+    def interp_points(self,pts,nsize=1,mode='linear'):
+
+        """
+        Interpolate raster values at a given point, or sets of points.
+
+       :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
+       value returned is nan.'
+       :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
+       :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
+           used to interpolate the raster value at each point. For more information, see
+           scipy.interpolate.interp2d. Default is linear.
+       :type pts: array-like
+       :type nsize: int
+       :type mode: str
+
+       :returns rpts: Array of raster value(s) for the given points.
+       :rtype rpts: array-like
+       """
+        assert mode in ['mean', 'linear', 'cubic', 'quintic',
+                        'nearest'], "mode must be mean, linear, cubic, quintic or nearest."
+
+        rpts = []
+
+        #TODO: might need to check if coordinates are center or point in the metadata here...
+
+        xx, yy = self.xxyy(offset='center', grid=False)
+        #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
+        # but such a method probably exists already within scipy/other interpolation packages?
+        for pt in pts:
+            i,j = self.xy2ij(pt[0],pt[1])
+            ij = (int(i[0] + 0.5), int(j[1] + 0.5))
+            if self.outside_image(ij, index=True):
+                rpts.append(np.nan)
+                continue
+            else:
+                x = xx[i - nsize:i + nsize + 1]
+                y = yy[j - nsize:j + nsize + 1]
+                z = self.data[i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
+                if mode in ['linear', 'cubic', 'quintic', 'nearest']:
+                    X, Y = np.meshgrid(x, y)
+                    try:
+                        zint = griddata((X.flatten(), Y.flatten()), z.flatten(), pt, method=mode)[0]
+                    except:
+                        zint = np.nan
+                else:
+                    zint = np.nanmean(z.flatten())
+                rpts.append(zint)
+        rpts = np.array(rpts)
+
+        return rpts
+
+
 class SatelliteImage(Raster):
+
+
+
     pass
