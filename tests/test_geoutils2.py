@@ -5,6 +5,7 @@ import os
 import geoutils.georaster as gr
 import geoutils.geovector as gv
 import matplotlib.pyplot as plt
+import numpy as np
 
 fn_img = os.path.join('/home/atom/code/devel/libs/GeoUtils/tests','data','LE71400412000304SGS00_B4_crop.TIF')
 fn_img2 = os.path.join('/home/atom/code/devel/libs/GeoUtils/tests','data','LE71400412000304SGS00_B4_crop2.TIF')
@@ -75,9 +76,30 @@ def test_inters_img(fn_img,fn_img2):
     inters = r.intersection(r2)
     print(inters)
 
+def test_raster2points(fn_img):
+
+    r = gr.Raster(fn_img)
+
+    xmin, ymin, xmax, ymax = r.ds.bounds
+
+    #random float
+    xrand = np.random.uniform(low=xmin, high=xmax, size=(50,))
+    yrand = np.random.uniform(low=ymin, high=ymax, size=(50,))
+
+
+    #random int
+    xrand = np.rand
+    pts = list(zip(xrand,yrand))
+
+    rpts = r.interp_points(pts)
+
+    print(rpts)
+
+
 
 if __name__ == '__main__':
-    test_load_img(fn_img)
-    test_crop_img(fn_img,fn_img2)
-    test_reproj_img(fn_img,fn_img2)
-    test_inters_img(fn_img,fn_img2)
+    # test_load_img(fn_img)
+    # test_crop_img(fn_img,fn_img2)
+    # test_reproj_img(fn_img,fn_img2)
+    # test_inters_img(fn_img,fn_img2)
+    test_raster2points(fn_img)
