@@ -110,16 +110,16 @@ class Raster(object):
         """ Create a Raster from a numpy array and some geo-referencing information.
 
         :param data:
-        :dtype data:
+        :type data:
         :param transform: the 2-D affine transform for the image mapping. 
             Either a tuple(x_res, 0.0, top_left_x, 0.0, y_res, top_left_y) or 
             an affine.Affine object.
-        :dtype transform: tuple, affine.Affine.
+        :type transform: tuple, affine.Affine.
         :param crs: Coordinate Reference System for image. Either a rasterio CRS, 
             or the EPSG integer.
-        :dtype crs: rasterio.crs.CRS or int
+        :type crs: rasterio.crs.CRS or int
         :param nodata:
-        :dtype nodata:
+        :type nodata:
 
         :returns: A Raster object containing the provided data.
         :rtype: Raster.
@@ -212,7 +212,7 @@ class Raster(object):
         if imgdata is None:
             imgdata = self.data
         if metadata is None:
-            metadata = self.metadata
+            metadata = self.ds.meta
 
         if metadata['driver'] == 'VRT':
             metadata['driver'] = vrt_to_driver
@@ -378,18 +378,18 @@ class Raster(object):
         Can be provided as Raster/rasterio data set or as path to the file.
         :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to.
-        :dtype crs: int, dict, str, CRS      
+        :type crs: int, dict, str, CRS
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
-        :dtype dst_size: tuple(int, int)
+        :type dst_size: tuple(int, int)
         :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the source CRS.
-        :dtype dst_bounds: dict or rio.coords.BoundingBox
+        :type dst_bounds: dict or rio.coords.BoundingBox
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :dtype dst_res: float or tuple(float, float)
+        :type dst_res: float or tuple(float, float)
         :param nodata: nodata value in reprojected data.
-        :dtype nodata: int, float, None
+        :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
-        :dtype resample: rio.warp.Resampling object
-        :param **kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
+        :type resampling: rio.warp.Resampling object
+        :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
 
         :returns: Raster
         :rtype: Raster
@@ -532,60 +532,89 @@ class Raster(object):
         Set new nodata values for bands (and possibly update arrays)
 
         :param ndv: nodata values
-        :type ndv: float, int
+        :type ndv: list or int or float
         :param update_array: change the existing nodata in array
         :type update_array: bool
         """
+
+        if not (isinstance(ndv, list) or isinstance(ndv, int) or isinstance(ndv, float)):
+            raise ValueError(
+                "Type of ndv not understood, must be list or float or int")
+        elif (isinstance(ndv,int) or isinstance(ndv,float)) and self.count>1:
+            print('Several raster band: using nodata value for all bands')
+            ndv = [ndv]*self.count
+        elif isinstance(ndv,list) and self.count == 1:
+            print('Only one raster band: using first nodata value provided')
+            ndv = ndv[0]
+
         meta = self.ds.meta
         imgdata = self.data
         pre_ndv = self.nodata
 
         meta.update({'nodata': ndv})
 
-        if not (isinstance(ndv, float) or isinstance(ndv, int)):
-            raise ValueError(
-                "Type of ndv not understood, must be float or int")
-
         if update_array and pre_ndv is not None:
             #nodata values are specific to each band
-            imgdata[imgdata==np.squeeze(np.array([pre_ndv]))[:,None,None]*np.ones((self.ds.height,self.ds.width))[None,:,:]]\
-                = np.squeeze(np.array([ndv]))[:,None,None]*np.ones((self.ds.height,self.ds.width))[None,:,:]
+
+            #tried to do data cube at once, doesn't work :(
+            # ind = (imgdata == np.array([pre_ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :])
+            # output = np.array([ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :]
+            # imgdata[ind] = output
+
+            #let's do a loop then
+            if self.count == 1:
+                ind = imgdata[:] == pre_ndv
+                imgdata[ind] = ndv
+            else:
+                for i in range(self.count):
+                    ind = imgdata[i,:] == pre_ndv[i]
+                    imgdata[i,ind] = ndv[i]
         else:
             imgdata = None
 
         self._update(metadata=meta,imgdata=imgdata)
 
-    def set_dtypes(self,dtypes,update_array=False):
+    def set_dtypes(self,dtypes,update_array=True):
 
         """
         Set new dtypes for bands (and possibly update arrays)
 
         :param dtypes: data types
-        :type dtypes: np.dtype or str
+        :type dtypes:  list or type or str
         :param update_array: change the existing dtype in arrays
         :type: update_array: bool
         """
+
+        if not (isinstance(dtypes,list) or isinstance(dtypes, type) or isinstance(dtypes, str)):
+            raise ValueError(
+                "Type of dtypes not understood, must be list or type or str")
+        elif isinstance(dtypes, type) or isinstance(dtypes, str):
+            print('Several raster band: using data type for all bands')
+            dtypes = (dtypes,) * self.count
+        elif isinstance(dtypes, list) and self.count == 1:
+            print('Only one raster band: using first data type provided')
+            dtypes = tuple(dtypes)
+
         meta = self.ds.meta
         imgdata = self.data
 
-        meta.update({'dtypes': dtypes})
+        #for rio.DatasetReader.meta, the proper name is "dtype"
+        meta.update({'dtype': dtypes[0]})
 
-        if not (isinstance(dtypes, np.dtype) or isinstance(dtypes, str)):
-            raise ValueError(
-                "Type of dtypes not understood, must be np.dtype or str")
-
+        #this should always be "True", as rasterio doesn't change the array type by default:
+        #ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
         if update_array:
-            if imgdata.shape[0]==1:
-                imgdata = imgdata.astype(dtypes)
+            if self.count == 1:
+                imgdata = imgdata.astype(dtypes[0])
             else:
-                # not sure _update supports multiple datatypes anyway (in terms of RAM usage?)
-                imgdata = imgdata.astype(np.float64)
+                #TODO: double-check, but I don't think we can have different dtypes for bands with rio (1 dtype in meta)
+                imgdata = imgdata.astype(dtypes[0])
                 for i in imgdata.shape[0]:
-                    imgdata[i,:] = imgdata[i,:].astype(dtypes[i])
+                    imgdata[i,:] = imgdata[i,:].astype(dtypes[0])
         else:
             imgdata = None
 
-        self._update(metadata=meta, imgdata=imgdata)
+        self._update(imgdata=imgdata,metadata=meta)
 
 
     def save(self, filename, driver='GTiff', dtype=None, blank_value=None):
@@ -905,9 +934,14 @@ class Raster(object):
         xmin, ymin, xmax, ymax = self.ds.bounds
         dx = list(self.ds.transform)[0]
         dy = list(self.ds.transform)[4]
-        print(dx,dy)
         npix_x = self.ds.width
         npix_y = self.ds.height
+
+        # transform = Affine.from_gdal(self.ds.transform)
+        # nx, ny = self.ds.width, self.ds.height
+        # xx, yy = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5) * transform
+
+        # return xx, yy
 
         if dx < 0:
             xx = np.linspace(xmax, xmin, npix_x + 1)
@@ -919,7 +953,6 @@ class Raster(object):
         else:
             yy = np.linspace(ymin, ymax, npix_y + 1)
 
-        #TODO: make this change robust to non-gridded data?
         if offset == 'center':
             xx += dx / 2  # shift by half a pixel
             yy += dy / 2
@@ -1015,27 +1048,34 @@ class Raster(object):
 
         #TODO: might need to check if coordinates are center or point in the metadata here...
 
+
         xx, yy = self.xxyy(offset='center', grid=False)
         #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
         # but such a method probably exists already within scipy/other interpolation packages?
         for pt in pts:
             i,j = self.xy2ij(pt[0],pt[1])
-            i = (int(i + 0.5))
-            j = (int(j + 0.5))
             if self.outside_image(i,j, index=True):
                 rpts.append(np.nan)
                 continue
             else:
                 x = xx[j - nsize:j + nsize + 1]
                 y = yy[i - nsize:i + nsize + 1]
+
                 #TODO: read only that window?
                 z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
                 if mode in ['linear', 'cubic', 'quintic', 'nearest']:
                     X, Y = np.meshgrid(x, y)
-                    # try:
-                    zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
-                    # except:
-                    #     zint = np.nan
+                    try:
+                        zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
+                    except:
+                        #TODO: currently fails when dealing with the edges
+                        print('Interpolation failed for:')
+                        print(pt)
+                        print(i,j)
+                        print(x)
+                        print(y)
+                        print(z)
+                        zint = np.nan
                 else:
                     zint = np.nanmean(z.flatten())
                 rpts.append(zint)
