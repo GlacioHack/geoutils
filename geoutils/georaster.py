@@ -95,7 +95,7 @@ class Raster(object):
         self._read_attrs(attrs)
 
         if load_data:
-            self.data = self.ds.load(bands)
+            self.data = self.ds.read(bands)
             self.nbands = self.data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
@@ -903,7 +903,9 @@ class Raster(object):
         assert offset in ['corner', 'center'], "ctype is not one of 'corner', 'center': {}".format(offset)
 
         xmin, ymin, xmax, ymax = self.ds.bounds
-        _, dx, _, _, dy, _ = self.ds.transform
+        dx = list(self.ds.transform)[0]
+        dy = list(self.ds.transform)[4]
+        print(dx,dy)
         npix_x = self.ds.width
         npix_y = self.ds.height
 
@@ -986,7 +988,7 @@ class Raster(object):
         else:
             return False
 
-    def interp_points(self,pts,nsize=1,mode='linear'):
+    def interp_points(self,pts,nsize=1,mode='linear',band=1):
 
         """
         Interpolate raster values at a given point, or sets of points.
@@ -997,9 +999,11 @@ class Raster(object):
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
            used to interpolate the raster value at each point. For more information, see
            scipy.interpolate.interp2d. Default is linear.
+       :param band: Raster band to use
        :type pts: array-like
        :type nsize: int
        :type mode: str
+       :type band: int
 
        :returns rpts: Array of raster value(s) for the given points.
        :rtype rpts: array-like
@@ -1016,20 +1020,22 @@ class Raster(object):
         # but such a method probably exists already within scipy/other interpolation packages?
         for pt in pts:
             i,j = self.xy2ij(pt[0],pt[1])
-            ij = (int(i[0] + 0.5), int(j[1] + 0.5))
-            if self.outside_image(ij, index=True):
+            i = (int(i + 0.5))
+            j = (int(j + 0.5))
+            if self.outside_image(i,j, index=True):
                 rpts.append(np.nan)
                 continue
             else:
-                x = xx[i - nsize:i + nsize + 1]
-                y = yy[j - nsize:j + nsize + 1]
-                z = self.data[i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
+                x = xx[j - nsize:j + nsize + 1]
+                y = yy[i - nsize:i + nsize + 1]
+                #TODO: read only that window?
+                z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
                 if mode in ['linear', 'cubic', 'quintic', 'nearest']:
                     X, Y = np.meshgrid(x, y)
-                    try:
-                        zint = griddata((X.flatten(), Y.flatten()), z.flatten(), pt, method=mode)[0]
-                    except:
-                        zint = np.nan
+                    # try:
+                    zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
+                    # except:
+                    #     zint = np.nan
                 else:
                     zint = np.nanmean(z.flatten())
                 rpts.append(zint)
