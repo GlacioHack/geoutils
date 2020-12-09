@@ -4,7 +4,7 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 import os
 import warnings
 import numpy as np
-
+import collections
 import rasterio as rio
 import rasterio.mask
 import rasterio.warp
@@ -89,8 +89,6 @@ class Raster(object):
         # Don't recognise the input, so stop here.
         else:
             raise ValueError('filename argument not recognised.')
-
-
 
         self._read_attrs(attrs)
 
@@ -532,18 +530,18 @@ class Raster(object):
         Set new nodata values for bands (and possibly update arrays)
 
         :param ndv: nodata values
-        :type ndv: list or int or float
+        :type ndv: collections.abc.Iterable or int or float
         :param update_array: change the existing nodata in array
         :type update_array: bool
         """
 
-        if not (isinstance(ndv, list) or isinstance(ndv, int) or isinstance(ndv, float)):
+        if not (isinstance(ndv, collections.abc.Iterable) or isinstance(ndv, int) or isinstance(ndv, float)):
             raise ValueError(
                 "Type of ndv not understood, must be list or float or int")
         elif (isinstance(ndv,int) or isinstance(ndv,float)) and self.count>1:
             print('Several raster band: using nodata value for all bands')
             ndv = [ndv]*self.count
-        elif isinstance(ndv,list) and self.count == 1:
+        elif isinstance(ndv,collections.abc.Iterable) and self.count == 1:
             print('Only one raster band: using first nodata value provided')
             ndv = ndv[0]
 
@@ -563,11 +561,11 @@ class Raster(object):
 
             #let's do a loop then
             if self.count == 1:
-                ind = imgdata[:] == pre_ndv
+                ind = (imgdata[:] == pre_ndv)
                 imgdata[ind] = ndv
             else:
                 for i in range(self.count):
-                    ind = imgdata[i,:] == pre_ndv[i]
+                    ind = (imgdata[i,:] == pre_ndv[i])
                     imgdata[i,ind] = ndv[i]
         else:
             imgdata = None
@@ -580,18 +578,18 @@ class Raster(object):
         Set new dtypes for bands (and possibly update arrays)
 
         :param dtypes: data types
-        :type dtypes:  list or type or str
+        :type dtypes: collections.abc.Iterable or type or str
         :param update_array: change the existing dtype in arrays
         :type: update_array: bool
         """
 
-        if not (isinstance(dtypes,list) or isinstance(dtypes, type) or isinstance(dtypes, str)):
+        if not (isinstance(dtypes,collections.abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
             raise ValueError(
                 "Type of dtypes not understood, must be list or type or str")
         elif isinstance(dtypes, type) or isinstance(dtypes, str):
             print('Several raster band: using data type for all bands')
             dtypes = (dtypes,) * self.count
-        elif isinstance(dtypes, list) and self.count == 1:
+        elif isinstance(dtypes, collections.abc.Iterable) and self.count == 1:
             print('Only one raster band: using first data type provided')
             dtypes = tuple(dtypes)
 
@@ -918,40 +916,25 @@ class Raster(object):
         else:
             return value
 
-    def xxyy(self, offset='corner', grid=True):
+    def coords(self, offset='corner', grid=True):
         """
         Get x,y coordinates of all pixels in the raster.
 
         :param offset: coordinate type. If 'corner', returns corner coordinates of pixels.
             If 'center', returns center coordinates. Default is corner.
-        :param grid: Return gridded coordinates. Default is True.
         :type offset: str
+        :param grid: Return gridded coordinates. Default is True.
         :type grid: bool
         :returns x,y: numpy arrays corresponding to the x,y coordinates of each pixel.
         """
         assert offset in ['corner', 'center'], "ctype is not one of 'corner', 'center': {}".format(offset)
 
-        xmin, ymin, xmax, ymax = self.ds.bounds
-        dx = list(self.ds.transform)[0]
-        dy = list(self.ds.transform)[4]
-        npix_x = self.ds.width
-        npix_y = self.ds.height
+        xmin, ymin, xmax, ymax = self.bounds
+        dx = list(self.transform)[0]
+        dy = list(self.transform)[4]
 
-        # transform = Affine.from_gdal(self.ds.transform)
-        # nx, ny = self.ds.width, self.ds.height
-        # xx, yy = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5) * transform
-
-        # return xx, yy
-
-        if dx < 0:
-            xx = np.linspace(xmax, xmin, npix_x + 1)
-        else:
-            xx = np.linspace(xmin, xmax, npix_x + 1)
-
-        if dy < 0:
-            yy = np.linspace(ymax, ymin, npix_y + 1)
-        else:
-            yy = np.linspace(ymin, ymax, npix_y + 1)
+        xx = np.linspace(xmin, xmax, self.width + 1)[::np.sign(dx)]
+        yy = np.linspace(xmin, xmax, self.height + 1)[::np.sign(dy)]
 
         if offset == 'center':
             xx += dx / 2  # shift by half a pixel
@@ -988,7 +971,7 @@ class Raster(object):
         :param j: column (j) index of pixel.
         :type j: array-like
         :param offset: return coordinates as "corner" or "center" of pixel
-        :param offset: str
+        :type offset: str
 
         :returns x, y: x,y coordinates of i,j in reference system.
         """
@@ -1003,10 +986,10 @@ class Raster(object):
         Check whether a given point falls outside of the raster.
 
         :param xi: Indices (or coordinates) of x direction to check.
-        :param yj: Indices (or coordinates) of y direction to check.
-        :param index: Interpret ij as raster indices (default is True). If False, assumes ij is coordinates.
         :type xi: array-like
+        :param yj: Indices (or coordinates) of y direction to check.
         :type yj: array-like
+        :param index: Interpret ij as raster indices (default is True). If False, assumes ij is coordinates.
         :type index: bool
 
         :returns is_outside: True if ij is outside of the image.
@@ -1028,14 +1011,14 @@ class Raster(object):
 
        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
        value returned is nan.'
+       :type pts: array-like
        :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
+       :type nsize: int
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
            used to interpolate the raster value at each point. For more information, see
            scipy.interpolate.interp2d. Default is linear.
-       :param band: Raster band to use
-       :type pts: array-like
-       :type nsize: int
        :type mode: str
+       :param band: Raster band to use
        :type band: int
 
        :returns rpts: Array of raster value(s) for the given points.
@@ -1049,7 +1032,7 @@ class Raster(object):
         #TODO: might need to check if coordinates are center or point in the metadata here...
 
 
-        xx, yy = self.xxyy(offset='center', grid=False)
+        xx, yy = self.coords(offset='center', grid=False)
         #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
         # but such a method probably exists already within scipy/other interpolation packages?
         for pt in pts:

@@ -2,19 +2,17 @@
 Test functions for geoutils (not using unittest)
 """
 import os
+import inspect
 import geoutils.georaster as gr
 import geoutils.geovector as gv
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-fn_img = os.path.join('/home/atom/code/devel/libs/GeoUtils/tests','data','LE71400412000304SGS00_B4_crop.TIF')
-fn_img2 = os.path.join('/home/atom/code/devel/libs/GeoUtils/tests','data','LE71400412000304SGS00_B4_crop2.TIF')
+path_module = os.path.dirname(os.path.dirname(os.path.abspath(inspect.getsourcefile(gr))))
 
-#to execute from console
-
-# test_img = os.path.join(os.path.dirname(os.path.abspath(__file__)),'data','LE71400412000304SGS00_B4_crop.TIF')
-# test_img2 = os.path.join(os.path.dirname(os.path.abspath(__file__)),'data','LE71400412000304SGS00_B4_crop2.TIF')
+fn_img = os.path.join(path_module,'tests','data','LE71400412000304SGS00_B4_crop.TIF')
+fn_img2 = os.path.join(path_module,'tests','data','LE71400412000304SGS00_B4_crop2.TIF')
 
 def test_load_img(fn_img):
 
