@@ -38,6 +38,29 @@ class TestRaster:
         #check summary matches that of RIO
         assert print(r) == print(r.info())
 
+    def test_copy(self,path_data):
+
+        fn_img, _ = path_data
+
+        r = gr.Raster(fn_img)
+        r2 = r.copy()
+
+        #should have no filename
+        assert r2.filename is None
+        #check a temporary memory file different than original disk file was created
+        assert r2.name != r.name
+        #check all attributes except name and dataset_mask array
+        default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
+                         'res', 'shape', 'transform', 'width']
+        for attr in default_attrs:
+            print(attr)
+            assert r.__getattribute__(attr) == r2.__getattribute__(attr)
+
+        #check data array
+        assert np.count_nonzero(~r.data == r2.data) == 0
+        #check dataset_mask array
+        assert np.count_nonzero(~r.dataset_mask() == r2.dataset_mask()) == 0
+
     def test_crop(self, path_data):
 
         fn_img, fn_img2 = path_data
