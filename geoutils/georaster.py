@@ -933,8 +933,8 @@ class Raster(object):
         dx = list(self.transform)[0]
         dy = list(self.transform)[4]
 
-        xx = np.linspace(xmin, xmax, self.width + 1)[::np.sign(dx)]
-        yy = np.linspace(xmin, xmax, self.height + 1)[::np.sign(dy)]
+        xx = np.linspace(xmin, xmax, self.width + 1)[::int(np.sign(dx))]
+        yy = np.linspace(xmin, xmax, self.height + 1)[::int(np.sign(dy))]
 
         if offset == 'center':
             xx += dx / 2  # shift by half a pixel
