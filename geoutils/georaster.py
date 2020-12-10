@@ -107,8 +107,8 @@ class Raster(object):
     def from_array(cls, data, transform, crs, nodata=None):
         """ Create a Raster from a numpy array and some geo-referencing information.
 
-        :param data:
-        :type data:
+        :param data: data array
+        :type data: np.ndarray
         :param transform: the 2-D affine transform for the image mapping. 
             Either a tuple(x_res, 0.0, top_left_x, 0.0, y_res, top_left_y) or 
             an affine.Affine object.
@@ -116,8 +116,8 @@ class Raster(object):
         :param crs: Coordinate Reference System for image. Either a rasterio CRS, 
             or the EPSG integer.
         :type crs: rasterio.crs.CRS or int
-        :param nodata:
-        :type nodata:
+        :param nodata: nodata value
+        :type nodata: int or float
 
         :returns: A Raster object containing the provided data.
         :rtype: Raster.
@@ -277,6 +277,23 @@ class Raster(object):
                             np.nanstd(self.data[b, :, :])))
 
         return "".join(as_str)
+
+    def copy(self,new_array=None):
+        """
+        Copy the Raster object in memory
+
+        :param new_array: New array to use for the copied Raster
+        :type new_array: np.ndarray
+        :return:
+        """
+        if new_array is not None:
+            data=new_array
+        else:
+            data=self.data
+
+        cp = Raster.from_array(data=data,transform=self.transform,crs=self.crs,nodata=self.nodata)
+
+        return cp
 
     def load(self, bands=None):
         """
