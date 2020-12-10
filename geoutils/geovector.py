@@ -1,5 +1,5 @@
 """
-GeoUtils.vectortools provides a toolset for working with vector data.
+geoutils.vectortools provides a toolset for working with vector data.
 """
 import warnings
 import numpy as np
