@@ -1,5 +1,5 @@
 """
-Test functions for satimg
+Test functions for SatelliteImage class
 """
 import os
 import inspect
@@ -25,7 +25,7 @@ class TestSatelliteImage:
         fn_img, _ = path_data
 
         img = si.SatelliteImage(fn_img,read_from_fn=False)
-
+        img = si.SatelliteImage(fn_img)
 
     def test_filename_parsing(self):
 
@@ -42,7 +42,27 @@ class TestSatelliteImage:
             attrs = si.parse_metadata_from_fn(names)
             print(attrs)
 
-    def test_tile_ext_parsing(self):
+    def test_sw_tile_naming_parsing(self):
+
+        #normal examples
+        test_tiles = ['N14W065','S14E065','N014W065','W065N014','W065N14','N00E000']
+        test_latlon = [(14,-65),(-14,65),(14,-65),(14,-65),(14,-65),(0,0)]
+
+        for tile in test_tiles:
+            assert si.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
+            assert si.sw_naming_to_latlon(tile)[1] == test_latlon[test_tiles.index(tile)][1]
+
+        for latlon in test_latlon:
+            assert si.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
+
+        #check possible exceptions, rounded lat/lon belong to their southwest border
+        assert si.latlon_to_sw_naming((0,0)) == 'N00E000'
+        #those are the same point, should give same naming
+        assert si.latlon_to_sw_naming((-90,0)) == 'S90E000'
+        assert si.latlon_to_sw_naming((90,0)) == 'S90E000'
+        #same here
+        assert si.latlon_to_sw_naming((0,-180)) == 'N00W180'
+        assert si.latlon_to_sw_naming((0,180)) == 'N00W180'
 
         pass
 
