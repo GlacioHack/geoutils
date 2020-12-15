@@ -49,7 +49,7 @@ def parse_metadata_from_fn(fname):
         elif re.match('T[0-9]{2}[A-Z]{3}', spl[0]):
             attrs = ('Sentinel-2', 'MSI', None, None, spl[0][1:], dt.datetime.strptime(spl[1], '%Y%m%dT%H%M%S'))
         elif spl[0] == 'SETSM':
-            attrs = (spl[1], 'WorldView/GeoEye', 'ArcticDEM/REMA-DEM', spl[7], None, dt.datetime.strptime(spl[2], '%Y%m%d'))
+            attrs = ('WorldView',spl[1], 'ArcticDEM/REMA', spl[7], None, dt.datetime.strptime(spl[2], '%Y%m%d'))
         elif spl[0] == 'SPOT':
             attrs = ('HFS', 'SPOT5', None, None, None, dt.datetime.strptime(spl[2], '%Y%m%d'))
         elif spl[0] == 'IODEM3':
@@ -73,7 +73,7 @@ def parse_metadata_from_fn(fname):
 
     # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplfied?))
     elif os.path.splitext(os.path.basename(fname))[1] == '.hgt':
-        attrs = ('SRTM', 'SRTM', 'SRTMGL1', '3', os.path.splitext(os.path.basename(fname)),
+        attrs = ('SRTM', 'SRTM', 'SRTMGL1', '3', os.path.splitext(os.path.basename(fname))[0],
                  dt.datetime(year=2000, month=2, day=15))
 
     else:
