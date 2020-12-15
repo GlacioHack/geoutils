@@ -64,7 +64,4 @@ class TestSatelliteImage:
         assert si.latlon_to_sw_naming((0,-180)) == 'N00W180'
         assert si.latlon_to_sw_naming((0,180)) == 'N00W180'
 
-        pass
-
-
 
