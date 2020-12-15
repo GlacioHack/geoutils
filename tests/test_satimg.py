@@ -6,7 +6,7 @@ import inspect
 import geoutils.georaster as gr
 import geoutils.satimg as si
 import pytest
-
+import datetime as dt
 
 DO_PLOT = False
 
@@ -37,10 +37,25 @@ class TestSatelliteImage:
                         'ASTGTM2_N00E108_dem.tif',
                         'N00E015.hgt',
                         'NASADEM_HGT_n00e041.hgt']
+        #corresponding data, filled manually
+        satellites = ['TanDEM-X','WorldView','Terra','IceBridge','SRTM','Terra','SRTM','SRTM']
+        sensors = ['TanDEM-X','WV02','ASTER','UAF-LS','SRTM','ASTER','SRTM','SRTM']
+        products = ['TDM1','ArcticDEM/REMA','L1A','ILAKS1B','SRTMv4.1','ASTGTM2','SRTMGL1','NASADEM-HGT']
+        #we can skip the version, bit subjective...
+        tiles = ['N00E104',None,None,None,'06_01','N00E108','N00E015','n00e041']
+        datetimes = [None,dt.datetime(year=2014,month=10,day=26),dt.datetime(year=2015,month=3,day=13,hour=22,minute=44,second=18),
+                     dt.datetime(year=2019,month=9,day=28),dt.datetime(year=2000,month=2,day=15),None,dt.datetime(year=2000,month=2,day=15),
+                     dt.datetime(year=2000,month=2,day=15)]
+
 
         for names in copied_names:
             attrs = si.parse_metadata_from_fn(names)
-            print(attrs)
+            i = copied_names.index(names)
+            assert satellites[i] == attrs[0]
+            assert sensors[i] == attrs[1]
+            assert products[i] == attrs[2]
+            assert tiles[i] == attrs[4]
+            assert datetimes[i] == attrs[5]
 
     def test_sw_tile_naming_parsing(self):
 
