@@ -49,8 +49,7 @@ def parse_metadata_from_fn(fname):
         elif re.match('T[0-9]{2}[A-Z]{3}', spl[0]):
             attrs = ('Sentinel-2', 'MSI', None, None, spl[0][1:], dt.datetime.strptime(spl[1], '%Y%m%dT%H%M%S'))
         elif spl[0] == 'SETSM':
-            attrs = (
-            spl[1], 'WorldView/GeoEye', 'ArcticDEM/REMA-DEM', spl[7], None, dt.datetime.strptime(spl[2], '%Y%m%d'))
+            attrs = (spl[1], 'WorldView/GeoEye', 'ArcticDEM/REMA-DEM', spl[7], None, dt.datetime.strptime(spl[2], '%Y%m%d'))
         elif spl[0] == 'SPOT':
             attrs = ('HFS', 'SPOT5', None, None, None, dt.datetime.strptime(spl[2], '%Y%m%d'))
         elif spl[0] == 'IODEM3':
@@ -140,16 +139,32 @@ def sw_naming_to_latlon(tile_name):
         else:
             raise ValueError('No west (W) or east (E) in the tile name')
 
-        if tile_name == 'S':
+        if tile_name[0] == 'S':
             lat = -lat_unsigned
         else:
             lat = lat_unsigned
+
+    elif tile_name[0] in ['W','E']:
+        if 'S' in tile_name:
+            lon_unsigned = int(tile_name[1:].split('S')[0])
+            lat = -int(tile_name[1:].split('S')[1])
+        elif 'N' in tile_name:
+            lon_unsigned = int(tile_name[1:].split('N')[0])
+            lat = int(tile_name[1:].split('N')[1])
+        else:
+            raise ValueError('No south (S) or north (N) in the tile name')
+
+        if tile_name[0] == 'W':
+            lon = -lon_unsigned
+        else:
+            lon = lon_unsigned
+
     else:
-        raise ValueError('No south (S) or north (N) in the tile name')
+        raise ValueError('Tile not recognized: should start with south (S), north (N), east (E) or west(W)')
 
     return lat, lon
 
-def latlon_to_sw_naming(latlon,latlon_sizes=((1,1),),lat_lims=((0,90),)):
+def latlon_to_sw_naming(latlon,latlon_sizes=((1,1),),lat_lims=((0,90.1),)):
     """
     Convert latitude and longitude to widely used southwestern corner tile naming (originally for SRTMGL1)
     Can account for varying tile sizes, and a dependency with the latitude (e.g., TDX global DEM)
@@ -165,22 +180,28 @@ def latlon_to_sw_naming(latlon,latlon_sizes=((1,1),),lat_lims=((0,90),)):
     :rtype: str
     """
 
-    if latlon[0]<0:
+    lon = latlon[1]
+    lon = ((lon + 180) % 360) - 180
+    lat = latlon[0]
+    lat = ((lat + 90) % 180) - 90
+
+    if lat<0:
         str_lat = 'S'
     else:
         str_lat = 'N'
 
-    if latlon[1]<0:
+    if lon<0:
         str_lon = 'W'
     else:
         str_lon = 'E'
 
+
     tile_name = None
     for latlim in lat_lims:
-        if latlim[0] <= latlon[0] < latlim[1]:
+        if latlim[0] <= np.abs(lat) < latlim[1]:
             ind = lat_lims.index(latlim)
-            lat_corner = np.floor(latlon[0]/latlon_sizes[ind][0])*latlon_sizes[ind][0]
-            lon_corner = np.floor(latlon[1]/latlon_sizes[ind][1])*latlon_sizes[ind][1]
+            lat_corner = np.floor(lat/latlon_sizes[ind][0])*latlon_sizes[ind][0]
+            lon_corner = np.floor(lon/latlon_sizes[ind][1])*latlon_sizes[ind][1]
             tile_name = str_lat+str(int(abs(lat_corner))).zfill(2)+str_lon+str(int(abs(lon_corner))).zfill(3)
 
     if tile_name is None:
