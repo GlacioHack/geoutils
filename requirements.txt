@@ -3,3 +3,4 @@ rasterio
 shapely
 rioxarray
 geopandas
+matplotlib
