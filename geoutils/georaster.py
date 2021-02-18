@@ -794,7 +794,12 @@ class Raster(object):
         :rtype: None
 
         """
-        rshow(self.ds, **kwargs)
+        # If data is not loaded, need to load it
+        if not self.isLoaded:
+            self.load()
+
+        # Use data array directly, as rshow on self.ds will re-load data
+        rshow(self.data, transform=self.transform, **kwargs)
 
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,
