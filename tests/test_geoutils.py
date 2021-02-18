@@ -15,18 +15,20 @@ DO_PLOT = False
 def path_data():
     path_module = os.path.dirname(os.path.dirname(os.path.abspath(inspect.getsourcefile(gr))))
     print(path_module)
-    fn_img = os.path.join(path_module, 'tests', 'data', 'LE71400412000304SGS00_B4_crop.TIF')
-    fn_img2 = os.path.join(path_module, 'tests', 'data', 'LE71400412000304SGS00_B4_crop2.TIF')
+    data_folder = os.path.join(path_module, 'tests', 'data')
 
-    return fn_img, fn_img2
+    path2data = {}
+    path2data['fn_img'] = os.path.join(data_folder, 'LE71400412000304SGS00_B4_crop.TIF')
+    path2data['fn_img2'] = os.path.join(data_folder, 'LE71400412000304SGS00_B4_crop2.TIF')
+    path2data['fn_img_RGB'] = os.path.join(data_folder, 'LE71400412000304SGS00_RGB.TIF')
+
+    return path2data
 
 class TestRaster:
 
     def test_info(self,path_data):
 
-        fn_img, fn_img2 = path_data
-
-        r = gr.Raster(fn_img)
+        r = gr.Raster(path_data['fn_img'])
 
         #check all is good with passing attributes
         default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name',
@@ -40,9 +42,7 @@ class TestRaster:
 
     def test_copy(self,path_data):
 
-        fn_img, _ = path_data
-
-        r = gr.Raster(fn_img)
+        r = gr.Raster(path_data['fn_img'])
         r2 = r.copy()
 
         #should have no filename
@@ -63,9 +63,8 @@ class TestRaster:
 
     def test_crop(self, path_data):
 
-        fn_img, fn_img2 = path_data
-        r = gr.Raster(fn_img)
-        r2 = gr.Raster(fn_img2)
+        r = gr.Raster(path_data['fn_img'])
+        r2 = gr.Raster(path_data['fn_img2'])
 
         b = r.bounds
         b2 = r2.bounds
@@ -91,9 +90,8 @@ class TestRaster:
 
     def test_reproj(self, path_data):
 
-        fn_img, fn_img2 = path_data
-        r = gr.Raster(fn_img)
-        r2 = gr.Raster(fn_img2)
+        r = gr.Raster(path_data['fn_img'])
+        r2 = gr.Raster(path_data['fn_img2'])
         r3 = r.reproject(r2)
 
         if DO_PLOT:
@@ -108,19 +106,15 @@ class TestRaster:
 
     def test_inters_img(self, path_data):
 
-        fn_img, fn_img2 = path_data
-
-        r = gr.Raster(fn_img)
-        r2 = gr.Raster(fn_img2)
+        r = gr.Raster(path_data['fn_img'])
+        r2 = gr.Raster(path_data['fn_img2'])
 
         inters = r.intersection(r2)
         print(inters)
 
     def test_interp(self,path_data):
 
-        fn_img, fn_img2 = path_data
-
-        r = gr.Raster(fn_img)
+        r = gr.Raster(path_data['fn_img'])
 
         xmin, ymin, xmax, ymax = r.ds.bounds
 
@@ -163,9 +157,7 @@ class TestRaster:
 
     def test_set_ndv(self,path_data):
 
-        fn_img, fn_img2 = path_data
-
-        r = gr.Raster(fn_img)
+        r = gr.Raster(path_data['fn_img'])
         r.set_ndv(ndv=[255])
         ndv_index = r.data==r.nodata
 
@@ -178,9 +170,7 @@ class TestRaster:
 
     def test_set_dtypes(self,path_data):
 
-        fn_img, fn_img2 = path_data
-
-        r = gr.Raster(fn_img)
+        r = gr.Raster(path_data['fn_img'])
         arr_1 = np.copy(r.data).astype(np.int8)
         r.set_dtypes(np.int8)
         arr_2 = np.copy(r.data)
@@ -190,3 +180,36 @@ class TestRaster:
 
         assert np.count_nonzero(~arr_1 == arr_2) == 0
         assert np.count_nonzero(~arr_2 == arr_3) == 0
+
+    def test_plot(self, path_data):
+
+        # Read single band raster and RGB raster
+        img = gr.Raster(path_data['fn_img'])
+        img_RGB = gr.Raster(path_data['fn_img_RGB'])
+
+        # Test default plot
+        ax = plt.subplot(111)
+        img.show(ax=ax, title="Simple plotting test")
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test plot RGB
+        ax = plt.subplot(111)
+        img_RGB.show(ax=ax, title="Plotting RGB")
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test plotting single band B/W
+        ax = plt.subplot(111)
+        img_RGB.show(band=0, cmap='gray', ax=ax, title="Plotting one band B/W")
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True

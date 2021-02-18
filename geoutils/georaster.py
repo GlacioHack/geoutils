@@ -775,13 +775,19 @@ class Raster(object):
         else:
             return extent
 
-    def show(self, **kwargs):
+    def show(self, band=None, **kwargs):
         """ Show/display the image, with axes in projection of image.
 
         This method is a wrapper to rasterio.plot.show. Any **kwargs which you give
         this method will be passed to rasterio.plot.show.
 
-        You can also pass in **kwargs to be used by the underlying imshow or 
+        :param band: which band to plot, from 0 to self.count-1 (default is all)
+        :type band: int
+
+        :returns: None
+        :rtype: None
+
+        You can also pass in **kwargs to be used by the underlying imshow or
         contour methods of matplotlib. The example below shows provision of
         a kwarg for rasterio.plot.show, and a kwarg for matplotlib as well::
 
@@ -789,12 +795,26 @@ class Raster(object):
             ax1 = plt.subplot(111)
             mpl_kws = {'cmap':'seismic'}
             myimage.show(ax=ax1, mpl_kws)
-
-        :returns: None
-        :rtype: None
-
         """
-        rshow(self.ds, **kwargs)
+        # If data is not loaded, need to load it
+        if not self.isLoaded:
+            self.load()
+
+        # Check if specific band selected, or take all
+        # rshow takes care of image dimensions
+        # if self.count=3 (4) => plotted as RGB(A)
+        if band is None:
+            band = np.arange(self.count)
+        elif isinstance(band, int):
+            if band >= self.count:
+                raise ValueError("band must be in range 0-{:d}".format(
+                    self.count-1))
+            pass
+        else:
+            raise ValueError("band must be int or None")
+
+        # Use data array directly, as rshow on self.ds will re-load data
+        rshow(self.data[band, :, :], transform=self.transform, **kwargs)
 
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,
