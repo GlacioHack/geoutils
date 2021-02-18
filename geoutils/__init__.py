@@ -5,6 +5,8 @@ GeoUtils is a python package of raster and vector tools.
 from . import georaster
 from . import geovector
 
+print('Does version.py exist?', path.exists(path.join(path.dirname(__file__),'version.py')))
+
 try:
     from geoutils.version import version as __version__
 except ImportError:  # pragma: no cover
