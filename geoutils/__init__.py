@@ -5,7 +5,9 @@ GeoUtils is a python package of raster and vector tools.
 from . import georaster
 from . import geovector
 from os import path
-print('Does version.py exist?', path.exists(path.join(path.dirname(__file__),'version.py')))
+fn = path.join(path.dirname(__file__), 'version.py')
+print('Checking', fn)
+print('Does version.py exist?', path.exists(fn))
 
 try:
     from geoutils.version import version as __version__
