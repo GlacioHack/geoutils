@@ -38,3 +38,5 @@ setup(name='geoutils',
       extras_require={'rioxarray': ['rioxarray']},
       scripts=[],
       zip_safe=False)
+
+print('Does version.py exist?', path.exists(path.join(path.dirname(__file__), 'geoutils','version.py')))
