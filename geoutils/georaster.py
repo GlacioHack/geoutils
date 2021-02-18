@@ -702,12 +702,12 @@ class Raster(object):
                 for gcp in gcps:
                     rio_gcps.append(rio.control.GroundControlPoint(*gcp))
 
-                dst.gcps = (rio_gcps, gcps_crs)
-
                 # Warning: this will overwrite the transform
                 if dst.transform != rio.transform.Affine(1, 0, 0, 0, 1, 0):
                     warnings.warn("A geotransform previously set is going \
 to be cleared due to the setting of GCPs.")
+
+                dst.gcps = (rio_gcps, gcps_crs)
 
         return
 
