@@ -180,3 +180,36 @@ class TestRaster:
 
         assert np.count_nonzero(~arr_1 == arr_2) == 0
         assert np.count_nonzero(~arr_2 == arr_3) == 0
+
+    def test_plot(self, path_data):
+
+        # Read single band raster and RGB raster
+        img = gr.Raster(path_data['fn_img'])
+        img_RGB = gr.Raster(path_data['fn_img_RGB'])
+
+        # Test default plot
+        ax = plt.subplot(111)
+        img.show(ax=ax, title="Simple plotting test")
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test plot RGB
+        ax = plt.subplot(111)
+        img_RGB.show(ax=ax, title="Plotting RGB")
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test plotting single band B/W
+        ax = plt.subplot(111)
+        img_RGB.show(band=0, cmap='gray', ax=ax, title="Plotting one band B/W")
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
