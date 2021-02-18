@@ -29,8 +29,8 @@ if write_version:
 
 setup(name='geoutils',
       version=FULLVERSION,
-      description='',
-      url='',
+      description='Tools for working with geospatial data',
+      url='https://www.github.com/GlacioHack/geoutils/',
       author='The GlacioHack Team',
       license='BSD-3',
       packages=['geoutils'],
@@ -38,5 +38,3 @@ setup(name='geoutils',
       extras_require={'rioxarray': ['rioxarray']},
       scripts=[],
       zip_safe=False)
-
-print('Does version.py exist?', path.exists(path.join(path.dirname(__file__), 'geoutils','version.py')))
