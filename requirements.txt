@@ -1,0 +1,6 @@
+numpy
+rasterio
+shapely
+rioxarray
+geopandas
+matplotlib
