@@ -632,13 +632,13 @@ class Raster(object):
         self._update(imgdata=imgdata,metadata=meta)
 
 
-    def save(self, filename, driver='GTiff', dtype=None, blank_value=None):
-        """ Write the Raster to a geo-referenced file. 
+    def save(self, filename, driver='GTiff', dtype=None, blank_value=None, co_opts={}, metadata={}, gcps=[], gcps_crs=None):
+        """ Write the Raster to a geo-referenced file.
 
         Given a filename to save the Raster to, create a geo-referenced file
         on disk which contains the contents of self.data.
 
-        If blank_value is set to an integer or float, then instead of writing 
+        If blank_value is set to an integer or float, then instead of writing
         the contents of self.data to disk, write this provided value to every
         pixel instead.
 
@@ -651,9 +651,17 @@ class Raster(object):
         :param blank_value: Use to write an image out with every pixel's value
         corresponding to this value, instead of writing the image data to disk.
         :type blank_value: None, int, float.
+        :param co_opts: GDAL creation options provided as a dictionary,
+        e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
+        :type co_opts: dict
+        :param metadata: pairs of metadata key, value
+        :type metadata: dict
+        :param gcps: list of gcps, each gcp being [row, col, x, y, (z)]
+        :type gcps: list
+        :param gcps_crs: the CRS of the GCPS (Default is None)
+        :type gcps_crs: rasterio.crs.CRS
 
         :returns: None.
-
         """
 
         dtype = self.data.dtype if dtype is None else dtype
@@ -678,9 +686,28 @@ class Raster(object):
                       dtype=save_data.dtype,
                       crs=self.ds.crs,
                       transform=self.ds.transform,
-                      nodata=self.ds.nodata) as dst:
+                      nodata=self.ds.nodata, **co_opts) as dst:
 
             dst.write(save_data)
+
+            # Add metadata (tags in rio)
+            dst.update_tags(**metadata)
+
+            # Save GCPs
+            if not isinstance(gcps, list):
+                raise ValueError("gcps must be a list")
+
+            if len(gcps) > 0:
+                rio_gcps = []
+                for gcp in gcps:
+                    rio_gcps.append(rio.control.GroundControlPoint(*gcp))
+
+                dst.gcps = (rio_gcps, gcps_crs)
+
+                # Warning: this will overwrite the transform
+                if dst.transform != rio.transform.Affine(1, 0, 0, 0, 1, 0):
+                    warnings.warn("A geotransform previously set is going \
+to be cleared due to the setting of GCPs.")
 
         return
 
