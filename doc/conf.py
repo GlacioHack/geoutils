@@ -63,7 +63,6 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 import geoutils
-import geoutils.version
 
 # The short X.Y version
 version = geoutils.__version__.split('+')[0]
@@ -222,7 +221,7 @@ text_version = ('.. warning:: \n\n'
                 'repository version, visit '
                 '`geoutils.readthedocs.org/en/latest '
                 '<http://geoutils.readthedocs.org/en/latest/>`_.\n'
-                ''.format(GeoUtils.__version__))
+                ''.format(geoutils.__version__))
 
 text_dev = ('.. warning:: \n\n'
             '  **This is the model documentation for users and developers of '
@@ -243,7 +242,7 @@ def write_index():
     except FileExistsError:
         pass
 
-    text = text_version if '+' not in GeoUtils.__version__ else text_dev
+    text = text_version if '+' not in geoutils.__version__ else text_dev
 
     with open(filename, 'w') as f:
         f.write(text)
