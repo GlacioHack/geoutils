@@ -13,5 +13,10 @@ sphinx:
 # Optionally build your docs in additional formats such as PDF and ePub
 formats: []
 
-conda:
-  environment: doc/rtd_environment.yml
+python:
+  version: 3.7
+  install:
+    - requirements: requirements.txt
+    - method: pip
+      path: .
+  system_packages: true  
