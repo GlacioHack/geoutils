@@ -7,7 +7,6 @@ import geopandas as gpd
 import rasterio as rio
 from rasterio import warp, features
 
-
 class Vector(object):
     """
     Create a Vector object from a fiona-supported vector dataset.
@@ -67,7 +66,7 @@ class Vector(object):
         """
         # If input is string, open as Raster
         if isinstance(rst, str):
-            from GeoUtils.georaster import Raster
+            from geoutils.georaster import Raster
             rst = Raster(rst)
 
         # Convert raster extent into self CRS

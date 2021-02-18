@@ -4,7 +4,7 @@ GeoUtils.raster_tools provides a toolset for working with raster data.
 import os
 import warnings
 import numpy as np
-
+import collections
 import rasterio as rio
 import rasterio.mask
 import rasterio.warp
@@ -17,6 +17,7 @@ from rasterio.plot import show as rshow
 
 from affine import Affine
 from shapely.geometry.polygon import Polygon
+from scipy.interpolate import griddata
 
 try:
     import rioxarray
@@ -28,7 +29,6 @@ else:
 # Attributes from rasterio's DatasetReader object to be kept by default
 default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
                  'res', 'shape', 'transform', 'width']
-
 
 class Raster(object):
     """
@@ -90,12 +90,11 @@ class Raster(object):
         else:
             raise ValueError('filename argument not recognised.')
 
-
-
         self._read_attrs(attrs)
 
         if load_data:
-            self.load(bands)
+            self.data = self.ds.read(bands)
+            self.nbands = self.data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
                 self.matches_disk = True
@@ -108,17 +107,17 @@ class Raster(object):
     def from_array(cls, data, transform, crs, nodata=None):
         """ Create a Raster from a numpy array and some geo-referencing information.
 
-        :param data:
-        :dtype data:
+        :param data: data array
+        :type data: np.ndarray
         :param transform: the 2-D affine transform for the image mapping. 
             Either a tuple(x_res, 0.0, top_left_x, 0.0, y_res, top_left_y) or 
             an affine.Affine object.
-        :dtype transform: tuple, affine.Affine.
+        :type transform: tuple, affine.Affine.
         :param crs: Coordinate Reference System for image. Either a rasterio CRS, 
             or the EPSG integer.
-        :dtype crs: rasterio.crs.CRS or int
-        :param nodata:
-        :dtype nodata:
+        :type crs: rasterio.crs.CRS or int
+        :param nodata: nodata value
+        :type nodata: int or float
 
         :returns: A Raster object containing the provided data.
         :rtype: Raster.
@@ -211,7 +210,7 @@ class Raster(object):
         if imgdata is None:
             imgdata = self.data
         if metadata is None:
-            metadata = self.metadata
+            metadata = self.ds.meta
 
         if metadata['driver'] == 'VRT':
             metadata['driver'] = vrt_to_driver
@@ -278,6 +277,23 @@ class Raster(object):
                             np.nanstd(self.data[b, :, :])))
 
         return "".join(as_str)
+
+    def copy(self,new_array=None):
+        """
+        Copy the Raster object in memory
+
+        :param new_array: New array to use for the copied Raster
+        :type new_array: np.ndarray
+        :return:
+        """
+        if new_array is not None:
+            data=new_array
+        else:
+            data=self.data
+
+        cp = Raster.from_array(data=data,transform=self.transform,crs=self.crs,nodata=self.nodata)
+
+        return cp
 
     def load(self, bands=None):
         """
@@ -377,18 +393,18 @@ class Raster(object):
         Can be provided as Raster/rasterio data set or as path to the file.
         :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to.
-        :dtype crs: int, dict, str, CRS      
+        :type crs: int, dict, str, CRS
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
-        :dtype dst_size: tuple(int, int)
+        :type dst_size: tuple(int, int)
         :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the source CRS.
-        :dtype dst_bounds: dict or rio.coords.BoundingBox
+        :type dst_bounds: dict or rio.coords.BoundingBox
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :dtype dst_res: float or tuple(float, float)
+        :type dst_res: float or tuple(float, float)
         :param nodata: nodata value in reprojected data.
-        :dtype nodata: int, float, None
+        :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
-        :dtype resample: rio.warp.Resampling object
-        :param **kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
+        :type resampling: rio.warp.Resampling object
+        :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
 
         :returns: Raster
         :rtype: Raster
@@ -525,6 +541,96 @@ class Raster(object):
         meta.update({'transform': rio.transform.Affine(dx, b, xmin + xoff,
                                                        d, dy, ymax + yoff)})
         self._update(metadata=meta)
+
+    def set_ndv(self, ndv, update_array=False):
+        """
+        Set new nodata values for bands (and possibly update arrays)
+
+        :param ndv: nodata values
+        :type ndv: collections.abc.Iterable or int or float
+        :param update_array: change the existing nodata in array
+        :type update_array: bool
+        """
+
+        if not (isinstance(ndv, collections.abc.Iterable) or isinstance(ndv, int) or isinstance(ndv, float)):
+            raise ValueError(
+                "Type of ndv not understood, must be list or float or int")
+        elif (isinstance(ndv,int) or isinstance(ndv,float)) and self.count>1:
+            print('Several raster band: using nodata value for all bands')
+            ndv = [ndv]*self.count
+        elif isinstance(ndv,collections.abc.Iterable) and self.count == 1:
+            print('Only one raster band: using first nodata value provided')
+            ndv = ndv[0]
+
+        meta = self.ds.meta
+        imgdata = self.data
+        pre_ndv = self.nodata
+
+        meta.update({'nodata': ndv})
+
+        if update_array and pre_ndv is not None:
+            #nodata values are specific to each band
+
+            #tried to do data cube at once, doesn't work :(
+            # ind = (imgdata == np.array([pre_ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :])
+            # output = np.array([ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :]
+            # imgdata[ind] = output
+
+            #let's do a loop then
+            if self.count == 1:
+                ind = (imgdata[:] == pre_ndv)
+                imgdata[ind] = ndv
+            else:
+                for i in range(self.count):
+                    ind = (imgdata[i,:] == pre_ndv[i])
+                    imgdata[i,ind] = ndv[i]
+        else:
+            imgdata = None
+
+        self._update(metadata=meta,imgdata=imgdata)
+
+    def set_dtypes(self,dtypes,update_array=True):
+
+        """
+        Set new dtypes for bands (and possibly update arrays)
+
+        :param dtypes: data types
+        :type dtypes: collections.abc.Iterable or type or str
+        :param update_array: change the existing dtype in arrays
+        :type: update_array: bool
+        """
+
+        if not (isinstance(dtypes,collections.abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
+            raise ValueError(
+                "Type of dtypes not understood, must be list or type or str")
+        elif isinstance(dtypes, type) or isinstance(dtypes, str):
+            print('Several raster band: using data type for all bands')
+            dtypes = (dtypes,) * self.count
+        elif isinstance(dtypes, collections.abc.Iterable) and self.count == 1:
+            print('Only one raster band: using first data type provided')
+            dtypes = tuple(dtypes)
+
+        meta = self.ds.meta
+        imgdata = self.data
+
+        #for rio.DatasetReader.meta, the proper name is "dtype"
+        meta.update({'dtype': dtypes[0]})
+
+        #this should always be "True", as rasterio doesn't change the array type by default:
+        #ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
+        if update_array:
+            if self.count == 1:
+                imgdata = imgdata.astype(dtypes[0])
+            else:
+                #TODO: double-check, but I don't think we can have different dtypes for bands with rio (1 dtype in meta)
+                imgdata = imgdata.astype(dtypes[0])
+                for i in imgdata.shape[0]:
+                    imgdata[i,:] = imgdata[i,:].astype(dtypes[0])
+        else:
+            imgdata = None
+
+        self._update(imgdata=imgdata,metadata=meta)
+
 
     def save(self, filename, driver='GTiff', dtype=None, blank_value=None):
         """ Write the Raster to a geo-referenced file. 
@@ -822,10 +928,164 @@ class Raster(object):
             raise ValueError(
                 'Value provided for band was not int or None.')
 
-        if return_window == True:
+        if return_window:
             return (value, win)
         else:
             return value
-    
+
+    def coords(self, offset='corner', grid=True):
+        """
+        Get x,y coordinates of all pixels in the raster.
+
+        :param offset: coordinate type. If 'corner', returns corner coordinates of pixels.
+            If 'center', returns center coordinates. Default is corner.
+        :type offset: str
+        :param grid: Return gridded coordinates. Default is True.
+        :type grid: bool
+        :returns x,y: numpy arrays corresponding to the x,y coordinates of each pixel.
+        """
+        assert offset in ['corner', 'center'], "ctype is not one of 'corner', 'center': {}".format(offset)
+
+        xmin, ymin, xmax, ymax = self.bounds
+        dx = list(self.transform)[0]
+        dy = list(self.transform)[4]
+
+        xx = np.linspace(xmin, xmax, self.width + 1)[::int(np.sign(dx))]
+        yy = np.linspace(xmin, xmax, self.height + 1)[::int(np.sign(dy))]
+
+        if offset == 'center':
+            xx += dx / 2  # shift by half a pixel
+            yy += dy / 2
+        if grid:
+            return np.meshgrid(xx[:-1], yy[:-1])  # drop the last element
+        else:
+            return xx[:-1], yy[:-1]
+
+    def xy2ij(self,x,y):
+        """
+        Return row, column indices for a given x,y coordinate pair.
+
+        :param x: x coordinates
+        :type x: array-like
+        :param y: y coordinates
+        :type y: array-like
+
+        :returns i, j: indices of x,y in the image.
+        :rtype i, j: array-like
+
+        """
+        i, j = self.ds.index(x,y)
+
+        return i, j
+
+    def ij2xy(self,i,j,offset='center'):
+
+        """
+        Return x,y coordinates for a given row, column index pair.
+
+        :param i: row (i) index of pixel.
+        :type i: array-like
+        :param j: column (j) index of pixel.
+        :type j: array-like
+        :param offset: return coordinates as "corner" or "center" of pixel
+        :type offset: str
+
+        :returns x, y: x,y coordinates of i,j in reference system.
+        """
+
+        x,y = self.ds.xy(i,j,offset=offset)
+
+        return x, y
+
+    def outside_image(self, xi,yj, index=True):
+        """
+        #TODO: calculate matricially for all points instead of doing for only one?
+        Check whether a given point falls outside of the raster.
+
+        :param xi: Indices (or coordinates) of x direction to check.
+        :type xi: array-like
+        :param yj: Indices (or coordinates) of y direction to check.
+        :type yj: array-like
+        :param index: Interpret ij as raster indices (default is True). If False, assumes ij is coordinates.
+        :type index: bool
+
+        :returns is_outside: True if ij is outside of the image.
+        """
+        if not index:
+            xi,xj = self.xy2ij(xi,yj)
+
+        if np.any(np.array((xi,yj)) < 0):
+            return True
+        elif xi > self.ds.width or yj > self.ds.height:
+            return True
+        else:
+            return False
+
+    def interp_points(self,pts,nsize=1,mode='linear',band=1):
+
+        """
+        Interpolate raster values at a given point, or sets of points.
+
+       :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
+       value returned is nan.'
+       :type pts: array-like
+       :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
+       :type nsize: int
+       :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
+           used to interpolate the raster value at each point. For more information, see
+           scipy.interpolate.interp2d. Default is linear.
+       :type mode: str
+       :param band: Raster band to use
+       :type band: int
+
+       :returns rpts: Array of raster value(s) for the given points.
+       :rtype rpts: array-like
+       """
+        assert mode in ['mean', 'linear', 'cubic', 'quintic',
+                        'nearest'], "mode must be mean, linear, cubic, quintic or nearest."
+
+        rpts = []
+
+        #TODO: might need to check if coordinates are center or point in the metadata here...
+
+
+        xx, yy = self.coords(offset='center', grid=False)
+        #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
+        # but such a method probably exists already within scipy/other interpolation packages?
+        for pt in pts:
+            i,j = self.xy2ij(pt[0],pt[1])
+            if self.outside_image(i,j, index=True):
+                rpts.append(np.nan)
+                continue
+            else:
+                x = xx[j - nsize:j + nsize + 1]
+                y = yy[i - nsize:i + nsize + 1]
+
+                #TODO: read only that window?
+                z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
+                if mode in ['linear', 'cubic', 'quintic', 'nearest']:
+                    X, Y = np.meshgrid(x, y)
+                    try:
+                        zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
+                    except:
+                        #TODO: currently fails when dealing with the edges
+                        print('Interpolation failed for:')
+                        print(pt)
+                        print(i,j)
+                        print(x)
+                        print(y)
+                        print(z)
+                        zint = np.nan
+                else:
+                    zint = np.nanmean(z.flatten())
+                rpts.append(zint)
+        rpts = np.array(rpts)
+
+        return rpts
+
+
 class SatelliteImage(Raster):
+
+
+
     pass
