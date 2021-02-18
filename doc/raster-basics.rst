@@ -1,5 +1,8 @@
 .. _raster-basics:
 
+Raster basics
+=============
+
 Opening a raster file
 ---------------------
 
