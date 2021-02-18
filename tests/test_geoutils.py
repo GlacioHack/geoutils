@@ -3,11 +3,13 @@ Test functions for geoutils
 """
 import os
 import inspect
-import geoutils.georaster as gr
-import geoutils.geovector as gv
+from tempfile import TemporaryFile
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+
+import geoutils.georaster as gr
+import geoutils.geovector as gv
 
 DO_PLOT = False
 
@@ -211,3 +213,16 @@ class TestRaster:
         else:
             plt.close()
         assert True
+
+    def test_saving(self, path_data):
+
+        # Read single band raster
+        img = gr.Raster(path_data['fn_img'])
+
+        # Save file to temporary file, with defaults opts
+        img.save(TemporaryFile())
+
+        # Test additional options
+        co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
+        metadata = {"Type": "test"}
+        img.save(TemporaryFile(), co_opts=co_opts, metadata=metadata)
