@@ -93,13 +93,13 @@ class Raster(object):
         self._read_attrs(attrs)
 
         if load_data:
-            self.__data = self.ds.read(bands)
-            self.nbands = self.__data.shape[0]
+            self._data = self.ds.read(bands)
+            self.nbands = self._data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
                 self.matches_disk = True
         else:
-            self.__data = None
+            self._data = None
             self.nbands = None
             self.isLoaded = False
 
@@ -197,17 +197,17 @@ class Raster(object):
     @property
     def data(self):
         """
-        Getter method for the __data class member.
+        Getter method for the _data class member.
 
         Returns:
-            np.ndarray: the __data member of this instance of Raster
+            np.ndarray: the _data member of this instance of Raster
         """
-        return self.__data
+        return self._data
 
     @data.setter
     def data(self, new_data):
         """
-        Setter method for the __data class member.
+        Setter method for the _data class member.
 
         :param new_data: New data to assign to this instance of Raster
         :type new_data: np.ndarray
@@ -217,16 +217,16 @@ class Raster(object):
             raise ValueError("New data must be a numpy array.")
 
         # Check that new_data has correct shape
-        if new_data.shape != self.__data.shape:
+        if new_data.shape != self._data.shape:
             raise ValueError("New data must be of the same shape as\
  existing data: {}.".format(self.shape))
 
         # Check that new_data has the right type
-        if new_data.dtype != self.__data.dtype:
+        if new_data.dtype != self._data.dtype:
             raise ValueError("New data must be of the same type as existing\
  data: {}".format(self.data.dtype))
 
-        self.__data = new_data
+        self._data = new_data
 
     def _update(self, imgdata=None, metadata=None, vrt_to_driver='GTiff'):
         """
@@ -242,7 +242,7 @@ class Raster(object):
         """
         memfile = MemoryFile()
         if imgdata is None:
-            imgdata = self.__data
+            imgdata = self._data
         if metadata is None:
             metadata = self.ds.meta
 
@@ -283,32 +283,32 @@ class Raster(object):
                   'Lower Right Corner:   {}, {}\n'.format(*self.bounds[2:])]
 
         if stats:
-            if self.__data is not None:
+            if self._data is not None:
                 if self.nbands == 1:
                     as_str.append('[MAXIMUM]:          {:.2f}\n'.format(
-                        np.nanmax(self.__data)))
+                        np.nanmax(self._data)))
                     as_str.append('[MINIMUM]:          {:.2f}\n'.format(
-                        np.nanmin(self.__data)))
+                        np.nanmin(self._data)))
                     as_str.append('[MEDIAN]:           {:.2f}\n'.format(
-                        np.nanmedian(self.__data)))
+                        np.nanmedian(self._data)))
                     as_str.append('[MEAN]:             {:.2f}\n'.format(
-                        np.nanmean(self.__data)))
+                        np.nanmean(self._data)))
                     as_str.append('[STD DEV]:          {:.2f}\n'.format(
-                        np.nanstd(self.__data)))
+                        np.nanstd(self._data)))
                 else:
                     for b in range(self.nbands):
                         # try to keep with rasterio convention.
                         as_str.append('Band {}:'.format(b + 1))
                         as_str.append('[MAXIMUM]:          {:.2f}\n'.format(
-                            np.nanmax(self.__data[b, :, :])))
+                            np.nanmax(self._data[b, :, :])))
                         as_str.append('[MINIMUM]:          {:.2f}\n'.format(
-                            np.nanmin(self.__data[b, :, :])))
+                            np.nanmin(self._data[b, :, :])))
                         as_str.append('[MEDIAN]:           {:.2f}\n'.format(
-                            np.nanmedian(self.__data[b, :, :])))
+                            np.nanmedian(self._data[b, :, :])))
                         as_str.append('[MEAN]:             {:.2f}\n'.format(
-                            np.nanmean(self.__data[b, :, :])))
+                            np.nanmean(self._data[b, :, :])))
                         as_str.append('[STD DEV]:          {:.2f}\n'.format(
-                            np.nanstd(self.__data[b, :, :])))
+                            np.nanstd(self._data[b, :, :])))
 
         return "".join(as_str)
 
@@ -323,7 +323,7 @@ class Raster(object):
         if new_array is not None:
             data=new_array
         else:
-            data=self.__data
+            data=self._data
 
         cp = Raster.from_array(data=data,transform=self.transform,crs=self.crs,nodata=self.nodata)
 
@@ -337,12 +337,12 @@ class Raster(object):
         :type bands: int, or list of ints
         """
         if bands is None:
-            self.__data = self.ds.read()
+            self._data = self.ds.read()
         else:
-            self.__data = self.ds.read(bands)
+            self._data = self.ds.read(bands)
 
-        if self.__data.ndim == 3:
-            self.nbands = self.__data.shape[0]
+        if self._data.ndim == 3:
+            self.nbands = self._data.shape[0]
         else:
             self.nbands = 1
 
@@ -389,11 +389,11 @@ class Raster(object):
             new_tfm = rio.transform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
 
             if self.isLoaded:
-                new_img = np.zeros((self.nbands, new_height, new_width), dtype=self.__data.dtype)
+                new_img = np.zeros((self.nbands, new_height, new_width), dtype=self._data.dtype)
             else:
-                new_img = np.zeros((self.count, new_height, new_width), dtype=self.__data.dtype)
+                new_img = np.zeros((self.count, new_height, new_width), dtype=self._data.dtype)
 
-            crop_img, tfm = rio.warp.reproject(self.__data, new_img,
+            crop_img, tfm = rio.warp.reproject(self._data, new_img,
                                                src_transform=self.transform,
                                                dst_transform=new_tfm,
                                                src_crs=self.crs,
@@ -548,7 +548,7 @@ class Raster(object):
         # Currently reprojects all in-memory bands at once.
         # This may need to be improved to allow reprojecting from-disk.
         # See rio.warp.reproject docstring for more info.
-        dst_data, dst_transformed = rio.warp.reproject(self.__data, **reproj_kwargs)
+        dst_data, dst_transformed = rio.warp.reproject(self._data, **reproj_kwargs)
 
         # Check for funny business.
         if dst_transform is not None:
@@ -597,7 +597,7 @@ class Raster(object):
             ndv = ndv[0]
 
         meta = self.ds.meta
-        imgdata = self.__data
+        imgdata = self._data
         pre_ndv = self.nodata
 
         meta.update({'nodata': ndv})
@@ -645,7 +645,7 @@ class Raster(object):
             dtypes = tuple(dtypes)
 
         meta = self.ds.meta
-        imgdata = self.__data
+        imgdata = self._data
 
         #for rio.DatasetReader.meta, the proper name is "dtype"
         meta.update({'dtype': dtypes[0]})
@@ -670,10 +670,10 @@ class Raster(object):
         """ Write the Raster to a geo-referenced file.
 
         Given a filename to save the Raster to, create a geo-referenced file
-        on disk which contains the contents of self.__data.
+        on disk which contains the contents of self._data.
 
         If blank_value is set to an integer or float, then instead of writing
-        the contents of self.__data to disk, write this provided value to every
+        the contents of self._data to disk, write this provided value to every
         pixel instead.
 
         :param filename: Filename to write the file to.
@@ -698,9 +698,9 @@ class Raster(object):
         :returns: None.
         """
 
-        dtype = self.__data.dtype if dtype is None else dtype
+        dtype = self._data.dtype if dtype is None else dtype
 
-        if (self.__data is None) & (blank_value is None):
+        if (self._data is None) & (blank_value is None):
             return AttributeError('No data loaded, and alterative blank_value not set.')
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
@@ -710,7 +710,7 @@ class Raster(object):
                 raise ValueError(
                     'blank_values must be one of int, float (or None).')
         else:
-            save_data = self.__data
+            save_data = self._data
 
         with rio.open(filename, 'w',
                       driver=driver,
@@ -875,7 +875,7 @@ to be cleared due to the setting of GCPs.")
             raise ValueError("band must be int or None")
 
         # Use data array directly, as rshow on self.ds will re-load data
-        rshow(self.__data[band, :, :], transform=self.transform, **kwargs)
+        rshow(self._data[band, :, :], transform=self.transform, **kwargs)
 
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,
@@ -1143,7 +1143,7 @@ to be cleared due to the setting of GCPs.")
                 y = yy[i - nsize:i + nsize + 1]
 
                 #TODO: read only that window?
-                z = self.__data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
+                z = self._data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
                 if mode in ['linear', 'cubic', 'quintic', 'nearest']:
                     X, Y = np.meshgrid(x, y)
                     try:
