@@ -8,22 +8,21 @@ More documentation to come!
 
 ## Installation ##
 
-* Main dependencies
-
-rasterio, geopandas, pyproj
-
-* Rapidly install dependencies
+* Create environment and install dependencies
 
 `conda env create -f environment.yml`
 
-* Package set up (once conda environment is create)
+* Activate environment
+
+`conda activate geoutils`
+
+* Install this package
 
 `pip install -e .` or `python setup.py install`
 
 * Check that everything is working by running the tests
 
 `pytest -rA`
-
 
 
 
