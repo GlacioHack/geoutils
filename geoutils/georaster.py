@@ -68,18 +68,16 @@ class Raster(object):
             self.filename = os.path.abspath(filename)
             if as_memfile:
                 # open the file in memory
-                self.memfile = MemoryFile(open(filename, 'rb'))
+                memfile = MemoryFile(open(filename, 'rb'))
                 # Read the file as a rasterio dataset
-                self.ds = self.memfile.open()
+                self.ds = memfile.open()
             else:
-                self.memfile = None
                 self.ds = rio.open(filename, 'r')
 
         # Or, image is already a Memory File.
         elif isinstance(filename, rio.io.MemoryFile):
             self.filename = None
-            self.memfile = filename
-            self.ds = self.memfile.open()
+            self.ds = filename.open()
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename, np.array):
@@ -218,7 +216,6 @@ class Raster(object):
         with memfile.open(**metadata) as ds:
             ds.write(imgdata)
 
-        self.memfile = memfile
         self.ds = memfile.open()
         self._read_attrs()
         self.matches_disk = False
@@ -237,9 +234,9 @@ class Raster(object):
         :rtype: str
         """
         as_str = ['Driver:               {} \n'.format(self.driver),
-                  'File on disk:         {} \n'.format(self.filename),
-                  'RIO MemoryFile:       {} \n'.format(self.name),
-                  'Matches file on disk? {} \n'.format(self.matches_disk),
+                  'Opened from file:     {} \n'.format(self.filename),
+                  'Filename:             {} \n'.format(self.name),
+                  'Raster matches disk file?  {} \n'.format(self.matches_disk),
                   'Size:                 {}, {}\n'.format(
                       self.width, self.height),
                   'Coordinate System:    EPSG:{}\n'.format(self.crs.to_epsg()),
