@@ -12,13 +12,17 @@ More documentation to come!
 
 rasterio, geopandas, pyproj
 
-* Rapidly install dependencies (can be tricky because of gdal)
+* Rapidly install dependencies
 
-`conda install -c conda-forge rasterio geopandas pyproj`
+`conda env create -f environment.yml`
 
 * Package set up (once conda environment is create)
 
 `pip install -e .` or `python setup.py install`
+
+* Check that everything is working by running the tests
+
+`pytest -rA`
 
 
 
