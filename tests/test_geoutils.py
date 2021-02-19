@@ -159,8 +159,8 @@ class TestRaster:
 
         r = gr.Raster(path_data['fn_img'])
         r.set_ndv(ndv=[255])
-        ndv_index = data==r.nodata
         data = r.get_data()
+        ndv_index = data==r.nodata
 
         #change data in case
         data[data == 254]=0
