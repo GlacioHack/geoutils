@@ -1,5 +1,5 @@
 """
-GeoUtils.raster_tools provides a toolset for working with raster data.
+geoutils.georaster provides a toolset for working with raster data.
 """
 import os
 import warnings
@@ -1129,10 +1129,3 @@ to be cleared due to the setting of GCPs.")
         rpts = np.array(rpts)
 
         return rpts
-
-
-class SatelliteImage(Raster):
-
-
-
-    pass
