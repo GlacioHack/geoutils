@@ -194,19 +194,8 @@ class Raster(object):
         for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
 
-    def set_data(self, new_data):
-        """
-        Setter method for the __data class member.
-
-        Args:
-            new_data (np.ndarray): New data to assign to this instance of Raster
-        """
-        if new_data.shape != self.__data.shape:
-            raise ValueError("New data must be of the same shape as existing data.")
-        else:
-            self.__data = new_data
-
-    def get_data(self):
+    @property
+    def data(self):
         """
         Getter method for the __data class member.
 
@@ -214,6 +203,30 @@ class Raster(object):
             np.ndarray: the __data member of this instance of Raster
         """
         return self.__data
+
+    @data.setter
+    def data(self, new_data):
+        """
+        Setter method for the __data class member.
+
+        :param new_data: New data to assign to this instance of Raster
+        :type new_data: np.ndarray
+        """
+        # Check that new_data is a Numpy array
+        if not isinstance(new_data, np.ndarray):
+            raise ValueError("New data must be a numpy array.")
+
+        # Check that new_data has correct shape
+        if new_data.shape != self.__data.shape:
+            raise ValueError("New data must be of the same shape as\
+ existing data: {}.".format(self.shape))
+
+        # Check that new_data has the right type
+        if new_data.dtype != self.__data.dtype:
+            raise ValueError("New data must be of the same type as existing\
+ data: {}".format(self.data.dtype))
+
+        self.__data = new_data
 
     def _update(self, imgdata=None, metadata=None, vrt_to_driver='GTiff'):
         """
