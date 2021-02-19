@@ -13,8 +13,8 @@ DO_PLOT = False
 @pytest.fixture()
 def path_data():
     data_folder = os.path.join('tests', 'data')
-    fn_img = os.path.join(path_module, 'tests', 'data', 'LE71400412000304SGS00_B4_crop.TIF')
-    fn_img2 = os.path.join(path_module, 'tests', 'data', 'LE71400412000304SGS00_B4_crop2.TIF')
+    fn_img = os.path.join(data_folder, 'LE71400412000304SGS00_B4_crop.TIF')
+    fn_img2 = os.path.join(data_folder,'LE71400412000304SGS00_B4_crop2.TIF')
 
     return fn_img, fn_img2
 
