@@ -1,5 +1,5 @@
 """
-Test functions for geoutils
+Test functions for georaster
 """
 import os
 import inspect
@@ -15,6 +15,7 @@ DO_PLOT = False
 
 @pytest.fixture()
 def path_data():
+
     data_folder = os.path.join('tests', 'data')
 
     path2data = {}
@@ -71,18 +72,17 @@ class TestRaster:
 
         b_minmax = (max(b[0],b2[0]),max(b[1],b2[1]),min(b[2],b2[2]),min(b[3],b2[3]))
 
-        #TODO: add copy here (with copy() method) and plot all at the end?
+        r_init = r.copy()
 
-        if DO_PLOT:
-            plt.figure()
-            r.show(title='Raster 1')
-            plt.figure()
-            r2.show(title='Raster 2')
-
+        #cropping overwrites the current Raster object
         r.crop(r2)
         b_crop = tuple(r.bounds)
 
         if DO_PLOT:
+            plt.figure()
+            r_init.show(title='Raster 1')
+            plt.figure()
+            r2.show(title='Raster 2')
             plt.figure()
             r.show(title='Raster 1 cropped to Raster 2')
 
@@ -117,8 +117,6 @@ class TestRaster:
         r = gr.Raster(path_data['fn_img'])
 
         xmin, ymin, xmax, ymax = r.ds.bounds
-
-        print(xmin, ymin, xmax, ymax)
 
         # testing interp, find_value, and read when it falls right on the coordinates
         xrand = np.random.randint(low=0,high=r.ds.width,size=(10,))*list(r.ds.transform)[0] + xmin + list(r.ds.transform)[0]/2
