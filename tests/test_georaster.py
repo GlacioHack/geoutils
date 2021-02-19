@@ -8,8 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from rasterio.io import MemoryFile
+
 import geoutils.georaster as gr
 import geoutils.geovector as gv
+
 
 DO_PLOT = False
 
@@ -26,6 +29,9 @@ def path_data():
     return path2data
 
 class TestRaster:
+
+    def test_open_as_memfile(self,path_data):
+        r = gr.Raster(path_data['fn_img'], as_memfile=True)
 
     def test_info(self,path_data):
 
