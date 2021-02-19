@@ -6,6 +6,4 @@ dependencies:
   - matplotlib
   - pyproj
   - rasterio
-  - pytest
-  - pip
   - rioxarray
