@@ -1,0 +1,19 @@
+name: geoutils
+channels:
+  - conda-forge
+dependencies:
+  - python=3
+  - geopandas
+  - matplotlib
+  - pyproj
+  - rasterio
+  - rioxarray
+
+  # code checks
+  - flake8
+
+  # testing
+  - pytest
+
+  # development
+  - pip
