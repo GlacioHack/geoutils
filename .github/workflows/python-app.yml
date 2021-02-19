@@ -23,8 +23,6 @@ jobs:
     - name: Install dependencies
       run: |
         $CONDA/bin/conda env update --file environment.yml --name base
-        $CONDA/bin/conda activate geoutils
-        $CONDA/bin/conda install -c conda-forge flake8 pip pytest
         $CONDA/bin/pip install .
     - name: Lint with flake8
       run: |
