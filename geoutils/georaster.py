@@ -276,6 +276,8 @@ class Raster(object):
                   'Matches file on disk? {} \n'.format(self.matches_disk),
                   'Size:                 {}, {}\n'.format(
                       self.width, self.height),
+                  'Number of bands:      {:d}\n'.format(self.count),
+                  'Data types:           {}\n'.format(self.dtypes),
                   'Coordinate System:    EPSG:{}\n'.format(self.crs.to_epsg()),
                   'NoData Value:         {}\n'.format(self.nodata),
                   'Pixel Size:           {}, {}\n'.format(*self.res),
