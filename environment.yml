@@ -1,0 +1,13 @@
+name: geoutils
+channels:
+  - conda-forge
+dependencies:
+  - geopandas
+  - matplotlib
+  - pyproj
+  - rasterio
+  - pytest
+  - pip
+  - rioxarray
+  - pip:
+    - "--editable=git+https://github.com/GlacioHack/GeoUtils.git#egg=GeoUtils"
