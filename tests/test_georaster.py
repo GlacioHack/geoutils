@@ -1,49 +1,37 @@
 """
 Test functions for georaster
 """
-import os
-import inspect
 from tempfile import TemporaryFile
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 import geoutils.georaster as gr
-import geoutils.geovector as gv
+from geoutils import datasets
+
 
 DO_PLOT = False
 
-@pytest.fixture()
-def path_data():
-
-    data_folder = os.path.join('tests', 'data')
-
-    path2data = {}
-    path2data['fn_img'] = os.path.join(data_folder, 'LE71400412000304SGS00_B4_crop.TIF')
-    path2data['fn_img2'] = os.path.join(data_folder, 'LE71400412000304SGS00_B4_crop2.TIF')
-    path2data['fn_img_RGB'] = os.path.join(data_folder, 'LE71400412000304SGS00_RGB.TIF')
-
-    return path2data
 
 class TestRaster:
 
-    def test_info(self,path_data):
+    def test_info(self):
 
-        r = gr.Raster(path_data['fn_img'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
 
         #check all is good with passing attributes
-        default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name',
-                         'nodata',
-                         'res', 'shape', 'transform', 'width']
+        default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver',
+                         'dtypes', 'height', 'indexes', 'name',
+                         'nodata', 'res', 'shape', 'transform', 'width']
         for attr in default_attrs:
             assert r.__getattribute__(attr) == r.ds.__getattribute__(attr)
 
         #check summary matches that of RIO
         assert print(r) == print(r.info())
 
-    def test_copy(self,path_data):
+    def test_copy(self):
 
-        r = gr.Raster(path_data['fn_img'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
         r2 = r.copy()
 
         #should have no filename
@@ -62,10 +50,10 @@ class TestRaster:
         #check dataset_mask array
         assert np.count_nonzero(~r.dataset_mask() == r2.dataset_mask()) == 0
 
-    def test_crop(self, path_data):
+    def test_crop(self):
 
-        r = gr.Raster(path_data['fn_img'])
-        r2 = gr.Raster(path_data['fn_img2'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
 
         b = r.bounds
         b2 = r2.bounds
@@ -88,10 +76,10 @@ class TestRaster:
 
         assert b_minmax == b_crop
 
-    def test_reproj(self, path_data):
+    def test_reproj(self):
 
-        r = gr.Raster(path_data['fn_img'])
-        r2 = gr.Raster(path_data['fn_img2'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
         r3 = r.reproject(r2)
 
         if DO_PLOT:
@@ -104,17 +92,17 @@ class TestRaster:
 
         #TODO: not sure what to assert here
 
-    def test_inters_img(self, path_data):
+    def test_inters_img(self):
 
-        r = gr.Raster(path_data['fn_img'])
-        r2 = gr.Raster(path_data['fn_img2'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
 
         inters = r.intersection(r2)
         print(inters)
 
-    def test_interp(self,path_data):
+    def test_interp(self):
 
-        r = gr.Raster(path_data['fn_img'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
 
         xmin, ymin, xmax, ymax = r.ds.bounds
 
@@ -153,9 +141,9 @@ class TestRaster:
         rpts = r.interp_points(pts)
         # print(rpts)
 
-    def test_set_ndv(self,path_data):
+    def test_set_ndv(self):
 
-        r = gr.Raster(path_data['fn_img'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
         r.set_ndv(ndv=[255])
         data = r.data
         ndv_index = data==r.nodata
@@ -167,9 +155,9 @@ class TestRaster:
 
         assert np.count_nonzero(~ndv_index_2==ndv_index) == 0
 
-    def test_set_dtypes(self,path_data):
+    def test_set_dtypes(self):
 
-        r = gr.Raster(path_data['fn_img'])
+        r = gr.Raster(datasets.get_path("landsat_B4"))
         arr_1 = np.copy(r.data).astype(np.int8)
         r.set_dtypes(np.int8)
         arr_2 = np.copy(r.data)
@@ -180,11 +168,11 @@ class TestRaster:
         assert np.count_nonzero(~arr_1 == arr_2) == 0
         assert np.count_nonzero(~arr_2 == arr_3) == 0
 
-    def test_plot(self, path_data):
+    def test_plot(self):
 
         # Read single band raster and RGB raster
-        img = gr.Raster(path_data['fn_img'])
-        img_RGB = gr.Raster(path_data['fn_img_RGB'])
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img_RGB = gr.Raster(datasets.get_path("landsat_RGB"))
 
         # Test default plot
         ax = plt.subplot(111)
@@ -213,10 +201,10 @@ class TestRaster:
             plt.close()
         assert True
 
-    def test_saving(self, path_data):
+    def test_saving(self):
 
         # Read single band raster
-        img = gr.Raster(path_data['fn_img'])
+        img = gr.Raster(datasets.get_path("landsat_B4"))
 
         # Save file to temporary file, with defaults opts
         img.save(TemporaryFile())

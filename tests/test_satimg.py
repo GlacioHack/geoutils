@@ -3,26 +3,21 @@ Test functions for SatelliteImage class
 """
 import os
 import inspect
-import geoutils.georaster as gr
-import geoutils.satimg as si
 import pytest
 import datetime as dt
 
+import geoutils.georaster as gr
+import geoutils.satimg as si
+from geoutils import datasets
+
 DO_PLOT = False
 
-@pytest.fixture()
-def path_data():
-    data_folder = os.path.join('tests', 'data')
-    fn_img = os.path.join(data_folder, 'LE71400412000304SGS00_B4_crop.TIF')
-    fn_img2 = os.path.join(data_folder,'LE71400412000304SGS00_B4_crop2.TIF')
-
-    return fn_img, fn_img2
 
 class TestSatelliteImage:
 
-    def test_load_subclass(self,path_data):
+    def test_load_subclass(self):
 
-        fn_img, _ = path_data
+        fn_img = datasets.get_path("landsat_B4")
 
         img = si.SatelliteImage(fn_img,read_from_fn=False)
         img = si.SatelliteImage(fn_img)
