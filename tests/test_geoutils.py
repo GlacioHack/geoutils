@@ -57,7 +57,7 @@ class TestRaster:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         #check data array
-        assert np.count_nonzero(~r.data == r2.data) == 0
+        assert np.count_nonzero(~r.get_data() == r2.get_data()) == 0
         #check dataset_mask array
         assert np.count_nonzero(~r.dataset_mask() == r2.dataset_mask()) == 0
 
@@ -128,7 +128,7 @@ class TestRaster:
         list_z = []
         list_z_ind = []
         r.load()
-        img = r.data
+        img = r.get_data()
         for k in range(len(xrand)):
             z_ind = img[0,i[k],j[k]]
             z = r.value_at_coords(xrand[k],yrand[k])
@@ -158,25 +158,26 @@ class TestRaster:
     def test_set_ndv(self,path_data):
 
         r = gr.Raster(path_data['fn_img'])
+        data = r.get_data()
         r.set_ndv(ndv=[255])
-        ndv_index = r.data==r.nodata
+        ndv_index = data==r.nodata
 
         #change data in case
-        r.data[r.data == 254]=0
+        data[data == 254]=0
         r.set_ndv(ndv=254,update_array=True)
-        ndv_index_2 = r.data==r.nodata
+        ndv_index_2 = data==r.nodata
 
         assert np.count_nonzero(~ndv_index_2==ndv_index) == 0
 
     def test_set_dtypes(self,path_data):
 
         r = gr.Raster(path_data['fn_img'])
-        arr_1 = np.copy(r.data).astype(np.int8)
+        arr_1 = np.copy(r.get_data()).astype(np.int8)
         r.set_dtypes(np.int8)
-        arr_2 = np.copy(r.data)
+        arr_2 = np.copy(r.get_data())
         r.set_dtypes([np.int8],update_array=True)
 
-        arr_3 = r.data
+        arr_3 = r.get_data()
 
         assert np.count_nonzero(~arr_1 == arr_2) == 0
         assert np.count_nonzero(~arr_2 == arr_3) == 0
