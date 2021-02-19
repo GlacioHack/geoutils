@@ -22,8 +22,8 @@ jobs:
         python-version: 3.9
     - name: Install dependencies
       run: |
-        $CONDA/bin/conda install -c conda-forge flake8 pip rasterio pytest
-        if [ -f requirements.txt ]; then $CONDA/bin/pip install -r requirements.txt; fi
+        $CONDA/bin/conda install -f environment.yml
+        $CONDA/bin/conda install -c conda-forge flake8 pip pytest
         $CONDA/bin/pip install .
     - name: Lint with flake8
       run: |
