@@ -8,8 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from rasterio.io import MemoryFile
+
 import geoutils.georaster as gr
 import geoutils.geovector as gv
+
 
 DO_PLOT = False
 
@@ -26,6 +29,9 @@ def path_data():
     return path2data
 
 class TestRaster:
+
+    def test_open_as_memfile(self,path_data):
+        r = gr.Raster(path_data['fn_img'], as_memfile=True)
 
     def test_info(self,path_data):
 
@@ -157,12 +163,13 @@ class TestRaster:
 
         r = gr.Raster(path_data['fn_img'])
         r.set_ndv(ndv=[255])
-        ndv_index = r.data==r.nodata
+        data = r.data
+        ndv_index = data==r.nodata
 
         #change data in case
-        r.data[r.data == 254]=0
+        data[data == 254]=0
         r.set_ndv(ndv=254,update_array=True)
-        ndv_index_2 = r.data==r.nodata
+        ndv_index_2 = data==r.nodata
 
         assert np.count_nonzero(~ndv_index_2==ndv_index) == 0
 

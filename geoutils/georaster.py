@@ -68,18 +68,16 @@ class Raster(object):
             self.filename = os.path.abspath(filename)
             if as_memfile:
                 # open the file in memory
-                self.memfile = MemoryFile(open(filename, 'rb'))
+                memfile = MemoryFile(open(filename, 'rb'))
                 # Read the file as a rasterio dataset
-                self.ds = self.memfile.open()
+                self.ds = memfile.open()
             else:
-                self.memfile = None
                 self.ds = rio.open(filename, 'r')
 
         # Or, image is already a Memory File.
         elif isinstance(filename, rio.io.MemoryFile):
             self.filename = None
-            self.memfile = filename
-            self.ds = self.memfile.open()
+            self.ds = filename.open()
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename, np.array):
@@ -93,13 +91,13 @@ class Raster(object):
         self._read_attrs(attrs)
 
         if load_data:
-            self.data = self.ds.read(bands)
-            self.nbands = self.data.shape[0]
+            self._data = self.ds.read(bands)
+            self.nbands = self._data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
                 self.matches_disk = True
         else:
-            self.data = None
+            self._data = None
             self.nbands = None
             self.isLoaded = False
 
@@ -194,6 +192,40 @@ class Raster(object):
         for attr in attrs:
             setattr(self, attr, getattr(self.ds, attr))
 
+    @property
+    def data(self):
+        """
+        Getter method for the _data class member.
+
+        Returns:
+            np.ndarray: the _data member of this instance of Raster
+        """
+        return self._data
+
+    @data.setter
+    def data(self, new_data):
+        """
+        Setter method for the _data class member.
+
+        :param new_data: New data to assign to this instance of Raster
+        :type new_data: np.ndarray
+        """
+        # Check that new_data is a Numpy array
+        if not isinstance(new_data, np.ndarray):
+            raise ValueError("New data must be a numpy array.")
+
+        # Check that new_data has correct shape
+        if new_data.shape != self._data.shape:
+            raise ValueError("New data must be of the same shape as\
+ existing data: {}.".format(self.shape))
+
+        # Check that new_data has the right type
+        if new_data.dtype != self._data.dtype:
+            raise ValueError("New data must be of the same type as existing\
+ data: {}".format(self.data.dtype))
+
+        self._data = new_data
+
     def _update(self, imgdata=None, metadata=None, vrt_to_driver='GTiff'):
         """
         Update the object with a new image or metadata.
@@ -218,7 +250,6 @@ class Raster(object):
         with memfile.open(**metadata) as ds:
             ds.write(imgdata)
 
-        self.memfile = memfile
         self.ds = memfile.open()
         self._read_attrs()
         self.matches_disk = False
@@ -237,11 +268,13 @@ class Raster(object):
         :rtype: str
         """
         as_str = ['Driver:               {} \n'.format(self.driver),
-                  'File on disk:         {} \n'.format(self.filename),
-                  'RIO MemoryFile:       {} \n'.format(self.name),
-                  'Matches file on disk? {} \n'.format(self.matches_disk),
+                  'Opened from file:     {} \n'.format(self.filename),
+                  'Filename:             {} \n'.format(self.name),
+                  'Raster matches disk file?  {} \n'.format(self.matches_disk),
                   'Size:                 {}, {}\n'.format(
                       self.width, self.height),
+                  'Number of bands:      {:d}\n'.format(self.count),
+                  'Data types:           {}\n'.format(self.dtypes),
                   'Coordinate System:    EPSG:{}\n'.format(self.crs.to_epsg()),
                   'NoData Value:         {}\n'.format(self.nodata),
                   'Pixel Size:           {}, {}\n'.format(*self.res),
@@ -303,12 +336,12 @@ class Raster(object):
         :type bands: int, or list of ints
         """
         if bands is None:
-            self.data = self.ds.read()
+            self._data = self.ds.read()
         else:
-            self.data = self.ds.read(bands)
+            self._data = self.ds.read(bands)
 
-        if self.data.ndim == 3:
-            self.nbands = self.data.shape[0]
+        if self._data.ndim == 3:
+            self.nbands = self._data.shape[0]
         else:
             self.nbands = 1
 
