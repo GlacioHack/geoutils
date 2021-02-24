@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from rasterio.io import MemoryFile
+
 import geoutils.georaster as gr
 from geoutils import datasets
 
