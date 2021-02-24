@@ -4,7 +4,6 @@ GeoUtils is a python package of raster and vector tools.
 
 from . import georaster
 from . import geovector
-from . import datasets
 from . import satimg
 
 try:

@@ -108,10 +108,10 @@ class TestRaster:
         xmin, ymin, xmax, ymax = r.ds.bounds
 
         # testing interp, find_value, and read when it falls right on the coordinates
-        xrand = np.random.randint(low=0, high=r.ds.width, size=(10,))
-        *list(r.ds.transform)[0] + xmin + list(r.ds.transform)[0]/2
-        yrand = ymax + np.random.randint(low=0, high=r.ds.height, size=(10,))
-        *list(r.ds.transform)[4] - list(r.ds.transform)[4]/2
+        xrand = (np.random.randint(low=0, high=r.ds.width, size=(10,))
+                 * list(r.ds.transform)[0] + xmin + list(r.ds.transform)[0]/2)
+        yrand = (ymax + np.random.randint(low=0, high=r.ds.height, size=(10,))
+                 * list(r.ds.transform)[4] - list(r.ds.transform)[4]/2)
         pts = list(zip(xrand, yrand))
         i, j = r.xy2ij(xrand, yrand)
         list_z = []
