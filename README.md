@@ -3,8 +3,6 @@ Set of tools to handle raster and vector data sets in Python.
 
 This package offers Python classes and functions as well as command line tools to work with both geospatial raster and vector datasets. It is built upon rasterio and GeoPandas. In a single command it can import any geo-referenced dataset that is understood by these libraries, complete with all geo-referencing information, various helper functions and interface between vector/raster data.
 
-More documentation to come!
-
 
 ## Installation ##
 
@@ -36,7 +34,15 @@ GeoUtils are composed of three libraries:
 ## How to contribute
 
 You can find ways to improve the libraries in the [issues](https://github.com/GlacioHack/GeoUtils/issues) section. All contributions are welcome.
-To avoid conflicts, it is suggested to use separate branches for each implementation. All changes must then be submitted to the dev branch using pull requests. Each PR must be reviewed by at least one other person.
+
+1. Fork the repository to your personal GitHub account, clone to your computer.
+2. (Optional but preferred:) Make a feature branch.
+3. Push to your feature branch.
+4. When ready, submit a Pull Request from your feature branch to `GlacioHack/geoutils:master`. 
+5. The PR will be reviewed by at least one other person. Usually your PR will be merged via 'squash and merge'.
+
+Direct pushing to the GlacioHack repository is not permitted.
+
 
 ### Documentation - please read ! ###
 In the interest of keeping the documentation simple, please write all docstring in reStructuredText (https://docutils.sourceforge.io/rst.html) format - eventually, we will try to set up auto-documentation using sphinx and readthedocs, and this will help in that task.
