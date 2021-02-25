@@ -9,8 +9,7 @@ import pytest
 from rasterio.io import MemoryFile
 
 import geoutils.georaster as gr
-import geoutils.datasets as datasets
-
+from geoutils import datasets
 
 
 DO_PLOT = False

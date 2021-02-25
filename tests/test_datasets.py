@@ -4,7 +4,7 @@ Test datasets
 import pytest
 
 import geoutils.georaster as gr
-import geoutils.datasets as datasets
+from geoutils import datasets
 
 
 @pytest.mark.parametrize(
