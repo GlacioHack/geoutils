@@ -8,7 +8,7 @@ import datetime as dt
 
 import geoutils.georaster as gr
 import geoutils.satimg as si
-from geoutils import datasets
+import geoutils.datasets as datasets
 
 DO_PLOT = False
 
