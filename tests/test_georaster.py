@@ -221,30 +221,29 @@ class TestRaster:
 
     def test_coords(self, path_data):
 
-        
-        for img_path in (path_data['fn_img'], path_data['fn_img_pos_y']):
-            print('test_coords:', img_path)
-            img = gr.Raster(img_path)
-            xx, yy = img.coords(offset='corner')
-            assert xx.min() == pytest.approx(img.bounds.left)
-            assert xx.max() == pytest.approx(img.bounds.right - img.res[0])
-            if img.res[1] > 0:
-                assert yy.min() == pytest.approx(img.bounds.bottom)
-                assert yy.max() == pytest.approx(img.bounds.top - img.res[1])
-            else:
-                assert yy.min() == pytest.approx(img.bounds.top)
-                assert yy.max() == pytest.approx(img.bounds.bottom + img.res[1])
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+        xx, yy = img.coords(offset='corner')
+        assert xx.min() == pytest.approx(img.bounds.left)
+        assert xx.max() == pytest.approx(img.bounds.right - img.res[0])
+        if img.res[1] > 0:
+            assert yy.min() == pytest.approx(img.bounds.bottom)
+            assert yy.max() == pytest.approx(img.bounds.top - img.res[1])
+        else:
+            # Currently not covered by test image
+            assert yy.min() == pytest.approx(img.bounds.top)
+            assert yy.max() == pytest.approx(img.bounds.bottom + img.res[1])
 
-            xx, yy = img.coords(offset='center')
-            hx = img.res[0] / 2
-            hy = img.res[1] / 2
-            assert xx.min() == pytest.approx(img.bounds.left + hx)
-            assert xx.max() == pytest.approx(img.bounds.right - hx)
-            if img.res[1] > 0:
-                assert yy.min() == pytest.approx(img.bounds.bottom + hy)
-                assert yy.max() == pytest.approx(img.bounds.top - hy)
-            else:
-                assert yy.min() == pytest.approx(img.bounds.top + hy)
-                assert yy.max() == pytest.approx(img.bounds.bottom - hy)
+        xx, yy = img.coords(offset='center')
+        hx = img.res[0] / 2
+        hy = img.res[1] / 2
+        assert xx.min() == pytest.approx(img.bounds.left + hx)
+        assert xx.max() == pytest.approx(img.bounds.right - hx)
+        if img.res[1] > 0:
+            assert yy.min() == pytest.approx(img.bounds.bottom + hy)
+            assert yy.max() == pytest.approx(img.bounds.top - hy)
+        else:
+            # Currently not covered by test image
+            assert yy.min() == pytest.approx(img.bounds.top + hy)
+            assert yy.max() == pytest.approx(img.bounds.bottom - hy)
 
 
