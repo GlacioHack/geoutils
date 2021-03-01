@@ -219,7 +219,7 @@ class TestRaster:
         metadata = {"Type": "test"}
         img.save(TemporaryFile(), co_opts=co_opts, metadata=metadata)
 
-    def test_coords(self, path_data):
+    def test_coords(self):
 
         img = gr.Raster(datasets.get_path("landsat_B4"))
         xx, yy = img.coords(offset='corner')
