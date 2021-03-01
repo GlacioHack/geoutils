@@ -1026,12 +1026,13 @@ to be cleared due to the setting of GCPs.")
         """
         assert offset in ['corner', 'center'], "ctype is not one of 'corner', 'center': {}".format(offset)
 
-        xmin, ymin, xmax, ymax = self.bounds
-        dx = list(self.transform)[0]
-        dy = list(self.transform)[4]
+        #xmin, ymin, xmax, ymax = self.bounds
+        bbox = self.bounds
+        dx = self.transform[0]
+        dy = self.transform[4]
 
-        xx = np.linspace(xmin, xmax, self.width + 1)[::int(np.sign(dx))]
-        yy = np.linspace(xmin, xmax, self.height + 1)[::int(np.sign(dy))]
+        xx = np.linspace(self.bounds.left, self.bounds.right, self.width + 1)[::int(np.sign(dx))]
+        yy = np.linspace(self.bounds.top, self.bounds.bottom, self.height + 1)[::int(np.sign(dy))]
 
         if offset == 'center':
             xx += dx / 2  # shift by half a pixel
