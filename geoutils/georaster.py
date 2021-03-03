@@ -40,8 +40,8 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-    def __init__(self, filename, attrs=None, load_data=True, bands=None, 
-        as_memfile=False):
+    def __init__(self, filename, attrs=None, load_data=True, bands=None,
+                 masked=True, as_memfile=False):
 
         """
         Load a rasterio-supported dataset, given a filename.
@@ -56,6 +56,8 @@ class Raster(object):
         :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
+        :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
+        :type masked: bool
         :param as_memfile: open the dataset via a rio.MemoryFile.
         :type as_memfile: bool
 
@@ -90,8 +92,11 @@ class Raster(object):
 
         self._read_attrs(attrs)
 
+        # Save _masked attribute to be used by self.load()
+        self._masked = masked
+
         if load_data:
-            self._data = self.ds.read(bands)
+            self.load()
             self.nbands = self._data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
@@ -336,9 +341,9 @@ class Raster(object):
         :type bands: int, or list of ints
         """
         if bands is None:
-            self._data = self.ds.read()
+            self._data = self.ds.read(masked=self._masked)
         else:
-            self._data = self.ds.read(bands)
+            self._data = self.ds.read(bands, masked=self._masked)
 
         if self._data.ndim == 3:
             self.nbands = self._data.shape[0]
@@ -611,16 +616,22 @@ class Raster(object):
 
             #let's do a loop then
             if self.count == 1:
-                ind = (imgdata[:] == pre_ndv)
-                imgdata[ind] = ndv
+                if np.ma.isMaskedArray(imgdata):
+                    imgdata.data[imgdata.mask] = ndv
+                else:
+                    ind = (imgdata[:] == pre_ndv)
+                    imgdata[ind] = ndv
             else:
                 for i in range(self.count):
-                    ind = (imgdata[i,:] == pre_ndv[i])
-                    imgdata[i,ind] = ndv[i]
+                    if np.ma.isMaskedArray(imgdata):
+                        imgdata.data[i, imgdata.mask[i, :]] = ndv[i]
+                    else:
+                        ind = (imgdata[i, :] == pre_ndv[i])
+                        imgdata[i, ind] = ndv[i]
         else:
             imgdata = None
 
-        self._update(metadata=meta,imgdata=imgdata)
+        self._update(metadata=meta, imgdata=imgdata)
 
     def set_dtypes(self,dtypes,update_array=True):
 
