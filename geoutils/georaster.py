@@ -590,13 +590,18 @@ class Raster(object):
         :type update_array: bool
         """
 
-        if not (isinstance(ndv, collections.abc.Iterable) or isinstance(ndv, int) or isinstance(ndv, float)):
+        if not isinstance(ndv,
+                          (collections.abc.Iterable, int, float,
+                           np.integer, np.floating)):
             raise ValueError(
                 "Type of ndv not understood, must be list or float or int")
-        elif (isinstance(ndv,int) or isinstance(ndv,float)) and self.count>1:
+
+        elif (isinstance(ndv,
+                         (int, float, np.integer, np.floating))) and self.count > 1:
             print('Several raster band: using nodata value for all bands')
             ndv = [ndv]*self.count
-        elif isinstance(ndv,collections.abc.Iterable) and self.count == 1:
+
+        elif isinstance(ndv, collections.abc.Iterable) and self.count == 1:
             print('Only one raster band: using first nodata value provided')
             ndv = ndv[0]
 
