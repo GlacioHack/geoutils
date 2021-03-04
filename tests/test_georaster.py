@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+import rasterio as rio
 from rasterio.io import MemoryFile
 
 import geoutils.georaster as gr
@@ -30,6 +31,78 @@ class TestRaster:
 
         # Check summary matches that of RIO
         assert print(r) == print(r.info())
+
+    def test_loading(self):
+        """
+        Test that loading metadata and data works for all possible cases.
+        """
+        # Test 1 - loading metadata only, single band
+        r = gr.Raster(datasets.get_path("landsat_B4"), load_data=False)
+
+        assert isinstance(r.ds, rio.DatasetReader)
+        assert r.driver == 'GTiff'
+        assert r.width == 800
+        assert r.height == 655
+        assert r.shape == (r.height, r.width)
+        assert r.count == 1
+        assert r.nbands is None
+        assert r.dtypes == ('uint8',)
+        assert r.transform == rio.transform.Affine(
+            30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0
+        )
+        assert r.res == (30.0, 30.0)
+        assert r.bounds == rio.coords.BoundingBox(
+            left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0
+        )
+        assert r.crs == rio.crs.CRS.from_epsg(32645)
+        assert not r.isLoaded
+
+        # Test 2 - loading the data afterward
+        r.load()
+        assert r.isLoaded
+        assert r.nbands == 1
+        assert r.data.shape == (r.count, r.height, r.width)
+
+        # Test 3 - single band, loading data
+        r = gr.Raster(datasets.get_path("landsat_B4"), load_data=True)
+        assert r.isLoaded
+        assert r.nbands == 1
+        assert r.data.shape == (r.count, r.height, r.width)
+
+        # Test 4 - multiple bands, load all bands
+        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True)
+        assert r.count == 3
+        assert r.indexes == (1, 2, 3)
+        assert r.nbands == 3
+        assert r.data.shape == (r.count, r.height, r.width)
+
+        # Test 5 - multiple bands, load one band only
+        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=1)
+        assert r.count == 3
+        assert r.indexes == (1, 2, 3)
+        assert r.nbands == 1
+        assert r.data.shape == (r.nbands, r.height, r.width)
+
+        # Test 6 - multiple bands, load a list of bands
+        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(1,2))
+        assert r.count == 3
+        assert r.indexes == (1, 2, 3)
+        assert r.nbands == 2
+        assert r.data.shape == (r.nbands, r.height, r.width)
+
+    def test_downsampling(self):
+        """
+        Check that self.data is correct when using downsampling
+        """
+        # Test single band
+        r = gr.Raster(datasets.get_path("landsat_B4"), downsampl=4)
+        assert r.data.shape == (1, 164, 200)
+        assert r.height == 655  # this should not have changed
+        assert r.width == 800
+
+        # Test multiple band
+        r = gr.Raster(datasets.get_path("landsat_RGB"), downsampl=2)
+        assert r.data.shape == (3, 328, 400)
 
     def test_copy(self):
 
