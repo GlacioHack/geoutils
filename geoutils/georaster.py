@@ -43,24 +43,25 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-    def __init__(self, filename, attrs=None, load_data=True, bands=None,
-                 masked=True, as_memfile=False):
-
+    def __init__(self, filename, bands=None, load_data=True, downsampl=1,
+                 masked=True, attrs=None, as_memfile=False):
         """
         Load a rasterio-supported dataset, given a filename.
 
         :param filename: The filename of the dataset.
         :type filename: str
+        :param bands: The band(s) to load into the object. Default is to load all bands.
+        :type bands: int, or list of ints
+        :param load_data: Load the raster data into the object. Default is True.
+        :type load_data: bool
+        :param downsampl: Reduce the size of the image loaded by this factor. Default is 1
+        :type downsampl: int, float
+        :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
+        :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         :type attrs: list of strings
-        :param load_data: Load the raster data into the object. Default is True.
-        :type load_data: bool
-        :param bands: The band(s) to load into the object. Default is to load all bands.
-        :type bands: int, or list of ints
-        :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
-        :type masked: bool
         :param as_memfile: open the dataset via a rio.MemoryFile.
         :type as_memfile: bool
 
@@ -98,8 +99,26 @@ class Raster(object):
         # Save _masked attribute to be used by self.load()
         self._masked = masked
 
+        # Check number of bands to be loaded
+        if bands is None:
+            nbands = self.count
+        elif isinstance(bands, int):
+            nbands = 1
+        elif isinstance(bands, collections.abc.Iterable):
+            nbands = len(bands)
+
+        # Downsampled image size
+        if not isinstance(downsampl, (int, float)):
+            raise ValueError("downsampl must be of type int or float")
+        if downsampl == 1:
+            out_shape = (nbands, self.height, self.width)
+        else:
+            down_width = int(np.ceil(self.width/downsampl))
+            down_height = int(np.ceil(self.height/downsampl))
+            out_shape = (nbands, down_height, down_width)
+
         if load_data:
-            self.load()
+            self.load(bands=bands, out_shape=out_shape)
             self.nbands = self._data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
@@ -336,22 +355,30 @@ class Raster(object):
 
         return cp
 
-    def load(self, bands=None):
+    def load(self, bands=None, **kwargs):
         """
-        Load specific bands of the dataset, using rasterio.read()
+        Load specific bands of the dataset, using rasterio.read().
+        Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
 
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
+        **kwargs: any additional arguments to rasterio.io.DatasetReader.read.
+        Useful ones are:
+        - out_shape: to load a subsampled version
+        - window: to load a cropped version
+        - resampling: to set the resampling algorithm
         """
         if bands is None:
-            self._data = self.ds.read(masked=self._masked)
+            self._data = self.ds.read(masked=self._masked, **kwargs)
         else:
-            self._data = self.ds.read(bands, masked=self._masked)
+            self._data = self.ds.read(bands, masked=self._masked, **kwargs)
 
-        if self._data.ndim == 3:
-            self.nbands = self._data.shape[0]
-        else:
-            self.nbands = 1
+        # If ndim is 2, expand to 3
+        if self._data.ndim == 2:
+            self._data = np.expand_dims(self._data, 0)
+
+        self.nbands = self._data.shape[0]
+        self.isLoaded = True
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
