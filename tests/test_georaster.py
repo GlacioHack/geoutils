@@ -12,7 +12,7 @@ import geoutils.georaster as gr
 from geoutils import datasets
 
 
-DO_PLOT = True #False
+DO_PLOT = False
 
 
 class TestRaster:
