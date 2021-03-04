@@ -295,9 +295,9 @@ class TestRaster:
             plt.close()
         assert True
 
-        # Test plotting single band B/W, no_cb
+        # Test plotting single band B/W, add_cb
         ax = plt.subplot(111)
-        img_RGB.show(band=0, cmap='gray', ax=ax, no_cb=True,
+        img_RGB.show(band=0, cmap='gray', ax=ax, add_cb=False,
                      title="Plotting one band B/W")
         if DO_PLOT:
             plt.show()

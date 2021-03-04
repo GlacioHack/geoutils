@@ -4,6 +4,7 @@
 geoutils.geoviewer provides a toolset for plotting raster and vector data
 
 TO DO:
+- change so that only needed band is loaded
 - include some options from imviewer: https://github.com/dshean/imview/blob/master/imview/imviewer.py
 """
 
