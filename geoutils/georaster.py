@@ -52,7 +52,7 @@ class Raster(object):
         :param load_data: Load the raster data into the object. Default is True.
         :type load_data: bool
         :param downsampl: Reduce the size of the image loaded by this factor. Default is 1
-        :type downsampl: int
+        :type downsampl: int, float
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
         :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
@@ -107,8 +107,8 @@ class Raster(object):
             nbands = len(bands)
 
         # Downsampled image size
-        if not isinstance(downsampl, int):
-            raise ValueError("downsampl must be of type int")
+        if not isinstance(downsampl, (int, float)):
+            raise ValueError("downsampl must be of type int or float")
         if downsampl == 1:
             out_shape = (nbands, self.height, self.width)
         else:
