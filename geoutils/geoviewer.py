@@ -31,7 +31,7 @@ def getparser():
     parser.add_argument('-vmin', dest='vmin', type=str, default=None, help='float, the minimum value for colorscale, or can be expressed as a percentile e.g. 5%% (default is calculated min value).')
     parser.add_argument('-vmax', dest='vmax', type=str, default=None, help='float, the maximum value for colorscale, or can be expressed as a percentile e.g. 95%% (default is calculated max value).')
     parser.add_argument('-band', dest='band', type=int, default=None, help='int, which band to display (start at 0) for multiband images (Default is 0).')
-    parser.add_argument('-nocb', dest='nocb', help='If set, will not display a colorbar (Default is to display the colorbar).',action='store_true')
+    parser.add_argument('-nocb', dest='nocb', help='If set, will not display a colorbar (Default is to display the colorbar).',action='store_false')
     parser.add_argument('-clabel', dest='clabel', type=str, default='', help='str, the label for the colorscale (Default is empty).')
     parser.add_argument('-title', dest='title', type=str, default='', help='str, figure title (Default is empty).')
     parser.add_argument('-figsize', dest='figsize', type=str, default='default', help='str, figure size, must be a tuple of size 2, either written with quotes, or two numbers seperated by coma, no space (Default is from rcParams).')
@@ -147,7 +147,7 @@ def main():
 
     # plot
     img.show(ax=ax, band=args.band, cmap=cmap, interpolation='nearest',
-             vmin=vmin, vmax=vmax, no_cb=args.nocb, cb_title=args.clabel,
+             vmin=vmin, vmax=vmax, add_cb=args.nocb, cb_title=args.clabel,
              title=args.title)
 
     plt.tight_layout()

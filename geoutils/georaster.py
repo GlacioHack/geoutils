@@ -855,7 +855,7 @@ to be cleared due to the setting of GCPs.")
             return extent
 
     def show(self, band=None, cmap=None, vmin=None, vmax=None, cb_title=None,
-             no_cb=False, ax=None, **kwargs):
+             add_cb=True, ax=None, **kwargs):
         """ Show/display the image, with axes in projection of image.
 
         This method is a wrapper to rasterio.plot.show. Any **kwargs which
@@ -871,11 +871,11 @@ to be cleared due to the setting of GCPs.")
         :type vmax: int, float
         :param cb_title: Colorbar label. Default is None.
         :type cb_title: str
-        :param no_cb: Set to True to not display a colorbar
-        :type no_cb: bool
+        :param add_cb: Set to True to display a colorbar. Default is True.
+        :type add_cb: bool
         :param ax: A figure ax to be used for plotting. If None, will create default figure and axes, and plot figure directly.
         :type ax: matplotlib.axes.Axes
-        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if no_cb is True)
+        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
         :rtype: (matplotlib.axes.Axes, matplotlib.colors.Colormap)
 
         You can also pass in **kwargs to be used by the underlying imshow or
@@ -907,7 +907,7 @@ to be cleared due to the setting of GCPs.")
         # If multiple bands (RGB), cbar does not make sense
         if isinstance(band, collections.abc.Iterable):
             if len(band) > 1:
-                no_cb = True
+                add_cb = False
 
         # Create colorbar
         # Use rcParam default
@@ -947,7 +947,7 @@ to be cleared due to the setting of GCPs.")
               cmap=cmap, vmin=vmin, vmax=vmax, **kwargs)
 
         # Add colorbar
-        if not no_cb:
+        if add_cb:
             cbar = fig.colorbar(
                 cm.ScalarMappable(norm=colors.Normalize(vmin=vmin, vmax=vmax),
                                   cmap=cmap), ax=ax0)
