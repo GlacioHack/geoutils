@@ -40,7 +40,7 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-    def __init__(self, filename, bands=None, load_data=True,
+    def __init__(self, filename, bands=None, load_data=True, downsampl=1,
                  masked=True, attrs=None, as_memfile=False):
         """
         Load a rasterio-supported dataset, given a filename.
@@ -51,6 +51,8 @@ class Raster(object):
         :type bands: int, or list of ints
         :param load_data: Load the raster data into the object. Default is True.
         :type load_data: bool
+        :param downsampl: Reduce the size of the image loaded by this factor. Default is 1
+        :type downsampl: int
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
         :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
@@ -94,8 +96,28 @@ class Raster(object):
         # Save _masked attribute to be used by self.load()
         self._masked = masked
 
+        # Check number of bands to be loaded
+        # If bands is int, force to be list so that self.data.ndim is 3
+        if bands is None:
+            nbands = self.count
+        elif isinstance(bands, int):
+            nbands = 1
+            bands = (bands,)
+        elif isinstance(bands, collections.abc.Iterable):
+            nbands = len(bands)
+
+        # Downsampled image size
+        if not isinstance(downsampl, int):
+            raise ValueError("downsampl must be of type int")
+        if downsampl == 1:
+            out_shape = (nbands, self.height, self.width)
+        else:
+            down_width = int(np.ceil(self.width/downsampl))
+            down_height = int(np.ceil(self.height/downsampl))
+            out_shape = (nbands, down_height, down_width)
+
         if load_data:
-            self.load(bands=bands)
+            self.load(bands=bands, out_shape=out_shape)
             self.nbands = self._data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
