@@ -97,12 +97,10 @@ class Raster(object):
         self._masked = masked
 
         # Check number of bands to be loaded
-        # If bands is int, force to be list so that self.data.ndim is 3
         if bands is None:
             nbands = self.count
         elif isinstance(bands, int):
             nbands = 1
-            bands = (bands,)
         elif isinstance(bands, collections.abc.Iterable):
             nbands = len(bands)
 
@@ -356,7 +354,8 @@ class Raster(object):
 
     def load(self, bands=None, **kwargs):
         """
-        Load specific bands of the dataset, using rasterio.read()
+        Load specific bands of the dataset, using rasterio.read().
+        Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
 
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
@@ -371,11 +370,11 @@ class Raster(object):
         else:
             self._data = self.ds.read(bands, masked=self._masked, **kwargs)
 
-        if self._data.ndim == 3:
-            self.nbands = self._data.shape[0]
-        else:
-            self.nbands = 1
+        # If ndim is 2, expand to 3
+        if self._data.ndim == 2:
+            self._data = np.expand_dims(self._data, 0)
 
+        self.nbands = self._data.shape[0]
         self.isLoaded = True
 
     def crop(self, cropGeom, mode='match_pixel'):
