@@ -918,20 +918,19 @@ to be cleared due to the setting of GCPs.")
         elif isinstance(cmap, matplotlib.colors.Colormap):
             pass
 
-        # Set colorbar min/max values
+        # Set colorbar min/max values (needed for ScalarMappable)
         if vmin is None:
             vmin = np.nanmin(self.data[band, :, :])
-        elif isinstance(vmin, (int, float, np.integer, np.floating)):
-            pass
-        else:
-            raise ValueError("vmin must be (numpy) integer/float or None")
 
         if vmax is None:
             vmax = np.nanmax(self.data[band, :, :])
-        elif isinstance(vmax, (int, float, np.integer, np.floating)):
-            pass
-        else:
-            raise ValueError("vmax must be (numpy) integer/float or None")
+
+        # Make sure they are numbers, to avoid mpl error
+        try:
+            vmin = float(vmin)
+            vmax = float(vmax)
+        except ValueError:
+            raise ValueError('vmin or vmax cannot be converted to float')
 
         # Create axes
         if ax is None:
