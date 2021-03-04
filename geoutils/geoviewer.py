@@ -4,7 +4,6 @@
 geoutils.geoviewer provides a toolset for plotting raster and vector data
 
 TO DO:
-- add option to downsample data before plotting for large data set (max_size)
 - include some options from imviewer: https://github.com/dshean/imview/blob/master/imview/imviewer.py
 """
 
@@ -35,11 +34,11 @@ def getparser():
     parser.add_argument('-clabel', dest='clabel', type=str, default='', help='str, the label for the colorscale (Default is empty).')
     parser.add_argument('-title', dest='title', type=str, default='', help='str, figure title (Default is empty).')
     parser.add_argument('-figsize', dest='figsize', type=str, default='default', help='str, figure size, must be a tuple of size 2, either written with quotes, or two numbers seperated by coma, no space (Default is from rcParams).')
-    #parser.add_argument('-max_size', dest='max_size', type=int, default=2000, help='int, image size is limited to max_size**2 for faster reading/displaying (Default is 2000).')
+    parser.add_argument('-max_size', dest='max_size', type=int, default=2000, help='int, image size is limited to max_size**2 for faster reading/displaying (Default is 2000).')
     parser.add_argument('-save', dest='save', type=str, default='', help='str, filename to the output filename to save to disk (Default is displayed on screen).')
     parser.add_argument('-dpi', dest='dpi', type=str, default='default', help='int, dpi value to use when saving figure (Default is from rcParams).')
     parser.add_argument('-nodata', dest='nodata', type=str, default='default', help='float, no data value (Default is read from file metadata).')
-    #parser.add_argument('-noresampl', dest='noresampl', default=False, action='store_true', help='True or False, if False then allow dynamic image downscaling, if True, prevent it.')
+    parser.add_argument('-noresampl', dest='noresampl', default=False, action='store_true', help='True or False, if False then allow dynamic image downscaling, if True, prevent it.')
 
     args = parser.parse_args()
 
@@ -56,14 +55,19 @@ def main():
     xmin, xmax, ymin, ymax = img.bounds
 
     ## Resample if image is too large ##
-    # if (img.nx*img.ny>args.max_size**2) & (not args.noresampl):
-    #     step = max(int(img.nx/args.max_size),int(img.ny/args.max_size))
-    #     print("Image will be downsampled by a factor %i." %step)
-    # else:
-    #     step=1
+    if ((img.width > args.max_size) or (img.height > args.max_size)) \
+       & (not args.noresampl):
+        dfact = max(
+            int(img.width/args.max_size),
+            int(img.height/args.max_size)
+        )
+        print("Image will be downsampled by a factor {}.".format(dfact))
+        new_shape = (img.count, int(img.height/dfact), int(img.width/dfact))
+    else:
+        new_shape = None
 
     ## Read image ##
-    img.load()
+    img.load(out_shape=new_shape)
 
     # Set no data value
     if args.nodata == 'default':
@@ -88,7 +92,7 @@ def main():
                 perc = float(perc)
                 vmin = np.percentile(img.data, perc)
             except ValueError:   # Case no % sign
-                raise ValueError("vmin must be a float or percentage, currently set to %s" %args.vmin)
+                raise ValueError("vmin must be a float or percentage, currently set to %s" % args.vmin)
 
     else:
         vmin = None
@@ -101,9 +105,9 @@ def main():
             perc, _ = args.vmax.split('%')
             try:
                 perc = float(perc)
-                vmax = np.percentile(img.data, perc)            
+                vmax = np.percentile(img.data, perc)
             except ValueError:   # Case no % sign
-                raise ValueError("vmax must be a float or percentage, currently set to %s" %args.vmax)
+                raise ValueError("vmax must be a float or percentage, currently set to %s" % args.vmax)
 
     else:
         vmax = None
