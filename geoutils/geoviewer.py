@@ -64,7 +64,7 @@ def main():
 
     ## Read image ##
     img.load()
-    
+
     # Set no data value
     if args.nodata == 'default':
         nodata = img.nodata
@@ -146,18 +146,9 @@ def main():
     ax = fig.add_subplot(111)
 
     # plot
-    img.show(ax=ax, band=args.band, cmap=cmap, interpolation='nearest', vmin=vmin, vmax=vmax, no_cb=args.nocb, cb_title=args.clabel, title=args.title)
-
-    # # colorbar
-    # if not args.nocb:
-    #     cb = plt.colorbar()
-
-    #     if args.clabel != '':
-    #         cb.set_label(args.clabel)
-
-    # title
-    # if args.title != '':
-    #     plt.title(args.title)
+    img.show(ax=ax, band=args.band, cmap=cmap, interpolation='nearest',
+             vmin=vmin, vmax=vmax, no_cb=args.nocb, cb_title=args.clabel,
+             title=args.title)
 
     plt.tight_layout()
 
@@ -166,7 +157,6 @@ def main():
         plt.savefig(args.save, dpi=dpi)
         print("Figure saved to file %s." % args.save)
     else:
-        print("Figure displayed on screen.")
         plt.show()
 
 
