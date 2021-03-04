@@ -40,24 +40,23 @@ class Raster(object):
     filename = None
     matches_disk = None
 
-    def __init__(self, filename, attrs=None, load_data=True, bands=None,
-                 masked=True, as_memfile=False):
-
+    def __init__(self, filename, bands=None, load_data=True,
+                 masked=True, attrs=None, as_memfile=False):
         """
         Load a rasterio-supported dataset, given a filename.
 
         :param filename: The filename of the dataset.
         :type filename: str
+        :param bands: The band(s) to load into the object. Default is to load all bands.
+        :type bands: int, or list of ints
+        :param load_data: Load the raster data into the object. Default is True.
+        :type load_data: bool
+        :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
+        :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         :type attrs: list of strings
-        :param load_data: Load the raster data into the object. Default is True.
-        :type load_data: bool
-        :param bands: The band(s) to load into the object. Default is to load all bands.
-        :type bands: int, or list of ints
-        :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
-        :type masked: bool
         :param as_memfile: open the dataset via a rio.MemoryFile.
         :type as_memfile: bool
 
@@ -96,7 +95,7 @@ class Raster(object):
         self._masked = masked
 
         if load_data:
-            self.load()
+            self.load(bands=bands)
             self.nbands = self._data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
@@ -333,22 +332,29 @@ class Raster(object):
 
         return cp
 
-    def load(self, bands=None):
+    def load(self, bands=None, **kwargs):
         """
         Load specific bands of the dataset, using rasterio.read()
 
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
+        **kwargs: any additional arguments to rasterio.io.DatasetReader.read.
+        Useful ones are:
+        - out_shape: to load a subsampled version
+        - window: to load a cropped version
+        - resampling: to set the resampling algorithm
         """
         if bands is None:
-            self._data = self.ds.read(masked=self._masked)
+            self._data = self.ds.read(masked=self._masked, **kwargs)
         else:
-            self._data = self.ds.read(bands, masked=self._masked)
+            self._data = self.ds.read(bands, masked=self._masked, **kwargs)
 
         if self._data.ndim == 3:
             self.nbands = self._data.shape[0]
         else:
             self.nbands = 1
+
+        self.isLoaded = True
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
