@@ -147,18 +147,36 @@ class TestRaster:
         # print(rpts)
 
     def test_set_ndv(self):
-
+        """
+        Read Landsat dataset and set 255 to no data. Save mask.
+        Then, set 254 as new no data (after setting 254 to 0). Save mask.
+        Check that both no data masks are identical and have correct number of pixels.
+        """
+        # Read Landsat image and set no data to 255
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r.set_ndv(ndv=[255])
-        data = r.data
-        ndv_index = data==r.nodata
+        ndv_index = r.data.mask
 
-        # Change data in case
-        data[data == 254] = 0
+        # Now set to 254, after changing 254 to 0.
+        r.data[r.data == 254] = 0
         r.set_ndv(ndv=254, update_array=True)
-        ndv_index_2 = data==r.nodata
+        ndv_index_2 = r.data.mask
 
-        assert np.count_nonzero(~ndv_index_2 == ndv_index) == 0
+        if DO_PLOT:
+            plt.figure(figsize=(12, 6))
+            plt.subplot(121)
+            plt.imshow(ndv_index[0], interpolation='nearest')
+            plt.title('Mask 1')
+            plt.subplot(122)
+            plt.imshow(ndv_index_2[0], interpolation='nearest')
+            plt.title('Mask 2 (should be identical)')
+            plt.show()
+
+        # Check both masks are identical
+        assert np.all(ndv_index_2 == ndv_index)
+
+        # Check that the number of no data value is correct
+        assert np.count_nonzero(ndv_index.data) == 112088
 
     def test_set_dtypes(self):
 

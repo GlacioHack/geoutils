@@ -12,6 +12,7 @@ This package contains tools for working with geospatial raster and vector data.
     :maxdepth: 1
 
     raster-basics
+    satimg-basics
     api
     
 
