@@ -1133,18 +1133,17 @@ to be cleared due to the setting of GCPs.")
         :param offset: coordinate type. If 'corner', returns corner coordinates of pixels.
             If 'center', returns center coordinates. Default is corner.
         :type offset: str
-        :param grid: Return gridded coordinates. Default is True.
+        :param grid: Return grid
         :type grid: bool
         :returns x,y: numpy arrays corresponding to the x,y coordinates of each pixel.
         """
         assert offset in ['corner', 'center'], "ctype is not one of 'corner', 'center': {}".format(offset)
 
-        xmin, ymin, xmax, ymax = self.bounds
-        dx = list(self.transform)[0]
-        dy = list(self.transform)[4]
+        dx = self.res[0]
+        dy = self.res[1]
 
-        xx = np.linspace(xmin, xmax, self.width + 1)[::int(np.sign(dx))]
-        yy = np.linspace(xmin, xmax, self.height + 1)[::int(np.sign(dy))]
+        xx = np.linspace(self.bounds.left, self.bounds.right, self.width + 1)[::int(np.sign(dx))]
+        yy = np.linspace(self.bounds.bottom, self.bounds.top, self.height + 1)[::int(np.sign(dy))]
 
         if offset == 'center':
             xx += dx / 2  # shift by half a pixel

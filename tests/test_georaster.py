@@ -327,3 +327,32 @@ class TestRaster:
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
         img.save(TemporaryFile(), co_opts=co_opts, metadata=metadata)
+
+    def test_coords(self):
+
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+        xx, yy = img.coords(offset='corner')
+        assert xx.min() == pytest.approx(img.bounds.left)
+        assert xx.max() == pytest.approx(img.bounds.right - img.res[0])
+        if img.res[1] > 0:
+            assert yy.min() == pytest.approx(img.bounds.bottom)
+            assert yy.max() == pytest.approx(img.bounds.top - img.res[1])
+        else:
+            # Currently not covered by test image
+            assert yy.min() == pytest.approx(img.bounds.top)
+            assert yy.max() == pytest.approx(img.bounds.bottom + img.res[1])
+
+        xx, yy = img.coords(offset='center')
+        hx = img.res[0] / 2
+        hy = img.res[1] / 2
+        assert xx.min() == pytest.approx(img.bounds.left + hx)
+        assert xx.max() == pytest.approx(img.bounds.right - hx)
+        if img.res[1] > 0:
+            assert yy.min() == pytest.approx(img.bounds.bottom + hy)
+            assert yy.max() == pytest.approx(img.bounds.top - hy)
+        else:
+            # Currently not covered by test image
+            assert yy.min() == pytest.approx(img.bounds.top + hy)
+            assert yy.max() == pytest.approx(img.bounds.bottom - hy)
+
+
