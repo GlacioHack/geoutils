@@ -14,6 +14,9 @@ from rasterio.io import MemoryFile
 from rasterio.crs import CRS
 from rasterio.warp import Resampling
 from rasterio.plot import show as rshow
+import matplotlib
+from matplotlib import colors, cm
+import matplotlib.pyplot as plt
 
 from affine import Affine
 from shapely.geometry.polygon import Polygon
@@ -878,17 +881,29 @@ to be cleared due to the setting of GCPs.")
         else:
             return extent
 
-    def show(self, band=None, **kwargs):
+    def show(self, band=None, cmap=None, vmin=None, vmax=None, cb_title=None,
+             add_cb=True, ax=None, **kwargs):
         """ Show/display the image, with axes in projection of image.
 
-        This method is a wrapper to rasterio.plot.show. Any **kwargs which you give
-        this method will be passed to rasterio.plot.show.
+        This method is a wrapper to rasterio.plot.show. Any **kwargs which
+        you give this method will be passed to rasterio.plot.show.
 
         :param band: which band to plot, from 0 to self.count-1 (default is all)
         :type band: int
-
-        :returns: None
-        :rtype: None
+        :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap']
+        :type cmap: matplotlib.colors.Colormap, str
+        :param vmin: Colorbar minimum value. Default is data min.
+        :type vmin: int, float
+        :param vmax: Colorbar maximum value. Default is data min.
+        :type vmax: int, float
+        :param cb_title: Colorbar label. Default is None.
+        :type cb_title: str
+        :param add_cb: Set to True to display a colorbar. Default is True.
+        :type add_cb: bool
+        :param ax: A figure ax to be used for plotting. If None, will create default figure and axes, and plot figure directly.
+        :type ax: matplotlib.axes.Axes
+        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
+        :rtype: (matplotlib.axes.Axes, matplotlib.colors.Colormap)
 
         You can also pass in **kwargs to be used by the underlying imshow or
         contour methods of matplotlib. The example below shows provision of
@@ -916,8 +931,63 @@ to be cleared due to the setting of GCPs.")
         else:
             raise ValueError("band must be int or None")
 
+        # If multiple bands (RGB), cbar does not make sense
+        if isinstance(band, collections.abc.Iterable):
+            if len(band) > 1:
+                add_cb = False
+
+        # Create colorbar
+        # Use rcParam default
+        if cmap is None:
+            cmap = plt.get_cmap(plt.rcParams['image.cmap'])
+        elif isinstance(cmap, str):
+            cmap = plt.get_cmap(cmap)
+        elif isinstance(cmap, matplotlib.colors.Colormap):
+            pass
+
+        # Set colorbar min/max values (needed for ScalarMappable)
+        if vmin is None:
+            vmin = np.nanmin(self.data[band, :, :])
+
+        if vmax is None:
+            vmax = np.nanmax(self.data[band, :, :])
+
+        # Make sure they are numbers, to avoid mpl error
+        try:
+            vmin = float(vmin)
+            vmax = float(vmax)
+        except ValueError:
+            raise ValueError('vmin or vmax cannot be converted to float')
+
+        # Create axes
+        if ax is None:
+            fig, ax0 = plt.subplots()
+        elif isinstance(ax, matplotlib.axes.Axes):
+            ax0 = ax
+            fig = ax.figure
+        else:
+            raise ValueError("ax must be a matplotlib.axes.Axes instance or None")
+
         # Use data array directly, as rshow on self.ds will re-load data
-        rshow(self.data[band, :, :], transform=self.transform, **kwargs)
+        rshow(self.data[band, :, :], transform=self.transform, ax=ax0,
+              cmap=cmap, vmin=vmin, vmax=vmax, **kwargs)
+
+        # Add colorbar
+        if add_cb:
+            cbar = fig.colorbar(
+                cm.ScalarMappable(norm=colors.Normalize(vmin=vmin, vmax=vmax),
+                                  cmap=cmap), ax=ax0)
+
+            if cb_title is not None:
+                cbar.set_label(cb_title)
+        else:
+            cbar= None
+
+        # If ax not set, figure should be plotted directly
+        if ax is None:
+            plt.show()
+        else:
+            return ax0, cbar
 
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,

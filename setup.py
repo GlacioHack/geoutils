@@ -47,5 +47,5 @@ setup(name='geoutils',
       package_data={"geoutils": data_files},
       install_requires=['rasterio', 'geopandas', 'pyproj'],
       extras_require={'rioxarray': ['rioxarray']},
-      scripts=[],
+      scripts=['geoutils/geoviewer.py'],
       zip_safe=False)
