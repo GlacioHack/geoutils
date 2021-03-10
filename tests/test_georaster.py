@@ -143,12 +143,15 @@ class TestRaster:
         b_crop = tuple(r.bounds)
 
         if DO_PLOT:
-            plt.figure()
-            r_init.show(title='Raster 1')
-            plt.figure()
-            r2.show(title='Raster 2')
-            plt.figure()
-            r.show(title='Raster 1 cropped to Raster 2')
+            fig1, ax1 = plt.subplots()
+            r_init.show(ax=ax1, title='Raster 1')
+
+            fig2, ax2 = plt.subplots()
+            r2.show(ax=ax2, title='Raster 2')
+
+            fig3, ax3 = plt.subplots()
+            r.show(ax=ax3, title='Raster 1 cropped to Raster 2')
+            plt.show()
 
         assert b_minmax == b_crop
 
@@ -159,12 +162,16 @@ class TestRaster:
         r3 = r.reproject(r2)
 
         if DO_PLOT:
-            plt.figure()
-            r.show(title='Raster 1')
-            plt.figure()
-            r2.show(title='Raster 2')
-            plt.figure()
-            r3.show(title='Raster 1 reprojected to Raster 2')
+            fig1, ax1 = plt.subplots()
+            r.show(ax=ax1, title='Raster 1')
+
+            fig2, ax2 = plt.subplots()
+            r2.show(ax=ax2, title='Raster 2')
+
+            fig3, ax3 = plt.subplots()
+            r3.show(ax=ax3, title='Raster 1 reprojected to Raster 2')
+
+            plt.show()
 
         # TODO: not sure what to assert here
 
@@ -288,9 +295,20 @@ class TestRaster:
             plt.close()
         assert True
 
-        # Test plotting single band B/W
+        # Test plotting single band B/W, add_cb
         ax = plt.subplot(111)
-        img_RGB.show(band=0, cmap='gray', ax=ax, title="Plotting one band B/W")
+        img_RGB.show(band=0, cmap='gray', ax=ax, add_cb=False,
+                     title="Plotting one band B/W")
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test vmin, vmax and cb_title
+        ax = plt.subplot(111)
+        img.show(cmap='gray', vmin=40, vmax=220, cb_title='Custom cbar',
+                 ax=ax, title="Testing vmin, vmax and cb_title")
         if DO_PLOT:
             plt.show()
         else:
@@ -309,3 +327,32 @@ class TestRaster:
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
         img.save(TemporaryFile(), co_opts=co_opts, metadata=metadata)
+
+    def test_coords(self):
+
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+        xx, yy = img.coords(offset='corner')
+        assert xx.min() == pytest.approx(img.bounds.left)
+        assert xx.max() == pytest.approx(img.bounds.right - img.res[0])
+        if img.res[1] > 0:
+            assert yy.min() == pytest.approx(img.bounds.bottom)
+            assert yy.max() == pytest.approx(img.bounds.top - img.res[1])
+        else:
+            # Currently not covered by test image
+            assert yy.min() == pytest.approx(img.bounds.top)
+            assert yy.max() == pytest.approx(img.bounds.bottom + img.res[1])
+
+        xx, yy = img.coords(offset='center')
+        hx = img.res[0] / 2
+        hy = img.res[1] / 2
+        assert xx.min() == pytest.approx(img.bounds.left + hx)
+        assert xx.max() == pytest.approx(img.bounds.right - hx)
+        if img.res[1] > 0:
+            assert yy.min() == pytest.approx(img.bounds.bottom + hy)
+            assert yy.max() == pytest.approx(img.bounds.top - hy)
+        else:
+            # Currently not covered by test image
+            assert yy.min() == pytest.approx(img.bounds.top + hy)
+            assert yy.max() == pytest.approx(img.bounds.bottom - hy)
+
+
