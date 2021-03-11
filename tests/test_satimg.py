@@ -2,14 +2,13 @@
 Test functions for SatelliteImage class
 """
 import os
-import inspect
 import pytest
 import datetime as dt
-
-import geoutils.georaster as gr
+import copy
 import geoutils.satimg as si
 from geoutils import datasets
-
+import geoutils
+import numpy as np
 
 DO_PLOT = False
 
@@ -22,6 +21,34 @@ class TestSatelliteImage:
 
         img = si.SatelliteImage(fn_img, read_from_fn=False)
         img = si.SatelliteImage(fn_img)
+
+    def test_copy(self):
+
+        fn_img = datasets.get_path("landsat_B4")
+
+        img = si.SatelliteImage(fn_img)
+
+        img2 = copy.copy(img)
+        img3 = img.copy()
+
+        # check the copied object is indeed a SatelliteImage
+        assert isinstance(img2,geoutils.satimg.SatelliteImage)
+        assert isinstance(img3,geoutils.satimg.SatelliteImage)
+
+        # check all immutable attributes are equal
+        georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
+                         'res', 'shape', 'transform', 'width']
+        satimg_attrs =  ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+
+        all_attrs = georaster_attrs + satimg_attrs
+
+        for attr in all_attrs:
+            assert img2.__getattribute__(attr) == img.__getattribute__(attr)
+
+        # check data array
+        assert np.count_nonzero(~img.data == img2.data) == 0
+        # check dataset_mask array
+        assert np.count_nonzero(~img2.dataset_mask() == img2.dataset_mask()) == 0
 
     def test_filename_parsing(self):
 
