@@ -7,6 +7,7 @@ import datetime as dt
 import numpy as np
 from geoutils.georaster import Raster
 import collections
+import copy
 
 lsat_sensor = {'C': 'OLI/TIRS', 'E': 'ETM+', 'T': 'TM', 'M': 'MSS', 'O': 'OLI', 'TI': 'TIRS'}
 
@@ -274,7 +275,7 @@ class SatelliteImage(Raster):
 
         # trying to get metadata from filename for the None attributes
         if read_from_fn and self.filename is not None:
-            self.__parse_metadata_from_fn()
+            self.__parse_metadata_from_fn(silent=silent)
 
         self.__get_date()
 
@@ -313,5 +314,21 @@ class SatelliteImage(Raster):
 
     def __parse_metadata_from_file(self,fn_meta):
         pass
+
+    def __copy__(self):
+
+        new_raster = super().copy()
+        new_raster.filename = self.filename
+        # all objects here are immutable so no need for a copy method (string and datetime)
+        # name_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+        # for attrs in name_attrs:
+        #     setattr(new_satimg,attrs,getattr(self,attrs))
+        #
+        return SatelliteImage(new_raster.filename,silent=True)
+
+    def copy(self):
+
+        return copy.copy(self)
+
 
 
