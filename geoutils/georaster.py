@@ -86,7 +86,7 @@ class Raster(object):
             self.ds = filename.open()
 
         # Provide a catch in case trying to load from data array
-        elif isinstance(filename, np.array):
+        elif isinstance(filename, np.ndarray):
             raise ValueError(
                 'np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ')
 
