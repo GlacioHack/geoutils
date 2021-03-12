@@ -355,4 +355,19 @@ class TestRaster:
             assert yy.min() == pytest.approx(img.bounds.top + hy)
             assert yy.max() == pytest.approx(img.bounds.bottom - hy)
 
+    def test_eq(self):
 
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img2 = gr.Raster(datasets.get_path("landsat_B4"))
+
+        assert np.array_equal(img.data, img2.data, equal_nan=True)
+        assert img.transform == img2.transform
+        assert img.crs == img2.crs
+        assert img.nodata == img2.nodata
+
+        assert img.__eq__(img2)
+        assert img == img2
+
+        img2.data += 1
+
+        assert img != img2
