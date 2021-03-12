@@ -5,6 +5,7 @@ import os
 import inspect
 import pytest
 import datetime as dt
+import numpy as np
 
 import geoutils.georaster as gr
 import geoutils.satimg as si
@@ -78,3 +79,28 @@ class TestSatelliteImage:
         # same here
         assert si.latlon_to_sw_naming((0, -180)) == 'N00W180'
         assert si.latlon_to_sw_naming((0, 180)) == 'N00W180'
+
+    def test_copy(self):
+        """
+        Test that the copy method works as expected for satimg. In particular
+        when copying r to r2:
+        - if r.data is modified and r copied, the updated data is copied
+        - if r is copied, r.data changed, r2.data should be unchanged
+        """
+        # Open dataset, update data and make a copy
+        r = si.SatelliteImage(datasets.get_path("landsat_B4"))
+        r.data += 5
+        r2 = r.copy()
+
+        # Check data array
+        assert np.all(r.data == r2.data)
+
+        # Check dataset_mask array
+        assert np.all(r.data.mask == r2.data.mask)
+
+        # Check that if r.data is modified, it does not affect r2.data
+        r.data += 5
+        assert not np.all(r.data == r2.data)
+
+        # Check that both have same output type
+        assert type(r) == type(r2)
