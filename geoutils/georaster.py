@@ -489,7 +489,7 @@ class Raster(object):
             # In case dst_res or dst_size is set, use original CRS
             if dst_crs is None:
                 dst_crs = self.crs
-            
+
         # Case a raster is provided as reference
         if dst_ref is not None:
 
@@ -584,10 +584,11 @@ class Raster(object):
             reproj_kwargs.update({'destination': dst_data})
 
         # Check that reprojection is actually needed
+        # Caution, dst_size is (width, height) while shape is (height, width)
         if all([
                 (dst_transform == self.transform) or (dst_transform is None),
                 (dst_crs == self.crs) or (dst_crs is None),
-                (dst_size == self.shape) or (dst_size is None),
+                (dst_size == self.shape[::-1]) or (dst_size is None),
                 (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None)
         ]):
             if (nodata == self.nodata) or (nodata is None):
@@ -605,6 +606,9 @@ class Raster(object):
         # This may need to be improved to allow reprojecting from-disk.
         # See rio.warp.reproject docstring for more info.
         dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+
+        # Enforce output type
+        dst_data = dst_data.astype(dtype)
 
         # Check for funny business.
         if dst_transform is not None:
