@@ -4,13 +4,9 @@ Test functions for SatelliteImage class
 import os
 import pytest
 import datetime as dt
-<<<<<<< HEAD
 import copy
-=======
 import numpy as np
-
 import geoutils.georaster as gr
->>>>>>> master
 import geoutils.satimg as si
 from geoutils import datasets
 import geoutils
