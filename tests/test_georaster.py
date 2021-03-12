@@ -105,14 +105,24 @@ class TestRaster:
         assert r.data.shape == (3, 328, 400)
 
     def test_copy(self):
-
+        """
+        Test that the copy method works as expected. In particular
+        when copying r to r2:
+        - creates a new memory file
+        - if r.data is modified and r copied, the updated data is copied
+        - if r is copied, r.data changed, r2.data should be unchanged
+        """
+        # Open dataset, update data and make a copy
         r = gr.Raster(datasets.get_path("landsat_B4"))
+        r.data += 5
         r2 = r.copy()
 
-        # Should have no filename
+        # Copy should have no filename
         assert r2.filename is None
-        #check a temporary memory file different than original disk file was created
+
+        # check a temporary memory file different than original disk file was created
         assert r2.name != r.name
+
         # Check all attributes except name and dataset_mask array
         default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
                          'res', 'shape', 'transform', 'width']
@@ -121,9 +131,17 @@ class TestRaster:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.count_nonzero(~r.data == r2.data) == 0
+        assert np.all(r.data == r2.data)
+
         # Check dataset_mask array
-        assert np.count_nonzero(~r.dataset_mask() == r2.dataset_mask()) == 0
+        assert np.all(r.data.mask == r2.data.mask)
+
+        # Check that if r.data is modified, it does not affect r2.data
+        r.data += 5
+        assert not np.all(r.data == r2.data)
+
+        # Check that both have same output type
+        assert type(r) == type(r2)
 
     def test_crop(self):
 
