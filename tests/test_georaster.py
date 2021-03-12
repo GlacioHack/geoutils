@@ -18,6 +18,46 @@ DO_PLOT = False
 
 class TestRaster:
 
+    def test_init(self):
+        """
+        Test that all possible inputs work properly in Raster class init
+        """
+
+        # first, filename
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert isinstance(r,gr.Raster)
+
+        # second, passing a Raster itself (points back to Raster passed)
+        r2 = gr.Raster(r)
+        assert isinstance(r2,gr.Raster)
+
+        # third, rio.Dataset
+        ds = rio.open(datasets.get_path("landsat_B4"))
+        r3 = gr.Raster(ds)
+        assert r3.filename is None
+        assert isinstance(r3,gr.Raster)
+
+        # finally, as memoryfile
+        memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), 'rb'))
+        r4 = gr.Raster(memfile)
+        assert isinstance(r4,gr.Raster)
+
+        assert np.logical_and.reduce((np.array_equal(r.data, r2.data, equal_nan=True),
+                                      np.array_equal(r2.data, r3.data, equal_nan=True),
+                                      np.array_equal(r3.data, r4.data, equal_nan=True)))
+
+        assert np.logical_and.reduce((np.all(r.data.mask == r2.data.mask),
+                                      np.all(r2.data.mask == r3.data.mask),
+                                      np.all(r3.data.mask == r4.data.mask)))
+
+        # the data will not be copied, immutable objects will
+        r.data[0, 0, 0] += 5
+        assert r2.data[0, 0, 0] == r.data[0, 0, 0]
+
+        r.nbands = 2
+        assert r.nbands != r2.nbands
+
+
     def test_info(self):
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
