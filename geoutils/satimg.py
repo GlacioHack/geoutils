@@ -7,6 +7,7 @@ import datetime as dt
 import numpy as np
 from geoutils.georaster import Raster
 import collections
+import copy
 
 lsat_sensor = {'C': 'OLI/TIRS', 'E': 'ETM+', 'T': 'TM', 'M': 'MSS', 'O': 'OLI', 'TI': 'TIRS'}
 
@@ -210,6 +211,8 @@ def latlon_to_sw_naming(latlon,latlon_sizes=((1,1),),lat_lims=((0,90.1),)):
     return tile_name
 
 
+satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+
 class SatelliteImage(Raster):
 
     def __init__(self, filename, attrs=None, load_data=True, bands=None,
@@ -274,7 +277,7 @@ class SatelliteImage(Raster):
 
         # trying to get metadata from filename for the None attributes
         if read_from_fn and self.filename is not None:
-            self.__parse_metadata_from_fn()
+            self.__parse_metadata_from_fn(silent=silent)
 
         self.__get_date()
 
@@ -313,5 +316,21 @@ class SatelliteImage(Raster):
 
     def __parse_metadata_from_file(self,fn_meta):
         pass
+
+    def __copy__(self):
+
+        new_satimg = super().copy()
+        new_satimg.filename = None
+        # all objects here are immutable so no need for a copy method (string and datetime)
+        # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
+        for attrs in satimg_attrs:
+            setattr(new_satimg,attrs,getattr(self,attrs))
+
+        return new_satimg
+
+    def copy(self):
+
+        return copy.copy(self)
+
 
 
