@@ -203,6 +203,20 @@ class Raster(object):
         """ Provide string of information about Raster. """
         return self.info()
 
+    def __eq__(self, other) -> bool:
+        """Check if a Raster's data and georeferencing is equal to another."""
+        if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
+            return NotImplemented
+        return all([
+            np.array_equal(self.data, other.data, equal_nan=True),
+            self.transform == other.transform,
+            self.crs == other.crs,
+            self.nodata == other.nodata
+        ])
+
+    def __ne__(self, other) -> bool:
+        return not self.__eq__(other)
+
     def _read_attrs(self, attrs=None):
         # Copy most used attributes/methods
         if attrs is None:
