@@ -483,6 +483,7 @@ class Raster(object):
             if dst_crs is not None:
                 raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
         else:
+            # In case dst_res or dst_size is set, use original CRS
             if dst_crs is None:
                 dst_crs = self.crs
             
@@ -591,7 +592,10 @@ class Raster(object):
                 return self
 
             else:
-                raise ValueError("Only nodata is different, use self.set_ndv")
+                warnings.warn("Only nodata is different, running self.set_ndv instead")
+                dst_r = self.copy()
+                dst_r.set_ndv(nodata)
+                return dst_r
 
         # Currently reprojects all in-memory bands at once.
         # This may need to be improved to allow reprojecting from-disk.
