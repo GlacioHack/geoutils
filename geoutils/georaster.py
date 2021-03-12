@@ -441,8 +441,9 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None, dst_bounds=None, dst_res=None,
-                  nodata=None, dtype=None, resampling=Resampling.nearest,
+    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None,
+                  dst_bounds=None, dst_res=None, nodata=None, dtype=None,
+                  resampling=Resampling.nearest, silent=False,
                   **kwargs):
         """ 
         Reproject raster to a specified grid.
@@ -472,6 +473,8 @@ class Raster(object):
         :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
         :type resampling: rio.warp.Resampling object
+        :param silent: If True, will not print warning statements
+        :type silent: bool
         :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
 
         :returns: Raster
@@ -588,7 +591,8 @@ class Raster(object):
                 (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None)
         ]):
             if (nodata == self.nodata) or (nodata is None):
-                warnings.warn("Output projection, bounds and size are identical -> return self")
+                if not silent:
+                    warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
                 return self
 
             else:
