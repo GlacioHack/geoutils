@@ -106,7 +106,7 @@ class TestRaster:
 
     def test_copy(self):
         """
-        Test that the copy method works as expected. In particular
+        Test that the copy method works as expected for Raster. In particular
         when copying r to r2:
         - creates a new memory file
         - if r.data is modified and r copied, the updated data is copied
@@ -117,31 +117,37 @@ class TestRaster:
         r.data += 5
         r2 = r.copy()
 
+        # Objects should be different (not pointing to the same memory)
+        assert r is not r2
+
+        # Check the object is a Raster
+        assert isinstance(r2, gr.Raster)
+
         # Copy should have no filename
         assert r2.filename is None
 
         # check a temporary memory file different than original disk file was created
         assert r2.name != r.name
 
-        # Check all attributes except name and dataset_mask array
-        default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
-                         'res', 'shape', 'transform', 'width']
-        for attr in default_attrs:
+        # Check all attributes except name, driver and dataset_mask array
+        # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
+        #                  'res', 'shape', 'transform', 'width']
+        # using list directly available in Class
+        attrs = [at for at in gr.default_attrs if at not in ['name','dataset_mask','driver']]
+        for attr in attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.all(r.data == r2.data)
+        assert np.array_equal(r.data,r2.data, equal_nan=True)
 
         # Check dataset_mask array
-        assert np.all(r.data.mask == r2.data.mask)
+        assert np.all(r.data.mask==r2.data.mask)
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
-        assert not np.all(r.data == r2.data)
+        assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
-        # Check that both have same output type
-        assert type(r) == type(r2)
 
     def test_crop(self):
 
