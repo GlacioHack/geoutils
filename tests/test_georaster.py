@@ -124,21 +124,22 @@ class TestRaster:
         assert r2.name != r.name
 
         # Check all attributes except name and dataset_mask array
-        default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
-                         'res', 'shape', 'transform', 'width']
-        for attr in default_attrs:
+        # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
+        #                  'res', 'shape', 'transform', 'width']
+        #using list directly in Class
+        for attr in gr.default_attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.all(r.data == r2.data)
+        assert np.array_equal(r.data,r2.data, equal_nan=True)
 
         # Check dataset_mask array
-        assert np.all(r.data.mask == r2.data.mask)
+        assert np.all(r.data.mask==r2.data.mask)
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
-        assert not np.all(r.data == r2.data)
+        assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check that both have same output type
         assert type(r) == type(r2)

@@ -39,24 +39,23 @@ class TestSatelliteImage:
         assert isinstance(r2, geoutils.satimg.SatelliteImage)
 
         # check all immutable attributes are equal
-        georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
-                           'res', 'shape', 'transform', 'width']
-        satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
-
-        all_attrs = georaster_attrs + satimg_attrs
+        # georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
+        #                    'res', 'shape', 'transform', 'width']
+        # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+        all_attrs = gr.default_attrs + si.satimg_attrs
 
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.all(r.data == r2.data)
+        assert np.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check dataset_mask array
         assert np.all(r.data.mask == r2.data.mask)
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
-        assert not np.all(r.data == r2.data)
+        assert not np.array_equal(r.data == r2.data, equal_nan=True)
 
         # Check that both have same output type
         assert type(r) == type(r2)

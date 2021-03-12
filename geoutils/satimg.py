@@ -211,6 +211,8 @@ def latlon_to_sw_naming(latlon,latlon_sizes=((1,1),),lat_lims=((0,90.1),)):
     return tile_name
 
 
+satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+
 class SatelliteImage(Raster):
 
     def __init__(self, filename, attrs=None, load_data=True, bands=None,
@@ -317,14 +319,14 @@ class SatelliteImage(Raster):
 
     def __copy__(self):
 
-        new_raster = super().copy()
-        new_raster.filename = self.filename
+        new_satimg = super().copy()
+        new_satimg.filename = None
         # all objects here are immutable so no need for a copy method (string and datetime)
-        # name_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
-        # for attrs in name_attrs:
-        #     setattr(new_satimg,attrs,getattr(self,attrs))
-        #
-        return SatelliteImage(new_raster.filename,silent=True)
+        # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
+        for attrs in satimg_attrs:
+            setattr(new_satimg,attrs,getattr(self,attrs))
+
+        return new_satimg
 
     def copy(self):
 
