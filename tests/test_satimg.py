@@ -4,7 +4,13 @@ Test functions for SatelliteImage class
 import os
 import pytest
 import datetime as dt
+<<<<<<< HEAD
 import copy
+=======
+import numpy as np
+
+import geoutils.georaster as gr
+>>>>>>> master
 import geoutils.satimg as si
 from geoutils import datasets
 import geoutils
@@ -23,32 +29,41 @@ class TestSatelliteImage:
         img = si.SatelliteImage(fn_img)
 
     def test_copy(self):
+        """
+        Test that the copy method works as expected for satimg. In particular
+        when copying r to r2:
+        - if r.data is modified and r copied, the updated data is copied
+        - if r is copied, r.data changed, r2.data should be unchanged
+        """
+        # Open dataset, update data and make a copy
+        r = si.SatelliteImage(datasets.get_path("landsat_B4"))
+        r.data += 5
+        r2 = r.copy()
 
-        fn_img = datasets.get_path("landsat_B4")
-
-        img = si.SatelliteImage(fn_img)
-
-        img2 = copy.copy(img)
-        img3 = img.copy()
-
-        # check the copied object is indeed a SatelliteImage
-        assert isinstance(img2,geoutils.satimg.SatelliteImage)
-        assert isinstance(img3,geoutils.satimg.SatelliteImage)
+        assert isinstance(r2, geoutils.satimg.SatelliteImage)
 
         # check all immutable attributes are equal
         georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
-                         'res', 'shape', 'transform', 'width']
-        satimg_attrs =  ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+                           'res', 'shape', 'transform', 'width']
+        satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
 
         all_attrs = georaster_attrs + satimg_attrs
 
         for attr in all_attrs:
-            assert img2.__getattribute__(attr) == img.__getattribute__(attr)
+            assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
-        # check data array
-        assert np.count_nonzero(~img.data == img2.data) == 0
-        # check dataset_mask array
-        assert np.count_nonzero(~img2.dataset_mask() == img2.dataset_mask()) == 0
+        # Check data array
+        assert np.all(r.data == r2.data)
+
+        # Check dataset_mask array
+        assert np.all(r.data.mask == r2.data.mask)
+
+        # Check that if r.data is modified, it does not affect r2.data
+        r.data += 5
+        assert not np.all(r.data == r2.data)
+
+        # Check that both have same output type
+        assert type(r) == type(r2)
 
     def test_filename_parsing(self):
 

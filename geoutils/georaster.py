@@ -338,7 +338,7 @@ class Raster(object):
 
         return "".join(as_str)
 
-    def copy(self,new_array=None):
+    def copy(self, new_array=None):
         """
         Copy the Raster object in memory
 
@@ -351,7 +351,7 @@ class Raster(object):
         else:
             data=self.data
 
-        cp = Raster.from_array(data=data,transform=self.transform,crs=self.crs,nodata=self.nodata)
+        cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata)
 
         return cp
 
@@ -589,7 +589,7 @@ class Raster(object):
             assert dst_transform == dst_transformed
 
         # Write results to a new Raster.
-        dst_r = Raster.from_array(dst_data, dst_transformed, dst_crs, nodata)
+        dst_r = self.from_array(dst_data, dst_transformed, dst_crs, nodata)
 
         return dst_r
 
