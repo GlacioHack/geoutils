@@ -49,7 +49,7 @@ class Raster(object):
         Load a rasterio-supported dataset, given a filename.
 
         :param filename: The filename of the dataset.
-        :type filename: str
+        :type filename: str, Raster, rio.io.Dataset, rio.io.MemoryFile
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
         :param load_data: Load the raster data into the object. Default is True.
@@ -68,8 +68,13 @@ class Raster(object):
         :return: A Raster object
         """
 
+        # If Raster is passed, simply point back to Raster
+        if isinstance(filename, Raster):
+            for key in filename.__dict__:
+                setattr(self,key,filename.__dict__[key])
+            return
         # Image is a file on disk.
-        if isinstance(filename, str):
+        elif isinstance(filename, str):
             # Save the absolute on-disk filename
             self.filename = os.path.abspath(filename)
             if as_memfile:
@@ -79,6 +84,11 @@ class Raster(object):
                 self.ds = memfile.open()
             else:
                 self.ds = rio.open(filename, 'r')
+
+        # If rio.Dataset is passed
+        elif isinstance(filename, rio.io.DatasetReader):
+            self.filename = None
+            self.ds = filename
 
         # Or, image is already a Memory File.
         elif isinstance(filename, rio.io.MemoryFile):
