@@ -36,14 +36,19 @@ class TestSatelliteImage:
         r.data += 5
         r2 = r.copy()
 
+        # Objects should be different (not pointing to the same memory)
+        assert r is not r2
+
+        # Check the object is a SatelliteImage
         assert isinstance(r2, geoutils.satimg.SatelliteImage)
 
         # check all immutable attributes are equal
         # georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
         #                    'res', 'shape', 'transform', 'width']
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
-        all_attrs = gr.default_attrs + si.satimg_attrs
-
+        # using list directly available in Class
+        attrs = [at for at in gr.default_attrs if at not in ['name', 'dataset_mask', 'driver']]
+        all_attrs = attrs + si.satimg_attrs
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
@@ -55,7 +60,7 @@ class TestSatelliteImage:
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
-        assert not np.array_equal(r.data == r2.data, equal_nan=True)
+        assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check that both have same output type
         assert type(r) == type(r2)

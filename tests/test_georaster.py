@@ -117,17 +117,24 @@ class TestRaster:
         r.data += 5
         r2 = r.copy()
 
+        # Objects should be different (not pointing to the same memory)
+        assert r is not r2
+
+        # Check the object is a Raster
+        assert isinstance(r2, gr.Raster)
+
         # Copy should have no filename
         assert r2.filename is None
 
         # check a temporary memory file different than original disk file was created
         assert r2.name != r.name
 
-        # Check all attributes except name and dataset_mask array
+        # Check all attributes except name, driver and dataset_mask array
         # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
         #                  'res', 'shape', 'transform', 'width']
-        #using list directly in Class
-        for attr in gr.default_attrs:
+        # using list directly available in Class
+        attrs = [at for at in gr.default_attrs if at not in ['name','dataset_mask','driver']]
+        for attr in attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
