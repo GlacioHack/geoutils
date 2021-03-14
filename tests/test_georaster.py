@@ -148,6 +148,19 @@ class TestRaster:
         r.data += 5
         assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
+    def test_matches_disk(self):
+        """
+        Test that changing the data updates matches disk as desired
+        """
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert r.matches_disk
+
+        # current behavior: even with no changes the tag will be updated
+        r.data += 0
+        assert not r.matches_disk
+
+        r.data = r.data + 5
+        assert not r.matches_disk
 
     def test_crop(self):
 

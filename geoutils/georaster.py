@@ -41,7 +41,7 @@ class Raster(object):
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
-    matches_disk = None
+    _matches_disk = None
 
     def __init__(self, filename, bands=None, load_data=True, downsampl=1,
                  masked=True, attrs=None, as_memfile=False):
@@ -122,7 +122,7 @@ class Raster(object):
             self.nbands = self._data.shape[0]
             self.isLoaded = True
             if isinstance(filename, str):
-                self.matches_disk = True
+                self._matches_disk = True
         else:
             self._data = None
             self.nbands = None
@@ -234,6 +234,15 @@ class Raster(object):
             setattr(self, attr, getattr(self.ds, attr))
 
     @property
+    def matches_disk(self):
+        """
+        Getter method for the _method class member
+
+        Returns: boolean: the _method member of this instance of Raster
+        """
+        return self._matches_disk
+
+    @property
     def data(self):
         """
         Getter method for the _data class member.
@@ -266,6 +275,8 @@ class Raster(object):
  data: {}".format(self.data.dtype))
 
         self._data = new_data
+        if self._matches_disk:
+            self._matches_disk = False
 
     def _update(self, imgdata=None, metadata=None, vrt_to_driver='GTiff'):
         """
@@ -293,7 +304,7 @@ class Raster(object):
 
         self.ds = memfile.open()
         self._read_attrs()
-        self.matches_disk = False
+        self._matches_disk = False
         if self.isLoaded:
             self.load()
 
@@ -393,6 +404,7 @@ class Raster(object):
 
         self.nbands = self._data.shape[0]
         self.isLoaded = True
+        self._matches_disk = True
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
