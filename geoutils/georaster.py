@@ -17,7 +17,6 @@ from rasterio.plot import show as rshow
 import matplotlib
 from matplotlib import colors, cm
 import matplotlib.pyplot as plt
-
 from affine import Affine
 from shapely.geometry.polygon import Polygon
 from scipy.interpolate import griddata
@@ -41,7 +40,8 @@ class Raster(object):
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
-    matches_disk = None
+    _is_modified = None
+    _disk_hash = None
 
     def __init__(self, filename, bands=None, load_data=True, downsampl=1,
                  masked=True, attrs=None, as_memfile=False):
@@ -130,13 +130,14 @@ class Raster(object):
         if load_data:
             self.load(bands=bands, out_shape=out_shape)
             self.nbands = self._data.shape[0]
-            self.isLoaded = True
+            self.is_loaded = True
             if isinstance(filename, str):
-                self.matches_disk = True
+                self._is_modified = False
+                self._disk_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
         else:
             self._data = None
             self.nbands = None
-            self.isLoaded = False
+            self.is_loaded = False
 
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
@@ -244,6 +245,19 @@ class Raster(object):
             setattr(self, attr, getattr(self.ds, attr))
 
     @property
+    def is_modified(self):
+        """
+        Getter method for the _method class member
+
+        Returns: boolean: the _method member of this instance of Raster
+        """
+        if not self._is_modified:
+            new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
+            self._is_modified = not (self._disk_hash == new_hash)
+
+        return self._is_modified
+
+    @property
     def data(self):
         """
         Getter method for the _data class member.
@@ -303,8 +317,7 @@ class Raster(object):
 
         self.ds = memfile.open()
         self._read_attrs()
-        self.matches_disk = False
-        if self.isLoaded:
+        if self.is_loaded:
             self.load()
 
     def info(self, stats=False):
@@ -321,7 +334,7 @@ class Raster(object):
         as_str = ['Driver:               {} \n'.format(self.driver),
                   'Opened from file:     {} \n'.format(self.filename),
                   'Filename:             {} \n'.format(self.name),
-                  'Raster matches disk file?  {} \n'.format(self.matches_disk),
+                  'Raster modified since disk load?  {} \n'.format(self._is_modified),
                   'Size:                 {}, {}\n'.format(
                       self.width, self.height),
                   'Number of bands:      {:d}\n'.format(self.count),
@@ -402,7 +415,7 @@ class Raster(object):
             self._data = np.expand_dims(self._data, 0)
 
         self.nbands = self._data.shape[0]
-        self.isLoaded = True
+        self.is_loaded = True
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
@@ -446,7 +459,7 @@ class Raster(object):
             new_width = int(window.width)
             new_tfm = rio.transform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
 
-            if self.isLoaded:
+            if self.is_loaded:
                 new_img = np.zeros((self.nbands, new_height, new_width), dtype=self.data.dtype)
             else:
                 new_img = np.zeros((self.count, new_height, new_width), dtype=self.data.dtype)
@@ -965,7 +978,7 @@ to be cleared due to the setting of GCPs.")
             myimage.show(ax=ax1, mpl_kws)
         """
         # If data is not loaded, need to load it
-        if not self.isLoaded:
+        if not self.is_loaded:
             self.load()
 
         # Check if specific band selected, or take all
