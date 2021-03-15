@@ -124,7 +124,7 @@ class Raster(object):
             self.is_loaded = True
             if isinstance(filename, str):
                 self._is_modified = False
-                self._disk_hash = hash((hashlib.sha1(self._data), self.transform, self.crs, self.nodata))
+                self._disk_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
         else:
             self._data = None
             self.nbands = None
@@ -243,10 +243,7 @@ class Raster(object):
         Returns: boolean: the _method member of this instance of Raster
         """
         if not self._is_modified:
-            print(self._disk_hash)
-            new_hash = hash((hashlib.sha1(self._data), self.transform, self.crs, self.nodata))
-            print(self._disk_hash)
-            print(new_hash)
+            new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
             self._is_modified = not (self._disk_hash == new_hash)
 
         return self._is_modified
@@ -283,6 +280,7 @@ class Raster(object):
             raise ValueError("New data must be of the same type as existing\
  data: {}".format(self.data.dtype))
 
+        self._data = new_data
 
     def _update(self, imgdata=None, metadata=None, vrt_to_driver='GTiff'):
         """
@@ -310,7 +308,6 @@ class Raster(object):
 
         self.ds = memfile.open()
         self._read_attrs()
-        self._is_modified = True
         if self.is_loaded:
             self.load()
 
@@ -410,7 +407,6 @@ class Raster(object):
 
         self.nbands = self._data.shape[0]
         self.is_loaded = True
-        self._is_modified = True
 
     def crop(self, cropGeom, mode='match_pixel'):
         """

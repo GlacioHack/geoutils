@@ -157,14 +157,15 @@ class TestRaster:
         r = gr.Raster(datasets.get_path("landsat_B4"))
         assert not r.is_modified
 
+        # this should not trigger the hash
         r.data = r.data + 0
-        assert r.is_modified
+        assert not r.is_modified
 
-        # current behavior: even with no changes (e.g. + 0) the tag will be updated
+        # this one neither
         r.data += 0
-        assert r.is_modified
+        assert not r.is_modified
 
-        # with real change too
+        # this will
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r.data = r.data + 5
         assert r.is_modified
