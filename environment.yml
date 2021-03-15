@@ -8,6 +8,7 @@ dependencies:
   - pyproj
   - rasterio
   - rioxarray
+  - scipy
 
   # code checks
   - flake8
