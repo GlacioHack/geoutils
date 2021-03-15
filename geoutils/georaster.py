@@ -666,6 +666,9 @@ class Raster(object):
         :type yoff: float
 
         """
+        # Check that data is loaded, as it is necessary for this method
+        assert self.is_loaded, "Data must be loaded, use self.load"
+
         meta = self.ds.meta
         dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
 
