@@ -15,8 +15,47 @@ from geoutils import datasets
 
 DO_PLOT = False
 
-
 class TestRaster:
+
+    def test_init(self):
+        """
+        Test that all possible inputs work properly in Raster class init
+        """
+
+        # first, filename
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert isinstance(r,gr.Raster)
+
+        # second, passing a Raster itself (points back to Raster passed)
+        r2 = gr.Raster(r)
+        assert isinstance(r2,gr.Raster)
+
+        # third, rio.Dataset
+        ds = rio.open(datasets.get_path("landsat_B4"))
+        r3 = gr.Raster(ds)
+        assert r3.filename is None
+        assert isinstance(r3,gr.Raster)
+
+        # finally, as memoryfile
+        memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), 'rb'))
+        r4 = gr.Raster(memfile)
+        assert isinstance(r4,gr.Raster)
+
+        assert np.logical_and.reduce((np.array_equal(r.data, r2.data, equal_nan=True),
+                                      np.array_equal(r2.data, r3.data, equal_nan=True),
+                                      np.array_equal(r3.data, r4.data, equal_nan=True)))
+
+        assert np.logical_and.reduce((np.all(r.data.mask == r2.data.mask),
+                                      np.all(r2.data.mask == r3.data.mask),
+                                      np.all(r3.data.mask == r4.data.mask)))
+
+        # the data will not be copied, immutable objects will
+        r.data[0, 0, 0] += 5
+        assert r2.data[0, 0, 0] == r.data[0, 0, 0]
+
+        r.nbands = 2
+        assert r.nbands != r2.nbands
+
 
     def test_info(self):
 
@@ -55,17 +94,17 @@ class TestRaster:
             left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0
         )
         assert r.crs == rio.crs.CRS.from_epsg(32645)
-        assert not r.isLoaded
+        assert not r.is_loaded
 
         # Test 2 - loading the data afterward
         r.load()
-        assert r.isLoaded
+        assert r.is_loaded
         assert r.nbands == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 3 - single band, loading data
         r = gr.Raster(datasets.get_path("landsat_B4"), load_data=True)
-        assert r.isLoaded
+        assert r.is_loaded
         assert r.nbands == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
@@ -148,6 +187,26 @@ class TestRaster:
         r.data += 5
         assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
+    def test_is_modified(self):
+        """
+        Test that changing the data updates is_modified as desired
+        """
+        # after laoding, should not be modified
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert not r.is_modified
+
+        # this should not trigger the hash
+        r.data = r.data + 0
+        assert not r.is_modified
+
+        # this one neither
+        r.data += 0
+        assert not r.is_modified
+
+        # this will
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r.data = r.data + 5
+        assert r.is_modified
 
     def test_crop(self):
 

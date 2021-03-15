@@ -17,12 +17,32 @@ DO_PLOT = False
 
 class TestSatelliteImage:
 
-    def test_load_subclass(self):
+    def test_init(self):
+        """
+        Test that inputs work properly in SatelliteImage class init
+        """
 
         fn_img = datasets.get_path("landsat_B4")
 
+        # from filename, checking option
         img = si.SatelliteImage(fn_img, read_from_fn=False)
         img = si.SatelliteImage(fn_img)
+        assert isinstance(img,si.SatelliteImage)
+
+        # from SatelliteImage
+        img2 = si.SatelliteImage(img)
+        assert isinstance(img2,si.SatelliteImage)
+
+        # from Raster
+        r = gr.Raster(fn_img)
+        img3 = si.SatelliteImage(r)
+        assert isinstance(img3,si.SatelliteImage)
+
+        assert np.logical_and.reduce((np.array_equal(img.data, img2.data, equal_nan=True),
+                                      np.array_equal(img2.data, img3.data, equal_nan=True)))
+
+        assert np.logical_and.reduce((np.all(img.data.mask == img2.data.mask),
+                                      np.all(img2.data.mask == img3.data.mask)))
 
     def test_copy(self):
         """
