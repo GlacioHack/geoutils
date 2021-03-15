@@ -203,6 +203,20 @@ class Raster(object):
         """ Provide string of information about Raster. """
         return self.info()
 
+    def __eq__(self, other) -> bool:
+        """Check if a Raster's data and georeferencing is equal to another."""
+        if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
+            return NotImplemented
+        return all([
+            np.array_equal(self.data, other.data, equal_nan=True),
+            self.transform == other.transform,
+            self.crs == other.crs,
+            self.nodata == other.nodata
+        ])
+
+    def __ne__(self, other) -> bool:
+        return not self.__eq__(other)
+
     def _read_attrs(self, attrs=None):
         # Copy most used attributes/methods
         if attrs is None:
@@ -338,7 +352,7 @@ class Raster(object):
 
         return "".join(as_str)
 
-    def copy(self,new_array=None):
+    def copy(self, new_array=None):
         """
         Copy the Raster object in memory
 
@@ -351,7 +365,7 @@ class Raster(object):
         else:
             data=self.data
 
-        cp = Raster.from_array(data=data,transform=self.transform,crs=self.crs,nodata=self.nodata)
+        cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata)
 
         return cp
 
@@ -615,7 +629,7 @@ class Raster(object):
             assert dst_transform == dst_transformed
 
         # Write results to a new Raster.
-        dst_r = Raster.from_array(dst_data, dst_transformed, dst_crs, nodata)
+        dst_r = self.from_array(dst_data, dst_transformed, dst_crs, nodata)
 
         return dst_r
 
