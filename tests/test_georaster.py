@@ -209,44 +209,83 @@ class TestRaster:
 
     def test_interp(self):
 
+        # FIRST, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
+        # at the center of pixel
         r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert r.ds.tags()['AREA_OR_POINT'] == 'Point'
 
         xmin, ymin, xmax, ymax = r.ds.bounds
 
-        # Test for several points: interp, value_at_coords, and read should be the same right on the coordinates
+        # We generate random points within the boundaries of the image
         xrand = (np.random.randint(low=0, high=r.ds.width, size=(10,))
                  * list(r.ds.transform)[0] + xmin + list(r.ds.transform)[0]/2)
         yrand = (ymax + np.random.randint(low=0, high=r.ds.height, size=(10,))
                  * list(r.ds.transform)[4] - list(r.ds.transform)[4]/2)
         pts = list(zip(xrand, yrand))
-        i, j = r.xy2ij(xrand, yrand)
-        list_z = []
+        # Get decimal indexes, those should all be .5 because values refer to the center
+        i, j = r.xy2ij(xrand, yrand,op=np.float32,shift_area_or_point=True)
+        assert np.all(i % 1 == 0.5)
+        assert np.all(j % 1 == 0.5)
+
+        # now we calculate the mean of values in each 2x2 slices of the data, and compare with interpolation at order 1
         list_z_ind = []
-        r.load()
         img = r.data
         for k in range(len(xrand)):
-            z_ind = img[0, i[k], j[k]]
-            z = r.value_at_coords(xrand[k], yrand[k])
+            # 2x2 slices
+            z_ind = np.mean(img[0, slice(int(np.floor(i[k])),int(np.ceil(i[k]))+1), slice(int(np.floor(j[k])),int(np.ceil(j[k]))+1)])
             list_z_ind.append(z_ind)
-            list_z.append(z)
 
-        rpts = r.interp_points(pts)
-
-        assert np.array_equal(np.array(list_z_ind,dtype=np.float32),np.array(list_z,dtype=np.float32),equal_nan=True)
-        assert np.array_equal(np.array(list_z,dtype=np.float32),rpts,equal_nan=True)
-
-        # Test for an invidiual point
-        x = 493135.0
-        y = 3104015.0
-        i, j = r.xy2ij(x, y)
-        assert img[0,i,j] == r.value_at_coords(x,y)
-        assert img[0,i,j] == r.interp_points([(x,y)])[0]
+        # order 1 interpolation
+        rpts = r.interp_points(pts,order=1)
+        # the values interpolated should be equal
+        assert np.array_equal(np.array(list_z_ind,dtype=np.float32),rpts,equal_nan=True)
 
         # Test there is no failure with random coordinates (edge effects, etc)
         xrand = np.random.uniform(low=xmin, high=xmax, size=(1000,))
         yrand = np.random.uniform(low=ymin, high=ymax, size=(1000,))
         pts = list(zip(xrand, yrand))
         rpts = r.interp_points(pts)
+
+        # SECOND, test after a crop: the Raster now has an Area interpretation, those should fall right on the integer
+        # pixel indexes
+        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r.crop(r2)
+        assert r.ds.tags()['AREA_OR_POINT'] == 'Area'
+
+        xmin, ymin, xmax, ymax = r.bounds
+
+        # We can test with several method for the exact indexes: interp, value_at_coords, and simple read should
+        # give back the same values that fall right on the coordinates
+        xrand = (np.random.randint(low=0, high=r.ds.width, size=(10,))
+                 * list(r.ds.transform)[0] + xmin + list(r.ds.transform)[0] / 2)
+        yrand = (ymax + np.random.randint(low=0, high=r.ds.height, size=(10,))
+                 * list(r.ds.transform)[4] - list(r.ds.transform)[4] / 2)
+        pts = list(zip(xrand, yrand))
+        # by default, i and j are returned as integers
+        i, j = r.xy2ij(xrand, yrand)
+        list_z = []
+        list_z_ind = []
+        img = r.data
+        for k in range(len(xrand)):
+            # we directly sample the values
+            z_ind = img[0, i[k], j[k]]
+            # we can also compare with the value_at_coords() functionality
+            z = r.value_at_coords(xrand[k], yrand[k])
+            list_z_ind.append(z_ind)
+            list_z.append(z)
+
+        rpts = r.interp_points(pts)
+
+        assert np.array_equal(np.array(list_z_ind, dtype=np.float32), np.array(list_z, dtype=np.float32),
+                              equal_nan=True)
+        assert np.array_equal(np.array(list_z, dtype=np.float32), rpts, equal_nan=True)
+
+        # test for an invidiual point (shape can be tricky at 1 dimension)
+        x = 493135.0
+        y = 3101015.0
+        i, j = r.xy2ij(x, y)
+        assert img[0, i, j] == r.value_at_coords(x, y)
+        assert img[0, i, j] == r.interp_points([(x, y)])[0]
 
     def test_set_ndv(self):
         """

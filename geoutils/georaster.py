@@ -1204,7 +1204,7 @@ to be cleared due to the setting of GCPs.")
                 raise ValueError('Operator must return np.floating values with AREA_OR_POINT subpixel shifting of indexes')
 
             # if point, shift index by half a pixel
-            if self.ds.tags()['AREA_OR_POINT'] == 'Point':
+            if self.ds.tags()['AREA_OR_POINT'] == 'Area':
                 i -= 0.5
                 j -= 0.5
             #otherwise, leave as is
@@ -1293,7 +1293,7 @@ to be cleared due to the setting of GCPs.")
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1,k2,index=True))(j,i)
 
-        rpts = map_coordinates(self.data[band-1,:,:], [i,j], **kwargs)
+        rpts = map_coordinates(self.data[band-1,:,:].astype(np.float32), [i,j], **kwargs)
         rpts = np.array(rpts,dtype=np.float32)
         rpts[np.array(ind_invalid)] = np.nan
 
