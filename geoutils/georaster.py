@@ -16,6 +16,7 @@ from rasterio.warp import Resampling
 from rasterio.plot import show as rshow
 import matplotlib
 import pyproj
+import math
 from scipy.ndimage import map_coordinates
 from matplotlib import colors, cm
 import matplotlib.pyplot as plt
@@ -1169,7 +1170,7 @@ to be cleared due to the setting of GCPs.")
         else:
             return xx[:-1], yy[:-1]
 
-    def xy2ij(self,x,y):
+    def xy2ij(self,x,y, op=math.floor,shift_area_or_point=False):
         """
         Return row, column indices for a given x,y coordinate pair.
 
@@ -1177,12 +1178,36 @@ to be cleared due to the setting of GCPs.")
         :type x: array-like
         :param y: y coordinates
         :type y: array-like
+        :param op: operator to calculate index
+        :type op: operator
+        :param shift_area_or_point: shift according to AREA_OR_POINT GDAL attribute:
+         interpretation to what the raster value corresponds to (AREA = lower left or POINT = center)
 
         :returns i, j: indices of x,y in the image.
         :rtype i, j: array-like
 
         """
-        i, j = self.ds.index(x,y)
+        i, j = self.ds.index(x,y,op=op)
+
+        # # necessary because rio.Dataset.index does not return Iterable for a single point
+        if not isinstance(i, Iterable):
+            i, j = (np.asarray([i, ]), np.asarray([j, ]))
+        else:
+            i, j = (np.asarray(i), np.asarray(j))
+
+        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the lower left corner (AREA) or the center of pixel (POINT)
+        # This has no influence on georeferencing, it's only about the interpretation of the raster values, and thus only
+        # affects sub-pixel interpolation
+
+        if shift_area_or_point:
+            if not isinstance(i.flat[0],np.floating):
+                raise ValueError('Operator must return np.floating values with AREA_OR_POINT subpixel shifting of indexes')
+
+            # if point, shift index by half a pixel
+            if self.ds.tags()['AREA_OR_POINT'] == 'Point':
+                i -= 0.5
+                j -= 0.5
+            #otherwise, leave as is
 
         return i, j
 
@@ -1264,21 +1289,7 @@ to be cleared due to the setting of GCPs.")
             transformer = pyproj.Transformer.from_crs(init_crs,dest_crs)
             x, y = transformer.transform(x,y)
 
-        i, j = self.ds.index(x, y, op=np.float32)
-        # # necessary because rio.Dataset.xy does not return Iterable for a single point
-        if not isinstance(i, Iterable):
-            i, j = (np.asarray([i,]), np.asarray([j,]))
-        else:
-            i, j = (np.asarray(i), np.asarray(j))
-
-        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the lower left corner (AREA) or the center of pixel (POINT)
-        # This has no influence on georeferencing, it's only about the interpretation of the raster values, and thus only
-        # affects sub-pixel interpolation
-
-        # if point, shift index by half a pixel
-        if self.ds.tags()['AREA_OR_POINT'] == 'Point':
-            i -= 0.5
-            j -= 0.5
+        i, j = self.xy2ij(x,y,op=np.float32,shift_area_or_point=True)
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1,k2,index=True))(j,i)
 
