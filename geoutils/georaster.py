@@ -15,6 +15,8 @@ from rasterio.crs import CRS
 from rasterio.warp import Resampling
 from rasterio.plot import show as rshow
 import matplotlib
+import pyproj
+from scipy.ndimage import map_coordinates
 from matplotlib import colors, cm
 import matplotlib.pyplot as plt
 
@@ -1218,16 +1220,16 @@ to be cleared due to the setting of GCPs.")
         :returns is_outside: True if ij is outside of the image.
         """
         if not index:
-            xi,xj = self.xy2ij(xi,yj)
+            xi,yj = self.xy2ij(xi,yj)
 
-        if np.any(np.array((xi,yj)) < 0):
+        if xi < 0 or yj < 0:
             return True
-        elif xi > self.ds.width or yj > self.ds.height:
+        elif xi > self.width or yj > self.height:
             return True
         else:
             return False
 
-    def interp_points(self,pts,nsize=1,mode='linear',band=1):
+    def interp_points(self,pts,input_latlon=False,nsize=1,mode='linear',band=1, **kwargs):
 
         """
         Interpolate raster values at a given point, or sets of points.
@@ -1235,6 +1237,8 @@ to be cleared due to the setting of GCPs.")
        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
        value returned is nan.'
        :type pts: array-like
+       :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
+       :type input_latlon: bool
        :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
        :type nsize: int
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
@@ -1250,41 +1254,60 @@ to be cleared due to the setting of GCPs.")
         assert mode in ['mean', 'linear', 'cubic', 'quintic',
                         'nearest'], "mode must be mean, linear, cubic, quintic or nearest."
 
+
         rpts = []
 
         #TODO: might need to check if coordinates are center or point in the metadata here...
 
 
-        xx, yy = self.coords(offset='center', grid=False)
-        #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
-        # but such a method probably exists already within scipy/other interpolation packages?
-        for pt in pts:
-            i,j = self.xy2ij(pt[0],pt[1])
-            if self.outside_image(i,j, index=True):
-                rpts.append(np.nan)
-                continue
-            else:
-                x = xx[j - nsize:j + nsize + 1]
-                y = yy[i - nsize:i + nsize + 1]
+        # get coordinates
+        x, y = list(zip(*pts))
+        # if those are in latlon, convert to Raster crs
+        if input_latlon:
+            init_crs = pyproj.CRS(4326)
+            dest_crs = pyproj.CRS(self.crs)
+            transformer = pyproj.Transformer.from_crs(init_crs,dest_crs)
+            x, y = transformer.transform(x,y)
 
-                #TODO: read only that window?
-                z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
-                if mode in ['linear', 'cubic', 'quintic', 'nearest']:
-                    X, Y = np.meshgrid(x, y)
-                    try:
-                        zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
-                    except:
-                        #TODO: currently fails when dealing with the edges
-                        print('Interpolation failed for:')
-                        print(pt)
-                        print(i,j)
-                        print(x)
-                        print(y)
-                        print(z)
-                        zint = np.nan
-                else:
-                    zint = np.nanmean(z.flatten())
-                rpts.append(zint)
-        rpts = np.array(rpts)
+        i, j = self.ds.index(x, y, op=np.float32)
+        i = np.array(i) - 0.5
+        j = np.array(j) - 0.5
+
+        ind_invalid = [self.outside_image(j[k],i[k],index=True) for k in range(len(i))]
+
+        rpts = map_coordinates(self.data[band-1,:,:], [i,j], **kwargs)
+        rpts = np.array(rpts,dtype=np.float32)
+        rpts[np.array(ind_invalid)] = np.nan
+
+        # #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
+        # # but such a method probably exists already within scipy/other interpolation packages?
+        # for pt in pts:
+        #     i,j = self.xy2ij(pt[0],pt[1])
+        #     if self.outside_image(i,j, index=True):
+        #         rpts.append(np.nan)
+        #         continue
+        #     else:
+        #         x = xx[j - nsize:j + nsize + 1]
+        #         y = yy[i - nsize:i + nsize + 1]
+        #
+        #         #TODO: read only that window?
+        #         z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
+        #         if mode in ['linear', 'cubic', 'quintic', 'nearest']:
+        #             X, Y = np.meshgrid(x, y)
+        #             try:
+        #                 zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
+        #             except:
+        #                 #TODO: currently fails when dealing with the edges
+        #                 print('Interpolation failed for:')
+        #                 print(pt)
+        #                 print(i,j)
+        #                 print(x)
+        #                 print(y)
+        #                 print(z)
+        #                 zint = np.nan
+        #         else:
+        #             zint = np.nanmean(z.flatten())
+        #         rpts.append(zint)
+        # rpts = np.array(rpts)
 
         return rpts
