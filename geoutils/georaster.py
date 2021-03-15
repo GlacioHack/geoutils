@@ -19,7 +19,7 @@ import pyproj
 from scipy.ndimage import map_coordinates
 from matplotlib import colors, cm
 import matplotlib.pyplot as plt
-
+from collections.abc import Iterable
 from affine import Affine
 from shapely.geometry.polygon import Polygon
 from scipy.interpolate import griddata
@@ -1254,12 +1254,9 @@ to be cleared due to the setting of GCPs.")
         assert mode in ['mean', 'linear', 'cubic', 'quintic',
                         'nearest'], "mode must be mean, linear, cubic, quintic or nearest."
 
-
-        rpts = []
-        #TODO: might need to check if coordinates are center or point in the metadata here...
-
         # get coordinates
         x, y = list(zip(*pts))
+
         # if those are in latlon, convert to Raster crs
         if input_latlon:
             init_crs = pyproj.CRS(4326)
@@ -1268,18 +1265,30 @@ to be cleared due to the setting of GCPs.")
             x, y = transformer.transform(x,y)
 
         i, j = self.ds.index(x, y, op=np.float32)
-        i = np.array(i) - 0.5
-        j = np.array(j) - 0.5
+        i, j = (np.asarray(i), np.asarray(j))
 
-        if i.ndim == 0:
+        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the lower left corner (AREA) or the center of pixel (POINT)
+        # This has no influence on georeferencing, it's only about the interpretation of the raster values, and thus only
+        # affects sub-pixel interpolation
+
+        # if point, shift index by half a pixel
+        if self.ds.tags()['AREA_OR_POINT'] == 'Point':
+            i -= 0.5
+            j -= 0.5
+
+        # necessary because rio.Dataset.xy does not return Iterable for a single point
+        if not isinstance(i, Iterable):
             i = [i]
+        if not isinstance(j, Iterable):
             j = [j]
 
-        ind_invalid = [self.outside_image(j[k],i[k],index=True) for k in range(len(i))]
+        ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1,k2,index=True))(j,i)
 
         rpts = map_coordinates(self.data[band-1,:,:], [i,j], **kwargs)
         rpts = np.array(rpts,dtype=np.float32)
         rpts[np.array(ind_invalid)] = np.nan
+
+        return rpts
 
         # #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
         # # but such a method probably exists already within scipy/other interpolation packages?
@@ -1311,5 +1320,3 @@ to be cleared due to the setting of GCPs.")
         #             zint = np.nanmean(z.flatten())
         #         rpts.append(zint)
         # rpts = np.array(rpts)
-
-        return rpts
