@@ -1265,7 +1265,11 @@ to be cleared due to the setting of GCPs.")
             x, y = transformer.transform(x,y)
 
         i, j = self.ds.index(x, y, op=np.float32)
-        i, j = (np.asarray(i), np.asarray(j))
+        # # necessary because rio.Dataset.xy does not return Iterable for a single point
+        if not isinstance(i, Iterable):
+            i, j = (np.asarray([i,]), np.asarray([j,]))
+        else:
+            i, j = (np.asarray(i), np.asarray(j))
 
         # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the lower left corner (AREA) or the center of pixel (POINT)
         # This has no influence on georeferencing, it's only about the interpretation of the raster values, and thus only
@@ -1275,12 +1279,6 @@ to be cleared due to the setting of GCPs.")
         if self.ds.tags()['AREA_OR_POINT'] == 'Point':
             i -= 0.5
             j -= 0.5
-
-        # necessary because rio.Dataset.xy does not return Iterable for a single point
-        if not isinstance(i, Iterable):
-            i = [i]
-        if not isinstance(j, Iterable):
-            j = [j]
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1,k2,index=True))(j,i)
 
