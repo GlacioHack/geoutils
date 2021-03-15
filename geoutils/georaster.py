@@ -17,7 +17,6 @@ from rasterio.plot import show as rshow
 import matplotlib
 from matplotlib import colors, cm
 import matplotlib.pyplot as plt
-
 from affine import Affine
 from shapely.geometry.polygon import Polygon
 from scipy.interpolate import griddata
@@ -41,7 +40,8 @@ class Raster(object):
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
-    matches_disk = None
+    _is_modified = None
+    _disk_hash = None
 
     def __init__(self, filename, bands=None, load_data=True, downsampl=1,
                  masked=True, attrs=None, as_memfile=False):
@@ -49,7 +49,7 @@ class Raster(object):
         Load a rasterio-supported dataset, given a filename.
 
         :param filename: The filename of the dataset.
-        :type filename: str
+        :type filename: str, Raster, rio.io.Dataset, rio.io.MemoryFile
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
         :param load_data: Load the raster data into the object. Default is True.
@@ -68,8 +68,13 @@ class Raster(object):
         :return: A Raster object
         """
 
+        # If Raster is passed, simply point back to Raster
+        if isinstance(filename, Raster):
+            for key in filename.__dict__:
+                setattr(self,key,filename.__dict__[key])
+            return
         # Image is a file on disk.
-        if isinstance(filename, str):
+        elif isinstance(filename, str):
             # Save the absolute on-disk filename
             self.filename = os.path.abspath(filename)
             if as_memfile:
@@ -79,6 +84,11 @@ class Raster(object):
                 self.ds = memfile.open()
             else:
                 self.ds = rio.open(filename, 'r')
+
+        # If rio.Dataset is passed
+        elif isinstance(filename, rio.io.DatasetReader):
+            self.filename = None
+            self.ds = filename
 
         # Or, image is already a Memory File.
         elif isinstance(filename, rio.io.MemoryFile):
@@ -120,13 +130,14 @@ class Raster(object):
         if load_data:
             self.load(bands=bands, out_shape=out_shape)
             self.nbands = self._data.shape[0]
-            self.isLoaded = True
+            self.is_loaded = True
             if isinstance(filename, str):
-                self.matches_disk = True
+                self._is_modified = False
+                self._disk_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
         else:
             self._data = None
             self.nbands = None
-            self.isLoaded = False
+            self.is_loaded = False
 
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
@@ -234,6 +245,19 @@ class Raster(object):
             setattr(self, attr, getattr(self.ds, attr))
 
     @property
+    def is_modified(self):
+        """
+        Getter method for the _method class member
+
+        Returns: boolean: the _method member of this instance of Raster
+        """
+        if not self._is_modified:
+            new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
+            self._is_modified = not (self._disk_hash == new_hash)
+
+        return self._is_modified
+
+    @property
     def data(self):
         """
         Getter method for the _data class member.
@@ -293,8 +317,7 @@ class Raster(object):
 
         self.ds = memfile.open()
         self._read_attrs()
-        self.matches_disk = False
-        if self.isLoaded:
+        if self.is_loaded:
             self.load()
 
     def info(self, stats=False):
@@ -311,7 +334,7 @@ class Raster(object):
         as_str = ['Driver:               {} \n'.format(self.driver),
                   'Opened from file:     {} \n'.format(self.filename),
                   'Filename:             {} \n'.format(self.name),
-                  'Raster matches disk file?  {} \n'.format(self.matches_disk),
+                  'Raster modified since disk load?  {} \n'.format(self._is_modified),
                   'Size:                 {}, {}\n'.format(
                       self.width, self.height),
                   'Number of bands:      {:d}\n'.format(self.count),
@@ -392,7 +415,7 @@ class Raster(object):
             self._data = np.expand_dims(self._data, 0)
 
         self.nbands = self._data.shape[0]
-        self.isLoaded = True
+        self.is_loaded = True
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
@@ -436,7 +459,7 @@ class Raster(object):
             new_width = int(window.width)
             new_tfm = rio.transform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
 
-            if self.isLoaded:
+            if self.is_loaded:
                 new_img = np.zeros((self.nbands, new_height, new_width), dtype=self.data.dtype)
             else:
                 new_img = np.zeros((self.count, new_height, new_width), dtype=self.data.dtype)
@@ -455,8 +478,9 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None, dst_bounds=None, dst_res=None,
-                  nodata=None, dtype=None, resampling=Resampling.nearest,
+    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None,
+                  dst_bounds=None, dst_res=None, nodata=None, dtype=None,
+                  resampling=Resampling.nearest, silent=False,
                   **kwargs):
         """ 
         Reproject raster to a specified grid.
@@ -474,7 +498,7 @@ class Raster(object):
         :param dst_ref: a reference raster. If set will use the attributes of this raster for the output grid.
         Can be provided as Raster/rasterio data set or as path to the file.
         :type dst_ref: Raster object, rasterio data set or a str.
-        :param crs: Specify the Coordinate Reference System to reproject to.
+        :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
         :type crs: int, dict, str, CRS
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
         :type dst_size: tuple(int, int)
@@ -486,6 +510,8 @@ class Raster(object):
         :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
         :type resampling: rio.warp.Resampling object
+        :param silent: If True, will not print warning statements
+        :type silent: bool
         :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
 
         :returns: Raster
@@ -497,9 +523,10 @@ class Raster(object):
             if dst_crs is not None:
                 raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
         else:
+            # In case dst_res or dst_size is set, use original CRS
             if dst_crs is None:
-                raise ValueError("One of `dst_ref` or `dst_crs` must be set.")
-            
+                dst_crs = self.crs
+
         # Case a raster is provided as reference
         if dst_ref is not None:
 
@@ -557,7 +584,7 @@ class Raster(object):
                 # Let rasterio determine the maximum bounds of the new raster.
                 reproj_kwargs.update({'dst_resolution': dst_res})
             else:
-                
+
                 # Bounds specified. First check if xres and yres are different.
                 if isinstance(dst_res, tuple):
                     xres = dst_res[0]
@@ -566,19 +593,19 @@ class Raster(object):
                     xres = dst_res
                     yres = dst_res
 
-                # Calculate new raster size which ensures that pixels have 
+                # Calculate new raster size which ensures that pixels have
                 # precisely the resolution specified.
                 dst_width = np.ceil((dst_bounds.right - dst_bounds.left) / xres)
                 dst_height = np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres)
                 dst_size = (int(dst_width), int(dst_height))
-                
+
                 # As a result of precise pixel size, the destination bounds may
                 # have to be adjusted.
                 x1 = dst_bounds.left + (xres*dst_width)
                 y1 = dst_bounds.top - (yres*dst_height)
-                dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top, 
+                dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top,
                     left=dst_bounds.left, bottom=y1, right=x1)
-                
+
 
         if dst_size is not None:
             # Fix raster size at nx, ny.
@@ -593,10 +620,32 @@ class Raster(object):
             dst_data = np.ones(dst_shape)
             reproj_kwargs.update({'destination': dst_data})
 
+        # Check that reprojection is actually needed
+        # Caution, dst_size is (width, height) while shape is (height, width)
+        if all([
+                (dst_transform == self.transform) or (dst_transform is None),
+                (dst_crs == self.crs) or (dst_crs is None),
+                (dst_size == self.shape[::-1]) or (dst_size is None),
+                (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None)
+        ]):
+            if (nodata == self.nodata) or (nodata is None):
+                if not silent:
+                    warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
+                return self
+
+            else:
+                warnings.warn("Only nodata is different, running self.set_ndv instead")
+                dst_r = self.copy()
+                dst_r.set_ndv(nodata)
+                return dst_r
+
         # Currently reprojects all in-memory bands at once.
         # This may need to be improved to allow reprojecting from-disk.
         # See rio.warp.reproject docstring for more info.
         dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+
+        # Enforce output type
+        dst_data = dst_data.astype(dtype)
 
         # Check for funny business.
         if dst_transform is not None:
@@ -929,7 +978,7 @@ to be cleared due to the setting of GCPs.")
             myimage.show(ax=ax1, mpl_kws)
         """
         # If data is not loaded, need to load it
-        if not self.isLoaded:
+        if not self.is_loaded:
             self.load()
 
         # Check if specific band selected, or take all
