@@ -1235,7 +1235,7 @@ to be cleared due to the setting of GCPs.")
         Interpolate raster values at a given point, or sets of points.
 
        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
-       value returned is nan.'
+       value returned is nan. Shape should be (N,2)'
        :type pts: array-like
        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
        :type input_latlon: bool
