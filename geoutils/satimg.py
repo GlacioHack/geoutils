@@ -8,6 +8,7 @@ import numpy as np
 from geoutils.georaster import Raster
 import collections
 import copy
+import rasterio as rio
 
 lsat_sensor = {'C': 'OLI/TIRS', 'E': 'ETM+', 'T': 'TM', 'M': 'MSS', 'O': 'OLI', 'TI': 'TIRS'}
 
@@ -223,7 +224,7 @@ class SatelliteImage(Raster):
         Load satellite data through the Raster class and parse additional attributes from filename or metadata.
 
         :param filename: The filename of the dataset.
-        :type filename: str
+        :type filename: str, SatelliteImage, Raster, rio.io.Dataset, rio.io.MemoryFile
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
            Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
@@ -258,7 +259,15 @@ class SatelliteImage(Raster):
         :return: A SatelliteImage object (Raster subclass)
         """
 
-        super().__init__(filename, attrs=attrs, load_data=load_data, bands=bands, as_memfile=as_memfile)
+        # If SatelliteImage is passed, simply point back to SatelliteImage
+        if isinstance(filename,SatelliteImage):
+            for key in filename.__dict__:
+                setattr(self, key, filename.__dict__[key])
+            return
+        # Else rely on parent Raster class options (including raised errors)
+        else:
+            super().__init__(filename, attrs=attrs, load_data=load_data, bands=bands, as_memfile=as_memfile)
+
 
         #TODO: maybe the Raster class should have an "original filename" attribute that doesn't get erased during
         # in-memory manipulation for the possibility of parsing metadata a later stage?
