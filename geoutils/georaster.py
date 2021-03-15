@@ -17,7 +17,6 @@ from rasterio.plot import show as rshow
 import matplotlib
 from matplotlib import colors, cm
 import matplotlib.pyplot as plt
-import hashlib
 from affine import Affine
 from shapely.geometry.polygon import Polygon
 from scipy.interpolate import griddata

@@ -8,7 +8,6 @@ import pytest
 
 import rasterio as rio
 from rasterio.io import MemoryFile
-import hashlib
 
 import geoutils.georaster as gr
 from geoutils import datasets
