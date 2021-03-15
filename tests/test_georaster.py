@@ -213,7 +213,7 @@ class TestRaster:
 
         xmin, ymin, xmax, ymax = r.ds.bounds
 
-        # testing interp, find_value, and read when it falls right on the coordinates
+        # Testing interp, find_value, and read when it falls right on the coordinates
         xrand = (np.random.randint(low=0, high=r.ds.width, size=(10,))
                  * list(r.ds.transform)[0] + xmin + list(r.ds.transform)[0]/2)
         yrand = (ymax + np.random.randint(low=0, high=r.ds.height, size=(10,))
@@ -231,24 +231,23 @@ class TestRaster:
             list_z.append(z)
 
         rpts = r.interp_points(pts)
-        print(list_z_ind)
-        print(list_z)
-        print(rpts)
+
+        assert np.array_equal(np.array(list_z_ind,dtype=np.float32),np.array(list_z,dtype=np.float32),equal_nan=True)
+        assert np.array_equal(np.array(list_z,dtype=np.float32),rpts,equal_nan=True)
 
         # Individual tests
         x = 493135.0
         y = 3104015.0
         print(r.value_at_coords(x, y))
         i, j = r.xy2ij(x, y)
-        print(img[0, i, j])
-        print(r.interp_points([(x, y)]))
+        assert img[0,i,j] == r.value_at_coords(x,y)
+        assert img[0,i,j] == r.interp_points([(x,y)])
 
-        # random float
+        # Test there is no failure with random coordinates
         xrand = np.random.uniform(low=xmin, high=xmax, size=(1000,))
         yrand = np.random.uniform(low=ymin, high=ymax, size=(1000,))
         pts = list(zip(xrand, yrand))
         rpts = r.interp_points(pts)
-        # print(rpts)
 
     def test_set_ndv(self):
         """

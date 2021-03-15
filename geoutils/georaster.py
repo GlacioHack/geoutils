@@ -1256,9 +1256,7 @@ to be cleared due to the setting of GCPs.")
 
 
         rpts = []
-
         #TODO: might need to check if coordinates are center or point in the metadata here...
-
 
         # get coordinates
         x, y = list(zip(*pts))
@@ -1272,6 +1270,10 @@ to be cleared due to the setting of GCPs.")
         i, j = self.ds.index(x, y, op=np.float32)
         i = np.array(i) - 0.5
         j = np.array(j) - 0.5
+
+        if i.ndim == 0:
+            i = [i]
+            j = [j]
 
         ind_invalid = [self.outside_image(j[k],i[k],index=True) for k in range(len(i))]
 
