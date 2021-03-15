@@ -1204,9 +1204,9 @@ to be cleared due to the setting of GCPs.")
                 raise ValueError('Operator must return np.floating values with AREA_OR_POINT subpixel shifting of indexes')
 
             # if point, shift index by half a pixel
-            if self.ds.tags()['AREA_OR_POINT'] == 'Area':
-                i -= 0.5
-                j -= 0.5
+            if self.ds.tags()['AREA_OR_POINT'] == 'Point':
+                i += 0.5
+                j += 0.5
             #otherwise, leave as is
 
         return i, j
