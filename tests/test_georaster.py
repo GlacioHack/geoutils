@@ -15,7 +15,6 @@ from geoutils import datasets
 
 DO_PLOT = False
 
-
 class TestRaster:
 
     def test_info(self):
