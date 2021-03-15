@@ -8,6 +8,7 @@ import pytest
 
 import rasterio as rio
 from rasterio.io import MemoryFile
+import hashlib
 
 import geoutils.georaster as gr
 from geoutils import datasets
@@ -55,17 +56,17 @@ class TestRaster:
             left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0
         )
         assert r.crs == rio.crs.CRS.from_epsg(32645)
-        assert not r.isLoaded
+        assert not r.is_loaded
 
         # Test 2 - loading the data afterward
         r.load()
-        assert r.isLoaded
+        assert r.is_loaded
         assert r.nbands == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 3 - single band, loading data
         r = gr.Raster(datasets.get_path("landsat_B4"), load_data=True)
-        assert r.isLoaded
+        assert r.is_loaded
         assert r.nbands == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
@@ -148,19 +149,25 @@ class TestRaster:
         r.data += 5
         assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
-    def test_matches_disk(self):
+    def test_is_modified(self):
         """
-        Test that changing the data updates matches disk as desired
+        Test that changing the data updates is_modified as desired
         """
+        # after laoding, should not be modified
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        assert r.matches_disk
+        assert not r.is_modified
 
-        # current behavior: even with no changes the tag will be updated
+        r.data = r.data + 0
+        assert r.is_modified
+
+        # current behavior: even with no changes (e.g. + 0) the tag will be updated
         r.data += 0
-        assert not r.matches_disk
+        assert r.is_modified
 
+        # with real change too
+        r = gr.Raster(datasets.get_path("landsat_B4"))
         r.data = r.data + 5
-        assert not r.matches_disk
+        assert r.is_modified
 
     def test_crop(self):
 
