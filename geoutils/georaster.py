@@ -455,8 +455,9 @@ class Raster(object):
     def clip(self):
         pass
 
-    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None, dst_bounds=None, dst_res=None,
-                  nodata=None, dtype=None, resampling=Resampling.nearest,
+    def reproject(self, dst_ref=None, dst_crs=None, dst_size=None,
+                  dst_bounds=None, dst_res=None, nodata=None, dtype=None,
+                  resampling=Resampling.nearest, silent=False,
                   **kwargs):
         """ 
         Reproject raster to a specified grid.
@@ -474,7 +475,7 @@ class Raster(object):
         :param dst_ref: a reference raster. If set will use the attributes of this raster for the output grid.
         Can be provided as Raster/rasterio data set or as path to the file.
         :type dst_ref: Raster object, rasterio data set or a str.
-        :param crs: Specify the Coordinate Reference System to reproject to.
+        :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
         :type crs: int, dict, str, CRS
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
         :type dst_size: tuple(int, int)
@@ -486,6 +487,8 @@ class Raster(object):
         :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
         :type resampling: rio.warp.Resampling object
+        :param silent: If True, will not print warning statements
+        :type silent: bool
         :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
 
         :returns: Raster
@@ -497,9 +500,10 @@ class Raster(object):
             if dst_crs is not None:
                 raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
         else:
+            # In case dst_res or dst_size is set, use original CRS
             if dst_crs is None:
-                raise ValueError("One of `dst_ref` or `dst_crs` must be set.")
-            
+                dst_crs = self.crs
+
         # Case a raster is provided as reference
         if dst_ref is not None:
 
@@ -557,7 +561,7 @@ class Raster(object):
                 # Let rasterio determine the maximum bounds of the new raster.
                 reproj_kwargs.update({'dst_resolution': dst_res})
             else:
-                
+
                 # Bounds specified. First check if xres and yres are different.
                 if isinstance(dst_res, tuple):
                     xres = dst_res[0]
@@ -566,19 +570,19 @@ class Raster(object):
                     xres = dst_res
                     yres = dst_res
 
-                # Calculate new raster size which ensures that pixels have 
+                # Calculate new raster size which ensures that pixels have
                 # precisely the resolution specified.
                 dst_width = np.ceil((dst_bounds.right - dst_bounds.left) / xres)
                 dst_height = np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres)
                 dst_size = (int(dst_width), int(dst_height))
-                
+
                 # As a result of precise pixel size, the destination bounds may
                 # have to be adjusted.
                 x1 = dst_bounds.left + (xres*dst_width)
                 y1 = dst_bounds.top - (yres*dst_height)
-                dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top, 
+                dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top,
                     left=dst_bounds.left, bottom=y1, right=x1)
-                
+
 
         if dst_size is not None:
             # Fix raster size at nx, ny.
@@ -593,10 +597,32 @@ class Raster(object):
             dst_data = np.ones(dst_shape)
             reproj_kwargs.update({'destination': dst_data})
 
+        # Check that reprojection is actually needed
+        # Caution, dst_size is (width, height) while shape is (height, width)
+        if all([
+                (dst_transform == self.transform) or (dst_transform is None),
+                (dst_crs == self.crs) or (dst_crs is None),
+                (dst_size == self.shape[::-1]) or (dst_size is None),
+                (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None)
+        ]):
+            if (nodata == self.nodata) or (nodata is None):
+                if not silent:
+                    warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
+                return self
+
+            else:
+                warnings.warn("Only nodata is different, running self.set_ndv instead")
+                dst_r = self.copy()
+                dst_r.set_ndv(nodata)
+                return dst_r
+
         # Currently reprojects all in-memory bands at once.
         # This may need to be improved to allow reprojecting from-disk.
         # See rio.warp.reproject docstring for more info.
         dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+
+        # Enforce output type
+        dst_data = dst_data.astype(dtype)
 
         # Check for funny business.
         if dst_transform is not None:
