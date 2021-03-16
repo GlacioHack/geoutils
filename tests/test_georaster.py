@@ -34,6 +34,7 @@ class TestRaster:
         ds = rio.open(datasets.get_path("landsat_B4"))
         r3 = gr.Raster(ds)
         assert isinstance(r3,gr.Raster)
+        assert r3.filename is not None
 
         # finally, as memoryfile
         memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), 'rb'))
