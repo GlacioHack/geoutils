@@ -7,6 +7,7 @@ from rasterio.crs import CRS
 from shapely.geometry.polygon import Polygon
 import shapely.ops
 import pyproj
+import numpy as np
 
 
 def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
@@ -47,6 +48,61 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
     return bbox
 
 
+def reproject_points(pts, in_crs, out_crs):
+    """
+    Reproject a set of point from input_crs to output_crs.
+
+    :param pts: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
+    :type pts: list, tuple, np.ndarray'
+    :param in_crs: Input CRS
+    :type in_crs: rasterio.crs.CRS
+    :param out_crs: Output CRS
+    :type out_crs: rasterio.crs.CRS
+
+    :returns: Reprojected points, of same shape as pts.
+    :rtype: list
+    """
+    assert np.shape(pts)[0] == 2, "pts must be of shape (2, N)"
+
+    x, y = pts
+    transformer = pyproj.Transformer.from_crs(in_crs, out_crs)
+    xout, yout = transformer.transform(x, y)
+    return (xout, yout)
+
+# Functions to convert from and to latlon
+
+crs_4326 = rio.crs.CRS.from_epsg(4326)
+
+def reproject_to_latlon(pts, in_crs):
+    """
+    Reproject a set of point from in_crs to lat/lon.
+
+    :param pts: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
+    :type pts: list, tuple, np.ndarray'
+    :param in_crs: Input CRS
+    :type in_crs: rasterio.crs.CRS
+
+    :returns: Reprojected points, of same shape as pts.
+    :rtype: list
+    """
+    return reproject_points(pts, in_crs, crs_4326)
+
+
+def reproject_from_latlon(pts, out_crs):
+    """
+    Reproject a set of point from lat/lon to out_crs.
+
+    :param pts: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
+    :type pts: list, tuple, np.ndarray'
+    :param out_crs: Output CRS
+    :type out_crs: rasterio.crs.CRS
+
+    :returns: Reprojected points, of same shape as pts.
+    :rtype: list
+    """
+    return reproject_points(pts, crs_4326, out_crs)
+
+
 def reproject_shape(inshape, in_crs, out_crs):
     """
     Reproject a shapely geometry from one CRS into another CRS.
@@ -65,7 +121,7 @@ def reproject_shape(inshape, in_crs, out_crs):
         in_crs, out_crs, always_xy=True, skip_equivalent=True).transform
     return shapely.ops.transform(reproj, inshape)
 
-  
+
 def compare_proj(proj1, proj2):
     """
     Compare two projections to see if they are the same, using pyproj.CRS.is_exact_same.
