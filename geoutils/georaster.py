@@ -43,19 +43,19 @@ class Raster(object):
     _is_modified = None
     _disk_hash = None
 
-    def __init__(self, filename, bands=None, load_data=True, downsampl=1,
+    def __init__(self, filename_or_dataset, bands=None, load_data=True, downsample=1,
                  masked=True, attrs=None, as_memfile=False):
         """
         Load a rasterio-supported dataset, given a filename.
 
-        :param filename: The filename of the dataset.
-        :type filename: str, Raster, rio.io.Dataset, rio.io.MemoryFile
+        :param filename_or_dataset: The filename of the dataset.
+        :type filename_or_dataset: str, Raster, rio.io.Dataset, rio.io.MemoryFile
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
         :param load_data: Load the raster data into the object. Default is True.
         :type load_data: bool
-        :param downsampl: Reduce the size of the image loaded by this factor. Default is 1
-        :type downsampl: int, float
+        :param downsample: Reduce the size of the image loaded by this factor. Default is 1
+        :type downsample: int, float
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
         :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
@@ -69,34 +69,33 @@ class Raster(object):
         """
 
         # If Raster is passed, simply point back to Raster
-        if isinstance(filename, Raster):
-            for key in filename.__dict__:
-                setattr(self,key,filename.__dict__[key])
+        if isinstance(filename_or_dataset, Raster):
+            for key in filename_or_dataset.__dict__:
+                setattr(self,key,filename_or_dataset.__dict__[key])
             return
         # Image is a file on disk.
-        elif isinstance(filename, str):
+        elif isinstance(filename_or_dataset, str):
             # Save the absolute on-disk filename
-            self.filename = os.path.abspath(filename)
+            self.filename = os.path.abspath(filename_or_dataset)
             if as_memfile:
                 # open the file in memory
-                memfile = MemoryFile(open(filename, 'rb'))
+                memfile = MemoryFile(open(filename_or_dataset, 'rb'))
                 # Read the file as a rasterio dataset
                 self.ds = memfile.open()
             else:
-                self.ds = rio.open(filename, 'r')
+                self.ds = rio.open(filename_or_dataset, 'r')
 
         # If rio.Dataset is passed
-        elif isinstance(filename, rio.io.DatasetReader):
-            self.filename = None
-            self.ds = filename
+        elif isinstance(filename_or_dataset, rio.io.DatasetReader):
+            self.filename = filename_or_dataset.files[0]
+            self.ds = filename_or_dataset
 
         # Or, image is already a Memory File.
-        elif isinstance(filename, rio.io.MemoryFile):
-            self.filename = None
-            self.ds = filename.open()
+        elif isinstance(filename_or_dataset, rio.io.MemoryFile):
+            self.ds = filename_or_dataset.open()
 
         # Provide a catch in case trying to load from data array
-        elif isinstance(filename, np.ndarray):
+        elif isinstance(filename_or_dataset, np.ndarray):
             raise ValueError(
                 'np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ')
 
@@ -118,20 +117,20 @@ class Raster(object):
             nbands = len(bands)
 
         # Downsampled image size
-        if not isinstance(downsampl, (int, float)):
-            raise ValueError("downsampl must be of type int or float")
-        if downsampl == 1:
+        if not isinstance(downsample, (int, float)):
+            raise ValueError("downsample must be of type int or float")
+        if downsample == 1:
             out_shape = (nbands, self.height, self.width)
         else:
-            down_width = int(np.ceil(self.width/downsampl))
-            down_height = int(np.ceil(self.height/downsampl))
+            down_width = int(np.ceil(self.width/downsample))
+            down_height = int(np.ceil(self.height/downsample))
             out_shape = (nbands, down_height, down_width)
 
         if load_data:
             self.load(bands=bands, out_shape=out_shape)
             self.nbands = self._data.shape[0]
             self.is_loaded = True
-            if isinstance(filename, str):
+            if isinstance(filename_or_dataset, str):
                 self._is_modified = False
                 self._disk_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
         else:
