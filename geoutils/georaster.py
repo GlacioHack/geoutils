@@ -43,7 +43,7 @@ class Raster(object):
     _is_modified = None
     _disk_hash = None
 
-    def __init__(self, filename_or_dataset, bands=None, load_data=True, downsampl=1,
+    def __init__(self, filename_or_dataset, bands=None, load_data=True, downsample=1,
                  masked=True, attrs=None, as_memfile=False):
         """
         Load a rasterio-supported dataset, given a filename.
@@ -54,8 +54,8 @@ class Raster(object):
         :type bands: int, or list of ints
         :param load_data: Load the raster data into the object. Default is True.
         :type load_data: bool
-        :param downsampl: Reduce the size of the image loaded by this factor. Default is 1
-        :type downsampl: int, float
+        :param downsample: Reduce the size of the image loaded by this factor. Default is 1
+        :type downsample: int, float
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
         :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
@@ -117,13 +117,13 @@ class Raster(object):
             nbands = len(bands)
 
         # Downsampled image size
-        if not isinstance(downsampl, (int, float)):
-            raise ValueError("downsampl must be of type int or float")
-        if downsampl == 1:
+        if not isinstance(downsample, (int, float)):
+            raise ValueError("downsample must be of type int or float")
+        if downsample == 1:
             out_shape = (nbands, self.height, self.width)
         else:
-            down_width = int(np.ceil(self.width/downsampl))
-            down_height = int(np.ceil(self.height/downsampl))
+            down_width = int(np.ceil(self.width/downsample))
+            down_height = int(np.ceil(self.height/downsample))
             out_shape = (nbands, down_height, down_width)
 
         if load_data:
