@@ -286,8 +286,8 @@ class Raster(object):
             orig_shape = (self.count, self.height, self.width)
 
         if new_data.shape != orig_shape:
-            raise ValueError("New data must be of the same shape as\
- existing data: {}.".format(orig_shape))
+            raise ValueError("New data must be of the same shape as "
+                             "existing data: {}.".format(orig_shape))
 
         # Check that new_data has the right type
         if new_data.dtype != self._data.dtype:
