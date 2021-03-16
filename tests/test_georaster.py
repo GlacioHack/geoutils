@@ -133,13 +133,13 @@ class TestRaster:
         Check that self.data is correct when using downsampling
         """
         # Test single band
-        r = gr.Raster(datasets.get_path("landsat_B4"), downsampl=4)
+        r = gr.Raster(datasets.get_path("landsat_B4"), downsample=4)
         assert r.data.shape == (1, 164, 200)
         assert r.height == 655  # this should not have changed
         assert r.width == 800
 
         # Test multiple band
-        r = gr.Raster(datasets.get_path("landsat_RGB"), downsampl=2)
+        r = gr.Raster(datasets.get_path("landsat_RGB"), downsample=2)
         assert r.data.shape == (3, 328, 400)
 
     def test_copy(self):
