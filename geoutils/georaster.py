@@ -279,9 +279,14 @@ class Raster(object):
             raise ValueError("New data must be a numpy array.")
 
         # Check that new_data has correct shape
-        if new_data.shape != self._data.shape:
-            raise ValueError("New data must be of the same shape as\
- existing data: {}.".format(self.shape))
+        if self.is_loaded:
+            orig_shape = self._data.shape
+        else:
+            orig_shape = (self.count, self.height, self.width)
+
+        if new_data.shape != orig_shape:
+            raise ValueError("New data must be of the same shape as "
+                             "existing data: {}.".format(orig_shape))
 
         # Check that new_data has the right type
         if new_data.dtype != self._data.dtype:
@@ -665,6 +670,9 @@ class Raster(object):
         :type yoff: float
 
         """
+        # Check that data is loaded, as it is necessary for this method
+        assert self.is_loaded, "Data must be loaded, use self.load"
+
         meta = self.ds.meta
         dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
 
