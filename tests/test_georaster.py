@@ -136,8 +136,8 @@ class TestRaster:
         # Test single band
         r = gr.Raster(datasets.get_path("landsat_B4"), downsample=4)
         assert r.data.shape == (1, 164, 200)
-        assert r.height == 655  # this should not have changed
-        assert r.width == 800
+        assert r.height == 164
+        assert r.width == 200
 
         # Test multiple band
         r = gr.Raster(datasets.get_path("landsat_RGB"), downsample=2)
