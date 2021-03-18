@@ -2,30 +2,85 @@
 Test functions for SatelliteImage class
 """
 import os
-import inspect
-import geoutils.georaster as gr
-import geoutils.satimg as si
 import pytest
 import datetime as dt
+import numpy as np
+import geoutils.georaster as gr
+import geoutils.satimg as si
+from geoutils import datasets
+import geoutils
+import numpy as np
 
 DO_PLOT = False
 
-@pytest.fixture()
-def path_data():
-    data_folder = os.path.join('tests', 'data')
-    fn_img = os.path.join(data_folder, 'LE71400412000304SGS00_B4_crop.TIF')
-    fn_img2 = os.path.join(data_folder,'LE71400412000304SGS00_B4_crop2.TIF')
-
-    return fn_img, fn_img2
 
 class TestSatelliteImage:
 
-    def test_load_subclass(self,path_data):
+    def test_init(self):
+        """
+        Test that inputs work properly in SatelliteImage class init
+        """
 
-        fn_img, _ = path_data
+        fn_img = datasets.get_path("landsat_B4")
 
-        img = si.SatelliteImage(fn_img,read_from_fn=False)
+        # from filename, checking option
+        img = si.SatelliteImage(fn_img, read_from_fn=False)
         img = si.SatelliteImage(fn_img)
+        assert isinstance(img,si.SatelliteImage)
+
+        # from SatelliteImage
+        img2 = si.SatelliteImage(img)
+        assert isinstance(img2,si.SatelliteImage)
+
+        # from Raster
+        r = gr.Raster(fn_img)
+        img3 = si.SatelliteImage(r)
+        assert isinstance(img3,si.SatelliteImage)
+
+        assert np.logical_and.reduce((np.array_equal(img.data, img2.data, equal_nan=True),
+                                      np.array_equal(img2.data, img3.data, equal_nan=True)))
+
+        assert np.logical_and.reduce((np.all(img.data.mask == img2.data.mask),
+                                      np.all(img2.data.mask == img3.data.mask)))
+
+    def test_copy(self):
+        """
+        Test that the copy method works as expected for SatelliteImage. In particular
+        when copying r to r2:
+        - if r.data is modified and r copied, the updated data is copied
+        - if r is copied, r.data changed, r2.data should be unchanged
+        """
+        # Open dataset, update data and make a copy
+        r = si.SatelliteImage(datasets.get_path("landsat_B4"))
+        r.data += 5
+        r2 = r.copy()
+
+        # Objects should be different (not pointing to the same memory)
+        assert r is not r2
+
+        # Check the object is a SatelliteImage
+        assert isinstance(r2, geoutils.satimg.SatelliteImage)
+
+        # check all immutable attributes are equal
+        # georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
+        #                    'res', 'shape', 'transform', 'width']
+        # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+        # using list directly available in Class
+        attrs = [at for at in gr.default_attrs if at not in ['name', 'dataset_mask', 'driver']]
+        all_attrs = attrs + si.satimg_attrs
+        for attr in all_attrs:
+            assert r.__getattribute__(attr) == r2.__getattribute__(attr)
+
+        # Check data array
+        assert np.array_equal(r.data, r2.data, equal_nan=True)
+
+        # Check dataset_mask array
+        assert np.all(r.data.mask == r2.data.mask)
+
+        # Check that if r.data is modified, it does not affect r2.data
+        r.data += 5
+        assert not np.array_equal(r.data, r2.data, equal_nan=True)
+
 
     def test_filename_parsing(self):
 
@@ -37,13 +92,17 @@ class TestSatelliteImage:
                         'ASTGTM2_N00E108_dem.tif',
                         'N00E015.hgt',
                         'NASADEM_HGT_n00e041.hgt']
-        #corresponding data, filled manually
-        satellites = ['TanDEM-X','WorldView','Terra','IceBridge','SRTM','Terra','SRTM','SRTM']
-        sensors = ['TanDEM-X','WV02','ASTER','UAF-LS','SRTM','ASTER','SRTM','SRTM']
-        products = ['TDM1','ArcticDEM/REMA','L1A','ILAKS1B','SRTMv4.1','ASTGTM2','SRTMGL1','NASADEM-HGT']
-        #we can skip the version, bit subjective...
-        tiles = ['N00E104',None,None,None,'06_01','N00E108','N00E015','n00e041']
-        datetimes = [None,dt.datetime(year=2014,month=10,day=26),dt.datetime(year=2015,month=3,day=13,hour=22,minute=44,second=18),
+        # Corresponding data, filled manually
+        satellites = ['TanDEM-X', 'WorldView', 'Terra', 'IceBridge', 'SRTM',
+                      'Terra', 'SRTM', 'SRTM']
+        sensors = ['TanDEM-X', 'WV02', 'ASTER', 'UAF-LS', 'SRTM', 'ASTER',
+                   'SRTM', 'SRTM']
+        products = ['TDM1', 'ArcticDEM/REMA', 'L1A', 'ILAKS1B', 'SRTMv4.1',
+                    'ASTGTM2', 'SRTMGL1', 'NASADEM-HGT']
+        # we can skip the version, bit subjective...
+        tiles = ['N00E104', None, None, None, '06_01', 'N00E108', 'N00E015',
+                 'n00e041']
+        datetimes = [None, dt.datetime(year=2014,month=10,day=26),dt.datetime(year=2015,month=3,day=13,hour=22,minute=44,second=18),
                      dt.datetime(year=2019,month=9,day=28),dt.datetime(year=2000,month=2,day=15),None,dt.datetime(year=2000,month=2,day=15),
                      dt.datetime(year=2000,month=2,day=15)]
 
@@ -70,13 +129,11 @@ class TestSatelliteImage:
         for latlon in test_latlon:
             assert si.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
 
-        #check possible exceptions, rounded lat/lon belong to their southwest border
-        assert si.latlon_to_sw_naming((0,0)) == 'N00E000'
-        #those are the same point, should give same naming
-        assert si.latlon_to_sw_naming((-90,0)) == 'S90E000'
-        assert si.latlon_to_sw_naming((90,0)) == 'S90E000'
-        #same here
-        assert si.latlon_to_sw_naming((0,-180)) == 'N00W180'
-        assert si.latlon_to_sw_naming((0,180)) == 'N00W180'
-
-
+        # check possible exceptions, rounded lat/lon belong to their southwest border
+        assert si.latlon_to_sw_naming((0, 0)) == 'N00E000'
+        # those are the same point, should give same naming
+        assert si.latlon_to_sw_naming((-90, 0)) == 'S90E000'
+        assert si.latlon_to_sw_naming((90, 0)) == 'S90E000'
+        # same here
+        assert si.latlon_to_sw_naming((0, -180)) == 'N00W180'
+        assert si.latlon_to_sw_naming((0, 180)) == 'N00W180'
