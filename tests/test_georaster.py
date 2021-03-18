@@ -11,6 +11,7 @@ from rasterio.io import MemoryFile
 
 import geoutils.georaster as gr
 from geoutils import datasets
+import geoutils.projtools as pt
 
 
 DO_PLOT = False
@@ -467,3 +468,39 @@ class TestRaster:
         img2.data += 1
 
         assert img != img2
+
+    def test_value_at_coords(self):
+        """
+        Check that values returned at selected pixels correspond to what is expected, both for original CRS and lat/lon.
+        """
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+
+        # Lower right pixel
+        x, y = [
+            img.bounds.right - img.res[0],
+            img.bounds.bottom + img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -1, -1]
+
+        # One pixel above
+        x, y = [
+            img.bounds.right - img.res[0],
+            img.bounds.bottom + 2 * img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -2, -1]
+
+        # One pixel left
+        x, y = [
+            img.bounds.right - 2 * img.res[0],
+            img.bounds.bottom + img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -1, -2]
