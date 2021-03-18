@@ -138,6 +138,26 @@ class Raster(object):
             self.nbands = None
             self.is_loaded = False
 
+        # update attributes when downsample is not 1
+        if downsample != 1:
+
+            # withd, height and shape must be same as data
+            self.width = down_width
+            self.height = down_height
+            self.shape = (down_height, down_width)
+
+            # Resolution is set, transform must be updated accordingly
+            self.res = tuple(np.asarray(self.res)*downsample)
+            self.transform = rio.transform.from_origin(
+                self.bounds.left, self.bounds.top,
+                self.res[0], self.res[1]
+            )
+
+            # Bounds may vary if initial shape not a multiple of downsample
+            self.bounds = rio.coords.BoundingBox(
+                *rio.transform.array_bounds(self.height, self.width, self.transform)
+            )
+
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
         """ Create a Raster from a numpy array and some geo-referencing information.
