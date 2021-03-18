@@ -341,6 +341,8 @@ class Raster(object):
 
         new_data must have the same shape as existing data! (bands dimension included)
 
+        new_data must have the same shape as existing data! (bands dimension included)
+
         :param new_data: New data to assign to this instance of Raster
         :type new_data: np.ndarray
         """
@@ -485,8 +487,11 @@ class Raster(object):
         """
         if bands is None:
             self._data = self.ds.read(masked=self._masked, **kwargs)
+            bands = self.ds.indexes
         else:
             self._data = self.ds.read(bands, masked=self._masked, **kwargs)
+            if type(bands) is int:
+                bands = (bands)
 
         # If ndim is 2, expand to 3
         if self._data.ndim == 2:
@@ -494,6 +499,7 @@ class Raster(object):
 
         self.nbands = self._data.shape[0]
         self.is_loaded = True
+        self.bands = bands
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
