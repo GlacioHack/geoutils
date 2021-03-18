@@ -81,7 +81,7 @@ class Raster(object):
         width
 
     """
-    
+
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
@@ -203,10 +203,12 @@ class Raster(object):
         :rtype: Raster.
 
         Example:
-        You have a data array in EPSG:32645. It has a spatial resolution of
-        30 m in x and y, and its top left corner is X=478000, Y=3108140.
-        >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-        >>> myim = Raster.from_array(data, transform, 32645)
+
+            You have a data array in EPSG:32645. It has a spatial resolution of
+            30 m in x and y, and its top left corner is X=478000, Y=3108140.
+
+            >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+            >>> myim = Raster.from_array(data, transform, 32645)
 
         """
 
@@ -292,7 +294,8 @@ class Raster(object):
     def is_modified(self):
         """ Check whether file has been modified since it was created/opened.
 
-        Returns: boolean: True if Raster has been modified. 
+        :returns: True if Raster has been modified. 
+        :rtype: bool
         """
         if not self._is_modified:
             new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
@@ -303,10 +306,10 @@ class Raster(object):
     @property
     def data(self):
         """
-        Getter method for the _data class member.
+        Get data.
 
-        Returns:
-            np.ndarray: the _data member of this instance of Raster
+        :returns: data array.
+        :rtype: np.ndarray 
         """
         return self._data
 
@@ -449,11 +452,13 @@ class Raster(object):
 
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
+
         **kwargs: any additional arguments to rasterio.io.DatasetReader.read.
         Useful ones are:
-        - out_shape: to load a subsampled version
-        - window: to load a cropped version
-        - resampling: to set the resampling algorithm
+        .. hlist::
+        * out_shape : to load a subsampled version
+        * window : to load a cropped version
+        * resampling : to set the resampling algorithm
         """
         if bands is None:
             self._data = self.ds.read(masked=self._masked, **kwargs)
@@ -545,8 +550,8 @@ class Raster(object):
 
         To reproject a Raster with different source bounds, first run Raster.crop.
 
-        :param dst_ref: a reference raster. If set will use the attributes of this raster for the output grid.
-        Can be provided as Raster/rasterio data set or as path to the file.
+        :param dst_ref: a reference raster. If set will use the attributes of this 
+            raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
         :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
         :type crs: int, dict, str, CRS
@@ -844,10 +849,10 @@ class Raster(object):
         :param dtype: Data Type to write the image as (defaults to dtype of image data)
         :type dtype: np.dtype
         :param blank_value: Use to write an image out with every pixel's value
-        corresponding to this value, instead of writing the image data to disk.
+            corresponding to this value, instead of writing the image data to disk.
         :type blank_value: None, int, float.
         :param co_opts: GDAL creation options provided as a dictionary,
-        e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
+            e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
         :type co_opts: dict
         :param metadata: pairs of metadata key, value
         :type metadata: dict
@@ -958,6 +963,7 @@ to be cleared due to the setting of GCPs.")
         Returns the bounding box of intersection between this image and another.
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
+        
         :param rst : path to the second image (or another Raster instance)
         :type rst: str, Raster
 
@@ -1125,30 +1131,30 @@ to be cleared due to the setting of GCPs.")
         :param band: the band number to extract from.
         :type band: int
         :param masked: If `masked` is `True` the return value will be a masked
-        array. Otherwise (the default) the return value will be a
-        regular array.
+            array. Otherwise (the default) the return value will be a
+            regular array.
         :type masked: bool, optional (default False)
         :param window: expand area around coordinate to dimensions \
                   window * window. window must be odd.
         :type window: None, int
         :param return_window: If True when window=int, returns (mean,array) \
-        where array is the dataset extracted via the specified window size.
+            where array is the dataset extracted via the specified window size.
         :type return_window: boolean
         :param boundless: If `True`, windows that extend beyond the dataset's extent
-        are permitted and partially or completely filled arrays (with self.nodata) will
-        be returned as appropriate.
+            are permitted and partially or completely filled arrays (with self.nodata) will
+            be returned as appropriate.
         :type boundless: bool, optional (default False)
         :param reducer_function: a function to apply to the values in window.
         :type reducer_function: function, optional (Default is np.ma.mean)
 
         :returns: When called on a Raster or with a specific band \
-        set, return value of pixel.
+            set, return value of pixel.
         :rtype: float
         :returns: If mutiple band Raster and the band is not specified, a \
-        dictionary containing the value of the pixel in each band.
+            dictionary containing the value of the pixel in each band.
         :rtype: dict
         :returns: In addition, if return_window=True, return tuple of \
-        (values, arrays)
+            (values, arrays)
         :rtype: tuple
 
         :examples:
@@ -1335,13 +1341,13 @@ to be cleared due to the setting of GCPs.")
         Interpolate raster values at a given point, or sets of points.
 
        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
-       value returned is nan.'
+            value returned is nan.
        :type pts: array-like
        :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
        :type nsize: int
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
-           used to interpolate the raster value at each point. For more information, see
-           scipy.interpolate.interp2d. Default is linear.
+            used to interpolate the raster value at each point. For more information, see
+            scipy.interpolate.interp2d. Default is linear.
        :type mode: str
        :param band: Raster band to use
        :type band: int
