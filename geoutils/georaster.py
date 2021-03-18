@@ -1054,7 +1054,7 @@ to be cleared due to the setting of GCPs.")
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,
                         reducer_function=np.ma.mean):
-        """ Extract the pixel value(s) at the specified coordinates.
+        """ Extract the pixel value(s) at the nearest pixel(s) from the specified coordinates.
 
         Extract pixel value of each band in dataset at the specified
         coordinates. Alternatively, if band is specified, return only that
@@ -1125,10 +1125,11 @@ to be cleared due to the setting of GCPs.")
 
         # Need to implement latlon option later
         if latlon:
-            raise NotImplementedError()
+            from geoutils import projtools
+            x, y = projtools.reproject_from_latlon((y, x), self.crs)
 
         # Convert coordinates to pixel space
-        row, col = self.ds.index(x, y)
+        row, col = self.ds.index(x, y, op=round)
 
         # Decide what pixel coordinates to read:
         if window != None:
