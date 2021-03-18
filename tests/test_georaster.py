@@ -143,6 +143,16 @@ class TestRaster:
         r = gr.Raster(datasets.get_path("landsat_RGB"), downsample=2)
         assert r.data.shape == (3, 328, 400)
 
+        # Test that xy2ij are consistent with new image
+        # Upper left
+        assert r.xy2ij(r.bounds.left, r.bounds.top) == (0, 0)
+        # Upper right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width)
+        # Bottom right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width)
+        # One pixel right and down
+        assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
+
     def test_copy(self):
         """
         Test that the copy method works as expected for Raster. In particular

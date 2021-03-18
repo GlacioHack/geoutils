@@ -141,22 +141,23 @@ class Raster(object):
         # update attributes when downsample is not 1
         if downsample != 1:
 
-            # withd, height and shape must be same as data
-            self.width = down_width
-            self.height = down_height
-            self.shape = (down_height, down_width)
+            # Original attributes
+            meta = self.ds.meta
+
+            # width and height must be same as data
+            meta.update({'width': down_width,
+                         'height': down_height})
 
             # Resolution is set, transform must be updated accordingly
-            self.res = tuple(np.asarray(self.res)*downsample)
-            self.transform = rio.transform.from_origin(
+            res = tuple(np.asarray(self.res)*downsample)
+            transform = rio.transform.from_origin(
                 self.bounds.left, self.bounds.top,
-                self.res[0], self.res[1]
+                res[0], res[1]
             )
+            meta.update({'transform': transform})
 
-            # Bounds may vary if initial shape not a multiple of downsample
-            self.bounds = rio.coords.BoundingBox(
-                *rio.transform.array_bounds(self.height, self.width, self.transform)
-            )
+            # Update metadata
+            self._update(self.data, metadata=meta)
 
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
@@ -343,6 +344,8 @@ class Raster(object):
         self._read_attrs()
         if self.is_loaded:
             self.load()
+
+        self._is_modified = True
 
     def info(self, stats=False):
         """ 
