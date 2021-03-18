@@ -73,7 +73,7 @@ def reproject_points(pts, in_crs, out_crs):
 
 crs_4326 = rio.crs.CRS.from_epsg(4326)
 
-def reproject_to_latlon(pts, in_crs):
+def reproject_to_latlon(pts, in_crs, round_: int = 8):
     """
     Reproject a set of point from in_crs to lat/lon.
 
@@ -81,14 +81,18 @@ def reproject_to_latlon(pts, in_crs):
     :type pts: list, tuple, np.ndarray'
     :param in_crs: Input CRS
     :type in_crs: rasterio.crs.CRS
+    :param round_: Output rounding. Default of 8 ensures cm accuracy
+    :type round_: int
 
     :returns: Reprojected points, of same shape as pts.
     :rtype: list
     """
-    return reproject_points(pts, in_crs, crs_4326)
+    proj_pts = reproject_points(pts, in_crs, crs_4326)
+    proj_pts = np.round(proj_pts, round_)
+    return proj_pts
 
 
-def reproject_from_latlon(pts, out_crs):
+def reproject_from_latlon(pts, out_crs, round_: int = 2):
     """
     Reproject a set of point from lat/lon to out_crs.
 
@@ -96,11 +100,15 @@ def reproject_from_latlon(pts, out_crs):
     :type pts: list, tuple, np.ndarray'
     :param out_crs: Output CRS
     :type out_crs: rasterio.crs.CRS
+    :param round_: Output rounding. Default of 2 ensures cm accuracy
+    :type round_: int
 
     :returns: Reprojected points, of same shape as pts.
     :rtype: list
     """
-    return reproject_points(pts, crs_4326, out_crs)
+    proj_pts = reproject_points(pts, crs_4326, out_crs)
+    proj_pts = np.round(proj_pts, round_)
+    return proj_pts
 
 
 def reproject_shape(inshape, in_crs, out_crs):
