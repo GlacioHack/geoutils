@@ -113,6 +113,7 @@ class TestRaster:
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 3
+        assert r.bands == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
@@ -120,13 +121,15 @@ class TestRaster:
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 1
+        assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(1,2))
+        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(2, 3))
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 2
+        assert r.bands == (2, 3)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
     def test_downsampling(self):
