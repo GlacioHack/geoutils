@@ -35,8 +35,53 @@ default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', '
 class Raster(object):
     """
     Create a Raster object from a rasterio-supported raster dataset.
-    """
 
+    If not otherwise specified below, attribute types and contents correspond
+    to the attributes defined by rasterio.
+
+    Attributes:
+        filename : str
+            The path/filename of the loaded, file, only set if a disk-based file is read in.
+        data : np.array 
+            Loaded image. Dimensions correspond to (bands, height, width).
+        nbands : int 
+            Number of bands loaded into .data
+        bands : tuple 
+            The indexes of the opened dataset which correspond to the bands loaded into data.
+        is_loaded : bool 
+            True if the image data have been loaded into this Raster.
+        ds : rio.io.DatasetReader
+            Link to underlying DatasetReader object.
+        bounds
+
+        count
+
+        crs
+        
+        dataset_mask
+
+        driver
+
+        dtypes
+
+        height
+
+        indexes
+
+        name
+
+        nodata
+
+        res
+
+        shape
+
+        transform
+
+        width
+
+    """
+    
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
@@ -245,10 +290,9 @@ class Raster(object):
 
     @property
     def is_modified(self):
-        """
-        Getter method for the _method class member
+        """ Check whether file has been modified since it was created/opened.
 
-        Returns: boolean: the _method member of this instance of Raster
+        Returns: boolean: True if Raster has been modified. 
         """
         if not self._is_modified:
             new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
@@ -269,7 +313,9 @@ class Raster(object):
     @data.setter
     def data(self, new_data):
         """
-        Setter method for the _data class member.
+        Set the contents of .data.
+
+        new_data must have the same shape as existing data! (bands dimension included)
 
         :param new_data: New data to assign to this instance of Raster
         :type new_data: np.ndarray
