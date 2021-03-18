@@ -137,12 +137,22 @@ class TestRaster:
         # Test single band
         r = gr.Raster(datasets.get_path("landsat_B4"), downsample=4)
         assert r.data.shape == (1, 164, 200)
-        assert r.height == 655  # this should not have changed
-        assert r.width == 800
+        assert r.height == 164
+        assert r.width == 200
 
         # Test multiple band
         r = gr.Raster(datasets.get_path("landsat_RGB"), downsample=2)
         assert r.data.shape == (3, 328, 400)
+
+        # Test that xy2ij are consistent with new image
+        # Upper left
+        assert r.xy2ij(r.bounds.left, r.bounds.top) == (0, 0)
+        # Upper right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width)
+        # Bottom right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width)
+        # One pixel right and down
+        assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
 
     def test_copy(self):
         """
