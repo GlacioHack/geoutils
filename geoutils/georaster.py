@@ -183,6 +183,27 @@ class Raster(object):
             self.nbands = None
             self.is_loaded = False
 
+        # update attributes when downsample is not 1
+        if downsample != 1:
+
+            # Original attributes
+            meta = self.ds.meta
+
+            # width and height must be same as data
+            meta.update({'width': down_width,
+                         'height': down_height})
+
+            # Resolution is set, transform must be updated accordingly
+            res = tuple(np.asarray(self.res)*downsample)
+            transform = rio.transform.from_origin(
+                self.bounds.left, self.bounds.top,
+                res[0], res[1]
+            )
+            meta.update({'transform': transform})
+
+            # Update metadata
+            self._update(self.data, metadata=meta)
+
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
         """ Create a Raster from a numpy array and some geo-referencing information.
@@ -372,6 +393,8 @@ class Raster(object):
         self._read_attrs()
         if self.is_loaded:
             self.load()
+
+        self._is_modified = True
 
     def info(self, stats=False):
         """ 
