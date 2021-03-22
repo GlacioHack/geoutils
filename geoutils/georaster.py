@@ -35,6 +35,51 @@ default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', '
 class Raster(object):
     """
     Create a Raster object from a rasterio-supported raster dataset.
+
+    If not otherwise specified below, attribute types and contents correspond
+    to the attributes defined by rasterio.
+
+    Attributes:
+        filename : str
+            The path/filename of the loaded, file, only set if a disk-based file is read in.
+        data : np.array 
+            Loaded image. Dimensions correspond to (bands, height, width).
+        nbands : int 
+            Number of bands loaded into .data
+        bands : tuple 
+            The indexes of the opened dataset which correspond to the bands loaded into data.
+        is_loaded : bool 
+            True if the image data have been loaded into this Raster.
+        ds : rio.io.DatasetReader
+            Link to underlying DatasetReader object.
+        bounds
+
+        count
+
+        crs
+        
+        dataset_mask
+
+        driver
+
+        dtypes
+
+        height
+
+        indexes
+
+        name
+
+        nodata
+
+        res
+
+        shape
+
+        transform
+
+        width
+
     """
 
     # This only gets set if a disk-based file is read in.
@@ -138,6 +183,27 @@ class Raster(object):
             self.nbands = None
             self.is_loaded = False
 
+        # update attributes when downsample is not 1
+        if downsample != 1:
+
+            # Original attributes
+            meta = self.ds.meta
+
+            # width and height must be same as data
+            meta.update({'width': down_width,
+                         'height': down_height})
+
+            # Resolution is set, transform must be updated accordingly
+            res = tuple(np.asarray(self.res)*downsample)
+            transform = rio.transform.from_origin(
+                self.bounds.left, self.bounds.top,
+                res[0], res[1]
+            )
+            meta.update({'transform': transform})
+
+            # Update metadata
+            self._update(self.data, metadata=meta)
+
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
         """ Create a Raster from a numpy array and some geo-referencing information.
@@ -158,10 +224,12 @@ class Raster(object):
         :rtype: Raster.
 
         Example:
-        You have a data array in EPSG:32645. It has a spatial resolution of
-        30 m in x and y, and its top left corner is X=478000, Y=3108140.
-        >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-        >>> myim = Raster.from_array(data, transform, 32645)
+
+            You have a data array in EPSG:32645. It has a spatial resolution of
+            30 m in x and y, and its top left corner is X=478000, Y=3108140.
+
+            >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+            >>> myim = Raster.from_array(data, transform, 32645)
 
         """
 
@@ -245,10 +313,10 @@ class Raster(object):
 
     @property
     def is_modified(self):
-        """
-        Getter method for the _method class member
+        """ Check whether file has been modified since it was created/opened.
 
-        Returns: boolean: the _method member of this instance of Raster
+        :returns: True if Raster has been modified. 
+        :rtype: bool
         """
         if not self._is_modified:
             new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
@@ -259,17 +327,21 @@ class Raster(object):
     @property
     def data(self):
         """
-        Getter method for the _data class member.
+        Get data.
 
-        Returns:
-            np.ndarray: the _data member of this instance of Raster
+        :returns: data array.
+        :rtype: np.ndarray 
         """
         return self._data
 
     @data.setter
     def data(self, new_data):
         """
-        Setter method for the _data class member.
+        Set the contents of .data.
+
+        new_data must have the same shape as existing data! (bands dimension included)
+
+        new_data must have the same shape as existing data! (bands dimension included)
 
         :param new_data: New data to assign to this instance of Raster
         :type new_data: np.ndarray
@@ -323,6 +395,8 @@ class Raster(object):
         self._read_attrs()
         if self.is_loaded:
             self.load()
+
+        self._is_modified = True
 
     def info(self, stats=False):
         """ 
@@ -403,16 +477,21 @@ class Raster(object):
 
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
+
         **kwargs: any additional arguments to rasterio.io.DatasetReader.read.
         Useful ones are:
-        - out_shape: to load a subsampled version
-        - window: to load a cropped version
-        - resampling: to set the resampling algorithm
+        .. hlist::
+        * out_shape : to load a subsampled version
+        * window : to load a cropped version
+        * resampling : to set the resampling algorithm
         """
         if bands is None:
             self._data = self.ds.read(masked=self._masked, **kwargs)
+            bands = self.ds.indexes
         else:
             self._data = self.ds.read(bands, masked=self._masked, **kwargs)
+            if type(bands) is int:
+                bands = (bands)
 
         # If ndim is 2, expand to 3
         if self._data.ndim == 2:
@@ -420,6 +499,7 @@ class Raster(object):
 
         self.nbands = self._data.shape[0]
         self.is_loaded = True
+        self.bands = bands
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
@@ -499,8 +579,8 @@ class Raster(object):
 
         To reproject a Raster with different source bounds, first run Raster.crop.
 
-        :param dst_ref: a reference raster. If set will use the attributes of this raster for the output grid.
-        Can be provided as Raster/rasterio data set or as path to the file.
+        :param dst_ref: a reference raster. If set will use the attributes of this 
+            raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
         :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
         :type crs: int, dict, str, CRS
@@ -798,10 +878,10 @@ class Raster(object):
         :param dtype: Data Type to write the image as (defaults to dtype of image data)
         :type dtype: np.dtype
         :param blank_value: Use to write an image out with every pixel's value
-        corresponding to this value, instead of writing the image data to disk.
+            corresponding to this value, instead of writing the image data to disk.
         :type blank_value: None, int, float.
         :param co_opts: GDAL creation options provided as a dictionary,
-        e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
+            e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
         :type co_opts: dict
         :param metadata: pairs of metadata key, value
         :type metadata: dict
@@ -912,6 +992,7 @@ to be cleared due to the setting of GCPs.")
         Returns the bounding box of intersection between this image and another.
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
+        
         :param rst : path to the second image (or another Raster instance)
         :type rst: str, Raster
 
@@ -1062,7 +1143,7 @@ to be cleared due to the setting of GCPs.")
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,
                         reducer_function=np.ma.mean):
-        """ Extract the pixel value(s) at the specified coordinates.
+        """ Extract the pixel value(s) at the nearest pixel(s) from the specified coordinates.
 
         Extract pixel value of each band in dataset at the specified
         coordinates. Alternatively, if band is specified, return only that
@@ -1079,30 +1160,30 @@ to be cleared due to the setting of GCPs.")
         :param band: the band number to extract from.
         :type band: int
         :param masked: If `masked` is `True` the return value will be a masked
-        array. Otherwise (the default) the return value will be a
-        regular array.
+            array. Otherwise (the default) the return value will be a
+            regular array.
         :type masked: bool, optional (default False)
         :param window: expand area around coordinate to dimensions \
                   window * window. window must be odd.
         :type window: None, int
         :param return_window: If True when window=int, returns (mean,array) \
-        where array is the dataset extracted via the specified window size.
+            where array is the dataset extracted via the specified window size.
         :type return_window: boolean
         :param boundless: If `True`, windows that extend beyond the dataset's extent
-        are permitted and partially or completely filled arrays (with self.nodata) will
-        be returned as appropriate.
+            are permitted and partially or completely filled arrays (with self.nodata) will
+            be returned as appropriate.
         :type boundless: bool, optional (default False)
         :param reducer_function: a function to apply to the values in window.
         :type reducer_function: function, optional (Default is np.ma.mean)
 
         :returns: When called on a Raster or with a specific band \
-        set, return value of pixel.
+            set, return value of pixel.
         :rtype: float
         :returns: If mutiple band Raster and the band is not specified, a \
-        dictionary containing the value of the pixel in each band.
+            dictionary containing the value of the pixel in each band.
         :rtype: dict
         :returns: In addition, if return_window=True, return tuple of \
-        (values, arrays)
+            (values, arrays)
         :rtype: tuple
 
         :examples:
@@ -1133,10 +1214,11 @@ to be cleared due to the setting of GCPs.")
 
         # Need to implement latlon option later
         if latlon:
-            raise NotImplementedError()
+            from geoutils import projtools
+            x, y = projtools.reproject_from_latlon((y, x), self.crs)
 
         # Convert coordinates to pixel space
-        row, col = self.ds.index(x, y)
+        row, col = self.ds.index(x, y, op=round)
 
         # Decide what pixel coordinates to read:
         if window != None:
@@ -1289,13 +1371,13 @@ to be cleared due to the setting of GCPs.")
         Interpolate raster values at a given point, or sets of points.
 
        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
-       value returned is nan.'
+            value returned is nan.
        :type pts: array-like
        :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
        :type nsize: int
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
-           used to interpolate the raster value at each point. For more information, see
-           scipy.interpolate.interp2d. Default is linear.
+            used to interpolate the raster value at each point. For more information, see
+            scipy.interpolate.interp2d. Default is linear.
        :type mode: str
        :param band: Raster band to use
        :type band: int

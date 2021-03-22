@@ -16,6 +16,7 @@ Georaster
 ---------
 
 .. automodule:: geoutils.georaster
+    :special-members: __init__
     :members:
 
 
