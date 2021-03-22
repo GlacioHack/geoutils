@@ -2,26 +2,85 @@
 Test functions for SatelliteImage class
 """
 import os
-import inspect
 import pytest
 import datetime as dt
-
+import numpy as np
 import geoutils.georaster as gr
 import geoutils.satimg as si
 from geoutils import datasets
-
+import geoutils
+import numpy as np
 
 DO_PLOT = False
 
 
 class TestSatelliteImage:
 
-    def test_load_subclass(self):
+    def test_init(self):
+        """
+        Test that inputs work properly in SatelliteImage class init
+        """
 
         fn_img = datasets.get_path("landsat_B4")
 
+        # from filename, checking option
         img = si.SatelliteImage(fn_img, read_from_fn=False)
         img = si.SatelliteImage(fn_img)
+        assert isinstance(img,si.SatelliteImage)
+
+        # from SatelliteImage
+        img2 = si.SatelliteImage(img)
+        assert isinstance(img2,si.SatelliteImage)
+
+        # from Raster
+        r = gr.Raster(fn_img)
+        img3 = si.SatelliteImage(r)
+        assert isinstance(img3,si.SatelliteImage)
+
+        assert np.logical_and.reduce((np.array_equal(img.data, img2.data, equal_nan=True),
+                                      np.array_equal(img2.data, img3.data, equal_nan=True)))
+
+        assert np.logical_and.reduce((np.all(img.data.mask == img2.data.mask),
+                                      np.all(img2.data.mask == img3.data.mask)))
+
+    def test_copy(self):
+        """
+        Test that the copy method works as expected for SatelliteImage. In particular
+        when copying r to r2:
+        - if r.data is modified and r copied, the updated data is copied
+        - if r is copied, r.data changed, r2.data should be unchanged
+        """
+        # Open dataset, update data and make a copy
+        r = si.SatelliteImage(datasets.get_path("landsat_B4"))
+        r.data += 5
+        r2 = r.copy()
+
+        # Objects should be different (not pointing to the same memory)
+        assert r is not r2
+
+        # Check the object is a SatelliteImage
+        assert isinstance(r2, geoutils.satimg.SatelliteImage)
+
+        # check all immutable attributes are equal
+        # georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
+        #                    'res', 'shape', 'transform', 'width']
+        # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+        # using list directly available in Class
+        attrs = [at for at in gr.default_attrs if at not in ['name', 'dataset_mask', 'driver']]
+        all_attrs = attrs + si.satimg_attrs
+        for attr in all_attrs:
+            assert r.__getattribute__(attr) == r2.__getattribute__(attr)
+
+        # Check data array
+        assert np.array_equal(r.data, r2.data, equal_nan=True)
+
+        # Check dataset_mask array
+        assert np.all(r.data.mask == r2.data.mask)
+
+        # Check that if r.data is modified, it does not affect r2.data
+        r.data += 5
+        assert not np.array_equal(r.data, r2.data, equal_nan=True)
+
 
     def test_filename_parsing(self):
 

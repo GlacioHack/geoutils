@@ -11,12 +11,52 @@ from rasterio.io import MemoryFile
 
 import geoutils.georaster as gr
 from geoutils import datasets
+import geoutils.projtools as pt
 
 
 DO_PLOT = False
 
-
 class TestRaster:
+
+    def test_init(self):
+        """
+        Test that all possible inputs work properly in Raster class init
+        """
+
+        # first, filename
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert isinstance(r,gr.Raster)
+
+        # second, passing a Raster itself (points back to Raster passed)
+        r2 = gr.Raster(r)
+        assert isinstance(r2,gr.Raster)
+
+        # third, rio.Dataset
+        ds = rio.open(datasets.get_path("landsat_B4"))
+        r3 = gr.Raster(ds)
+        assert isinstance(r3,gr.Raster)
+        assert r3.filename is not None
+
+        # finally, as memoryfile
+        memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), 'rb'))
+        r4 = gr.Raster(memfile)
+        assert isinstance(r4,gr.Raster)
+
+        assert np.logical_and.reduce((np.array_equal(r.data, r2.data, equal_nan=True),
+                                      np.array_equal(r2.data, r3.data, equal_nan=True),
+                                      np.array_equal(r3.data, r4.data, equal_nan=True)))
+
+        assert np.logical_and.reduce((np.all(r.data.mask == r2.data.mask),
+                                      np.all(r2.data.mask == r3.data.mask),
+                                      np.all(r3.data.mask == r4.data.mask)))
+
+        # the data will not be copied, immutable objects will
+        r.data[0, 0, 0] += 5
+        assert r2.data[0, 0, 0] == r.data[0, 0, 0]
+
+        r.nbands = 2
+        assert r.nbands != r2.nbands
+
 
     def test_info(self):
 
@@ -55,17 +95,17 @@ class TestRaster:
             left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0
         )
         assert r.crs == rio.crs.CRS.from_epsg(32645)
-        assert not r.isLoaded
+        assert not r.is_loaded
 
         # Test 2 - loading the data afterward
         r.load()
-        assert r.isLoaded
+        assert r.is_loaded
         assert r.nbands == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 3 - single band, loading data
         r = gr.Raster(datasets.get_path("landsat_B4"), load_data=True)
-        assert r.isLoaded
+        assert r.is_loaded
         assert r.nbands == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
@@ -74,6 +114,7 @@ class TestRaster:
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 3
+        assert r.bands == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
@@ -81,13 +122,15 @@ class TestRaster:
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 1
+        assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(1,2))
+        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(2, 3))
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 2
+        assert r.bands == (2, 3)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
     def test_downsampling(self):
@@ -95,35 +138,89 @@ class TestRaster:
         Check that self.data is correct when using downsampling
         """
         # Test single band
-        r = gr.Raster(datasets.get_path("landsat_B4"), downsampl=4)
+        r = gr.Raster(datasets.get_path("landsat_B4"), downsample=4)
         assert r.data.shape == (1, 164, 200)
-        assert r.height == 655  # this should not have changed
-        assert r.width == 800
+        assert r.height == 164
+        assert r.width == 200
 
         # Test multiple band
-        r = gr.Raster(datasets.get_path("landsat_RGB"), downsampl=2)
+        r = gr.Raster(datasets.get_path("landsat_RGB"), downsample=2)
         assert r.data.shape == (3, 328, 400)
 
-    def test_copy(self):
+        # Test that xy2ij are consistent with new image
+        # Upper left
+        assert r.xy2ij(r.bounds.left, r.bounds.top) == (0, 0)
+        # Upper right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width)
+        # Bottom right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width)
+        # One pixel right and down
+        assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
 
+    def test_copy(self):
+        """
+        Test that the copy method works as expected for Raster. In particular
+        when copying r to r2:
+        - creates a new memory file
+        - if r.data is modified and r copied, the updated data is copied
+        - if r is copied, r.data changed, r2.data should be unchanged
+        """
+        # Open dataset, update data and make a copy
         r = gr.Raster(datasets.get_path("landsat_B4"))
+        r.data += 5
         r2 = r.copy()
 
-        # Should have no filename
+        # Objects should be different (not pointing to the same memory)
+        assert r is not r2
+
+        # Check the object is a Raster
+        assert isinstance(r2, gr.Raster)
+
+        # Copy should have no filename
         assert r2.filename is None
-        #check a temporary memory file different than original disk file was created
+
+        # check a temporary memory file different than original disk file was created
         assert r2.name != r.name
-        # Check all attributes except name and dataset_mask array
-        default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
-                         'res', 'shape', 'transform', 'width']
-        for attr in default_attrs:
+
+        # Check all attributes except name, driver and dataset_mask array
+        # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
+        #                  'res', 'shape', 'transform', 'width']
+        # using list directly available in Class
+        attrs = [at for at in gr.default_attrs if at not in ['name','dataset_mask','driver']]
+        for attr in attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.count_nonzero(~r.data == r2.data) == 0
+        assert np.array_equal(r.data,r2.data, equal_nan=True)
+
         # Check dataset_mask array
-        assert np.count_nonzero(~r.dataset_mask() == r2.dataset_mask()) == 0
+        assert np.all(r.data.mask==r2.data.mask)
+
+        # Check that if r.data is modified, it does not affect r2.data
+        r.data += 5
+        assert not np.array_equal(r.data, r2.data, equal_nan=True)
+
+    def test_is_modified(self):
+        """
+        Test that changing the data updates is_modified as desired
+        """
+        # after laoding, should not be modified
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert not r.is_modified
+
+        # this should not trigger the hash
+        r.data = r.data + 0
+        assert not r.is_modified
+
+        # this one neither
+        r.data += 0
+        assert not r.is_modified
+
+        # this will
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r.data = r.data + 5
+        assert r.is_modified
 
     def test_crop(self):
 
@@ -355,4 +452,55 @@ class TestRaster:
             assert yy.min() == pytest.approx(img.bounds.top + hy)
             assert yy.max() == pytest.approx(img.bounds.bottom - hy)
 
+    def test_eq(self):
 
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img2 = gr.Raster(datasets.get_path("landsat_B4"))
+
+        assert np.array_equal(img.data, img2.data, equal_nan=True)
+        assert img.transform == img2.transform
+        assert img.crs == img2.crs
+        assert img.nodata == img2.nodata
+
+        assert img.__eq__(img2)
+        assert img == img2
+
+        img2.data += 1
+
+        assert img != img2
+
+    def test_value_at_coords(self):
+        """
+        Check that values returned at selected pixels correspond to what is expected, both for original CRS and lat/lon.
+        """
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+
+        # Lower right pixel
+        x, y = [
+            img.bounds.right - img.res[0],
+            img.bounds.bottom + img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -1, -1]
+
+        # One pixel above
+        x, y = [
+            img.bounds.right - img.res[0],
+            img.bounds.bottom + 2 * img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -2, -1]
+
+        # One pixel left
+        x, y = [
+            img.bounds.right - 2 * img.res[0],
+            img.bounds.bottom + img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -1, -2]
