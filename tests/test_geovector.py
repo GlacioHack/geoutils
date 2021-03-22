@@ -21,3 +21,11 @@ class TestVector:
         vector2.ds = vector2.ds.query("NAME == 'Ayerbreen'")
 
         assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]
+
+    def test_query(self):
+
+        vector2 = self.glacier_outlines.query("NAME == 'Ayerbreen'")
+
+        assert vector2 is not self.glacier_outlines
+
+        assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]

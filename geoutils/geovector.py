@@ -162,3 +162,20 @@ class Vector(object):
                                   transform=transform, default_value=in_value)
 
         return mask
+
+    def query(self, expression: str, inplace=False):
+        """
+        Query the Vector dataset with a valid Pandas expression.
+
+        :param expression: A python-like expression to evaluate. Example: "col1 > col2"
+        :param inplace: Whether the query should modify the data in place or return a modified copy.
+
+        :returns: Vector resulting from the provided query expression or itself if inplace=True.
+        """
+        # Modify inplace if wanted and return the self instance.
+        if inplace:
+            self.ds.query(expression, inplace=True)
+            return self
+
+        # Otherwise, create a new Vector from the queried dataset.
+        return Vector(self.ds.query(expression))
