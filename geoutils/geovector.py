@@ -59,6 +59,11 @@ class Vector(object):
 
         return "".join(as_str)
 
+    def copy(self):
+        """Return a copy of the Vector."""
+        # Utilise the copy method of GeoPandas
+        return Vector(self.ds.copy())
+
     def crop2raster(self, rst):
         """
         Update self so that features outside the extent of a raster file are cropped. Reprojection is done on the fly if both data set have different projections.
