@@ -4,12 +4,12 @@
 The license (see LICENSE) applies to all contributions.
 
 ## Issue Conventions
-When submitting bugs, please filll out the bug report template in full.
+When submitting bugs, please fill out the bug report template in full.
 
 Please search existing issues, open and closed, before creating a new one.
 
 ## Git conventions
-Work on features should be made on a fork of `geoutils` and submitted as a pull request (PR) to main or a relevant branch.
+Work on features should be made on a fork of `geoutils` and submitted as a pull request (PR) to master or a relevant branch.
 
 ## Code conventions
 
