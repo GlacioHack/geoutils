@@ -2,10 +2,12 @@
 geoutils.vectortools provides a toolset for working with vector data.
 """
 import warnings
-import numpy as np
+
 import geopandas as gpd
+import numpy as np
 import rasterio as rio
-from rasterio import warp, features
+from rasterio import features, warp
+
 
 class Vector(object):
     """
@@ -22,11 +24,11 @@ class Vector(object):
         :return: A Vector object
         """
 
-        if isinstance(filename,str):
+        if isinstance(filename, str):
             ds = gpd.read_file(filename)
             self.ds = ds
             self.name = filename
-        elif isinstance(filename,gpd.GeoDataFrame):
+        elif isinstance(filename, gpd.GeoDataFrame):
             self.ds = filename
             self.name = None
         else:
