@@ -7,6 +7,10 @@ from . import geovector
 from . import datasets
 from . import satimg
 
+from .georaster import Raster
+from .geovector import Vector
+from .satimg import SatelliteImage
+
 try:
     from geoutils.version import version as __version__
 except ImportError:  # pragma: no cover
