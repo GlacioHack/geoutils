@@ -2,10 +2,12 @@
 geoutils.vectortools provides a toolset for working with vector data.
 """
 import warnings
-import numpy as np
+
 import geopandas as gpd
+import numpy as np
 import rasterio as rio
-from rasterio import warp, features
+from rasterio import features, warp
+
 
 class Vector(object):
     """
@@ -22,11 +24,11 @@ class Vector(object):
         :return: A Vector object
         """
 
-        if isinstance(filename,str):
+        if isinstance(filename, str):
             ds = gpd.read_file(filename)
             self.ds = ds
             self.name = filename
-        elif isinstance(filename,gpd.GeoDataFrame):
+        elif isinstance(filename, gpd.GeoDataFrame):
             self.ds = filename
             self.name = None
         else:
@@ -56,6 +58,11 @@ class Vector(object):
             self.ds.__repr__()]
 
         return "".join(as_str)
+
+    def copy(self):
+        """Return a copy of the Vector."""
+        # Utilise the copy method of GeoPandas
+        return Vector(self.ds.copy())
 
     def crop2raster(self, rst):
         """
@@ -155,3 +162,20 @@ class Vector(object):
                                   transform=transform, default_value=in_value)
 
         return mask
+
+    def query(self, expression: str, inplace=False):
+        """
+        Query the Vector dataset with a valid Pandas expression.
+
+        :param expression: A python-like expression to evaluate. Example: "col1 > col2"
+        :param inplace: Whether the query should modify the data in place or return a modified copy.
+
+        :returns: Vector resulting from the provided query expression or itself if inplace=True.
+        """
+        # Modify inplace if wanted and return the self instance.
+        if inplace:
+            self.ds.query(expression, inplace=True)
+            return self
+
+        # Otherwise, create a new Vector from the queried dataset.
+        return Vector(self.ds.query(expression))
