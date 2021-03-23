@@ -48,5 +48,7 @@ Direct pushing to the GlacioHack repository is not permitted.
 In the interest of keeping the documentation simple, please write all docstring in reStructuredText (https://docutils.sourceforge.io/rst.html) format - eventually, we will try to set up auto-documentation using sphinx and readthedocs, and this will help in that task.
 
 ### Testing - again please read!
-These tools are only valuable if we can rely on them to perform exactly as we expect. So, we need testing. Please create tests for every function that you make, as much as you are able. Guidance/examples here for the moment: https://github.com/GeoUtils/georaster/blob/master/test/test_georaster.py
-https://github.com/corteva/rioxarray/blob/master/test/integration/test_integration__io.py
+These tools are only valuable if we can rely on them to perform exactly as we expect. So, we need testing. Please create tests for every function that you make, as much as you are able. Guidance/examples here for the moment: 
+- https://github.com/GeoUtils/georaster/blob/master/test/test_georaster.py
+- https://github.com/corteva/rioxarray/blob/master/test/integration/test_integration__io.py
+
