@@ -4,7 +4,6 @@ Test functions for SatelliteImage class
 import os
 import pytest
 import datetime as dt
-import copy
 import numpy as np
 import geoutils.georaster as gr
 import geoutils.satimg as si

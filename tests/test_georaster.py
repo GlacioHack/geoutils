@@ -11,6 +11,7 @@ from rasterio.io import MemoryFile
 
 import geoutils.georaster as gr
 from geoutils import datasets
+import geoutils.projtools as pt
 
 
 DO_PLOT = False
@@ -33,8 +34,8 @@ class TestRaster:
         # third, rio.Dataset
         ds = rio.open(datasets.get_path("landsat_B4"))
         r3 = gr.Raster(ds)
-        assert r3.filename is None
         assert isinstance(r3,gr.Raster)
+        assert r3.filename is not None
 
         # finally, as memoryfile
         memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), 'rb'))
@@ -113,6 +114,7 @@ class TestRaster:
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 3
+        assert r.bands == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
@@ -120,13 +122,15 @@ class TestRaster:
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 1
+        assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(1,2))
+        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(2, 3))
         assert r.count == 3
         assert r.indexes == (1, 2, 3)
         assert r.nbands == 2
+        assert r.bands == (2, 3)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
     def test_downsampling(self):
@@ -134,14 +138,24 @@ class TestRaster:
         Check that self.data is correct when using downsampling
         """
         # Test single band
-        r = gr.Raster(datasets.get_path("landsat_B4"), downsampl=4)
+        r = gr.Raster(datasets.get_path("landsat_B4"), downsample=4)
         assert r.data.shape == (1, 164, 200)
-        assert r.height == 655  # this should not have changed
-        assert r.width == 800
+        assert r.height == 164
+        assert r.width == 200
 
         # Test multiple band
-        r = gr.Raster(datasets.get_path("landsat_RGB"), downsampl=2)
+        r = gr.Raster(datasets.get_path("landsat_RGB"), downsample=2)
         assert r.data.shape == (3, 328, 400)
+
+        # Test that xy2ij are consistent with new image
+        # Upper left
+        assert r.xy2ij(r.bounds.left, r.bounds.top) == (0, 0)
+        # Upper right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width)
+        # Bottom right
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width)
+        # One pixel right and down
+        assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
 
     def test_copy(self):
         """
@@ -454,3 +468,39 @@ class TestRaster:
         img2.data += 1
 
         assert img != img2
+
+    def test_value_at_coords(self):
+        """
+        Check that values returned at selected pixels correspond to what is expected, both for original CRS and lat/lon.
+        """
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+
+        # Lower right pixel
+        x, y = [
+            img.bounds.right - img.res[0],
+            img.bounds.bottom + img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -1, -1]
+
+        # One pixel above
+        x, y = [
+            img.bounds.right - img.res[0],
+            img.bounds.bottom + 2 * img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -2, -1]
+
+        # One pixel left
+        x, y = [
+            img.bounds.right - 2 * img.res[0],
+            img.bounds.bottom + img.res[1]
+        ]
+        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
+        assert img.value_at_coords(x, y) == \
+            img.value_at_coords(lon, lat, latlon=True) == \
+            img.data[0, -1, -2]
