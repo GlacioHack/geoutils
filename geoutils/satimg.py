@@ -69,7 +69,6 @@ def parse_metadata_from_fn(fname):
         elif spl[0] == 'srtm':
             attrs = ('SRTM', 'SRTM', 'SRTMv4.1', None, '_'.join(spl[1:]), dt.datetime(year=2000, month=2, day=15))
         else:
-            print("No metadata could be read from filename.")
             attrs = (None,)*6
 
     # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplfied?))
