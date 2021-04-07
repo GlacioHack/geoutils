@@ -2,6 +2,7 @@
 Test functions for SatelliteImage class
 """
 import os
+import sys
 import pytest
 import datetime as dt
 import numpy as np
@@ -9,6 +10,7 @@ import geoutils.georaster as gr
 import geoutils.satimg as si
 from geoutils import datasets
 import geoutils
+from io import StringIO
 import numpy as np
 
 DO_PLOT = False
@@ -42,6 +44,37 @@ class TestSatelliteImage:
 
         assert np.logical_and.reduce((np.all(img.data.mask == img2.data.mask),
                                       np.all(img2.data.mask == img3.data.mask)))
+
+    def test_silent(self):
+        """
+        Test that the silent method does not return any output in console
+        """
+        fn_img = datasets.get_path("landsat_B4")
+
+        # let's capture stdout
+        # cf https://stackoverflow.com/questions/16571150/how-to-capture-stdout-output-from-a-python-function-call
+        class Capturing(list):
+            def __enter__(self):
+                self._stdout = sys.stdout
+                sys.stdout = self._stringio = StringIO()
+                return self
+
+            def __exit__(self, *args):
+                self.extend(self._stringio.getvalue().splitlines())
+                del self._stringio  # free up some memory
+                sys.stdout = self._stdout
+
+        with Capturing() as output1:
+            img = si.SatelliteImage(fn_img)
+
+        # check the metadata reading outputs to console
+        assert len(output1)>0
+
+        with Capturing() as output2:
+            img = si.SatelliteImage(fn_img,silent=True)
+
+        # check nothing outputs to console
+        assert len(output2)==0
 
     def test_copy(self):
         """
