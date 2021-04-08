@@ -248,6 +248,14 @@ class Raster(object):
         if len(data.shape) < 3:
             data = np.expand_dims(data, 0)
 
+        # Preserves input mask
+        if isinstance(data, np.ma.masked_array):
+            if nodata is None:
+                if np.sum(data.mask) > 0:
+                    raise ValueError("For masked arrays, a nodata value must be set")
+            else:
+                data.data[data.mask] = nodata
+
         # Open handle to new memory file
         mfh = MemoryFile()
 
