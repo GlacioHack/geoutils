@@ -504,3 +504,26 @@ class TestRaster:
         assert img.value_at_coords(x, y) == \
             img.value_at_coords(lon, lat, latlon=True) == \
             img.data[0, -1, -2]
+
+    def test_from_array(self):
+
+        # Test that from_array works if nothing is changed
+        # -> most tests already performed in test_copy, no need for more
+        img = gr.Raster(datasets.get_path('landsat_B4'))
+        out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=img.nodata)
+        assert np.array_equal(out_img.data, img.data)
+
+        # Test that changes to data are taken into account
+        bias = 5
+        out_img = gr.Raster.from_array(img.data + bias, img.transform, img.crs, nodata=img.nodata)
+        assert np.array_equal(out_img.data, img.data + bias)
+
+        # Test that nodata is properly taken into account
+        out_img = gr.Raster.from_array(img.data + 5, img.transform, img.crs, nodata=0)
+        assert out_img.nodata == 0
+
+        # Test that data mask is taken into account
+        img.data.mask = np.zeros((img.shape), dtype='bool')
+        img.data.mask[0, 0, 0] = True
+        out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
+        assert out_img.data.mask[0, 0, 0]
