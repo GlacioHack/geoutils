@@ -248,6 +248,10 @@ class Raster(object):
         if len(data.shape) < 3:
             data = np.expand_dims(data, 0)
 
+        # Preserves input mask
+        if isinstance(data, np.ma.masked_array):
+            data.data[data.mask] = nodata
+
         # Open handle to new memory file
         mfh = MemoryFile()
 
