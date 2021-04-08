@@ -249,7 +249,7 @@ class Raster(object):
             data = np.expand_dims(data, 0)
 
         # Preserves input mask
-        if isinstance(data, np.ma.masked_array):
+        if isinstance(data, np.ma.masked_array) & (nodata is not None):
             data.data[data.mask] = nodata
 
         # Open handle to new memory file
