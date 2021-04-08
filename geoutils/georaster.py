@@ -701,17 +701,19 @@ class Raster(object):
                 dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top,
                     left=dst_bounds.left, bottom=y1, right=x1)
 
-
+        # Fix output shape (dst_size is (ncol, nrow))
         if dst_size is not None:
-            # Fix raster size at nx, ny.
             dst_shape = (self.count, dst_size[1], dst_size[0])
+            dst_data = np.ones(dst_shape)
+            reproj_kwargs.update({'destination': dst_data})
+        else:
+            dst_shape = (self.count, self.width, self.height)
 
-            # Fix nx,ny with destination bounds requested.
-            if dst_bounds is not None:
-                dst_transform = rio.transform.from_bounds(*dst_bounds,
-                                                          width=dst_shape[2], height=dst_shape[1])
-                reproj_kwargs.update({'dst_transform': dst_transform})
-
+        # Fix nx,ny with destination bounds requested.
+        if dst_bounds is not None:
+            dst_transform = rio.transform.from_bounds(*dst_bounds,
+                                                      width=dst_shape[2], height=dst_shape[1])
+            reproj_kwargs.update({'dst_transform': dst_transform})
             dst_data = np.ones(dst_shape)
             reproj_kwargs.update({'destination': dst_data})
 
