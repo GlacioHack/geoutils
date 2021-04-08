@@ -511,7 +511,7 @@ class TestRaster:
         # -> most tests already performed in test_copy, no need for more
         img = gr.Raster(datasets.get_path('landsat_B4'))
         out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=img.nodata)
-        assert np.array_equal(out_img.data, img.data)
+        assert out_img == img
 
         # Test that changes to data are taken into account
         bias = 5
