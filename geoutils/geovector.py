@@ -81,7 +81,7 @@ class Vector(object):
         # Note: could skip this if we could test if rojections are same
         # Note: should include a method in Raster to get extent in other projections, not only using corners
         left, bottom, right, top = rst.bounds
-        x1, x2, y1, y2 = warp.transform_bounds(
+        x1, y1, x2, y2 = warp.transform_bounds(
             rst.crs, self.ds.crs, left, bottom, right, top)
         self.ds = self.ds.cx[x1:x2, y1:y2]
 
