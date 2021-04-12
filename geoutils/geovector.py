@@ -2,6 +2,7 @@
 geoutils.vectortools provides a toolset for working with vector data.
 """
 import warnings
+import collections
 
 import geopandas as gpd
 import numpy as np
@@ -157,6 +158,109 @@ the provided raster file.
         mask = features.rasterize(shapes=vect.geometry,
                                   fill=0, out_shape=out_shape,
                                   transform=transform, default_value=1, dtype='uint8').astype('bool')
+
+        return mask
+
+    def rasterize(self, rst=None, crs=None, xres=None, yres=None, bounds=None, in_value=None, out_value=0):
+        """
+        Return an array with input geometries burned in.
+
+        By default, output raster has the extent/dimensions of the provided raster file.
+        Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
+        Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
+
+        Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
+        Default is an index from 1 to len(self.ds).
+
+        :param rst: A raster to be used as reference for the output grid
+        :type rst: Raster object or str
+        :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
+        :type crs: pyproj.crs.crs.CRS, rasterio.crs.CRS
+        :param xres: Output raster spatial resolution in x. Only is rst is None.
+        :type xres: float
+        :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
+        :type yres: float
+        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
+        :type bounds: tuple
+        :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1)
+        :type in_value: int, float, iterable
+        :param out_value: Value to be burned outside the polygons (Default is 0)
+        :type out_value: int, float
+
+        :returns: array containing the burned geometries
+        :rtype: numpy.array
+        """
+        # If input rst is string, open as Raster
+        if isinstance(rst, str):
+            from geoutils.georaster import Raster
+            rst = Raster(rst)
+
+        # If no rst given, use provided dimensions
+        if rst is None:
+
+            # At minimum, xres must be set
+            if xres is None:
+                raise ValueError('at least rst or xres must be set')
+            if yres is None:
+                yres = xres
+
+            # By default, use self's CRS and bounds
+            if crs is None:
+                crs = self.ds.crs
+            if bounds is None:
+                bounds = self.ds.total_bounds
+
+            # Calculate raster shape
+            left, bottom, right, top = bounds
+            height = abs((right-left)/xres)
+            width = abs((top-bottom)/yres)
+
+            if width % 1 != 0 or height % 1 != 0:
+                warnings.warn(
+                    "Bounds not a multiple of xres/yres, use rounded bounds")
+
+            width = int(np.round(width))
+            height = int(np.round(height))
+            out_shape = (height, width)
+
+            # Calculate raster transform
+            transform = rio.transform.from_bounds(
+                left, bottom, right, top, width, height)
+
+        # otherwise use directly rst's dimensions
+        else:
+            out_shape = rst.shape
+            transform = rst.transform
+            crs = rst.crs
+
+        # Reproject vector into rst CRS
+        # Note: would need to check if CRS are different
+        vect = self.ds.to_crs(crs)
+
+        # Set default burn value, index from 1 to len(self.ds)
+        if in_value is None:
+            in_value = self.ds.index + 1
+
+        # Rasterize geometry
+        if isinstance(in_value, collections.abc.Iterable):
+            if len(in_value) != len(vect.geometry):
+                raise ValueError(
+                    "in_value must have same length as self.ds.geometry, currently {} != {}".format(
+                        len(in_value), len(vect.geometry))
+                )
+
+            out_geom = ((geom, value) for geom, value in zip(vect.geometry, in_value))
+
+            mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape,
+                                      transform=transform)
+
+        elif isinstance(in_value, (int, float, np.integer)):
+            mask = features.rasterize(shapes=vect.geometry, fill=out_value, out_shape=out_shape,
+                                      transform=transform, default_value=in_value)
+        else:
+            raise ValueError(
+                "in_value must be a single number or an iterable with same length as self.ds.geometry"
+            )
 
         return mask
 
