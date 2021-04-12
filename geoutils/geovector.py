@@ -84,9 +84,10 @@ class Vector(object):
             rst.crs, self.ds.crs, left, bottom, right, top)
         self.ds = self.ds.cx[x1:x2, y1:y2]
 
-    def create_mask(self, rst=None, crs=None, xres=None, yres=None, bounds=None, in_value=255, out_value=0):
+    def create_mask(self, rst=None, crs=None, xres=None, yres=None, bounds=None):
         """
-        Rasterize the vector features into a raster which has the extent/dimensions of the provided raster file.
+        Rasterize the vector features into a boolean raster which has the extent/dimensions of \
+the provided raster file.
 
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs. Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
         Vector features which fall outside the bounds of the raster file are not written to the new mask file.
@@ -101,10 +102,6 @@ class Vector(object):
         :type yres: float
         :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
         :type bounds: tuple
-        :param in_value: Value to be burnt inside the polygons (Default 255)
-        :type in_value: float
-        :param out_value: Value to be burnt outside the polygons (Default 0)
-        :type out_value: float
 
         :returns: array containing the mask
         :rtype: numpy.array
@@ -158,8 +155,8 @@ class Vector(object):
 
         # Rasterize geomtry
         mask = features.rasterize(shapes=vect.geometry,
-                                  fill=out_value, out_shape=out_shape,
-                                  transform=transform, default_value=in_value)
+                                  fill=0, out_shape=out_shape,
+                                  transform=transform, default_value=1, dtype='uint8').astype('bool')
 
         return mask
 
