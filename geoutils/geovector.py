@@ -254,7 +254,7 @@ the provided raster file.
             mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape,
                                       transform=transform)
 
-        elif isinstance(in_value, (int, float, np.integer)):
+        elif isinstance(in_value, (int, float, np.integer, np.floating)):
             mask = features.rasterize(shapes=vect.geometry, fill=out_value, out_shape=out_shape,
                                       transform=transform, default_value=in_value)
         else:
