@@ -160,6 +160,10 @@ the provided raster file.
                                   fill=0, out_shape=out_shape,
                                   transform=transform, default_value=1, dtype='uint8').astype('bool')
 
+        # Force output mask to be of same dimension as input rst
+        if rst is not None:
+            mask = mask.reshape((rst.count, rst.height, rst.width))
+
         return mask
 
     def rasterize(self, rst=None, crs=None, xres=None, yres=None, bounds=None, in_value=None, out_value=0):
