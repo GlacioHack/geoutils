@@ -3,6 +3,7 @@ geoutils.vectortools provides a toolset for working with vector data.
 """
 import warnings
 import collections
+from numbers import Number
 
 import geopandas as gpd
 import numpy as np
@@ -254,7 +255,7 @@ the provided raster file.
             mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape,
                                       transform=transform)
 
-        elif isinstance(in_value, (int, float, np.integer, np.floating)):
+        elif isinstance(in_value, Number):
             mask = features.rasterize(shapes=vect.geometry, fill=out_value, out_shape=out_shape,
                                       transform=transform, default_value=in_value)
         else:
