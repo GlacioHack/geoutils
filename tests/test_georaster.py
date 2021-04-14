@@ -2,19 +2,19 @@
 Test functions for georaster
 """
 from tempfile import TemporaryFile
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-
 import rasterio as rio
 from rasterio.io import MemoryFile
 
 import geoutils.georaster as gr
-from geoutils import datasets
 import geoutils.projtools as pt
-
+from geoutils import datasets
 
 DO_PLOT = False
+
 
 class TestRaster:
 
@@ -25,22 +25,22 @@ class TestRaster:
 
         # first, filename
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        assert isinstance(r,gr.Raster)
+        assert isinstance(r, gr.Raster)
 
         # second, passing a Raster itself (points back to Raster passed)
         r2 = gr.Raster(r)
-        assert isinstance(r2,gr.Raster)
+        assert isinstance(r2, gr.Raster)
 
         # third, rio.Dataset
         ds = rio.open(datasets.get_path("landsat_B4"))
         r3 = gr.Raster(ds)
-        assert isinstance(r3,gr.Raster)
+        assert isinstance(r3, gr.Raster)
         assert r3.filename is not None
 
         # finally, as memoryfile
         memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), 'rb'))
         r4 = gr.Raster(memfile)
-        assert isinstance(r4,gr.Raster)
+        assert isinstance(r4, gr.Raster)
 
         assert np.logical_and.reduce((np.array_equal(r.data, r2.data, equal_nan=True),
                                       np.array_equal(r2.data, r3.data, equal_nan=True),
@@ -56,7 +56,6 @@ class TestRaster:
 
         r.nbands = 2
         assert r.nbands != r2.nbands
-
 
     def test_info(self):
 
@@ -186,16 +185,16 @@ class TestRaster:
         # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
         #                  'res', 'shape', 'transform', 'width']
         # using list directly available in Class
-        attrs = [at for at in gr.default_attrs if at not in ['name','dataset_mask','driver']]
+        attrs = [at for at in gr.default_attrs if at not in ['name', 'dataset_mask', 'driver']]
         for attr in attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.array_equal(r.data,r2.data, equal_nan=True)
+        assert np.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check dataset_mask array
-        assert np.all(r.data.mask==r2.data.mask)
+        assert np.all(r.data.mask == r2.data.mask)
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
