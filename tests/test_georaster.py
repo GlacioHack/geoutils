@@ -1,12 +1,15 @@
 """
 Test functions for georaster
 """
+import os
+import tempfile
 from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
+from pylint import epylint
 from rasterio.io import MemoryFile
 
 import geoutils.georaster as gr
@@ -554,3 +557,40 @@ class TestRaster:
         img.data.mask[0, 0, 0] = True
         out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
         assert out_img.data.mask[0, 0, 0]
+
+    def test_type_hints(self):
+        """Test that pylint doesn't raise errors on valid code."""
+        # Create a temporary directory and a temporary filename
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_path = os.path.join(temp_dir.name, "code.py")
+
+        # Load the attributes to check
+        attributes = gr.default_attrs + ["is_loaded", "filename", "nbands", "filename"]
+
+        # Create some sample code that should be correct
+        sample_code = "\n".join([
+            "'''Sample code that should conform to pylint's standards.'''",  # Add docstring
+            "import geoutils as gu",  # Import geoutils
+            "raster = gu.Raster(gu.datasets.get_path('landsat_B4'))",  # Load a raster
+        ] + \
+            # The below statements should not raise a 'no-member' (E1101) error.
+            [f"{attribute.upper()} = raster.{attribute}" for attribute in attributes] + \
+            # Add a newline to the end.
+            [""]
+        )
+
+        # Write the code to the temporary file
+        with open(temp_path, "w") as outfile:
+            outfile.write(sample_code)
+
+        # Run pylint and parse the stdout as a string
+        lint_string = epylint.py_run(temp_path, return_std=True)[0].getvalue()
+
+        print(lint_string)  # Print the output for debug purposes
+
+        # Bad linting errors are defined here. Currently just "no-member" errors
+        bad_lints = [f"Instance of 'Raster' has no '{attribute}' member" for attribute in attributes]
+
+        # Assert that none of the bad errors are in the pylint output
+        for bad_lint in bad_lints:
+            assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"

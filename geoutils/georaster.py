@@ -1,9 +1,12 @@
 """
 geoutils.georaster provides a toolset for working with raster data.
 """
+from __future__ import annotations
+
 import collections
 import os
 import warnings
+from typing import Optional, Union
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -33,6 +36,7 @@ else:
 default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
                  'res', 'shape', 'transform', 'width']
 
+
 class Raster(object):
     """
     Create a Raster object from a rasterio-supported raster dataset.
@@ -58,7 +62,7 @@ class Raster(object):
         count
 
         crs
-        
+
         dataset_mask
 
         driver
@@ -86,8 +90,25 @@ class Raster(object):
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
-    _is_modified = None
-    _disk_hash = None
+    _is_modified: Optional[bool] = None
+    _disk_hash: Optional[int] = None
+
+    # Rasterio-inherited names and types are defined here to get proper type hints.
+    # Maybe these don't have to be hard-coded in the future?
+    transform: Affine
+    crs: CRS
+    nodata: Optional[Union[int, float]]
+    res: list[float]
+    bounds: rio.coords.BoundingBox
+    height: int
+    width: int
+    shape: tuple[int, int]
+    indexes: list[int]
+    count: int
+    dataset_mask: Optional[np.ndarray]
+    driver: str
+    dtypes: list[str]
+    name: str
 
     def __init__(self, filename_or_dataset, bands=None, load_data=True, downsample=1,
                  masked=True, attrs=None, as_memfile=False):
