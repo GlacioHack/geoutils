@@ -1,15 +1,16 @@
 import os
 
-__all__ = ["datasets", "get_path"]
+__all__ = ["available", "get_path"]
 
 _module_path = os.path.dirname(__file__)
 
-datasets = {"landsat_B4": "LE71400412000304SGS00_B4_crop.TIF",
+available = {"landsat_B4": "LE71400412000304SGS00_B4_crop.TIF",
             "landsat_B4_crop": "LE71400412000304SGS00_B4_crop2.TIF",
-            "landsat_RGB": "LE71400412000304SGS00_RGB.TIF"}
+            "landsat_RGB": "LE71400412000304SGS00_RGB.TIF",
+            "glacier_outlines": "glacier_outlines.gpkg"}
 
 
-def get_path(dset):
+def get_path(dset=None):
     """
     Get the path to the data file.
     Parameters
@@ -21,10 +22,10 @@ def get_path(dset):
     --------
     >>> geoutils.datasets.get_path("landsat_B4")
     """
-    if dset in list(datasets.keys()):
-        return os.path.abspath(os.path.join(_module_path, datasets[dset]))
+    if dset in list(available.keys()):
+        return os.path.abspath(os.path.join(_module_path, available[dset]))
     else:
-        msg = "The dataset '{:s}' is not available. ".format(set)
+        msg = "The dataset '{}' is not available. ".format(dset)
         msg += "Available datasets are {}".format(
-            ", ".join(list(datasets.keys())))
+            ", ".join(list(available.keys())))
         raise ValueError(msg)

@@ -69,7 +69,6 @@ def parse_metadata_from_fn(fname):
         elif spl[0] == 'srtm':
             attrs = ('SRTM', 'SRTM', 'SRTMv4.1', None, '_'.join(spl[1:]), dt.datetime(year=2000, month=2, day=15))
         else:
-            print("No metadata could be read from filename.")
             attrs = (None,)*6
 
     # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplfied?))
@@ -78,7 +77,6 @@ def parse_metadata_from_fn(fname):
                  dt.datetime(year=2000, month=2, day=15))
 
     else:
-        print("No metadata could be read from filename.")
         attrs = (None,)*6
 
     return attrs
@@ -306,6 +304,11 @@ class SatelliteImage(Raster):
         fname = self.filename
         name_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
         attrs = parse_metadata_from_fn(fname)
+
+        if all([att is None for att in attrs]):
+            if not silent:
+                print("No metadata could be read from filename.")
+            return
 
         for n in name_attrs:
             a = self.__getattribute__(n)

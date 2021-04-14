@@ -254,6 +254,7 @@ class TestRaster:
 
     def test_reproj(self):
 
+        # Test reprojecting to dst_ref
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
         r3 = r.reproject(r2)
@@ -270,7 +271,34 @@ class TestRaster:
 
             plt.show()
 
-        # TODO: not sure what to assert here
+        # Assert the initial rasters are different
+        assert r.bounds != r2.bounds
+        assert r.shape != r2.shape
+
+        # Reproject raster should have same dimensions/georeferences as r2
+        assert r3.bounds == r2.bounds
+        assert r3.shape == r2.shape
+        assert r3.bounds == r2.bounds
+        assert r3.transform == r2.transform
+
+        # If a nodata is set, make sure it is preserved
+        r.set_ndv(255)
+        r3 = r.reproject(r2)
+        assert r.nodata == r3.nodata
+
+        # Test dst_size
+        out_size = (r.shape[1]//2, r.shape[0]//2)  # Outsize is (ncol, nrow)
+        r3 = r.reproject(dst_size=out_size)
+        assert r3.shape == (out_size[1], out_size[0])
+
+        # Test dst_bounds
+        r3 = r.reproject(dst_bounds=r2.bounds)
+        assert r3.bounds == r2.bounds
+
+        # Test dst_crs
+        out_crs = rio.crs.CRS.from_epsg(4326)
+        r3 = r.reproject(dst_crs=out_crs)
+        assert r3.crs.to_epsg() == 4326
 
     def test_inters_img(self):
 
@@ -504,3 +532,26 @@ class TestRaster:
         assert img.value_at_coords(x, y) == \
             img.value_at_coords(lon, lat, latlon=True) == \
             img.data[0, -1, -2]
+
+    def test_from_array(self):
+
+        # Test that from_array works if nothing is changed
+        # -> most tests already performed in test_copy, no need for more
+        img = gr.Raster(datasets.get_path('landsat_B4'))
+        out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=img.nodata)
+        assert out_img == img
+
+        # Test that changes to data are taken into account
+        bias = 5
+        out_img = gr.Raster.from_array(img.data + bias, img.transform, img.crs, nodata=img.nodata)
+        assert np.array_equal(out_img.data, img.data + bias)
+
+        # Test that nodata is properly taken into account
+        out_img = gr.Raster.from_array(img.data + 5, img.transform, img.crs, nodata=0)
+        assert out_img.nodata == 0
+
+        # Test that data mask is taken into account
+        img.data.mask = np.zeros((img.shape), dtype='bool')
+        img.data.mask[0, 0, 0] = True
+        out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
+        assert out_img.data.mask[0, 0, 0]
