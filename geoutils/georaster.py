@@ -1446,10 +1446,10 @@ to be cleared due to the setting of GCPs.")
 
         :returns: A list of Rasters for each band.
         """
-        bands: list[Raster] = []
+        bands: list[self] = []
 
         for band_n in range(self.nbands):
-            bands.append(Raster.from_array(
+            bands.append(self.from_array(
                 self.data[band_n, :, :],
                 transform=self.transform,
                 crs=self.crs,
