@@ -555,3 +555,22 @@ class TestRaster:
         img.data.mask[0, 0, 0] = True
         out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
         assert out_img.data.mask[0, 0, 0]
+
+    def test_split_bands(self):
+
+        img = gr.Raster(datasets.get_path('landsat_RGB'))
+
+        red, green, blue = img.split_bands()
+
+        # Check that the red band is not equal to the full RGB data.
+        assert red != img
+
+        assert red.nbands == 1
+        assert img.nbands == 3
+
+        # Test that the red band corresponds to the first band of the img
+        assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+
+        # Modify the red band and make sure it doesn't propagate to the original img (it's a copy)
+        red.data += 1
+        assert not np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
