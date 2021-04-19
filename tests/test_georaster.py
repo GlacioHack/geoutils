@@ -594,3 +594,22 @@ class TestRaster:
         # Assert that none of the bad errors are in the pylint output
         for bad_lint in bad_lints:
             assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"
+
+    def test_split_bands(self):
+
+        img = gr.Raster(datasets.get_path('landsat_RGB'))
+
+        red, green, blue = img.split_bands()
+
+        # Check that the red band is not equal to the full RGB data.
+        assert red != img
+
+        assert red.nbands == 1
+        assert img.nbands == 3
+
+        # Test that the red band corresponds to the first band of the img
+        assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+
+        # Modify the red band and make sure it doesn't propagate to the original img (it's a copy)
+        red.data += 1
+        assert not np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
