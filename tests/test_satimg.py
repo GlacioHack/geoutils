@@ -28,16 +28,16 @@ class TestSatelliteImage:
         # from filename, checking option
         img = si.SatelliteImage(fn_img, read_from_fn=False)
         img = si.SatelliteImage(fn_img)
-        assert isinstance(img,si.SatelliteImage)
+        assert isinstance(img, si.SatelliteImage)
 
         # from SatelliteImage
         img2 = si.SatelliteImage(img)
-        assert isinstance(img2,si.SatelliteImage)
+        assert isinstance(img2, si.SatelliteImage)
 
         # from Raster
         r = gr.Raster(fn_img)
         img3 = si.SatelliteImage(r)
-        assert isinstance(img3,si.SatelliteImage)
+        assert isinstance(img3, si.SatelliteImage)
 
         assert np.logical_and.reduce((np.array_equal(img.data, img2.data, equal_nan=True),
                                       np.array_equal(img2.data, img3.data, equal_nan=True)))
@@ -68,13 +68,13 @@ class TestSatelliteImage:
             img = si.SatelliteImage(fn_img)
 
         # check the metadata reading outputs to console
-        assert len(output1)>0
+        assert len(output1) > 0
 
         with Capturing() as output2:
-            img = si.SatelliteImage(fn_img,silent=True)
+            img = si.SatelliteImage(fn_img, silent=True)
 
         # check nothing outputs to console
-        assert len(output2)==0
+        assert len(output2) == 0
 
     def test_copy(self):
         """
@@ -114,7 +114,6 @@ class TestSatelliteImage:
         r.data += 5
         assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
-
     def test_filename_parsing(self):
 
         copied_names = ['TDM1_DEM__30_N00E104_DEM.tif',
@@ -135,10 +134,10 @@ class TestSatelliteImage:
         # we can skip the version, bit subjective...
         tiles = ['N00E104', None, None, None, '06_01', 'N00E108', 'N00E015',
                  'n00e041']
-        datetimes = [None, dt.datetime(year=2014,month=10,day=26),dt.datetime(year=2015,month=3,day=13,hour=22,minute=44,second=18),
-                     dt.datetime(year=2019,month=9,day=28),dt.datetime(year=2000,month=2,day=15),None,dt.datetime(year=2000,month=2,day=15),
-                     dt.datetime(year=2000,month=2,day=15)]
-
+        datetimes = [None, dt.datetime(year=2014, month=10, day=26), dt.datetime(year=2015, month=3, day=13, hour=22, minute=44, second=18),
+                     dt.datetime(year=2019, month=9, day=28), dt.datetime(year=2000, month=2,
+                                                                          day=15), None, dt.datetime(year=2000, month=2, day=15),
+                     dt.datetime(year=2000, month=2, day=15)]
 
         for names in copied_names:
             attrs = si.parse_metadata_from_fn(names)
@@ -151,9 +150,9 @@ class TestSatelliteImage:
 
     def test_sw_tile_naming_parsing(self):
 
-        #normal examples
-        test_tiles = ['N14W065','S14E065','N014W065','W065N014','W065N14','N00E000']
-        test_latlon = [(14,-65),(-14,65),(14,-65),(14,-65),(14,-65),(0,0)]
+        # normal examples
+        test_tiles = ['N14W065', 'S14E065', 'N014W065', 'W065N014', 'W065N14', 'N00E000']
+        test_latlon = [(14, -65), (-14, 65), (14, -65), (14, -65), (14, -65), (0, 0)]
 
         for tile in test_tiles:
             assert si.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
@@ -170,3 +169,4 @@ class TestSatelliteImage:
         # same here
         assert si.latlon_to_sw_naming((0, -180)) == 'N00W180'
         assert si.latlon_to_sw_naming((0, 180)) == 'N00W180'
+
