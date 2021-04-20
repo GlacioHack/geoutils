@@ -1,8 +1,12 @@
 """
 geoutils.georaster provides a toolset for working with raster data.
 """
+from __future__ import annotations
+
 import os
 import warnings
+from typing import Optional, Union
+
 import numpy as np
 import collections
 import rasterio as rio
@@ -1440,20 +1444,43 @@ to be cleared due to the setting of GCPs.")
 
         return rpts
 
-    def split_bands(self):
+    def split_bands(self, copy: bool = False, subset: Optional[Union[list[int], int]] = None):
         """
         Split the bands into separate copied rasters.
 
-        :returns: A list of Rasters for each band.
+        :param copy: Copy the bands or return slices of the original data.
+        :param subset: Optional. A subset of band indices to extract. Defaults to all.
+
+        :returns: A list of Rasters for each band, or one Raster if len(subset)==1.
         """
         bands: list[self] = []
 
-        for band_n in range(self.nbands):
-            bands.append(self.from_array(
-                self.data[band_n, :, :],
-                transform=self.transform,
-                crs=self.crs,
-                nodata=self.nodata
-            ))
+        if subset is None:
+            indices = list(range(self.nbands))
+        elif isinstance(subset, int):
+            indices = [subset]
+        elif isinstance(subset, list):
+            indices = subset
+        else:
+            raise ValueError(f"'subset' got invalid type: {type(subset)}. Expected list[int], int or None")
 
-        return bands
+        if copy:
+            for band_n in indices:
+                # Generate a new Raster from a copy of the band's data
+                bands.append(self.from_array(
+                    self.data[band_n, :, :],
+                    transform=self.transform,
+                    crs=self.crs,
+                    nodata=self.nodata
+                ))
+        else:
+            for band_n in indices:
+                # Generate a new instance with the same underlying values.
+                raster = Raster(self)
+                # Set the data to a slice of the original array
+                raster._data = self.data[band_n, :, :].reshape(((1,) + self.data.shape[1:]))
+                # Set the nbands
+                raster.nbands = 1
+                bands.append(raster)
+
+        return bands if len(bands) > 1 else bands[0]

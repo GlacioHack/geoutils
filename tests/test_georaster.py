@@ -560,17 +560,44 @@ class TestRaster:
 
         img = gr.Raster(datasets.get_path('landsat_RGB'))
 
-        red, green, blue = img.split_bands()
+        red, green, blue = img.split_bands(copy=False)
 
-        # Check that the red band is not equal to the full RGB data.
-        assert red != img
-
+        # Check that the shapes are correct.
         assert red.nbands == 1
+        assert red.data.shape[0] == 1
         assert img.nbands == 3
+        assert img.data.shape[0] == 3
+
+        # Extract only one band (then it will not return a list)
+        red2 = img.split_bands(copy=False, subset=0)
+
+        # Extract a subset with a list in a weird direction
+        blue2, green2 = img.split_bands(copy=False, subset=[2, 1])
+
+        # Check that the subset functionality works as expected.
+        assert np.array_equal(red.data.astype("float32"), red2.data.astype("float32"))
+        assert np.array_equal(blue.data.astype("float32"), blue2.data.astype("float32"))
+        assert np.array_equal(green.data.astype("float32"), green2.data.astype("float32"))
+
+        # Check that the red channel and the rgb data shares memory
+        assert np.shares_memory(red.data, img.data)
+
+        # Check that the red band data is not equal to the full RGB data.
+        assert red != img
 
         # Test that the red band corresponds to the first band of the img
         assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
 
-        # Modify the red band and make sure it doesn't propagate to the original img (it's a copy)
+        # Modify the red band and make sure it propagates to the original img (it's not a copy)
         red.data += 1
-        assert not np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+        assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+
+        # Copy the bands instead of pointing to the same memory.
+        red_c = img.split_bands(copy=True, subset=0)
+
+        # Check that the red band data does not share memory with the rgb image (it's a copy)
+        assert not np.shares_memory(red_c, img)
+
+        # Modify the copy, and make sure the original data is not modifed.
+        red_c.data += 1
+        assert not np.array_equal(red_c.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
