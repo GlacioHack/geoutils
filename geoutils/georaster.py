@@ -1444,7 +1444,7 @@ to be cleared due to the setting of GCPs.")
 
         return rpts
 
-    def split_bands(self, copy=False, subset: Optional[Union[list[int], int]] = None):
+    def split_bands(self, copy: bool = False, subset: Optional[Union[list[int], int]] = None):
         """
         Split the bands into separate copied rasters.
 

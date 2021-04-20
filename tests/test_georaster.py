@@ -592,7 +592,7 @@ class TestRaster:
         red.data += 1
         assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
 
-        # Copy the bands instead of
+        # Copy the bands instead of pointing to the same memory.
         red_c = img.split_bands(copy=True, subset=0)
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
