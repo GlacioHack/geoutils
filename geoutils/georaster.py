@@ -33,8 +33,8 @@ else:
     _has_rioxarray = True
 
 # Attributes from rasterio's DatasetReader object to be kept by default
-default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
-                 'res', 'shape', 'transform', 'width']
+# default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
+#                 'res', 'shape', 'transform', 'width']
 
 
 class Raster(object):
@@ -324,15 +324,29 @@ class Raster(object):
     def __ne__(self, other) -> bool:
         return not self.__eq__(other)
 
+    def _get_rio_attrs(self) -> list[str]:
+        """Get the attributes that have the same name in rio.DatasetReader and Raster."""
+        rio_attrs: list[str] = []
+        for attr in self.__annotations__.keys():
+            if "__" in attr or attr not in dir(self.ds):
+                continue
+            rio_attrs.append(attr)
+        return rio_attrs
+
     def _read_attrs(self, attrs=None):
         # Copy most used attributes/methods
+        rio_attrs = self._get_rio_attrs()
+        for attr in self.__annotations__.keys():
+            if "__" in attr or attr not in dir(self.ds):
+                continue
+            rio_attrs.append(attr)
         if attrs is None:
-            self._saved_attrs = default_attrs
-            attrs = default_attrs
+            self._saved_attrs = rio_attrs
+            attrs = rio_attrs
         else:
             if isinstance(attrs, str):
                 attrs = [attrs]
-            for attr in default_attrs:
+            for attr in rio_attrs:
                 if attr not in attrs:
                     attrs.append(attr)
             self._saved_attrs = attrs

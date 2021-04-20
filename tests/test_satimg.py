@@ -99,7 +99,7 @@ class TestSatelliteImage:
         #                    'res', 'shape', 'transform', 'width']
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
         # using list directly available in Class
-        attrs = [at for at in gr.default_attrs if at not in ['name', 'dataset_mask', 'driver']]
+        attrs = [at for at in r._get_rio_attrs() if at not in ['name', 'dataset_mask', 'driver']]
         all_attrs = attrs + si.satimg_attrs
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)

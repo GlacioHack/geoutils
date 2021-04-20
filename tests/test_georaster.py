@@ -188,7 +188,7 @@ class TestRaster:
         # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
         #                  'res', 'shape', 'transform', 'width']
         # using list directly available in Class
-        attrs = [at for at in gr.default_attrs if at not in ['name', 'dataset_mask', 'driver']]
+        attrs = [at for at in r._get_rio_attrs() if at not in ['name', 'dataset_mask', 'driver']]
         for attr in attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
@@ -564,8 +564,10 @@ class TestRaster:
         temp_dir = tempfile.TemporaryDirectory()
         temp_path = os.path.join(temp_dir.name, "code.py")
 
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+
         # Load the attributes to check
-        attributes = gr.default_attrs + ["is_loaded", "filename", "nbands", "filename"]
+        attributes = r._get_rio_attrs() + ["is_loaded", "filename", "nbands", "filename"]
 
         # Create some sample code that should be correct
         sample_code = "\n".join([
