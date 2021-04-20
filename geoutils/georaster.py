@@ -1469,3 +1469,21 @@ to be cleared due to the setting of GCPs.")
         rpts = np.array(rpts)
 
         return rpts
+
+    def split_bands(self):
+        """
+        Split the bands into separate copied rasters.
+
+        :returns: A list of Rasters for each band.
+        """
+        bands: list[self] = []
+
+        for band_n in range(self.nbands):
+            bands.append(self.from_array(
+                self.data[band_n, :, :],
+                transform=self.transform,
+                crs=self.crs,
+                nodata=self.nodata
+            ))
+
+        return bands
