@@ -22,7 +22,8 @@ jobs:
         python-version: 3.9
     - name: Install dependencies
       run: |
-        $CONDA/bin/conda env update --file environment.yml --name base
+        $CONDA/bin/conda install -y -c conda-forge mamba
+        $CONDA/bin/mamba env update --file environment.yml --name base
         $CONDA/bin/pip install -r dev-requirements.txt
         $CONDA/bin/pip install .
     - name: Lint with flake8
