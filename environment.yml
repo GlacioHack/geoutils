@@ -9,11 +9,3 @@ dependencies:
   - rasterio
   - rioxarray
 
-  # code checks
-  - flake8
-
-  # testing
-  - pytest
-
-  # development
-  - pip
