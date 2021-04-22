@@ -601,3 +601,23 @@ class TestRaster:
         # Modify the copy, and make sure the original data is not modifed.
         red_c.data += 1
         assert not np.array_equal(red_c.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+
+    def test_resampling_str(self):
+        """Test that resampling methods can be given as strings instead of rio enums."""
+        assert gr._resampling_from_str("nearest") == rio.warp.Resampling.nearest
+        assert gr._resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline
+
+        # Check that odd strings return the appropriate error.
+        try:
+            gr._resampling_from_str("CUBIC_SPLINE")
+        except ValueError as exception:
+            if "not a valid rasterio.warp.Resampling method" not in str(exception):
+                raise exception
+
+        img1 = gr.Raster(datasets.get_path("landsat_B4"))
+        img2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+
+        # Resample the rasters using a new resampling method and see that the string and enum gives the same result.
+        img3a = img1.reproject(img2, resampling="q1")
+        img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
+        assert img3a == img3b
