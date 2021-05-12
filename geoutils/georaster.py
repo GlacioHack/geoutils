@@ -37,6 +37,29 @@ else:
 #                 'res', 'shape', 'transform', 'width']
 
 
+
+def _resampling_from_str(resampling: str) -> Resampling:
+    """
+    Match a rio.warp.Resampling enum from a string representation.
+
+    :param resampling: A case-sensitive string matching the resampling enum (e.g. 'cubic_spline')
+    :raises ValueError: If no matching Resampling enum was found.
+    :returns: A rio.warp.Resampling enum that matches the given string.
+    """
+    # Try to match the string version of the resampling method with a rio Resampling enum name
+    for method in rio.warp.Resampling:
+        if str(method).replace("Resampling.", "") == resampling:
+            resampling_method = method
+            break
+    # If no match was found, raise an error.
+    else:
+        raise ValueError(
+            f"'{resampling}' is not a valid rasterio.warp.Resampling method. "
+            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
+        )
+    return resampling_method
+
+
 class Raster(object):
     """
     Create a Raster object from a rasterio-supported raster dataset.
@@ -636,7 +659,7 @@ class Raster(object):
         :param nodata: nodata value in reprojected data.
         :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
-        :type resampling: rio.warp.Resampling object
+        :type resampling: rio.warp or a matching string representation.
         :param silent: If True, will not print warning statements
         :type silent: bool
         :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
@@ -697,7 +720,7 @@ class Raster(object):
             'src_transform': self.transform,
             'src_crs': self.crs,
             'dst_crs': dst_crs,
-            'resampling': resampling,
+            'resampling': resampling if isinstance(resampling, Resampling) else _resampling_from_str(resampling),
             'dst_nodata': nodata
         }
 
