@@ -1,20 +1,22 @@
 """
 Test functions for georaster
 """
+import os
+import tempfile
 from tempfile import TemporaryFile
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-
 import rasterio as rio
-from rasterio.io import MemoryFile
+from pylint import epylint
 
 import geoutils.georaster as gr
-from geoutils import datasets
 import geoutils.projtools as pt
-
+from geoutils import datasets
 
 DO_PLOT = False
+
 
 class TestRaster:
 
@@ -25,22 +27,22 @@ class TestRaster:
 
         # first, filename
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        assert isinstance(r,gr.Raster)
+        assert isinstance(r, gr.Raster)
 
         # second, passing a Raster itself (points back to Raster passed)
         r2 = gr.Raster(r)
-        assert isinstance(r2,gr.Raster)
+        assert isinstance(r2, gr.Raster)
 
         # third, rio.Dataset
         ds = rio.open(datasets.get_path("landsat_B4"))
         r3 = gr.Raster(ds)
-        assert isinstance(r3,gr.Raster)
+        assert isinstance(r3, gr.Raster)
         assert r3.filename is not None
 
         # finally, as memoryfile
         memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), 'rb'))
         r4 = gr.Raster(memfile)
-        assert isinstance(r4,gr.Raster)
+        assert isinstance(r4, gr.Raster)
 
         assert np.logical_and.reduce((np.array_equal(r.data, r2.data, equal_nan=True),
                                       np.array_equal(r2.data, r3.data, equal_nan=True),
@@ -56,7 +58,6 @@ class TestRaster:
 
         r.nbands = 2
         assert r.nbands != r2.nbands
-
 
     def test_info(self):
 
@@ -186,16 +187,16 @@ class TestRaster:
         # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
         #                  'res', 'shape', 'transform', 'width']
         # using list directly available in Class
-        attrs = [at for at in gr.default_attrs if at not in ['name','dataset_mask','driver']]
+        attrs = [at for at in r._get_rio_attrs() if at not in ['name', 'dataset_mask', 'driver']]
         for attr in attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.array_equal(r.data,r2.data, equal_nan=True)
+        assert np.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check dataset_mask array
-        assert np.all(r.data.mask==r2.data.mask)
+        assert np.all(r.data.mask == r2.data.mask)
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
@@ -555,6 +556,45 @@ class TestRaster:
         img.data.mask[0, 0, 0] = True
         out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
         assert out_img.data.mask[0, 0, 0]
+
+    def test_type_hints(self):
+        """Test that pylint doesn't raise errors on valid code."""
+        # Create a temporary directory and a temporary filename
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_path = os.path.join(temp_dir.name, "code.py")
+
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+
+        # Load the attributes to check
+        attributes = r._get_rio_attrs() + ["is_loaded", "filename", "nbands", "filename"]
+
+        # Create some sample code that should be correct
+        sample_code = "\n".join([
+            "'''Sample code that should conform to pylint's standards.'''",  # Add docstring
+            "import geoutils as gu",  # Import geoutils
+            "raster = gu.Raster(gu.datasets.get_path('landsat_B4'))",  # Load a raster
+        ] + \
+            # The below statements should not raise a 'no-member' (E1101) error.
+            [f"{attribute.upper()} = raster.{attribute}" for attribute in attributes] + \
+            # Add a newline to the end.
+            [""]
+        )
+
+        # Write the code to the temporary file
+        with open(temp_path, "w") as outfile:
+            outfile.write(sample_code)
+
+        # Run pylint and parse the stdout as a string
+        lint_string = epylint.py_run(temp_path, return_std=True)[0].getvalue()
+
+        print(lint_string)  # Print the output for debug purposes
+
+        # Bad linting errors are defined here. Currently just "no-member" errors
+        bad_lints = [f"Instance of 'Raster' has no '{attribute}' member" for attribute in attributes]
+
+        # Assert that none of the bad errors are in the pylint output
+        for bad_lint in bad_lints:
+            assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"
 
     def test_split_bands(self):
 

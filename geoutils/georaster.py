@@ -3,27 +3,27 @@ geoutils.georaster provides a toolset for working with raster data.
 """
 from __future__ import annotations
 
+import collections
 import os
 import warnings
 from typing import Optional, Union
 
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
-import collections
 import rasterio as rio
 import rasterio.mask
+import rasterio.transform
 import rasterio.warp
 import rasterio.windows
-import rasterio.transform
-from rasterio.io import MemoryFile
-from rasterio.crs import CRS
-from rasterio.warp import Resampling
-from rasterio.plot import show as rshow
-import matplotlib
-from matplotlib import colors, cm
-import matplotlib.pyplot as plt
 from affine import Affine
-from shapely.geometry.polygon import Polygon
+from matplotlib import cm, colors
+from rasterio.crs import CRS
+from rasterio.io import MemoryFile
+from rasterio.plot import show as rshow
+from rasterio.warp import Resampling
 from scipy.interpolate import griddata
+from shapely.geometry.polygon import Polygon
 
 try:
     import rioxarray
@@ -33,8 +33,9 @@ else:
     _has_rioxarray = True
 
 # Attributes from rasterio's DatasetReader object to be kept by default
-default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
-                 'res', 'shape', 'transform', 'width']
+# default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
+#                 'res', 'shape', 'transform', 'width']
+
 
 
 def _resampling_from_str(resampling: str) -> Resampling:
@@ -84,7 +85,7 @@ class Raster(object):
         count
 
         crs
-        
+
         dataset_mask
 
         driver
@@ -112,8 +113,25 @@ class Raster(object):
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
-    _is_modified = None
-    _disk_hash = None
+    _is_modified: Optional[bool] = None
+    _disk_hash: Optional[int] = None
+
+    # Rasterio-inherited names and types are defined here to get proper type hints.
+    # Maybe these don't have to be hard-coded in the future?
+    transform: Affine
+    crs: CRS
+    nodata: Optional[Union[int, float]]
+    res: list[float]
+    bounds: rio.coords.BoundingBox
+    height: int
+    width: int
+    shape: tuple[int, int]
+    indexes: list[int]
+    count: int
+    dataset_mask: Optional[np.ndarray]
+    driver: str
+    dtypes: list[str]
+    name: str
 
     def __init__(self, filename_or_dataset, bands=None, load_data=True, downsample=1,
                  masked=True, attrs=None, as_memfile=False):
@@ -139,11 +157,10 @@ class Raster(object):
 
         :return: A Raster object
         """
-
         # If Raster is passed, simply point back to Raster
         if isinstance(filename_or_dataset, Raster):
             for key in filename_or_dataset.__dict__:
-                setattr(self,key,filename_or_dataset.__dict__[key])
+                setattr(self, key, filename_or_dataset.__dict__[key])
             return
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, str):
@@ -330,15 +347,29 @@ class Raster(object):
     def __ne__(self, other) -> bool:
         return not self.__eq__(other)
 
+    def _get_rio_attrs(self) -> list[str]:
+        """Get the attributes that have the same name in rio.DatasetReader and Raster."""
+        rio_attrs: list[str] = []
+        for attr in self.__annotations__.keys():
+            if "__" in attr or attr not in dir(self.ds):
+                continue
+            rio_attrs.append(attr)
+        return rio_attrs
+
     def _read_attrs(self, attrs=None):
         # Copy most used attributes/methods
+        rio_attrs = self._get_rio_attrs()
+        for attr in self.__annotations__.keys():
+            if "__" in attr or attr not in dir(self.ds):
+                continue
+            rio_attrs.append(attr)
         if attrs is None:
-            self._saved_attrs = default_attrs
-            attrs = default_attrs
+            self._saved_attrs = rio_attrs
+            attrs = rio_attrs
         else:
             if isinstance(attrs, str):
                 attrs = [attrs]
-            for attr in default_attrs:
+            for attr in rio_attrs:
                 if attr not in attrs:
                     attrs.append(attr)
             self._saved_attrs = attrs
@@ -497,9 +528,9 @@ class Raster(object):
         :return:
         """
         if new_array is not None:
-            data=new_array
+            data = new_array
         else:
-            data=self.data
+            data = self.data
 
         cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata)
 
@@ -726,7 +757,7 @@ class Raster(object):
                 x1 = dst_bounds.left + (xres*dst_width)
                 y1 = dst_bounds.top - (yres*dst_height)
                 dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top,
-                    left=dst_bounds.left, bottom=y1, right=x1)
+                                                    left=dst_bounds.left, bottom=y1, right=x1)
 
         # Fix output shape (dst_size is (ncol, nrow))
         if dst_size is not None:
@@ -832,14 +863,14 @@ class Raster(object):
         meta.update({'nodata': ndv})
 
         if update_array and pre_ndv is not None:
-            #nodata values are specific to each band
+            # nodata values are specific to each band
 
-            #tried to do data cube at once, doesn't work :(
+            # tried to do data cube at once, doesn't work :(
             # ind = (imgdata == np.array([pre_ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :])
             # output = np.array([ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :]
             # imgdata[ind] = output
 
-            #let's do a loop then
+            # let's do a loop then
             if self.count == 1:
                 if np.ma.isMaskedArray(imgdata):
                     imgdata.data[imgdata.mask] = ndv
@@ -858,8 +889,7 @@ class Raster(object):
 
         self._update(metadata=meta, imgdata=imgdata)
 
-    def set_dtypes(self,dtypes,update_array=True):
-
+    def set_dtypes(self, dtypes, update_array=True):
         """
         Set new dtypes for bands (and possibly update arrays)
 
@@ -869,7 +899,7 @@ class Raster(object):
         :type: update_array: bool
         """
 
-        if not (isinstance(dtypes,collections.abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
+        if not (isinstance(dtypes, collections.abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
             raise ValueError(
                 "Type of dtypes not understood, must be list or type or str")
         elif isinstance(dtypes, type) or isinstance(dtypes, str):
@@ -882,24 +912,23 @@ class Raster(object):
         meta = self.ds.meta
         imgdata = self.data
 
-        #for rio.DatasetReader.meta, the proper name is "dtype"
+        # for rio.DatasetReader.meta, the proper name is "dtype"
         meta.update({'dtype': dtypes[0]})
 
-        #this should always be "True", as rasterio doesn't change the array type by default:
-        #ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
+        # this should always be "True", as rasterio doesn't change the array type by default:
+        # ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
         if update_array:
             if self.count == 1:
                 imgdata = imgdata.astype(dtypes[0])
             else:
-                #TODO: double-check, but I don't think we can have different dtypes for bands with rio (1 dtype in meta)
+                # TODO: double-check, but I don't think we can have different dtypes for bands with rio (1 dtype in meta)
                 imgdata = imgdata.astype(dtypes[0])
                 for i in imgdata.shape[0]:
-                    imgdata[i,:] = imgdata[i,:].astype(dtypes[0])
+                    imgdata[i, :] = imgdata[i, :].astype(dtypes[0])
         else:
             imgdata = None
 
-        self._update(imgdata=imgdata,metadata=meta)
-
+        self._update(imgdata=imgdata, metadata=meta)
 
     def save(self, filename, driver='GTiff', dtype=None, blank_value=None, co_opts={}, metadata={}, gcps=[], gcps_crs=None):
         """ Write the Raster to a geo-referenced file.
@@ -1005,7 +1034,7 @@ to be cleared due to the setting of GCPs.")
 
         return xr
 
-    def get_bounds_projected(self, out_crs, densify_pts_max:int=5000):
+    def get_bounds_projected(self, out_crs, densify_pts_max: int = 5000):
         """
         Return self's bounds in the given CRS.
 
@@ -1018,21 +1047,20 @@ to be cleared due to the setting of GCPs.")
         # Max points to be added between image corners to account for non linear edges
         # rasterio's default is a bit low for very large images
         # instead, use image dimensions, with a maximum of 50000
-        densify_pts = min( max(self.width, self.height), densify_pts_max)
+        densify_pts = min(max(self.width, self.height), densify_pts_max)
 
         # Calculate new bounds
         left, bottom, right, top = self.bounds
         new_bounds = rio.warp.transform_bounds(self.crs, out_crs, left, bottom, right, top, densify_pts)
 
         return new_bounds
-    
-    
+
     def intersection(self, rst):
         """ 
         Returns the bounding box of intersection between this image and another.
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
-        
+
         :param rst : path to the second image (or another Raster instance)
         :type rst: str, Raster
 
@@ -1041,6 +1069,7 @@ to be cleared due to the setting of GCPs.")
         :rtype: tuple
         """
         from geoutils import projtools
+
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             rst = Raster(rst, load_data=False)
@@ -1172,7 +1201,7 @@ to be cleared due to the setting of GCPs.")
             if cb_title is not None:
                 cbar.set_label(cb_title)
         else:
-            cbar= None
+            cbar = None
 
         # If ax not set, figure should be plotted directly
         if ax is None:
@@ -1345,7 +1374,7 @@ to be cleared due to the setting of GCPs.")
         else:
             return xx[:-1], yy[:-1]
 
-    def xy2ij(self,x,y):
+    def xy2ij(self, x, y):
         """
         Return row, column indices for a given x,y coordinate pair.
 
@@ -1358,12 +1387,11 @@ to be cleared due to the setting of GCPs.")
         :rtype i, j: array-like
 
         """
-        i, j = self.ds.index(x,y)
+        i, j = self.ds.index(x, y)
 
         return i, j
 
-    def ij2xy(self,i,j,offset='center'):
-
+    def ij2xy(self, i, j, offset='center'):
         """
         Return x,y coordinates for a given row, column index pair.
 
@@ -1377,11 +1405,11 @@ to be cleared due to the setting of GCPs.")
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-        x,y = self.ds.xy(i,j,offset=offset)
+        x, y = self.ds.xy(i, j, offset=offset)
 
         return x, y
 
-    def outside_image(self, xi,yj, index=True):
+    def outside_image(self, xi, yj, index=True):
         """
         #TODO: calculate matricially for all points instead of doing for only one?
         Check whether a given point falls outside of the raster.
@@ -1396,17 +1424,16 @@ to be cleared due to the setting of GCPs.")
         :returns is_outside: True if ij is outside of the image.
         """
         if not index:
-            xi,xj = self.xy2ij(xi,yj)
+            xi, xj = self.xy2ij(xi, yj)
 
-        if np.any(np.array((xi,yj)) < 0):
+        if np.any(np.array((xi, yj)) < 0):
             return True
         elif xi > self.ds.width or yj > self.ds.height:
             return True
         else:
             return False
 
-    def interp_points(self,pts,nsize=1,mode='linear',band=1):
-
+    def interp_points(self, pts, nsize=1, mode='linear', band=1):
         """
         Interpolate raster values at a given point, or sets of points.
 
@@ -1430,32 +1457,31 @@ to be cleared due to the setting of GCPs.")
 
         rpts = []
 
-        #TODO: might need to check if coordinates are center or point in the metadata here...
-
+        # TODO: might need to check if coordinates are center or point in the metadata here...
 
         xx, yy = self.coords(offset='center', grid=False)
-        #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
+        # TODO: right now it's a loop... could add multiprocessing parallel loop outside,
         # but such a method probably exists already within scipy/other interpolation packages?
         for pt in pts:
-            i,j = self.xy2ij(pt[0],pt[1])
-            if self.outside_image(i,j, index=True):
+            i, j = self.xy2ij(pt[0], pt[1])
+            if self.outside_image(i, j, index=True):
                 rpts.append(np.nan)
                 continue
             else:
                 x = xx[j - nsize:j + nsize + 1]
                 y = yy[i - nsize:i + nsize + 1]
 
-                #TODO: read only that window?
+                # TODO: read only that window?
                 z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
                 if mode in ['linear', 'cubic', 'quintic', 'nearest']:
                     X, Y = np.meshgrid(x, y)
                     try:
                         zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
                     except:
-                        #TODO: currently fails when dealing with the edges
+                        # TODO: currently fails when dealing with the edges
                         print('Interpolation failed for:')
                         print(pt)
-                        print(i,j)
+                        print(i, j)
                         print(x)
                         print(y)
                         print(z)
