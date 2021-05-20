@@ -80,6 +80,7 @@ class Raster(object):
             True if the image data have been loaded into this Raster.
         ds : rio.io.DatasetReader
             Link to underlying DatasetReader object.
+
         bounds
 
         count
@@ -107,9 +108,7 @@ class Raster(object):
         transform
 
         width
-
     """
-
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
@@ -544,7 +543,7 @@ class Raster(object):
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
 
-        **kwargs: any additional arguments to rasterio.io.DatasetReader.read.
+        \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
         Useful ones are:
         .. hlist::
         * out_shape : to load a subsampled version
@@ -1041,7 +1040,7 @@ to be cleared due to the setting of GCPs.")
         :param out_crs: Output CRS
         :type out_crs: rasterio.crs.CRS
         :param densify_pts_max: Maximum points to be added between image corners to account for non linear edges (Default 5000)
-        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+                                Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         :type densify_pts_max: int
         """
         # Max points to be added between image corners to account for non linear edges
@@ -1105,7 +1104,7 @@ to be cleared due to the setting of GCPs.")
              add_cb=True, ax=None, **kwargs):
         """ Show/display the image, with axes in projection of image.
 
-        This method is a wrapper to rasterio.plot.show. Any **kwargs which
+        This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
         you give this method will be passed to rasterio.plot.show.
 
         :param band: which band to plot, from 0 to self.count-1 (default is all)
@@ -1125,7 +1124,7 @@ to be cleared due to the setting of GCPs.")
         :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
         :rtype: (matplotlib.axes.Axes, matplotlib.colors.Colormap)
 
-        You can also pass in **kwargs to be used by the underlying imshow or
+        You can also pass in \*\*kwargs to be used by the underlying imshow or
         contour methods of matplotlib. The example below shows provision of
         a kwarg for rasterio.plot.show, and a kwarg for matplotlib as well::
 
