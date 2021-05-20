@@ -8,6 +8,7 @@ import os
 import warnings
 from typing import Optional, Union
 
+import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,6 +19,7 @@ import rasterio.warp
 import rasterio.windows
 from affine import Affine
 from matplotlib import cm, colors
+from rasterio.features import shapes
 from rasterio.crs import CRS
 from rasterio.io import MemoryFile
 from rasterio.plot import show as rshow
@@ -1533,3 +1535,36 @@ to be cleared due to the setting of GCPs.")
                 bands.append(raster)
 
         return bands if len(bands) > 1 else bands[0]
+    
+    def polygonize(self, rst=None, in_value=1):
+        """
+        Return a GeoDataFrame with distinct geometries separated from a raster.
+        :param rst: A raster to be used as reference for the output grid
+        :type rst: Raster object or str
+        :param in_value: Value(s) of the raster from which to create geometries (Default is 1)
+        :type in_value: int, float, iterable
+        :returns: GeoDataFrame containing the polygonized geometries
+        :rtype: geopandas.GeoDataFrame
+        """
+        
+        # If input rst is string, open as Raster
+        if isinstance(rst, str):
+            from geoutils.georaster import Raster
+            rst = Raster(rst)
+
+        # Polygonize raster
+        if isinstance(in_value, Number):
+            
+            bool_msk = np.array(rst.data == in_value).astype(np.uint8)
+            results = ({'properties': {'raster_val': v}, 'geometry': s}
+                        for i, (s, v) in enumerate(shapes(bool_msk), 
+                                                          mask=bool_msk)))
+            
+            gdf = gpd.GeoDataFrame.from_features(list(results))
+            gdf.insert(0, 'New_ID', range(0, 0 + len(gdf)))
+            gdf.set_geometry(col='geometry', inplace=True)
+       
+        else:
+            raise ValueError("in_value must be a Number")
+            
+        return gdf
