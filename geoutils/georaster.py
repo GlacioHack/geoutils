@@ -1220,7 +1220,7 @@ to be cleared due to the setting of GCPs.")
         else:
             return xx[:-1], yy[:-1]
 
-    def xy2ij(self,x,y, op=np.float32,shift_area_or_point=False):
+    def xy2ij(self,x,y, op=np.float32,area_or_point=None):
         """
         Return row, column indices for a given x,y coordinate pair.
 
@@ -1229,16 +1229,19 @@ to be cleared due to the setting of GCPs.")
         :param y: y coordinates
         :type y: array-like
         :param op: operator to calculate index
-        :type op: operator
-        :param shift_area_or_point: shift according to AREA_OR_POINT GDAL attribute:
-         interpretation to what the raster value corresponds to (AREA = lower left or POINT = center)
+        :type op: Any
+        :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or force position ('Point' or 'Area') of
+        the interpretation of where the raster value corresponds to in the pixel ('Area' = lower left or 'Point' = center)
+        :type area_or_point: str, None
 
         :returns i, j: indices of x,y in the image.
         :rtype i, j: array-like
 
         """
         if op not in [np.float32,np.float64,float]:
-            raise UserWarning('Operator does not return float: rio.Dataset.index might return unreliable indexes due to rounding issues')
+            raise UserWarning('Operator does not return float: rio.Dataset.index might return unreliable indexes due to rounding issues.')
+        if area_or_point not in [None,'Area','Point']:
+            raise ValueError('Argument "area_or_point" must be either None (falls back to GDAL metadata), "Point" or "Area".')
 
         i, j = self.ds.index(x,y,op=op)
 
@@ -1252,14 +1255,17 @@ to be cleared due to the setting of GCPs.")
         # This has no influence on georeferencing, it's only about the interpretation of the raster values, and thus only
         # affects sub-pixel interpolation
 
-        if shift_area_or_point:
+        # if input is None, default to GDAL METADATA
+        if area_or_point is None:
+            area_or_point = self.ds.tags()['AREA_OR_POINT']
+
+        if area_or_point == 'Point':
             if not isinstance(i.flat[0],np.floating):
                 raise ValueError('Operator must return np.floating values to perform AREA_OR_POINT subpixel index shifting')
 
             # if point, shift index by half a pixel
-            if self.ds.tags()['AREA_OR_POINT'] == 'Point':
-                i += 0.5
-                j += 0.5
+            i += 0.5
+            j += 0.5
             #otherwise, leave as is
 
         return i, j
@@ -1285,7 +1291,6 @@ to be cleared due to the setting of GCPs.")
 
     def outside_image(self, xi,yj, index=True):
         """
-        #TODO: calculate matricially for all points instead of doing for only one?
         Check whether a given point falls outside of the raster.
 
         :param xi: Indices (or coordinates) of x direction to check.
@@ -1307,7 +1312,7 @@ to be cleared due to the setting of GCPs.")
         else:
             return False
 
-    def interp_points(self,pts,input_latlon=False,nsize=1,mode='linear',band=1, **kwargs):
+    def interp_points(self,pts,input_latlon=False,mode='linear',band=1, area_or_point=None, **kwargs):
 
         """
         Interpolate raster values at a given point, or sets of points.
@@ -1317,14 +1322,15 @@ to be cleared due to the setting of GCPs.")
        :type pts: array-like
        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
        :type input_latlon: bool
-       :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
-       :type nsize: int
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
            used to interpolate the raster value at each point. For more information, see
            scipy.interpolate.interp2d. Default is linear.
        :type mode: str
        :param band: Raster band to use
        :type band: int
+       :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or force position ('Point' or 'Area') of
+        the interpretation of where the raster value corresponds to in the pixel ('Area' = lower left or 'Point' = center)
+       :type area_or_point: str, None
 
        :returns rpts: Array of raster value(s) for the given points.
        :rtype rpts: array-like
@@ -1342,7 +1348,7 @@ to be cleared due to the setting of GCPs.")
             transformer = pyproj.Transformer.from_crs(init_crs,dest_crs)
             x, y = transformer.transform(x,y)
 
-        i, j = self.xy2ij(x,y,op=np.float32,shift_area_or_point=True)
+        i, j = self.xy2ij(x,y,op=np.float32,area_or_point=area_or_point)
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1,k2,index=True))(j,i)
 
