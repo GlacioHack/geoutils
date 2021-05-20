@@ -7,7 +7,6 @@ import datetime as dt
 import numpy as np
 from geoutils.georaster import Raster
 import collections
-import copy
 import rasterio as rio
 
 lsat_sensor = {'C': 'OLI/TIRS', 'E': 'ETM+', 'T': 'TM', 'M': 'MSS', 'O': 'OLI', 'TI': 'TIRS'}
@@ -70,7 +69,6 @@ def parse_metadata_from_fn(fname):
         elif spl[0] == 'srtm':
             attrs = ('SRTM', 'SRTM', 'SRTMv4.1', None, '_'.join(spl[1:]), dt.datetime(year=2000, month=2, day=15))
         else:
-            print("No metadata could be read from filename.")
             attrs = (None,)*6
 
     # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplfied?))
@@ -79,7 +77,6 @@ def parse_metadata_from_fn(fname):
                  dt.datetime(year=2000, month=2, day=15))
 
     else:
-        print("No metadata could be read from filename.")
         attrs = (None,)*6
 
     return attrs
@@ -216,15 +213,15 @@ satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datet
 
 class SatelliteImage(Raster):
 
-    def __init__(self, filename, attrs=None, load_data=True, bands=None,
+    def __init__(self, filename_or_dataset, attrs=None, load_data=True, bands=None,
                  as_memfile=False, read_from_fn=True, datetime=None, tile_name=None, satellite=None, sensor=None, product=None,
                  version=None, read_from_meta=True,fn_meta=None,silent=False):
 
         """
         Load satellite data through the Raster class and parse additional attributes from filename or metadata.
 
-        :param filename: The filename of the dataset.
-        :type filename: str, SatelliteImage, Raster, rio.io.Dataset, rio.io.MemoryFile
+        :param filename_or_dataset: The filename of the dataset.
+        :type filename_or_dataset: str, SatelliteImage, Raster, rio.io.Dataset, rio.io.MemoryFile
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
            Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
@@ -260,17 +257,13 @@ class SatelliteImage(Raster):
         """
 
         # If SatelliteImage is passed, simply point back to SatelliteImage
-        if isinstance(filename,SatelliteImage):
-            for key in filename.__dict__:
-                setattr(self, key, filename.__dict__[key])
+        if isinstance(filename_or_dataset,SatelliteImage):
+            for key in filename_or_dataset.__dict__:
+                setattr(self, key, filename_or_dataset.__dict__[key])
             return
         # Else rely on parent Raster class options (including raised errors)
         else:
-            super().__init__(filename, attrs=attrs, load_data=load_data, bands=bands, as_memfile=as_memfile)
-
-
-        #TODO: maybe the Raster class should have an "original filename" attribute that doesn't get erased during
-        # in-memory manipulation for the possibility of parsing metadata a later stage?
+            super().__init__(filename_or_dataset, attrs=attrs, load_data=load_data, bands=bands, as_memfile=as_memfile)
 
         # priority to user input
         self.datetime = datetime
@@ -312,6 +305,11 @@ class SatelliteImage(Raster):
         name_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
         attrs = parse_metadata_from_fn(fname)
 
+        if all([att is None for att in attrs]):
+            if not silent:
+                print("No metadata could be read from filename.")
+            return
+
         for n in name_attrs:
             a = self.__getattribute__(n)
             a_fn =  attrs[name_attrs.index(n)]
@@ -326,20 +324,15 @@ class SatelliteImage(Raster):
     def __parse_metadata_from_file(self,fn_meta):
         pass
 
-    def __copy__(self):
+    def copy(self,new_array=None):
 
-        new_satimg = super().copy()
-        new_satimg.filename = None
+        new_satimg = super().copy(new_array=new_array)
         # all objects here are immutable so no need for a copy method (string and datetime)
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
         for attrs in satimg_attrs:
             setattr(new_satimg,attrs,getattr(self,attrs))
 
         return new_satimg
-
-    def copy(self):
-
-        return copy.copy(self)
 
 
 

@@ -1,0 +1,8 @@
+rasterio
+geopandas
+pyproj
+flake8
+pytest
+sphinx
+sphinx_rtd_theme
+pylint

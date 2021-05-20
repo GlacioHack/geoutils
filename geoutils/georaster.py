@@ -1,29 +1,30 @@
 """
 geoutils.georaster provides a toolset for working with raster data.
 """
+from __future__ import annotations
+
+import collections
 import os
 import warnings
+from typing import Optional, Union
+
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
-import collections
 import rasterio as rio
 import rasterio.mask
+import rasterio.transform
 import rasterio.warp
 import rasterio.windows
-import rasterio.transform
-from rasterio.io import MemoryFile
-from rasterio.crs import CRS
-from rasterio.warp import Resampling
-from rasterio.plot import show as rshow
-import matplotlib
-import pyproj
-import math
-from scipy.ndimage import map_coordinates
-from matplotlib import colors, cm
-import matplotlib.pyplot as plt
-from collections.abc import Iterable
 from affine import Affine
-from shapely.geometry.polygon import Polygon
+from matplotlib import cm, colors
+from rasterio.crs import CRS
+from rasterio.io import MemoryFile
+from rasterio.plot import show as rshow
+from rasterio.warp import Resampling
 from scipy.interpolate import griddata
+from scipy.ndimage import map_coordinates
+from shapely.geometry.polygon import Polygon
 
 try:
     import rioxarray
@@ -33,33 +34,119 @@ else:
     _has_rioxarray = True
 
 # Attributes from rasterio's DatasetReader object to be kept by default
-default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
-                 'res', 'shape', 'transform', 'width']
+# default_attrs = ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes', 'name', 'nodata',
+#                 'res', 'shape', 'transform', 'width']
+
+
+
+def _resampling_from_str(resampling: str) -> Resampling:
+    """
+    Match a rio.warp.Resampling enum from a string representation.
+
+    :param resampling: A case-sensitive string matching the resampling enum (e.g. 'cubic_spline')
+    :raises ValueError: If no matching Resampling enum was found.
+    :returns: A rio.warp.Resampling enum that matches the given string.
+    """
+    # Try to match the string version of the resampling method with a rio Resampling enum name
+    for method in rio.warp.Resampling:
+        if str(method).replace("Resampling.", "") == resampling:
+            resampling_method = method
+            break
+    # If no match was found, raise an error.
+    else:
+        raise ValueError(
+            f"'{resampling}' is not a valid rasterio.warp.Resampling method. "
+            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
+        )
+    return resampling_method
+
 
 class Raster(object):
     """
     Create a Raster object from a rasterio-supported raster dataset.
+
+    If not otherwise specified below, attribute types and contents correspond
+    to the attributes defined by rasterio.
+
+    Attributes:
+        filename : str
+            The path/filename of the loaded, file, only set if a disk-based file is read in.
+        data : np.array 
+            Loaded image. Dimensions correspond to (bands, height, width).
+        nbands : int 
+            Number of bands loaded into .data
+        bands : tuple 
+            The indexes of the opened dataset which correspond to the bands loaded into data.
+        is_loaded : bool 
+            True if the image data have been loaded into this Raster.
+        ds : rio.io.DatasetReader
+            Link to underlying DatasetReader object.
+        bounds
+
+        count
+
+        crs
+
+        dataset_mask
+
+        driver
+
+        dtypes
+
+        height
+
+        indexes
+
+        name
+
+        nodata
+
+        res
+
+        shape
+
+        transform
+
+        width
+
     """
 
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
-    _is_modified = None
-    _disk_hash = None
+    _is_modified: Optional[bool] = None
+    _disk_hash: Optional[int] = None
 
-    def __init__(self, filename, bands=None, load_data=True, downsampl=1,
+    # Rasterio-inherited names and types are defined here to get proper type hints.
+    # Maybe these don't have to be hard-coded in the future?
+    transform: Affine
+    crs: CRS
+    nodata: Optional[Union[int, float]]
+    res: list[float]
+    bounds: rio.coords.BoundingBox
+    height: int
+    width: int
+    shape: tuple[int, int]
+    indexes: list[int]
+    count: int
+    dataset_mask: Optional[np.ndarray]
+    driver: str
+    dtypes: list[str]
+    name: str
+
+    def __init__(self, filename_or_dataset, bands=None, load_data=True, downsample=1,
                  masked=True, attrs=None, as_memfile=False):
         """
         Load a rasterio-supported dataset, given a filename.
 
-        :param filename: The filename of the dataset.
-        :type filename: str, Raster, rio.io.Dataset, rio.io.MemoryFile
+        :param filename_or_dataset: The filename of the dataset.
+        :type filename_or_dataset: str, Raster, rio.io.Dataset, rio.io.MemoryFile
         :param bands: The band(s) to load into the object. Default is to load all bands.
         :type bands: int, or list of ints
         :param load_data: Load the raster data into the object. Default is True.
         :type load_data: bool
-        :param downsampl: Reduce the size of the image loaded by this factor. Default is 1
-        :type downsampl: int, float
+        :param downsample: Reduce the size of the image loaded by this factor. Default is 1
+        :type downsample: int, float
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
         :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
@@ -71,36 +158,34 @@ class Raster(object):
 
         :return: A Raster object
         """
-
         # If Raster is passed, simply point back to Raster
-        if isinstance(filename, Raster):
-            for key in filename.__dict__:
-                setattr(self,key,filename.__dict__[key])
+        if isinstance(filename_or_dataset, Raster):
+            for key in filename_or_dataset.__dict__:
+                setattr(self, key, filename_or_dataset.__dict__[key])
             return
         # Image is a file on disk.
-        elif isinstance(filename, str):
+        elif isinstance(filename_or_dataset, str):
             # Save the absolute on-disk filename
-            self.filename = os.path.abspath(filename)
+            self.filename = os.path.abspath(filename_or_dataset)
             if as_memfile:
                 # open the file in memory
-                memfile = MemoryFile(open(filename, 'rb'))
+                memfile = MemoryFile(open(filename_or_dataset, 'rb'))
                 # Read the file as a rasterio dataset
                 self.ds = memfile.open()
             else:
-                self.ds = rio.open(filename, 'r')
+                self.ds = rio.open(filename_or_dataset, 'r')
 
         # If rio.Dataset is passed
-        elif isinstance(filename, rio.io.DatasetReader):
-            self.filename = None
-            self.ds = filename
+        elif isinstance(filename_or_dataset, rio.io.DatasetReader):
+            self.filename = filename_or_dataset.files[0]
+            self.ds = filename_or_dataset
 
         # Or, image is already a Memory File.
-        elif isinstance(filename, rio.io.MemoryFile):
-            self.filename = None
-            self.ds = filename.open()
+        elif isinstance(filename_or_dataset, rio.io.MemoryFile):
+            self.ds = filename_or_dataset.open()
 
         # Provide a catch in case trying to load from data array
-        elif isinstance(filename, np.ndarray):
+        elif isinstance(filename_or_dataset, np.ndarray):
             raise ValueError(
                 'np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ')
 
@@ -122,26 +207,47 @@ class Raster(object):
             nbands = len(bands)
 
         # Downsampled image size
-        if not isinstance(downsampl, (int, float)):
-            raise ValueError("downsampl must be of type int or float")
-        if downsampl == 1:
+        if not isinstance(downsample, (int, float)):
+            raise ValueError("downsample must be of type int or float")
+        if downsample == 1:
             out_shape = (nbands, self.height, self.width)
         else:
-            down_width = int(np.ceil(self.width/downsampl))
-            down_height = int(np.ceil(self.height/downsampl))
+            down_width = int(np.ceil(self.width/downsample))
+            down_height = int(np.ceil(self.height/downsample))
             out_shape = (nbands, down_height, down_width)
 
         if load_data:
             self.load(bands=bands, out_shape=out_shape)
             self.nbands = self._data.shape[0]
             self.is_loaded = True
-            if isinstance(filename, str):
+            if isinstance(filename_or_dataset, str):
                 self._is_modified = False
                 self._disk_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
         else:
             self._data = None
             self.nbands = None
             self.is_loaded = False
+
+        # update attributes when downsample is not 1
+        if downsample != 1:
+
+            # Original attributes
+            meta = self.ds.meta
+
+            # width and height must be same as data
+            meta.update({'width': down_width,
+                         'height': down_height})
+
+            # Resolution is set, transform must be updated accordingly
+            res = tuple(np.asarray(self.res)*downsample)
+            transform = rio.transform.from_origin(
+                self.bounds.left, self.bounds.top,
+                res[0], res[1]
+            )
+            meta.update({'transform': transform})
+
+            # Update metadata
+            self._update(self.data, metadata=meta)
 
     @classmethod
     def from_array(cls, data, transform, crs, nodata=None):
@@ -163,10 +269,12 @@ class Raster(object):
         :rtype: Raster.
 
         Example:
-        You have a data array in EPSG:32645. It has a spatial resolution of
-        30 m in x and y, and its top left corner is X=478000, Y=3108140.
-        >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-        >>> myim = Raster.from_array(data, transform, 32645)
+
+            You have a data array in EPSG:32645. It has a spatial resolution of
+            30 m in x and y, and its top left corner is X=478000, Y=3108140.
+
+            >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+            >>> myim = Raster.from_array(data, transform, 32645)
 
         """
 
@@ -184,6 +292,14 @@ class Raster(object):
         # If a 2-D ('single-band') array is passed in, give it a band dimension.
         if len(data.shape) < 3:
             data = np.expand_dims(data, 0)
+
+        # Preserves input mask
+        if isinstance(data, np.ma.masked_array):
+            if nodata is None:
+                if np.sum(data.mask) > 0:
+                    raise ValueError("For masked arrays, a nodata value must be set")
+            else:
+                data.data[data.mask] = nodata
 
         # Open handle to new memory file
         mfh = MemoryFile()
@@ -232,15 +348,29 @@ class Raster(object):
     def __ne__(self, other) -> bool:
         return not self.__eq__(other)
 
+    def _get_rio_attrs(self) -> list[str]:
+        """Get the attributes that have the same name in rio.DatasetReader and Raster."""
+        rio_attrs: list[str] = []
+        for attr in self.__annotations__.keys():
+            if "__" in attr or attr not in dir(self.ds):
+                continue
+            rio_attrs.append(attr)
+        return rio_attrs
+
     def _read_attrs(self, attrs=None):
         # Copy most used attributes/methods
+        rio_attrs = self._get_rio_attrs()
+        for attr in self.__annotations__.keys():
+            if "__" in attr or attr not in dir(self.ds):
+                continue
+            rio_attrs.append(attr)
         if attrs is None:
-            self._saved_attrs = default_attrs
-            attrs = default_attrs
+            self._saved_attrs = rio_attrs
+            attrs = rio_attrs
         else:
             if isinstance(attrs, str):
                 attrs = [attrs]
-            for attr in default_attrs:
+            for attr in rio_attrs:
                 if attr not in attrs:
                     attrs.append(attr)
             self._saved_attrs = attrs
@@ -250,10 +380,10 @@ class Raster(object):
 
     @property
     def is_modified(self):
-        """
-        Getter method for the _method class member
+        """ Check whether file has been modified since it was created/opened.
 
-        Returns: boolean: the _method member of this instance of Raster
+        :returns: True if Raster has been modified. 
+        :rtype: bool
         """
         if not self._is_modified:
             new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
@@ -264,17 +394,21 @@ class Raster(object):
     @property
     def data(self):
         """
-        Getter method for the _data class member.
+        Get data.
 
-        Returns:
-            np.ndarray: the _data member of this instance of Raster
+        :returns: data array.
+        :rtype: np.ndarray 
         """
         return self._data
 
     @data.setter
     def data(self, new_data):
         """
-        Setter method for the _data class member.
+        Set the contents of .data.
+
+        new_data must have the same shape as existing data! (bands dimension included)
+
+        new_data must have the same shape as existing data! (bands dimension included)
 
         :param new_data: New data to assign to this instance of Raster
         :type new_data: np.ndarray
@@ -284,9 +418,14 @@ class Raster(object):
             raise ValueError("New data must be a numpy array.")
 
         # Check that new_data has correct shape
-        if new_data.shape != self._data.shape:
-            raise ValueError("New data must be of the same shape as\
- existing data: {}.".format(self.shape))
+        if self.is_loaded:
+            orig_shape = self._data.shape
+        else:
+            orig_shape = (self.count, self.height, self.width)
+
+        if new_data.shape != orig_shape:
+            raise ValueError("New data must be of the same shape as "
+                             "existing data: {}.".format(orig_shape))
 
         # Check that new_data has the right type
         if new_data.dtype != self._data.dtype:
@@ -323,6 +462,8 @@ class Raster(object):
         self._read_attrs()
         if self.is_loaded:
             self.load()
+
+        self._is_modified = True
 
     def info(self, stats=False):
         """ 
@@ -388,9 +529,9 @@ class Raster(object):
         :return:
         """
         if new_array is not None:
-            data=new_array
+            data = new_array
         else:
-            data=self.data
+            data = self.data
 
         cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata)
 
@@ -403,16 +544,21 @@ class Raster(object):
 
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
+
         **kwargs: any additional arguments to rasterio.io.DatasetReader.read.
         Useful ones are:
-        - out_shape: to load a subsampled version
-        - window: to load a cropped version
-        - resampling: to set the resampling algorithm
+        .. hlist::
+        * out_shape : to load a subsampled version
+        * window : to load a cropped version
+        * resampling : to set the resampling algorithm
         """
         if bands is None:
             self._data = self.ds.read(masked=self._masked, **kwargs)
+            bands = self.ds.indexes
         else:
             self._data = self.ds.read(bands, masked=self._masked, **kwargs)
+            if type(bands) is int:
+                bands = (bands)
 
         # If ndim is 2, expand to 3
         if self._data.ndim == 2:
@@ -420,6 +566,7 @@ class Raster(object):
 
         self.nbands = self._data.shape[0]
         self.is_loaded = True
+        self.bands = bands
 
     def crop(self, cropGeom, mode='match_pixel'):
         """
@@ -499,8 +646,8 @@ class Raster(object):
 
         To reproject a Raster with different source bounds, first run Raster.crop.
 
-        :param dst_ref: a reference raster. If set will use the attributes of this raster for the output grid.
-        Can be provided as Raster/rasterio data set or as path to the file.
+        :param dst_ref: a reference raster. If set will use the attributes of this 
+            raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
         :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
         :type crs: int, dict, str, CRS
@@ -513,7 +660,7 @@ class Raster(object):
         :param nodata: nodata value in reprojected data.
         :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
-        :type resampling: rio.warp.Resampling object
+        :type resampling: rio.warp or a matching string representation.
         :param silent: If True, will not print warning statements
         :type silent: bool
         :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
@@ -566,13 +713,16 @@ class Raster(object):
             # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
             dtype = self.dtypes[0]
 
+        if nodata is None:
+            nodata = self.nodata
+
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
             'src_transform': self.transform,
             'src_crs': self.crs,
             'dst_crs': dst_crs,
-            'resampling': resampling,
-            'dst_nodata': self.nodata
+            'resampling': resampling if isinstance(resampling, Resampling) else _resampling_from_str(resampling),
+            'dst_nodata': nodata
         }
 
         # Create a BoundingBox if required
@@ -608,19 +758,21 @@ class Raster(object):
                 x1 = dst_bounds.left + (xres*dst_width)
                 y1 = dst_bounds.top - (yres*dst_height)
                 dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top,
-                    left=dst_bounds.left, bottom=y1, right=x1)
+                                                    left=dst_bounds.left, bottom=y1, right=x1)
 
-
+        # Fix output shape (dst_size is (ncol, nrow))
         if dst_size is not None:
-            # Fix raster size at nx, ny.
             dst_shape = (self.count, dst_size[1], dst_size[0])
+            dst_data = np.ones(dst_shape)
+            reproj_kwargs.update({'destination': dst_data})
+        else:
+            dst_shape = (self.count, self.width, self.height)
 
-            # Fix nx,ny with destination bounds requested.
-            if dst_bounds is not None:
-                dst_transform = rio.transform.from_bounds(*dst_bounds,
-                                                          width=dst_shape[2], height=dst_shape[1])
-                reproj_kwargs.update({'dst_transform': dst_transform})
-
+        # Fix nx,ny with destination bounds requested.
+        if dst_bounds is not None:
+            dst_transform = rio.transform.from_bounds(*dst_bounds,
+                                                      width=dst_shape[2], height=dst_shape[1])
+            reproj_kwargs.update({'dst_transform': dst_transform})
             dst_data = np.ones(dst_shape)
             reproj_kwargs.update({'destination': dst_data})
 
@@ -632,7 +784,7 @@ class Raster(object):
                 (dst_size == self.shape[::-1]) or (dst_size is None),
                 (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None)
         ]):
-            if (nodata == self.nodata) or (nodata is None):
+            if (nodata == self.nodata):
                 if not silent:
                     warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
                 return self
@@ -670,6 +822,9 @@ class Raster(object):
         :type yoff: float
 
         """
+        # Check that data is loaded, as it is necessary for this method
+        assert self.is_loaded, "Data must be loaded, use self.load"
+
         meta = self.ds.meta
         dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
 
@@ -709,14 +864,14 @@ class Raster(object):
         meta.update({'nodata': ndv})
 
         if update_array and pre_ndv is not None:
-            #nodata values are specific to each band
+            # nodata values are specific to each band
 
-            #tried to do data cube at once, doesn't work :(
+            # tried to do data cube at once, doesn't work :(
             # ind = (imgdata == np.array([pre_ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :])
             # output = np.array([ndv])[:, None, None] * np.ones((self.ds.height, self.ds.width))[None, :, :]
             # imgdata[ind] = output
 
-            #let's do a loop then
+            # let's do a loop then
             if self.count == 1:
                 if np.ma.isMaskedArray(imgdata):
                     imgdata.data[imgdata.mask] = ndv
@@ -735,8 +890,7 @@ class Raster(object):
 
         self._update(metadata=meta, imgdata=imgdata)
 
-    def set_dtypes(self,dtypes,update_array=True):
-
+    def set_dtypes(self, dtypes, update_array=True):
         """
         Set new dtypes for bands (and possibly update arrays)
 
@@ -746,7 +900,7 @@ class Raster(object):
         :type: update_array: bool
         """
 
-        if not (isinstance(dtypes,collections.abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
+        if not (isinstance(dtypes, collections.abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
             raise ValueError(
                 "Type of dtypes not understood, must be list or type or str")
         elif isinstance(dtypes, type) or isinstance(dtypes, str):
@@ -759,24 +913,23 @@ class Raster(object):
         meta = self.ds.meta
         imgdata = self.data
 
-        #for rio.DatasetReader.meta, the proper name is "dtype"
+        # for rio.DatasetReader.meta, the proper name is "dtype"
         meta.update({'dtype': dtypes[0]})
 
-        #this should always be "True", as rasterio doesn't change the array type by default:
-        #ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
+        # this should always be "True", as rasterio doesn't change the array type by default:
+        # ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
         if update_array:
             if self.count == 1:
                 imgdata = imgdata.astype(dtypes[0])
             else:
-                #TODO: double-check, but I don't think we can have different dtypes for bands with rio (1 dtype in meta)
+                # TODO: double-check, but I don't think we can have different dtypes for bands with rio (1 dtype in meta)
                 imgdata = imgdata.astype(dtypes[0])
                 for i in imgdata.shape[0]:
-                    imgdata[i,:] = imgdata[i,:].astype(dtypes[0])
+                    imgdata[i, :] = imgdata[i, :].astype(dtypes[0])
         else:
             imgdata = None
 
-        self._update(imgdata=imgdata,metadata=meta)
-
+        self._update(imgdata=imgdata, metadata=meta)
 
     def save(self, filename, driver='GTiff', dtype=None, blank_value=None, co_opts={}, metadata={}, gcps=[], gcps_crs=None):
         """ Write the Raster to a geo-referenced file.
@@ -795,10 +948,10 @@ class Raster(object):
         :param dtype: Data Type to write the image as (defaults to dtype of image data)
         :type dtype: np.dtype
         :param blank_value: Use to write an image out with every pixel's value
-        corresponding to this value, instead of writing the image data to disk.
+            corresponding to this value, instead of writing the image data to disk.
         :type blank_value: None, int, float.
         :param co_opts: GDAL creation options provided as a dictionary,
-        e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
+            e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
         :type co_opts: dict
         :param metadata: pairs of metadata key, value
         :type metadata: dict
@@ -882,7 +1035,7 @@ to be cleared due to the setting of GCPs.")
 
         return xr
 
-    def get_bounds_projected(self, out_crs, densify_pts_max:int=5000):
+    def get_bounds_projected(self, out_crs, densify_pts_max: int = 5000):
         """
         Return self's bounds in the given CRS.
 
@@ -895,20 +1048,20 @@ to be cleared due to the setting of GCPs.")
         # Max points to be added between image corners to account for non linear edges
         # rasterio's default is a bit low for very large images
         # instead, use image dimensions, with a maximum of 50000
-        densify_pts = min( max(self.width, self.height), densify_pts_max)
+        densify_pts = min(max(self.width, self.height), densify_pts_max)
 
         # Calculate new bounds
         left, bottom, right, top = self.bounds
         new_bounds = rio.warp.transform_bounds(self.crs, out_crs, left, bottom, right, top, densify_pts)
 
         return new_bounds
-    
-    
+
     def intersection(self, rst):
         """ 
         Returns the bounding box of intersection between this image and another.
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
+
         :param rst : path to the second image (or another Raster instance)
         :type rst: str, Raster
 
@@ -917,6 +1070,7 @@ to be cleared due to the setting of GCPs.")
         :rtype: tuple
         """
         from geoutils import projtools
+
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             rst = Raster(rst, load_data=False)
@@ -1048,7 +1202,7 @@ to be cleared due to the setting of GCPs.")
             if cb_title is not None:
                 cbar.set_label(cb_title)
         else:
-            cbar= None
+            cbar = None
 
         # If ax not set, figure should be plotted directly
         if ax is None:
@@ -1059,7 +1213,7 @@ to be cleared due to the setting of GCPs.")
     def value_at_coords(self, x, y, latlon=False, band=None, masked=False,
                         window=None, return_window=False, boundless=True,
                         reducer_function=np.ma.mean):
-        """ Extract the pixel value(s) at the specified coordinates.
+        """ Extract the pixel value(s) at the nearest pixel(s) from the specified coordinates.
 
         Extract pixel value of each band in dataset at the specified
         coordinates. Alternatively, if band is specified, return only that
@@ -1076,30 +1230,30 @@ to be cleared due to the setting of GCPs.")
         :param band: the band number to extract from.
         :type band: int
         :param masked: If `masked` is `True` the return value will be a masked
-        array. Otherwise (the default) the return value will be a
-        regular array.
+            array. Otherwise (the default) the return value will be a
+            regular array.
         :type masked: bool, optional (default False)
         :param window: expand area around coordinate to dimensions \
                   window * window. window must be odd.
         :type window: None, int
         :param return_window: If True when window=int, returns (mean,array) \
-        where array is the dataset extracted via the specified window size.
+            where array is the dataset extracted via the specified window size.
         :type return_window: boolean
         :param boundless: If `True`, windows that extend beyond the dataset's extent
-        are permitted and partially or completely filled arrays (with self.nodata) will
-        be returned as appropriate.
+            are permitted and partially or completely filled arrays (with self.nodata) will
+            be returned as appropriate.
         :type boundless: bool, optional (default False)
         :param reducer_function: a function to apply to the values in window.
         :type reducer_function: function, optional (Default is np.ma.mean)
 
         :returns: When called on a Raster or with a specific band \
-        set, return value of pixel.
+            set, return value of pixel.
         :rtype: float
         :returns: If mutiple band Raster and the band is not specified, a \
-        dictionary containing the value of the pixel in each band.
+            dictionary containing the value of the pixel in each band.
         :rtype: dict
         :returns: In addition, if return_window=True, return tuple of \
-        (values, arrays)
+            (values, arrays)
         :rtype: tuple
 
         :examples:
@@ -1130,10 +1284,11 @@ to be cleared due to the setting of GCPs.")
 
         # Need to implement latlon option later
         if latlon:
-            raise NotImplementedError()
+            from geoutils import projtools
+            x, y = projtools.reproject_from_latlon((y, x), self.crs)
 
         # Convert coordinates to pixel space
-        row, col = self.ds.index(x, y)
+        row, col = self.ds.index(x, y, op=round)
 
         # Decide what pixel coordinates to read:
         if window != None:
@@ -1270,8 +1425,7 @@ to be cleared due to the setting of GCPs.")
 
         return i, j
 
-    def ij2xy(self,i,j,offset='center'):
-
+    def ij2xy(self, i, j, offset='center'):
         """
         Return x,y coordinates for a given row, column index pair.
 
@@ -1285,11 +1439,11 @@ to be cleared due to the setting of GCPs.")
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-        x,y = self.ds.xy(i,j,offset=offset)
+        x, y = self.ds.xy(i, j, offset=offset)
 
         return x, y
 
-    def outside_image(self, xi,yj, index=True):
+    def outside_image(self, xi, yj, index=True):
         """
         Check whether a given point falls outside of the raster.
 
@@ -1303,9 +1457,9 @@ to be cleared due to the setting of GCPs.")
         :returns is_outside: True if ij is outside of the image.
         """
         if not index:
-            xi,yj = self.xy2ij(xi,yj)
+            xi, xj = self.xy2ij(xi, yj)
 
-        if xi < 0 or yj < 0:
+        if np.any(np.array((xi, yj)) < 0):
             return True
         elif xi > self.width or yj > self.height:
             return True
@@ -1323,8 +1477,8 @@ to be cleared due to the setting of GCPs.")
        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
        :type input_latlon: bool
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
-           used to interpolate the raster value at each point. For more information, see
-           scipy.interpolate.interp2d. Default is linear.
+            used to interpolate the raster value at each point. For more information, see
+            scipy.interpolate.interp2d. Default is linear.
        :type mode: str
        :param band: Raster band to use
        :type band: int
@@ -1388,3 +1542,45 @@ to be cleared due to the setting of GCPs.")
         #             zint = np.nanmean(z.flatten())
         #         rpts.append(zint)
         # rpts = np.array(rpts)
+        
+
+    def split_bands(self, copy: bool = False, subset: Optional[Union[list[int], int]] = None):
+        """
+        Split the bands into separate copied rasters.
+
+        :param copy: Copy the bands or return slices of the original data.
+        :param subset: Optional. A subset of band indices to extract. Defaults to all.
+
+        :returns: A list of Rasters for each band, or one Raster if len(subset)==1.
+        """
+        bands: list[self] = []
+
+        if subset is None:
+            indices = list(range(self.nbands))
+        elif isinstance(subset, int):
+            indices = [subset]
+        elif isinstance(subset, list):
+            indices = subset
+        else:
+            raise ValueError(f"'subset' got invalid type: {type(subset)}. Expected list[int], int or None")
+
+        if copy:
+            for band_n in indices:
+                # Generate a new Raster from a copy of the band's data
+                bands.append(self.from_array(
+                    self.data[band_n, :, :],
+                    transform=self.transform,
+                    crs=self.crs,
+                    nodata=self.nodata
+                ))
+        else:
+            for band_n in indices:
+                # Generate a new instance with the same underlying values.
+                raster = Raster(self)
+                # Set the data to a slice of the original array
+                raster._data = self.data[band_n, :, :].reshape(((1,) + self.data.shape[1:]))
+                # Set the nbands
+                raster.nbands = 1
+                bands.append(raster)
+
+        return bands if len(bands) > 1 else bands[0]
