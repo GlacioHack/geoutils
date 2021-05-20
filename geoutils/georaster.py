@@ -18,6 +18,7 @@ import rasterio.warp
 import rasterio.windows
 from affine import Affine
 from matplotlib import cm, colors
+import pyproj
 from rasterio.crs import CRS
 from rasterio.io import MemoryFile
 from rasterio.plot import show as rshow
