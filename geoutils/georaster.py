@@ -405,7 +405,23 @@ class Raster(object):
         """
         Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
         """
+        if isinstance(other, Raster):
+            # Need to convert both rasters to a common type before doing the negation
+            ctype = np.find_common_type([*self.dtypes, *other.dtypes], [])
+            other = other.astype(ctype)
+
         return self + -other
+
+    def astype(self, dtype: Union[type, str]) -> Raster:
+        """
+        Converts the data type of a Raster object.
+
+        :param dtype: Any numpy dtype or string accepted by numpy.astype
+
+        :returns: the output Raster with dtype changed.
+        """
+        out_data = self.data.astype(dtype)
+        return self.from_array(out_data, self.transform, self.crs)
 
     def _get_rio_attrs(self) -> list[str]:
         """Get the attributes that have the same name in rio.DatasetReader and Raster."""
