@@ -1375,7 +1375,7 @@ to be cleared due to the setting of GCPs.")
         else:
             return xx[:-1], yy[:-1]
 
-    def xy2ij(self,x,y, op=np.float32,area_or_point=None):
+    def xy2ij(self,x,y, op=np.float32,area_or_point=None,precision=None):
         """
         Return row, column indices for a given x,y coordinate pair.
 
@@ -1385,6 +1385,8 @@ to be cleared due to the setting of GCPs.")
         :type y: array-like
         :param op: operator to calculate index
         :type op: Any
+        :param precision: precision for rio.Dataset.index
+        :type precision: Any
         :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or force position ('Point' or 'Area') of
         the interpretation of where the raster value corresponds to in the pixel ('Area' = lower left or 'Point' = center)
         :type area_or_point: str, None
@@ -1394,14 +1396,14 @@ to be cleared due to the setting of GCPs.")
 
         """
         if op not in [np.float32,np.float64,float]:
-            raise UserWarning('Operator does not return float: rio.Dataset.index might return unreliable indexes due to rounding issues.')
+            raise UserWarning('Operator is not of type float: rio.Dataset.index might return unreliable indexes due to rounding issues.')
         if area_or_point not in [None,'Area','Point']:
             raise ValueError('Argument "area_or_point" must be either None (falls back to GDAL metadata), "Point" or "Area".')
 
-        i, j = self.ds.index(x,y,op=op)
+        i, j = self.ds.index(x,y,op=op,precision=precision)
 
         # # necessary because rio.Dataset.index does not return Iterable for a single point
-        if not isinstance(i, Iterable):
+        if not isinstance(i, collections.abc.Iterable):
             i, j = (np.asarray([i, ]), np.asarray([j, ]))
         else:
             i, j = (np.asarray(i), np.asarray(j))
