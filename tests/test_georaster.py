@@ -283,10 +283,21 @@ class TestRaster:
         yrand = ymax + np.random.randint(low=0, high=r.ds.height, size=(10,)) \
                  * list(r.ds.transform)[4]
         pts = list(zip(xrand, yrand))
-        # Get decimal indexes, those should all be .5 because values refer to the center
-        i, j = r.xy2ij(xrand, yrand,op=np.float32,shift_area_or_point=True)
+        # Get decimal indexes based on Point GDAL METADATA
+        # Those should all be .5 because values refer to the center
+        i, j = r.xy2ij(xrand, yrand,area_or_point=None)
         assert np.all(i % 1 == 0.5)
         assert np.all(j % 1 == 0.5)
+
+        # Force point
+        i, j = r.xy2ij(xrand, yrand,area_or_point='Point')
+        assert np.all(i % 1 == 0.5)
+        assert np.all(j % 1 == 0.5)
+
+        # Force area
+        i, j = r.xy2ij(xrand, yrand,area_or_point='Area')
+        assert np.all(i % 1 == 0)
+        assert np.all(j % 1 == 0)
 
         # now we calculate the mean of values in each 2x2 slices of the data, and compare with interpolation at order 1
         list_z_ind = []
@@ -297,7 +308,7 @@ class TestRaster:
             list_z_ind.append(z_ind)
 
         # order 1 interpolation
-        rpts = r.interp_points(pts,order=1)
+        rpts = r.interp_points(pts,order=1,area_or_point='Area')
         # the values interpolated should be equal
         assert np.array_equal(np.array(list_z_ind,dtype=np.float32),rpts,equal_nan=True)
 
@@ -323,7 +334,7 @@ class TestRaster:
                  * list(r.ds.transform)[4]
         pts = list(zip(xrand, yrand))
         # by default, i and j are returned as integers
-        i, j = r.xy2ij(xrand, yrand,op=np.float32,shift_area_or_point=True)
+        i, j = r.xy2ij(xrand, yrand,op=np.float32,area_or_point='Area')
         list_z_ind = []
         img = r.data
         for k in range(len(xrand)):
@@ -340,7 +351,7 @@ class TestRaster:
         # test for an invidiual point (shape can be tricky at 1 dimension)
         x = 493120.0
         y = 3101000.0
-        i, j = r.xy2ij(x, y,op=np.float32,shift_area_or_point=True)
+        i, j = r.xy2ij(x, y,area_or_point='Area')
         assert img[0, int(i), int(j)] == r.interp_points([(x, y)],order=1)[0]
 
         #TODO: understand why there is this:
