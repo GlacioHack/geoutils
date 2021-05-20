@@ -152,9 +152,9 @@ class TestRaster:
         # Upper left
         assert r.xy2ij(r.bounds.left, r.bounds.top) == (0, 0)
         # Upper right
-        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width)
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width+1)
         # Bottom right
-        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width)
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width+1)
         # One pixel right and down
         assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
 
