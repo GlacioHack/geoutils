@@ -1220,7 +1220,7 @@ to be cleared due to the setting of GCPs.")
         else:
             return xx[:-1], yy[:-1]
 
-    def xy2ij(self,x,y, op=math.floor,shift_area_or_point=False):
+    def xy2ij(self,x,y, op=np.float32,shift_area_or_point=False):
         """
         Return row, column indices for a given x,y coordinate pair.
 
@@ -1237,6 +1237,9 @@ to be cleared due to the setting of GCPs.")
         :rtype i, j: array-like
 
         """
+        if op not in [np.float32,np.float64,float]:
+            raise UserWarning('Operator does not return float: rio.Dataset.index might return unreliable indexes due to rounding issues')
+
         i, j = self.ds.index(x,y,op=op)
 
         # # necessary because rio.Dataset.index does not return Iterable for a single point
@@ -1245,13 +1248,13 @@ to be cleared due to the setting of GCPs.")
         else:
             i, j = (np.asarray(i), np.asarray(j))
 
-        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the lower left corner (AREA) or the center of pixel (POINT)
+        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the upper left corner (AREA) or the center of pixel (POINT)
         # This has no influence on georeferencing, it's only about the interpretation of the raster values, and thus only
         # affects sub-pixel interpolation
 
         if shift_area_or_point:
             if not isinstance(i.flat[0],np.floating):
-                raise ValueError('Operator must return np.floating values with AREA_OR_POINT subpixel shifting of indexes')
+                raise ValueError('Operator must return np.floating values to perform AREA_OR_POINT subpixel index shifting')
 
             # if point, shift index by half a pixel
             if self.ds.tags()['AREA_OR_POINT'] == 'Point':
