@@ -401,7 +401,7 @@ class Raster(object):
         out_rst.data = -out_rst.data
         return out_rst
 
-    def __sub__(self, other: Raster) -> Raster:
+    def __sub__(self, other: Union[Raster, np.ndarray, Number]) -> Raster:
         """
         Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
         """
