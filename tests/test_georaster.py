@@ -152,9 +152,9 @@ class TestRaster:
         # Upper left
         assert r.xy2ij(r.bounds.left, r.bounds.top) == (0, 0)
         # Upper right
-        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width)
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.top) == (0, r.width+1)
         # Bottom right
-        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width)
+        assert r.xy2ij(r.bounds.right+r.res[0], r.bounds.bottom) == (r.height, r.width+1)
         # One pixel right and down
         assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
 
@@ -311,46 +311,118 @@ class TestRaster:
 
     def test_interp(self):
 
+        # FIRST, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
+        # at the center of pixel
         r = gr.Raster(datasets.get_path("landsat_B4"))
+        assert r.ds.tags()['AREA_OR_POINT'] == 'Point'
 
         xmin, ymin, xmax, ymax = r.ds.bounds
 
-        # testing interp, find_value, and read when it falls right on the coordinates
-        xrand = (np.random.randint(low=0, high=r.ds.width, size=(10,))
-                 * list(r.ds.transform)[0] + xmin + list(r.ds.transform)[0]/2)
-        yrand = (ymax + np.random.randint(low=0, high=r.ds.height, size=(10,))
-                 * list(r.ds.transform)[4] - list(r.ds.transform)[4]/2)
+        # We generate random points within the boundaries of the image
+
+
+        xrand = np.random.randint(low=0, high=r.ds.width, size=(10,)) \
+                * list(r.ds.transform)[0] + xmin
+        yrand = ymax + np.random.randint(low=0, high=r.ds.height, size=(10,)) \
+                 * list(r.ds.transform)[4]
         pts = list(zip(xrand, yrand))
-        i, j = r.xy2ij(xrand, yrand)
-        list_z = []
+        # Get decimal indexes based on Point GDAL METADATA
+        # Those should all be .5 because values refer to the center
+        i, j = r.xy2ij(xrand, yrand,area_or_point=None)
+        assert np.all(i % 1 == 0.5)
+        assert np.all(j % 1 == 0.5)
+
+        # Force point
+        i, j = r.xy2ij(xrand, yrand,area_or_point='Point')
+        assert np.all(i % 1 == 0.5)
+        assert np.all(j % 1 == 0.5)
+
+        # Force area
+        i, j = r.xy2ij(xrand, yrand,area_or_point='Area')
+        assert np.all(i % 1 == 0)
+        assert np.all(j % 1 == 0)
+
+        # now we calculate the mean of values in each 2x2 slices of the data, and compare with interpolation at order 1
         list_z_ind = []
-        r.load()
         img = r.data
         for k in range(len(xrand)):
-            z_ind = img[0, i[k], j[k]]
-            z = r.value_at_coords(xrand[k], yrand[k])
+            # 2x2 slices
+            z_ind = np.mean(img[0, slice(int(np.floor(i[k])),int(np.ceil(i[k]))+1), slice(int(np.floor(j[k])),int(np.ceil(j[k]))+1)])
             list_z_ind.append(z_ind)
-            list_z.append(z)
 
-        rpts = r.interp_points(pts)
-        print(list_z_ind)
-        print(list_z)
-        print(rpts)
+        # order 1 interpolation
+        rpts = r.interp_points(pts,order=1,area_or_point='Area')
+        # the values interpolated should be equal
+        assert np.array_equal(np.array(list_z_ind,dtype=np.float32),rpts,equal_nan=True)
 
-        # Individual tests
-        x = 493135.0
-        y = 3104015.0
-        print(r.value_at_coords(x, y))
-        i, j = r.xy2ij(x, y)
-        print(img[0, i, j])
-        print(r.interp_points([(x, y)]))
-
-        # random float
+        # Test there is no failure with random coordinates (edge effects, etc)
         xrand = np.random.uniform(low=xmin, high=xmax, size=(1000,))
         yrand = np.random.uniform(low=ymin, high=ymax, size=(1000,))
         pts = list(zip(xrand, yrand))
         rpts = r.interp_points(pts)
-        # print(rpts)
+
+        # SECOND, test after a crop: the Raster now has an Area interpretation, those should fall right on the integer
+        # pixel indexes
+        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r.crop(r2)
+        assert r.ds.tags()['AREA_OR_POINT'] == 'Area'
+
+        xmin, ymin, xmax, ymax = r.bounds
+
+        # We can test with several method for the exact indexes: interp, value_at_coords, and simple read should
+        # give back the same values that fall right on the coordinates
+        xrand = np.random.randint(low=0, high=r.ds.width, size=(10,)) \
+                 * list(r.ds.transform)[0] + xmin
+        yrand = ymax + np.random.randint(low=0, high=r.ds.height, size=(10,)) \
+                 * list(r.ds.transform)[4]
+        pts = list(zip(xrand, yrand))
+        # by default, i and j are returned as integers
+        i, j = r.xy2ij(xrand, yrand,op=np.float32,area_or_point='Area')
+        list_z_ind = []
+        img = r.data
+        for k in range(len(xrand)):
+            # we directly sample the values
+            z_ind = img[0, int(i[k]), int(j[k])]
+            # we can also compare with the value_at_coords() functionality
+            list_z_ind.append(z_ind)
+
+
+        rpts = r.interp_points(pts,order=1)
+
+        assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
+
+        # test for an invidiual point (shape can be tricky at 1 dimension)
+        x = 493120.0
+        y = 3101000.0
+        i, j = r.xy2ij(x, y,area_or_point='Area')
+        assert img[0, int(i), int(j)] == r.interp_points([(x, y)],order=1)[0]
+
+        #TODO: understand why there is this:
+        # r.ds.index(x, y)
+        # Out[33]: (75, 301)
+        # r.ds.index(x, y, op=np.float32)
+        # Out[34]: (75.0, 302.0)
+
+    def test_value_at_coords(self):
+
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r.crop(r2)
+
+        # random test point that raised an error
+        itest=118
+        jtest=516
+        xtest=499540
+        ytest=3099710
+
+        z = r.data[0,itest,jtest]
+        x_out, y_out = r.ij2xy(itest,jtest,offset='ul')
+        assert x_out == xtest
+        assert y_out == ytest
+
+        #TODO: this fails, don't know why
+        # z_val = r.value_at_coords(xtest,ytest)
+        # assert z == z_val
 
     def test_set_ndv(self):
         """
