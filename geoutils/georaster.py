@@ -1547,25 +1547,27 @@ to be cleared due to the setting of GCPs.")
         :returns: GeoDataFrame containing the polygonized geometries
         :rtype: geopandas.geodataframe.GeoDataFrame
         """
-        
+    
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             from geoutils.georaster import Raster
+    
             rst = Raster(rst)
-
+    
         # Polygonize raster
         if isinstance(in_value, Number):
-            
+    
             bool_msk = np.array(rst.data == in_value).astype(np.uint8)
-            results = ({'properties': {'raster_val': v}, 'geometry': s}
-                        for i, (s, v) in enumerate(shapes(bool_msk, 
-                                                          mask=bool_msk)))
-            
+            results = (
+                {"properties": {"raster_val": v}, "geometry": s}
+                for i, (s, v) in enumerate(shapes(bool_msk, mask=bool_msk))
+            )
+    
             gdf = gpd.GeoDataFrame.from_features(list(results))
-            gdf.insert(0, 'New_ID', range(0, 0 + len(gdf)))
-            gdf.set_geometry(col='geometry', inplace=True)
-       
+            gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
+            gdf.set_geometry(col="geometry", inplace=True)
+    
         else:
             raise ValueError("in_value must be a Number")
-            
+    
         return gdf
