@@ -1558,7 +1558,7 @@ to be cleared due to the setting of GCPs.")
             bool_msk = np.array(rst.data == in_value).astype(np.uint8)
             results = ({'properties': {'raster_val': v}, 'geometry': s}
                         for i, (s, v) in enumerate(shapes(bool_msk), 
-                                                          mask=bool_msk)))
+                                                          mask=bool_msk))
             
             gdf = gpd.GeoDataFrame.from_features(list(results))
             gdf.insert(0, 'New_ID', range(0, 0 + len(gdf)))
