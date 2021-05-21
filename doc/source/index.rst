@@ -13,11 +13,17 @@ Our functionalities are mostly based on `rasterio <https://rasterio.readthedocs.
 * the interactions between raster and vectors, such as rasterizing, clipping or cropping are made easier thanks to the class ``Vector``.
 
 
+.. literalinclude:: code/index_example.py
+
+.. program-output:: $PYTHON code/index_example.py 
+        :shell:
+
 .. toctree::
     :maxdepth: 1
 
     raster-basics
     satimg-basics
+    vector-basics
     api
     
 
