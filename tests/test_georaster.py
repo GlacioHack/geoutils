@@ -158,6 +158,68 @@ class TestRaster:
         # One pixel right and down
         assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
 
+    def test_add_sub(self):
+        """
+        Test addition, subtraction and negation on a Raster object.
+        """
+        # Create fake rasters with random values in 0-255 and dtype uint8
+        width = height = 5
+        transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
+        r1 = gr.Raster.from_array(np.random.randint(0, 255, (height, width), dtype='uint8'),
+                                  transform=transform, crs=None)
+        r2 = gr.Raster.from_array(np.random.randint(0, 255, (height, width), dtype='uint8'),
+                                  transform=transform, crs=None)
+
+        # Test negation
+        r3 = -r1
+        assert np.all(r3.data == -r1.data)
+        assert r3.dtypes == ('uint8',)
+
+        # Test addition
+        r3 = r1 + r2
+        assert np.all(r3.data == r1.data + r2.data)
+        assert r3.dtypes == ('uint8',)
+
+        # Test subtraction
+        r3 = r1 - r2
+        assert np.all(r3.data == r1.data - r2.data)
+        assert r3.dtypes == ('uint8',)
+
+        # Test with dtype Float32
+        r1 = gr.Raster.from_array(np.random.randint(0, 255, (height, width)).astype('float32'),
+                                  transform=transform, crs=None)
+        r3 = -r1
+        assert np.all(r3.data == -r1.data)
+        assert r3.dtypes == ('float32',)
+
+        r3 = r1 + r2
+        assert np.all(r3.data == r1.data + r2.data)
+        assert r3.dtypes == ('float32',)
+
+        r3 = r1 - r2
+        assert np.all(r3.data == r1.data - r2.data)
+        assert r3.dtypes == ('float32',)
+
+        # Check that errors are properly raised
+        # different shapes
+        r1 = gr.Raster.from_array(np.random.randint(0, 255, (height + 1, width)).astype('float32'),
+                                  transform=transform, crs=None)
+        pytest.raises(ValueError, r1.__add__, r2)
+        pytest.raises(ValueError, r1.__sub__, r2)
+
+        # different CRS
+        r1 = gr.Raster.from_array(np.random.randint(0, 255, (height, width)).astype('float32'),
+                                  transform=transform, crs=rio.crs.CRS.from_epsg(4326))
+        pytest.raises(ValueError, r1.__add__, r2)
+        pytest.raises(ValueError, r1.__sub__, r2)
+
+        # different transform
+        transform2 = rio.transform.from_bounds(0, 0, 2, 2, width, height)
+        r1 = gr.Raster.from_array(np.random.randint(0, 255, (height, width)).astype('float32'),
+                                  transform=transform2, crs=None)
+        pytest.raises(ValueError, r1.__add__, r2)
+        pytest.raises(ValueError, r1.__sub__, r2)
+
     def test_copy(self):
         """
         Test that the copy method works as expected for Raster. In particular

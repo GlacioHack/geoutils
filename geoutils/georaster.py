@@ -4,6 +4,7 @@ geoutils.georaster provides a toolset for working with raster data.
 from __future__ import annotations
 
 import collections
+from numbers import Number
 import os
 import warnings
 from typing import Optional, Union
@@ -347,6 +348,81 @@ class Raster(object):
 
     def __ne__(self, other) -> bool:
         return not self.__eq__(other)
+
+    def __add__(self, other: Union[Raster, np.ndarray, Number]) -> Raster:
+        """
+        Sum up the data of two rasters or a raster and a numpy array, or a raster and single number.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        # Check that other is of correct type
+        if not isinstance(other, (Raster, np.ndarray, Number)):
+            raise ValueError("Addition possible only with a Raster, np.ndarray or single number.")
+
+        # Case 1 - other is a Raster
+        if isinstance(other, Raster):
+            # Check that both data are loaded
+            if not (self.is_loaded & other.is_loaded):
+                raise ValueError("Raster's data must be loaded with self.load().")
+
+            # Check that both rasters have the same shape and georeferences
+            if (self.data.shape == other.data.shape) & (self.transform == other.transform) & (self.crs == other.crs):
+                pass
+            else:
+                raise ValueError("Both rasters must have the same shape, transform and CRS.")
+
+            other_data = other.data
+
+        # Case 2 - other is a numpy array
+        elif isinstance(other, np.ndarray):
+            # Check that both array have the same shape
+            if (self.data.shape == other.shape):
+                pass
+            else:
+                raise ValueError("Both rasters must have the same shape.")
+
+            other_data = other
+
+        # Case 3 - other is a single number
+        else:
+            other_data = other
+
+        # Calculate the sum of arrays
+        data = self.data + other_data
+
+        # Save as a new Raster
+        out_rst = self.from_array(data, self.transform, self.crs, nodata=self.nodata)
+
+        return out_rst
+
+    def __neg__(self) -> Raster:
+        """Return self with self.data set to -self.data"""
+        out_rst = self.copy()
+        out_rst.data = -out_rst.data
+        return out_rst
+
+    def __sub__(self, other: Union[Raster, np.ndarray, Number]) -> Raster:
+        """
+        Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
+        """
+        if isinstance(other, Raster):
+            # Need to convert both rasters to a common type before doing the negation
+            ctype = np.find_common_type([*self.dtypes, *other.dtypes], [])
+            other = other.astype(ctype)
+
+        return self + -other
+
+    def astype(self, dtype: Union[type, str]) -> Raster:
+        """
+        Converts the data type of a Raster object.
+
+        :param dtype: Any numpy dtype or string accepted by numpy.astype
+
+        :returns: the output Raster with dtype changed.
+        """
+        out_data = self.data.astype(dtype)
+        return self.from_array(out_data, self.transform, self.crs)
 
     def _get_rio_attrs(self) -> list[str]:
         """Get the attributes that have the same name in rio.DatasetReader and Raster."""

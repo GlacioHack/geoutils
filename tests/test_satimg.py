@@ -12,6 +12,7 @@ from geoutils import datasets
 import geoutils
 from io import StringIO
 import numpy as np
+import rasterio as rio
 
 DO_PLOT = False
 
@@ -75,6 +76,28 @@ class TestSatelliteImage:
 
         # check nothing outputs to console
         assert len(output2) == 0
+
+    def test_add_sub(self):
+        """
+        Test that overloading of addition, subtraction and negation works for child classes as well. 
+        """
+        # Create fake rasters with random values in 0-255 and dtype uint8
+        width = height = 5
+        transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
+        satimg1 = si.SatelliteImage.from_array(np.random.randint(0, 255, (height, width), dtype='uint8'),
+                                               transform=transform, crs=None)
+        satimg2 = si.SatelliteImage.from_array(np.random.randint(0, 255, (height, width), dtype='uint8'),
+                                               transform=transform, crs=None)
+
+        # Check that output type is same - other tests are in test_georaster.py
+        sat_out = -satimg1
+        assert isinstance(sat_out, si.SatelliteImage)
+
+        sat_out = satimg1 + satimg2
+        assert isinstance(sat_out, si.SatelliteImage)
+
+        sat_out = satimg1 - satimg2
+        assert isinstance(sat_out, si.SatelliteImage)
 
     def test_copy(self):
         """
