@@ -1537,30 +1537,25 @@ to be cleared due to the setting of GCPs.")
 
         return bands if len(bands) > 1 else bands[0]
     
-    def polygonize(self, rst=None, in_value=1):
+    def polygonize(self, in_value=1):
         """
-        Return a GeoDataFrame with distinct geometries separated from a raster.
-        :param rst: A raster to be used for the polygonization
-        :type rst: Raster object or str
-        :param in_value: Value(s) of the raster from which to create geometries (Default is 1)
+        Return a GeoDataFrame polygonized from a raster.
+        :param in_value: Value of the raster from which to create geometries (Default is 1)
         :type in_value: int, float
         :returns: GeoDataFrame containing the polygonized geometries
         :rtype: geopandas.geodataframe.GeoDataFrame
         """
     
-        # If input rst is string, open as Raster
-        if isinstance(rst, str):
-            from geoutils.georaster import Raster
-    
-            rst = Raster(rst)
-    
         # Polygonize raster
         if isinstance(in_value, Number):
     
-            bool_msk = np.array(rst.data == in_value).astype(np.uint8)
+            if np.sum(self.data == in_value) == 0:
+                raise ValueError("no pixel with in_value {}".format(in_value))
+    
+            bool_msk = np.array(self.data == in_value).astype(np.uint8)
             results = (
-                {"properties": {"raster_val": v}, "geometry": s}
-                for i, (s, v) in enumerate(shapes(bool_msk, mask=bool_msk))
+                {"properties": {"raster_value": v}, "geometry": s}
+                for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk))
             )
     
             gdf = gpd.GeoDataFrame.from_features(list(results))

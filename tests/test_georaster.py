@@ -661,3 +661,9 @@ class TestRaster:
         img3a = img1.reproject(img2, resampling="q1")
         img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
         assert img3a == img3b
+        
+    def test_polygonize(self):
+        """Test that polygonize doesn't raise errors."""
+        img = gr.Raster(datasets.get_path('landsat_B4'))
+        assert gdf = img.polygonize()
+        
