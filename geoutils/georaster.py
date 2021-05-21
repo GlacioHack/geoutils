@@ -631,8 +631,8 @@ class Raster(object):
 
     def reproject(self, dst_ref=None, dst_crs=None, dst_size=None,
                   dst_bounds=None, dst_res=None, nodata=None, dtype=None,
-                  resampling=Resampling.nearest, silent=False,
-                  **kwargs):
+                  resampling=Resampling.nearest, silent=False, n_threads=0,
+                  memory_limit=64):
         """ 
         Reproject raster to a specified grid.
 
@@ -663,7 +663,10 @@ class Raster(object):
         :type resampling: rio.warp or a matching string representation.
         :param silent: If True, will not print warning statements
         :type silent: bool
-        :param kwargs: additional keywords are passed to rasterio.warp.reproject. Use with caution.
+        :param n_threads: The number of worker threads. Defaults to (os.cpu_count() - 1).
+        :type n_threads: int
+        :param memory_limit: The warp operation memory limit in MB. Larger values may perform better.
+        :type memory_limit: int
 
         :returns: Raster
         :rtype: Raster
@@ -794,6 +797,15 @@ class Raster(object):
                 dst_r = self.copy()
                 dst_r.set_ndv(nodata)
                 return dst_r
+
+        # Set the performance keywords
+        if n_threads == 0:
+            # Default to cpu count minus one. If the cpu count is undefined, num_threads will be 1
+            cpu_count = os.cpu_count() or 2
+            num_threads = cpu_count - 1
+        else:
+            num_threads = n_threads
+        reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
 
         # Currently reprojects all in-memory bands at once.
         # This may need to be improved to allow reprojecting from-disk.
