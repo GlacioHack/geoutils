@@ -4,6 +4,7 @@ geoutils.georaster provides a toolset for working with raster data.
 from __future__ import annotations
 
 import collections
+from numbers import Number
 import os
 import warnings
 from typing import Optional, Union
@@ -20,12 +21,14 @@ import rasterio.warp
 import rasterio.windows
 from affine import Affine
 from matplotlib import cm, colors
-from rasterio.features import shapes
+import pyproj
 from rasterio.crs import CRS
+from rasterio.features import shapes
 from rasterio.io import MemoryFile
 from rasterio.plot import show as rshow
 from rasterio.warp import Resampling
 from scipy.interpolate import griddata
+from scipy.ndimage import map_coordinates
 from shapely.geometry.polygon import Polygon
 
 try:
@@ -83,6 +86,7 @@ class Raster(object):
             True if the image data have been loaded into this Raster.
         ds : rio.io.DatasetReader
             Link to underlying DatasetReader object.
+
         bounds
 
         count
@@ -110,9 +114,7 @@ class Raster(object):
         transform
 
         width
-
     """
-
     # This only gets set if a disk-based file is read in.
     # If the Raster is created with from_array, from_mem etc, this stays as None.
     filename = None
@@ -350,6 +352,81 @@ class Raster(object):
     def __ne__(self, other) -> bool:
         return not self.__eq__(other)
 
+    def __add__(self, other: Union[Raster, np.ndarray, Number]) -> Raster:
+        """
+        Sum up the data of two rasters or a raster and a numpy array, or a raster and single number.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        # Check that other is of correct type
+        if not isinstance(other, (Raster, np.ndarray, Number)):
+            raise ValueError("Addition possible only with a Raster, np.ndarray or single number.")
+
+        # Case 1 - other is a Raster
+        if isinstance(other, Raster):
+            # Check that both data are loaded
+            if not (self.is_loaded & other.is_loaded):
+                raise ValueError("Raster's data must be loaded with self.load().")
+
+            # Check that both rasters have the same shape and georeferences
+            if (self.data.shape == other.data.shape) & (self.transform == other.transform) & (self.crs == other.crs):
+                pass
+            else:
+                raise ValueError("Both rasters must have the same shape, transform and CRS.")
+
+            other_data = other.data
+
+        # Case 2 - other is a numpy array
+        elif isinstance(other, np.ndarray):
+            # Check that both array have the same shape
+            if (self.data.shape == other.shape):
+                pass
+            else:
+                raise ValueError("Both rasters must have the same shape.")
+
+            other_data = other
+
+        # Case 3 - other is a single number
+        else:
+            other_data = other
+
+        # Calculate the sum of arrays
+        data = self.data + other_data
+
+        # Save as a new Raster
+        out_rst = self.from_array(data, self.transform, self.crs, nodata=self.nodata)
+
+        return out_rst
+
+    def __neg__(self) -> Raster:
+        """Return self with self.data set to -self.data"""
+        out_rst = self.copy()
+        out_rst.data = -out_rst.data
+        return out_rst
+
+    def __sub__(self, other: Union[Raster, np.ndarray, Number]) -> Raster:
+        """
+        Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
+        """
+        if isinstance(other, Raster):
+            # Need to convert both rasters to a common type before doing the negation
+            ctype = np.find_common_type([*self.dtypes, *other.dtypes], [])
+            other = other.astype(ctype)
+
+        return self + -other
+
+    def astype(self, dtype: Union[type, str]) -> Raster:
+        """
+        Converts the data type of a Raster object.
+
+        :param dtype: Any numpy dtype or string accepted by numpy.astype
+
+        :returns: the output Raster with dtype changed.
+        """
+        out_data = self.data.astype(dtype)
+        return self.from_array(out_data, self.transform, self.crs)
+
     def _get_rio_attrs(self) -> list[str]:
         """Get the attributes that have the same name in rio.DatasetReader and Raster."""
         rio_attrs: list[str] = []
@@ -547,7 +624,7 @@ class Raster(object):
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
         :type bands: int, or list of ints
 
-        **kwargs: any additional arguments to rasterio.io.DatasetReader.read.
+        \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
         Useful ones are:
         .. hlist::
         * out_shape : to load a subsampled version
@@ -1044,7 +1121,7 @@ to be cleared due to the setting of GCPs.")
         :param out_crs: Output CRS
         :type out_crs: rasterio.crs.CRS
         :param densify_pts_max: Maximum points to be added between image corners to account for non linear edges (Default 5000)
-        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+                                Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         :type densify_pts_max: int
         """
         # Max points to be added between image corners to account for non linear edges
@@ -1108,7 +1185,7 @@ to be cleared due to the setting of GCPs.")
              add_cb=True, ax=None, **kwargs):
         """ Show/display the image, with axes in projection of image.
 
-        This method is a wrapper to rasterio.plot.show. Any **kwargs which
+        This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
         you give this method will be passed to rasterio.plot.show.
 
         :param band: which band to plot, from 0 to self.count-1 (default is all)
@@ -1128,7 +1205,7 @@ to be cleared due to the setting of GCPs.")
         :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
         :rtype: (matplotlib.axes.Axes, matplotlib.colors.Colormap)
 
-        You can also pass in **kwargs to be used by the underlying imshow or
+        You can also pass in \*\*kwargs to be used by the underlying imshow or
         contour methods of matplotlib. The example below shows provision of
         a kwarg for rasterio.plot.show, and a kwarg for matplotlib as well::
 
@@ -1377,7 +1454,7 @@ to be cleared due to the setting of GCPs.")
         else:
             return xx[:-1], yy[:-1]
 
-    def xy2ij(self, x, y):
+    def xy2ij(self,x,y, op=np.float32,area_or_point=None,precision=None):
         """
         Return row, column indices for a given x,y coordinate pair.
 
@@ -1385,12 +1462,47 @@ to be cleared due to the setting of GCPs.")
         :type x: array-like
         :param y: y coordinates
         :type y: array-like
+        :param op: operator to calculate index
+        :type op: Any
+        :param precision: precision for rio.Dataset.index
+        :type precision: Any
+        :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or force position ('Point' or 'Area') of
+        the interpretation of where the raster value corresponds to in the pixel ('Area' = lower left or 'Point' = center)
+        :type area_or_point: str, None
 
         :returns i, j: indices of x,y in the image.
         :rtype i, j: array-like
 
         """
-        i, j = self.ds.index(x, y)
+        if op not in [np.float32,np.float64,float]:
+            raise UserWarning('Operator is not of type float: rio.Dataset.index might return unreliable indexes due to rounding issues.')
+        if area_or_point not in [None,'Area','Point']:
+            raise ValueError('Argument "area_or_point" must be either None (falls back to GDAL metadata), "Point" or "Area".')
+
+        i, j = self.ds.index(x,y,op=op,precision=precision)
+
+        # # necessary because rio.Dataset.index does not return Iterable for a single point
+        if not isinstance(i, collections.abc.Iterable):
+            i, j = (np.asarray([i, ]), np.asarray([j, ]))
+        else:
+            i, j = (np.asarray(i), np.asarray(j))
+
+        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the upper left corner (AREA) or the center of pixel (POINT)
+        # This has no influence on georeferencing, it's only about the interpretation of the raster values, and thus only
+        # affects sub-pixel interpolation
+
+        # if input is None, default to GDAL METADATA
+        if area_or_point is None:
+            area_or_point = self.ds.tags()['AREA_OR_POINT']
+
+        if area_or_point == 'Point':
+            if not isinstance(i.flat[0],np.floating):
+                raise ValueError('Operator must return np.floating values to perform AREA_OR_POINT subpixel index shifting')
+
+            # if point, shift index by half a pixel
+            i += 0.5
+            j += 0.5
+            #otherwise, leave as is
 
         return i, j
 
@@ -1414,7 +1526,6 @@ to be cleared due to the setting of GCPs.")
 
     def outside_image(self, xi, yj, index=True):
         """
-        #TODO: calculate matricially for all points instead of doing for only one?
         Check whether a given point falls outside of the raster.
 
         :param xi: Indices (or coordinates) of x direction to check.
@@ -1431,26 +1542,30 @@ to be cleared due to the setting of GCPs.")
 
         if np.any(np.array((xi, yj)) < 0):
             return True
-        elif xi > self.ds.width or yj > self.ds.height:
+        elif xi > self.width or yj > self.height:
             return True
         else:
             return False
 
-    def interp_points(self, pts, nsize=1, mode='linear', band=1):
+    def interp_points(self,pts,input_latlon=False,mode='linear',band=1, area_or_point=None, **kwargs):
+
         """
         Interpolate raster values at a given point, or sets of points.
 
        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
-            value returned is nan.
+       value returned is nan. Shape should be (N,2)'
        :type pts: array-like
-       :param nsize: Number of neighboring points to include in the interpolation. Default is 1.
-       :type nsize: int
+       :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
+       :type input_latlon: bool
        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
             used to interpolate the raster value at each point. For more information, see
             scipy.interpolate.interp2d. Default is linear.
        :type mode: str
        :param band: Raster band to use
        :type band: int
+       :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or force position ('Point' or 'Area') of
+        the interpretation of where the raster value corresponds to in the pixel ('Area' = lower left or 'Point' = center)
+       :type area_or_point: str, None
 
        :returns rpts: Array of raster value(s) for the given points.
        :rtype rpts: array-like
@@ -1458,43 +1573,57 @@ to be cleared due to the setting of GCPs.")
         assert mode in ['mean', 'linear', 'cubic', 'quintic',
                         'nearest'], "mode must be mean, linear, cubic, quintic or nearest."
 
-        rpts = []
+        # get coordinates
+        x, y = list(zip(*pts))
 
-        # TODO: might need to check if coordinates are center or point in the metadata here...
+        # if those are in latlon, convert to Raster crs
+        if input_latlon:
+            init_crs = pyproj.CRS(4326)
+            dest_crs = pyproj.CRS(self.crs)
+            transformer = pyproj.Transformer.from_crs(init_crs,dest_crs)
+            x, y = transformer.transform(x,y)
 
-        xx, yy = self.coords(offset='center', grid=False)
-        # TODO: right now it's a loop... could add multiprocessing parallel loop outside,
-        # but such a method probably exists already within scipy/other interpolation packages?
-        for pt in pts:
-            i, j = self.xy2ij(pt[0], pt[1])
-            if self.outside_image(i, j, index=True):
-                rpts.append(np.nan)
-                continue
-            else:
-                x = xx[j - nsize:j + nsize + 1]
-                y = yy[i - nsize:i + nsize + 1]
+        i, j = self.xy2ij(x,y,op=np.float32,area_or_point=area_or_point)
 
-                # TODO: read only that window?
-                z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
-                if mode in ['linear', 'cubic', 'quintic', 'nearest']:
-                    X, Y = np.meshgrid(x, y)
-                    try:
-                        zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
-                    except:
-                        # TODO: currently fails when dealing with the edges
-                        print('Interpolation failed for:')
-                        print(pt)
-                        print(i, j)
-                        print(x)
-                        print(y)
-                        print(z)
-                        zint = np.nan
-                else:
-                    zint = np.nanmean(z.flatten())
-                rpts.append(zint)
-        rpts = np.array(rpts)
+        ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1,k2,index=True))(j,i)
+
+        rpts = map_coordinates(self.data[band-1,:,:].astype(np.float32), [i,j], **kwargs)
+        rpts = np.array(rpts,dtype=np.float32)
+        rpts[np.array(ind_invalid)] = np.nan
 
         return rpts
+
+        # #TODO: right now it's a loop... could add multiprocessing parallel loop outside,
+        # # but such a method probably exists already within scipy/other interpolation packages?
+        # for pt in pts:
+        #     i,j = self.xy2ij(pt[0],pt[1])
+        #     if self.outside_image(i,j, index=True):
+        #         rpts.append(np.nan)
+        #         continue
+        #     else:
+        #         x = xx[j - nsize:j + nsize + 1]
+        #         y = yy[i - nsize:i + nsize + 1]
+        #
+        #         #TODO: read only that window?
+        #         z = self.data[band-1, i - nsize:i + nsize + 1, j - nsize:j + nsize + 1]
+        #         if mode in ['linear', 'cubic', 'quintic', 'nearest']:
+        #             X, Y = np.meshgrid(x, y)
+        #             try:
+        #                 zint = griddata((X.flatten(), Y.flatten()), z.flatten(), list(pt), method=mode)[0]
+        #             except:
+        #                 #TODO: currently fails when dealing with the edges
+        #                 print('Interpolation failed for:')
+        #                 print(pt)
+        #                 print(i,j)
+        #                 print(x)
+        #                 print(y)
+        #                 print(z)
+        #                 zint = np.nan
+        #         else:
+        #             zint = np.nanmean(z.flatten())
+        #         rpts.append(zint)
+        # rpts = np.array(rpts)
+        
 
     def split_bands(self, copy: bool = False, subset: Optional[Union[list[int], int]] = None):
         """
