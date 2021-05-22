@@ -23,6 +23,9 @@ This package offers Python classes and functions as well as command line tools t
 `pytest -rA`
 
 
+## Documentation
+See the full documentation at https://geoutils.readthedocs.io.
+
 
 ## Structure 
 
@@ -30,6 +33,7 @@ GeoUtils are composed of three libraries:
 - `georaster.py` to handle raster data set. In particular, a Raster class to load a raster file along with metadata.
 - `geovector.py` to handle vector data set. In particular, a Vector class to load a raster file along with metadata.
 - `projtools.py` with various tools around projections.
+
 
 ## How to contribute
 
