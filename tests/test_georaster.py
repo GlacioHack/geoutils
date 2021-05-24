@@ -4,6 +4,7 @@ Test functions for georaster
 import os
 import tempfile
 from tempfile import TemporaryFile
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -72,6 +73,11 @@ class TestRaster:
 
         # Check summary matches that of RIO
         assert print(r) == print(r.info())
+
+        # Check that the stats=True flag doesn't trigger a warning
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            r.info(stats=True)
 
     def test_loading(self):
         """
