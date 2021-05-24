@@ -4,6 +4,7 @@ geoutils.georaster provides a toolset for working with raster data.
 from __future__ import annotations
 
 import collections
+import copy
 from numbers import Number
 import os
 import warnings
@@ -644,7 +645,7 @@ class Raster(object):
         self.is_loaded = True
         self.bands = bands
 
-    def crop(self, cropGeom, mode='match_pixel'):
+    def crop(self, cropGeom, mode='match_pixel', inplace=True) -> Raster:
         """
         Crop the Raster to a given extent.
 
@@ -656,21 +657,21 @@ class Raster(object):
             resolution, cropping to the extent that most closely aligns with the current coordinates. 'match_extent'
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
         :type mode: str
-
+        :param inplace: Update the raster inplace or return copy.
+        :type inplace: bool
+        :returns: None if inplace=True and a new Raster if inplace=False
         """
         import geoutils.geovector as vt
 
         assert mode in ['match_extent', 'match_pixel'], "mode must be one of 'match_pixel', 'match_extent'"
-        if isinstance(cropGeom, Raster):
+        if isinstance(cropGeom, (Raster, vt.Vector)):
             xmin, ymin, xmax, ymax = cropGeom.bounds
-        elif isinstance(cropGeom, vt.Vector):
-            raise NotImplementedError
         elif isinstance(cropGeom, (list, tuple)):
             xmin, ymin, xmax, ymax = cropGeom
         else:
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
-        meta = self.ds.meta
+        meta = copy.copy(self.ds.meta)
 
         if mode == 'match_pixel':
             crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
@@ -700,7 +701,11 @@ class Raster(object):
                          'width': new_width,
                          'transform': tfm})
 
-        self._update(crop_img, meta)
+        if inplace:
+            self._update(crop_img, meta)
+
+        else:
+            return Raster.from_array(crop_img, meta["transform"], meta["crs"], meta["nodata"])
 
     def clip(self):
         pass

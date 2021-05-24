@@ -35,6 +35,8 @@ class Vector(object):
             self.name = None
         else:
             raise ValueError('filename argument not recognised.')
+        
+        self.crs = self.ds.crs
 
     def __repr__(self):
         return self.ds.__repr__()
@@ -60,6 +62,11 @@ class Vector(object):
             self.ds.__repr__()]
 
         return "".join(as_str)
+
+    @property
+    def bounds(self) -> rio.coords.BoundingBox:
+        """Get a bounding box of the total bounds of the Vector."""
+        return rio.coords.BoundingBox(*self.ds.total_bounds)
 
     def copy(self):
         """Return a copy of the Vector."""

@@ -4,6 +4,7 @@ Test functions for georaster
 import os
 import tempfile
 from tempfile import TemporaryFile
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,6 +13,7 @@ import rasterio as rio
 from pylint import epylint
 
 import geoutils.georaster as gr
+import geoutils as gu
 import geoutils.projtools as pt
 from geoutils import datasets
 
@@ -290,8 +292,19 @@ class TestRaster:
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
 
+        # Read a vector and extract only the largest outline within the extent of r
+        outlines = gu.Vector(datasets.get_path("glacier_outlines"))
+        outlines.ds = outlines.ds.to_crs(r.crs)
+        outlines.crop2raster(r)
+        outlines = outlines.query(f"index == {np.argmax(outlines.ds.geometry.area)}")
+
+        # Crop the raster to the outline and validate that it got smaller
+        r_outline_cropped = r.crop(outlines, inplace=False)
+        assert r.data.size > r_outline_cropped.data.size
+
         b = r.bounds
         b2 = r2.bounds
+        print(r.shape, r2.shape, b, b2, r.res, r2.res)
 
         b_minmax = (max(b[0], b2[0]), max(b[1], b2[1]),
                     min(b[2], b2[2]), min(b[3], b2[3]))
