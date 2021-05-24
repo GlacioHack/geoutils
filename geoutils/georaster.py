@@ -1019,7 +1019,8 @@ class Raster(object):
 
         self._update(imgdata=imgdata, metadata=meta)
 
-    def save(self, filename, driver='GTiff', dtype=None, blank_value=None, co_opts={}, metadata={}, gcps=[], gcps_crs=None):
+    def save(self, filename, driver='GTiff', dtype=None, compress="deflate", tiled=False, blank_value=None,
+             co_opts={}, metadata={}, gcps=[], gcps_crs=None):
         """ Write the Raster to a geo-referenced file.
 
         Given a filename to save the Raster to, create a geo-referenced file
@@ -1035,6 +1036,11 @@ class Raster(object):
         :type driver: str
         :param dtype: Data Type to write the image as (defaults to dtype of image data)
         :type dtype: np.dtype
+        :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE)
+        :type compress: str, None
+        :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
+                      but increases file size.
+        :type tiled: bool
         :param blank_value: Use to write an image out with every pixel's value
             corresponding to this value, instead of writing the image data to disk.
         :type blank_value: None, int, float.
@@ -1073,7 +1079,9 @@ class Raster(object):
                       dtype=save_data.dtype,
                       crs=self.ds.crs,
                       transform=self.ds.transform,
-                      nodata=self.ds.nodata, **co_opts) as dst:
+                      nodata=self.ds.nodata,
+                      compress=compress,
+                      tiled=tiled, **co_opts) as dst:
 
             dst.write(save_data)
 
