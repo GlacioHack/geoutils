@@ -80,13 +80,13 @@ class TestRaster:
             warnings.simplefilter("error")
             stats = r.info(stats=True)
 
+        # Validate that the mask is respected by adding 0 values (there are none to begin with.)
         r.data.ravel()[:1000] = 0
+        # Set the nodata value to 0, then validate that they are excluded from the new minimum
         r.set_ndv(0)
-
         new_stats = r.info(stats=True)
-
         for i, line in enumerate(stats.splitlines()):
-            if "MAXIMUM" not in line:
+            if "MINIMUM" not in line:
                 continue
             assert line == new_stats.splitlines()[i]
 
