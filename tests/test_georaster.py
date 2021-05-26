@@ -304,7 +304,6 @@ class TestRaster:
 
         b = r.bounds
         b2 = r2.bounds
-        print(r.shape, r2.shape, b, b2, r.res, r2.res)
 
         b_minmax = (max(b[0], b2[0]), max(b[1], b2[1]),
                     min(b[2], b2[2]), min(b[3], b2[3]))
