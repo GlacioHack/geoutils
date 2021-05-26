@@ -29,3 +29,17 @@ class TestVector:
         assert vector2 is not self.glacier_outlines
 
         assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]
+
+    def test_bounds(self):
+
+        bounds = self.glacier_outlines.bounds
+
+        assert bounds.left < bounds.right
+        assert bounds.bottom < bounds.top
+
+        assert bounds.left == self.glacier_outlines.ds.total_bounds[0]
+        assert bounds.bottom == self.glacier_outlines.ds.total_bounds[1]
+        assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
+        assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
+
+
