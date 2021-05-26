@@ -72,12 +72,24 @@ class TestRaster:
             assert r.__getattribute__(attr) == r.ds.__getattribute__(attr)
 
         # Check summary matches that of RIO
-        assert print(r) == print(r.info())
+        assert str(r) == r.info()
 
         # Check that the stats=True flag doesn't trigger a warning
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            r.info(stats=True)
+            stats = r.info(stats=True)
+
+        r.data.ravel()[:1000] = 0
+        r.set_ndv(0)
+
+        new_stats = r.info(stats=True)
+
+        for i, line in enumerate(stats.splitlines()):
+            if "MAXIMUM" not in line:
+                continue
+            assert line == new_stats.splitlines()[i]
+
+
 
     def test_loading(self):
         """
