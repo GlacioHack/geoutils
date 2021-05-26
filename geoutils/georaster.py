@@ -575,7 +575,7 @@ class Raster(object):
                     as_str.append('[MINIMUM]:          {:.2f}\n'.format(
                         np.nanmin(self.data)))
                     as_str.append('[MEDIAN]:           {:.2f}\n'.format(
-                        np.nanmedian(self.data)))
+                        np.ma.median(self.data)))
                     as_str.append('[MEAN]:             {:.2f}\n'.format(
                         np.nanmean(self.data)))
                     as_str.append('[STD DEV]:          {:.2f}\n'.format(
@@ -589,7 +589,7 @@ class Raster(object):
                         as_str.append('[MINIMUM]:          {:.2f}\n'.format(
                             np.nanmin(self.data[b, :, :])))
                         as_str.append('[MEDIAN]:           {:.2f}\n'.format(
-                            np.nanmedian(self.data[b, :, :])))
+                            np.ma.median(self.data[b, :, :])))
                         as_str.append('[MEAN]:             {:.2f}\n'.format(
                             np.nanmean(self.data[b, :, :])))
                         as_str.append('[STD DEV]:          {:.2f}\n'.format(

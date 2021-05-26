@@ -73,7 +73,24 @@ class TestRaster:
             assert r.__getattribute__(attr) == r.ds.__getattribute__(attr)
 
         # Check summary matches that of RIO
-        assert print(r) == print(r.info())
+        assert str(r) == r.info()
+
+        # Check that the stats=True flag doesn't trigger a warning
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            stats = r.info(stats=True)
+
+        # Validate that the mask is respected by adding 0 values (there are none to begin with.)
+        r.data.ravel()[:1000] = 0
+        # Set the nodata value to 0, then validate that they are excluded from the new minimum
+        r.set_ndv(0)
+        new_stats = r.info(stats=True)
+        for i, line in enumerate(stats.splitlines()):
+            if "MINIMUM" not in line:
+                continue
+            assert line == new_stats.splitlines()[i]
+
+
 
     def test_loading(self):
         """
