@@ -7,3 +7,4 @@ dependencies:
   - matplotlib
   - pyproj
   - rasterio
+  - scipy
