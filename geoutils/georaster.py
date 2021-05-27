@@ -788,6 +788,11 @@ class Raster(object):
             # Determine target CRS
             dst_crs = CRS.from_user_input(dst_crs)
 
+        # Set output dtype
+        if dtype is None:
+            # Warning: this will not work for multiple bands with different dtypes
+            dtype = self.dtypes[0]
+
         if nodata is None:
             nodata = self.nodata
             # If no data was set, need to set one by default, in case reprojection is done outside original bounds
@@ -849,7 +854,7 @@ class Raster(object):
         # Set output shape (Note: dst_size is (ncol, nrow))
         if dst_size is not None:
             dst_shape = (self.count, dst_size[1], dst_size[0])
-            dst_data = np.ones(dst_shape)
+            dst_data = np.ones(dst_shape, dtype=dtype)
             reproj_kwargs.update({'destination': dst_data})
         else:
             dst_shape = (self.count, self.height, self.width)
@@ -869,7 +874,7 @@ class Raster(object):
 
             # Specify the output bounds and shape, let rasterio handle the rest
             reproj_kwargs.update({'dst_transform': dst_transform})
-            dst_data = np.ones((dst_height, dst_width))
+            dst_data = np.ones((dst_height, dst_width), dtype=dtype)
             reproj_kwargs.update({'destination': dst_data})
 
         # Check that reprojection is actually needed
@@ -906,10 +911,6 @@ class Raster(object):
         dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
 
         # Enforce output type
-        if dtype is None:
-            # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
-            dtype = self.dtypes[0]
-
         dst_data = dst_data.astype(dtype)
 
         # Check for funny business.
