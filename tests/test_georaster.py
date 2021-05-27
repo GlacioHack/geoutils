@@ -348,6 +348,7 @@ class TestRaster:
 
         # Test reprojecting to dst_ref
         r = gr.Raster(datasets.get_path("landsat_B4"))
+        r.set_ndv(0)  # to avoid warnings - will be used when reprojecting outside bounds
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
         r3 = r.reproject(r2)
 
@@ -385,10 +386,19 @@ class TestRaster:
         assert r3.bounds == r.bounds
 
         # Test dst_bounds
-        # Create bounds with 1/2 and 1/3 pixel extra on the right/bottom.
-        bounds = np.copy(r2.bounds)
+        # if bounds is a multiple of res, outptut res should be preserved
+        bounds = np.copy(r.bounds)
         dst_bounds = rio.coords.BoundingBox(
-            left=bounds[0], bottom=bounds[1] - r2.res[0]/3., right=bounds[2] + r2.res[1]/2., top=bounds[3]
+            left=bounds[0], bottom=bounds[1] + r.res[0], right=bounds[2] - 2*r.res[1], top=bounds[3]
+        )
+        r3 = r.reproject(dst_bounds=dst_bounds)
+        assert r3.bounds == dst_bounds
+        assert r3.res == r.res
+
+        # Create bounds with 1/2 and 1/3 pixel extra on the right/bottom.
+        bounds = np.copy(r.bounds)
+        dst_bounds = rio.coords.BoundingBox(
+            left=bounds[0], bottom=bounds[1] - r.res[0]/3., right=bounds[2] + r.res[1]/2., top=bounds[3]
         )
 
         # if bounds are not a multiple of res, the latter will be updated accordingly
