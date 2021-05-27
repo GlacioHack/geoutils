@@ -856,6 +856,7 @@ class Raster(object):
             yres, xres = self.res
             dst_width = int(np.ceil((dst_bounds.right - dst_bounds.left) / xres))
             dst_height = int(np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres))
+            dst_size = (dst_width, dst_height)
 
             # Calculate associated transform
             dst_transform = rio.transform.from_bounds(*dst_bounds, width=dst_width, height=dst_height)
