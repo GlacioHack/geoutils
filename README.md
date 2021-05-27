@@ -13,24 +13,16 @@ This package offers Python classes and functions as well as command line tools t
 ## Installation
 
 #### With conda (recommended)
-First, set a strict channel priority. This seems to be optional (but recommended) on UNIX-based systems, but essential for Windows:
 ```bash
-conda config --add channels conda-forge
-conda config --set channel_priority strict
+conda install --channel conda-forge --strict-channel-priority geoutils
 ```
-Then install `geoutils`:
-```bash
-conda install geoutils
-```
+The `--strict-channel-priority` flag seems essential for Windows installs to function correctly, and is recommended for UNIX-based systems as well.
 
 #### With pip
 Make sure GDAL and PROJ are properly installed, then:
 ```bash
 pip install https://github.com/GlacioHack/GeoUtils/tarball/main
 ```
-
-
-
 
 ## Documentation
 See the full documentation at https://geoutils.readthedocs.io.
@@ -56,31 +48,4 @@ You can find ways to improve the libraries in the [issues](https://github.com/Gl
 
 Direct pushing to the GlacioHack repository is not permitted.
 
-
-### Development installation
-* Clone the main repo (or your fork)
-```bash
-git clone https://github.com/GlacioHack/GeoUtils  # Or your own fork
-cd GeoUtils
-```
-
-* Create environment and install dependencies
-```bash
-conda env create -f environment.yml
-```
-
-* Activate the environment
-```bash
-conda activate geoutils
-```
-
-* Install this package
-
-`pip install -e .` or `python setup.py install`
-
-* Check that everything is working by running the tests
-
-```bash
-pytest -rA
-```
-
+A more detailed contribution instruction [can be found here](CONTRIBUTING.md).
