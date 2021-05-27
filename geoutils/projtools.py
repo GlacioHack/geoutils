@@ -24,13 +24,13 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
     :returns: Output polygon
     :rtype: shapely Polygon
     """
-    # If boundsGeom is a rasterio or Raster object
-    if hasattr(boundsGeom, 'bounds'):
-        xmin, ymin, xmax, ymax = boundsGeom.bounds
-        in_crs = boundsGeom.crs
-    # If boundsGeom is a GeoPandas or Vector object
-    elif hasattr(boundsGeom, 'total_bounds'):
+    # If boundsGeom is a GeoPandas or Vector object (warning, has both total_bounds and bounds attributes)
+    if hasattr(boundsGeom, 'total_bounds'):
         xmin, ymin, xmax, ymax = boundsGeom.total_bounds
+        in_crs = boundsGeom.crs
+    # If boundsGeom is a rasterio or Raster object
+    elif hasattr(boundsGeom, 'bounds'):
+        xmin, ymin, xmax, ymax = boundsGeom.bounds
         in_crs = boundsGeom.crs
     # if a list of coordinates
     elif isinstance(boundsGeom, (list, tuple)):
@@ -46,7 +46,6 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
         raise NotImplementedError()
 
     return bbox
-
 
 def reproject_points(pts, in_crs, out_crs):
     """
