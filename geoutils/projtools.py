@@ -24,13 +24,13 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
     :returns: Output polygon
     :rtype: shapely Polygon
     """
-    # If boundsGeom is a rasterio or Raster object
-    if hasattr(boundsGeom, 'bounds'):
-        xmin, ymin, xmax, ymax = boundsGeom.bounds
-        in_crs = boundsGeom.crs
-    # If boundsGeom is a GeoPandas or Vector object
-    elif hasattr(boundsGeom, 'total_bounds'):
+    # If boundsGeom is a GeoPandas or Vector object (warning, has both total_bounds and bounds attributes)
+    if hasattr(boundsGeom, 'total_bounds'):
         xmin, ymin, xmax, ymax = boundsGeom.total_bounds
+        in_crs = boundsGeom.crs
+    # If boundsGeom is a rasterio or Raster object
+    elif hasattr(boundsGeom, 'bounds'):
+        xmin, ymin, xmax, ymax = boundsGeom.bounds
         in_crs = boundsGeom.crs
     # if a list of coordinates
     elif isinstance(boundsGeom, (list, tuple)):
@@ -46,6 +46,41 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
         raise NotImplementedError()
 
     return bbox
+
+
+def merge_bounds(bounds_list, merging_algorithm="union"):
+    """
+    Merge a list of bounds into single bounds, using either the union or intersection.
+
+    :param bounds_list: A list of geometries with bounds, i.e. a list of coordinates (xmin, ymin, xmax, ymax), \
+a rasterio/Raster object, a geoPandas/Vector object.
+    :type bounds_list: list, tuple
+    :param merging_algorithm: the algorithm to use for merging, either "union" or "intersection"
+    :type merging_algorithm: str
+
+    :returns: Output bounds (xmin, ymin, xmax, ymax)
+    :rtype: tuple
+    """
+    # Check that bounds_list is a list of bounds objects
+    assert isinstance(bounds_list, (list, tuple)), "bounds_list must be a list/tuple"
+    for bounds in bounds_list:
+        assert (hasattr(bounds, 'bounds') or hasattr(bounds, 'total_bounds') or isinstance(bounds, (list, tuple))), \
+            "bounds_list must be a list of lists/tuples of coordinates or an object with attributes bounds" \
+            " or total_bounds"
+
+    output_poly = bounds2poly(bounds_list[0])
+
+    for boundsGeom in bounds_list[1:]:
+        new_poly = bounds2poly(boundsGeom)
+
+        if merging_algorithm == "union":
+            output_poly = output_poly.union(new_poly)
+        elif merging_algorithm == "intersection":
+            output_poly = output_poly.intersection(new_poly)
+        else:
+            raise ValueError("merging_algorithm must be 'union' or 'intersection'")
+
+    return output_poly.bounds
 
 
 def reproject_points(pts, in_crs, out_crs):
