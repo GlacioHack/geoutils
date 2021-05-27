@@ -899,6 +899,10 @@ class Raster(object):
         dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
 
         # Enforce output type
+        if dtype is None:
+            # CHECK CORRECT IMPLEMENTATION! (rasterio dtypes seems to be on a per-band basis)
+            dtype = self.dtypes[0]
+
         dst_data = dst_data.astype(dtype)
 
         # Check for funny business.
