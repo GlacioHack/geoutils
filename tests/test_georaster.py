@@ -378,14 +378,32 @@ class TestRaster:
         r3 = r.reproject(r2)
         assert r.nodata == r3.nodata
 
-        # Test dst_size
+        # Test dst_size - this should modify the shape, and hence resolution, but not the bounds
         out_size = (r.shape[1]//2, r.shape[0]//2)  # Outsize is (ncol, nrow)
         r3 = r.reproject(dst_size=out_size)
         assert r3.shape == (out_size[1], out_size[0])
+        assert r3.bounds == r.bounds
 
         # Test dst_bounds
-        r3 = r.reproject(dst_bounds=r2.bounds)
-        assert r3.bounds == r2.bounds
+        # Create bounds with 1/2 and 1/3 pixel extra on the right/bottom.
+        bounds = np.copy(r2.bounds)
+        dst_bounds = rio.coords.BoundingBox(
+            left=bounds[0], bottom=bounds[1] - r2.res[0]/3., right=bounds[2] + r2.res[1]/2., top=bounds[3]
+        )
+
+        # if bounds are not a multiple of res, the latter will be updated accordingly
+        r3 = r.reproject(dst_bounds=dst_bounds)
+        assert r3.bounds == dst_bounds
+        assert r3.res != r.res
+
+        # If dst_res is set, the resolution will be enforced
+        # Bounds will be enforced for upper-left pixel, but ajusted by up to one pixel for the lower right bound.
+        r3 = r.reproject(dst_bounds=dst_bounds, dst_res=r.res)
+        assert r3.res == r.res
+        assert r3.bounds.left == dst_bounds.left
+        assert r3.bounds.top == dst_bounds.top
+        assert np.abs(r3.bounds.right - dst_bounds.right) < r3.res[1]
+        assert np.abs(r3.bounds.bottom - dst_bounds.bottom) < r3.res[0]
 
         # Test dst_crs
         out_crs = rio.crs.CRS.from_epsg(4326)
