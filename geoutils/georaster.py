@@ -790,6 +790,12 @@ class Raster(object):
 
         if nodata is None:
             nodata = self.nodata
+            # If no data was set, need to set one by default, in case reprojection is done outside original bounds
+            # Otherwise, output nodata will be 99999 by default which will not work as expected for uint8 data.
+            if nodata is None:
+                if not silent:
+                    warnings.warn("No nodata set, will use 0")
+                nodata = 0
 
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
