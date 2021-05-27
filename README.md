@@ -1,26 +1,35 @@
 # GeoUtils
 Set of tools to handle raster and vector data sets in Python.
 
+![](https://readthedocs.org/projects/geoutils/badge/?version=latest)
+[![build](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml/badge.svg)](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml)
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
+[![Conda Platforms](https://img.shields.io/conda/pn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
+[![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
+
 This package offers Python classes and functions as well as command line tools to work with both geospatial raster and vector datasets. It is built upon rasterio and GeoPandas. In a single command it can import any geo-referenced dataset that is understood by these libraries, complete with all geo-referencing information, various helper functions and interface between vector/raster data.
 
 
 ## Installation ##
 
-* Create environment and install dependencies
+#### With conda (recommended)
+First, set a strict channel priority. This seems to be optional (but recommended) on UNIX-based systems, but essential for Windows:
+```bash
+conda config --add channels conda-forge
+conda config --set channel_priority strict
+```
+Then install `geoutils`:
+```bash
+conda install geoutils
+```
 
-`conda env create -f environment.yml`
+#### With pip
+Make sure GDAL and PROJ are properly installed, then:
+```bash
+pip install https://github.com/GlacioHack/GeoUtils/tarball/main
+```
 
-* Activate environment
 
-`conda activate geoutils`
-
-* Install this package
-
-`pip install -e .` or `python setup.py install`
-
-* Check that everything is working by running the tests
-
-`pytest -rA`
 
 
 ## Documentation
@@ -48,9 +57,30 @@ You can find ways to improve the libraries in the [issues](https://github.com/Gl
 Direct pushing to the GlacioHack repository is not permitted.
 
 
-### Documentation - please read ! ###
-In the interest of keeping the documentation simple, please write all docstring in reStructuredText (https://docutils.sourceforge.io/rst.html) format - eventually, we will try to set up auto-documentation using sphinx and readthedocs, and this will help in that task.
+### Development installation
+* Clone the main repo (or your fork)
+```bash
+git clone https://github.com/GlacioHack/GeoUtils  # Or your own fork
+cd GeoUtils
+```
 
-### Testing - again please read!
-These tools are only valuable if we can rely on them to perform exactly as we expect. So, we need testing. Please create tests for every function that you make, as much as you are able. Guidance/examples here for the moment: https://github.com/GeoUtils/georaster/blob/master/test/test_georaster.py
-https://github.com/corteva/rioxarray/blob/master/test/integration/test_integration__io.py
+* Create environment and install dependencies
+```bash
+conda env create -f environment.yml
+```
+
+* Activate the environment
+```bash
+conda activate geoutils
+```
+
+* Install this package
+
+`pip install -e .` or `python setup.py install`
+
+* Check that everything is working by running the tests
+
+```bash
+pytest -rA
+```
+
