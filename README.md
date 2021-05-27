@@ -10,7 +10,7 @@ Set of tools to handle raster and vector data sets in Python.
 This package offers Python classes and functions as well as command line tools to work with both geospatial raster and vector datasets. It is built upon rasterio and GeoPandas. In a single command it can import any geo-referenced dataset that is understood by these libraries, complete with all geo-referencing information, various helper functions and interface between vector/raster data.
 
 
-## Installation ##
+## Installation
 
 #### With conda (recommended)
 First, set a strict channel priority. This seems to be optional (but recommended) on UNIX-based systems, but essential for Windows:
