@@ -41,5 +41,3 @@ class TestVector:
         assert bounds.bottom == self.glacier_outlines.ds.total_bounds[1]
         assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
-
-

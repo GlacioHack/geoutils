@@ -44,7 +44,7 @@ Or just print nicely to console:
 
         print(information)
 
-.. program-output:: $PYTHON -c "exec(open('code/raster-basics_open_file.py').read()); print(information)" 
+.. program-output:: $PYTHON -c "exec(open('code/raster-basics_open_file.py').read()); print(information)"
         :shell:
 
 Resampling a Raster to fit another
@@ -112,5 +112,3 @@ It is therefore recommended to choose the method that fits the purpose best, usi
 3) ``resampling="cubic_spline"``: Often considered the best approach. Not as performant as simpler methods.
 
 All valid resampling methods can be seen in the `Rasterio documentation <https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling>`_.
-
-

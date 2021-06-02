@@ -28,7 +28,7 @@ pip install https://github.com/GlacioHack/GeoUtils/tarball/main
 See the full documentation at https://geoutils.readthedocs.io.
 
 
-## Structure 
+## Structure
 
 GeoUtils are composed of three libraries:
 - `georaster.py` to handle raster data set. In particular, a Raster class to load a raster file along with metadata.
@@ -43,7 +43,7 @@ You can find ways to improve the libraries in the [issues](https://github.com/Gl
 1. Fork the repository to your personal GitHub account, clone to your computer.
 2. (Optional but preferred:) Make a feature branch.
 3. Push to your feature branch.
-4. When ready, submit a Pull Request from your feature branch to `GlacioHack/geoutils:master`. 
+4. When ready, submit a Pull Request from your feature branch to `GlacioHack/geoutils:master`.
 5. The PR will be reviewed by at least one other person. Usually your PR will be merged via 'squash and merge'.
 
 Direct pushing to the GlacioHack repository is not permitted.

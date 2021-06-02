@@ -15,7 +15,7 @@ Our functionalities are mostly based on `rasterio <https://rasterio.readthedocs.
 
 .. literalinclude:: code/index_example.py
 
-.. program-output:: $PYTHON code/index_example.py 
+.. program-output:: $PYTHON code/index_example.py
         :shell:
 
 .. toctree::
@@ -25,7 +25,7 @@ Our functionalities are mostly based on `rasterio <https://rasterio.readthedocs.
     satimg-basics
     vector-basics
     api
-    
+
 
 
 

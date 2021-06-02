@@ -4,7 +4,7 @@ import subprocess
 import sys
 import warnings
 
-from sphinx.cmd.build import main; 
+from sphinx.cmd.build import main
 
 
 class TestDocs:
@@ -42,7 +42,13 @@ class TestDocs:
 
         # Run the makefile
         build_commands = ["make", "-C", self.docs_dir, "html"]
-        build_commands = [sys.executable, "-m", "sphinx", os.path.join(self.docs_dir, "source"), os.path.join(self.docs_dir, "build")]
+        build_commands = [
+            sys.executable,
+            "-m",
+            "sphinx",
+            os.path.join(self.docs_dir, "source"),
+            os.path.join(self.docs_dir, "build"),
+        ]
         main([os.path.join(self.docs_dir, "source"), os.path.join(self.docs_dir, "build")])
         """
         result = subprocess.run(
@@ -64,4 +70,3 @@ class TestDocs:
         if len(result.stderr) > 0:
             warnings.warn(result.stderr)
         """
-

@@ -11,5 +11,5 @@ information = image.info()
 #### TEXT
 information = image.info(stats=True)
 #### TEXT
-with open('file.txt', 'w') as fh:
-        fh.writelines(information)
+with open("file.txt", "w") as fh:
+    fh.writelines(information)

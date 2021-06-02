@@ -1,20 +1,20 @@
 """
 GeoUtils.projtools provides a toolset for dealing with different coordinate reference systems (CRS).
 """
-import rasterio as rio
+import numpy as np
 import pyproj
+import rasterio as rio
+import shapely.ops
 from rasterio.crs import CRS
 from shapely.geometry.polygon import Polygon
-import shapely.ops
-import pyproj
-import numpy as np
 
 
 def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
     """
     Converts self's bounds into a shapely Polygon. Optionally, returns it into a different CRS.
 
-    :param boundsGeom: A geometry with bounds. Can be either a list of coordinates (xmin, ymin, xmax, ymax), a rasterio/Raster object, a geoPandas/Vector object
+    :param boundsGeom: A geometry with bounds. Can be either a list of coordinates (xmin, ymin, xmax, ymax),\
+            a rasterio/Raster object, a geoPandas/Vector object
     :type boundsGeom: list, tuple, object with attributes bounds or total_bounds
     :param in_crs: Input CRS
     :type in_crs: rasterio.crs.CRS
@@ -25,11 +25,11 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
     :rtype: shapely Polygon
     """
     # If boundsGeom is a GeoPandas or Vector object (warning, has both total_bounds and bounds attributes)
-    if hasattr(boundsGeom, 'total_bounds'):
+    if hasattr(boundsGeom, "total_bounds"):
         xmin, ymin, xmax, ymax = boundsGeom.total_bounds
         in_crs = boundsGeom.crs
     # If boundsGeom is a rasterio or Raster object
-    elif hasattr(boundsGeom, 'bounds'):
+    elif hasattr(boundsGeom, "bounds"):
         xmin, ymin, xmax, ymax = boundsGeom.bounds
         in_crs = boundsGeom.crs
     # if a list of coordinates
@@ -37,10 +37,10 @@ def bounds2poly(boundsGeom, in_crs=None, out_crs=None):
         xmin, ymin, xmax, ymax = boundsGeom
     else:
         raise ValueError(
-            "boundsGeom must a list/tuple of coordinates or an object with attributes bounds or total_bounds.")
+            "boundsGeom must a list/tuple of coordinates or an object with attributes bounds or total_bounds."
+        )
 
-    bbox = Polygon([(xmin, ymin), (xmax, ymin),
-                    (xmax, ymax), (xmin, ymax)])
+    bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
     if out_crs is not None:
         raise NotImplementedError()
@@ -64,11 +64,12 @@ a rasterio/Raster object, a geoPandas/Vector object.
     # Check that bounds_list is a list of bounds objects
     assert isinstance(bounds_list, (list, tuple)), "bounds_list must be a list/tuple"
     for bounds in bounds_list:
-        assert (hasattr(bounds, 'bounds') or hasattr(bounds, 'total_bounds') or isinstance(bounds, (list, tuple))), \
-            "bounds_list must be a list of lists/tuples of coordinates or an object with attributes bounds" \
-            " or total_bounds"
+        assert hasattr(bounds, "bounds") or hasattr(bounds, "total_bounds") or isinstance(bounds, (list, tuple)), (
+            "bounds_list must be a list of lists/tuples of coordinates or an object with attributes bounds "
+            "or total_bounds"
+        )
 
-    output_poly = bounds2poly(bounds_list[0])
+    output_poly = bounds2poly(boundsGeom=bounds_list[0], in_crs=None)
 
     for boundsGeom in bounds_list[1:]:
         new_poly = bounds2poly(boundsGeom)
@@ -104,9 +105,11 @@ def reproject_points(pts, in_crs, out_crs):
     xout, yout = transformer.transform(x, y)
     return (xout, yout)
 
+
 # Functions to convert from and to latlon
 
 crs_4326 = rio.crs.CRS.from_epsg(4326)
+
 
 def reproject_to_latlon(pts, in_crs, round_: int = 8):
     """
@@ -160,8 +163,7 @@ def reproject_shape(inshape, in_crs, out_crs):
     :returns: Reprojected geometry
     :rtype: shapely geometry
     """
-    reproj = pyproj.Transformer.from_crs(
-        in_crs, out_crs, always_xy=True, skip_equivalent=True).transform
+    reproj = pyproj.Transformer.from_crs(in_crs, out_crs, always_xy=True, skip_equivalent=True).transform
     return shapely.ops.transform(reproj, inshape)
 
 
@@ -176,8 +178,9 @@ def compare_proj(proj1, proj2):
 
     :returns: True if the two projections are the same.
     """
-    assert all([isinstance(proj1, (pyproj.CRS,CRS)), isinstance(proj2, (pyproj.CRS, CRS))]), \
-        'proj1 and proj2 must be rasterio.crs.CRS objects.'
+    assert all(
+        [isinstance(proj1, (pyproj.CRS, CRS)), isinstance(proj2, (pyproj.CRS, CRS))]
+    ), "proj1 and proj2 must be rasterio.crs.CRS objects."
     proj1 = pyproj.CRS(proj1.to_string())
     proj2 = pyproj.CRS(proj2.to_string())
 

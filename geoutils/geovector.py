@@ -1,8 +1,8 @@
 """
 geoutils.vectortools provides a toolset for working with vector data.
 """
-import warnings
 import collections
+import warnings
 from numbers import Number
 
 import geopandas as gpd
@@ -11,7 +11,7 @@ import rasterio as rio
 from rasterio import features, warp
 
 
-class Vector(object):
+class Vector:
     """
     Create a Vector object from a fiona-supported vector dataset.
     """
@@ -34,8 +34,8 @@ class Vector(object):
             self.ds = filename
             self.name = None
         else:
-            raise ValueError('filename argument not recognised.')
-        
+            raise ValueError("filename argument not recognised.")
+
         self.crs = self.ds.crs
 
     def __repr__(self):
@@ -53,13 +53,13 @@ class Vector(object):
         :rtype: str
         """
         as_str = [  # 'Driver:             {} \n'.format(self.driver),
-            'Filename:           {} \n'.format(self.name),
-            'Coordinate System:  EPSG:{}\n'.format(
-                self.ds.crs.to_epsg()),
-            'Number of features: {} \n'.format(len(self.ds)),
-            'Extent:             {} \n'.format(self.ds.total_bounds.tolist()),
-            'Attributes:         {} \n'.format(self.ds.columns.tolist()),
-            self.ds.__repr__()]
+            f"Filename:           {self.name} \n",
+            f"Coordinate System:  EPSG:{self.ds.crs.to_epsg()}\n",
+            f"Number of features: {len(self.ds)} \n",
+            f"Extent:             {self.ds.total_bounds.tolist()} \n",
+            f"Attributes:         {self.ds.columns.tolist()} \n",
+            self.ds.__repr__(),
+        ]
 
         return "".join(as_str)
 
@@ -75,7 +75,9 @@ class Vector(object):
 
     def crop2raster(self, rst):
         """
-        Update self so that features outside the extent of a raster file are cropped. Reprojection is done on the fly if both data set have different projections.
+        Update self so that features outside the extent of a raster file are cropped.
+
+        Reprojection is done on the fly if both data set have different projections.
 
         :param rst: A Raster object or string to filename
         :type rst: Raster object or str
@@ -83,14 +85,14 @@ class Vector(object):
         # If input is string, open as Raster
         if isinstance(rst, str):
             from geoutils.georaster import Raster
+
             rst = Raster(rst)
 
         # Convert raster extent into self CRS
         # Note: could skip this if we could test if rojections are same
         # Note: should include a method in Raster to get extent in other projections, not only using corners
         left, bottom, right, top = rst.bounds
-        x1, y1, x2, y2 = warp.transform_bounds(
-            rst.crs, self.ds.crs, left, bottom, right, top)
+        x1, y1, x2, y2 = warp.transform_bounds(rst.crs, self.ds.crs, left, bottom, right, top)
         self.ds = self.ds.cx[x1:x2, y1:y2]
 
     def create_mask(self, rst=None, crs=None, xres=None, yres=None, bounds=None):
@@ -98,7 +100,9 @@ class Vector(object):
         Rasterize the vector features into a boolean raster which has the extent/dimensions of \
 the provided raster file.
 
-        Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs. Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
+        Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
+        Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
+
         Vector features which fall outside the bounds of the raster file are not written to the new mask file.
 
         :param rst: A Raster object or string to filename
@@ -118,6 +122,7 @@ the provided raster file.
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             from geoutils.georaster import Raster
+
             rst = Raster(rst)
 
         # If no rst given, use provided dimensions
@@ -125,7 +130,7 @@ the provided raster file.
 
             # At minimum, xres must be set
             if xres is None:
-                raise ValueError('at least rst or xres must be set')
+                raise ValueError("at least rst or xres must be set")
             if yres is None:
                 yres = xres
 
@@ -137,20 +142,18 @@ the provided raster file.
 
             # Calculate raster shape
             left, bottom, right, top = bounds
-            height = abs((right-left)/xres)
-            width = abs((top-bottom)/yres)
+            height = abs((right - left) / xres)
+            width = abs((top - bottom) / yres)
 
             if width % 1 != 0 or height % 1 != 0:
-                warnings.warn(
-                    "Bounds not a multiple of xres/yres, use rounded bounds")
+                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
 
             width = int(np.round(width))
             height = int(np.round(height))
             out_shape = (height, width)
 
             # Calculate raster transform
-            transform = rio.transform.from_bounds(
-                left, bottom, right, top, width, height)
+            transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
         # otherwise use directly rst's dimensions
         else:
@@ -163,9 +166,9 @@ the provided raster file.
         vect = self.ds.to_crs(crs)
 
         # Rasterize geomtry
-        mask = features.rasterize(shapes=vect.geometry,
-                                  fill=0, out_shape=out_shape,
-                                  transform=transform, default_value=1, dtype='uint8').astype('bool')
+        mask = features.rasterize(
+            shapes=vect.geometry, fill=0, out_shape=out_shape, transform=transform, default_value=1, dtype="uint8"
+        ).astype("bool")
 
         # Force output mask to be of same dimension as input rst
         if rst is not None:
@@ -205,6 +208,7 @@ the provided raster file.
         # If input rst is string, open as Raster
         if isinstance(rst, str):
             from geoutils.georaster import Raster
+
             rst = Raster(rst)
 
         # If no rst given, use provided dimensions
@@ -212,7 +216,7 @@ the provided raster file.
 
             # At minimum, xres must be set
             if xres is None:
-                raise ValueError('at least rst or xres must be set')
+                raise ValueError("at least rst or xres must be set")
             if yres is None:
                 yres = xres
 
@@ -224,20 +228,18 @@ the provided raster file.
 
             # Calculate raster shape
             left, bottom, right, top = bounds
-            height = abs((right-left)/xres)
-            width = abs((top-bottom)/yres)
+            height = abs((right - left) / xres)
+            width = abs((top - bottom) / yres)
 
             if width % 1 != 0 or height % 1 != 0:
-                warnings.warn(
-                    "Bounds not a multiple of xres/yres, use rounded bounds")
+                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
 
             width = int(np.round(width))
             height = int(np.round(height))
             out_shape = (height, width)
 
             # Calculate raster transform
-            transform = rio.transform.from_bounds(
-                left, bottom, right, top, width, height)
+            transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
         # otherwise use directly rst's dimensions
         else:
@@ -258,21 +260,20 @@ the provided raster file.
             if len(in_value) != len(vect.geometry):
                 raise ValueError(
                     "in_value must have same length as self.ds.geometry, currently {} != {}".format(
-                        len(in_value), len(vect.geometry))
+                        len(in_value), len(vect.geometry)
+                    )
                 )
 
             out_geom = ((geom, value) for geom, value in zip(vect.geometry, in_value))
 
-            mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape,
-                                      transform=transform)
+            mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape, transform=transform)
 
         elif isinstance(in_value, Number):
-            mask = features.rasterize(shapes=vect.geometry, fill=out_value, out_shape=out_shape,
-                                      transform=transform, default_value=in_value)
-        else:
-            raise ValueError(
-                "in_value must be a single number or an iterable with same length as self.ds.geometry"
+            mask = features.rasterize(
+                shapes=vect.geometry, fill=out_value, out_shape=out_shape, transform=transform, default_value=in_value
             )
+        else:
+            raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
         return mask
 
