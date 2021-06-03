@@ -438,7 +438,7 @@ class Raster:
     def _get_rio_attrs(self) -> list[str]:
         """Get the attributes that have the same name in rio.DatasetReader and Raster."""
         rio_attrs: list[str] = []
-        for attr in self.__annotations__.keys():
+        for attr in Raster.__annotations__.keys():
             if "__" in attr or attr not in dir(self.ds):
                 continue
             rio_attrs.append(attr)

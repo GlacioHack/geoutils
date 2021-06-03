@@ -124,9 +124,9 @@ class TestRaster:
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.nbands is None
-        assert r.dtypes == ["uint8"]
+        assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-        assert r.res == [30.0, 30.0]
+        assert np.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
         assert not r.is_loaded
@@ -146,15 +146,15 @@ class TestRaster:
         # Test 4 - multiple bands, load all bands
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True)
         assert r.count == 3
-        assert r.indexes == [1, 2, 3]
+        assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 3
-        assert r.bands == (1, 2, 3)
+        assert np.array_equal(r.bands, [1, 2, 3])
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=1)
         assert r.count == 3
-        assert r.indexes == [1, 2, 3]
+        assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 1
         assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
@@ -162,9 +162,9 @@ class TestRaster:
         # Test 6 - multiple bands, load a list of bands
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=[2, 3])
         assert r.count == 3
-        assert r.indexes == [1, 2, 3]
+        assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 2
-        assert r.bands == (2, 3)
+        assert np.array_equal(r.bands, (2, 3))
         assert r.data.shape == (r.nbands, r.height, r.width)
 
     def test_downsampling(self) -> None:
@@ -208,23 +208,17 @@ class TestRaster:
         # Test negation
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert r3.dtypes == [
-            "uint8",
-        ]
+        assert np.array_equal(r3.dtypes, ["uint8"])
 
         # Test addition
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert r3.dtypes == [
-            "uint8",
-        ]
+        assert np.array_equal(r3.dtypes, ["uint8"])
 
         # Test subtraction
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert r3.dtypes == [
-            "uint8",
-        ]
+        assert np.array_equal(r3.dtypes, ["uint8"])
 
         # Test with dtype Float32
         r1 = gr.Raster.from_array(
@@ -232,21 +226,15 @@ class TestRaster:
         )
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert r3.dtypes == [
-            "float32",
-        ]
+        assert np.array_equal(r3.dtypes, ["float32"])
 
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert r3.dtypes == [
-            "float32",
-        ]
+        assert np.array_equal(r3.dtypes, ["float32"])
 
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert r3.dtypes == [
-            "float32",
-        ]
+        assert np.array_equal(r3.dtypes, ["float32"])
 
         # Check that errors are properly raised
         # different shapes
@@ -829,7 +817,7 @@ class TestRaster:
         assert img.data.shape[0] == 3
 
         # Extract only one band (then it will not return a list)
-        red2 = img.split_bands(copy=False, subset=0)
+        red2 = img.split_bands(copy=False, subset=0)[0]
 
         # Extract a subset with a list in a weird direction
         blue2, green2 = img.split_bands(copy=False, subset=[2, 1])

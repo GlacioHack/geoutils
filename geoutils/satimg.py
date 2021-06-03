@@ -6,6 +6,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
+import warnings
 from collections.abc import Iterable
 from typing import Any
 
@@ -351,7 +352,9 @@ class SatelliteImage(Raster):
                     )
 
     def __parse_metadata_from_file(self, fn_meta: str | None) -> None:
-        raise NotImplementedError(fn_meta)
+        warnings.warn(f"Parse metadata from file not implemented. {fn_meta}")
+
+        return None
 
     def copy(self, new_array: np.ndarray | None = None) -> SatelliteImage:
         new_satimg = super().copy(new_array=new_array)  # type: ignore
