@@ -82,4 +82,3 @@ It can also be run as a separate tool:
 ```bash
 pre-commit run --all-files
 ```
-
