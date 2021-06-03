@@ -2,7 +2,6 @@ import os
 import shutil
 import subprocess
 import sys
-import warnings
 
 from sphinx.cmd.build import main
 
@@ -10,7 +9,7 @@ from sphinx.cmd.build import main
 class TestDocs:
     docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../", "doc/")
 
-    def test_example_code(self):
+    def test_example_code(self) -> None:
         """Try running each python script in the docs/source/code\
                 directory and check that it doesn't raise an error."""
         current_dir = os.getcwd()
@@ -28,7 +27,7 @@ class TestDocs:
 
         os.chdir(current_dir)
 
-    def test_build(self):
+    def test_build(self) -> None:
         """Try building the docs and see if it works."""
 
         # Remove the build directory if it exists.
@@ -40,33 +39,5 @@ class TestDocs:
         env = os.environ.copy()
         env["SPHINXBUILD"] = f"{sys.executable} -m sphinx"
 
-        # Run the makefile
-        build_commands = ["make", "-C", self.docs_dir, "html"]
-        build_commands = [
-            sys.executable,
-            "-m",
-            "sphinx",
-            os.path.join(self.docs_dir, "source"),
-            os.path.join(self.docs_dir, "build"),
-        ]
+        # Run sphinx-buil
         main([os.path.join(self.docs_dir, "source"), os.path.join(self.docs_dir, "build")])
-        """
-        result = subprocess.run(
-            build_commands,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding="utf-8",
-            env=env
-        )
-        """
-
-        """
-        # Raise an error if the string "error" is in the stderr.
-        if "error" in str(result.stderr).lower():
-            raise RuntimeError(result.stderr)
-
-        # If "error" is not in the stderr string but it exists, show it as a warning.
-        if len(result.stderr) > 0:
-            warnings.warn(result.stderr)
-        """

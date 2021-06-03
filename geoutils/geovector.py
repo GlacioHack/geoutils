@@ -1,14 +1,24 @@
 """
 geoutils.vectortools provides a toolset for working with vector data.
 """
+from __future__ import annotations
+
 import collections
 import warnings
+from collections.abc import Iterable
 from numbers import Number
+from typing import TypeVar
 
 import geopandas as gpd
 import numpy as np
 import rasterio as rio
 from rasterio import features, warp
+from rasterio.crs import CRS
+
+import geoutils as gu
+
+# This is a generic Vector-type (if subclasses are made, this will change appropriately)
+VectorType = TypeVar("VectorType", bound="Vector")
 
 
 class Vector:
@@ -16,12 +26,11 @@ class Vector:
     Create a Vector object from a fiona-supported vector dataset.
     """
 
-    def __init__(self, filename):
+    def __init__(self, filename: str | gpd.GeoDataFrame):
         """
         Load a fiona-supported dataset, given a filename.
 
         :param filename: The filename or GeoDataFrame of the dataset.
-        :type filename: str or gpd.GeoDataFrame
 
         :return: A Vector object
         """
@@ -29,7 +38,7 @@ class Vector:
         if isinstance(filename, str):
             ds = gpd.read_file(filename)
             self.ds = ds
-            self.name = filename
+            self.name: str | gpd.GeoDataFrame | None = filename
         elif isinstance(filename, gpd.GeoDataFrame):
             self.ds = filename
             self.name = None
@@ -38,14 +47,14 @@ class Vector:
 
         self.crs = self.ds.crs
 
-    def __repr__(self):
-        return self.ds.__repr__()
+    def __repr__(self) -> str:
+        return str(self.ds.__repr__())
 
-    def __str__(self):
+    def __str__(self) -> str:
         """ Provide string of information about Raster. """
         return self.info()
 
-    def info(self):
+    def info(self) -> str:
         """
         Returns string of information about the vector (filename, coordinate system, number of layers, features, etc.).
 
@@ -68,25 +77,24 @@ class Vector:
         """Get a bounding box of the total bounds of the Vector."""
         return rio.coords.BoundingBox(*self.ds.total_bounds)
 
-    def copy(self):
+    def copy(self: VectorType) -> VectorType:
         """Return a copy of the Vector."""
         # Utilise the copy method of GeoPandas
-        return Vector(self.ds.copy())
+        new_vector = self.__new__(type(self))
+        new_vector.__init__(self.ds.copy())
+        return new_vector  # type: ignore
 
-    def crop2raster(self, rst):
+    def crop2raster(self, rst: gu.Raster) -> None:
         """
         Update self so that features outside the extent of a raster file are cropped.
 
         Reprojection is done on the fly if both data set have different projections.
 
         :param rst: A Raster object or string to filename
-        :type rst: Raster object or str
         """
         # If input is string, open as Raster
         if isinstance(rst, str):
-            from geoutils.georaster import Raster
-
-            rst = Raster(rst)
+            rst = gu.Raster(rst)
 
         # Convert raster extent into self CRS
         # Note: could skip this if we could test if rojections are same
@@ -95,7 +103,14 @@ class Vector:
         x1, y1, x2, y2 = warp.transform_bounds(rst.crs, self.ds.crs, left, bottom, right, top)
         self.ds = self.ds.cx[x1:x2, y1:y2]
 
-    def create_mask(self, rst=None, crs=None, xres=None, yres=None, bounds=None):
+    def create_mask(
+        self,
+        rst: str | gu.georaster.RasterType | None = None,
+        crs: CRS | None = None,
+        xres: float | None = None,
+        yres: float | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+    ) -> np.ndarray:
         """
         Rasterize the vector features into a boolean raster which has the extent/dimensions of \
 the provided raster file.
@@ -106,24 +121,16 @@ the provided raster file.
         Vector features which fall outside the bounds of the raster file are not written to the new mask file.
 
         :param rst: A Raster object or string to filename
-        :type rst: Raster object or str
         :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
-        :type crs: pyproj.crs.crs.CRS, rasterio.crs.CRS
         :param xres: Output raster spatial resolution in x. Only is rst is None.
-        :type xres: float
         :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
-        :type yres: float
         :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
-        :type bounds: tuple
 
         :returns: array containing the mask
-        :rtype: numpy.array
         """
         # If input rst is string, open as Raster
         if isinstance(rst, str):
-            from geoutils.georaster import Raster
-
-            rst = Raster(rst)
+            rst = gu.Raster(rst)  # type: ignore
 
         # If no rst given, use provided dimensions
         if rst is None:
@@ -157,26 +164,35 @@ the provided raster file.
 
         # otherwise use directly rst's dimensions
         else:
-            out_shape = rst.shape
-            transform = rst.transform
-            crs = rst.crs
+            out_shape = rst.shape  # type: ignore
+            transform = rst.transform  # type: ignore
+            crs = rst.crs  # type: ignore
 
         # Reproject vector into rst CRS
         # Note: would need to check if CRS are different
         vect = self.ds.to_crs(crs)
 
-        # Rasterize geomtry
+        # Rasterize geometry
         mask = features.rasterize(
             shapes=vect.geometry, fill=0, out_shape=out_shape, transform=transform, default_value=1, dtype="uint8"
         ).astype("bool")
 
         # Force output mask to be of same dimension as input rst
         if rst is not None:
-            mask = mask.reshape((rst.count, rst.height, rst.width))
+            mask = mask.reshape((rst.count, rst.height, rst.width))  # type: ignore
 
         return mask
 
-    def rasterize(self, rst=None, crs=None, xres=None, yres=None, bounds=None, in_value=None, out_value=0):
+    def rasterize(
+        self,
+        rst: str | gu.georaster.RasterType | None = None,
+        crs: CRS | None = None,
+        xres: float | None = None,
+        yres: float | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        in_value: int | float | Iterable[int | float] | None = None,
+        out_value: int | float = 0,
+    ) -> np.ndarray:
         """
         Return an array with input geometries burned in.
 
@@ -188,28 +204,18 @@ the provided raster file.
         Default is an index from 1 to len(self.ds).
 
         :param rst: A raster to be used as reference for the output grid
-        :type rst: Raster object or str
         :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
-        :type crs: pyproj.crs.crs.CRS, rasterio.crs.CRS
         :param xres: Output raster spatial resolution in x. Only is rst is None.
-        :type xres: float
         :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
-        :type yres: float
         :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
-        :type bounds: tuple
         :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1)
-        :type in_value: int, float, iterable
         :param out_value: Value to be burned outside the polygons (Default is 0)
-        :type out_value: int, float
 
         :returns: array containing the burned geometries
-        :rtype: numpy.array
         """
         # If input rst is string, open as Raster
         if isinstance(rst, str):
-            from geoutils.georaster import Raster
-
-            rst = Raster(rst)
+            rst = gu.Raster(rst)  # type: ignore
 
         # If no rst given, use provided dimensions
         if rst is None:
@@ -243,9 +249,9 @@ the provided raster file.
 
         # otherwise use directly rst's dimensions
         else:
-            out_shape = rst.shape
-            transform = rst.transform
-            crs = rst.crs
+            out_shape = rst.shape  # type: ignore
+            transform = rst.transform  # type: ignore
+            crs = rst.crs  # type: ignore
 
         # Reproject vector into rst CRS
         # Note: would need to check if CRS are different
@@ -257,10 +263,10 @@ the provided raster file.
 
         # Rasterize geometry
         if isinstance(in_value, collections.abc.Iterable):
-            if len(in_value) != len(vect.geometry):
+            if len(in_value) != len(vect.geometry):  # type: ignore
                 raise ValueError(
                     "in_value must have same length as self.ds.geometry, currently {} != {}".format(
-                        len(in_value), len(vect.geometry)
+                        len(in_value), len(vect.geometry)  # type: ignore
                     )
                 )
 
@@ -277,7 +283,7 @@ the provided raster file.
 
         return mask
 
-    def query(self, expression: str, inplace=False):
+    def query(self: VectorType, expression: str, inplace: bool = False) -> VectorType:
         """
         Query the Vector dataset with a valid Pandas expression.
 
@@ -292,4 +298,6 @@ the provided raster file.
             return self
 
         # Otherwise, create a new Vector from the queried dataset.
-        return Vector(self.ds.query(expression))
+        new_vector = self.__new__(type(self))
+        new_vector.__init__(self.ds.query(expression))
+        return new_vector  # type: ignore

@@ -8,7 +8,7 @@ import geoutils.projtools as pt
 
 
 class TestProjTools:
-    def test_latlon_reproject(self):
+    def test_latlon_reproject(self) -> None:
         """
         Check that to and from latlon projections are self consistent within tolerated rounding errors
         """
@@ -26,7 +26,7 @@ class TestProjTools:
         assert np.all(x == randx)
         assert np.all(y == randy)
 
-    def test_merge_bounds(self):
+    def test_merge_bounds(self) -> None:
         """
         Check that merge_bounds and bounds2poly work as expected for all kinds of bounds objects.
         """

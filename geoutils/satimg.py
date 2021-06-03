@@ -1,19 +1,24 @@
 """
 geoutils.satimg provides a toolset for working with satellite data.
 """
+from __future__ import annotations
+
 import datetime as dt
 import os
 import re
+from collections.abc import Iterable
+from typing import Any
 
 import numpy as np
+import rasterio as rio
 
-from geoutils.georaster import Raster
+from geoutils.georaster import Raster, RasterType
 
 lsat_sensor = {"C": "OLI/TIRS", "E": "ETM+", "T": "TM", "M": "MSS", "O": "OLI", "TI": "TIRS"}
 
 
-def parse_landsat(gname):
-    attrs = []
+def parse_landsat(gname: str) -> list[Any]:
+    attrs: list[Any] = []
     if len(gname.split("_")[0]) > 15:
         attrs.append(f"Landsat {int(gname[2])}")
         attrs.append(lsat_sensor[gname[1]])
@@ -35,7 +40,7 @@ def parse_landsat(gname):
     return attrs
 
 
-def parse_metadata_from_fn(fname):
+def parse_metadata_from_fn(fname: str) -> list[Any]:
 
     bname = os.path.splitext(os.path.basename(fname))[0]
 
@@ -46,7 +51,7 @@ def parse_metadata_from_fn(fname):
 
         # attrs corresponds to: satellite, sensor, product, version, tile_name, datetime
         if re.match("L[COTEM][0-9]{2}", spl[0]):
-            attrs = parse_landsat(bname)
+            attrs: tuple[Any, ...] | list[Any] = parse_landsat(bname)
         elif spl[0][0] == "L" and len(spl) == 1:
             attrs = parse_landsat(bname)
         elif re.match("T[0-9]{2}[A-Z]{3}", spl[0]):
@@ -93,22 +98,19 @@ def parse_metadata_from_fn(fname):
     else:
         attrs = (None,) * 6
 
-    return attrs
+    return list(attrs)
 
 
-def parse_tile_attr_from_name(tile_name, product=None):
+def parse_tile_attr_from_name(tile_name: str, product: str | None = None) -> tuple[float, float, tuple[int, int], int]:
     """
     Convert tile naming to metadata coordinates based on sensor and product
     by default the SRTMGL1 1x1° tile naming convention to lat, lon (originally SRTMGL1)
 
     :param tile_name: tile name
-    :type tile_name: str
     :param product: satellite product
-    :type product: str
 
     :returns: lat, lon of southwestern corner
     """
-
     if product is None or product in ["ASTGTM2", "SRTMGL1", "NASADEM"]:
         ymin, xmin = sw_naming_to_latlon(tile_name)
         yx_sizes = (1, 1)
@@ -129,7 +131,7 @@ def parse_tile_attr_from_name(tile_name, product=None):
     return ymin, xmin, yx_sizes, epsg
 
 
-def sw_naming_to_latlon(tile_name):
+def sw_naming_to_latlon(tile_name: str) -> tuple[float, float]:
 
     """
     Get latitude and longitude corresponding to southwestern corner of tile naming (originally SRTMGL1 convention)
@@ -138,10 +140,8 @@ def sw_naming_to_latlon(tile_name):
     most existing products, but for example it is NXXXWYYY for ALOS) and to reverted formats (WXXXNYY).
 
     :param tile_name: name of tile
-    :type tile_name: str
 
     :return: latitude and longitude of southwestern corner
-    :rtype: tuple
     """
 
     tile_name = tile_name.upper()
@@ -181,20 +181,20 @@ def sw_naming_to_latlon(tile_name):
     return lat, lon
 
 
-def latlon_to_sw_naming(latlon, latlon_sizes=((1, 1),), lat_lims=((0, 90.1),)):
+def latlon_to_sw_naming(
+    latlon: tuple[float, float],
+    latlon_sizes: Iterable[tuple[float, float]] = ((1.0, 1.0),),
+    lat_lims: Iterable[tuple[float, float]] = ((0.0, 90.1),),
+) -> str:
     """
     Convert latitude and longitude to widely used southwestern corner tile naming (originally for SRTMGL1)
     Can account for varying tile sizes, and a dependency with the latitude (e.g., TDX global DEM)
 
     :param latlon: latitude and longitude
-    :type latlon: collections.abc.Iterable
     :param latlon_sizes: sizes of lat/lon tiles corresponding to latitude intervals
-    :type latlon_sizes: collections.abc.Iterable
     :param lat_lims: latitude intervals
-    :type lat_lims: collections.abc.Iterable
 
     :returns: tile name
-    :rtype: str
     """
 
     lon = latlon[1]
@@ -213,11 +213,13 @@ def latlon_to_sw_naming(latlon, latlon_sizes=((1, 1),), lat_lims=((0, 90.1),)):
         str_lon = "E"
 
     tile_name = None
-    for latlim in lat_lims:
+    lat_lims_list = list(lat_lims)
+    latlon_sizes_list = list(latlon_sizes)
+    for latlim in lat_lims_list:
         if latlim[0] <= np.abs(lat) < latlim[1]:
-            ind = lat_lims.index(latlim)
-            lat_corner = np.floor(lat / latlon_sizes[ind][0]) * latlon_sizes[ind][0]
-            lon_corner = np.floor(lon / latlon_sizes[ind][1]) * latlon_sizes[ind][1]
+            ind = lat_lims_list.index(latlim)
+            lat_corner = np.floor(lat / latlon_sizes_list[ind][0]) * latlon_sizes_list[ind][0]
+            lon_corner = np.floor(lon / latlon_sizes_list[ind][1]) * latlon_sizes_list[ind][1]
             tile_name = str_lat + str(int(abs(lat_corner))).zfill(2) + str_lon + str(int(abs(lon_corner))).zfill(3)
 
     if tile_name is None:
@@ -230,60 +232,48 @@ satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datet
 
 
 class SatelliteImage(Raster):
+
+    date: None | dt.datetime
+
     def __init__(
         self,
-        filename_or_dataset,
-        attrs=None,
-        load_data=True,
-        bands=None,
-        as_memfile=False,
-        read_from_fn=True,
-        datetime=None,
-        tile_name=None,
-        satellite=None,
-        sensor=None,
-        product=None,
-        version=None,
-        read_from_meta=True,
-        fn_meta=None,
-        silent=False,
-    ):
+        filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
+        attrs: list[str] | None = None,
+        load_data: bool = True,
+        bands: int | list[int] | None = None,
+        as_memfile: bool = False,
+        read_from_fn: bool = True,
+        datetime: dt.datetime | None = None,
+        tile_name: str | None = None,
+        satellite: str | None = None,
+        sensor: str | None = None,
+        product: str | None = None,
+        version: str | None = None,
+        read_from_meta: bool = True,
+        fn_meta: str | None = None,
+        silent: bool = False,
+    ) -> None:
 
         """
         Load satellite data through the Raster class and parse additional attributes from filename or metadata.
 
         :param filename_or_dataset: The filename of the dataset.
-        :type filename_or_dataset: str, SatelliteImage, Raster, rio.io.Dataset, rio.io.MemoryFile
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
            Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
-        :type attrs: list of strings
         :param load_data: Load the raster data into the object. Default is True.
-        :type load_data: bool
         :param bands: The band(s) to load into the object. Default is to load all bands.
-        :type bands: int, or list of ints
         :param as_memfile: open the dataset via a rio.MemoryFile.
-        :type as_memfile: bool
         :param read_from_fn: Try to read metadata from the filename
-        :type: bool
         :param datetime: Provide datetime attribute
-        :type datetime: dt.datetime
         :param tile_name: Provide tile name
-        :type tile_name: str
         :param satellite: Provide satellite name
-        :type satellite: str
         :param sensor: Provide sensor name
-        :type sensor: str
         :param product: Provide data product name
-        :type product: str
         :param version: Provide data version
-        :type version: str
         :param read_from_meta: Try to read metadata from known associated metadata files
-        :type read_from_meta: bool
         :param fn_meta: Provide filename of associated metadata
-        :type: fn_meta: str
         :param silent: No informative output when trying to read metadata
-        :type silent: bool
 
         :return: A SatelliteImage object (Raster subclass)
         """
@@ -315,27 +305,26 @@ class SatelliteImage(Raster):
 
         self.__get_date()
 
-    def __get_date(self):
+    def __get_date(self) -> dt.datetime | None:  # type: ignore
 
         """
         Get date from datetime
         :return:
         """
         if self.datetime is not None:
-            self.date = self.datetime.date()
+            self.date = self.datetime.date()  # type: ignore
         else:
             self.date = None
 
-    def __parse_metadata_from_fn(self, silent=False):
+    def __parse_metadata_from_fn(self, silent: bool = False) -> None:
 
         """
         Attempts to pull metadata (e.g., sensor, date information) from fname, setting sensor, satellite,
         tile, datetime, and date attributes.
         """
-
         fname = self.filename
         name_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
-        attrs = parse_metadata_from_fn(fname)
+        attrs = parse_metadata_from_fn(fname if fname is not None else "")
 
         if all(att is None for att in attrs):
             if not silent:
@@ -361,12 +350,11 @@ class SatelliteImage(Raster):
                         + "from filename"
                     )
 
-    def __parse_metadata_from_file(self, fn_meta):
-        pass
+    def __parse_metadata_from_file(self, fn_meta: str | None) -> None:
+        raise NotImplementedError(fn_meta)
 
-    def copy(self, new_array=None):
-
-        new_satimg = super().copy(new_array=new_array)
+    def copy(self, new_array: np.ndarray | None = None) -> SatelliteImage:
+        new_satimg = super().copy(new_array=new_array)  # type: ignore
         # all objects here are immutable so no need for a copy method (string and datetime)
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
         for attrs in satimg_attrs:

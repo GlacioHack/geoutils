@@ -12,7 +12,7 @@ available = {
 }
 
 
-def get_path(dset=None):
+def get_path(dset: str) -> str:
     """
     Get the path to the data file.
     Parameters
@@ -26,7 +26,7 @@ def get_path(dset=None):
     """
     if dset in list(available.keys()):
         return os.path.abspath(os.path.join(_module_path, available[dset]))
-    else:
-        msg = f"The dataset '{dset}' is not available. "
-        msg += "Available datasets are {}".format(", ".join(list(available.keys())))
-        raise ValueError(msg)
+
+    msg = f"The dataset '{dset}' is not available. "
+    msg += "Available datasets are {}".format(", ".join(list(available.keys())))
+    raise ValueError(msg)

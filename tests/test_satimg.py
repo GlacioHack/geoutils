@@ -2,12 +2,10 @@
 Test functions for SatelliteImage class
 """
 import datetime as dt
-import os
 import sys
 from io import StringIO
 
 import numpy as np
-import pytest
 import rasterio as rio
 
 import geoutils
@@ -19,7 +17,7 @@ DO_PLOT = False
 
 
 class TestSatelliteImage:
-    def test_init(self):
+    def test_init(self) -> None:
         """
         Test that inputs work properly in SatelliteImage class init
         """
@@ -48,7 +46,7 @@ class TestSatelliteImage:
             (np.all(img.data.mask == img2.data.mask), np.all(img2.data.mask == img3.data.mask))
         )
 
-    def test_silent(self):
+    def test_silent(self) -> None:
         """
         Test that the silent method does not return any output in console
         """
@@ -56,30 +54,30 @@ class TestSatelliteImage:
 
         # let's capture stdout
         # cf https://stackoverflow.com/questions/16571150/how-to-capture-stdout-output-from-a-python-function-call
-        class Capturing(list):
-            def __enter__(self):
+        class Capturing(list):  # type: ignore
+            def __enter__(self):  # type: ignore
                 self._stdout = sys.stdout
                 sys.stdout = self._stringio = StringIO()
                 return self
 
-            def __exit__(self, *args):
+            def __exit__(self, *args) -> None:  # type: ignore
                 self.extend(self._stringio.getvalue().splitlines())
                 del self._stringio  # free up some memory
                 sys.stdout = self._stdout
 
         with Capturing() as output1:
-            img = si.SatelliteImage(fn_img)
+            si.SatelliteImage(fn_img)
 
         # check the metadata reading outputs to console
         assert len(output1) > 0
 
         with Capturing() as output2:
-            img = si.SatelliteImage(fn_img, silent=True)
+            si.SatelliteImage(fn_img, silent=True)
 
         # check nothing outputs to console
         assert len(output2) == 0
 
-    def test_add_sub(self):
+    def test_add_sub(self) -> None:
         """
         Test that overloading of addition, subtraction and negation works for child classes as well.
         """
@@ -100,10 +98,10 @@ class TestSatelliteImage:
         sat_out = satimg1 + satimg2
         assert isinstance(sat_out, si.SatelliteImage)
 
-        sat_out = satimg1 - satimg2
+        sat_out = satimg1 - satimg2  # type: ignore
         assert isinstance(sat_out, si.SatelliteImage)
 
-    def test_copy(self):
+    def test_copy(self) -> None:
         """
         Test that the copy method works as expected for SatelliteImage. In particular
         when copying r to r2:
@@ -141,7 +139,7 @@ class TestSatelliteImage:
         r.data += 5
         assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
-    def test_filename_parsing(self):
+    def test_filename_parsing(self) -> None:
 
         copied_names = [
             "TDM1_DEM__30_N00E104_DEM.tif",
@@ -179,7 +177,7 @@ class TestSatelliteImage:
             assert tiles[i] == attrs[4]
             assert datetimes[i] == attrs[5]
 
-    def test_sw_tile_naming_parsing(self):
+    def test_sw_tile_naming_parsing(self) -> None:
 
         # normal examples
         test_tiles = ["N14W065", "S14E065", "N014W065", "W065N014", "W065N14", "N00E000"]

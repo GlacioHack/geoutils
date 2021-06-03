@@ -6,18 +6,19 @@ TO DO:
 - change so that only needed band is loaded
 - include some options from imviewer: https://github.com/dshean/imview/blob/master/imview/imviewer.py
 """
+from __future__ import annotations
 
 import argparse
 import sys
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from geoutils.georaster import Raster
-from geoutils.geovector import Vector
 
 
-def getparser():
+def getparser() -> argparse.Namespace:
 
     # Set up description
     parser = argparse.ArgumentParser(description="Visualisation tool for any image supported by GDAL.")
@@ -38,14 +39,20 @@ def getparser():
         dest="vmin",
         type=str,
         default=None,
-        help="float, the minimum value for colorscale, or can be expressed as a percentile e.g. 5%% (default is calculated min value).",
+        help=(
+            "float, the minimum value for colorscale, or can be expressed as a "
+            "percentile e.g. 5%% (default is calculated min value)."
+        ),
     )
     parser.add_argument(
         "-vmax",
         dest="vmax",
         type=str,
         default=None,
-        help="float, the maximum value for colorscale, or can be expressed as a percentile e.g. 95%% (default is calculated max value).",
+        help=(
+            "float, the maximum value for colorscale, or can be expressed as a "
+            "percentile e.g. 95%% (default is calculated max value)."
+        ),
     )
     parser.add_argument(
         "-band",
@@ -69,7 +76,10 @@ def getparser():
         dest="figsize",
         type=str,
         default="default",
-        help="str, figure size, must be a tuple of size 2, either written with quotes, or two numbers seperated by coma, no space (Default is from rcParams).",
+        help=(
+            "str, figure size, must be a tuple of size 2, either written with quotes, "
+            "or two numbers separated by comma, no space (Default is from rcParams)."
+        ),
     )
     parser.add_argument(
         "-max_size",
@@ -112,24 +122,24 @@ def getparser():
     return args
 
 
-def main():
+def main() -> None:
 
     # Parse arguments
     args = getparser()
 
-    ## Load image metadata ##
+    # Load image metadata #
     img = Raster(args.filename, load_data=False)
     xmin, xmax, ymin, ymax = img.bounds
 
-    ## Resample if image is too large ##
+    # Resample if image is too large #
     if ((img.width > args.max_size) or (img.height > args.max_size)) & (not args.noresampl):
         dfact = max(int(img.width / args.max_size), int(img.height / args.max_size))
         print(f"Image will be downsampled by a factor {dfact}.")
-        new_shape = (img.count, int(img.height / dfact), int(img.width / dfact))
+        new_shape: tuple[Any, ...] | None = (img.count, int(img.height / dfact), int(img.width / dfact))
     else:
         new_shape = None
 
-    ## Read image ##
+    # Read image #
     img.load(out_shape=new_shape)
 
     # Set no data value
@@ -143,12 +153,12 @@ def main():
 
         img.set_ndv(nodata)
 
-    ## Set default parameters ##
+    # Set default parameters #
 
     # vmin
     if args.vmin is not None:
         try:
-            vmin = float(args.vmin)
+            vmin: float | None = float(args.vmin)
         except ValueError:  # Case is not a number
             perc, _ = args.vmin.split("%")
             try:
@@ -163,7 +173,7 @@ def main():
     # vmax
     if args.vmax is not None:
         try:
-            vmax = float(args.vmax)
+            vmax: float | None = float(args.vmax)
         except ValueError:  # Case is not a number
             perc, _ = args.vmax.split("%")
             try:
@@ -191,10 +201,11 @@ def main():
         figsize = plt.rcParams["figure.figsize"]
     else:
         try:
-            figsize = tuple(eval(args.figsize))
+            figsize = tuple(int(arg) for arg in args.figsize)
             xfigsize, yfigsize = figsize
-        except:
+        except Exception as exception:
             print("ERROR: figsize must be a tuple of size 2, currently set to %s" % args.figsize)
+            sys.stderr.write(str(exception))
             sys.exit(1)
 
     # dpi
@@ -206,7 +217,7 @@ def main():
         except ValueError:
             raise ValueError("ERROR: dpi must be an integer, currently set to %s" % args.dpi)
 
-    ## Plot data ##
+    # Plot data #
 
     fig = plt.figure(figsize=figsize)
     ax = fig.add_subplot(111)

@@ -1,5 +1,6 @@
 from glob import glob
 from os import path
+from typing import Optional
 
 from setuptools import setup
 
@@ -9,12 +10,12 @@ VERSION = FULLVERSION
 write_version = True
 
 
-def write_version_py(filename=None):
+def write_version_py(filename: Optional[str] = None) -> None:
     cnt = """\
 version = '%s'
 short_version = '%s'
 """
-    if not filename:
+    if filename is None:
         filename = path.join(path.dirname(__file__), "geoutils", "version.py")
 
     a = open(filename, "w")

@@ -10,12 +10,12 @@ from geoutils import datasets
 
 
 @pytest.mark.parametrize("test_dataset", ["landsat_B4", "landsat_B4_crop", "landsat_RGB"])
-def test_read_paths_raster(test_dataset):
+def test_read_paths_raster(test_dataset: str) -> None:
     assert isinstance(gu.Raster(datasets.get_path(test_dataset)), gu.Raster)
 
 
 @pytest.mark.parametrize("test_dataset", ["glacier_outlines"])
-def test_read_paths_vector(test_dataset):
+def test_read_paths_vector(test_dataset: str) -> None:
     assert isinstance(gu.Vector(datasets.get_path(test_dataset)), gu.Vector)
 
 
@@ -29,7 +29,7 @@ original_sha256 = {
 
 
 @pytest.mark.parametrize("test_dataset", ["landsat_B4", "landsat_B4_crop", "landsat_RGB", "glacier_outlines"])
-def test_data_integrity(test_dataset):
+def test_data_integrity(test_dataset: str) -> None:
     """
     Test that input data is not corrupted by checking sha265 sum
     """

@@ -21,7 +21,7 @@ DO_PLOT = False
 
 
 class TestRaster:
-    def test_init(self):
+    def test_init(self) -> None:
         """
         Test that all possible inputs work properly in Raster class init
         """
@@ -68,7 +68,7 @@ class TestRaster:
         r.nbands = 2
         assert r.nbands != r2.nbands
 
-    def test_info(self):
+    def test_info(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
 
@@ -110,7 +110,7 @@ class TestRaster:
                 continue
             assert line == new_stats.splitlines()[i]
 
-    def test_loading(self):
+    def test_loading(self) -> None:
         """
         Test that loading metadata and data works for all possible cases.
         """
@@ -124,9 +124,9 @@ class TestRaster:
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.nbands is None
-        assert r.dtypes == ("uint8",)
+        assert r.dtypes == ["uint8"]
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-        assert r.res == (30.0, 30.0)
+        assert r.res == [30.0, 30.0]
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
         assert not r.is_loaded
@@ -146,7 +146,7 @@ class TestRaster:
         # Test 4 - multiple bands, load all bands
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True)
         assert r.count == 3
-        assert r.indexes == (1, 2, 3)
+        assert r.indexes == [1, 2, 3]
         assert r.nbands == 3
         assert r.bands == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
@@ -154,20 +154,20 @@ class TestRaster:
         # Test 5 - multiple bands, load one band only
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=1)
         assert r.count == 3
-        assert r.indexes == (1, 2, 3)
+        assert r.indexes == [1, 2, 3]
         assert r.nbands == 1
         assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=(2, 3))
+        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=[2, 3])
         assert r.count == 3
-        assert r.indexes == (1, 2, 3)
+        assert r.indexes == [1, 2, 3]
         assert r.nbands == 2
         assert r.bands == (2, 3)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
-    def test_downsampling(self):
+    def test_downsampling(self) -> None:
         """
         Check that self.data is correct when using downsampling
         """
@@ -191,7 +191,7 @@ class TestRaster:
         # One pixel right and down
         assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
 
-    def test_add_sub(self):
+    def test_add_sub(self) -> None:
         """
         Test addition, subtraction and negation on a Raster object.
         """
@@ -208,17 +208,23 @@ class TestRaster:
         # Test negation
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert r3.dtypes == ("uint8",)
+        assert r3.dtypes == [
+            "uint8",
+        ]
 
         # Test addition
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert r3.dtypes == ("uint8",)
+        assert r3.dtypes == [
+            "uint8",
+        ]
 
         # Test subtraction
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert r3.dtypes == ("uint8",)
+        assert r3.dtypes == [
+            "uint8",
+        ]
 
         # Test with dtype Float32
         r1 = gr.Raster.from_array(
@@ -226,23 +232,33 @@ class TestRaster:
         )
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert r3.dtypes == ("float32",)
+        assert r3.dtypes == [
+            "float32",
+        ]
 
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert r3.dtypes == ("float32",)
+        assert r3.dtypes == [
+            "float32",
+        ]
 
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert r3.dtypes == ("float32",)
+        assert r3.dtypes == [
+            "float32",
+        ]
 
         # Check that errors are properly raised
         # different shapes
         r1 = gr.Raster.from_array(
             np.random.randint(0, 255, (height + 1, width)).astype("float32"), transform=transform, crs=None
         )
-        pytest.raises(ValueError, r1.__add__, r2)
-        pytest.raises(ValueError, r1.__sub__, r2)
+        expected_message = "Both rasters must have the same shape, transform and CRS."
+        with pytest.raises(ValueError, match=expected_message):
+            r1.__add__(r2)
+
+        with pytest.raises(ValueError, match=expected_message):
+            r1.__sub__(r2)
 
         # different CRS
         r1 = gr.Raster.from_array(
@@ -250,18 +266,26 @@ class TestRaster:
             transform=transform,
             crs=rio.crs.CRS.from_epsg(4326),
         )
-        pytest.raises(ValueError, r1.__add__, r2)
-        pytest.raises(ValueError, r1.__sub__, r2)
+
+        with pytest.raises(ValueError, match=expected_message):
+            r1.__add__(r2)
+
+        with pytest.raises(ValueError, match=expected_message):
+            r1.__sub__(r2)
 
         # different transform
         transform2 = rio.transform.from_bounds(0, 0, 2, 2, width, height)
         r1 = gr.Raster.from_array(
             np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
         )
-        pytest.raises(ValueError, r1.__add__, r2)
-        pytest.raises(ValueError, r1.__sub__, r2)
 
-    def test_copy(self):
+        with pytest.raises(ValueError, match=expected_message):
+            r1.__add__(r2)
+
+        with pytest.raises(ValueError, match=expected_message):
+            r1.__sub__(r2)
+
+    def test_copy(self) -> None:
         """
         Test that the copy method works as expected for Raster. In particular
         when copying r to r2:
@@ -305,11 +329,11 @@ class TestRaster:
         r.data += 5
         assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
-    def test_is_modified(self):
+    def test_is_modified(self) -> None:
         """
         Test that changing the data updates is_modified as desired
         """
-        # after laoding, should not be modified
+        # after loading, should not be modified
         r = gr.Raster(datasets.get_path("landsat_B4"))
         assert not r.is_modified
 
@@ -326,7 +350,7 @@ class TestRaster:
         r.data = r.data + 5
         assert r.is_modified
 
-    def test_crop(self):
+    def test_crop(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
@@ -339,7 +363,7 @@ class TestRaster:
 
         # Crop the raster to the outline and validate that it got smaller
         r_outline_cropped = r.crop(outlines, inplace=False)
-        assert r.data.size > r_outline_cropped.data.size
+        assert r.data.size > r_outline_cropped.data.size  # type: ignore
 
         b = r.bounds
         b2 = r2.bounds
@@ -365,7 +389,7 @@ class TestRaster:
 
         assert b_minmax == b_crop
 
-    def test_reproj(self):
+    def test_reproj(self) -> None:
 
         # Test reprojecting to dst_ref
         r = gr.Raster(datasets.get_path("landsat_B4"))
@@ -428,7 +452,7 @@ class TestRaster:
         assert r3.res != r.res
 
         # If dst_res is set, the resolution will be enforced
-        # Bounds will be enforced for upper-left pixel, but ajusted by up to one pixel for the lower right bound.
+        # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
         r3 = r.reproject(dst_bounds=dst_bounds, dst_res=r.res)
         assert r3.res == r.res
         assert r3.bounds.left == dst_bounds.left
@@ -441,7 +465,7 @@ class TestRaster:
         r3 = r.reproject(dst_crs=out_crs)
         assert r3.crs.to_epsg() == 4326
 
-    def test_inters_img(self):
+    def test_inters_img(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
@@ -449,7 +473,7 @@ class TestRaster:
         inters = r.intersection(r2)
         print(inters)
 
-    def test_interp(self):
+    def test_interp(self) -> None:
 
         # FIRST, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
         # at the center of pixel
@@ -543,7 +567,7 @@ class TestRaster:
         # r.ds.index(x, y, op=np.float32)
         # Out[34]: (75.0, 302.0)
 
-    def test_value_at_coords(self):
+    def test_value_at_coords(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
@@ -555,7 +579,7 @@ class TestRaster:
         xtest = 499540
         ytest = 3099710
 
-        z = r.data[0, itest, jtest]
+        # z = r.data[0, itest, jtest]
         x_out, y_out = r.ij2xy(itest, jtest, offset="ul")
         assert x_out == xtest
         assert y_out == ytest
@@ -564,7 +588,7 @@ class TestRaster:
         # z_val = r.value_at_coords(xtest,ytest)
         # assert z == z_val
 
-    def test_set_ndv(self):
+    def test_set_ndv(self) -> None:
         """
         Read Landsat dataset and set 255 to no data. Save mask.
         Then, set 254 as new no data (after setting 254 to 0). Save mask.
@@ -596,7 +620,7 @@ class TestRaster:
         # Check that the number of no data value is correct
         assert np.count_nonzero(ndv_index.data) == 112088
 
-    def test_set_dtypes(self):
+    def test_set_dtypes(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
         arr_1 = np.copy(r.data).astype(np.int8)
@@ -609,7 +633,7 @@ class TestRaster:
         assert np.count_nonzero(~arr_1 == arr_2) == 0
         assert np.count_nonzero(~arr_2 == arr_3) == 0
 
-    def test_plot(self):
+    def test_plot(self) -> None:
 
         # Read single band raster and RGB raster
         img = gr.Raster(datasets.get_path("landsat_B4"))
@@ -651,7 +675,7 @@ class TestRaster:
             plt.close()
         assert True
 
-    def test_saving(self):
+    def test_saving(self) -> None:
 
         # Read single band raster
         img = gr.Raster(datasets.get_path("landsat_B4"))
@@ -664,7 +688,7 @@ class TestRaster:
         metadata = {"Type": "test"}
         img.save(TemporaryFile(), co_opts=co_opts, metadata=metadata)
 
-    def test_coords(self):
+    def test_coords(self) -> None:
 
         img = gr.Raster(datasets.get_path("landsat_B4"))
         xx, yy = img.coords(offset="corner")
@@ -691,7 +715,7 @@ class TestRaster:
             assert yy.min() == pytest.approx(img.bounds.top + hy)
             assert yy.max() == pytest.approx(img.bounds.bottom - hy)
 
-    def test_eq(self):
+    def test_eq(self) -> None:
 
         img = gr.Raster(datasets.get_path("landsat_B4"))
         img2 = gr.Raster(datasets.get_path("landsat_B4"))
@@ -708,7 +732,7 @@ class TestRaster:
 
         assert img != img2
 
-    def test_value_at_coords(self):
+    def test_value_at_coords2(self) -> None:
         """
         Check that values returned at selected pixels correspond to what is expected, both for original CRS and lat/lon.
         """
@@ -729,7 +753,7 @@ class TestRaster:
         lat, lon = pt.reproject_to_latlon([x, y], img.crs)
         assert img.value_at_coords(x, y) == img.value_at_coords(lon, lat, latlon=True) == img.data[0, -1, -2]
 
-    def test_from_array(self):
+    def test_from_array(self) -> None:
 
         # Test that from_array works if nothing is changed
         # -> most tests already performed in test_copy, no need for more
@@ -752,7 +776,7 @@ class TestRaster:
         out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
         assert out_img.data.mask[0, 0, 0]
 
-    def test_type_hints(self):
+    def test_type_hints(self) -> None:
         """Test that pylint doesn't raise errors on valid code."""
         # Create a temporary directory and a temporary filename
         temp_dir = tempfile.TemporaryDirectory()
@@ -792,7 +816,7 @@ class TestRaster:
         for bad_lint in bad_lints:
             assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"
 
-    def test_split_bands(self):
+    def test_split_bands(self) -> None:
 
         img = gr.Raster(datasets.get_path("landsat_RGB"))
 
@@ -829,23 +853,23 @@ class TestRaster:
         assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
 
         # Copy the bands instead of pointing to the same memory.
-        red_c = img.split_bands(copy=True, subset=0)
+        red_c = img.split_bands(copy=True, subset=0)[0]
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
         assert not np.shares_memory(red_c, img)
 
-        # Modify the copy, and make sure the original data is not modifed.
+        # Modify the copy, and make sure the original data is not modified.
         red_c.data += 1
         assert not np.array_equal(red_c.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
 
-    def test_resampling_str(self):
+    def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
-        assert gr._resampling_from_str("nearest") == rio.warp.Resampling.nearest
-        assert gr._resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline
+        assert gr._resampling_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
+        assert gr._resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
 
         # Check that odd strings return the appropriate error.
         try:
-            gr._resampling_from_str("CUBIC_SPLINE")
+            gr._resampling_from_str("CUBIC_SPLINE")  # noqa
         except ValueError as exception:
             if "not a valid rasterio.warp.Resampling method" not in str(exception):
                 raise exception

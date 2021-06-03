@@ -9,7 +9,7 @@ import os
 import warnings
 from collections.abc import Iterable
 from numbers import Number
-from typing import Any, Callable, TypeVar
+from typing import IO, Any, Callable, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -151,21 +151,19 @@ class Raster:
         Load a rasterio-supported dataset, given a filename.
 
         :param filename_or_dataset: The filename of the dataset.
-        :type filename_or_dataset: str, Raster, rio.io.Dataset, rio.io.MemoryFile
+
         :param bands: The band(s) to load into the object. Default is to load all bands.
-        :type bands: int, or list of ints
+
         :param load_data: Load the raster data into the object. Default is True.
-        :type load_data: bool
+
         :param downsample: Reduce the size of the image loaded by this factor. Default is 1
-        :type downsample: int, float
+
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
-        :type masked: bool
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
-        :type attrs: list of strings
+
         :param as_memfile: open the dataset via a rio.MemoryFile.
-        :type as_memfile: bool
 
         :return: A Raster object
         """
@@ -266,19 +264,19 @@ class Raster:
         """Create a Raster from a numpy array and some geo-referencing information.
 
         :param data: data array
-        :type data: np.ndarray
+
         :param transform: the 2-D affine transform for the image mapping.
             Either a tuple(x_res, 0.0, top_left_x, 0.0, y_res, top_left_y) or
             an affine.Affine object.
-        :type transform: tuple, affine.Affine.
+
         :param crs: Coordinate Reference System for image. Either a rasterio CRS,
             or the EPSG integer.
-        :type crs: rasterio.crs.CRS or int
+
         :param nodata: nodata value
-        :type nodata: int or float
+
 
         :returns: A Raster object containing the provided data.
-        :rtype: Raster.
+
 
         Example:
 
@@ -472,7 +470,7 @@ class Raster:
         """Check whether file has been modified since it was created/opened.
 
         :returns: True if Raster has been modified.
-        :rtype: bool
+
         """
         if not self._is_modified:
             new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
@@ -486,7 +484,7 @@ class Raster:
         Get data.
 
         :returns: data array.
-        :rtype: np.ndarray
+
         """
         return self._data
 
@@ -497,10 +495,8 @@ class Raster:
 
         new_data must have the same shape as existing data! (bands dimension included)
 
-        new_data must have the same shape as existing data! (bands dimension included)
-
         :param new_data: New data to assign to this instance of Raster
-        :type new_data: np.ndarray
+
         """
         # Check that new_data is a Numpy array
         if not isinstance(new_data, np.ndarray):
@@ -536,12 +532,9 @@ class Raster:
         Update the object with a new image or metadata.
 
         :param imgdata: image data to update with.
-        :type imgdata: None or np.array
         :param metadata: metadata to update with.
-        :type metadata: dict
         :param vrt_to_driver: name of driver to coerce a VRT to. This is required
         because rasterio does not support writing to to a VRTSourcedRasterBand.
-        :type vrt_to_driver: str
         """
         memfile = MemoryFile()
         if imgdata is None:
@@ -568,10 +561,10 @@ class Raster:
 
         :param stats: Add statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
             not calculate statistics.
-        :type stats: bool
+
 
         :returns: text information about Raster attributes.
-        :rtype: str
+
         """
         as_str = [
             f"Driver:               {self.driver} \n",
@@ -613,7 +606,7 @@ class Raster:
         Copy the Raster object in memory
 
         :param new_array: New array to use for the copied Raster
-        :type new_array: np.ndarray
+
         :return:
         """
         if new_array is not None:
@@ -625,13 +618,13 @@ class Raster:
 
         return cp
 
-    def load(self, bands: int | list[int] | None = None, **kwargs) -> None:
+    def load(self, bands: int | list[int] | None = None, **kwargs: Any) -> None:
         r"""
         Load specific bands of the dataset, using rasterio.read().
         Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
 
         :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
-        :type bands: int, or list of ints
+
 
         \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
         Useful ones are:
@@ -659,8 +652,8 @@ class Raster:
     def crop(
         self: RasterType,
         cropGeom: Raster | Vector | list[float] | tuple[float, ...],
-        mode="match_pixel",
-        inplace=True,
+        mode: str = "match_pixel",
+        inplace: bool = True,
     ) -> RasterType | None:
         """
         Crop the Raster to a given extent.
@@ -672,9 +665,8 @@ class Raster:
         :param mode: one of 'match_pixel' (default) or 'match_extent'. 'match_pixel' will preserve the original pixel
             resolution, cropping to the extent that most closely aligns with the current coordinates. 'match_extent'
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
-        :type mode: str
         :param inplace: Update the raster inplace or return copy.
-        :type inplace: bool
+
         :returns: None if inplace=True and a new Raster if inplace=False
         """
         assert mode in [
@@ -738,7 +730,7 @@ class Raster:
         dst_crs: CRS | str | None = None,
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        dst_res: float | tuple[float, float] | None = None,
+        dst_res: float | Iterable[float] | None = None,
         nodata: int | float | None = None,
         dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.nearest,
@@ -761,29 +753,19 @@ class Raster:
 
         :param dst_ref: a reference raster. If set will use the attributes of this
             raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
-        :type dst_ref: Raster object, rasterio data set or a str.
         :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
-        :type crs: int, dict, str, CRS
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
-        :type dst_size: tuple(int, int)
         :param dst_bounds: a BoundingBox object or a dictionary containing\
                 left, bottom, right, top bounds in the source CRS.
-        :type dst_bounds: dict or rio.coords.BoundingBox
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :type dst_res: float or tuple(float, float)
         :param nodata: nodata value in reprojected data.
-        :type nodata: int, float, None
         :param resampling: A rasterio Resampling method
-        :type resampling: rio.warp or a matching string representation.
         :param silent: If True, will not print warning statements
-        :type silent: bool
         :param n_threads: The number of worker threads. Defaults to (os.cpu_count() - 1).
-        :type n_threads: int
         :param memory_limit: The warp operation memory limit in MB. Larger values may perform better.
-        :type memory_limit: int
 
         :returns: Raster
-        :rtype: Raster
+
         """
 
         # Check that either dst_ref or dst_crs is provided
@@ -964,9 +946,8 @@ class Raster:
         Translate the Raster by a given x,y offset.
 
         :param xoff: Translation x offset.
-        :type xoff: float
         :param yoff: Translation y offset.
-        :type yoff: float
+
 
         """
         # Check that data is loaded, as it is necessary for this method
@@ -983,9 +964,8 @@ class Raster:
         Set new nodata values for bands (and possibly update arrays)
 
         :param ndv: nodata values
-        :type ndv: collections.abc.Iterable or int or float
         :param update_array: change the existing nodata in array
-        :type update_array: bool
+
         """
 
         if not isinstance(ndv, (Iterable, int, float, np.integer, np.floating)):
@@ -1028,21 +1008,20 @@ class Raster:
 
         self._update(metadata=meta, imgdata=imgdata)
 
-    def set_dtypes(self, dtypes: Iterable | np.dtype | str, update_array: bool = True) -> None:
+    def set_dtypes(self, dtypes: Iterable[np.dtype | str] | np.dtype | str, update_array: bool = True) -> None:
         """
         Set new dtypes for bands (and possibly update arrays)
 
         :param dtypes: data types
-        :type dtypes: collections.abc.Iterable or type or str
         :param update_array: change the existing dtype in arrays
-        :type: update_array: bool
+
         """
-        if not (isinstance(dtypes, collections.abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
+        if not (isinstance(dtypes, Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
             raise ValueError("Type of dtypes not understood, must be list or type or str")
         elif isinstance(dtypes, type) or isinstance(dtypes, str):
             print("Several raster band: using data type for all bands")
             dtypes = (dtypes,) * self.count
-        elif isinstance(dtypes, collections.abc.Iterable) and self.count == 1:
+        elif isinstance(dtypes, Iterable) and self.count == 1:
             print("Only one raster band: using first data type provided")
             dtypes = tuple(dtypes)
 
@@ -1069,7 +1048,7 @@ class Raster:
 
     def save(
         self,
-        filename: str,
+        filename: str | IO[bytes],
         driver: str = "GTiff",
         dtype: np.dtype | None = None,
         compress: str = "deflate",
@@ -1090,28 +1069,19 @@ class Raster:
         pixel instead.
 
         :param filename: Filename to write the file to.
-        :type filename: str
         :param driver: the 'GDAL' driver to use to write the file as.
-        :type driver: str
         :param dtype: Data Type to write the image as (defaults to dtype of image data)
-        :type dtype: np.dtype
         :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE)
-        :type compress: str, None
         :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
                       but increases file size.
-        :type tiled: bool
         :param blank_value: Use to write an image out with every pixel's value
             corresponding to this value, instead of writing the image data to disk.
-        :type blank_value: None, int, float.
         :param co_opts: GDAL creation options provided as a dictionary,
             e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
-        :type co_opts: dict
         :param metadata: pairs of metadata key, value
-        :type metadata: dict
         :param gcps: list of gcps, each gcp being [row, col, x, y, (z)]
-        :type gcps: list
         :param gcps_crs: the CRS of the GCPS (Default is None)
-        :type gcps_crs: rasterio.crs.CRS
+
 
         :returns: None.
         """
@@ -1184,9 +1154,8 @@ to be cleared due to the setting of GCPs."
         the methods and attributes of the resulting DataArray.
 
         :param name: Set the name of the DataArray.
-        :type name: str
+
         :returns: xarray DataArray
-        :rtype: xr.DataArray
         """
         if not _has_rioxarray:
             raise ImportError("rioxarray is required for this functionality.")
@@ -1205,7 +1174,7 @@ to be cleared due to the setting of GCPs."
         :param densify_pts_max: Maximum points to be added between image corners to account for non linear edges.
                                 Reduce if time computation is really critical (ms) or increase if extent is \
                                         not accurate enough.
-        :type densify_pts_max: int
+
         """
         # Max points to be added between image corners to account for non linear edges
         # rasterio's default is a bit low for very large images
@@ -1225,11 +1194,10 @@ to be cleared due to the setting of GCPs."
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
         :param rst : path to the second image (or another Raster instance)
-        :type rst: str, Raster
 
         :returns: extent of the intersection between the 2 images \
         (xmin, ymin, xmax, ymax) in self's coordinate system.
-        :rtype: tuple
+
         """
         from geoutils import projtools
 
@@ -1255,14 +1223,14 @@ to be cleared due to the setting of GCPs."
 
         # Compute intersection envelope
         intersect = poly1.intersection(poly2)
-        extent = intersect.envelope.bounds
+        extent: tuple[float, float, float, float] = intersect.envelope.bounds
 
         # check that intersection is not void
         if intersect.area == 0:
             warnings.warn("Warning: Intersection is void")
             return (0.0, 0.0, 0.0, 0.0)
-        else:
-            return extent
+
+        return extent
 
     def show(
         self,
@@ -1273,30 +1241,24 @@ to be cleared due to the setting of GCPs."
         cb_title: str | None = None,
         add_cb: bool = True,
         ax: matplotlib.axes.Axes | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
         r"""Show/display the image, with axes in projection of image.
 
         This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
         you give this method will be passed to rasterio.plot.show.
 
         :param band: which band to plot, from 0 to self.count-1 (default is all)
-        :type band: int
         :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap']
-        :type cmap: matplotlib.colors.Colormap, str
         :param vmin: Colorbar minimum value. Default is data min.
-        :type vmin: int, float
         :param vmax: Colorbar maximum value. Default is data min.
-        :type vmax: int, float
         :param cb_title: Colorbar label. Default is None.
-        :type cb_title: str
         :param add_cb: Set to True to display a colorbar. Default is True.
-        :type add_cb: bool
         :param ax: A figure ax to be used for plotting. If None, will create default figure and axes,\
                 and plot figure directly.
-        :type ax: matplotlib.axes.Axes
+
         :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
-        :rtype: (matplotlib.axes.Axes, matplotlib.colors.Colormap)
+
 
         You can also pass in \*\*kwargs to be used by the underlying imshow or
         contour methods of matplotlib. The example below shows provision of
@@ -1386,13 +1348,14 @@ to be cleared due to the setting of GCPs."
         # If ax not set, figure should be plotted directly
         if ax is None:
             plt.show()
-        else:
-            return ax0, cbar
+            return None
+
+        return ax0, cbar
 
     def value_at_coords(
         self,
-        x: float,
-        y: float,
+        x: float | list[float],
+        y: float | list[float],
         latlon: bool = False,
         band: int | None = None,
         masked: bool = False,
@@ -1400,7 +1363,7 @@ to be cleared due to the setting of GCPs."
         return_window: bool = False,
         boundless: bool = True,
         reducer_function: Callable[[np.ndarray], float] = np.ma.mean,
-    ) -> tuple[Number, ...]:
+    ) -> Any:
         """ Extract the pixel value(s) at the nearest pixel(s) from the specified coordinates.
 
         Extract pixel value of each band in dataset at the specified
@@ -1410,39 +1373,27 @@ to be cleared due to the setting of GCPs."
         Optionally, return mean of pixels within a square window.
 
         :param x: x (or longitude) coordinate.
-        :type x: float
         :param y: y (or latitude) coordinate.
-        :type y: float
         :param latlon: Set to True if coordinates provided as longitude/latitude.
-        :type latlon: boolean
         :param band: the band number to extract from.
-        :type band: int
         :param masked: If `masked` is `True` the return value will be a masked
             array. Otherwise (the default) the return value will be a
             regular array.
-        :type masked: bool, optional (default False)
         :param window: expand area around coordinate to dimensions \
                   window * window. window must be odd.
-        :type window: None, int
         :param return_window: If True when window=int, returns (mean,array) \
             where array is the dataset extracted via the specified window size.
-        :type return_window: boolean
         :param boundless: If `True`, windows that extend beyond the dataset's extent
             are permitted and partially or completely filled arrays (with self.nodata) will
             be returned as appropriate.
-        :type boundless: bool, optional (default False)
         :param reducer_function: a function to apply to the values in window.
-        :type reducer_function: function, optional (Default is np.ma.mean)
 
         :returns: When called on a Raster or with a specific band \
             set, return value of pixel.
-        :rtype: float
         :returns: If multiple band Raster and the band is not specified, a \
             dictionary containing the value of the pixel in each band.
-        :rtype: dict
         :returns: In addition, if return_window=True, return tuple of \
             (values, arrays)
-        :rtype: tuple
 
         :examples:
 
@@ -1454,6 +1405,7 @@ to be cleared due to the setting of GCPs."
         (c = provided coordinate, v= value of surrounding coordinate)
 
         """
+        value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
         if window is not None:
             if window % 2 != 1:
                 raise ValueError("Window must be an odd number.")
@@ -1555,9 +1507,8 @@ to be cleared due to the setting of GCPs."
 
         :param offset: coordinate type. If 'corner', returns corner coordinates of pixels.
             If 'center', returns center coordinates. Default is corner.
-        :type offset: str
         :param grid: Return grid
-        :type grid: bool
+
         :returns x,y: numpy arrays corresponding to the x,y coordinates of each pixel.
         """
         assert offset in [
@@ -1575,7 +1526,8 @@ to be cleared due to the setting of GCPs."
             xx += dx / 2  # shift by half a pixel
             yy += dy / 2
         if grid:
-            return np.meshgrid(xx[:-1], yy[:-1])  # drop the last element
+            meshgrid: tuple[np.ndarray, np.ndarray] = np.meshgrid(xx[:-1], yy[:-1])  # drop the last element
+            return meshgrid
         else:
             return xx[:-1], yy[:-1]
 
@@ -1591,20 +1543,15 @@ to be cleared due to the setting of GCPs."
         Return row, column indices for a given x,y coordinate pair.
 
         :param x: x coordinates
-        :type x: array-like
         :param y: y coordinates
-        :type y: array-like
         :param op: operator to calculate index
-        :type op: Any
         :param precision: precision for rio.Dataset.index
-        :type precision: Any
         :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or \
                 force position ('Point' or 'Area') of the interpretation of where the raster value \
                 corresponds to in the pixel ('Area' = lower left or 'Point' = center)
-        :type area_or_point: str, None
 
         :returns i, j: indices of x,y in the image.
-        :rtype i, j: array-like
+
 
         """
         if op not in [np.float32, np.float64, float]:
@@ -1663,11 +1610,8 @@ to be cleared due to the setting of GCPs."
         Return x,y coordinates for a given row, column index pair.
 
         :param i: row (i) index of pixel.
-        :type i: array-like
         :param j: column (j) index of pixel.
-        :type j: array-like
         :param offset: return coordinates as "corner" or "center" of pixel
-        :type offset: str
 
         :returns x, y: x,y coordinates of i,j in reference system.
         """
@@ -1681,11 +1625,8 @@ to be cleared due to the setting of GCPs."
         Check whether a given point falls outside of the raster.
 
         :param xi: Indices (or coordinates) of x direction to check.
-        :type xi: array-like
         :param yj: Indices (or coordinates) of y direction to check.
-        :type yj: array-like
         :param index: Interpret ij as raster indices (default is True). If False, assumes ij is coordinates.
-        :type index: bool
 
         :returns is_outside: True if ij is outside of the image.
         """
@@ -1706,7 +1647,7 @@ to be cleared due to the setting of GCPs."
         mode: str = "linear",
         band: int = 1,
         area_or_point: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> np.ndarray:
 
         """
@@ -1714,22 +1655,16 @@ to be cleared due to the setting of GCPs."
 
         :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
         value returned is nan. Shape should be (N,2)'
-        :type pts: array-like
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
-        :type input_latlon: bool
         :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
              used to interpolate the raster value at each point. For more information, see
              scipy.interpolate.interp2d. Default is linear.
-        :type mode: str
         :param band: Raster band to use
-        :type band: int
         :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or force position\
                 ('Point' or 'Area') of the interpretation of where the raster value corresponds to in the pixel\
                 ('Area' = lower left or 'Point' = center)
-        :type area_or_point: str, None
 
         :returns rpts: Array of raster value(s) for the given points.
-        :rtype rpts: array-like
         """
         assert mode in [
             "mean",
@@ -1790,16 +1725,14 @@ to be cleared due to the setting of GCPs."
         #         rpts.append(zint)
         # rpts = np.array(rpts)
 
-    def split_bands(
-        self: RasterType, copy: bool = False, subset: list[int] | int | None = None
-    ) -> Raster | list[Raster]:
+    def split_bands(self: RasterType, copy: bool = False, subset: list[int] | int | None = None) -> list[Raster]:
         """
         Split the bands into separate copied rasters.
 
         :param copy: Copy the bands or return slices of the original data.
         :param subset: Optional. A subset of band indices to extract. Defaults to all.
 
-        :returns: A list of Rasters for each band, or one Raster if len(subset)==1.
+        :returns: A list of Rasters for each band.
         """
         bands: list[Raster] = []
 
@@ -1833,4 +1766,4 @@ to be cleared due to the setting of GCPs."
                 raster.nbands = 1
                 bands.append(raster)
 
-        return bands if len(bands) > 1 else bands[0]
+        return bands
