@@ -10,3 +10,4 @@ sphinxcontrib_programoutput
 sphinx_autodoc_typehints
 matplotlib
 scipy
+pre-commit
