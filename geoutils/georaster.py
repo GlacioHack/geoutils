@@ -875,22 +875,23 @@ class Raster:
         else:
             dst_shape = (self.count, self.height, self.width)
 
-        # If dst_bounds is set, but not dst_res, will enforce dst_bounds
+        # If dst_bounds is set, will enforce dst_bounds
         if dst_bounds is not None:
 
-            # Calculate new raster size which ensures that pixels resolution is as close as possible to original
-            # Raster size is increased by up to one pixel if needed
-            yres, xres = self.res
-            dst_width = int(np.ceil((dst_bounds.right - dst_bounds.left) / xres))
-            dst_height = int(np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres))
-            dst_size = (dst_width, dst_height)
+            if dst_size is None:
+                # Calculate new raster size which ensures that pixels resolution is as close as possible to original
+                # Raster size is increased by up to one pixel if needed
+                yres, xres = self.res
+                dst_width = int(np.ceil((dst_bounds.right - dst_bounds.left) / xres))
+                dst_height = int(np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres))
+                dst_size = (dst_width, dst_height)
 
             # Calculate associated transform
-            dst_transform = rio.transform.from_bounds(*dst_bounds, width=dst_width, height=dst_height)
+            dst_transform = rio.transform.from_bounds(*dst_bounds, width=dst_size[0], height=dst_size[1])
 
             # Specify the output bounds and shape, let rasterio handle the rest
             reproj_kwargs.update({"dst_transform": dst_transform})
-            dst_data = np.ones((dst_height, dst_width), dtype=dtype)
+            dst_data = np.ones((dst_size[1], dst_size[0]), dtype=dtype)
             reproj_kwargs.update({"destination": dst_data})
 
         # Check that reprojection is actually needed
