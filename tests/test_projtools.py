@@ -8,13 +8,12 @@ import geoutils.projtools as pt
 
 
 class TestProjTools:
-
-    def test_latlon_reproject(self):
+    def test_latlon_reproject(self) -> None:
         """
         Check that to and from latlon projections are self consistent within tolerated rounding errors
         """
 
-        img = gu.Raster(gu.datasets.get_path('landsat_B4'))
+        img = gu.Raster(gu.datasets.get_path("landsat_B4"))
 
         # Test on random points
         nsample = 100
@@ -27,12 +26,12 @@ class TestProjTools:
         assert np.all(x == randx)
         assert np.all(y == randy)
 
-    def test_merge_bounds(self):
+    def test_merge_bounds(self) -> None:
         """
         Check that merge_bounds and bounds2poly work as expected for all kinds of bounds objects.
         """
-        img1 = gu.Raster(gu.datasets.get_path('landsat_B4'))
-        img2 = gu.Raster(gu.datasets.get_path('landsat_B4_crop'))
+        img1 = gu.Raster(gu.datasets.get_path("landsat_B4"))
+        img2 = gu.Raster(gu.datasets.get_path("landsat_B4_crop"))
 
         # Check union (default) - with Raster objects
         out_bounds = pt.merge_bounds((img1, img2))
@@ -58,7 +57,7 @@ class TestProjTools:
 
         # Check with gpd.GeoDataFrame
         outlines = gu.Vector(gu.datasets.get_path("glacier_outlines"))
-        outlines = gu.Vector(outlines.ds.to_crs(img1.crs))   # reproject to img1's CRS
+        outlines = gu.Vector(outlines.ds.to_crs(img1.crs))  # reproject to img1's CRS
         out_bounds = pt.merge_bounds((img1, outlines.ds))
 
         assert out_bounds[0] == min(img1.bounds.left, outlines.ds.total_bounds[0])
