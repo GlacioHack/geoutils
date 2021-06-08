@@ -3,7 +3,7 @@ GeoUtils.projtools provides a toolset for dealing with different coordinate refe
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections import abc
 
 import geopandas as gpd
 import numpy as np
@@ -61,7 +61,7 @@ def bounds2poly(
 
 
 def merge_bounds(
-    bounds_list: Iterable[list[float] | Raster | rio.io.DatasetReader | Vector | gpd.GeoDataFrame],
+    bounds_list: abc.Iterable[list[float] | Raster | rio.io.DatasetReader | Vector | gpd.GeoDataFrame],
     merging_algorithm: str = "union",
 ) -> tuple[float, ...]:
     """

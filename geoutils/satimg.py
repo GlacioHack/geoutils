@@ -7,7 +7,7 @@ import datetime as dt
 import os
 import re
 import warnings
-from collections.abc import Iterable
+from collections import abc
 from typing import Any
 
 import numpy as np
@@ -184,8 +184,8 @@ def sw_naming_to_latlon(tile_name: str) -> tuple[float, float]:
 
 def latlon_to_sw_naming(
     latlon: tuple[float, float],
-    latlon_sizes: Iterable[tuple[float, float]] = ((1.0, 1.0),),
-    lat_lims: Iterable[tuple[float, float]] = ((0.0, 90.1),),
+    latlon_sizes: abc.Iterable[tuple[float, float]] = ((1.0, 1.0),),
+    lat_lims: abc.Iterable[tuple[float, float]] = ((0.0, 90.1),),
 ) -> str:
     """
     Convert latitude and longitude to widely used southwestern corner tile naming (originally for SRTMGL1)

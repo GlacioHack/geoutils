@@ -3,9 +3,8 @@ geoutils.vectortools provides a toolset for working with vector data.
 """
 from __future__ import annotations
 
-import collections
 import warnings
-from collections.abc import Iterable
+from collections import abc
 from numbers import Number
 from typing import TypeVar
 
@@ -190,7 +189,7 @@ the provided raster file.
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        in_value: int | float | Iterable[int | float] | None = None,
+        in_value: int | float | abc.Iterable[int | float] | None = None,
         out_value: int | float = 0,
     ) -> np.ndarray:
         """
@@ -262,7 +261,7 @@ the provided raster file.
             in_value = self.ds.index + 1
 
         # Rasterize geometry
-        if isinstance(in_value, collections.abc.Iterable):
+        if isinstance(in_value, abc.Iterable):
             if len(in_value) != len(vect.geometry):  # type: ignore
                 raise ValueError(
                     "in_value must have same length as self.ds.geometry, currently {} != {}".format(

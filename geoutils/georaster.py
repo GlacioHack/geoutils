@@ -3,11 +3,10 @@ geoutils.georaster provides a toolset for working with raster data.
 """
 from __future__ import annotations
 
-import collections
 import copy
 import os
 import warnings
-from collections.abc import Iterable
+from collections import abc
 from numbers import Number
 from typing import IO, Any, Callable, TypeVar
 
@@ -211,7 +210,7 @@ class Raster:
             nbands = self.count
         elif isinstance(bands, int):
             nbands = 1
-        elif isinstance(bands, collections.abc.Iterable):
+        elif isinstance(bands, abc.Iterable):
             nbands = len(bands)
 
         # Downsampled image size
@@ -730,7 +729,7 @@ class Raster:
         dst_crs: CRS | str | None = None,
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        dst_res: float | Iterable[float] | None = None,
+        dst_res: float | abc.Iterable[float] | None = None,
         nodata: int | float | None = None,
         dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.nearest,
@@ -959,7 +958,7 @@ class Raster:
         meta.update({"transform": rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)})
         self._update(metadata=meta)
 
-    def set_ndv(self, ndv: Iterable[int | float] | int | float, update_array: bool = False) -> None:
+    def set_ndv(self, ndv: abc.Iterable[int | float] | int | float, update_array: bool = False) -> None:
         """
         Set new nodata values for bands (and possibly update arrays)
 
@@ -968,14 +967,14 @@ class Raster:
 
         """
 
-        if not isinstance(ndv, (Iterable, int, float, np.integer, np.floating)):
+        if not isinstance(ndv, (abc.Iterable, int, float, np.integer, np.floating)):
             raise ValueError("Type of ndv not understood, must be list or float or int")
 
         elif (isinstance(ndv, (int, float, np.integer, np.floating))) and self.count > 1:
             print("Several raster band: using nodata value for all bands")
             ndv = [ndv] * self.count
 
-        elif isinstance(ndv, Iterable) and self.count == 1:
+        elif isinstance(ndv, abc.Iterable) and self.count == 1:
             print("Only one raster band: using first nodata value provided")
             ndv = list(ndv)[0]
 
@@ -1008,7 +1007,7 @@ class Raster:
 
         self._update(metadata=meta, imgdata=imgdata)
 
-    def set_dtypes(self, dtypes: Iterable[np.dtype | str] | np.dtype | str, update_array: bool = True) -> None:
+    def set_dtypes(self, dtypes: abc.Iterable[np.dtype | str] | np.dtype | str, update_array: bool = True) -> None:
         """
         Set new dtypes for bands (and possibly update arrays)
 
@@ -1016,12 +1015,12 @@ class Raster:
         :param update_array: change the existing dtype in arrays
 
         """
-        if not (isinstance(dtypes, Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
+        if not (isinstance(dtypes, abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
             raise ValueError("Type of dtypes not understood, must be list or type or str")
         elif isinstance(dtypes, type) or isinstance(dtypes, str):
             print("Several raster band: using data type for all bands")
             dtypes = (dtypes,) * self.count
-        elif isinstance(dtypes, Iterable) and self.count == 1:
+        elif isinstance(dtypes, abc.Iterable) and self.count == 1:
             print("Only one raster band: using first data type provided")
             dtypes = tuple(dtypes)
 
@@ -1286,7 +1285,7 @@ to be cleared due to the setting of GCPs."
             raise ValueError("band must be int or None")
 
         # If multiple bands (RGB), cbar does not make sense
-        if isinstance(band, collections.abc.Iterable):
+        if isinstance(band, abc.Iterable):
             if len(band) > 1:
                 add_cb = False
 
@@ -1566,8 +1565,8 @@ to be cleared due to the setting of GCPs."
 
         i, j = self.ds.index(x, y, op=op, precision=precision)
 
-        # # necessary because rio.Dataset.index does not return Iterable for a single point
-        if not isinstance(i, collections.abc.Iterable):
+        # # necessary because rio.Dataset.index does not return abc.Iterable for a single point
+        if not isinstance(i, abc.Iterable):
             i, j = (
                 np.asarray(
                     [
