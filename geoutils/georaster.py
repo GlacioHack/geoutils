@@ -124,7 +124,7 @@ class Raster:
     transform: Affine
     crs: CRS
     nodata: int | float | None
-    res: tuple[float]
+    res: tuple[float | int, float | int]
     bounds: rio.coords.BoundingBox
     height: int
     width: int
