@@ -27,7 +27,7 @@ Suggested formatters are:
 
 These can all be installed with this command:
 ```bash
-pip install prospector git+https://github.com/mypy/mypy.git pydocstyle autopep8 isort
+pip install prospector git+https://github.com/python/mypy.git pydocstyle autopep8 isort
 ```
 Note that your text editor of choice will also need to be configured with these tools (and max character length changed).
 
