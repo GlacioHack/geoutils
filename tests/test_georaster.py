@@ -379,11 +379,27 @@ class TestRaster:
 
     def test_reproj(self) -> None:
 
-        # Test reprojecting to dst_ref
+        # Reference raster to be used
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r.set_ndv(0)  # to avoid warnings - will be used when reprojecting outside bounds
+
+        # A second raster with different bounds, shape and resolution
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r2 = r2.reproject(dst_res=20)
+        assert r2.res == (20, 20)
+
+        # Assert the initial rasters are different
+        assert r.bounds != r2.bounds
+        assert r.shape != r2.shape
+        assert r.res != r2.res
+
+        # Test reprojecting to dst_ref
+        # Reproject raster should have same dimensions/georeferences as r2
         r3 = r.reproject(r2)
+        assert r3.bounds == r2.bounds
+        assert r3.shape == r2.shape
+        assert r3.bounds == r2.bounds
+        assert r3.transform == r2.transform
 
         if DO_PLOT:
             fig1, ax1 = plt.subplots()
@@ -396,16 +412,6 @@ class TestRaster:
             r3.show(ax=ax3, title="Raster 1 reprojected to Raster 2")
 
             plt.show()
-
-        # Assert the initial rasters are different
-        assert r.bounds != r2.bounds
-        assert r.shape != r2.shape
-
-        # Reproject raster should have same dimensions/georeferences as r2
-        assert r3.bounds == r2.bounds
-        assert r3.shape == r2.shape
-        assert r3.bounds == r2.bounds
-        assert r3.transform == r2.transform
 
         # If a nodata is set, make sure it is preserved
         r.set_ndv(255)
