@@ -11,6 +11,3 @@
 * [ ] Have you successfully run the tests locally?
 * [ ] Have you added to or updated the project documentation?
 <!-- You can erase any parts of this template not applicable to your Pull Request. -->
-
-
-
