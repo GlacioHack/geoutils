@@ -632,7 +632,7 @@ class TestRaster:
         r = gr.Raster(datasets.get_path("landsat_B4"))
 
         # Test changing dtypes that does not modify the data
-        for dtype in [np.uint8, np.uint16, np.float32, np.float64, 'float32']:
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
             rout = r.astype(dtype)
             assert rout == r
             assert np.dtype(rout.dtypes[0]) == dtype
@@ -647,7 +647,7 @@ class TestRaster:
         pytest.warns(UserWarning, r.astype, dtype)  # check a warning is raised
 
         # Test modify in place
-        for dtype in [np.uint8, np.uint16, np.float32, np.float64, 'float32']:
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
             r2 = r.copy()
             out = r2.astype(dtype, inplace=True)
             assert out is None
