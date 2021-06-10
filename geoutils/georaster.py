@@ -1026,44 +1026,6 @@ class Raster:
 
         self._update(metadata=meta, imgdata=imgdata)
 
-    def set_dtypes(self, dtypes: abc.Iterable[np.dtype | str] | np.dtype | str, update_array: bool = True) -> None:
-        """
-        Set new dtypes for bands (and possibly update arrays)
-
-        :param dtypes: data types
-        :param update_array: change the existing dtype in arrays
-
-        """
-        if not (isinstance(dtypes, abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
-            raise ValueError("Type of dtypes not understood, must be list or type or str")
-        elif isinstance(dtypes, type) or isinstance(dtypes, str):
-            print("Several raster band: using data type for all bands")
-            dtypes = (dtypes,) * self.count
-        elif isinstance(dtypes, abc.Iterable) and self.count == 1:
-            print("Only one raster band: using first data type provided")
-            dtypes = tuple(dtypes)
-
-        meta = self.ds.meta
-        imgdata = self.data
-
-        # for rio.DatasetReader.meta, the proper name is "dtype"
-        meta.update({"dtype": dtypes[0]})  # type: ignore
-
-        # this should always be "True", as rasterio doesn't change the array type by default:
-        # ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
-        if update_array:
-            if self.count == 1:
-                imgdata = imgdata.astype(dtypes[0])  # type: ignore
-            else:
-                # TODO: double-check, but I don't think we can have different dtypes for bands with rio (1dtype in meta)
-                imgdata = imgdata.astype(dtypes[0])  # type: ignore
-                for i in imgdata.shape[0]:  # type: ignore
-                    imgdata[i, :] = imgdata[i, :].astype(dtypes[0])  # type: ignore
-        else:
-            imgdata = None
-
-        self._update(imgdata=imgdata, metadata=meta)
-
     def save(
         self,
         filename: str | IO[bytes],

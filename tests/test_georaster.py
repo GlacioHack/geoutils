@@ -614,19 +614,6 @@ class TestRaster:
         # Check that the number of no data value is correct
         assert np.count_nonzero(ndv_index.data) == 112088
 
-    def test_set_dtypes(self) -> None:
-
-        r = gr.Raster(datasets.get_path("landsat_B4"))
-        arr_1 = np.copy(r.data).astype(np.int8)
-        r.set_dtypes(np.int8)
-        arr_2 = np.copy(r.data)
-        r.set_dtypes([np.int8], update_array=True)
-
-        arr_3 = r.data
-
-        assert np.count_nonzero(~arr_1 == arr_2) == 0
-        assert np.count_nonzero(~arr_2 == arr_3) == 0
-
     def test_astype(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
