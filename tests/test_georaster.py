@@ -655,6 +655,19 @@ class TestRaster:
             assert np.dtype(r2.dtypes[0]) == dtype
             assert r2.data.dtype == dtype
 
+        # Test with masked values
+        # First line is set to 0 and 0 set to nodata - check that 0 not used
+        # Note that nodata must be set or astype will raise an error
+        assert not np.any(r2.data == 0)
+        r2 = r.copy()
+        r2.data[0, 0] = 0
+        r2.set_ndv(0)
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
+            rout = r2.astype(dtype)
+            assert rout == r2
+            assert np.dtype(rout.dtypes[0]) == dtype
+            assert rout.data.dtype == dtype
+
     def test_plot(self) -> None:
 
         # Read single band raster and RGB raster
