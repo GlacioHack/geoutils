@@ -627,6 +627,34 @@ class TestRaster:
         assert np.count_nonzero(~arr_1 == arr_2) == 0
         assert np.count_nonzero(~arr_2 == arr_3) == 0
 
+    def test_astype(self) -> None:
+
+        r = gr.Raster(datasets.get_path("landsat_B4"))
+
+        # Test changing dtypes that does not modify the data
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, 'float32']:
+            rout = r.astype(dtype)
+            assert rout == r
+            assert np.dtype(rout.dtypes[0]) == dtype
+            assert rout.data.dtype == dtype
+
+        # Test a dtype that will modify the data
+        dtype = np.int8
+        rout = r.astype(dtype)
+        assert rout != r
+        assert np.dtype(rout.dtypes[0]) == dtype
+        assert rout.data.dtype == dtype
+        pytest.warns(UserWarning, r.astype, dtype)  # check a warning is raised
+
+        # Test modify in place
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, 'float32']:
+            r2 = r.copy()
+            out = r2.astype(dtype, inplace=True)
+            assert out is None
+            assert r2 == r
+            assert np.dtype(r2.dtypes[0]) == dtype
+            assert r2.data.dtype == dtype
+
     def test_plot(self) -> None:
 
         # Read single band raster and RGB raster

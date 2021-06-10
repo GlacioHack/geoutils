@@ -423,16 +423,34 @@ class Raster:
 
         return self + -other  # type: ignore
 
-    def astype(self, dtype: np.dtype | type | str) -> Raster:
+    def astype(self, dtype: np.dtype | type | str, inplace: bool = False) -> Raster | None:
         """
         Converts the data type of a Raster object.
 
         :param dtype: Any numpy dtype or string accepted by numpy.astype
+        :param inplace: Set to True to modify the raster in place.
 
         :returns: the output Raster with dtype changed.
         """
+        # Check that dtype is supported by rasterio
+        if not rio.dtypes.check_dtype(dtype):
+            raise TypeError(f"{dtype} is not supported by rasterio")
+
+        # Check that data type change will not result in a loss of information
+        if not rio.dtypes.can_cast_dtype(self.data, dtype):
+            warnings.warn(
+                "dtype conversion will result in a loss of information. "
+                f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data."
+            )
+
         out_data = self.data.astype(dtype)
-        return self.from_array(out_data, self.transform, self.crs)
+        if inplace:
+            meta = self.ds.meta
+            meta.update({"dtype": dtype})
+            self._update(imgdata=out_data, metadata=meta)
+            return None
+        else:
+            return self.from_array(out_data, self.transform, self.crs, nodata=self.nodata)
 
     def _get_rio_attrs(self) -> list[str]:
         """Get the attributes that have the same name in rio.DatasetReader and Raster."""
