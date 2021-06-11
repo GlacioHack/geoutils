@@ -720,9 +720,6 @@ class Raster:
         else:
             return self.from_array(crop_img, meta["transform"], meta["crs"], meta["nodata"])
 
-    def clip(self) -> None:
-        return None
-
     def reproject(
         self: RasterType,
         dst_ref: RasterType | rio.io.Dataset | str | None = None,
