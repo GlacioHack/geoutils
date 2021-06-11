@@ -8,7 +8,7 @@ import os
 import warnings
 from collections import abc
 from numbers import Number
-from typing import IO, Any, Callable, TypeVar
+from typing import IO, Any, Callable, Literal, TypeVar, overload
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -422,6 +422,14 @@ class Raster:
             other = other.astype(ctype)
 
         return self + -other  # type: ignore
+
+    @overload
+    def astype(self, dtype: np.dtype | type | str, inplace: Literal[False]) -> Raster:
+        ...
+
+    @overload
+    def astype(self, dtype: np.dtype | type | str, inplace: Literal[True]) -> None:
+        ...
 
     def astype(self, dtype: np.dtype | type | str, inplace: bool = False) -> Raster | None:
         """
