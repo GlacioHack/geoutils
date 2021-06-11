@@ -877,7 +877,7 @@ class TestRaster:
         assert img3a == img3b
 
 
-@pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])
+@pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])  # type: ignore
 def test_numpy_functions(dtype: str) -> None:
     """Test how rasters can be used as/with numpy arrays."""
     warnings.simplefilter("error")
