@@ -903,3 +903,39 @@ class TestRaster:
         img3a = img1.reproject(img2, resampling="q1")
         img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
         assert img3a == img3b
+
+
+@pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])  # type: ignore
+def test_numpy_functions(dtype: str) -> None:
+    """Test how rasters can be used as/with numpy arrays."""
+    warnings.simplefilter("error")
+
+    # Create an array of unique values starting at 0 and ending at 24
+    array = np.arange(25, dtype=dtype).reshape((1, 5, 5))
+    # Create an associated dummy transform
+    transform = rio.transform.from_origin(0, 5, 1, 1)
+
+    # Create a raster from the array
+    raster = gu.Raster.from_array(array, transform=transform, crs=4326)
+
+    # Test some ufuncs
+    assert np.median(raster) == 12.0
+    assert np.mean(raster) == 12.0
+
+    # Check that rasters don't  become arrays when using simple arithmetic.
+    assert isinstance(raster + 1, gr.Raster)
+
+    # Test that array_equal works
+    assert np.array_equal(array, raster)
+
+    # Test the data setter method by creating a new array
+    raster.data = array + 2
+
+    # Check that the median updated accordingly.
+    assert np.median(raster) == 14.0
+
+    # Test
+    raster += array
+
+    assert isinstance(raster, gr.Raster)
+    assert np.median(raster) == 26.0

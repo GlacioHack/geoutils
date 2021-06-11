@@ -635,6 +635,13 @@ class Raster:
 
         return cp
 
+    @property
+    def __array_interface__(self) -> dict[str, Any]:
+        if self._data is None:
+            self.load()
+
+        return self._data.__array_interface__  # type: ignore
+
     def load(self, bands: int | list[int] | None = None, **kwargs: Any) -> None:
         r"""
         Load specific bands of the dataset, using rasterio.read().
@@ -737,9 +744,6 @@ class Raster:
             return None
         else:
             return self.from_array(crop_img, meta["transform"], meta["crs"], meta["nodata"])
-
-    def clip(self) -> None:
-        return None
 
     def reproject(
         self: RasterType,

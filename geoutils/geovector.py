@@ -50,7 +50,7 @@ class Vector:
         return str(self.ds.__repr__())
 
     def __str__(self) -> str:
-        """ Provide string of information about Raster. """
+        """Provide string of information about Raster."""
         return self.info()
 
     def info(self) -> str:

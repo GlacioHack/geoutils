@@ -24,7 +24,7 @@ repos:
 
         # Format the code aggressively using black
         - repo: https://github.com/psf/black
-          rev: 20.8b1
+          rev: 21.5b2
           hooks:
                   - id: black
                     args: [--line-length=120]
@@ -40,7 +40,6 @@ repos:
                   additional_dependencies:
                           - flake8-comprehensions==3.1.0
                           - flake8-bugbear==21.3.2
-                          - pandas-dev-flaker==0.2.0
                   files: ^(geoutils|tests)
         # Lint the code using mypy
         - repo: https://github.com/pre-commit/mirrors-mypy
@@ -69,7 +68,7 @@ repos:
 
         # Automatically upgrade syntax to a minimum version
         - repo: https://github.com/asottile/pyupgrade
-          rev: v2.18.3
+          rev: v2.19.1
           hooks:
                 - id: pyupgrade
                   args: [--py37-plus]
@@ -95,6 +94,6 @@ repos:
 
         # Add custom regex lints (see .relint.yml)
         - repo: https://github.com/codingjoe/relint
-          rev: 1.2.0
+          rev: 1.2.1
           hooks:
                 - id: relint
