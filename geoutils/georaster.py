@@ -419,7 +419,7 @@ class Raster:
         if isinstance(other, Raster):
             # Need to convert both rasters to a common type before doing the negation
             ctype: np.dtype = np.find_common_type([*self.dtypes, *other.dtypes], [])
-            other = other.astype(ctype)
+            other = other.astype(ctype)  # type: ignore
 
         return self + -other  # type: ignore
 

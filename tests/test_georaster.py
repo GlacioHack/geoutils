@@ -620,14 +620,14 @@ class TestRaster:
 
         # Test changing dtypes that does not modify the data
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
-            rout = r.astype(dtype)
+            rout = r.astype(dtype)  # type: ignore
             assert rout == r
             assert np.dtype(rout.dtypes[0]) == dtype
             assert rout.data.dtype == dtype
 
         # Test a dtype that will modify the data
         dtype = np.int8
-        rout = r.astype(dtype)
+        rout = r.astype(dtype)  # type: ignore
         assert rout != r
         assert np.dtype(rout.dtypes[0]) == dtype
         assert rout.data.dtype == dtype
@@ -650,7 +650,7 @@ class TestRaster:
         r2.data[0, 0] = 0
         r2.set_ndv(0)
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
-            rout = r2.astype(dtype)
+            rout = r2.astype(dtype)  # type: ignore
             assert rout == r2
             assert np.dtype(rout.dtypes[0]) == dtype
             assert rout.data.dtype == dtype
