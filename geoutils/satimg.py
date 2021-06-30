@@ -252,7 +252,7 @@ class SatelliteImage(Raster):
         version: str | None = None,
         read_from_meta: bool = True,
         fn_meta: str | None = None,
-        silent: bool = False,
+        silent: bool = True,
     ) -> None:
 
         """
