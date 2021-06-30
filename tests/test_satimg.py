@@ -66,7 +66,7 @@ class TestSatelliteImage:
                 sys.stdout = self._stdout
 
         with Capturing() as output1:
-            si.SatelliteImage(fn_img)
+            si.SatelliteImage(fn_img, silent=False)
 
         # check the metadata reading outputs to console
         assert len(output1) > 0
