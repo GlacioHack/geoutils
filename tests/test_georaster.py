@@ -876,6 +876,34 @@ class TestRaster:
         img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
         assert img3a == img3b
 
+    def test_point_subset(self) -> None:
+        """Test the outputs of the point_subset method and that it doesn't load if not needed."""
+        # Create a small raster to test point sampling on
+        img1 = gu.Raster.from_array(
+            np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
+        )
+
+        # Sample the whole raster (fraction==1)
+        points = img1.point_subset(1)
+
+        # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
+        assert points.shape == (25, 3)
+        assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
+
+        assert img1.point_subset(0.2).shape == (5, 3)
+
+        img2 = gu.Raster(datasets.get_path("landsat_RGB"), load_data=False)
+
+        points = img2.point_subset(10)
+
+        assert points.shape == (10, 5)
+        assert not img2.is_loaded
+
+        points_frame = img2.point_subset(10, as_frame=True)
+
+        assert np.array_equal(points_frame.columns, ["b1", "b2", "b3", "geometry"])
+        assert points_frame.crs == img2.crs
+
 
 @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])  # type: ignore
 def test_numpy_functions(dtype: str) -> None:
