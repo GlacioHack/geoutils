@@ -1682,16 +1682,26 @@ to be cleared due to the setting of GCPs.")
                 raise ValueError("no pixel with in_value {}".format(in_value))
     
             bool_msk = np.array(self.data == in_value).astype(np.uint8)
-            results = (
-                {"properties": {"raster_value": v}, "geometry": s}
-                for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk))
-            )
-    
-            gdf = gpd.GeoDataFrame.from_features(list(results))
-            gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
-            gdf.set_geometry(col="geometry", inplace=True)
-    
+
+        elif isinstance(in_value, tuple):
+
+            if np.sum((self.data > in_value[0]) & (self.data < in_value[1])) == 0:
+                raise ValueError("no pixel with in_value between {} and {}".format(in_value[0], in_value[1]))
+            
+            bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(np.uint8)
+        
         else:
-            raise ValueError("in_value must be a Number")
-    
+            
+            raise ValueError("in_value must be a Number or a Tuple") 
+            
+        results = (
+            {"properties": {"raster_value": v}, "geometry": s}
+            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk))
+        )
+        
+        gdf = gpd.GeoDataFrame.from_features(list(results))
+        gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
+        gdf.set_geometry(col="geometry", inplace=True)
+
+        
         return gdf
