@@ -1832,6 +1832,9 @@ to be cleared due to the setting of GCPs."
         else:
             pixel_data = np.array(list(self.ds.sample(zip(x_coords, y_coords)))).T
 
+        if isinstance(pixel_data, np.ma.masked_array):
+            pixel_data = np.where(pixel_data.mask, np.nan, pixel_data.data)
+
         # Merge the coordinates and pixel data into a point cloud.
         points = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
 

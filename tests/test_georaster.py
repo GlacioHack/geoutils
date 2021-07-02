@@ -887,6 +887,7 @@ class TestRaster:
         points = img1.point_subset(1)
 
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
+        assert isinstance(points, np.ndarray)
         assert points.shape == (25, 3)
         assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
 
