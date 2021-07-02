@@ -1669,8 +1669,8 @@ to be cleared due to the setting of GCPs.")
     def polygonize(self, in_value=1):
         """
         Return a GeoDataFrame polygonized from a raster.
-        :param in_value: Value of the raster from which to create geometries (Default is 1)
-        :type in_value: int, float
+        :param in_value: Value or range of values of the raster from which to create geometries (Default is 1)
+        :type in_value: int, float, tuple
         :returns: GeoDataFrame containing the polygonized geometries
         :rtype: geopandas.geodataframe.GeoDataFrame
         """
