@@ -10,7 +10,7 @@ import warnings
 from typing import Optional, Union
 
 import geopandas as gpd
-import geoutils.geovector as vt
+import geoutils.geovector as gv
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1730,5 +1730,5 @@ to be cleared due to the setting of GCPs.")
         gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
         gdf.set_geometry(col="geometry", inplace=True)
     
-        return vt.Vector(gdf)
+        return gv.Vector(gdf)
 

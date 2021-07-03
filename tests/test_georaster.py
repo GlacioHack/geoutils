@@ -12,6 +12,7 @@ import rasterio as rio
 from pylint import epylint
 
 import geoutils.georaster as gr
+import geoutils.geovector as gv
 import geoutils.projtools as pt
 from geoutils import datasets
 
@@ -799,5 +800,5 @@ class TestRaster:
     def test_polygonize(self):
         """Test that polygonize doesn't raise errors."""
         img = gr.Raster(datasets.get_path('landsat_B4'))
-        assert isinstance(img.polygonize(), gdf)
+        assert isinstance(img.polygonize(), gv.Vector)
         
