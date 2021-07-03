@@ -47,7 +47,7 @@ setup(
     license="BSD-3",
     packages=["geoutils", "geoutils.datasets"],
     package_data={"geoutils": data_files},
-    install_requires=["rasterio", "geopandas", "pyproj", "scipy"],
+    install_requires=["rasterio", "geopandas", "pyproj", "scipy", "typing-extensions; python_version < '3.8'"],
     extras_require={"rioxarray": ["rioxarray"]},
     scripts=["geoutils/geoviewer.py"],
     zip_safe=False,

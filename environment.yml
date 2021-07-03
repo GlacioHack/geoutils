@@ -8,3 +8,7 @@ dependencies:
   - pyproj
   - rasterio
   - scipy
+  - pip
+  - pip:
+
+    - "typing-extensions; python_version < '3.8'"
