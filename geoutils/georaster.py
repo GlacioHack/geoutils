@@ -8,7 +8,12 @@ import os
 import warnings
 from collections import abc
 from numbers import Number
-from typing import IO, Any, Callable, Literal, TypeVar
+from typing import IO, Any, Callable, TypeVar
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal  # type: ignore
 
 import matplotlib
 import matplotlib.pyplot as plt
