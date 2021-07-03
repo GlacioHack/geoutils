@@ -9,7 +9,6 @@ import os
 import warnings
 from typing import Optional, Union
 
-from collections import Sequence
 import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
@@ -1671,10 +1670,11 @@ to be cleared due to the setting of GCPs.")
         """
         Return a GeoDataFrame polygonized from a raster.
         
-        :param in_value: Value or range of values of the raster from which to create geometries (Default is 1)
-        :type in_value: int, float, tuple, list, np.ndarray
+        :param in_value: Value or range of values of the raster from which to create geometries (Default is 1). If 'all',
+          all unique pixel values of the raster are used.
+        :type in_value: int, float, tuple, list, string np.ndarray
         
-        :returns: GeoDataFrame containing the polygonized geometries
+        :returns: GeoDataFrame containing the polygonized geometries.
         :rtype: geopandas.geodataframe.GeoDataFrame
         """
     
@@ -1709,6 +1709,12 @@ to be cleared due to the setting of GCPs.")
                 )
     
             bool_msk = np.isin(self.data, in_value).astype("uint8")
+    
+        # mask all valid values
+        elif in_value == "all":
+    
+            vals_for_msk = list(set(self.data.flatten()))
+            bool_msk = np.isin(self.data, vals_for_msk).astype("uint8")
     
         else:
     
