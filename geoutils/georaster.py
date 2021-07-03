@@ -8,7 +8,7 @@ import os
 import warnings
 from collections import abc
 from numbers import Number
-from typing import IO, Any, Callable, TypeVar
+from typing import IO, Any, Callable, Literal, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -38,6 +38,8 @@ else:
     _has_rioxarray = True
 
 RasterType = TypeVar("RasterType", bound="Raster")
+
+TRUE = Literal[True]
 
 
 def _resampling_from_str(resampling: str) -> Resampling:
