@@ -10,11 +10,6 @@ from collections import abc
 from numbers import Number
 from typing import IO, Any, Callable, TypeVar
 
-try:
-    from typing import Literal
-except ImportError:
-    from typing_extensions import Literal  # type: ignore
-
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,6 +30,12 @@ from shapely.geometry.polygon import Polygon
 
 from geoutils.geovector import Vector
 
+# If python38 or above, Literal is builtin. Otherwise, use typing_extensions
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal  # type: ignore
+
 try:
     import rioxarray
 except ImportError:
@@ -44,7 +45,7 @@ else:
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
-TRUE = Literal[True]
+TRUE = Literal[True]  # This should be removed soon; it is for testing the import
 
 
 def _resampling_from_str(resampling: str) -> Resampling:
