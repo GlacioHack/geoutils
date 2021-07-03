@@ -10,3 +10,5 @@ sphinxcontrib_programoutput
 sphinx_autodoc_typehints
 matplotlib
 scipy
+pre-commit
+typing-extensions; python_version < '3.8'

@@ -1,23 +1,24 @@
-from setuptools import setup
-from os import path
 from glob import glob
+from os import path
+from typing import Optional
 
-FULLVERSION = '0.0.1'
+from setuptools import setup
+
+FULLVERSION = "0.0.3"
 VERSION = FULLVERSION
 
 write_version = True
 
 
-def write_version_py(filename=None):
+def write_version_py(filename: Optional[str] = None) -> None:
     cnt = """\
 version = '%s'
 short_version = '%s'
 """
-    if not filename:
-        filename = path.join(path.dirname(__file__), 'geoutils',
-                             'version.py')
+    if filename is None:
+        filename = path.join(path.dirname(__file__), "geoutils", "version.py")
 
-    a = open(filename, 'w')
+    a = open(filename, "w")
     try:
         a.write(cnt % (FULLVERSION, VERSION))
     finally:
@@ -37,15 +38,17 @@ for item in glob("geoutils/datasets/*"):
         data_files.append(path.join("datasets", bname))
 
 
-setup(name='geoutils',
-      version=FULLVERSION,
-      description='Tools for working with geospatial data',
-      url='https://www.github.com/GlacioHack/geoutils/',
-      author='The GlacioHack Team',
-      license='BSD-3',
-      packages=['geoutils', 'geoutils.datasets'],
-      package_data={"geoutils": data_files},
-      install_requires=['rasterio', 'geopandas', 'pyproj','scipy'],
-      extras_require={'rioxarray': ['rioxarray']},
-      scripts=['geoutils/geoviewer.py'],
-      zip_safe=False)
+setup(
+    name="geoutils",
+    version=FULLVERSION,
+    description="Tools for working with geospatial data",
+    url="https://www.github.com/GlacioHack/geoutils/",
+    author="The GlacioHack Team",
+    license="BSD-3",
+    packages=["geoutils", "geoutils.datasets"],
+    package_data={"geoutils": data_files},
+    install_requires=["rasterio", "geopandas", "pyproj", "scipy", "typing-extensions; python_version < '3.8'"],
+    extras_require={"rioxarray": ["rioxarray"]},
+    scripts=["geoutils/geoviewer.py"],
+    zip_safe=False,
+)
