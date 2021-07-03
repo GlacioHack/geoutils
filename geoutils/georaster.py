@@ -9,7 +9,9 @@ import os
 import warnings
 from typing import Optional, Union
 
+from collections import Sequence
 import geopandas as gpd
+from itertools import starmap
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1669,20 +1671,23 @@ to be cleared due to the setting of GCPs.")
     def polygonize(self, in_value=1):
         """
         Return a GeoDataFrame polygonized from a raster.
+        
         :param in_value: Value or range of values of the raster from which to create geometries (Default is 1)
         :type in_value: int, float, tuple
+        
         :returns: GeoDataFrame containing the polygonized geometries
         :rtype: geopandas.geodataframe.GeoDataFrame
         """
     
-        # Polygonize raster
+        # mask a unique value set by a number
         if isinstance(in_value, Number):
-    
+            
             if np.sum(self.data == in_value) == 0:
                 raise ValueError("no pixel with in_value {}".format(in_value))
     
             bool_msk = np.array(self.data == in_value).astype(np.uint8)
 
+        # mask values within boundaries set by a tuple
         elif isinstance(in_value, tuple):
 
             if np.sum((self.data > in_value[0]) & (self.data < in_value[1])) == 0:
@@ -1690,9 +1695,17 @@ to be cleared due to the setting of GCPs.")
             
             bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(np.uint8)
         
+        # mask specific values set by a sequence
+        elif isinstance(in_value, Sequence):
+            
+            if np.isin(self.data, in_value) == 0:
+                raise ValueError(" ".join(starmap('{}'.format, in_value)))
+                
+            bool_msk = np.isin(self.data, in_value).astype("uint8")
+            
         else:
             
-            raise ValueError("in_value must be a Number or a Tuple") 
+            raise ValueError("in_value must be a Number, a Tuple or a Sequence") 
             
         results = (
             {"properties": {"raster_value": v}, "geometry": s}
