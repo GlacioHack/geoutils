@@ -1823,7 +1823,7 @@ to be cleared due to the setting of GCPs."
         rows = (choice / self.width).astype(int)
 
         # Extract the coordinates of the pixels and filter by the chosen pixels.
-        x_coords, y_coords = [np.array(a) for a in self.ij2xy(rows, cols, offset="center")]
+        x_coords, y_coords = (np.array(a) for a in self.ij2xy(rows, cols, offset="center"))
 
         # If the Raster is loaded, pick from the data, otherwise use the disk-sample method from rasterio.
         if self.is_loaded:
