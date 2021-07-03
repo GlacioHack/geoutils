@@ -1680,40 +1680,48 @@ to be cleared due to the setting of GCPs.")
     
         # mask a unique value set by a number
         if isinstance(in_value, Number):
-            
+    
             if np.sum(self.data == in_value) == 0:
                 raise ValueError("no pixel with in_value {}".format(in_value))
     
             bool_msk = np.array(self.data == in_value).astype(np.uint8)
-
+    
         # mask values within boundaries set by a tuple
         elif isinstance(in_value, tuple):
-
+    
             if np.sum((self.data > in_value[0]) & (self.data < in_value[1])) == 0:
-                raise ValueError("no pixel with in_value between {} and {}".format(in_value[0], in_value[1]))
-            
-            bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(np.uint8)
-        
+                raise ValueError(
+                    "no pixel with in_value between {} and {}".format(
+                        in_value[0], in_value[1]
+                    )
+                )
+    
+            bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(
+                np.uint8
+            )
+    
         # mask specific values set by a sequence
         elif isinstance(in_value, list) or isinstance(in_value, np.ndarray):
-            
+    
             if np.sum(np.isin(self.data, in_value)) == 0:
-                raise ValueError('no pixel with in_value ' + ', '.join(map('{}'.format,in_value)))
-                
+                raise ValueError(
+                    "no pixel with in_value " + ", ".join(map("{}".format, in_value))
+                )
+    
             bool_msk = np.isin(self.data, in_value).astype("uint8")
-            
+    
         else:
-            
-            raise ValueError("in_value must be a number, a tuple or a sequence") 
-            
+    
+            raise ValueError("in_value must be a number, a tuple or a sequence")
+    
         results = (
             {"properties": {"raster_value": v}, "geometry": s}
             for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk))
         )
-        
+    
         gdf = gpd.GeoDataFrame.from_features(list(results))
         gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
         gdf.set_geometry(col="geometry", inplace=True)
-
-        
+    
         return gdf
+
