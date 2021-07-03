@@ -1776,14 +1776,14 @@ to be cleared due to the setting of GCPs."
     # Unfortunately, the Literal type doesn't work for py37, so a bool | None has to be used instead.
     # When py38 is the least supported version, this should be 'as_frame: Literal[True]`) -> pd.GeoDataFrame etc.
     @overload
-    def point_subset(self, subset: float | int, as_frame: bool) -> gpd.GeoDataFrame:
+    def to_points(self, subset: float | int, as_frame: bool) -> gpd.GeoDataFrame:
         ...
 
     @overload
-    def point_subset(self, subset: float | int, as_frame: None) -> np.ndarray:
+    def to_points(self, subset: float | int, as_frame: None) -> np.ndarray:
         ...
 
-    def point_subset(self, subset: float | int, as_frame: bool | None = None) -> np.ndarray:
+    def to_points(self, subset: float | int = 1, as_frame: bool | None = None) -> np.ndarray:
         """
         Subset a point cloud of the raster.
 
@@ -1823,8 +1823,7 @@ to be cleared due to the setting of GCPs."
         rows = (choice / self.width).astype(int)
 
         # Extract the coordinates of the pixels and filter by the chosen pixels.
-        x_coords, y_coords = self.coords(offset="center")
-        x_coords, y_coords = x_coords[rows, cols], y_coords[rows, cols]
+        x_coords, y_coords = [np.array(a) for a in self.ij2xy(rows, cols, offset="center")]
 
         # If the Raster is loaded, pick from the data, otherwise use the disk-sample method from rasterio.
         if self.is_loaded:
