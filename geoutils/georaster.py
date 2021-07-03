@@ -46,8 +46,6 @@ else:
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
-TRUE = Literal[True]  # This should be removed soon; it is for testing the import
-
 
 def _resampling_from_str(resampling: str) -> Resampling:
     """
@@ -1781,17 +1779,21 @@ to be cleared due to the setting of GCPs."
 
         return bands
 
-    # Unfortunately, the Literal type doesn't work for py37, so a bool | None has to be used instead.
-    # When py38 is the least supported version, this should be 'as_frame: Literal[True]`) -> pd.GeoDataFrame etc.
     @overload
-    def to_points(self, subset: float | int, as_frame: bool) -> gpd.GeoDataFrame:
+    def to_points(
+        self, subset: float | int, as_frame: Literal[True], pixel_offset: Literal["center", "corner"]
+    ) -> gpd.GeoDataFrame:
         ...
 
     @overload
-    def to_points(self, subset: float | int, as_frame: None) -> np.ndarray:
+    def to_points(
+        self, subset: float | int, as_frame: Literal[False], pixel_offset: Literal["center", "corner"]
+    ) -> np.ndarray:
         ...
 
-    def to_points(self, subset: float | int = 1, as_frame: bool | None = None) -> np.ndarray:
+    def to_points(
+        self, subset: float | int = 1, as_frame: bool = False, pixel_offset: Literal["center", "corner"] = "center"
+    ) -> np.ndarray:
         """
         Subset a point cloud of the raster.
 
@@ -1806,6 +1808,7 @@ to be cleared due to the setting of GCPs."
 
         :param subset: The point count or fraction. If 'subset' > 1, it's parsed as a count.
         :param as_frame: Return a GeoDataFrame with a geometry column and crs instead of an ndarray.
+        :param pixel_offset: The point at which to associate the pixel coordinate with ('corner' == upper left).
 
         :raises ValueError: If the subset count or fraction is poorly formatted.
 
@@ -1831,7 +1834,7 @@ to be cleared due to the setting of GCPs."
         rows = (choice / self.width).astype(int)
 
         # Extract the coordinates of the pixels and filter by the chosen pixels.
-        x_coords, y_coords = (np.array(a) for a in self.ij2xy(rows, cols, offset="center"))
+        x_coords, y_coords = (np.array(a) for a in self.ij2xy(rows, cols, offset=pixel_offset))
 
         # If the Raster is loaded, pick from the data, otherwise use the disk-sample method from rasterio.
         if self.is_loaded:
