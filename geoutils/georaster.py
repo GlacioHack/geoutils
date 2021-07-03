@@ -11,7 +11,6 @@ from typing import Optional, Union
 
 from collections import Sequence
 import geopandas as gpd
-from itertools import starmap
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1673,7 +1672,7 @@ to be cleared due to the setting of GCPs.")
         Return a GeoDataFrame polygonized from a raster.
         
         :param in_value: Value or range of values of the raster from which to create geometries (Default is 1)
-        :type in_value: int, float, tuple
+        :type in_value: int, float, tuple, list, np.ndarray
         
         :returns: GeoDataFrame containing the polygonized geometries
         :rtype: geopandas.geodataframe.GeoDataFrame
@@ -1696,16 +1695,16 @@ to be cleared due to the setting of GCPs.")
             bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(np.uint8)
         
         # mask specific values set by a sequence
-        elif isinstance(in_value, Sequence):
+        elif isinstance(in_value, list) or isinstance(in_value, np.ndarray):
             
-            if np.isin(self.data, in_value) == 0:
-                raise ValueError(" ".join(starmap('{}'.format, in_value)))
+            if np.sum(np.isin(self.data, in_value)) == 0:
+                raise ValueError('no pixel with in_value ' + ', '.join(map('{}'.format,in_value)))
                 
             bool_msk = np.isin(self.data, in_value).astype("uint8")
             
         else:
             
-            raise ValueError("in_value must be a Number, a Tuple or a Sequence") 
+            raise ValueError("in_value must be a number, a tuple or a sequence") 
             
         results = (
             {"properties": {"raster_value": v}, "geometry": s}

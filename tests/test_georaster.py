@@ -799,5 +799,5 @@ class TestRaster:
     def test_polygonize(self):
         """Test that polygonize doesn't raise errors."""
         img = gr.Raster(datasets.get_path('landsat_B4'))
-        assert gdf = img.polygonize()
+        assert isinstance(img.polygonize(), gdf)
         
