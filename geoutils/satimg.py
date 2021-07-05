@@ -297,7 +297,7 @@ class SatelliteImage(Raster):
         self.version = version
 
         # trying to get metadata from separate metadata file
-        if read_from_meta and self.filename is not None:
+        if read_from_meta and self.filename is not None and fn_meta is not None:
             self.__parse_metadata_from_file(fn_meta)
 
         # trying to get metadata from filename for the None attributes
