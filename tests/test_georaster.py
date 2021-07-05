@@ -378,6 +378,7 @@ class TestRaster:
         assert b_minmax == b_crop
 
     def test_reproj(self) -> None:
+        warnings.simplefilter("error")
 
         # Reference raster to be used
         r = gr.Raster(datasets.get_path("landsat_B4"))
@@ -385,6 +386,7 @@ class TestRaster:
 
         # A second raster with different bounds, shape and resolution
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r2.set_ndv(0)
         r2 = r2.reproject(dst_res=20)
         assert r2.res == (20, 20)
 
@@ -858,6 +860,7 @@ class TestRaster:
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
+        warnings.simplefilter("error")
         assert gr._resampling_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
         assert gr._resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
 
@@ -870,6 +873,8 @@ class TestRaster:
 
         img1 = gr.Raster(datasets.get_path("landsat_B4"))
         img2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        img1.set_ndv(0)
+        img2.set_ndv(0)
 
         # Resample the rasters using a new resampling method and see that the string and enum gives the same result.
         img3a = img1.reproject(img2, resampling="q1")
