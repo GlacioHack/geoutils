@@ -382,11 +382,9 @@ class TestRaster:
 
         # Reference raster to be used
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        r.set_ndv(0)  # to avoid warnings - will be used when reprojecting outside bounds
 
         # A second raster with different bounds, shape and resolution
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
-        r2.set_ndv(0)
         r2 = r2.reproject(dst_res=20)
         assert r2.res == (20, 20)
 
@@ -416,9 +414,10 @@ class TestRaster:
             plt.show()
 
         # If a nodata is set, make sure it is preserved
-        r.set_ndv(255)
-        r3 = r.reproject(r2)
-        assert r.nodata == r3.nodata
+        r_ndv = r.copy()
+        r_ndv.set_ndv(255)
+        r3 = r_ndv.reproject(r2)
+        assert r_ndv.nodata == r3.nodata
 
         # Test dst_size - this should modify the shape, and hence resolution, but not the bounds
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
@@ -446,6 +445,20 @@ class TestRaster:
         r3 = r.reproject(dst_bounds=dst_bounds)
         assert r3.bounds == dst_bounds
         assert r3.res != r.res
+
+        # Assert that when reprojection creates nodata (voids), if no nodata is set, a default value is set
+        r3 = r.reproject(dst_bounds=dst_bounds)
+        assert r.nodata is None
+        assert r3.nodata == 255
+
+        # Particularly crucial if nodata falls outside the original image range -> check range is preserved
+        r_float = r.astype("float32")
+        assert r_float.nodata is None
+        r3 = r_float.reproject(dst_bounds=dst_bounds)
+        assert r3.nodata == -99999
+        assert np.min(r3.data.data) == r3.nodata
+        assert np.min(r3.data) == np.min(r_float.data)
+        assert np.max(r3.data) == np.max(r_float.data)
 
         # If dst_res is set, the resolution will be enforced
         # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
