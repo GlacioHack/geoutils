@@ -767,7 +767,8 @@ class Raster:
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
-        nodata: int | float | None = None,
+        dst_nodata: int | float | None = None,
+        src_nodata: int | float | None = None,
         dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
@@ -794,7 +795,8 @@ class Raster:
         :param dst_bounds: a BoundingBox object or a dictionary containing\
                 left, bottom, right, top bounds in the source CRS.
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :param nodata: nodata value in reprojected data.
+        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source, and if source is None, will use GDAL's default.
+        :param src_nodata: nodata value of the source. If set to None, will read from the metadata.
         :param resampling: A rasterio Resampling method
         :param silent: If True, will not print warning statements
         :param n_threads: The number of worker threads. Defaults to (os.cpu_count() - 1).
@@ -844,14 +846,14 @@ class Raster:
             # Warning: this will not work for multiple bands with different dtypes
             dtype = self.dtypes[0]
 
-        if nodata is None:
-            nodata = self.nodata
-            # If no data was set, need to set one by default, in case reprojection is done outside original bounds
-            # Otherwise, output nodata will be 99999 by default which will not work as expected for uint8 data.
-            if nodata is None:
-                if not silent:
-                    warnings.warn("No nodata set, will use 0")
-                nodata = 0
+        # Set source nodata if provided
+        if src_nodata is None:
+            src_nodata = self.nodata
+
+        # Set destination nodata if provided.
+        # This is needed in areas not covered by the input data. If set to None, will use GDAL's default
+        if dst_nodata is None:
+            dst_nodata = self.nodata
 
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
@@ -859,7 +861,8 @@ class Raster:
             "src_crs": self.crs,
             "dst_crs": dst_crs,
             "resampling": resampling if isinstance(resampling, Resampling) else _resampling_from_str(resampling),
-            "dst_nodata": nodata,
+            "src_nodata": src_nodata,
+            "dst_nodata": dst_nodata,
         }
 
         # If dst_ref is None, check other input arguments
@@ -941,7 +944,7 @@ class Raster:
                 (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
             ]
         ):
-            if nodata == self.nodata:
+            if dst_nodata == self.nodata:
                 if not silent:
                     warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
                 return self
@@ -949,7 +952,7 @@ class Raster:
             else:
                 warnings.warn("Only nodata is different, running self.set_ndv instead")
                 dst_r = self.copy()
-                dst_r.set_ndv(nodata)
+                dst_r.set_ndv(dst_nodata)
                 return dst_r
 
         # Set the performance keywords
@@ -974,7 +977,7 @@ class Raster:
             assert dst_transform == dst_transformed
 
         # Write results to a new Raster.
-        dst_r = self.from_array(dst_data, dst_transformed, dst_crs, nodata)
+        dst_r = self.from_array(dst_data, dst_transformed, dst_crs, dst_nodata)
 
         return dst_r
 
