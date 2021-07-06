@@ -39,7 +39,7 @@ jobs:
 
     - name: Install development dependencies and package
       run: |
-        mamba install sphinx numpydoc sphinx_rtd_theme sphinx-autodoc-typehints sphinxcontrib-programoutput flake8 pytest matplotlib pylint
+        mamba install sphinx numpydoc sphinx_rtd_theme sphinx-autodoc-typehints sphinxcontrib-programoutput flake8 pytest matplotlib pylint typing-extensions
         pip install -e . --no-dependencies
 
     - name: Lint with flake8
@@ -50,4 +50,4 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest -rA
+        pytest -ra

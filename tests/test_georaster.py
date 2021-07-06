@@ -378,6 +378,7 @@ class TestRaster:
         assert b_minmax == b_crop
 
     def test_reproj(self) -> None:
+        warnings.simplefilter("error")
 
         # Reference raster to be used
         r = gr.Raster(datasets.get_path("landsat_B4"))
@@ -385,6 +386,7 @@ class TestRaster:
 
         # A second raster with different bounds, shape and resolution
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r2.set_ndv(0)
         r2 = r2.reproject(dst_res=20)
         assert r2.res == (20, 20)
 
@@ -886,6 +888,7 @@ class TestRaster:
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
+        warnings.simplefilter("error")
         assert gr._resampling_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
         assert gr._resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
 
@@ -898,11 +901,42 @@ class TestRaster:
 
         img1 = gr.Raster(datasets.get_path("landsat_B4"))
         img2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        img1.set_ndv(0)
+        img2.set_ndv(0)
 
         # Resample the rasters using a new resampling method and see that the string and enum gives the same result.
         img3a = img1.reproject(img2, resampling="q1")
         img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
         assert img3a == img3b
+
+    def test_to_points(self) -> None:
+        """Test the outputs of the to_points method and that it doesn't load if not needed."""
+        # Create a small raster to test point sampling on
+        img1 = gu.Raster.from_array(
+            np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
+        )
+
+        # Sample the whole raster (fraction==1)
+        points = img1.to_points(1)
+
+        # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
+        assert isinstance(points, np.ndarray)
+        assert points.shape == (25, 3)
+        assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
+
+        assert img1.to_points(0.2).shape == (5, 3)
+
+        img2 = gu.Raster(datasets.get_path("landsat_RGB"), load_data=False)
+
+        points = img2.to_points(10)
+
+        assert points.shape == (10, 5)
+        assert not img2.is_loaded
+
+        points_frame = img2.to_points(10, as_frame=True)
+
+        assert np.array_equal(points_frame.columns, ["b1", "b2", "b3", "geometry"])
+        assert points_frame.crs == img2.crs
 
 
 @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])  # type: ignore

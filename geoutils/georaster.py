@@ -8,8 +8,9 @@ import os
 import warnings
 from collections import abc
 from numbers import Number
-from typing import IO, Any, Callable, Literal, TypeVar, overload
+from typing import IO, Any, Callable, TypeVar, overload
 
+import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,6 +30,12 @@ from scipy.ndimage import map_coordinates
 from shapely.geometry.polygon import Polygon
 
 from geoutils.geovector import Vector
+
+# If python38 or above, Literal is builtin. Otherwise, use typing_extensions
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal  # type: ignore
 
 try:
     import rioxarray
@@ -1759,3 +1766,82 @@ to be cleared due to the setting of GCPs."
                 bands.append(raster)
 
         return bands
+
+    @overload
+    def to_points(
+        self, subset: float | int, as_frame: Literal[True], pixel_offset: Literal["center", "corner"]
+    ) -> gpd.GeoDataFrame:
+        ...
+
+    @overload
+    def to_points(
+        self, subset: float | int, as_frame: Literal[False], pixel_offset: Literal["center", "corner"]
+    ) -> np.ndarray:
+        ...
+
+    def to_points(
+        self, subset: float | int = 1, as_frame: bool = False, pixel_offset: Literal["center", "corner"] = "center"
+    ) -> np.ndarray:
+        """
+        Subset a point cloud of the raster.
+
+        If 'subset' is either 1 or is equal to the pixel count, all points are returned in order.
+        If 'subset' is smaller than 1 (for fractions) or the pixel count, a random sample is returned.
+
+        If the raster is not loaded, sampling will be done from disk without loading the entire Raster.
+
+        Formats:
+            * `as_frame` == None | False: A numpy ndarray of shape (N, 2 + nbands) with the columns [x, y, b1, b2..].
+            * `as_frame` == True: A GeoPandas GeoDataFrame with the columns ["b1", "b2", ..., "geometry"]
+
+        :param subset: The point count or fraction. If 'subset' > 1, it's parsed as a count.
+        :param as_frame: Return a GeoDataFrame with a geometry column and crs instead of an ndarray.
+        :param pixel_offset: The point at which to associate the pixel coordinate with ('corner' == upper left).
+
+        :raises ValueError: If the subset count or fraction is poorly formatted.
+
+        :returns: An ndarray/GeoDataFrame of the shape (N, 2 + nbands) where N is the subset count.
+        """
+        data_size = self.width * self.height
+
+        # Validate the subset argument.
+        if subset <= 0.0:
+            raise ValueError(f"Subset cannot be zero or negative (given value: {subset})")
+        # If the subset is equal to or less than 1, it is assumed to be a fraction.
+        if subset <= 1.0:
+            subset = int(data_size * subset)
+        else:
+            subset = int(subset)
+        if subset > data_size:
+            raise ValueError(f"Subset cannot exceed the size of the dataset ({subset} vs {data_size})")
+
+        # If the subset is smaller than the max size, take a random subset of indices, otherwise take the whole.
+        choice = np.random.randint(0, data_size - 1, subset) if subset != data_size else np.arange(data_size)
+
+        cols = choice % self.width
+        rows = (choice / self.width).astype(int)
+
+        # Extract the coordinates of the pixels and filter by the chosen pixels.
+        x_coords, y_coords = (np.array(a) for a in self.ij2xy(rows, cols, offset=pixel_offset))
+
+        # If the Raster is loaded, pick from the data, otherwise use the disk-sample method from rasterio.
+        if self.is_loaded:
+            pixel_data = self.data[:, rows, cols]
+        else:
+            pixel_data = np.array(list(self.ds.sample(zip(x_coords, y_coords)))).T
+
+        if isinstance(pixel_data, np.ma.masked_array):
+            pixel_data = np.where(pixel_data.mask, np.nan, pixel_data.data)
+
+        # Merge the coordinates and pixel data into a point cloud.
+        points = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
+
+        if as_frame:
+            points = gpd.GeoDataFrame(
+                points[:, 2:],
+                columns=[f"b{i}" for i in range(1, pixel_data.shape[0] + 1)],
+                geometry=gpd.points_from_xy(points[:, 0], points[:, 1]),
+                crs=self.crs,
+            )
+
+        return points
