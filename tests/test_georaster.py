@@ -620,6 +620,23 @@ class TestRaster:
         r = gr.Raster(datasets.get_path("landsat_B4"), nodata=0)
         assert r.nodata == 0
 
+    def test_default_ndv(self) -> None:
+        """
+        Test that the default nodata values are as expected.
+        """
+        assert gr.default_ndv("uint8") == np.iinfo("uint8").max
+        assert gr.default_ndv("int8") == np.iinfo("int8").min
+        assert gr.default_ndv("uint16") == np.iinfo("uint16").max
+        assert gr.default_ndv("int16") == np.iinfo("int16").min
+        assert gr.default_ndv("uint32") == 99999
+        for dtype in ["int32", "float32", "float64", "float128"]:
+            assert gr.default_ndv(dtype) == -99999
+
+        # Check that an error is raised for other types
+        expected_message = "No default nodata value set for dtype"
+        with pytest.raises(NotImplementedError, match=expected_message):
+            gr.default_ndv("bla")
+
     def test_astype(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))

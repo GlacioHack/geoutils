@@ -69,6 +69,31 @@ def _resampling_from_str(resampling: str) -> Resampling:
     return resampling_method
 
 
+# Function to set the default nodata values for any given dtype
+# Similar to GDAL for int types, but without absurdly long nodata values for floats.
+# For unsigned types, the maximum value is chosen (with a max of 99999).
+# For signed types, the minimum value is chosen (with a min of -99999).
+def default_ndv(dtype: str) -> int:
+    """
+    Set the default nodata value for any given dtype, when this is not provided.
+    """
+    default_ndv_lookup = {
+        "uint8": 255,
+        "int8": -128,
+        "uint16": 65535,
+        "int16": -32768,
+        "uint32": 99999,
+        "int32": -99999,
+        "float32": -99999,
+        "float64": -99999,
+        "float128": -99999,
+    }
+    if dtype in default_ndv_lookup.keys():
+        return default_ndv_lookup[dtype]
+    else:
+        raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
+
+
 class Raster:
     """
     Create a Raster object from a rasterio-supported raster dataset.
@@ -859,10 +884,12 @@ class Raster:
         if src_nodata is None:
             src_nodata = self.nodata
 
-        # Set destination nodata if provided.
-        # This is needed in areas not covered by the input data. If set to None, will use GDAL's default
+        # Set destination nodata if provided. This is needed in areas not covered by the input data.
+        # If None, will use GeoUtils' default, as rasterio's default is unknown, hence cannot be handled properly.
         if dst_nodata is None:
             dst_nodata = self.nodata
+            if dst_nodata is None:
+                dst_nodata = default_ndv(dtype)
 
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
