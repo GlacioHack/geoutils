@@ -616,6 +616,10 @@ class TestRaster:
         # Check that the number of no data value is correct
         assert np.count_nonzero(ndv_index.data) == 112088
 
+        # Check that nodata can also be set upon loading
+        r = gr.Raster(datasets.get_path("landsat_B4"), nodata=0)
+        assert r.nodata == 0
+
     def test_astype(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))

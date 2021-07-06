@@ -150,6 +150,7 @@ class Raster:
         load_data: bool = True,
         downsample: int | float = 1,
         masked: bool = True,
+        nodata: abc.Iterable[int | float] | int | float = None,
         attrs: list[str] | None = None,
         as_memfile: bool = False,
     ) -> None:
@@ -165,6 +166,9 @@ class Raster:
         :param downsample: Reduce the size of the image loaded by this factor. Default is 1
 
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
+
+        :param nodata: nodata to be used (overwrites the metadata). Default is None, i.e. reads from metadata.
+
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
@@ -258,6 +262,10 @@ class Raster:
 
             # Update metadata
             self._update(self.data, metadata=meta)
+
+        # Set nodata
+        if nodata is not None:
+            self.set_ndv(nodata)
 
     @classmethod
     def from_array(
