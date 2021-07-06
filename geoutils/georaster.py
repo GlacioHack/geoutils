@@ -795,7 +795,8 @@ class Raster:
         :param dst_bounds: a BoundingBox object or a dictionary containing\
                 left, bottom, right, top bounds in the source CRS.
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source, and if source is None, will use GDAL's default.
+        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source, \
+        and if source is None, will use GDAL's default.
         :param src_nodata: nodata value of the source. If set to None, will read from the metadata.
         :param resampling: A rasterio Resampling method
         :param silent: If True, will not print warning statements
@@ -944,12 +945,12 @@ class Raster:
                 (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
             ]
         ):
-            if dst_nodata == self.nodata:
+            if (dst_nodata == self.nodata) or (dst_nodata is None):
                 if not silent:
                     warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
                 return self
 
-            else:
+            elif dst_nodata is not None:
                 warnings.warn("Only nodata is different, running self.set_ndv instead")
                 dst_r = self.copy()
                 dst_r.set_ndv(dst_nodata)
