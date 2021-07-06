@@ -426,20 +426,46 @@ class Raster:
         if isinstance(other, Raster):
             # Need to convert both rasters to a common type before doing the negation
             ctype: np.dtype = np.find_common_type([*self.dtypes, *other.dtypes], [])
-            other = other.astype(ctype)
+            other = other.astype(ctype)  # type: ignore
 
         return self + -other  # type: ignore
 
-    def astype(self, dtype: np.dtype | type | str) -> Raster:
+    @overload
+    def astype(self, dtype: np.dtype | type | str, inplace: Literal[False]) -> Raster:
+        ...
+
+    @overload
+    def astype(self, dtype: np.dtype | type | str, inplace: Literal[True]) -> None:
+        ...
+
+    def astype(self, dtype: np.dtype | type | str, inplace: bool = False) -> Raster | None:
         """
         Converts the data type of a Raster object.
 
         :param dtype: Any numpy dtype or string accepted by numpy.astype
+        :param inplace: Set to True to modify the raster in place.
 
         :returns: the output Raster with dtype changed.
         """
+        # Check that dtype is supported by rasterio
+        if not rio.dtypes.check_dtype(dtype):
+            raise TypeError(f"{dtype} is not supported by rasterio")
+
+        # Check that data type change will not result in a loss of information
+        if not rio.dtypes.can_cast_dtype(self.data, dtype):
+            warnings.warn(
+                "dtype conversion will result in a loss of information. "
+                f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data."
+            )
+
         out_data = self.data.astype(dtype)
-        return self.from_array(out_data, self.transform, self.crs)
+        if inplace:
+            meta = self.ds.meta
+            meta.update({"dtype": dtype})
+            self._update(imgdata=out_data, metadata=meta)
+            return None
+        else:
+            return self.from_array(out_data, self.transform, self.crs, nodata=self.nodata)
 
     def _get_rio_attrs(self) -> list[str]:
         """Get the attributes that have the same name in rio.DatasetReader and Raster."""
@@ -1018,44 +1044,6 @@ class Raster:
             imgdata = None
 
         self._update(metadata=meta, imgdata=imgdata)
-
-    def set_dtypes(self, dtypes: abc.Iterable[np.dtype | str] | np.dtype | str, update_array: bool = True) -> None:
-        """
-        Set new dtypes for bands (and possibly update arrays)
-
-        :param dtypes: data types
-        :param update_array: change the existing dtype in arrays
-
-        """
-        if not (isinstance(dtypes, abc.Iterable) or isinstance(dtypes, type) or isinstance(dtypes, str)):
-            raise ValueError("Type of dtypes not understood, must be list or type or str")
-        elif isinstance(dtypes, type) or isinstance(dtypes, str):
-            print("Several raster band: using data type for all bands")
-            dtypes = (dtypes,) * self.count
-        elif isinstance(dtypes, abc.Iterable) and self.count == 1:
-            print("Only one raster band: using first data type provided")
-            dtypes = tuple(dtypes)
-
-        meta = self.ds.meta
-        imgdata = self.data
-
-        # for rio.DatasetReader.meta, the proper name is "dtype"
-        meta.update({"dtype": dtypes[0]})  # type: ignore
-
-        # this should always be "True", as rasterio doesn't change the array type by default:
-        # ValueError: the array's dtype 'int8' does not match the file's dtype 'uint8'
-        if update_array:
-            if self.count == 1:
-                imgdata = imgdata.astype(dtypes[0])  # type: ignore
-            else:
-                # TODO: double-check, but I don't think we can have different dtypes for bands with rio (1dtype in meta)
-                imgdata = imgdata.astype(dtypes[0])  # type: ignore
-                for i in imgdata.shape[0]:  # type: ignore
-                    imgdata[i, :] = imgdata[i, :].astype(dtypes[0])  # type: ignore
-        else:
-            imgdata = None
-
-        self._update(imgdata=imgdata, metadata=meta)
 
     def save(
         self,

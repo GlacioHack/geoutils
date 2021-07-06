@@ -616,18 +616,46 @@ class TestRaster:
         # Check that the number of no data value is correct
         assert np.count_nonzero(ndv_index.data) == 112088
 
-    def test_set_dtypes(self) -> None:
+    def test_astype(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        arr_1 = np.copy(r.data).astype(np.int8)
-        r.set_dtypes(np.int8)
-        arr_2 = np.copy(r.data)
-        r.set_dtypes([np.int8], update_array=True)
 
-        arr_3 = r.data
+        # Test changing dtypes that does not modify the data
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
+            rout = r.astype(dtype)  # type: ignore
+            assert rout == r
+            assert np.dtype(rout.dtypes[0]) == dtype
+            assert rout.data.dtype == dtype
 
-        assert np.count_nonzero(~arr_1 == arr_2) == 0
-        assert np.count_nonzero(~arr_2 == arr_3) == 0
+        # Test a dtype that will modify the data
+        dtype = np.int8
+        rout = r.astype(dtype)  # type: ignore
+        assert rout != r
+        assert np.dtype(rout.dtypes[0]) == dtype
+        assert rout.data.dtype == dtype
+        pytest.warns(UserWarning, r.astype, dtype)  # check a warning is raised
+
+        # Test modify in place
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
+            r2 = r.copy()
+            out = r2.astype(dtype, inplace=True)
+            assert out is None
+            assert r2 == r
+            assert np.dtype(r2.dtypes[0]) == dtype
+            assert r2.data.dtype == dtype
+
+        # Test with masked values
+        # First line is set to 0 and 0 set to nodata - check that 0 not used
+        # Note that nodata must be set or astype will raise an error
+        assert not np.any(r2.data == 0)
+        r2 = r.copy()
+        r2.data[0, 0] = 0
+        r2.set_ndv(0)
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
+            rout = r2.astype(dtype)  # type: ignore
+            assert rout == r2
+            assert np.dtype(rout.dtypes[0]) == dtype
+            assert rout.data.dtype == dtype
 
     def test_plot(self) -> None:
 
