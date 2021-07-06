@@ -460,6 +460,11 @@ class TestRaster:
         assert np.min(r3.data) == np.min(r_float.data)
         assert np.max(r3.data) == np.max(r_float.data)
 
+        # Check that dst_nodata works as expected
+        r3 = r_float.reproject(dst_bounds=dst_bounds, dst_nodata=999)
+        assert r3.nodata == 999
+        assert np.max(r3.data.data) == r3.nodata
+
         # If dst_res is set, the resolution will be enforced
         # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
         r3 = r.reproject(dst_bounds=dst_bounds, dst_res=r.res)
