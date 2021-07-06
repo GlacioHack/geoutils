@@ -150,7 +150,7 @@ class Raster:
         load_data: bool = True,
         downsample: int | float = 1,
         masked: bool = True,
-        nodata: abc.Iterable[int | float] | int | float = None,
+        nodata: abc.Iterable[int | float] | int | float | None = None,
         attrs: list[str] | None = None,
         as_memfile: bool = False,
     ) -> None:
