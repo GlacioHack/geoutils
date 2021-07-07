@@ -1049,11 +1049,10 @@ class Raster:
 
     def set_ndv(self, ndv: abc.Iterable[int | float] | int | float, update_array: bool = False) -> None:
         """
-        Set new nodata values for bands (and possibly update arrays)
+        Set new nodata values for bands (and possibly update arrays).
 
         :param ndv: nodata values
         :param update_array: change the existing nodata in array
-
         """
 
         if not isinstance(ndv, (abc.Iterable, int, float, np.integer, np.floating)):
@@ -1066,6 +1065,18 @@ class Raster:
         elif isinstance(ndv, abc.Iterable) and self.count == 1:
             print("Only one raster band: using first nodata value provided")
             ndv = list(ndv)[0]
+
+        # Check that ndv has same length as number of bands in self
+        if isinstance(ndv, abc.Iterable):
+            if len(ndv) != self.count:
+                raise ValueError(f"Length of ndv ({len(ndv)}) incompatible with number of bands ({self.count})")
+            # Check that ndv value is compatible with dtype
+            for k in range(len(ndv)):
+                if not rio.dtypes.can_cast_dtype(ndv[k], self.dtypes[k]):
+                    raise ValueError(f"ndv value {ndv[k]} incompatible with self.dtype {self.dtypes[k]}")
+        else:
+            if not rio.dtypes.can_cast_dtype(ndv, self.dtypes[0]):
+                raise ValueError(f"ndv value {ndv} incompatible with self.dtype {self.dtypes[0]}")
 
         meta = self.ds.meta
         imgdata = self.data
