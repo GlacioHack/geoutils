@@ -73,7 +73,7 @@ def _resampling_from_str(resampling: str) -> Resampling:
 # Similar to GDAL for int types, but without absurdly long nodata values for floats.
 # For unsigned types, the maximum value is chosen (with a max of 99999).
 # For signed types, the minimum value is chosen (with a min of -99999).
-def default_ndv(dtype: str) -> int:
+def _default_ndv(dtype: str) -> int:
     """
     Set the default nodata value for any given dtype, when this is not provided.
     """
@@ -889,7 +889,7 @@ class Raster:
         if dst_nodata is None:
             dst_nodata = self.nodata
             if dst_nodata is None:
-                dst_nodata = default_ndv(dtype)
+                dst_nodata = _default_ndv(dtype)
 
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
