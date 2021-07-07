@@ -187,7 +187,7 @@ class Raster:
         load_data: bool = True,
         downsample: int | float = 1,
         masked: bool = True,
-        nodata: abc.Iterable[int | float] | int | float | None = None,
+        nodata: abc.Sequence[int | float] | int | float | None = None,
         attrs: list[str] | None = None,
         as_memfile: bool = False,
     ) -> None:
@@ -1049,7 +1049,7 @@ class Raster:
         meta.update({"transform": rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)})
         self._update(metadata=meta)
 
-    def set_ndv(self, ndv: abc.Iterable[int | float] | int | float, update_array: bool = False) -> None:
+    def set_ndv(self, ndv: abc.Sequence[int | float] | int | float, update_array: bool = False) -> None:
         """
         Set new nodata values for bands (and possibly update arrays).
 
@@ -1057,19 +1057,19 @@ class Raster:
         :param update_array: change the existing nodata in array
         """
 
-        if not isinstance(ndv, (abc.Iterable, int, float, np.integer, np.floating)):
+        if not isinstance(ndv, (abc.Sequence, int, float, np.integer, np.floating)):
             raise ValueError("Type of ndv not understood, must be list or float or int")
 
         elif (isinstance(ndv, (int, float, np.integer, np.floating))) and self.count > 1:
             print("Several raster band: using nodata value for all bands")
             ndv = [ndv] * self.count
 
-        elif isinstance(ndv, abc.Iterable) and self.count == 1:
+        elif isinstance(ndv, abc.Sequence) and self.count == 1:
             print("Only one raster band: using first nodata value provided")
             ndv = list(ndv)[0]
 
         # Check that ndv has same length as number of bands in self
-        if isinstance(ndv, abc.Iterable):
+        if isinstance(ndv, abc.Sequence):
             if len(ndv) != self.count:
                 raise ValueError(f"Length of ndv ({len(ndv)}) incompatible with number of bands ({self.count})")
             # Check that ndv value is compatible with dtype
@@ -1349,7 +1349,7 @@ to be cleared due to the setting of GCPs."
             raise ValueError("band must be int or None")
 
         # If multiple bands (RGB), cbar does not make sense
-        if isinstance(band, abc.Iterable):
+        if isinstance(band, abc.Sequence):
             if len(band) > 1:
                 add_cb = False
 
