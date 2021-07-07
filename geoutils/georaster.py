@@ -73,7 +73,7 @@ def _resampling_from_str(resampling: str) -> Resampling:
 # Similar to GDAL for int types, but without absurdly long nodata values for floats.
 # For unsigned types, the maximum value is chosen (with a max of 99999).
 # For signed types, the minimum value is chosen (with a min of -99999).
-def _default_ndv(dtype: str) -> int:
+def _default_ndv(dtype: str | np.dtype | type) -> int:
     """
     Set the default nodata value for any given dtype, when this is not provided.
     """
@@ -88,6 +88,18 @@ def _default_ndv(dtype: str) -> int:
         "float64": -99999,
         "float128": -99999,
     }
+    # Check argument dtype is as expected
+    if not isinstance(dtype, (str, np.dtype, type)):
+        raise ValueError(f"dtype {dtype} not understood")
+
+    # Convert numpy types to string
+    if isinstance(dtype, type):
+        dtype = np.dtype(dtype).name
+
+    # Convert np.dtype to string
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.name
+
     if dtype in default_ndv_lookup.keys():
         return default_ndv_lookup[dtype]
     else:

@@ -650,6 +650,17 @@ class TestRaster:
         for dtype in ["int32", "float32", "float64", "float128"]:
             assert gr._default_ndv(dtype) == -99999
 
+        # Check it works with most frequent np.dtypes too
+        assert gr._default_ndv(np.dtype("uint8")) == np.iinfo("uint8").max
+        for dtype in [np.dtype("int32"), np.dtype("float32"), np.dtype("float64")]:
+            assert gr._default_ndv(dtype) == -99999
+
+
+        # Check it works with most frequent types too
+        assert gr._default_ndv(np.uint8) == np.iinfo("uint8").max
+        for dtype in [np.int32, np.float32, np.float64]:
+            assert gr._default_ndv(dtype) == -99999
+
         # Check that an error is raised for other types
         expected_message = "No default nodata value set for dtype"
         with pytest.raises(NotImplementedError, match=expected_message):
