@@ -290,7 +290,7 @@ class Raster:
             30 m in x and y, and its top left corner is X=478000, Y=3108140.
 
             >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-            >>> myim = Raster.from_array(data, transform, 32645)
+            >>> myim = Raster.from_array(data, transform, 32645)  # doctest: +SKIP
 
         """
 
@@ -1408,12 +1408,12 @@ to be cleared due to the setting of GCPs."
 
         :examples:
 
-        >>> self.value_at_coords(-48.125,67.8901,window=3)
-        Returns mean of a 3*3 window:
-            v v v \
-            v c v  | = float(mean)
-            v v v /
-        (c = provided coordinate, v= value of surrounding coordinate)
+            >>> self.value_at_coords(-48.125,67.8901,window=3)  # doctest: +SKIP
+            Returns mean of a 3*3 window:
+                v v v \
+                v c v  | = float(mean)
+                v v v /
+            (c = provided coordinate, v= value of surrounding coordinate)
 
         """
         value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
