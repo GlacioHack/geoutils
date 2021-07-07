@@ -998,10 +998,10 @@ class Raster:
                 return self
 
             elif dst_nodata is not None:
-                warnings.warn("Only nodata is different, running self.set_ndv instead")
-                dst_r = self.copy()
-                dst_r.set_ndv(dst_nodata)
-                return dst_r
+                if not silent:
+                    warnings.warn("Only nodata is different, consider using the 'set_ndv()' method instead'\
+                    ' -> return self (not a copy!)")
+                return self
 
         # Set the performance keywords
         if n_threads == 0:
