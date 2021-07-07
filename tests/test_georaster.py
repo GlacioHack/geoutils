@@ -638,6 +638,11 @@ class TestRaster:
         r = gr.Raster(datasets.get_path("landsat_B4"), nodata=5)
         assert r.nodata == 5
 
+        # Check that an error is raised if nodata value is incompatible with dtype
+        expected_message = r"ndv value .* incompatible with self.dtype .*"
+        with pytest.raises(ValueError, match=expected_message):
+            r.set_ndv(0.5)
+
     def test_default_ndv(self) -> None:
         """
         Test that the default nodata values are as expected.
@@ -654,7 +659,6 @@ class TestRaster:
         assert gr._default_ndv(np.dtype("uint8")) == np.iinfo("uint8").max
         for dtype in [np.dtype("int32"), np.dtype("float32"), np.dtype("float64")]:
             assert gr._default_ndv(dtype) == -99999
-
 
         # Check it works with most frequent types too
         assert gr._default_ndv(np.uint8) == np.iinfo("uint8").max
