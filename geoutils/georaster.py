@@ -352,11 +352,13 @@ class Raster:
 
     def __eq__(self, other: object) -> bool:
         """Check if a Raster's data and georeferencing is equal to another."""
+        from geoutils.misc import array_equal
+
         if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
             return NotImplemented
         return all(
             [
-                np.array_equal(self.data, other.data, equal_nan=True),
+                array_equal(self.data, other.data, equal_nan=True),
                 self.transform == other.transform,
                 self.crs == other.crs,
                 self.nodata == other.nodata,

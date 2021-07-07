@@ -14,6 +14,7 @@ from pylint import epylint
 
 import geoutils as gu
 import geoutils.georaster as gr
+import geoutils.misc
 import geoutils.projtools as pt
 from geoutils import datasets
 
@@ -47,9 +48,9 @@ class TestRaster:
 
         assert np.logical_and.reduce(
             (
-                np.array_equal(r.data, r2.data, equal_nan=True),
-                np.array_equal(r2.data, r3.data, equal_nan=True),
-                np.array_equal(r3.data, r4.data, equal_nan=True),
+                geoutils.misc.array_equal(r.data, r2.data, equal_nan=True),
+                geoutils.misc.array_equal(r2.data, r3.data, equal_nan=True),
+                geoutils.misc.array_equal(r3.data, r4.data, equal_nan=True),
             )
         )
 
@@ -124,9 +125,9 @@ class TestRaster:
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.nbands is None
-        assert np.array_equal(r.dtypes, ["uint8"])
+        assert geoutils.misc.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-        assert np.array_equal(r.res, [30.0, 30.0])
+        assert geoutils.misc.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
         assert not r.is_loaded
@@ -146,15 +147,15 @@ class TestRaster:
         # Test 4 - multiple bands, load all bands
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True)
         assert r.count == 3
-        assert np.array_equal(r.indexes, [1, 2, 3])
+        assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 3
-        assert np.array_equal(r.bands, [1, 2, 3])
+        assert geoutils.misc.array_equal(r.bands, [1, 2, 3])
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=1)
         assert r.count == 3
-        assert np.array_equal(r.indexes, [1, 2, 3])
+        assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 1
         assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
@@ -162,9 +163,9 @@ class TestRaster:
         # Test 6 - multiple bands, load a list of bands
         r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=[2, 3])
         assert r.count == 3
-        assert np.array_equal(r.indexes, [1, 2, 3])
+        assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 2
-        assert np.array_equal(r.bands, (2, 3))
+        assert geoutils.misc.array_equal(r.bands, (2, 3))
         assert r.data.shape == (r.nbands, r.height, r.width)
 
     def test_downsampling(self) -> None:
@@ -208,17 +209,17 @@ class TestRaster:
         # Test negation
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert np.array_equal(r3.dtypes, ["uint8"])
+        assert geoutils.misc.array_equal(r3.dtypes, ["uint8"])
 
         # Test addition
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert np.array_equal(r3.dtypes, ["uint8"])
+        assert geoutils.misc.array_equal(r3.dtypes, ["uint8"])
 
         # Test subtraction
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert np.array_equal(r3.dtypes, ["uint8"])
+        assert geoutils.misc.array_equal(r3.dtypes, ["uint8"])
 
         # Test with dtype Float32
         r1 = gr.Raster.from_array(
@@ -226,15 +227,15 @@ class TestRaster:
         )
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert np.array_equal(r3.dtypes, ["float32"])
+        assert geoutils.misc.array_equal(r3.dtypes, ["float32"])
 
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert np.array_equal(r3.dtypes, ["float32"])
+        assert geoutils.misc.array_equal(r3.dtypes, ["float32"])
 
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert np.array_equal(r3.dtypes, ["float32"])
+        assert geoutils.misc.array_equal(r3.dtypes, ["float32"])
 
         # Check that errors are properly raised
         # different shapes
@@ -308,14 +309,14 @@ class TestRaster:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.array_equal(r.data, r2.data, equal_nan=True)
+        assert geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check dataset_mask array
         assert np.all(r.data.mask == r2.data.mask)
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
-        assert not np.array_equal(r.data, r2.data, equal_nan=True)
+        assert not geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
 
     def test_is_modified(self) -> None:
         """
@@ -514,7 +515,7 @@ class TestRaster:
         # order 1 interpolation
         rpts = r.interp_points(pts, order=1, area_or_point="Area")
         # the values interpolated should be equal
-        assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
+        assert geoutils.misc.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
         # Test there is no failure with random coordinates (edge effects, etc)
         xrand = np.random.uniform(low=xmin, high=xmax, size=(1000,))
@@ -547,7 +548,7 @@ class TestRaster:
 
         rpts = r.interp_points(pts, order=1)
 
-        assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
+        assert geoutils.misc.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
         # test for an invidiual point (shape can be tricky at 1 dimension)
         x = 493120.0
@@ -714,7 +715,7 @@ class TestRaster:
         img = gr.Raster(datasets.get_path("landsat_B4"))
         img2 = gr.Raster(datasets.get_path("landsat_B4"))
 
-        assert np.array_equal(img.data, img2.data, equal_nan=True)
+        assert geoutils.misc.array_equal(img.data, img2.data, equal_nan=True)
         assert img.transform == img2.transform
         assert img.crs == img2.crs
         assert img.nodata == img2.nodata
@@ -758,7 +759,7 @@ class TestRaster:
         # Test that changes to data are taken into account
         bias = 5
         out_img = gr.Raster.from_array(img.data + bias, img.transform, img.crs, nodata=img.nodata)
-        assert np.array_equal(out_img.data, img.data + bias)
+        assert geoutils.misc.array_equal(out_img.data, img.data + bias)
 
         # Test that nodata is properly taken into account
         out_img = gr.Raster.from_array(img.data + 5, img.transform, img.crs, nodata=0)
@@ -829,9 +830,9 @@ class TestRaster:
         blue2, green2 = img.split_bands(copy=False, subset=[2, 1])
 
         # Check that the subset functionality works as expected.
-        assert np.array_equal(red.data.astype("float32"), red2.data.astype("float32"))
-        assert np.array_equal(blue.data.astype("float32"), blue2.data.astype("float32"))
-        assert np.array_equal(green.data.astype("float32"), green2.data.astype("float32"))
+        assert geoutils.misc.array_equal(red.data.astype("float32"), red2.data.astype("float32"))
+        assert geoutils.misc.array_equal(blue.data.astype("float32"), blue2.data.astype("float32"))
+        assert geoutils.misc.array_equal(green.data.astype("float32"), green2.data.astype("float32"))
 
         # Check that the red channel and the rgb data shares memory
         assert np.shares_memory(red.data, img.data)
@@ -840,11 +841,11 @@ class TestRaster:
         assert red != img
 
         # Test that the red band corresponds to the first band of the img
-        assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+        assert geoutils.misc.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
 
         # Modify the red band and make sure it propagates to the original img (it's not a copy)
         red.data += 1
-        assert np.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+        assert geoutils.misc.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
 
         # Copy the bands instead of pointing to the same memory.
         red_c = img.split_bands(copy=True, subset=0)[0]
@@ -854,7 +855,9 @@ class TestRaster:
 
         # Modify the copy, and make sure the original data is not modified.
         red_c.data += 1
-        assert not np.array_equal(red_c.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+        assert not geoutils.misc.array_equal(
+            red_c.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32")
+        )
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
@@ -889,7 +892,7 @@ class TestRaster:
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
         assert isinstance(points, np.ndarray)
         assert points.shape == (25, 3)
-        assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
+        assert geoutils.misc.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
 
         assert img1.to_points(0.2).shape == (5, 3)
 
@@ -902,7 +905,7 @@ class TestRaster:
 
         points_frame = img2.to_points(10, as_frame=True)
 
-        assert np.array_equal(points_frame.columns, ["b1", "b2", "b3", "geometry"])
+        assert geoutils.misc.array_equal(points_frame.columns, ["b1", "b2", "b3", "geometry"])
         assert points_frame.crs == img2.crs
 
 
@@ -927,7 +930,7 @@ def test_numpy_functions(dtype: str) -> None:
     assert isinstance(raster + 1, gr.Raster)
 
     # Test that array_equal works
-    assert np.array_equal(array, raster)
+    assert geoutils.misc.array_equal(array, raster)
 
     # Test the data setter method by creating a new array
     raster.data = array + 2
