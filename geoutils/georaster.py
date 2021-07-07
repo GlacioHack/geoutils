@@ -999,8 +999,10 @@ class Raster:
 
             elif dst_nodata is not None:
                 if not silent:
-                    warnings.warn("Only nodata is different, consider using the 'set_ndv()' method instead'\
-                    ' -> return self (not a copy!)")
+                    warnings.warn(
+                        "Only nodata is different, consider using the 'set_ndv()' method instead'\
+                    ' -> return self (not a copy!)"
+                    )
                 return self
 
         # Set the performance keywords
