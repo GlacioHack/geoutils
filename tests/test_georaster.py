@@ -879,16 +879,16 @@ class TestRaster:
         
     def test_polygonize(self):
         """Test that polygonize doesn't raise errors."""
-        img = gr.Raster(datasets.get_path('landsat_B4'))
-        
-        value = np.unique(img)[0]   
-
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+    
+        value = np.unique(img)[0]
+    
         pixel_area = np.sum(img == value) * img.res[0] * img.res[1]
-        
+    
         polygonized = img.polygonize(value)
-        
+    
         polygon_area = polygonized.ds.area.sum()
-        
+    
         assert polygon_area == pytest.approx(pixel_area)
         assert isinstance(polygonized, gv.Vector)
         
