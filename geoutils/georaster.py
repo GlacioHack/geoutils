@@ -1867,7 +1867,7 @@ to be cleared due to the setting of GCPs."
         :param in_value: Value or range of values of the raster from which to create geometries (Default is 1). If 'all',
           all unique pixel values of the raster are used.
         
-        :returns: GeoDataFrame containing the polygonized geometries.
+        :returns: Vector containing the polygonized geometries.
         """
     
         # mask a unique value set by a number
