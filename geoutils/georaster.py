@@ -11,7 +11,6 @@ from numbers import Number
 from typing import IO, Any, Callable, TypeVar, overload
 
 import geopandas as gpd
-import geoutils.geovector as gv
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,6 +30,7 @@ from rasterio.warp import Resampling
 from scipy.ndimage import map_coordinates
 from shapely.geometry.polygon import Polygon
 
+import geoutils.geovector as gv
 from geoutils.geovector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -1859,66 +1859,60 @@ to be cleared due to the setting of GCPs."
             )
 
         return points
-    
-    def polygonize(self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1) -> Vector:
+
+    def polygonize(
+        self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1
+    ) -> Vector:
         """
         Return a GeoDataFrame polygonized from a raster.
-        
-        :param in_value: Value or range of values of the raster from which to create geometries (Default is 1). If 'all',
-          all unique pixel values of the raster are used.
-        
+
+        :param in_value: Value or range of values of the raster from which to
+          create geometries (Default is 1). If 'all', all unique pixel values of the raster are used.
+
         :returns: Vector containing the polygonized geometries.
         """
-    
+
         # mask a unique value set by a number
         if isinstance(in_value, Number):
-    
+
             if np.sum(self.data == in_value) == 0:
-                raise ValueError("no pixel with in_value {}".format(in_value))
-    
+                raise ValueError(f"no pixel with in_value {in_value}")
+
             bool_msk = np.array(self.data == in_value).astype(np.uint8)
-    
+
         # mask values within boundaries set by a tuple
         elif isinstance(in_value, tuple):
-    
+
             if np.sum((self.data > in_value[0]) & (self.data < in_value[1])) == 0:
-                raise ValueError(
-                    "no pixel with in_value between {} and {}".format(
-                        in_value[0], in_value[1]
-                    )
-                )
-    
-            bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(
-                np.uint8
-            )
-    
+                raise ValueError(f"no pixel with in_value between {in_value[0]} and {in_value[1]}")
+
+            bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(np.uint8)
+
         # mask specific values set by a sequence
         elif isinstance(in_value, list) or isinstance(in_value, np.ndarray):
-    
+
             if np.sum(np.isin(self.data, in_value)) == 0:
-                raise ValueError(
-                    "no pixel with in_value " + ", ".join(map("{}".format, in_value))
-                )
-    
+                raise ValueError("no pixel with in_value " + ", ".join(map("{}".format, in_value)))
+
             bool_msk = np.isin(self.data, in_value).astype("uint8")
-    
+
         # mask all valid values
         elif in_value == "all":
-    
+
             vals_for_msk = list(set(self.data.flatten()))
             bool_msk = np.isin(self.data, vals_for_msk).astype("uint8")
-    
+
         else:
-    
+
             raise ValueError("in_value must be a number, a tuple or a sequence")
-    
+
         results = (
             {"properties": {"raster_value": v}, "geometry": s}
             for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk))
         )
-    
+
         gdf = gpd.GeoDataFrame.from_features(list(results))
         gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
         gdf.set_geometry(col="geometry", inplace=True)
-    
+
         return gv.Vector(gdf)
