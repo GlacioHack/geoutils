@@ -1866,10 +1866,8 @@ to be cleared due to the setting of GCPs."
         
         :param in_value: Value or range of values of the raster from which to create geometries (Default is 1). If 'all',
           all unique pixel values of the raster are used.
-        :type in_value: int, float, tuple, list, string np.ndarray
         
         :returns: GeoDataFrame containing the polygonized geometries.
-        :rtype: geopandas.geodataframe.GeoDataFrame
         """
     
         # mask a unique value set by a number
