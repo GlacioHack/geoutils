@@ -1860,7 +1860,7 @@ to be cleared due to the setting of GCPs."
 
         return points
     
-    def polygonize(self, in_value=1):
+    def polygonize(self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1) -> Vector:
         """
         Return a GeoDataFrame polygonized from a raster.
         
