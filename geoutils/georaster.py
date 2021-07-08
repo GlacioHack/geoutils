@@ -15,7 +15,6 @@ import geoutils.geovector as gv
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from numbers import Number
 import pyproj
 import rasterio as rio
 import rasterio.mask
