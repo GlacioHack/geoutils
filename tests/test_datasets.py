@@ -22,7 +22,7 @@ def test_read_paths_vector(test_dataset: str) -> None:
 # Original sha256 obtained with `sha256sum filename`
 original_sha256 = {
     "landsat_B4": "271fa34e248f016f87109c8e81960caaa737558fbae110ec9e0d9e2d30d80c26",
-    "landsat_B4_crop": "21b514a627571296eb26690b041f863b9fce4f98037c58a5f6f61deefd639541",
+    "landsat_B4_crop": "8d4cf05377957bec9fe9a9ec0c24ea93255e17b529368e8338b1e1865c8b0c83",
     "landsat_RGB": "7d0505a8610fd7784cb71c03e5b242715cd1574e978c2c86553d60fd82372c30",
     "glacier_outlines": "d1a5bcd4bd4731a24c2398c016a6f5a8064160fedd5bab10609adacda9ba41ef",
 }

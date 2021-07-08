@@ -69,6 +69,43 @@ def _resampling_from_str(resampling: str) -> Resampling:
     return resampling_method
 
 
+# Function to set the default nodata values for any given dtype
+# Similar to GDAL for int types, but without absurdly long nodata values for floats.
+# For unsigned types, the maximum value is chosen (with a max of 99999).
+# For signed types, the minimum value is chosen (with a min of -99999).
+def _default_ndv(dtype: str | np.dtype | type) -> int:
+    """
+    Set the default nodata value for any given dtype, when this is not provided.
+    """
+    default_ndv_lookup = {
+        "uint8": 255,
+        "int8": -128,
+        "uint16": 65535,
+        "int16": -32768,
+        "uint32": 99999,
+        "int32": -99999,
+        "float32": -99999,
+        "float64": -99999,
+        "float128": -99999,
+    }
+    # Check argument dtype is as expected
+    if not isinstance(dtype, (str, np.dtype, type)):
+        raise ValueError(f"dtype {dtype} not understood")
+
+    # Convert numpy types to string
+    if isinstance(dtype, type):
+        dtype = np.dtype(dtype).name
+
+    # Convert np.dtype to string
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.name
+
+    if dtype in default_ndv_lookup.keys():
+        return default_ndv_lookup[dtype]
+    else:
+        raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
+
+
 class Raster:
     """
     Create a Raster object from a rasterio-supported raster dataset.
@@ -150,6 +187,7 @@ class Raster:
         load_data: bool = True,
         downsample: int | float = 1,
         masked: bool = True,
+        nodata: abc.Sequence[int | float] | int | float | None = None,
         attrs: list[str] | None = None,
         as_memfile: bool = False,
     ) -> None:
@@ -165,6 +203,9 @@ class Raster:
         :param downsample: Reduce the size of the image loaded by this factor. Default is 1
 
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
+
+        :param nodata: nodata to be used (overwrites the metadata). Default is None, i.e. reads from metadata.
+
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
             Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
@@ -258,6 +299,10 @@ class Raster:
 
             # Update metadata
             self._update(self.data, metadata=meta)
+
+        # Set nodata
+        if nodata is not None:
+            self.set_ndv(nodata)
 
     @classmethod
     def from_array(
@@ -767,7 +812,8 @@ class Raster:
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
-        nodata: int | float | None = None,
+        dst_nodata: int | float | None = None,
+        src_nodata: int | float | None = None,
         dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
@@ -794,7 +840,9 @@ class Raster:
         :param dst_bounds: a BoundingBox object or a dictionary containing\
                 left, bottom, right, top bounds in the source CRS.
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :param nodata: nodata value in reprojected data.
+        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source, \
+        and if source is None, will use GDAL's default.
+        :param src_nodata: nodata value of the source. If set to None, will read from the metadata.
         :param resampling: A rasterio Resampling method
         :param silent: If True, will not print warning statements
         :param n_threads: The number of worker threads. Defaults to (os.cpu_count() - 1).
@@ -844,14 +892,16 @@ class Raster:
             # Warning: this will not work for multiple bands with different dtypes
             dtype = self.dtypes[0]
 
-        if nodata is None:
-            nodata = self.nodata
-            # If no data was set, need to set one by default, in case reprojection is done outside original bounds
-            # Otherwise, output nodata will be 99999 by default which will not work as expected for uint8 data.
-            if nodata is None:
-                if not silent:
-                    warnings.warn("No nodata set, will use 0")
-                nodata = 0
+        # Set source nodata if provided
+        if src_nodata is None:
+            src_nodata = self.nodata
+
+        # Set destination nodata if provided. This is needed in areas not covered by the input data.
+        # If None, will use GeoUtils' default, as rasterio's default is unknown, hence cannot be handled properly.
+        if dst_nodata is None:
+            dst_nodata = self.nodata
+            if dst_nodata is None:
+                dst_nodata = _default_ndv(dtype)
 
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
@@ -859,7 +909,8 @@ class Raster:
             "src_crs": self.crs,
             "dst_crs": dst_crs,
             "resampling": resampling if isinstance(resampling, Resampling) else _resampling_from_str(resampling),
-            "dst_nodata": nodata,
+            "src_nodata": src_nodata,
+            "dst_nodata": dst_nodata,
         }
 
         # If dst_ref is None, check other input arguments
@@ -941,16 +992,18 @@ class Raster:
                 (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
             ]
         ):
-            if nodata == self.nodata:
+            if (dst_nodata == self.nodata) or (dst_nodata is None):
                 if not silent:
                     warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
                 return self
 
-            else:
-                warnings.warn("Only nodata is different, running self.set_ndv instead")
-                dst_r = self.copy()
-                dst_r.set_ndv(nodata)
-                return dst_r
+            elif dst_nodata is not None:
+                if not silent:
+                    warnings.warn(
+                        "Only nodata is different, consider using the 'set_ndv()' method instead'\
+                    ' -> return self (not a copy!)"
+                    )
+                return self
 
         # Set the performance keywords
         if n_threads == 0:
@@ -974,7 +1027,7 @@ class Raster:
             assert dst_transform == dst_transformed
 
         # Write results to a new Raster.
-        dst_r = self.from_array(dst_data, dst_transformed, dst_crs, nodata)
+        dst_r = self.from_array(dst_data, dst_transformed, dst_crs, dst_nodata)
 
         return dst_r
 
@@ -996,25 +1049,36 @@ class Raster:
         meta.update({"transform": rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)})
         self._update(metadata=meta)
 
-    def set_ndv(self, ndv: abc.Iterable[int | float] | int | float, update_array: bool = False) -> None:
+    def set_ndv(self, ndv: abc.Sequence[int | float] | int | float, update_array: bool = False) -> None:
         """
-        Set new nodata values for bands (and possibly update arrays)
+        Set new nodata values for bands (and possibly update arrays).
 
         :param ndv: nodata values
         :param update_array: change the existing nodata in array
-
         """
 
-        if not isinstance(ndv, (abc.Iterable, int, float, np.integer, np.floating)):
+        if not isinstance(ndv, (abc.Sequence, int, float, np.integer, np.floating)):
             raise ValueError("Type of ndv not understood, must be list or float or int")
 
         elif (isinstance(ndv, (int, float, np.integer, np.floating))) and self.count > 1:
             print("Several raster band: using nodata value for all bands")
             ndv = [ndv] * self.count
 
-        elif isinstance(ndv, abc.Iterable) and self.count == 1:
+        elif isinstance(ndv, abc.Sequence) and self.count == 1:
             print("Only one raster band: using first nodata value provided")
             ndv = list(ndv)[0]
+
+        # Check that ndv has same length as number of bands in self
+        if isinstance(ndv, abc.Sequence):
+            if len(ndv) != self.count:
+                raise ValueError(f"Length of ndv ({len(ndv)}) incompatible with number of bands ({self.count})")
+            # Check that ndv value is compatible with dtype
+            for k in range(len(ndv)):
+                if not rio.dtypes.can_cast_dtype(ndv[k], self.dtypes[k]):
+                    raise ValueError(f"ndv value {ndv[k]} incompatible with self.dtype {self.dtypes[k]}")
+        else:
+            if not rio.dtypes.can_cast_dtype(ndv, self.dtypes[0]):
+                raise ValueError(f"ndv value {ndv} incompatible with self.dtype {self.dtypes[0]}")
 
         meta = self.ds.meta
         imgdata = self.data
@@ -1285,7 +1349,7 @@ to be cleared due to the setting of GCPs."
             raise ValueError("band must be int or None")
 
         # If multiple bands (RGB), cbar does not make sense
-        if isinstance(band, abc.Iterable):
+        if isinstance(band, abc.Sequence):
             if len(band) > 1:
                 add_cb = False
 
