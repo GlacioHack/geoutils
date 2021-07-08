@@ -289,11 +289,10 @@ class Raster:
             You have a data array in EPSG:32645. It has a spatial resolution of
             30 m in x and y, and its top left corner is X=478000, Y=3108140.
 
+            >>> data = np.ones((500, 500), dtype="uint8")
             >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-            >>> myim = Raster.from_array(data, transform, 32645)  # doctest: +SKIP
-
+            >>> myim = Raster.from_array(data, transform, 32645)
         """
-
         if not isinstance(transform, Affine):
             if isinstance(transform, tuple):
                 transform = Affine(*transform)
