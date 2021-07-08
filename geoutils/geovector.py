@@ -109,6 +109,7 @@ class Vector:
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
+        buffer: float = 0,
     ) -> np.ndarray:
         """
         Rasterize the vector features into a boolean raster which has the extent/dimensions of \
@@ -124,6 +125,8 @@ the provided raster file.
         :param xres: Output raster spatial resolution in x. Only is rst is None.
         :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
         :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
+        :param buffer: Size of buffer to be added around the features, in the raster's projection units.
+        If a negative value is set, will erode the features.
 
         :returns: array containing the mask
         """
@@ -166,10 +169,24 @@ the provided raster file.
             out_shape = rst.shape  # type: ignore
             transform = rst.transform  # type: ignore
             crs = rst.crs  # type: ignore
+            bounds = rst.bounds
+
+        # Crop vector geometries to avoid issues when reprojecting
+        left, bottom, right, top = bounds
+        x1, y1, x2, y2 = warp.transform_bounds(rst.crs, self.ds.crs, left, bottom, right, top)
+        self.ds = self.ds.cx[x1:x2, y1:y2]
 
         # Reproject vector into rst CRS
         # Note: would need to check if CRS are different
         vect = self.ds.to_crs(crs)
+
+        # Create a buffer around the features
+        if not isinstance(buffer, Number):
+            raise ValueError(f"`buffer` must be a number, currently set to {buffer}")
+        if buffer != 0:
+            vect.geometry = [geom.buffer(buffer) for geom in vect.geometry]
+        elif buffer == 0:
+            pass
 
         # Rasterize geometry
         mask = features.rasterize(
