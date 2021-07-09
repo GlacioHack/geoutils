@@ -891,6 +891,7 @@ class TestRaster:
 
         assert polygon_area == pytest.approx(pixel_area)
         assert isinstance(polygonized, gv.Vector)
+        assert polygonized.crs == img.crs
 
     def test_to_points(self) -> None:
         """Test the outputs of the to_points method and that it doesn't load if not needed."""
