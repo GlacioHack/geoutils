@@ -1,14 +1,10 @@
 """Miscellaneous functions, mainly for testing."""
 from __future__ import annotations
 
-from typing import Any, List, Tuple, TypeVar
-
 import numpy as np
 
+from geoutils._typing import ArrayLike
 from geoutils.georaster import Raster, RasterType
-
-# Make an array-like type (since the array-like numpy type only exists in numpy>=1.20)
-ArrayLike = TypeVar("ArrayLike", np.ndarray, np.ma.masked_array, List[Any], Tuple[Any])
 
 
 def array_equal(

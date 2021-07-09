@@ -29,6 +29,7 @@ from rasterio.warp import Resampling
 from scipy.ndimage import map_coordinates
 from shapely.geometry.polygon import Polygon
 
+from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
 from geoutils.geovector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -131,7 +132,7 @@ class Raster:
     transform: Affine
     crs: CRS
     nodata: int | float | None
-    res: tuple[float | int, float | int]
+    res: tuple[float, float]
     bounds: rio.coords.BoundingBox
     height: int
     width: int
@@ -148,7 +149,7 @@ class Raster:
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
         bands: None | int | list[int] = None,
         load_data: bool = True,
-        downsample: int | float = 1,
+        downsample: AnyNumber = 1,
         masked: bool = True,
         attrs: list[str] | None = None,
         as_memfile: bool = False,
@@ -431,7 +432,7 @@ class Raster:
 
         return self + -other  # type: ignore
 
-    def astype(self, dtype: np.dtype | type | str) -> Raster:
+    def astype(self, dtype: DTypeLike) -> Raster:
         """
         Converts the data type of a Raster object.
 
@@ -1062,7 +1063,7 @@ class Raster:
         self,
         filename: str | IO[bytes],
         driver: str = "GTiff",
-        dtype: np.dtype | None = None,
+        dtype: DTypeLike | None = None,
         compress: str = "deflate",
         tiled: bool = False,
         blank_value: None | int | float = None,
@@ -1366,8 +1367,8 @@ to be cleared due to the setting of GCPs."
 
     def value_at_coords(
         self,
-        x: float | list[float],
-        y: float | list[float],
+        x: float | ArrayLike,
+        y: float | ArrayLike,
         latlon: bool = False,
         band: int | None = None,
         masked: bool = False,
@@ -1545,8 +1546,8 @@ to be cleared due to the setting of GCPs."
 
     def xy2ij(
         self,
-        x: np.ndarray,
-        y: np.ndarray,
+        x: ArrayLike,
+        y: ArrayLike,
         op: type = np.float32,
         area_or_point: str | None = None,
         precision: float | None = None,
@@ -1617,7 +1618,7 @@ to be cleared due to the setting of GCPs."
 
         return i, j
 
-    def ij2xy(self, i: np.ndarray, j: np.ndarray, offset: str = "center") -> tuple[np.ndarray, np.ndarray]:
+    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "center") -> tuple[np.ndarray, np.ndarray]:
         """
         Return x,y coordinates for a given row, column index pair.
 
@@ -1632,7 +1633,7 @@ to be cleared due to the setting of GCPs."
 
         return x, y
 
-    def outside_image(self, xi: np.ndarray, yj: np.ndarray, index: bool = True) -> bool:
+    def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
         Check whether a given point falls outside of the raster.
 
@@ -1647,14 +1648,14 @@ to be cleared due to the setting of GCPs."
 
         if np.any(np.array((xi, yj)) < 0):
             return True
-        elif xi > self.width or yj > self.height:
+        elif np.asanyarray(xi) > self.width or np.asanyarray(yj) > self.height:
             return True
         else:
             return False
 
     def interp_points(
         self,
-        pts: np.ndarray,
+        pts: ArrayLike,
         input_latlon: bool = False,
         mode: str = "linear",
         band: int = 1,
