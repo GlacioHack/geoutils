@@ -1908,11 +1908,13 @@ to be cleared due to the setting of GCPs."
 
         results = (
             {"properties": {"raster_value": v}, "geometry": s}
-            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk))
+            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk,
+                                              transform=self.transform))
         )
 
         gdf = gpd.GeoDataFrame.from_features(list(results))
         gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
         gdf.set_geometry(col="geometry", inplace=True)
+        gdf.set_crs(self.crs, inplace=True)
 
         return gv.Vector(gdf)
