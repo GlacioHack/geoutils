@@ -477,7 +477,6 @@ class Raster:
 
         return self + -other  # type: ignore
 
-
     @overload
     def astype(self, dtype: DTypeLike, inplace: Literal[False]) -> Raster:
         ...
