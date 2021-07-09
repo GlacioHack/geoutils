@@ -182,7 +182,6 @@ the provided raster file.
         gdf = gdf.cx[x1:x2, y1:y2]
 
         # Reproject vector into rst CRS
-        # Note: would need to check if CRS are different
         gdf = gdf.to_crs(crs)
 
         # Create a buffer around the features
@@ -275,7 +274,6 @@ the provided raster file.
             crs = rst.crs  # type: ignore
 
         # Reproject vector into rst CRS
-        # Note: would need to check if CRS are different
         vect = self.ds.to_crs(crs)
 
         # Set default burn value, index from 1 to len(self.ds)
