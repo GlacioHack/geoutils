@@ -35,7 +35,10 @@ class Vector:
         """
 
         if isinstance(filename, str):
-            ds = gpd.read_file(filename)
+            with warnings.catch_warnings():
+                # This warning shows up in numpy 1.21 (2021-07-09)
+                warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
+                ds = gpd.read_file(filename)
             self.ds = ds
             self.name: str | gpd.GeoDataFrame | None = filename
         elif isinstance(filename, gpd.GeoDataFrame):
