@@ -50,4 +50,4 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest -rA
+        pytest -ra

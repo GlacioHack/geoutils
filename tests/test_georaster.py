@@ -379,10 +379,10 @@ class TestRaster:
         assert b_minmax == b_crop
 
     def test_reproj(self) -> None:
+        warnings.simplefilter("error")
 
         # Reference raster to be used
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        r.set_ndv(0)  # to avoid warnings - will be used when reprojecting outside bounds
 
         # A second raster with different bounds, shape and resolution
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
@@ -415,9 +415,10 @@ class TestRaster:
             plt.show()
 
         # If a nodata is set, make sure it is preserved
-        r.set_ndv(255)
-        r3 = r.reproject(r2)
-        assert r.nodata == r3.nodata
+        r_ndv = r.copy()
+        r_ndv.set_ndv(255)
+        r3 = r_ndv.reproject(r2)
+        assert r_ndv.nodata == r3.nodata
 
         # Test dst_size - this should modify the shape, and hence resolution, but not the bounds
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
@@ -445,6 +446,25 @@ class TestRaster:
         r3 = r.reproject(dst_bounds=dst_bounds)
         assert r3.bounds == dst_bounds
         assert r3.res != r.res
+
+        # Assert that when reprojection creates nodata (voids), if no nodata is set, a default value is set
+        r3 = r.reproject(dst_bounds=dst_bounds)
+        assert r.nodata is None
+        assert r3.nodata == 255
+
+        # Particularly crucial if nodata falls outside the original image range -> check range is preserved
+        r_float = r.astype("float32")  # type: ignore
+        assert r_float.nodata is None
+        r3 = r_float.reproject(dst_bounds=dst_bounds)
+        assert r3.nodata == -99999
+        assert np.min(r3.data.data) == r3.nodata
+        assert np.min(r3.data) == np.min(r_float.data)
+        assert np.max(r3.data) == np.max(r_float.data)
+
+        # Check that dst_nodata works as expected
+        r3 = r_float.reproject(dst_bounds=dst_bounds, dst_nodata=999)
+        assert r3.nodata == 999
+        assert np.max(r3.data.data) == r3.nodata
 
         # If dst_res is set, the resolution will be enforced
         # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
@@ -615,18 +635,82 @@ class TestRaster:
         # Check that the number of no data value is correct
         assert np.count_nonzero(ndv_index.data) == 112088
 
-    def test_set_dtypes(self) -> None:
+        # Check that nodata can also be set upon loading
+        r = gr.Raster(datasets.get_path("landsat_B4"), nodata=5)
+        assert r.nodata == 5
+
+        # Check that an error is raised if nodata value is incompatible with dtype
+        expected_message = r"ndv value .* incompatible with self.dtype .*"
+        with pytest.raises(ValueError, match=expected_message):
+            r.set_ndv(0.5)
+
+    def test_default_ndv(self) -> None:
+        """
+        Test that the default nodata values are as expected.
+        """
+        assert gr._default_ndv("uint8") == np.iinfo("uint8").max
+        assert gr._default_ndv("int8") == np.iinfo("int8").min
+        assert gr._default_ndv("uint16") == np.iinfo("uint16").max
+        assert gr._default_ndv("int16") == np.iinfo("int16").min
+        assert gr._default_ndv("uint32") == 99999
+        for dtype in ["int32", "float32", "float64", "float128"]:
+            assert gr._default_ndv(dtype) == -99999
+
+        # Check it works with most frequent np.dtypes too
+        assert gr._default_ndv(np.dtype("uint8")) == np.iinfo("uint8").max
+        for dtype in [np.dtype("int32"), np.dtype("float32"), np.dtype("float64")]:
+            assert gr._default_ndv(dtype) == -99999
+
+        # Check it works with most frequent types too
+        assert gr._default_ndv(np.uint8) == np.iinfo("uint8").max
+        for dtype in [np.int32, np.float32, np.float64]:
+            assert gr._default_ndv(dtype) == -99999
+
+        # Check that an error is raised for other types
+        expected_message = "No default nodata value set for dtype"
+        with pytest.raises(NotImplementedError, match=expected_message):
+            gr._default_ndv("bla")
+
+    def test_astype(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        arr_1 = np.copy(r.data).astype(np.int8)
-        r.set_dtypes(np.int8)
-        arr_2 = np.copy(r.data)
-        r.set_dtypes([np.int8], update_array=True)
 
-        arr_3 = r.data
+        # Test changing dtypes that does not modify the data
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
+            rout = r.astype(dtype)  # type: ignore
+            assert rout == r
+            assert np.dtype(rout.dtypes[0]) == dtype
+            assert rout.data.dtype == dtype
 
-        assert np.count_nonzero(~arr_1 == arr_2) == 0
-        assert np.count_nonzero(~arr_2 == arr_3) == 0
+        # Test a dtype that will modify the data
+        dtype = np.int8
+        rout = r.astype(dtype)  # type: ignore
+        assert rout != r
+        assert np.dtype(rout.dtypes[0]) == dtype
+        assert rout.data.dtype == dtype
+        pytest.warns(UserWarning, r.astype, dtype)  # check a warning is raised
+
+        # Test modify in place
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
+            r2 = r.copy()
+            out = r2.astype(dtype, inplace=True)
+            assert out is None
+            assert r2 == r
+            assert np.dtype(r2.dtypes[0]) == dtype
+            assert r2.data.dtype == dtype
+
+        # Test with masked values
+        # First line is set to 0 and 0 set to nodata - check that 0 not used
+        # Note that nodata must be set or astype will raise an error
+        assert not np.any(r2.data == 0)
+        r2 = r.copy()
+        r2.data[0, 0] = 0
+        r2.set_ndv(0)
+        for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
+            rout = r2.astype(dtype)  # type: ignore
+            assert rout == r2
+            assert np.dtype(rout.dtypes[0]) == dtype
+            assert rout.data.dtype == dtype
 
     def test_plot(self) -> None:
 
@@ -861,6 +945,7 @@ class TestRaster:
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
+        warnings.simplefilter("error")
         assert gr._resampling_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
         assert gr._resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
 
@@ -873,6 +958,8 @@ class TestRaster:
 
         img1 = gr.Raster(datasets.get_path("landsat_B4"))
         img2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        img1.set_ndv(0)
+        img2.set_ndv(0)
 
         # Resample the rasters using a new resampling method and see that the string and enum gives the same result.
         img3a = img1.reproject(img2, resampling="q1")
