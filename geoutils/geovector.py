@@ -109,7 +109,7 @@ class Vector:
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: float = 0,
+        buffer: float | int = 0,
     ) -> np.ndarray:
         """
         Rasterize the vector features into a boolean raster which has the extent/dimensions of \
@@ -165,15 +165,17 @@ the provided raster file.
             transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
         # otherwise use directly rst's dimensions
-        else:
-            out_shape = rst.shape  # type: ignore
-            transform = rst.transform  # type: ignore
-            crs = rst.crs  # type: ignore
+        elif isinstance(rst, gu.Raster):
+            out_shape = rst.shape
+            transform = rst.transform
+            crs = rst.crs
             bounds = rst.bounds
+        else:
+            raise ValueError("`rst` must be either a str, geoutils.Raster or None")
 
         # Crop vector geometries to avoid issues when reprojecting
-        left, bottom, right, top = bounds
-        x1, y1, x2, y2 = warp.transform_bounds(rst.crs, self.ds.crs, left, bottom, right, top)
+        left, bottom, right, top = bounds  # type: ignore
+        x1, y1, x2, y2 = warp.transform_bounds(crs, self.ds.crs, left, bottom, right, top)
         self.ds = self.ds.cx[x1:x2, y1:y2]
 
         # Reproject vector into rst CRS
@@ -181,8 +183,8 @@ the provided raster file.
         vect = self.ds.to_crs(crs)
 
         # Create a buffer around the features
-        if not isinstance(buffer, Number):
-            raise ValueError(f"`buffer` must be a number, currently set to {buffer}")
+        if not isinstance(buffer, (float, int)):
+            raise ValueError(f"`buffer` must be a float or int, currently set to {type(buffer)}")
         if buffer != 0:
             vect.geometry = [geom.buffer(buffer) for geom in vect.geometry]
         elif buffer == 0:
