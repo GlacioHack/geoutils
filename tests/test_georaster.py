@@ -14,6 +14,7 @@ from pylint import epylint
 
 import geoutils as gu
 import geoutils.georaster as gr
+import geoutils.geovector as gv
 import geoutils.projtools as pt
 from geoutils import datasets
 
@@ -962,6 +963,22 @@ class TestRaster:
         img3a = img1.reproject(img2, resampling="q1")
         img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
         assert img3a == img3b
+
+    def test_polygonize(self) -> None:
+        """Test that polygonize doesn't raise errors."""
+        img = gr.Raster(datasets.get_path("landsat_B4"))
+
+        value = np.unique(img)[0]
+
+        pixel_area = np.sum(img == value) * img.res[0] * img.res[1]
+
+        polygonized = img.polygonize(value)
+
+        polygon_area = polygonized.ds.area.sum()
+
+        assert polygon_area == pytest.approx(pixel_area)
+        assert isinstance(polygonized, gv.Vector)
+        assert polygonized.crs == img.crs
 
     def test_to_points(self) -> None:
         """Test the outputs of the to_points method and that it doesn't load if not needed."""
