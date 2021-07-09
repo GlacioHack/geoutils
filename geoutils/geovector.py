@@ -173,26 +173,29 @@ the provided raster file.
         else:
             raise ValueError("`rst` must be either a str, geoutils.Raster or None")
 
+        # Copying GeoPandas dataframe before applying changes
+        gdf = self.ds.copy()
+
         # Crop vector geometries to avoid issues when reprojecting
         left, bottom, right, top = bounds  # type: ignore
-        x1, y1, x2, y2 = warp.transform_bounds(crs, self.ds.crs, left, bottom, right, top)
-        self.ds = self.ds.cx[x1:x2, y1:y2]
+        x1, y1, x2, y2 = warp.transform_bounds(crs, gdf.crs, left, bottom, right, top)
+        gdf = gdf.cx[x1:x2, y1:y2]
 
         # Reproject vector into rst CRS
         # Note: would need to check if CRS are different
-        vect = self.ds.to_crs(crs)
+        gdf = gdf.to_crs(crs)
 
         # Create a buffer around the features
         if not isinstance(buffer, (int, float, np.number)):
             raise ValueError(f"`buffer` must be a number, currently set to {type(buffer)}")
         if buffer != 0:
-            vect.geometry = [geom.buffer(buffer) for geom in vect.geometry]
+            gdf.geometry = [geom.buffer(buffer) for geom in gdf.geometry]
         elif buffer == 0:
             pass
 
         # Rasterize geometry
         mask = features.rasterize(
-            shapes=vect.geometry, fill=0, out_shape=out_shape, transform=transform, default_value=1, dtype="uint8"
+            shapes=gdf.geometry, fill=0, out_shape=out_shape, transform=transform, default_value=1, dtype="uint8"
         ).astype("bool")
 
         # Force output mask to be of same dimension as input rst

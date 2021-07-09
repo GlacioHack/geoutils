@@ -79,12 +79,17 @@ class TestSynthetic:
         Test Vector.create_mask.
         """
         # First with given res and bounds -> Should be a 21 x 21 array with 0 everywhere except center pixel
-        vector = self.vector
+        vector = self.vector.copy()
         out_mask = vector.create_mask(xres=1, bounds=(0, 0, 21, 21))
         ref_mask = np.zeros((21, 21), dtype="bool")
         ref_mask[10, 10] = True
         assert out_mask.shape == (21, 21)
         assert np.all(ref_mask == out_mask)
+
+        # Check that vector has not been modified by accident
+        assert vector.bounds == self.vector.bounds
+        assert len(vector.ds) == len(self.vector.ds)
+        assert vector.crs == self.vector.crs
 
         # Then with a gu.Raster as reference, single band
         rst = gu.Raster.from_array(np.zeros((21, 21)), transform=(1.0, 0.0, 0.0, 0.0, -1.0, 21.0), crs="EPSG:4326")
