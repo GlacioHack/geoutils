@@ -1,7 +1,7 @@
 import geopandas as gpd
 import numpy as np
 from shapely.geometry.polygon import Polygon
-from skimage.morphology import erosion
+from scipy.ndimage.morphology import binary_erosion
 
 import geoutils as gu
 
@@ -48,7 +48,7 @@ class TestVector:
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
 
 
-class SyntheticTest:
+class TestSynthetic:
 
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
     poly = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
@@ -100,12 +100,14 @@ class SyntheticTest:
         assert np.all(ref_mask == out_mask_buff)
 
         # Test that buffer > 0 works
+        rst = gu.Raster.from_array(np.zeros((21, 21)), transform=(1.0, 0.0, 0.0, 0.0, -1.0, 21.0), crs="EPSG:4326")
+        out_mask = vector.create_mask(rst)
         for buffer in np.arange(1, 8):
             out_mask_buff = vector.create_mask(rst, buffer=buffer)
             diff = out_mask_buff & ~out_mask
             assert np.count_nonzero(diff) > 0
             # Difference between masks should always be thinner than buffer + 1
-            eroded_diff = erosion(diff.squeeze(), np.ones((buffer + 1, buffer + 1)))
+            eroded_diff = binary_erosion(diff.squeeze(), np.ones((buffer + 1, buffer + 1)))
             assert np.count_nonzero(eroded_diff) == 0
 
         # Test that buffer < 0 works
@@ -116,5 +118,5 @@ class SyntheticTest:
             diff = ~out_mask_buff & out_mask
             assert np.count_nonzero(diff) > 0
             # Difference between masks should always be thinner than buffer + 1
-            eroded_diff = erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
+            eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
