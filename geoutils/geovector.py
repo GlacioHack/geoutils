@@ -109,7 +109,7 @@ class Vector:
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: float | int = 0,
+        buffer: int | float | np.number = 0,
     ) -> np.ndarray:
         """
         Rasterize the vector features into a boolean raster which has the extent/dimensions of \
@@ -183,8 +183,8 @@ the provided raster file.
         vect = self.ds.to_crs(crs)
 
         # Create a buffer around the features
-        if not isinstance(buffer, (float, int)):
-            raise ValueError(f"`buffer` must be a float or int, currently set to {type(buffer)}")
+        if not isinstance(buffer, (int, float, np.number)):
+            raise ValueError(f"`buffer` must be a number, currently set to {type(buffer)}")
         if buffer != 0:
             vect.geometry = [geom.buffer(buffer) for geom in vect.geometry]
         elif buffer == 0:
