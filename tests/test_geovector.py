@@ -1,3 +1,8 @@
+import geopandas as gpd
+import numpy as np
+from shapely.geometry.polygon import Polygon
+from skimage.morphology import erosion
+
 import geoutils as gu
 
 GLACIER_OUTLINES_URL = "http://public.data.npolar.no/cryoclim/CryoClim_GAO_SJ_1990.zip"
@@ -41,3 +46,75 @@ class TestVector:
         assert bounds.bottom == self.glacier_outlines.ds.total_bounds[1]
         assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
+
+
+class SyntheticTest:
+
+    # Create a synthetic vector file with a square of size 1, started at position (10, 10)
+    poly = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
+    gdf = gpd.GeoDataFrame(
+        {
+            "geometry": [
+                poly,
+            ]
+        },
+        crs="EPSG:4326",
+    )
+    vector = gu.Vector(gdf)
+
+    # Create a synthetic vector file with a square of size 5, started at position (8, 8)
+    poly = Polygon([(8, 8), (13, 8), (13, 13), (8, 13)])
+    gdf = gpd.GeoDataFrame(
+        {
+            "geometry": [
+                poly,
+            ]
+        },
+        crs="EPSG:4326",
+    )
+    vector_5 = gu.Vector(gdf)
+
+    def test_create_mask(self) -> None:
+        """
+        Test Vector.create_mask.
+        """
+        # First with given res and bounds -> Should be a 21 x 21 array with 0 everywhere except center pixel
+        vector = self.vector
+        out_mask = vector.create_mask(xres=1, bounds=(0, 0, 21, 21))
+        ref_mask = np.zeros((21, 21), dtype="bool")
+        ref_mask[10, 10] = True
+        assert out_mask.shape == (21, 21)
+        assert np.all(ref_mask == out_mask)
+
+        # Then with a gu.Raster as reference, single band
+        rst = gu.Raster.from_array(np.zeros((21, 21)), transform=(1.0, 0.0, 0.0, 0.0, -1.0, 21.0), crs="EPSG:4326")
+        out_mask = vector.create_mask(rst)
+        assert out_mask.shape == (1, 21, 21)
+
+        # With gu.Raster, 2 bands -> fails...
+        # rst = gu.Raster.from_array(np.zeros((2, 21, 21)), transform=(1., 0., 0., 0., -1., 21.), crs='EPSG:4326')
+        # out_mask = vector.create_mask(rst)
+
+        # Test that buffer = 0 works
+        out_mask_buff = vector.create_mask(rst, buffer=0)
+        assert np.all(ref_mask == out_mask_buff)
+
+        # Test that buffer > 0 works
+        for buffer in np.arange(1, 8):
+            out_mask_buff = vector.create_mask(rst, buffer=buffer)
+            diff = out_mask_buff & ~out_mask
+            assert np.count_nonzero(diff) > 0
+            # Difference between masks should always be thinner than buffer + 1
+            eroded_diff = erosion(diff.squeeze(), np.ones((buffer + 1, buffer + 1)))
+            assert np.count_nonzero(eroded_diff) == 0
+
+        # Test that buffer < 0 works
+        vector_5 = self.vector_5
+        out_mask = vector_5.create_mask(rst)
+        for buffer in np.arange(-1, -3, -1):
+            out_mask_buff = vector_5.create_mask(rst, buffer=buffer)
+            diff = ~out_mask_buff & out_mask
+            assert np.count_nonzero(diff) > 0
+            # Difference between masks should always be thinner than buffer + 1
+            eroded_diff = erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
+            assert np.count_nonzero(eroded_diff) == 0
