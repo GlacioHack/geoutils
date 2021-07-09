@@ -1,7 +1,7 @@
 import geopandas as gpd
 import numpy as np
-from shapely.geometry.polygon import Polygon
 from scipy.ndimage.morphology import binary_erosion
+from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 
