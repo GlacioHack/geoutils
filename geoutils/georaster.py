@@ -1908,8 +1908,7 @@ to be cleared due to the setting of GCPs."
 
         results = (
             {"properties": {"raster_value": v}, "geometry": s}
-            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk,
-                                              transform=self.transform))
+            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk, transform=self.transform))
         )
 
         gdf = gpd.GeoDataFrame.from_features(list(results))
