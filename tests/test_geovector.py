@@ -1,5 +1,6 @@
 import geopandas as gpd
 import numpy as np
+import pytest
 from scipy.ndimage.morphology import binary_erosion
 from shapely.geometry.polygon import Polygon
 from shapely.geometry.multipolygon import MultiPolygon
@@ -173,3 +174,21 @@ class TestSynthetic:
         assert len(vertices) == 2
         assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]
         assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0)]
+
+    def test_generate_voronoi(self):
+        """
+        Check that geovector.generate_voronoi_polygons works on a simple Polygon.
+        Does not work with simple shapes as squares or triangles as teh diagram is infinite.
+        For now, test on a set of two squares.
+        """
+        # Check with a multipolygon
+        voronoi = gu.geovector.generate_voronoi_polygons(self.vector_multipoly.ds)
+        assert len(voronoi) == 2
+        vertices = gu.geovector.extract_vertices(voronoi)
+        assert vertices == [[(5.5, 10.5), (10.5, 10.5), (10.5, 5.5), (5.5, 10.5)],
+                            [(5.5, 10.5), (10.5, 5.5), (5.5, 5.5), (5.5, 10.5)]]
+
+        # Check that it fails with proper error for too simple geometries
+        expected_message = "Invalid geometry, cannot generate finite Voronoi polygons"
+        with pytest.raises(ValueError, match=expected_message):
+            voronoi = gu.geovector.generate_voronoi_polygons(self.vector.ds)

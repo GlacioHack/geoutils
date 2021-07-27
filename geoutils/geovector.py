@@ -13,6 +13,8 @@ import numpy as np
 import rasterio as rio
 from rasterio import features, warp
 from rasterio.crs import CRS
+import shapely
+from scipy.spatial import Voronoi
 
 import geoutils as gu
 
@@ -352,3 +354,31 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
         vertices.extend([list(ext.coords) for ext in exteriors])
 
     return vertices
+
+
+def generate_voronoi_polygons(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Function to generate the Voronoi polygons (tesselation) from the vertices of all geometries in a GeoDataFrame.
+
+    Uses scipy.spatial.voronoi.
+
+    :param: The GeoDataFrame from whose vertices are used for the Voronoi polygons.
+
+    :returns: A GeoDataFrame containing the Voronoi polygons.
+    """
+    # Extract the coordinates of the vertices of all geometries in gdf
+    vertices = extract_vertices(gdf)
+    coords = np.concatenate(vertices)
+
+    # Create the Voronoi diagram and extract ridges
+    vor = Voronoi(coords)
+    lines = [shapely.geometry.LineString(vor.vertices[line]) for line in vor.ridge_vertices if -1 not in line]
+    polys = list(shapely.ops.polygonize(lines))
+    if len(polys) == 0:
+        raise ValueError("Invalid geometry, cannot generate finite Voronoi polygons")
+
+    # Convert into GeoDataFrame
+    voronoi = gpd.GeoDataFrame(geometry=gpd.GeoSeries(polys))
+    voronoi.crs = gdf.crs
+
+    return voronoi
