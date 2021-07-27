@@ -14,6 +14,7 @@ import rasterio as rio
 from rasterio import features, warp
 from rasterio.crs import CRS
 import shapely
+from shapely.geometry.polygon import Polygon
 from scipy.spatial import Voronoi
 
 import geoutils as gu
@@ -382,3 +383,38 @@ def generate_voronoi_polygons(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     voronoi.crs = gdf.crs
 
     return voronoi
+
+
+def generate_voronoi_with_bounds(gdf: gpd.GeoDataFrame, bound_poly: Polygon) -> gpd.GeoDataFrame:
+    """
+    Generate Voronoi polygons that are bounded by the polygon bound_poly, to avoid Voronoi polygons that extend \
+far beyond the original geometry.
+
+    Voronoi polygons are created using generate_voronoi_polygons, cropped to the extent of bound_poly and gaps \
+are filled with new polygons.
+
+    :param: The GeoDataFrame from whose vertices are used for the Voronoi polygons.
+    :param: A shapely Polygon to be used for bounding the Voronoi diagrams.
+
+    :returns: A GeoDataFrame containing the Voronoi polygons.
+    """
+    # Create Voronoi polygons
+    voronoi = generate_voronoi_polygons(gdf)
+
+    # Crop Voronoi polygons to input bound_poly extent
+    voronoi_crop = voronoi.intersection(bound_poly)
+    voronoi_crop = gpd.GeoDataFrame(geometry=voronoi_crop)  # convert to DataFrame
+
+    # Dissolve all Voronoi polygons and subtract from bounds to get gaps
+    voronoi_merged = voronoi_crop.dissolve()
+    bound_gdf = gpd.GeoDataFrame(geometry=gpd.GeoSeries(bound_poly))
+    bound_gdf.crs = gdf.crs
+    gaps = bound_gdf.difference(voronoi_merged)
+
+    # Merge cropped Voronoi with gaps, if not empty, otherwise return cropped Voronoi
+    if not np.sum(gaps.area.values) == 0:
+        voronoi_all = gpd.GeoDataFrame(geometry=list(voronoi_crop.geometry) + list(gaps.geometry[0]))
+        voronoi_all.crs = gdf.crs
+        return voronoi_all
+    else:
+        return voronoi_crop
