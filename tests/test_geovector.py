@@ -2,6 +2,9 @@ import geopandas as gpd
 import numpy as np
 from scipy.ndimage.morphology import binary_erosion
 from shapely.geometry.polygon import Polygon
+from shapely.geometry.multipolygon import MultiPolygon
+from shapely.geometry.linestring import LineString
+from shapely.geometry.multilinestring import MultiLineString
 
 import geoutils as gu
 
@@ -62,6 +65,16 @@ class TestSynthetic:
     )
     vector = gu.Vector(gdf)
 
+    # Same with a square started at position (5, 5)
+    poly2 = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
+    gdf = gpd.GeoDataFrame({"geometry": [poly2]}, crs="EPSG:4326")
+    vector2 = gu.Vector(gdf)
+
+    # Create a multipolygon with both
+    multipoly = MultiPolygon([poly, poly2])
+    gdf = gpd.GeoDataFrame({"geometry": [multipoly]}, crs="EPSG:4326")
+    vector_multipoly = gu.Vector(gdf)
+
     # Create a synthetic vector file with a square of size 5, started at position (8, 8)
     poly = Polygon([(8, 8), (13, 8), (13, 13), (8, 13)])
     gdf = gpd.GeoDataFrame(
@@ -73,6 +86,15 @@ class TestSynthetic:
         crs="EPSG:4326",
     )
     vector_5 = gu.Vector(gdf)
+
+    # Create a synthetic LineString geometry
+    lines = LineString([(10, 10), (11, 10), (11, 11)])
+    gdf = gpd.GeoDataFrame({"geometry": [lines]}, crs="EPSG:4326")
+    vector_lines = gu.Vector(gdf)
+
+    multilines = MultiLineString([[(10, 10), (11, 10), (11, 11)], [(5, 5), (6, 5), (6, 6)]])
+    gdf = gpd.GeoDataFrame({"geometry": [multilines]}, crs="EPSG:4326")
+    vector_multilines = gu.Vector(gdf)
 
     def test_create_mask(self) -> None:
         """
@@ -125,3 +147,29 @@ class TestSynthetic:
             # Difference between masks should always be thinner than buffer + 1
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
+
+    def test_extract_vertices(self):
+        """
+        Test that extract_vertices works with simple geometries.
+        """
+        # Polygons
+        vertices = gu.geovector.extract_vertices(self.vector.ds)
+        assert len(vertices) == 1
+        assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]]
+
+        # MultiPolygons
+        vertices = gu.geovector.extract_vertices(self.vector_multipoly.ds)
+        assert len(vertices) == 2
+        assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]
+        assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0), (5.0, 5.0)]
+
+        # LineString
+        vertices = gu.geovector.extract_vertices(self.vector_lines.ds)
+        assert len(vertices) == 1
+        assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]]
+
+        # MultiLineString
+        vertices = gu.geovector.extract_vertices(self.vector_multilines.ds)
+        assert len(vertices) == 2
+        assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]
+        assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0)]

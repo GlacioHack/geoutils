@@ -320,3 +320,35 @@ the provided raster file.
         new_vector = self.__new__(type(self))
         new_vector.__init__(self.ds.query(expression))
         return new_vector  # type: ignore
+
+
+############################################
+# Additional stand-alone utility functions #
+############################################
+
+def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
+    """
+    Function to extract the exterior vertices of all shapes within a gpd.GeoDataFrame.
+
+    :param gdf: The GeoDataFrame from which the vertices need to be extracted.
+
+    :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal \ to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
+    """
+    vertices = []
+    # Loop on all geometries within gdf
+    for geom in gdf.geometry:
+        # Extract geometry exterior(s)
+        if geom.geom_type == 'MultiPolygon':
+            exteriors = [p.exterior for p in geom]
+        elif geom.geom_type == 'Polygon':
+            exteriors = [geom.exterior,]
+        elif geom.geom_type == 'LineString':
+            exteriors = [geom,]
+        elif geom.geom_type == 'MultiLineString':
+            exteriors = geom
+        else:
+            raise NotImplementedError(f"Geometry type {geom.geom_type} not implemented.")
+
+        vertices.extend([list(ext.coords) for ext in exteriors])
+
+    return vertices
