@@ -335,6 +335,9 @@ of each geometry.
         The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,\
 hence one geometry "steps" slightly on the neighbor buffer in some cases.
 
+        Note: A similar functionality is provided by momepy (http://docs.momepy.org) and is probably more robust.
+        It could be implemented in GeoPandas in the future: https://github.com/geopandas/geopandas/issues/2015
+
         :examples:
         >>> outlines = gu.Vector(gu.datasets.get_path('glacier_outlines'))
         >>> outlines = gu.Vector(outlines.ds.to_crs('EPSG:32645'))
