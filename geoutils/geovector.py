@@ -495,7 +495,13 @@ are filled with new polygons.
     gaps = bound_gdf.difference(voronoi_merged)
 
     # Merge cropped Voronoi with gaps, if not empty, otherwise return cropped Voronoi
-    if not np.sum(gaps.area.values) == 0:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", "Geometry is in a geographic CRS. Results from 'area' are likely incorrect."
+        )
+        tot_area = np.sum(gaps.area.values)
+
+    if not tot_area == 0:
         voronoi_all = gpd.GeoDataFrame(geometry=list(voronoi_crop.geometry) + list(gaps.geometry[0]))
         voronoi_all.crs = gdf.crs
         return voronoi_all
