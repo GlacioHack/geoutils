@@ -1,6 +1,10 @@
 import geopandas as gpd
 import numpy as np
+import pytest
 from scipy.ndimage.morphology import binary_erosion
+from shapely.geometry.linestring import LineString
+from shapely.geometry.multilinestring import MultiLineString
+from shapely.geometry.multipolygon import MultiPolygon
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
@@ -51,28 +55,34 @@ class TestVector:
 class TestSynthetic:
 
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
-    poly = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
-    gdf = gpd.GeoDataFrame(
-        {
-            "geometry": [
-                poly,
-            ]
-        },
-        crs="EPSG:4326",
-    )
+    poly1 = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
+    gdf = gpd.GeoDataFrame({"geometry": [poly1]}, crs="EPSG:4326")
     vector = gu.Vector(gdf)
 
+    # Same with a square started at position (5, 5)
+    poly2 = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
+    gdf = gpd.GeoDataFrame({"geometry": [poly2]}, crs="EPSG:4326")
+    vector2 = gu.Vector(gdf)
+
+    # Create a multipolygon with both
+    multipoly = MultiPolygon([poly1, poly2])
+    gdf = gpd.GeoDataFrame({"geometry": [multipoly]}, crs="EPSG:4326")
+    vector_multipoly = gu.Vector(gdf)
+
     # Create a synthetic vector file with a square of size 5, started at position (8, 8)
-    poly = Polygon([(8, 8), (13, 8), (13, 13), (8, 13)])
-    gdf = gpd.GeoDataFrame(
-        {
-            "geometry": [
-                poly,
-            ]
-        },
-        crs="EPSG:4326",
-    )
+    poly3 = Polygon([(8, 8), (13, 8), (13, 13), (8, 13)])
+    gdf = gpd.GeoDataFrame({"geometry": [poly3]}, crs="EPSG:4326")
     vector_5 = gu.Vector(gdf)
+
+    # Create a synthetic LineString geometry
+    lines = LineString([(10, 10), (11, 10), (11, 11)])
+    gdf = gpd.GeoDataFrame({"geometry": [lines]}, crs="EPSG:4326")
+    vector_lines = gu.Vector(gdf)
+
+    # Create a synthetic MultiLineString geometry
+    multilines = MultiLineString([[(10, 10), (11, 10), (11, 11)], [(5, 5), (6, 5), (6, 6)]])
+    gdf = gpd.GeoDataFrame({"geometry": [multilines]}, crs="EPSG:4326")
+    vector_multilines = gu.Vector(gdf)
 
     def test_create_mask(self) -> None:
         """
@@ -125,3 +135,113 @@ class TestSynthetic:
             # Difference between masks should always be thinner than buffer + 1
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
+
+    def test_extract_vertices(self) -> None:
+        """
+        Test that extract_vertices works with simple geometries.
+        """
+        # Polygons
+        vertices = gu.geovector.extract_vertices(self.vector.ds)
+        assert len(vertices) == 1
+        assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]]
+
+        # MultiPolygons
+        vertices = gu.geovector.extract_vertices(self.vector_multipoly.ds)
+        assert len(vertices) == 2
+        assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]
+        assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0), (5.0, 5.0)]
+
+        # LineString
+        vertices = gu.geovector.extract_vertices(self.vector_lines.ds)
+        assert len(vertices) == 1
+        assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]]
+
+        # MultiLineString
+        vertices = gu.geovector.extract_vertices(self.vector_multilines.ds)
+        assert len(vertices) == 2
+        assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]
+        assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0)]
+
+    def test_generate_voronoi(self) -> None:
+        """
+        Check that geovector.generate_voronoi_polygons works on a simple Polygon.
+        Does not work with simple shapes as squares or triangles as the diagram is infinite.
+        For now, test on a set of two squares.
+        """
+        # Check with a multipolygon
+        voronoi = gu.geovector.generate_voronoi_polygons(self.vector_multipoly.ds)
+        assert len(voronoi) == 2
+        vertices = gu.geovector.extract_vertices(voronoi)
+        assert vertices == [
+            [(5.5, 10.5), (10.5, 10.5), (10.5, 5.5), (5.5, 10.5)],
+            [(5.5, 10.5), (10.5, 5.5), (5.5, 5.5), (5.5, 10.5)],
+        ]
+
+        # Check that it fails with proper error for too simple geometries
+        expected_message = "Invalid geometry, cannot generate finite Voronoi polygons"
+        with pytest.raises(ValueError, match=expected_message):
+            voronoi = gu.geovector.generate_voronoi_polygons(self.vector.ds)
+
+    def test_buffer_without_overlap(self) -> None:
+        """
+        Check that non-overlapping buffer feature works. Does not work on simple geometries, so test on MultiPolygon.
+        Yet, very simple geometries yield unexpected results, as is the case for the second test case here.
+        """
+        # Case 1, test with two squares, in separate Polygons
+        two_squares = gu.Vector(gpd.GeoDataFrame(geometry=[self.poly1, self.poly2], crs="EPSG:4326"))
+
+        # Check with buffers that should not overlap
+        # ------------------------------------------
+        buffer_size = 2
+        buffer = two_squares.buffer_without_overlap(buffer_size)
+
+        # Output should be of same size as input and same geometry type
+        assert len(buffer.ds) == len(two_squares.ds)
+        assert np.all(buffer.ds.geometry.geom_type == two_squares.ds.geometry.geom_type)
+
+        # Extract individual geometries
+        polys = []
+        for geom in buffer.ds.geometry:
+            if geom.geom_type in ["MultiPolygon"]:
+                polys.extend(list(geom))
+            else:
+                polys.append(geom)
+
+        # Check they do not overlap
+        for i in range(len(polys)):
+            for j in range(i + 1, len(polys)):
+                assert not polys[i].intersects(polys[j])
+
+        # buffer should yield the same result as create_mask with buffer, minus the original mask
+        mask_nonoverlap = buffer.create_mask(xres=0.1, bounds=(0, 0, 21, 21))
+        mask_buffer = two_squares.create_mask(xres=0.1, bounds=(0, 0, 21, 21), buffer=buffer_size)
+        mask_nobuffer = two_squares.create_mask(xres=0.1, bounds=(0, 0, 21, 21))
+        assert np.all(mask_nobuffer | mask_nonoverlap == mask_buffer)
+
+        # Case 2 - Check with buffers that overlap -> this case is actually not the expected result !
+        # -------------------------------
+        buffer_size = 5
+        buffer = two_squares.buffer_without_overlap(buffer_size)
+
+        # Output should be of same size as input and same geometry type
+        assert len(buffer.ds) == len(two_squares.ds)
+        assert np.all(buffer.ds.geometry.geom_type == two_squares.ds.geometry.geom_type)
+
+        # Extract individual geometries
+        polys = []
+        for geom in buffer.ds.geometry:
+            if geom.geom_type in ["MultiPolygon"]:
+                polys.extend(list(geom))
+            else:
+                polys.append(geom)
+
+        # Check they do not overlap
+        for i in range(len(polys)):
+            for j in range(i + 1, len(polys)):
+                assert polys[i].intersection(polys[j]).area == 0
+
+        # buffer should yield the same result as create_mask with buffer, minus the original mask
+        mask_nonoverlap = buffer.create_mask(xres=0.1, bounds=(0, 0, 21, 21))
+        mask_buffer = two_squares.create_mask(xres=0.1, bounds=(0, 0, 21, 21), buffer=buffer_size)
+        mask_nobuffer = two_squares.create_mask(xres=0.1, bounds=(0, 0, 21, 21))
+        assert np.all(mask_nobuffer | mask_nonoverlap == mask_buffer)
