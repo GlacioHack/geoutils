@@ -218,7 +218,7 @@ class TestSynthetic:
         mask_nobuffer = two_squares.create_mask(xres=0.1, bounds=(0, 0, 21, 21))
         assert np.all(mask_nobuffer | mask_nonoverlap == mask_buffer)
 
-        # Check with buffers that overlap -> this case is actually not the expected result !
+        # Case 2 - Check with buffers that overlap -> this case is actually not the expected result !
         # -------------------------------
         buffer_size = 5
         buffer = two_squares.buffer_without_overlap(buffer_size)
