@@ -413,9 +413,9 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         return gu.Vector(merged_voronoi)
 
 
-############################################
-# Additional stand-alone utility functions #
-############################################
+# -----------------------------------------
+# Additional stand-alone utility functions
+# -----------------------------------------
 
 
 def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
@@ -449,7 +449,7 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
 
 def generate_voronoi_polygons(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
-    Function to generate the Voronoi polygons (tessellation) from the vertices of all geometries in a GeoDataFrame.
+    Generate Voronoi polygons (tessellation) from the vertices of all geometries in a GeoDataFrame.
 
     Uses scipy.spatial.voronoi.
 
