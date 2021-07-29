@@ -422,7 +422,8 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
 
     :param gdf: The GeoDataFrame from which the vertices need to be extracted.
 
-    :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal \ to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
+    :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal \
+ to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
     """
     vertices = []
     # Loop on all geometries within gdf
@@ -446,7 +447,7 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
 
 def generate_voronoi_polygons(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
-    Function to generate the Voronoi polygons (tesselation) from the vertices of all geometries in a GeoDataFrame.
+    Function to generate the Voronoi polygons (tessellation) from the vertices of all geometries in a GeoDataFrame.
 
     Uses scipy.spatial.voronoi.
 

@@ -149,7 +149,7 @@ class TestSynthetic:
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
 
-    def test_extract_vertices(self):
+    def test_extract_vertices(self) -> None:
         """
         Test that extract_vertices works with simple geometries.
         """
@@ -175,10 +175,10 @@ class TestSynthetic:
         assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]
         assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0)]
 
-    def test_generate_voronoi(self):
+    def test_generate_voronoi(self) -> None:
         """
         Check that geovector.generate_voronoi_polygons works on a simple Polygon.
-        Does not work with simple shapes as squares or triangles as teh diagram is infinite.
+        Does not work with simple shapes as squares or triangles as the diagram is infinite.
         For now, test on a set of two squares.
         """
         # Check with a multipolygon
