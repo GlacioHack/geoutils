@@ -9,14 +9,14 @@ from numbers import Number
 from typing import TypeVar
 
 import geopandas as gpd
+import matplotlib.pyplot as plt
 import numpy as np
 import rasterio as rio
+import shapely
 from rasterio import features, warp
 from rasterio.crs import CRS
-import shapely
-from shapely.geometry.polygon import Polygon
 from scipy.spatial import Voronoi
-import matplotlib.pyplot as plt
+from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 
@@ -369,7 +369,7 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
             plt.figure(figsize=(16, 4))
             ax1 = plt.subplot(141)
             voronoi_all.plot(ax=ax1)
-            gdf.plot(fc='none', ec='k', ax=ax1)
+            gdf.plot(fc="none", ec="k", ax=ax1)
             ax1.set_title("Voronoi polygons, cropped")
 
         # Extract Voronoi polygons only within the buffer area
@@ -377,12 +377,12 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
 
         # Join attributes of original geometries into the Voronoi polygons
         voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff)
-        joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how='right')
+        joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how="right")
 
         # Plot results -> some polygons are duplicated
         if plot:
             ax2 = plt.subplot(142, sharex=ax1, sharey=ax1)
-            joined_voronoi.plot(ax=ax2, column="index_left", alpha=0.5, ec='k')
+            joined_voronoi.plot(ax=ax2, column="index_left", alpha=0.5, ec="k")
             gdf.plot(ax=ax2, column=gdf.index.values)
             ax2.set_title("Buffer with duplicated polygons")
 
@@ -393,12 +393,12 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         # Plot results -> unique polygons only
         if plot:
             ax3 = plt.subplot(143, sharex=ax1, sharey=ax1)
-            unique_voronoi.plot(ax=ax3, column="index_left", alpha=0.5, ec='k')
+            unique_voronoi.plot(ax=ax3, column="index_left", alpha=0.5, ec="k")
             gdf.plot(ax=ax3, column=gdf.index.values)
             ax3.set_title("Buffer with unique polygons")
 
         # Dissolve all polygons by original index
-        merged_voronoi = unique_voronoi.dissolve(by='index_left')
+        merged_voronoi = unique_voronoi.dissolve(by="index_left")
 
         # Plot
         if plot:
@@ -415,8 +415,9 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
 # Additional stand-alone utility functions #
 ############################################
 
+
 def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
-    """
+    r"""
     Function to extract the exterior vertices of all shapes within a gpd.GeoDataFrame.
 
     :param gdf: The GeoDataFrame from which the vertices need to be extracted.
@@ -427,13 +428,13 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
     # Loop on all geometries within gdf
     for geom in gdf.geometry:
         # Extract geometry exterior(s)
-        if geom.geom_type == 'MultiPolygon':
+        if geom.geom_type == "MultiPolygon":
             exteriors = [p.exterior for p in geom]
-        elif geom.geom_type == 'Polygon':
-            exteriors = [geom.exterior,]
-        elif geom.geom_type == 'LineString':
-            exteriors = [geom,]
-        elif geom.geom_type == 'MultiLineString':
+        elif geom.geom_type == "Polygon":
+            exteriors = [geom.exterior]
+        elif geom.geom_type == "LineString":
+            exteriors = [geom]
+        elif geom.geom_type == "MultiLineString":
             exteriors = geom
         else:
             raise NotImplementedError(f"Geometry type {geom.geom_type} not implemented.")
@@ -499,9 +500,7 @@ are filled with new polygons.
 
     # Merge cropped Voronoi with gaps, if not empty, otherwise return cropped Voronoi
     with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", "Geometry is in a geographic CRS. Results from 'area' are likely incorrect."
-        )
+        warnings.filterwarnings("ignore", "Geometry is in a geographic CRS. Results from 'area' are likely incorrect.")
         tot_area = np.sum(gaps.area.values)
 
     if not tot_area == 0:
