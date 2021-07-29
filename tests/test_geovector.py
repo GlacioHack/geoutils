@@ -56,14 +56,7 @@ class TestSynthetic:
 
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
     poly = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
-    gdf = gpd.GeoDataFrame(
-        {
-            "geometry": [
-                poly,
-            ]
-        },
-        crs="EPSG:4326",
-    )
+    gdf = gpd.GeoDataFrame({"geometry": [poly]}, crs="EPSG:4326")
     vector = gu.Vector(gdf)
 
     # Same with a square started at position (5, 5)
@@ -78,14 +71,7 @@ class TestSynthetic:
 
     # Create a synthetic vector file with a square of size 5, started at position (8, 8)
     poly = Polygon([(8, 8), (13, 8), (13, 13), (8, 13)])
-    gdf = gpd.GeoDataFrame(
-        {
-            "geometry": [
-                poly,
-            ]
-        },
-        crs="EPSG:4326",
-    )
+    gdf = gpd.GeoDataFrame({"geometry": [poly]}, crs="EPSG:4326")
     vector_5 = gu.Vector(gdf)
 
     # Create a synthetic LineString geometry
