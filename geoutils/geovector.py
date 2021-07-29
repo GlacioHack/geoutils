@@ -375,8 +375,9 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         # Extract Voronoi polygons only within the buffer area
         voronoi_diff = voronoi_all.intersection(buffer.geometry[0])
 
-        # Join attributes of original geometries into the Voronoi polygons
-        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff)
+        # Split all polygons, and join attributes of original geometries into the Voronoi polygons
+        # Splitting, i.e. explode, is needed when Voronoi generate MultiPolygons that may extend over several features.
+        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode())
         joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how="right")
 
         # Plot results -> some polygons are duplicated
@@ -505,7 +506,7 @@ are filled with new polygons.
         tot_area = np.sum(gaps.area.values)
 
     if not tot_area == 0:
-        voronoi_all = gpd.GeoDataFrame(geometry=list(voronoi_crop.geometry) + list(gaps.geometry[0]))
+        voronoi_all = gpd.GeoDataFrame(geometry=list(voronoi_crop.geometry) + list(gaps.geometry))
         voronoi_all.crs = gdf.crs
         return voronoi_all
     else:
