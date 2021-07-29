@@ -334,6 +334,7 @@ the provided raster file.
 of each geometry.
         The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,\
 hence one geometry "steps" slightly on the neighbor buffer in some cases.
+        The algorithm may also yield unexpected results on very simple geometries.
 
         Note: A similar functionality is provided by momepy (http://docs.momepy.org) and is probably more robust.
         It could be implemented in GeoPandas in the future: https://github.com/geopandas/geopandas/issues/2015
