@@ -4,7 +4,7 @@ from typing import Optional
 
 from setuptools import setup
 
-FULLVERSION = "0.0.3"
+FULLVERSION = "0.0.4"
 VERSION = FULLVERSION
 
 write_version = True
