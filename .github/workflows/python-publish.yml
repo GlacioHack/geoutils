@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
      inputs:
         reason:
-          description: 'Reason for manual trigger'     
+          description: 'Reason for manual trigger'
           required: true
-          default: 'testing' 
+          default: 'testing'
 
 jobs:
   deploy:
@@ -35,4 +35,4 @@ jobs:
       run: |
         python setup.py sdist bdist_wheel
         twine upload dist/*
-        
+
