@@ -46,7 +46,7 @@ Clone the git repo and create a conda environment
 ```bash
 git clone https://github.com/GlacioHack/geoutils.git
 cd geoutils
-conda create -f environment.yml  # add '-n custom_name' if you want.
+conda env create -f environment.yml  # add '-n custom_name' if you want.
 conda activate geoutils  # or any other name specified above
 pip install -e .  # Install geoutils in developer mode
 ```
