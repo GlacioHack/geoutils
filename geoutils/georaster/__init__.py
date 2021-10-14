@@ -1,1 +1,1 @@
-from geoutils.georaster.raster import Raster, RasterType
+from geoutils.georaster.raster import Raster, RasterType  # noqa
