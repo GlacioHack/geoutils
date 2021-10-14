@@ -9,6 +9,7 @@ dependencies:
   - rasterio
   - scipy
   - pip
+  - tqdm
   - pip:
 
     - "typing-extensions; python_version < '3.8'"
