@@ -24,3 +24,7 @@ For the above filename, this will be printed in the console:
 Currently supporting the nomenclatures used for: Landsat, Sentinel-2, ArcticDEM, REMA, ASTER L1A, ASTER GDEM, NASADEM, TanDEM-X, SRTM and SPOT-5
 
 More to come...
+
+.. minigallery:: geoutils.SatelliteImage
+        :add-heading:
+        :heading-level: -

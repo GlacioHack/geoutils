@@ -49,7 +49,7 @@ setup(
     url="https://www.github.com/GlacioHack/geoutils/",
     author="The GlacioHack Team",
     license="BSD-3",
-    packages=["geoutils", "geoutils.datasets"],
+    packages=["geoutils", "geoutils.datasets", "geoutils.georaster"],
     package_data={"geoutils": data_files},
     install_requires=[
         "rasterio",
