@@ -10,6 +10,7 @@ Full information about geoutils' functionality is provided on this page.
 .. autosummary::
         :toctree: gen_modules/
         :template: module.rst
+        :recursive:
 
         georaster
         geovector
