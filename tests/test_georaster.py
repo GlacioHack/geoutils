@@ -17,6 +17,7 @@ import geoutils.georaster as gr
 import geoutils.geovector as gv
 import geoutils.projtools as pt
 from geoutils import datasets
+from geoutils.georaster.raster import _default_ndv, _resampling_from_str
 
 DO_PLOT = False
 
@@ -648,28 +649,28 @@ class TestRaster:
         """
         Test that the default nodata values are as expected.
         """
-        assert gr._default_ndv("uint8") == np.iinfo("uint8").max
-        assert gr._default_ndv("int8") == np.iinfo("int8").min
-        assert gr._default_ndv("uint16") == np.iinfo("uint16").max
-        assert gr._default_ndv("int16") == np.iinfo("int16").min
-        assert gr._default_ndv("uint32") == 99999
+        assert _default_ndv("uint8") == np.iinfo("uint8").max
+        assert _default_ndv("int8") == np.iinfo("int8").min
+        assert _default_ndv("uint16") == np.iinfo("uint16").max
+        assert _default_ndv("int16") == np.iinfo("int16").min
+        assert _default_ndv("uint32") == 99999
         for dtype in ["int32", "float32", "float64", "float128"]:
-            assert gr._default_ndv(dtype) == -99999
+            assert _default_ndv(dtype) == -99999
 
         # Check it works with most frequent np.dtypes too
-        assert gr._default_ndv(np.dtype("uint8")) == np.iinfo("uint8").max
+        assert _default_ndv(np.dtype("uint8")) == np.iinfo("uint8").max
         for dtype in [np.dtype("int32"), np.dtype("float32"), np.dtype("float64")]:
-            assert gr._default_ndv(dtype) == -99999
+            assert _default_ndv(dtype) == -99999
 
         # Check it works with most frequent types too
-        assert gr._default_ndv(np.uint8) == np.iinfo("uint8").max
+        assert _default_ndv(np.uint8) == np.iinfo("uint8").max
         for dtype in [np.int32, np.float32, np.float64]:
-            assert gr._default_ndv(dtype) == -99999
+            assert _default_ndv(dtype) == -99999
 
         # Check that an error is raised for other types
         expected_message = "No default nodata value set for dtype"
         with pytest.raises(NotImplementedError, match=expected_message):
-            gr._default_ndv("bla")
+            _default_ndv("bla")
 
     def test_astype(self) -> None:
 
@@ -944,12 +945,12 @@ class TestRaster:
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
         warnings.simplefilter("error")
-        assert gr._resampling_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
-        assert gr._resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
+        assert _resampling_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
+        assert _resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
 
         # Check that odd strings return the appropriate error.
         try:
-            gr._resampling_from_str("CUBIC_SPLINE")  # noqa
+            _resampling_from_str("CUBIC_SPLINE")  # noqa
         except ValueError as exception:
             if "not a valid rasterio.warp.Resampling method" not in str(exception):
                 raise exception
