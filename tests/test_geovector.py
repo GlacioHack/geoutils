@@ -51,6 +51,13 @@ class TestVector:
         assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
 
+    def test_rasterize(self) -> None:
+
+        burned = self.glacier_outlines.rasterize(xres=30)
+
+        assert burned.shape[0] > 0
+        assert burned.shape[1] > 0
+
 
 class TestSynthetic:
 

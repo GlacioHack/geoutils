@@ -258,8 +258,8 @@ the provided raster file.
 
             # Calculate raster shape
             left, bottom, right, top = bounds
-            height = abs((right - left) / xres)
-            width = abs((top - bottom) / yres)
+            width = abs((right - left) / xres)
+            height = abs((top - bottom) / yres)
 
             if width % 1 != 0 or height % 1 != 0:
                 warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
