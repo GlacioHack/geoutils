@@ -13,13 +13,14 @@ Full information about geoutils' functionality is provided on this page.
         :recursive:
 
         georaster
+        georaster.raster
         geovector
         projtools
         satimg
         geoviewer
         datasets
 
-.. automodule:: geoutils
+.. automodule geoutils
 
    .. contents:: Contents
       :local:

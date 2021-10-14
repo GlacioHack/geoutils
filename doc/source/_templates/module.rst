@@ -36,10 +36,6 @@
 
    {% for item in classes %}
 
-   {% set special_classes = ["Raster", "SatelliteImage", "Vector"] %}
-
-   {% if item not in special_classes %}
-
    {{item}}
    {{ "-" * (item | length) }}
 
@@ -53,7 +49,6 @@
    .. minigallery:: {{fullname}}.{{item}}
        :add-heading:
 
-   {% endif %}
    {% endfor %}
    {% endif %}
    {% endblock %}
