@@ -15,7 +15,7 @@ import rasterio.warp
 from tqdm import tqdm
 
 import geoutils as gu
-from geoutils.georaster import RasterType
+from geoutils.georaster import Raster, RasterType
 
 
 def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
@@ -119,13 +119,13 @@ def merge_bounding_boxes(bounds: list[rio.coords.BoundingBox], resolution: float
 
 
 def stack_rasters(
-    rasters: list[gu.georaster.Raster],
+    rasters: list[RasterType],
     reference: int | gu.Raster = 0,
     resampling_method: str | rio.warp.Resampling = "bilinear",
     use_ref_bounds: bool = False,
     diff: bool = False,
     progress: bool = True,
-) -> gu.Raster:
+) -> Raster:
     """
     Stack a list of rasters into a common grid as a 3D np array with nodata set to Nan.
 
@@ -220,7 +220,7 @@ def merge_rasters(
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.warp.Resampling = "bilinear",
     use_ref_bounds: bool = False,
-) -> gu.georaster.Raster:
+) -> Raster:
     """
     Merge a list of rasters into one larger raster.
 
@@ -385,7 +385,7 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> np.ndarray:
     return indices.reshape(shape)
 
 
-def get_xy_rotated(raster: gu.georaster.Raster, along_track_angle: float) -> tuple[np.ndarray, np.ndarray]:
+def get_xy_rotated(raster: Raster, along_track_angle: float) -> tuple[np.ndarray, np.ndarray]:
     """
     Rotate x, y axes of image to get along- and cross-track distances.
     :param raster: raster to get x,y positions from.
