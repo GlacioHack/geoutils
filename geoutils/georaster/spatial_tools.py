@@ -125,7 +125,7 @@ def stack_rasters(
     use_ref_bounds: bool = False,
     diff: bool = False,
     progress: bool = True,
-) -> Raster:
+) -> RasterType:
     """
     Stack a list of rasters into a common grid as a 3D np array with nodata set to Nan.
 
@@ -204,7 +204,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     data = np.asarray(data)
 
     # Save as gu.Raster
-    r = gu.georaster.Raster.from_array(
+    r = reference_raster.from_array(
         data=data,
         transform=rio.transform.from_bounds(*dst_bounds, width=data[0].shape[1], height=data[0].shape[0]),
         crs=reference_raster.crs,
@@ -215,8 +215,8 @@ height2 and width2 are set based on reference's resolution and the maximum exten
 
 
 def merge_rasters(
-    rasters: list[gu.georaster.Raster],
-    reference: int | gu.Raster = 0,
+    rasters: list[RasterType],
+    reference: int | Raster = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.warp.Resampling = "bilinear",
     use_ref_bounds: bool = False,
