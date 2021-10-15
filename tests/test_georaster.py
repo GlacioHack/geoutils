@@ -17,7 +17,8 @@ import geoutils.georaster as gr
 import geoutils.geovector as gv
 import geoutils.projtools as pt
 from geoutils import datasets
-from geoutils.georaster.raster import _default_ndv, _resampling_from_str
+from geoutils.georaster.raster import _default_ndv
+from geoutils.misc import resampling_method_from_str
 
 DO_PLOT = False
 
@@ -945,12 +946,12 @@ class TestRaster:
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
         warnings.simplefilter("error")
-        assert _resampling_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
-        assert _resampling_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
+        assert resampling_method_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
+        assert resampling_method_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
 
         # Check that odd strings return the appropriate error.
         try:
-            _resampling_from_str("CUBIC_SPLINE")  # noqa
+            resampling_method_from_str("CUBIC_SPLINE")  # noqa
         except ValueError as exception:
             if "not a valid rasterio.warp.Resampling method" not in str(exception):
                 raise exception

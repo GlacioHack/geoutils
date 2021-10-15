@@ -58,6 +58,7 @@ setup(
         "scipy",
         "typing-extensions; python_version < '3.8'",
         "matplotlib",
+        "tqdm",
     ],
     extras_require={"rioxarray": ["rioxarray"]},
     scripts=["geoutils/geoviewer.py"],
