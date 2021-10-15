@@ -23,93 +23,111 @@ from geoutils import datasets
 #     assert np.nanmean(np.abs(diff.data)) < 100
 
 
-class TestMerging:
+class stack_merge_images:
     """
     Test cases for stacking and merging images
     Split an image with some overlap, then stack/merge it, and validate bounds and shape.
     """
 
-    img = gu.Raster(datasets.get_path("landsat_B4"))
+    def __init__(self, image: str) -> None:
+        img = gu.Raster(datasets.get_path(image))
+        self.img = img
 
-    # Find the easting midpoint of the img
-    x_midpoint = np.mean([img.bounds.right, img.bounds.left])
-    x_midpoint -= x_midpoint % img.res[0]
+        # Find the easting midpoint of the img
+        x_midpoint = np.mean([img.bounds.right, img.bounds.left])
+        x_midpoint -= x_midpoint % img.res[0]
 
-    # Cut the img into two imgs that slightly overlap each other.
-    img1 = img.copy()
-    img1.crop(
-        rio.coords.BoundingBox(
-            right=x_midpoint + img.res[0] * 3, left=img.bounds.left, top=img.bounds.top, bottom=img.bounds.bottom
+        # Cut the img into two imgs that slightly overlap each other.
+        self.img1 = img.copy()
+        self.img1.crop(
+            rio.coords.BoundingBox(
+                right=x_midpoint + img.res[0] * 3, left=img.bounds.left, top=img.bounds.top, bottom=img.bounds.bottom
+            )
         )
+        self.img2 = img.copy()
+        self.img2.crop(
+            rio.coords.BoundingBox(
+                left=x_midpoint - img.res[0] * 3, right=img.bounds.right, top=img.bounds.top, bottom=img.bounds.bottom
+            )
+        )
+
+        # To check that use_ref_bounds work - create a img that do not cover the whole extent
+        self.img3 = img.copy()
+        self.img3.crop(
+            rio.coords.BoundingBox(
+                left=x_midpoint - img.res[0] * 3,
+                right=img.bounds.right - img.res[0] * 2,
+                top=img.bounds.top,
+                bottom=img.bounds.bottom,
+            )
+        )
+
+
+@pytest.fixture
+def images_1d():  # type: ignore
+    return stack_merge_images("landsat_B4")
+
+
+@pytest.fixture
+def images_3d():  # type: ignore
+    return stack_merge_images("landsat_RGB")
+
+
+@pytest.mark.parametrize("rasters", [pytest.lazy_fixture("images_1d")])  # type: ignore
+#    pytest.lazy_fixture('images_3d')]) ## Requires Raster.reproject() fix.
+def test_stack_rasters(rasters) -> None:  # type: ignore
+    """Test stack_rasters"""
+    # Merge the two overlapping DEMs and check that output bounds and shape is correct
+    stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
+
+    assert stacked_img.count == 2
+    assert rasters.img.shape == stacked_img.shape
+
+    merged_bounds = gu.georaster.spatial_tools.merge_bounding_boxes(
+        [rasters.img1.bounds, rasters.img2.bounds], resolution=rasters.img1.res[0]
     )
-    img2 = img.copy()
-    img2.crop(
-        rio.coords.BoundingBox(
-            left=x_midpoint - img.res[0] * 3, right=img.bounds.right, top=img.bounds.top, bottom=img.bounds.bottom
-        )
+    assert merged_bounds == stacked_img.bounds
+
+    # Check that reference works with input Raster
+    stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img)
+    assert rasters.img.bounds == stacked_img.bounds
+
+    # Others than int or gu.Raster should raise a ValueError
+    try:
+        stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img2], reference="a string")
+    except ValueError as exception:
+        if "reference should be" not in str(exception):
+            raise exception
+
+    # Check that use_ref_bounds works - use a img that do not cover the whole extent
+
+    # This case should not preserve original extent
+    stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img3])
+    assert stacked_img.bounds != rasters.img.bounds
+
+    # This case should preserve original extent
+    stacked_img2 = gu.georaster.spatial_tools.stack_rasters(
+        [rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True
     )
+    assert stacked_img2.bounds == rasters.img.bounds
 
-    # To check that use_ref_bounds work - create a img that do not cover the whole extent
-    img3 = img.copy()
-    img3.crop(
-        rio.coords.BoundingBox(
-            left=x_midpoint - img.res[0] * 3,
-            right=img.bounds.right - img.res[0] * 2,
-            top=img.bounds.top,
-            bottom=img.bounds.bottom,
-        )
-    )
 
-    def test_stack_rasters(self) -> None:
-        """Test stack_rasters"""
-        # Merge the two overlapping DEMs and check that output bounds and shape is correct
-        stacked_img = gu.georaster.spatial_tools.stack_rasters([self.img1, self.img2])
+@pytest.mark.parametrize("rasters", [pytest.lazy_fixture("images_1d")])  # type: ignore
+#    pytest.lazy_fixture('images_3d')]) ##Requires Raster.reproject() fix.
+def test_merge_rasters(rasters) -> None:  # type: ignore
+    """Test merge_rasters"""
+    # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
+    merged_img = gu.georaster.spatial_tools.merge_rasters([rasters.img1, rasters.img2])
+    assert rasters.img.data.shape == merged_img.data.shape
+    assert rasters.img.bounds == merged_img.bounds
 
-        assert stacked_img.count == 2
-        assert self.img.shape == stacked_img.shape
+    diff = rasters.img.data - merged_img.data
 
-        merged_bounds = gu.georaster.spatial_tools.merge_bounding_boxes(
-            [self.img1.bounds, self.img2.bounds], resolution=self.img1.res[0]
-        )
-        assert merged_bounds == stacked_img.bounds
+    assert np.abs(np.nanmean(diff)) < 0.3
 
-        # Check that reference works with input Raster
-        stacked_img = gu.georaster.spatial_tools.stack_rasters([self.img1, self.img2], reference=self.img)
-        assert self.img.bounds == stacked_img.bounds
-
-        # Others than int or gu.Raster should raise a ValueError
-        try:
-            stacked_img = gu.georaster.spatial_tools.stack_rasters([self.img1, self.img2], reference="a string")
-        except ValueError as exception:
-            if "reference should be" not in str(exception):
-                raise exception
-
-        # Check that use_ref_bounds works - use a img that do not cover the whole extent
-
-        # This case should not preserve original extent
-        stacked_img = gu.georaster.spatial_tools.stack_rasters([self.img1, self.img3])
-        assert stacked_img.bounds != self.img.bounds
-
-        # This case should preserve original extent
-        stacked_img2 = gu.georaster.spatial_tools.stack_rasters(
-            [self.img1, self.img3], reference=self.img, use_ref_bounds=True
-        )
-        assert stacked_img2.bounds == self.img.bounds
-
-    def test_merge_rasters(self) -> None:
-        """Test merge_rasters"""
-        # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
-        merged_img = gu.georaster.spatial_tools.merge_rasters([self.img1, self.img2])
-        assert self.img.data.shape == merged_img.data.shape
-        assert self.img.bounds == merged_img.bounds
-
-        diff = self.img.data - merged_img.data
-
-        assert np.abs(np.nanmean(diff)) < 0.3
-
-        # Check that reference works
-        merged_img2 = gu.georaster.spatial_tools.merge_rasters([self.img1, self.img2], reference=self.img)
-        assert merged_img2 == merged_img
+    # Check that reference works
+    merged_img2 = gu.georaster.spatial_tools.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
+    assert merged_img2 == merged_img
 
 
 def test_subdivide_array() -> None:
