@@ -51,12 +51,21 @@ class TestVector:
         assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
 
-    def test_rasterize(self) -> None:
+    def test_rasterize_proj(self) -> None:
 
-        burned = self.glacier_outlines.rasterize(xres=30)
+        burned = self.glacier_outlines.rasterize(xres=3000)
 
-        assert burned.shape[0] > 0
-        assert burned.shape[1] > 0
+        assert burned.shape[0] == 146
+        assert burned.shape[1] == 115
+
+    def test_rasterize_unproj(self) -> None:
+        """Test rasterizing an EPSG:3426 dataset into a projection."""
+        v = gu.Vector(gu.datasets.get_path("glacier_outlines"))
+        # Use Web Mercator at 30 m.
+        burned = v.rasterize(xres=30, crs=3857)
+
+        assert burned.shape[0] == 1251
+        assert burned.shape[1] == 1522
 
 
 class TestSynthetic:
