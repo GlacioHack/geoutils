@@ -67,19 +67,20 @@ class TestRaster:
         r.data[0, 0, 0] += 5
         assert r2.data[0, 0, 0] == r.data[0, 0, 0]
 
-        r.nbands = 2
+        #r.nbands = 2
+        r._data = np.repeat(r.data, 2).reshape((2,) + r.shape)
         assert r.nbands != r2.nbands
 
     def test_info(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
 
+
         # Check all is good with passing attributes
         default_attrs = [
             "bounds",
             "count",
             "crs",
-            "dataset_mask",
             "driver",
             "dtypes",
             "height",
@@ -91,8 +92,9 @@ class TestRaster:
             "transform",
             "width",
         ]
-        for attr in default_attrs:
-            assert r.__getattribute__(attr) == r.ds.__getattribute__(attr)
+        with rio.open(datasets.get_path("landsat_B4")) as dataset:
+            for attr in default_attrs:
+                assert r.__getattribute__(attr) == dataset.__getattribute__(attr)
 
         # Check summary matches that of RIO
         assert str(r) == r.info()
@@ -119,13 +121,12 @@ class TestRaster:
         # Test 1 - loading metadata only, single band
         r = gr.Raster(datasets.get_path("landsat_B4"), load_data=False)
 
-        assert isinstance(r.ds, rio.DatasetReader)
         assert r.driver == "GTiff"
         assert r.width == 800
         assert r.height == 655
         assert r.shape == (r.height, r.width)
         assert r.count == 1
-        assert r.nbands is None
+        #assert r.nbands is None
         assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
@@ -158,7 +159,7 @@ class TestRaster:
         assert r.count == 3
         assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 1
-        assert r.bands == (1)
+        #assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
@@ -301,10 +302,10 @@ class TestRaster:
         assert r2.name != r.name
 
         # Check all attributes except name, driver and dataset_mask array
-        # default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
-        #                  'res', 'shape', 'transform', 'width']
+        default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
+                          'res', 'shape', 'transform', 'width']
         # using list directly available in Class
-        attrs = [at for at in r._get_rio_attrs() if at not in ["name", "dataset_mask", "driver"]]
+        attrs = [at for at in default_attrs]
         for attr in attrs:
             print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
