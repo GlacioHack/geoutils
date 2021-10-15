@@ -185,19 +185,3 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 
     same: bool = proj1.is_exact_same(proj2)
     return same
-
-
-def resampling_method_from_str(method_str: str) -> rio.warp.Resampling:
-    """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
-    # Try to match the string version of the resampling method with a rio Resampling enum name
-    for method in rio.warp.Resampling:
-        if str(method).replace("Resampling.", "") == method_str:
-            resampling_method = method
-            break
-    # If no match was found, raise an error.
-    else:
-        raise ValueError(
-            f"'{method_str}' is not a valid rasterio.warp.Resampling method. "
-            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
-        )
-    return resampling_method
