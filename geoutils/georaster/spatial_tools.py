@@ -145,7 +145,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
  in case the reference should not be stacked. Defaults to the first raster in the list.
     :param resampling_method: The resampling method for the raster reprojections.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
-    :param diff: If True, will return the difference to the reference, rather than the DEMs.
+    :param diff: If True, will return the difference to the reference raster.
     :param progress: If True, will display a progress bar. Default is True.
 
     :returns: The stacked raster with the same parameters (optionally bounds) as the reference.
@@ -189,12 +189,12 @@ height2 and width2 are set based on reference's resolution and the maximum exten
 
         # Optionally calculate difference
         if diff:
-            ddem = (reference_raster.data - reprojected_raster.data).squeeze()
-            ddem, _ = get_array_and_mask(ddem)
-            data.append(ddem)
+            diff_to_ref = (reference_raster.data - reprojected_raster.data).squeeze()
+            diff_to_ref, _ = get_array_and_mask(diff_to_ref)
+            data.append(diff_to_ref)
         else:
-            dem, _ = get_array_and_mask(reprojected_raster.data.squeeze())
-            data.append(dem)
+            img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
+            data.append(img_data)
 
         # Remove unloaded rasters
         if not raster.is_loaded:
