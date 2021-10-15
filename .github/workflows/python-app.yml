@@ -39,7 +39,7 @@ jobs:
 
     - name: Install development dependencies and package
       run: |
-        mamba install sphinx numpydoc sphinx_rtd_theme sphinx-autodoc-typehints sphinxcontrib-programoutput flake8 pytest matplotlib pylint typing-extensions sphinx-gallery scikit-image
+        mamba install sphinx numpydoc sphinx_rtd_theme sphinx-autodoc-typehints sphinxcontrib-programoutput flake8 pytest pytest-lazy-fixture matplotlib pylint typing-extensions sphinx-gallery scikit-image
         pip install -e . --no-dependencies
 
     - name: Lint with flake8
