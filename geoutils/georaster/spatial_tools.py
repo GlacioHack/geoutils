@@ -220,7 +220,7 @@ def merge_rasters(
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.warp.Resampling = "bilinear",
     use_ref_bounds: bool = False,
-) -> Raster:
+) -> RasterType:
     """
     Merge a list of rasters into one larger raster.
 
@@ -277,7 +277,7 @@ If several algorithms are provided, each result is returned as a separate band.
             merged_data.append(np.apply_along_axis(algo, axis=0, arr=raster_stack.data))
 
     # Save as gu.Raster
-    merged_raster = gu.georaster.Raster.from_array(
+    merged_raster = reference_raster.from_array(
         data=np.reshape(merged_data, (len(merged_data),) + merged_data[0].shape),
         transform=rio.transform.from_bounds(
             *raster_stack.bounds, width=merged_data[0].shape[1], height=merged_data[0].shape[0]
