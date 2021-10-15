@@ -32,6 +32,7 @@ from shapely.geometry.polygon import Polygon
 
 import geoutils.geovector as gv
 from geoutils.geovector import Vector
+from geoutils.misc import resampling_method_from_str
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -47,28 +48,6 @@ else:
     _has_rioxarray = True
 
 RasterType = TypeVar("RasterType", bound="Raster")
-
-
-def _resampling_from_str(resampling: str) -> Resampling:
-    """
-    Match a rio.warp.Resampling enum from a string representation.
-
-    :param resampling: A case-sensitive string matching the resampling enum (e.g. 'cubic_spline')
-    :raises ValueError: If no matching Resampling enum was found.
-    :returns: A rio.warp.Resampling enum that matches the given string.
-    """
-    # Try to match the string version of the resampling method with a rio Resampling enum name
-    for method in rio.warp.Resampling:
-        if str(method).replace("Resampling.", "") == resampling:
-            resampling_method = method
-            break
-    # If no match was found, raise an error.
-    else:
-        raise ValueError(
-            f"'{resampling}' is not a valid rasterio.warp.Resampling method. "
-            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
-        )
-    return resampling_method
 
 
 # Function to set the default nodata values for any given dtype
@@ -910,7 +889,7 @@ class Raster:
             "src_transform": self.transform,
             "src_crs": self.crs,
             "dst_crs": dst_crs,
-            "resampling": resampling if isinstance(resampling, Resampling) else _resampling_from_str(resampling),
+            "resampling": resampling if isinstance(resampling, Resampling) else resampling_method_from_str(resampling),
             "src_nodata": src_nodata,
             "dst_nodata": dst_nodata,
         }

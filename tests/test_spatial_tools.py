@@ -78,23 +78,23 @@ def images_3d():  # type: ignore
 def test_stack_rasters(rasters) -> None:  # type: ignore
     """Test stack_rasters"""
     # Merge the two overlapping DEMs and check that output bounds and shape is correct
-    stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
+    stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
 
     assert stacked_img.count == 2
     assert rasters.img.shape == stacked_img.shape
 
-    merged_bounds = gu.georaster.spatial_tools.merge_bounding_boxes(
+    merged_bounds = gu.spatial_tools.merge_bounding_boxes(
         [rasters.img1.bounds, rasters.img2.bounds], resolution=rasters.img1.res[0]
     )
     assert merged_bounds == stacked_img.bounds
 
     # Check that reference works with input Raster
-    stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img)
+    stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img)
     assert rasters.img.bounds == stacked_img.bounds
 
     # Others than int or gu.Raster should raise a ValueError
     try:
-        stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img2], reference="a string")
+        stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2], reference="a string")
     except ValueError as exception:
         if "reference should be" not in str(exception):
             raise exception
@@ -102,11 +102,11 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
     # Check that use_ref_bounds works - use a img that do not cover the whole extent
 
     # This case should not preserve original extent
-    stacked_img = gu.georaster.spatial_tools.stack_rasters([rasters.img1, rasters.img3])
+    stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img3])
     assert stacked_img.bounds != rasters.img.bounds
 
     # This case should preserve original extent
-    stacked_img2 = gu.georaster.spatial_tools.stack_rasters(
+    stacked_img2 = gu.spatial_tools.stack_rasters(
         [rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True
     )
     assert stacked_img2.bounds == rasters.img.bounds
@@ -117,7 +117,7 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
 def test_merge_rasters(rasters) -> None:  # type: ignore
     """Test merge_rasters"""
     # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
-    merged_img = gu.georaster.spatial_tools.merge_rasters([rasters.img1, rasters.img2])
+    merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2])
     assert rasters.img.data.shape == merged_img.data.shape
     assert rasters.img.bounds == merged_img.bounds
 
@@ -126,7 +126,7 @@ def test_merge_rasters(rasters) -> None:  # type: ignore
     assert np.abs(np.nanmean(diff)) < 0.3
 
     # Check that reference works
-    merged_img2 = gu.georaster.spatial_tools.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
+    merged_img2 = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
     assert merged_img2 == merged_img
 
 
@@ -134,18 +134,18 @@ def test_subdivide_array() -> None:
 
     test_shape = (6, 4)
     test_count = 4
-    subdivision_grid = gu.georaster.spatial_tools.subdivide_array(test_shape, test_count)
+    subdivision_grid = gu.spatial_tools.subdivide_array(test_shape, test_count)
 
     assert subdivision_grid.shape == test_shape
     assert np.unique(subdivision_grid).size == test_count
 
-    assert np.unique(gu.georaster.spatial_tools.subdivide_array((3, 3), 3)).size == 3
+    assert np.unique(gu.spatial_tools.subdivide_array((3, 3), 3)).size == 3
 
     with pytest.raises(ValueError, match=r"Expected a 2D shape, got 1D shape.*"):
-        gu.georaster.spatial_tools.subdivide_array((5,), 2)
+        gu.spatial_tools.subdivide_array((5,), 2)
 
     with pytest.raises(ValueError, match=r"Shape.*smaller than.*"):
-        gu.georaster.spatial_tools.subdivide_array((5, 2), 15)
+        gu.spatial_tools.subdivide_array((5, 2), 15)
 
 
 @pytest.mark.parametrize("dtype", ["uint8", "uint16", "int32", "float32", "float16"])  # type: ignore
@@ -189,13 +189,13 @@ def test_get_array_and_mask(
     # Validate that incorrect shapes raise the correct error.
     if not check_should_pass:
         with pytest.raises(ValueError, match="Invalid array shape given"):
-            gu.georaster.spatial_tools.get_array_and_mask(array, check_shape=True)
+            gu.spatial_tools.get_array_and_mask(array, check_shape=True)
 
         # Stop the test here as the failure is now validated.
         return
 
     # Get a copy of the array and check its shape (it should always pass at this point)
-    arr, _ = gu.georaster.spatial_tools.get_array_and_mask(array, copy=True, check_shape=True)
+    arr, _ = gu.spatial_tools.get_array_and_mask(array, copy=True, check_shape=True)
 
     # Validate that the array is a copy
     assert not np.shares_memory(arr, array)
@@ -212,7 +212,7 @@ def test_get_array_and_mask(
         warnings.simplefilter("always")
 
         # Try to create a view.
-        arr_view, mask = gu.georaster.spatial_tools.get_array_and_mask(array, copy=False)
+        arr_view, mask = gu.spatial_tools.get_array_and_mask(array, copy=False)
 
         # If it should be possible, validate that there were no warnings.
         if view_should_be_possible:
@@ -256,29 +256,29 @@ class TestSubsample:
     @pytest.mark.parametrize("array", [array1D, array2D, array3D])  # type: ignore
     def test_subsample(self, array: np.ndarray) -> None:
         """
-        Test gu.georaster.spatial_tools.subsample_raster.
+        Test gu.spatial_tools.subsample_raster.
         """
         # Test that subsample > 1 works as expected, i.e. output 1D array, with no masked values, or selected size
         for npts in np.arange(2, np.size(array)):
-            random_values = gu.georaster.spatial_tools.subsample_raster(array, subsample=npts)
+            random_values = gu.spatial_tools.subsample_raster(array, subsample=npts)
             assert np.ndim(random_values) == 1
             assert np.size(random_values) == npts
             assert np.count_nonzero(random_values.mask) == 0
 
         # Test if subsample > number of valid values => return all
-        random_values = gu.georaster.spatial_tools.subsample_raster(array, subsample=np.size(array) + 3)
+        random_values = gu.spatial_tools.subsample_raster(array, subsample=np.size(array) + 3)
         assert np.all(np.sort(random_values) == array[~array.mask])
 
         # Test if subsample = 1 => return all valid values
-        random_values = gu.georaster.spatial_tools.subsample_raster(array, subsample=1)
+        random_values = gu.spatial_tools.subsample_raster(array, subsample=1)
         assert np.all(np.sort(random_values) == array[~array.mask])
 
         # Test if subsample < 1
-        random_values = gu.georaster.spatial_tools.subsample_raster(array, subsample=0.5)
+        random_values = gu.spatial_tools.subsample_raster(array, subsample=0.5)
         assert np.size(random_values) == int(np.size(array) * 0.5)
 
         # Test with optional argument return_indices
-        indices = gu.georaster.spatial_tools.subsample_raster(array, subsample=0.3, return_indices=True)
+        indices = gu.spatial_tools.subsample_raster(array, subsample=0.3, return_indices=True)
         assert np.ndim(indices) == 2
         assert len(indices) == np.ndim(array)
         assert np.ndim(array[indices]) == 1

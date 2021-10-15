@@ -4,6 +4,8 @@ from __future__ import annotations
 import functools
 import warnings
 
+import rasterio as rio
+
 import geoutils
 
 
@@ -62,3 +64,19 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
         return new_func
 
     return deprecator_func
+
+
+def resampling_method_from_str(method_str: str) -> rio.warp.Resampling:
+    """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
+    # Try to match the string version of the resampling method with a rio Resampling enum name
+    for method in rio.warp.Resampling:
+        if str(method).replace("Resampling.", "") == method_str:
+            resampling_method = method
+            break
+    # If no match was found, raise an error.
+    else:
+        raise ValueError(
+            f"'{method_str}' is not a valid rasterio.warp.Resampling method. "
+            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
+        )
+    return resampling_method

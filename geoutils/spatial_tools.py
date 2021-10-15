@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils.georaster import Raster, RasterType
+from geoutils.misc import resampling_method_from_str
 
 
 def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
@@ -84,22 +85,6 @@ def get_valid_extent(array: np.ndarray | np.ma.masked_array) -> tuple[int, ...]:
     cols_nonzero = np.where(np.count_nonzero(valid_mask, axis=0) > 0)[0]
     rows_nonzero = np.where(np.count_nonzero(valid_mask, axis=1) > 0)[0]
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
-
-
-def resampling_method_from_str(method_str: str) -> rio.warp.Resampling:
-    """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
-    # Try to match the string version of the resampling method with a rio Resampling enum name
-    for method in rio.warp.Resampling:
-        if str(method).replace("Resampling.", "") == method_str:
-            resampling_method = method
-            break
-    # If no match was found, raise an error.
-    else:
-        raise ValueError(
-            f"'{method_str}' is not a valid rasterio.warp.Resampling method. "
-            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
-        )
-    return resampling_method
 
 
 def merge_bounding_boxes(bounds: list[rio.coords.BoundingBox], resolution: float) -> rio.coords.BoundingBox:
