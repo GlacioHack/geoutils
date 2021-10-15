@@ -3,6 +3,7 @@ geopandas
 pyproj
 flake8
 pytest
+pytest-lazy-fixture
 sphinx
 sphinx_rtd_theme
 pylint
