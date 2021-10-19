@@ -415,7 +415,7 @@ class Raster:
 
     def __overloading_check__(
         self: RasterType, other: RasterType | np.ndarray | Number
-    ) -> tuple[np.ndarray, np.ndarray | Number, np.dtype, Number]:
+    ) -> tuple[np.ndarray, np.ndarray | Number, float | int | None]:
         """
         Before any operation overloading, check input data type and return both self and other data as either \
 a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
@@ -512,7 +512,7 @@ Must be a Raster, np.ndarray or single number."
 
         # Check that if no ndv was set, a default value is used
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
 
         # Save to output Raster
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
@@ -536,7 +536,7 @@ Must be a Raster, np.ndarray or single number."
         self_data, other_data, ndv = self.__overloading_check__(other)
         out_data = self_data - other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
         return self.from_array(out_data, self.transform, self.crs, nodata=ndv)
 
     def __rsub__(self: RasterType, other: np.ndarray | Number) -> RasterType:
@@ -546,7 +546,7 @@ Must be a Raster, np.ndarray or single number."
         self_data, other_data, ndv = self.__overloading_check__(other)
         out_data = other_data - self_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
         return self.from_array(out_data, self.transform, self.crs, nodata=ndv)
 
     def __mul__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
@@ -559,7 +559,7 @@ Must be a Raster, np.ndarray or single number."
         self_data, other_data, ndv = self.__overloading_check__(other)
         out_data = self_data * other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
         return out_rst
 
@@ -579,7 +579,7 @@ Must be a Raster, np.ndarray or single number."
         self_data, other_data, ndv = self.__overloading_check__(other)
         out_data = self_data / other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
         return out_rst
 
@@ -590,7 +590,7 @@ Must be a Raster, np.ndarray or single number."
         self_data, other_data, ndv = self.__overloading_check__(other)
         out_data = other_data / self_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
         return out_rst
 
@@ -613,7 +613,7 @@ Must be a Raster, np.ndarray or single number."
         self_data, other_data, ndv = self.__overloading_check__(other)
         out_data = other_data // self_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
         return out_rst
 
@@ -627,7 +627,7 @@ Must be a Raster, np.ndarray or single number."
         self_data, other_data, ndv = self.__overloading_check__(other)
         out_data = self_data % other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
-            ndv = _default_ndv(other_data.dtype)
+            ndv = _default_ndv(out_data.dtype)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
         return out_rst
 
