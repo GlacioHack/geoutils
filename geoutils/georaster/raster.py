@@ -489,9 +489,9 @@ Must be a Raster, np.ndarray or single number."
         if (ndv1 is not None) and (out_dtype == dtype1):
             out_ndv = ndv1
 
-        # Convert output data to correct dtype
+        # Convert output data to correct dtype and masked_array
         if isinstance(other_data, np.ndarray):
-            other_data = other_data.astype(out_dtype, copy=False)
+            other_data = np.ma.asarray(other_data).astype(out_dtype, copy=False)
 
         self_data = self.data.astype(out_dtype)
 
@@ -631,7 +631,7 @@ Must be a Raster, np.ndarray or single number."
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
         return out_rst
 
-    def __pow__(self: RasterType, power: Number) -> RasterType:
+    def __pow__(self: RasterType, power: int | float) -> RasterType:
         """
         Calculate the power of self.data and returns a Raster.
         """
