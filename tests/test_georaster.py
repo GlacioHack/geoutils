@@ -1153,6 +1153,58 @@ class TestsArithmetic:
         else:
             assert r3.nodata == _default_ndv(dtype)
 
+    reflective_ops = [["__add__", "__radd__"], ["__mul__", "__rmul__"]]
+
+    @pytest.mark.parametrize("ops", reflective_ops)  # type: ignore
+    def test_reflectivity(self, ops: list[str]) -> None:
+        """
+        Check reflective operations
+        """
+        warnings.filterwarnings("ignore", message="invalid value encountered")
+
+        # Test various inputs: Raster with different dtypes, np.ndarray, single number
+        array = np.random.randint(1, 255, (1, self.height, self.width)).astype("float64")
+        floatval = 3.14
+        intval = 1
+
+        # Get reflective operations
+        op1, op2 = ops
+
+        # Test with uint8 rasters
+        r3 = getattr(self.r1, op1)(self.r2)
+        r4 = getattr(self.r1, op2)(self.r2)
+        assert r3 == r4
+
+        # Test with different dtypes
+        r3 = getattr(self.r1_f32, op1)(self.r2)
+        r4 = getattr(self.r1_f32, op2)(self.r2)
+        assert r3 == r4
+
+        # Test with ndv set
+        r3 = getattr(self.r1_ndv, op1)(self.r2)
+        r4 = getattr(self.r1_ndv, op2)(self.r2)
+        assert r3 == r4
+
+        # Test with zeros values (e.g. division)
+        r3 = getattr(self.r1, op1)(self.r2_zero)
+        r4 = getattr(self.r1, op2)(self.r2_zero)
+        assert r3 == r4
+
+        # Test with a numpy array
+        r3 = getattr(self.r1, op1)(array)
+        r4 = getattr(self.r1, op2)(array)
+        assert r3 == r4
+
+        # Test with an integer
+        r3 = getattr(self.r1, op1)(intval)
+        r4 = getattr(self.r1, op2)(intval)
+        assert r3 == r4
+
+        # Test with a float value
+        r3 = getattr(self.r1, op1)(floatval)
+        r4 = getattr(self.r1, op2)(floatval)
+        assert r3 == r4
+
     @classmethod
     def from_array(
         cls: type[TestsArithmetic],
