@@ -1016,6 +1016,11 @@ class TestsArithmetic:
         np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
     )
 
+    # Tests with child class
+    satimg = gu.SatelliteImage.from_array(
+        np.random.randint(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
+    )
+
     def test_equal(self) -> None:
         """
         Test that __eq__ and __ne__ work as expected
@@ -1071,6 +1076,7 @@ class TestsArithmetic:
         r1_ndv = self.r1_ndv
         r2 = self.r2
         r2_zero = self.r2_zero
+        satimg = self.satimg
         array = np.random.randint(1, 255, (1, self.height, self.width)).astype("float64")
         floatval = 3.14
         intval = 1
@@ -1081,6 +1087,7 @@ class TestsArithmetic:
         r3 = getattr(r1, op)(r2)
         ctype = np.find_common_type([r1.data.dtype, r2.data.dtype], [])
         numpy_output = getattr(r1.data.astype(ctype), op)(r2.data.astype(ctype))
+        assert isinstance(r3, gr.Raster)
         assert np.all(r3.data == numpy_output)
         assert r3.data.dtype == numpy_output.dtype
         if np.sum(r3.data.mask) == 0:
@@ -1094,6 +1101,7 @@ class TestsArithmetic:
         r1_copy = r1.copy()
         r2_copy = r2.copy()
         r3 = getattr(r1, op)(r2)
+        assert isinstance(r3, gr.Raster)
         assert r1 == r1_copy
         assert r2 == r2_copy
 
@@ -1129,6 +1137,7 @@ class TestsArithmetic:
         # Test with a numpy array
         r1 = self.r1_f32
         r3 = getattr(r1, op)(array)
+        assert isinstance(r3, gr.Raster)
         assert np.all(r3.data == getattr(r1.data, op)(array))
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
@@ -1137,6 +1146,7 @@ class TestsArithmetic:
 
         # Test with an integer
         r3 = getattr(r1, op)(intval)
+        assert isinstance(r3, gr.Raster)
         assert np.all(r3.data == getattr(r1.data, op)(intval))
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
@@ -1146,12 +1156,17 @@ class TestsArithmetic:
         # Test with a float value
         r3 = getattr(r1, op)(floatval)
         dtype = np.dtype(rio.dtypes.get_minimum_dtype(floatval))
+        assert isinstance(r3, gr.Raster)
         assert r3.data.dtype == dtype
         assert np.all(r3.data == getattr(r1.data, op)(np.array(floatval).astype(dtype)))
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
         else:
             assert r3.nodata == _default_ndv(dtype)
+
+        # Test with child class
+        r3 = getattr(satimg, op)(intval)
+        assert isinstance(r3, gu.satimg.SatelliteImage)
 
     reflective_ops = [["__add__", "__radd__"], ["__mul__", "__rmul__"]]
 
