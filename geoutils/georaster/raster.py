@@ -413,7 +413,7 @@ class Raster:
     def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
-    def __overloading_check__(
+    def _overloading_check(
         self: RasterType, other: RasterType | np.ndarray | Number
     ) -> tuple[np.ndarray, np.ndarray | Number, float | int | None]:
         """
@@ -505,7 +505,7 @@ Must be a Raster, np.ndarray or single number."
         Otherwise, other must be a single number.
         """
         # Check inputs and return compatible data, output dtype and nodata value
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
 
         # Run calculation
         out_data = self_data + other_data
@@ -533,7 +533,7 @@ Must be a Raster, np.ndarray or single number."
         """
         Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = self_data - other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
@@ -543,7 +543,7 @@ Must be a Raster, np.ndarray or single number."
         """
         Subtraction overloading when other is first item in the operation (e.g. 1 - rst).
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = other_data - self_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
@@ -556,7 +556,7 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = self_data * other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
@@ -576,7 +576,7 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = self_data / other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
@@ -587,7 +587,7 @@ Must be a Raster, np.ndarray or single number."
         """
         True division overloading when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = other_data / self_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
@@ -601,7 +601,7 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = self_data // other_data
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
         return out_rst
@@ -610,7 +610,7 @@ Must be a Raster, np.ndarray or single number."
         """
         Floor division overloading when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = other_data // self_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
@@ -624,7 +624,7 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self.__overloading_check__(other)
+        self_data, other_data, ndv = self._overloading_check(other)
         out_data = self_data % other_data
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
