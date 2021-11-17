@@ -2,6 +2,7 @@
 Test datasets
 """
 import hashlib
+import warnings
 
 import pytest
 
@@ -16,6 +17,7 @@ def test_read_paths_raster(test_dataset: str) -> None:
 
 @pytest.mark.parametrize("test_dataset", ["glacier_outlines"])  # type: ignore
 def test_read_paths_vector(test_dataset: str) -> None:
+    warnings.simplefilter("error")
     assert isinstance(gu.Vector(datasets.get_path(test_dataset)), gu.Vector)
 
 

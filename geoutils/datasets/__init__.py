@@ -18,8 +18,7 @@ def get_path(dset: str) -> str:
     :param dset: The name of the dataset. See ``geoutils.datasets.available`` for all options.
 
     :examples:
-        >>> geoutils.datasets.get_path("landsat_B4")
-
+        >>> geoutils.datasets.get_path("landsat_B4")  # doctest: +SKIP
     """
     if dset in list(available.keys()):
         return os.path.abspath(os.path.join(_module_path, available[dset]))

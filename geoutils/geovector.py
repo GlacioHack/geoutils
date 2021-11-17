@@ -39,7 +39,10 @@ class Vector:
         """
 
         if isinstance(filename, str):
-            ds = gpd.read_file(filename)
+            with warnings.catch_warnings():
+                # This warning shows up in numpy 1.21 (2021-07-09)
+                warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
+                ds = gpd.read_file(filename)
             self.ds = ds
             self.name: str | gpd.GeoDataFrame | None = filename
         elif isinstance(filename, gpd.GeoDataFrame):
@@ -353,9 +356,9 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         >>> outlines = gu.Vector(gu.datasets.get_path('glacier_outlines'))
         >>> outlines = gu.Vector(outlines.ds.to_crs('EPSG:32645'))
         >>> buffer = outlines.buffer_without_overlap(500)
-        >>> ax = buffer.ds.plot()
-        >>> outlines.ds.plot(ax=ax, ec='k', fc='none')
-        >>> plt.show()
+        >>> ax = buffer.ds.plot()  # doctest: +SKIP
+        >>> outlines.ds.plot(ax=ax, ec='k', fc='none')  # doctest: +SKIP
+        >>> plt.show()  # doctest: +SKIP
 
         :param buffer_size: Buffer size in self's coordinate system units.
         :param plot: Set to True to show intermediate plots, useful for understanding or debugging.
@@ -388,7 +391,7 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
 
         # Split all polygons, and join attributes of original geometries into the Voronoi polygons
         # Splitting, i.e. explode, is needed when Voronoi generate MultiPolygons that may extend over several features.
-        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode())
+        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode(index_parts=True))
         joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how="right")
 
         # Plot results -> some polygons are duplicated

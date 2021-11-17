@@ -31,8 +31,8 @@ from scipy.ndimage import map_coordinates
 from shapely.geometry.polygon import Polygon
 
 import geoutils.geovector as gv
+from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
 from geoutils.geovector import Vector
-from geoutils.misc import resampling_method_from_str
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -149,7 +149,7 @@ class Raster:
     transform: Affine
     crs: CRS
     nodata: int | float | None
-    res: tuple[float | int, float | int]
+    res: tuple[float, float]
     bounds: rio.coords.BoundingBox
     height: int
     width: int
@@ -166,7 +166,7 @@ class Raster:
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
         bands: None | int | list[int] = None,
         load_data: bool = True,
-        downsample: int | float = 1,
+        downsample: AnyNumber = 1,
         masked: bool = True,
         nodata: abc.Sequence[int | float] | int | float | None = None,
         attrs: list[str] | None = None,
@@ -315,11 +315,10 @@ class Raster:
             You have a data array in EPSG:32645. It has a spatial resolution of
             30 m in x and y, and its top left corner is X=478000, Y=3108140.
 
+            >>> data = np.ones((500, 500), dtype="uint8")
             >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
             >>> myim = Raster.from_array(data, transform, 32645)
-
         """
-
         if not isinstance(transform, Affine):
             if isinstance(transform, tuple):
                 transform = Affine(*transform)
@@ -378,11 +377,13 @@ class Raster:
 
     def __eq__(self, other: object) -> bool:
         """Check if a Raster's data and georeferencing is equal to another."""
+        from geoutils.misc import array_equal
+
         if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
             return NotImplemented
         return all(
             [
-                np.array_equal(self.data, other.data, equal_nan=True),
+                array_equal(self.data, other.data, equal_nan=True),
                 self.transform == other.transform,
                 self.crs == other.crs,
                 self.nodata == other.nodata,
@@ -628,14 +629,14 @@ Must be a Raster, np.ndarray or single number."
         return out_rst
 
     @overload
-    def astype(self, dtype: np.dtype | type | str, inplace: Literal[False]) -> Raster:
+    def astype(self, dtype: DTypeLike, inplace: Literal[False]) -> Raster:
         ...
 
     @overload
-    def astype(self, dtype: np.dtype | type | str, inplace: Literal[True]) -> None:
+    def astype(self, dtype: DTypeLike, inplace: Literal[True]) -> None:
         ...
 
-    def astype(self, dtype: np.dtype | type | str, inplace: bool = False) -> Raster | None:
+    def astype(self, dtype: DTypeLike, inplace: bool = False) -> Raster | None:
         """
         Converts the data type of a Raster object.
 
@@ -1055,6 +1056,8 @@ Must be a Raster, np.ndarray or single number."
             if dst_nodata is None:
                 dst_nodata = _default_ndv(dtype)
 
+        from geoutils.misc import resampling_method_from_str
+
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
             "src_transform": self.transform,
@@ -1265,7 +1268,7 @@ Must be a Raster, np.ndarray or single number."
         self,
         filename: str | IO[bytes],
         driver: str = "GTiff",
-        dtype: np.dtype | None = None,
+        dtype: DTypeLike | None = None,
         compress: str = "deflate",
         tiled: bool = False,
         blank_value: None | int | float = None,
@@ -1569,8 +1572,8 @@ to be cleared due to the setting of GCPs."
 
     def value_at_coords(
         self,
-        x: float | list[float],
-        y: float | list[float],
+        x: float | ArrayLike,
+        y: float | ArrayLike,
         latlon: bool = False,
         band: int | None = None,
         masked: bool = False,
@@ -1612,12 +1615,12 @@ to be cleared due to the setting of GCPs."
 
         :examples:
 
-        >>> self.value_at_coords(-48.125,67.8901,window=3)
-        Returns mean of a 3*3 window:
-            v v v \
-            v c v  | = float(mean)
-            v v v /
-        (c = provided coordinate, v= value of surrounding coordinate)
+            >>> self.value_at_coords(-48.125,67.8901,window=3)  # doctest: +SKIP
+            Returns mean of a 3*3 window:
+                v v v \
+                v c v  | = float(mean)
+                v v v /
+            (c = provided coordinate, v= value of surrounding coordinate)
 
         """
         value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
@@ -1748,8 +1751,8 @@ to be cleared due to the setting of GCPs."
 
     def xy2ij(
         self,
-        x: np.ndarray,
-        y: np.ndarray,
+        x: ArrayLike,
+        y: ArrayLike,
         op: type = np.float32,
         area_or_point: str | None = None,
         precision: float | None = None,
@@ -1820,7 +1823,7 @@ to be cleared due to the setting of GCPs."
 
         return i, j
 
-    def ij2xy(self, i: np.ndarray, j: np.ndarray, offset: str = "center") -> tuple[np.ndarray, np.ndarray]:
+    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "center") -> tuple[np.ndarray, np.ndarray]:
         """
         Return x,y coordinates for a given row, column index pair.
 
@@ -1835,7 +1838,7 @@ to be cleared due to the setting of GCPs."
 
         return x, y
 
-    def outside_image(self, xi: np.ndarray, yj: np.ndarray, index: bool = True) -> bool:
+    def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
         Check whether a given point falls outside of the raster.
 
@@ -1850,14 +1853,14 @@ to be cleared due to the setting of GCPs."
 
         if np.any(np.array((xi, yj)) < 0):
             return True
-        elif xi > self.width or yj > self.height:
+        elif np.asanyarray(xi) > self.width or np.asanyarray(yj) > self.height:
             return True
         else:
             return False
 
     def interp_points(
         self,
-        pts: np.ndarray,
+        pts: ArrayLike,
         input_latlon: bool = False,
         mode: str = "linear",
         band: int = 1,
