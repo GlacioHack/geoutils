@@ -6,6 +6,7 @@ Set of tools to handle raster and vector data sets in Python.
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
 [![Conda Platforms](https://img.shields.io/conda/pn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
 [![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
+[![PyPI version](https://badge.fury.io/py/geoutils.svg)](https://badge.fury.io/py/geoutils)
 
 This package offers Python classes and functions as well as command line tools to work with both geospatial raster and vector datasets. It is built upon rasterio and GeoPandas. In a single command it can import any geo-referenced dataset that is understood by these libraries, complete with all geo-referencing information, various helper functions and interface between vector/raster data.
 
@@ -19,7 +20,13 @@ conda install --channel conda-forge --strict-channel-priority geoutils
 The `--strict-channel-priority` flag seems essential for Windows installs to function correctly, and is recommended for UNIX-based systems as well.
 
 #### With pip
-Make sure GDAL and PROJ are properly installed, then:
+
+From PyPI:
+```bash
+pip install geoutils
+```
+
+Or from the repository tarball: make sure GDAL and PROJ are properly installed, then:
 ```bash
 pip install https://github.com/GlacioHack/GeoUtils/tarball/main
 ```

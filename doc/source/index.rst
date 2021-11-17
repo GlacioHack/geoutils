@@ -4,7 +4,7 @@
    contain the root 'toctree' directive.
 
 Welcome to GeoUtils's documentation!
-================================
+====================================
 GeoUtils aims to make handling of georeferenced data, either in raster or vector format, easier and available to anyone.
 
 Our functionalities are mostly based on `rasterio <https://rasterio.readthedocs.io>`_ and `GeoPandas <https://geopandas.org/>`_, but here are some of the additional benefits provided by GeoUtils:
@@ -24,6 +24,7 @@ Our functionalities are mostly based on `rasterio <https://rasterio.readthedocs.
     raster-basics
     satimg-basics
     vector-basics
+    auto_examples/index.rst
     api
 
 

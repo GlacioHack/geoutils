@@ -23,6 +23,7 @@ import rasterio.windows
 from affine import Affine
 from matplotlib import cm, colors
 from rasterio.crs import CRS
+from rasterio.features import shapes
 from rasterio.io import MemoryFile
 from rasterio.plot import show as rshow
 from rasterio.warp import Resampling
@@ -30,6 +31,7 @@ from scipy.ndimage import map_coordinates
 from shapely.geometry.polygon import Polygon
 
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
+import geoutils.geovector as gv
 from geoutils.geovector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -46,28 +48,6 @@ else:
     _has_rioxarray = True
 
 RasterType = TypeVar("RasterType", bound="Raster")
-
-
-def _resampling_from_str(resampling: str) -> Resampling:
-    """
-    Match a rio.warp.Resampling enum from a string representation.
-
-    :param resampling: A case-sensitive string matching the resampling enum (e.g. 'cubic_spline')
-    :raises ValueError: If no matching Resampling enum was found.
-    :returns: A rio.warp.Resampling enum that matches the given string.
-    """
-    # Try to match the string version of the resampling method with a rio Resampling enum name
-    for method in rio.warp.Resampling:
-        if str(method).replace("Resampling.", "") == resampling:
-            resampling_method = method
-            break
-    # If no match was found, raise an error.
-    else:
-        raise ValueError(
-            f"'{resampling}' is not a valid rasterio.warp.Resampling method. "
-            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
-        )
-    return resampling_method
 
 
 # Function to set the default nodata values for any given dtype
@@ -413,16 +393,37 @@ class Raster:
     def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
-    def __add__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def _overloading_check(
+        self: RasterType, other: RasterType | np.ndarray | Number
+    ) -> tuple[np.ndarray, np.ndarray | Number, float | int | None]:
         """
-        Sum up the data of two rasters or a raster and a numpy array, or a raster and single number.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
-        If other is a np.ndarray, it must have the same shape.
-        Otherwise, other must be a single number.
+        Before any operation overloading, check input data type and return both self and other data as either \
+a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
+        Also returns the best compatible nodata value.
+
+        The nodata value is set in the following order:
+        - to nodata of self, if output dtype is same as self's dtype
+        - to nodata of other, if other is of Raster type and output dtype is same as other's dtype
+        - otherwise falls to default nodata value for the output dtype (only if masked values -> done externally)
+
+        Inputs:
+        :param other: The other data set to be used in the operation.
+
+        :returns: a tuple containing, self.data converted to the compatible dtype, other data converted to \
+np.ndarray or number and correct dtype, the compatible nodata value.
         """
         # Check that other is of correct type
+        # If not, a NotImplementedError should be raised, in case other's class has a method implemented.
+        # See https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
         if not isinstance(other, (Raster, np.ndarray, Number)):
-            raise ValueError("Addition possible only with a Raster, np.ndarray or single number.")
+            raise NotImplementedError(
+                f"Operation between an object of type {type(other)} and a Raster impossible. \
+Must be a Raster, np.ndarray or single number."
+            )
+
+        # Get self's dtype and nodata
+        ndv1 = self.nodata
+        dtype1 = self.data.dtype
 
         # Case 1 - other is a Raster
         if isinstance(other, Raster):
@@ -437,6 +438,8 @@ class Raster:
                 raise ValueError("Both rasters must have the same shape, transform and CRS.")
 
             other_data = other.data
+            ndv2 = other.nodata
+            dtype2 = other_data.dtype
 
         # Case 2 - other is a numpy array
         elif isinstance(other, np.ndarray):
@@ -447,35 +450,183 @@ class Raster:
                 raise ValueError("Both rasters must have the same shape.")
 
             other_data = other
+            ndv2 = None
+            dtype2 = other_data.dtype
 
         # Case 3 - other is a single number
         else:
             other_data = other
+            ndv2 = None
+            dtype2 = rio.dtypes.get_minimum_dtype(other_data)
 
-        # Calculate the sum of arrays
-        data = self.data + other_data
+        # Figure out output dtype
+        out_dtype = np.find_common_type([dtype1, dtype2], [])
 
-        # Save as a new Raster
-        out_rst = self.from_array(data, self.transform, self.crs, nodata=self.nodata)
+        # Figure output nodata
+        out_ndv = None
+        if (ndv2 is not None) and (out_dtype == dtype2):
+            out_ndv = ndv2
+        if (ndv1 is not None) and (out_dtype == dtype1):
+            out_ndv = ndv1
+
+        # Convert output data to correct dtype and masked_array
+        if isinstance(other_data, np.ndarray):
+            other_data = np.ma.asarray(other_data).astype(out_dtype, copy=False)
+
+        self_data = self.data.astype(out_dtype)
+
+        return self_data, other_data, out_ndv
+
+    def __add__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+        """
+        Sum up the data of two rasters or a raster and a numpy array, or a raster and single number.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        # Check inputs and return compatible data, output dtype and nodata value
+        self_data, other_data, ndv = self._overloading_check(other)
+
+        # Run calculation
+        out_data = self_data + other_data
+
+        # Check that if no ndv was set, a default value is used
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+
+        # Save to output Raster
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
 
         return out_rst
+
+    def __radd__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+        """
+        Addition overloading when other is first item in the operation (e.g. 1 + rst).
+        """
+        return self.__add__(other)
 
     def __neg__(self: RasterType) -> RasterType:
         """Return self with self.data set to -self.data"""
-        out_rst = self.copy()
-        out_rst.data = -out_rst.data
-        return out_rst
+        return self.from_array(-self.data, self.transform, self.crs, nodata=self.nodata)
 
     def __sub__(self, other: Raster | np.ndarray | Number) -> Raster:
         """
         Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
         """
-        if isinstance(other, Raster):
-            # Need to convert both rasters to a common type before doing the negation
-            ctype: np.dtype = np.find_common_type([*self.dtypes, *other.dtypes], [])
-            other = other.astype(ctype)  # type: ignore
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = self_data - other_data
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+        return self.from_array(out_data, self.transform, self.crs, nodata=ndv)
 
-        return self + -other  # type: ignore
+    def __rsub__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+        """
+        Subtraction overloading when other is first item in the operation (e.g. 1 - rst).
+        """
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = other_data - self_data
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+        return self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+
+    def __mul__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+        """
+        Multiply the data of two rasters or a raster and a numpy array, or a raster and single number.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = self_data * other_data
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return out_rst
+
+    def __rmul__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+        """
+        Multiplication overloading when other is first item in the operation (e.g. 2 * rst).
+        """
+        return self.__mul__(other)
+
+    def __truediv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+        """
+        True division of the data of two rasters or a raster and a numpy array, or a raster and single number.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = self_data / other_data
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return out_rst
+
+    def __rtruediv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+        """
+        True division overloading when other is first item in the operation (e.g. 1/rst).
+        """
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = other_data / self_data
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return out_rst
+
+    def __floordiv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+        """
+        Floor division of the data of two rasters or a raster and a numpy array, or a raster and single number.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = self_data // other_data
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return out_rst
+
+    def __rfloordiv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+        """
+        Floor division overloading when other is first item in the operation (e.g. 1/rst).
+        """
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = other_data // self_data
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return out_rst
+
+    def __mod__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+        """
+        Modulo of the data of two rasters or a raster and a numpy array, or a raster and single number.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, ndv = self._overloading_check(other)
+        out_data = self_data % other_data
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return out_rst
+
+    def __pow__(self: RasterType, power: int | float) -> RasterType:
+        """
+        Calculate the power of self.data and returns a Raster.
+        """
+        # Check that input is a number
+        if not isinstance(power, Number):
+            raise ValueError("Power needs to be a number.")
+
+        # Calculate the product of arrays and save to new Raster
+        out_data = self.data ** power
+        ndv = self.nodata
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
+            ndv = _default_ndv(out_data.dtype)
+
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=self.nodata)
+        return out_rst
 
     @overload
     def astype(self, dtype: DTypeLike, inplace: Literal[False]) -> Raster:
@@ -905,12 +1056,13 @@ class Raster:
             if dst_nodata is None:
                 dst_nodata = _default_ndv(dtype)
 
+        from geoutils.misc import resampling_method_from_str
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
             "src_transform": self.transform,
             "src_crs": self.crs,
             "dst_crs": dst_crs,
-            "resampling": resampling if isinstance(resampling, Resampling) else _resampling_from_str(resampling),
+            "resampling": resampling if isinstance(resampling, Resampling) else resampling_method_from_str(resampling),
             "src_nodata": src_nodata,
             "dst_nodata": dst_nodata,
         }
@@ -1911,3 +2063,61 @@ to be cleared due to the setting of GCPs."
             )
 
         return points
+
+    def polygonize(
+        self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1
+    ) -> Vector:
+        """
+        Return a GeoDataFrame polygonized from a raster.
+
+        :param in_value: Value or range of values of the raster from which to
+          create geometries (Default is 1). If 'all', all unique pixel values of the raster are used.
+
+        :returns: Vector containing the polygonized geometries.
+        """
+
+        # mask a unique value set by a number
+        if isinstance(in_value, Number):
+
+            if np.sum(self.data == in_value) == 0:
+                raise ValueError(f"no pixel with in_value {in_value}")
+
+            bool_msk = np.array(self.data == in_value).astype(np.uint8)
+
+        # mask values within boundaries set by a tuple
+        elif isinstance(in_value, tuple):
+
+            if np.sum((self.data > in_value[0]) & (self.data < in_value[1])) == 0:
+                raise ValueError(f"no pixel with in_value between {in_value[0]} and {in_value[1]}")
+
+            bool_msk = ((self.data > in_value[0]) & (self.data < in_value[1])).astype(np.uint8)
+
+        # mask specific values set by a sequence
+        elif isinstance(in_value, list) or isinstance(in_value, np.ndarray):
+
+            if np.sum(np.isin(self.data, in_value)) == 0:
+                raise ValueError("no pixel with in_value " + ", ".join(map("{}".format, in_value)))
+
+            bool_msk = np.isin(self.data, in_value).astype("uint8")
+
+        # mask all valid values
+        elif in_value == "all":
+
+            vals_for_msk = list(set(self.data.flatten()))
+            bool_msk = np.isin(self.data, vals_for_msk).astype("uint8")
+
+        else:
+
+            raise ValueError("in_value must be a number, a tuple or a sequence")
+
+        results = (
+            {"properties": {"raster_value": v}, "geometry": s}
+            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk, transform=self.transform))
+        )
+
+        gdf = gpd.GeoDataFrame.from_features(list(results))
+        gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
+        gdf.set_geometry(col="geometry", inplace=True)
+        gdf.set_crs(self.crs, inplace=True)
+
+        return gv.Vector(gdf)

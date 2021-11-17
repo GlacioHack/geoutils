@@ -1,4 +1,5 @@
 import os
+import geoutils
 
 __all__ = ["available", "get_path"]
 
@@ -15,14 +16,10 @@ available = {
 def get_path(dset: str) -> str:
     """
     Get the path to the data file.
-    Parameters
-    ----------
-    dset : str
-        The name of the dataset. See ``geoutils.datasets.available`` for
-        all options.
-    Examples
-    --------
-    >>> geoutils.datasets.get_path("landsat_B4")  # doctest: +SKIP
+    :param dset: The name of the dataset. See ``geoutils.datasets.available`` for all options.
+
+    :examples:
+        >>> geoutils.datasets.get_path("landsat_B4")  # doctest: +SKIP
     """
     if dset in list(available.keys()):
         return os.path.abspath(os.path.join(_module_path, available[dset]))

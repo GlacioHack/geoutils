@@ -3,6 +3,7 @@
 Raster basics
 =============
 
+
 Opening a raster file
 ---------------------
 
@@ -51,11 +52,11 @@ Resampling a Raster to fit another
 ----------------------------------
 
 Comparing multiple rasters can often be a burden if multiple coordinate systems, bounding boxes, and resolutions are involved.
-The ``Raster`` class simplifies this using two methods: ``Raster.crop()`` and ``Raster.reproject()``.
+The :class:`geoutils.Raster` class simplifies this using two methods: ``Raster.crop()`` and ``Raster.reproject()``.
 
 Cropping a Raster
 *****************
-:func:`geoutils.georaster.Raster.crop`
+:func:`geoutils.Raster.crop`
 
 If a large raster should be cropped to a smaller extent without changing the uncropped data, this is possible through the crop function.
 
@@ -93,7 +94,7 @@ prints:
 
 Reprojecting a Raster
 *********************
-:func:`geoutils.georaster.Raster.reproject`
+:func:`geoutils.Raster.reproject`
 
 For rasters with different coordinate systems, resolutions or grids, reprojection is needed to fit one raster to another.
 ``Raster.reproject()`` is apt for these use-cases:
@@ -112,3 +113,7 @@ It is therefore recommended to choose the method that fits the purpose best, usi
 3) ``resampling="cubic_spline"``: Often considered the best approach. Not as performant as simpler methods.
 
 All valid resampling methods can be seen in the `Rasterio documentation <https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling>`_.
+
+.. minigallery:: geoutils.Raster
+        :add-heading:
+        :heading-level: -

@@ -232,7 +232,7 @@ def latlon_to_sw_naming(
 satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
 
 
-class SatelliteImage(Raster):
+class SatelliteImage(Raster):  # type: ignore
 
     date: None | dt.datetime
 
@@ -363,4 +363,4 @@ class SatelliteImage(Raster):
         for attrs in satimg_attrs:
             setattr(new_satimg, attrs, getattr(self, attrs))
 
-        return new_satimg
+        return new_satimg  # type: ignore
