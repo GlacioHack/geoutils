@@ -30,8 +30,8 @@ from rasterio.warp import Resampling
 from scipy.ndimage import map_coordinates
 from shapely.geometry.polygon import Polygon
 
-from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
 import geoutils.geovector as gv
+from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
 from geoutils.geovector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -1057,6 +1057,7 @@ Must be a Raster, np.ndarray or single number."
                 dst_nodata = _default_ndv(dtype)
 
         from geoutils.misc import resampling_method_from_str
+
         # Basic reprojection options, needed in all cases.
         reproj_kwargs = {
             "src_transform": self.transform,

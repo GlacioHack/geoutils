@@ -4,12 +4,10 @@ from __future__ import annotations
 import functools
 import warnings
 
+import numpy as np
 import rasterio as rio
 
 import geoutils
-
-import numpy as np
-
 from geoutils._typing import ArrayLike
 from geoutils.georaster import Raster, RasterType
 
@@ -97,6 +95,7 @@ def array_equal(
             return False
 
     return bool(np.nansum(np.abs(diff)) <= tolerance)
+
 
 def deprecate(removal_version: str | None = None, details: str | None = None):  # type: ignore
     """

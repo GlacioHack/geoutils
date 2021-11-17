@@ -1,5 +1,4 @@
 import os
-import geoutils
 
 __all__ = ["available", "get_path"]
 

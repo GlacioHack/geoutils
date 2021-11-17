@@ -16,8 +16,8 @@ from pylint import epylint
 
 import geoutils as gu
 import geoutils.georaster as gr
-import geoutils.misc
 import geoutils.geovector as gv
+import geoutils.misc
 import geoutils.projtools as pt
 from geoutils import datasets
 from geoutils.georaster.raster import _default_ndv
