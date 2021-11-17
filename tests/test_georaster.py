@@ -495,14 +495,14 @@ class TestRaster:
         # FIRST, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
         # at the center of pixel
         r = gr.Raster(datasets.get_path("landsat_B4"))
-        assert r.ds.tags()["AREA_OR_POINT"] == "Point"
+        assert r.tags["AREA_OR_POINT"] == "Point"
 
-        xmin, ymin, xmax, ymax = r.ds.bounds
+        xmin, ymin, xmax, ymax = r.bounds
 
         # We generate random points within the boundaries of the image
 
-        xrand = np.random.randint(low=0, high=r.ds.width, size=(10,)) * list(r.ds.transform)[0] + xmin
-        yrand = ymax + np.random.randint(low=0, high=r.ds.height, size=(10,)) * list(r.ds.transform)[4]
+        xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
+        yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
         # Get decimal indexes based on Point GDAL METADATA
         # Those should all be .5 because values refer to the center
@@ -549,14 +549,14 @@ class TestRaster:
         # pixel indexes
         r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
         r.crop(r2)
-        assert r.ds.tags()["AREA_OR_POINT"] == "Area"
+        assert r.tags["AREA_OR_POINT"] == "Area"
 
         xmin, ymin, xmax, ymax = r.bounds
 
         # We can test with several method for the exact indexes: interp, value_at_coords, and simple read should
         # give back the same values that fall right on the coordinates
-        xrand = np.random.randint(low=0, high=r.ds.width, size=(10,)) * list(r.ds.transform)[0] + xmin
-        yrand = ymax + np.random.randint(low=0, high=r.ds.height, size=(10,)) * list(r.ds.transform)[4]
+        xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
+        yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
         # by default, i and j are returned as integers
         i, j = r.xy2ij(xrand, yrand, op=np.float32, area_or_point="Area")
@@ -674,6 +674,7 @@ class TestRaster:
             _default_ndv("bla")
 
     def test_astype(self) -> None:
+        warnings.simplefilter("error")
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
 
@@ -685,12 +686,12 @@ class TestRaster:
             assert rout.data.dtype == dtype
 
         # Test a dtype that will modify the data
-        dtype = np.int8
-        rout = r.astype(dtype)  # type: ignore
-        assert rout != r
-        assert np.dtype(rout.dtypes[0]) == dtype
-        assert rout.data.dtype == dtype
-        pytest.warns(UserWarning, r.astype, dtype)  # check a warning is raised
+        with pytest.warns(UserWarning, match="dtype conversion will result in a loss"):
+            dtype = np.int8
+            rout = r.astype(dtype)  # type: ignore
+            assert rout != r
+            assert np.dtype(rout.dtypes[0]) == dtype
+            assert rout.data.dtype == dtype
 
         # Test modify in place
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:

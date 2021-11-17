@@ -235,6 +235,7 @@ class Raster:
         self.name: str | None = None
         self.nodata: int | float | None = None
         self.filename: str | None = None
+        self.tags: dict[str, Any] = {}
 
         self._data: np.ndarray | np.ma.masked_array | None = None
         self._bands = bands
@@ -281,6 +282,7 @@ class Raster:
                 self.nodata = ds.nodata
                 self.name = ds.name
                 self.driver = ds.driver
+                self.tags.update(ds.tags())
 
                 self._disk_shape = (ds.count, ds.height, ds.width)
                 self._disk_indexes = ds.indexes
@@ -571,6 +573,7 @@ class Raster:
 
         out_data = self.data.astype(dtype)
         if inplace:
+            self._data = out_data
             return None
         else:
             return self.from_array(out_data, self.transform, self.crs, nodata=self.nodata)
@@ -783,9 +786,12 @@ class Raster:
         if inplace:
             self._data = crop_img
             self.transform = tfm
+            self.tags["AREA_OR_POINT"] = "Area"  # TODO: Explain why this should have an area interpretation now
             return None
         else:
-            return self.from_array(crop_img, tfm, self.crs, self.nodata)
+            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata)
+            newraster.tags["AREA_OR_POINT"] = "Area"
+            return newraster
 
     def reproject(
         self: RasterType,
@@ -1461,7 +1467,7 @@ to be cleared due to the setting of GCPs."
             x, y = projtools.reproject_from_latlon((y, x), self.crs)
 
         # Convert coordinates to pixel space
-        row, col = self.ds.index(x, y, op=round)
+        row, col = rio.transform.rowcol(self.transform, x, y, op=round)
 
         # Decide what pixel coordinates to read:
         if window is not None:
@@ -1623,8 +1629,7 @@ to be cleared due to the setting of GCPs."
 
         # if input is None, default to GDAL METADATA
         if area_or_point is None:
-            #area_or_point = self.ds.tags()["AREA_OR_POINT"]
-            area_or_point = "point"
+            area_or_point = self.tags.get("AREA_OR_POINT", "Point")
 
         if area_or_point == "Point":
             if not isinstance(i.flat[0], np.floating):
