@@ -189,7 +189,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     data = np.asarray(data)
 
     # Save as gu.Raster
-    r = reference_raster.from_array(
+    r = gu.Raster.from_array(
         data=data,
         transform=rio.transform.from_bounds(*dst_bounds, width=data[0].shape[1], height=data[0].shape[0]),
         crs=reference_raster.crs,
