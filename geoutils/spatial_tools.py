@@ -156,7 +156,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     # Make a data list and add all of the reprojected rasters into it.
     data: list[np.ndarray] = []
 
-    for raster in tqdm(rasters, disable=~progress):
+    for raster in tqdm(rasters, disable=not progress):
 
         # Check that data is loaded, otherwise temporarily load it
         if not raster.is_loaded:
@@ -188,7 +188,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     # Convert to numpy array
     data = np.asarray(data)
 
-    # Save as gu.Raster
+    # Save as gu.Raster - needed as some child classes may not accept multiple bands
     r = gu.Raster.from_array(
         data=data,
         transform=rio.transform.from_bounds(*dst_bounds, width=data[0].shape[1], height=data[0].shape[0]),
@@ -205,6 +205,7 @@ def merge_rasters(
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.warp.Resampling = "bilinear",
     use_ref_bounds: bool = False,
+    progress: bool = True,
 ) -> RasterType:
     """
     Merge a list of rasters into one larger raster.
@@ -221,6 +222,7 @@ def merge_rasters(
 If several algorithms are provided, each result is returned as a separate band.
     :param resampling_method: The resampling method for the raster reprojections.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
+    :param progress: If True, will display a progress bar. Default is True.
 
     :returns: The merged raster with the same parameters (excl. bounds) as the reference.
     """
@@ -247,7 +249,11 @@ If several algorithms are provided, each result is returned as a separate band.
 
     # Reproject and stack all rasters
     raster_stack = stack_rasters(
-        rasters, reference=reference, resampling_method=resampling_method, use_ref_bounds=use_ref_bounds
+        rasters,
+        reference=reference,
+        resampling_method=resampling_method,
+        use_ref_bounds=use_ref_bounds,
+        progress=progress,
     )
 
     # Try to use the keyword axis=0 for the merging algorithm (if it's a numpy ufunc).
