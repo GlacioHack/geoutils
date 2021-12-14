@@ -110,7 +110,7 @@ def stack_rasters(
     use_ref_bounds: bool = False,
     diff: bool = False,
     progress: bool = True,
-) -> RasterType:
+) -> gu.Raster:
     """
     Stack a list of rasters into a common grid as a 3D np array with nodata set to Nan.
 

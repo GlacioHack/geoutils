@@ -4,6 +4,7 @@ Functions to test the spatial tools.
 from __future__ import annotations
 
 import warnings
+from typing import Callable
 
 import numpy as np
 import pytest
@@ -31,7 +32,7 @@ class stack_merge_images:
     Param `cls` is used to set the type of the output, e.g. gu.Raster (default).
     """
 
-    def __init__(self, image: str, cls: RasterType = gu.Raster) -> None:
+    def __init__(self, image: str, cls: Callable[[str], RasterType] = gu.Raster) -> None:
         img = cls(datasets.get_path(image))
         self.img = img
 
