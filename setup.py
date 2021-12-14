@@ -53,7 +53,7 @@ setup(
     package_data={"geoutils": data_files},
     install_requires=[
         "rasterio",
-        "geopandas",
+        "geopandas >= 0.10.0",
         "pyproj",
         "scipy",
         "typing-extensions; python_version < '3.8'",
