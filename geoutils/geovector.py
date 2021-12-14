@@ -391,7 +391,7 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
 
         # Split all polygons, and join attributes of original geometries into the Voronoi polygons
         # Splitting, i.e. explode, is needed when Voronoi generate MultiPolygons that may extend over several features.
-        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode(index_parts=True))
+        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode(index_parts=True))  # requires geopandas>=0.10
         joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how="right")
 
         # Plot results -> some polygons are duplicated

@@ -4,6 +4,7 @@ Functions to test the spatial tools.
 from __future__ import annotations
 
 import warnings
+from typing import Callable
 
 import numpy as np
 import pytest
@@ -11,6 +12,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import datasets
+from geoutils.georaster import RasterType
 
 # def test_dem_subtraction():
 #     """Test that the DEM subtraction script gives reasonable numbers."""
@@ -27,10 +29,11 @@ class stack_merge_images:
     """
     Test cases for stacking and merging images
     Split an image with some overlap, then stack/merge it, and validate bounds and shape.
+    Param `cls` is used to set the type of the output, e.g. gu.Raster (default).
     """
 
-    def __init__(self, image: str) -> None:
-        img = gu.Raster(datasets.get_path(image))
+    def __init__(self, image: str, cls: Callable[[str], RasterType] = gu.Raster) -> None:
+        img = cls(datasets.get_path(image))
         self.img = img
 
         # Find the easting midpoint of the img
@@ -69,11 +72,18 @@ def images_1d():  # type: ignore
 
 
 @pytest.fixture
+def sat_images():  # type: ignore
+    return stack_merge_images("landsat_B4", cls=gu.SatelliteImage)
+
+
+@pytest.fixture
 def images_3d():  # type: ignore
     return stack_merge_images("landsat_RGB")
 
 
-@pytest.mark.parametrize("rasters", [pytest.lazy_fixture("images_1d")])  # type: ignore
+@pytest.mark.parametrize(
+    "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images")]
+)  # type: ignore
 #    pytest.lazy_fixture('images_3d')]) ## Requires Raster.reproject() fix.
 def test_stack_rasters(rasters) -> None:  # type: ignore
     """Test stack_rasters"""
@@ -82,6 +92,7 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
 
     assert stacked_img.count == 2
     assert rasters.img.shape == stacked_img.shape
+    assert type(stacked_img) == gu.Raster  # Check output object is always Raster, whatever input was given
 
     merged_bounds = gu.spatial_tools.merge_bounding_boxes(
         [rasters.img1.bounds, rasters.img2.bounds], resolution=rasters.img1.res[0]

@@ -1,5 +1,5 @@
 rasterio
-geopandas
+geopandas >= 0.10.0
 pyproj
 flake8
 pytest
