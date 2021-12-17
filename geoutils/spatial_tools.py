@@ -276,7 +276,11 @@ If several algorithms are provided, each result is returned as a separate band.
 
     # Convert to masked array, and set all Nans to nodata
     merged_data = np.ma.asarray(merged_data)
-    merged_data[np.isnan(merged_data)] = reference_raster.nodata
+    if reference_raster.nodata is not None:
+        nodata = reference_raster.nodata
+    else:
+        nodata = _default_ndv(merged_data.dtype)
+    merged_data[np.isnan(merged_data)] = nodata
 
     # Save as gu.Raster
     merged_raster = reference_raster.from_array(
@@ -285,7 +289,7 @@ If several algorithms are provided, each result is returned as a separate band.
             *raster_stack.bounds, width=merged_data[0].shape[1], height=merged_data[0].shape[0]
         ),
         crs=reference_raster.crs,
-        nodata=reference_raster.nodata,
+        nodata=nodata,
     )
 
     return merged_raster
