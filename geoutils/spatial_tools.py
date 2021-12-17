@@ -17,6 +17,7 @@ from tqdm import tqdm
 import geoutils as gu
 from geoutils.georaster import Raster, RasterType
 from geoutils.misc import resampling_method_from_str
+from geoutils.georaster.raster import _default_ndv
 
 
 def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
@@ -187,15 +188,19 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             raster._data = None
 
     # Convert to numpy array
-    data = np.asarray(data)
-    data[np.isnan(data)] = reference_raster.nodata
+    data = np.ma.asarray(data)
+    if reference_raster.nodata is not None:
+        nodata = reference_raster.nodata
+    else:
+        nodata = _default_ndv(data.dtype)
+    data[np.isnan(data)] = nodata
 
     # Save as gu.Raster - needed as some child classes may not accept multiple bands
     r = gu.Raster.from_array(
         data=data,
         transform=rio.transform.from_bounds(*dst_bounds, width=data[0].shape[1], height=data[0].shape[0]),
         crs=reference_raster.crs,
-        nodata=reference_raster.nodata,
+        nodata=nodata,
     )
 
     return r
