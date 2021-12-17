@@ -187,6 +187,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
 
     # Convert to numpy array
     data = np.asarray(data)
+    data[np.isnan(data)] = reference_raster.nodata
 
     # Save as gu.Raster - needed as some child classes may not accept multiple bands
     r = gu.Raster.from_array(
@@ -266,6 +267,10 @@ If several algorithms are provided, each result is returned as a separate band.
             if "'axis' is an invalid keyword" not in str(exception):
                 raise exception
             merged_data.append(np.apply_along_axis(algo, axis=0, arr=raster_stack.data))
+
+    # Convert to masked array, and set all Nans to nodata
+    merged_data = np.ma.asarray(merged_data)
+    merged_data[np.isnan(merged_data)] = reference_raster.nodata
 
     # Save as gu.Raster
     merged_raster = reference_raster.from_array(
