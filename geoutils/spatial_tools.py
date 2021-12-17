@@ -16,8 +16,8 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils.georaster import Raster, RasterType
-from geoutils.misc import resampling_method_from_str
 from geoutils.georaster.raster import _default_ndv
+from geoutils.misc import resampling_method_from_str
 
 
 def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
