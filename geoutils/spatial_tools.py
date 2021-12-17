@@ -170,6 +170,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             dst_crs=reference_raster.crs,
             dtype=reference_raster.data.dtype,
             dst_nodata=reference_raster.nodata,
+            silent=True
         )
 
         # Optionally calculate difference
