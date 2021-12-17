@@ -187,7 +187,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         if not raster.is_loaded:
             raster._data = None
 
-    # Convert to numpy array
+    # Convert to masked array
     data = np.ma.asarray(data)
     if reference_raster.nodata is not None:
         nodata = reference_raster.nodata
