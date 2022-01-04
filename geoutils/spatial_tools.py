@@ -163,14 +163,16 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             raster.load()
             raster.is_loaded = False
 
+        ndv = reference_raster.nodata or gu.georaster.raster._default_ndv(reference_raster.data.dtype)
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
             dst_bounds=dst_bounds,
             dst_res=reference_raster.res,
             dst_crs=reference_raster.crs,
             dtype=reference_raster.data.dtype,
-            dst_nodata=reference_raster.nodata,
+            dst_nodata=ndv,
         )
+        reprojected_raster.set_ndv(ndv)
 
         # Optionally calculate difference
         if diff:
@@ -178,15 +180,15 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             diff_to_ref, _ = get_array_and_mask(diff_to_ref)
             data.append(diff_to_ref)
         else:
-            img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
-            data.append(img_data)
+            #img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
+            data.append(reprojected_raster.data.squeeze())
 
         # Remove unloaded rasters
         if not raster.is_loaded:
             raster._data = None
 
     # Convert to numpy array
-    data = np.asarray(data)
+    data = np.ma.masked_array(data, mask=np.moveaxis(np.dstack([d.mask for d in data]), 2, 0))
 
     # Save as gu.Raster - needed as some child classes may not accept multiple bands
     r = gu.Raster.from_array(

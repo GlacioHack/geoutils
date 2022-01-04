@@ -562,7 +562,7 @@ Must be a Raster, np.ndarray or single number."
         out_data = self_data + other_data
 
         # Check that if no ndv was set, a default value is used
-        if (np.sum(out_data.mask) > 0) & (ndv is None):
+        if (np.sum(getattr(out_data, "mask", 0)) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
 
         # Save to output Raster
@@ -1177,7 +1177,10 @@ Must be a Raster, np.ndarray or single number."
         dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
 
         # Enforce output type
-        dst_data = dst_data.astype(dtype)
+        dst_data = np.ma.masked_array(dst_data.astype(dtype))
+
+        if dst_nodata is not None:
+            dst_data.mask = dst_data == dst_nodata
 
         # Check for funny business.
         if dst_transform is not None:

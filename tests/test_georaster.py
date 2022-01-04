@@ -129,7 +129,6 @@ class TestRaster:
         assert r.height == 655
         assert r.shape == (r.height, r.width)
         assert r.count == 1
-        assert r.nbands is None
         assert geoutils.misc.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert geoutils.misc.array_equal(r.res, [30.0, 30.0])
@@ -1041,7 +1040,7 @@ def test_numpy_functions(dtype: str) -> None:
     transform = rio.transform.from_origin(0, 5, 1, 1)
 
     # Create a raster from the array
-    raster = gu.Raster.from_array(array, transform=transform, crs=4326)
+    raster = gu.Raster.from_array(np.ma.masked_array(array), transform=transform, crs=4326)
 
     # Test some ufuncs
     assert np.median(raster) == 12.0
@@ -1074,17 +1073,17 @@ class TestsArithmetic:
     # Create fake rasters with random values in 0-255 and dtype uint8
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-    r1 = gr.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
-    r2 = gr.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
+    r1 = gr.Raster.from_array(np.ma.masked_array(np.random.randint(1, 255, (height, width), dtype="uint8")), transform=transform, crs=None)
+    r2 = gr.Raster.from_array(np.ma.masked_array(np.random.randint(1, 255, (height, width), dtype="uint8")), transform=transform, crs=None)
 
     # Tests with different dtype
     r1_f32 = gr.Raster.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
+        np.ma.masked_array(np.random.randint(1, 255, (height, width))).astype("float32"), transform=transform, crs=None
     )
 
     # Test with ndv value set
     r1_ndv = gr.Raster.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"),
+        np.ma.masked_array(np.random.randint(1, 255, (height, width))).astype("float32"),
         transform=transform,
         crs=None,
         nodata=_default_ndv("float32"),
@@ -1092,7 +1091,7 @@ class TestsArithmetic:
 
     # Test with 0 values
     r2_zero = gr.Raster.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"),
+        np.ma.masked_array(np.random.randint(1, 255, (height, width))).astype("float32"),
         transform=transform,
         crs=None,
         nodata=_default_ndv("float32"),
@@ -1101,23 +1100,23 @@ class TestsArithmetic:
 
     # Create rasters with different shape, crs or transforms for testing errors
     r1_wrong_shape = gr.Raster.from_array(
-        np.random.randint(0, 255, (height + 1, width)).astype("float32"), transform=transform, crs=None
+        np.ma.masked_array(np.random.randint(0, 255, (height + 1, width))).astype("float32"), transform=transform, crs=None
     )
 
     r1_wrong_crs = gr.Raster.from_array(
-        np.random.randint(0, 255, (height, width)).astype("float32"),
+        np.ma.masked_array(np.random.randint(0, 255, (height, width))).astype("float32"),
         transform=transform,
         crs=rio.crs.CRS.from_epsg(4326),
     )
 
     transform2 = rio.transform.from_bounds(0, 0, 2, 2, width, height)
     r1_wrong_transform = gr.Raster.from_array(
-        np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
+        np.ma.masked_array(np.random.randint(0, 255, (height, width))).astype("float32"), transform=transform2, crs=None
     )
 
     # Tests with child class
     satimg = gu.SatelliteImage.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
+        np.ma.masked_array(np.random.randint(1, 255, (height, width))).astype("float32"), transform=transform, crs=None
     )
 
     def test_equal(self) -> None:

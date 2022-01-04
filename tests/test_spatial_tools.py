@@ -128,11 +128,23 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
 def test_merge_rasters(rasters) -> None:  # type: ignore
     """Test merge_rasters"""
     # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
-    merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2])
+
+    merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
+
+    stacked = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
     assert rasters.img.data.shape == merged_img.data.shape
     assert rasters.img.bounds == merged_img.bounds
 
     diff = rasters.img.data - merged_img.data
+
+    import matplotlib.pyplot as plt
+    plt.subplot(131)
+    plt.imshow(diff.squeeze())
+    plt.subplot(132)
+    plt.imshow(stacked.data[0, :, :])
+    plt.subplot(133)
+    plt.imshow(stacked.data[1, :, :])
+    plt.show()
 
     assert np.abs(np.nanmean(diff)) < 0.3
 
