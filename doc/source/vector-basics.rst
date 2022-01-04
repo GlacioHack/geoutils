@@ -39,3 +39,7 @@ We can prove that glaciers are bright (who could have known!?) by masking the va
         :shell:
 
 TODO: Add rasterize text.
+
+.. minigallery:: geoutils.Raster
+        :add-heading:
+        :heading-level: -

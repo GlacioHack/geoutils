@@ -4,7 +4,7 @@ from typing import Optional
 
 from setuptools import setup
 
-FULLVERSION = "0.0.4"
+FULLVERSION = "0.0.5"
 VERSION = FULLVERSION
 
 write_version = True
@@ -49,15 +49,16 @@ setup(
     url="https://www.github.com/GlacioHack/geoutils/",
     author="The GlacioHack Team",
     license="BSD-3",
-    packages=["geoutils", "geoutils.datasets"],
+    packages=["geoutils", "geoutils.datasets", "geoutils.georaster"],
     package_data={"geoutils": data_files},
     install_requires=[
         "rasterio",
-        "geopandas",
+        "geopandas >= 0.10.0",
         "pyproj",
         "scipy",
         "typing-extensions; python_version < '3.8'",
         "matplotlib",
+        "tqdm",
     ],
     extras_require={"rioxarray": ["rioxarray"]},
     scripts=["geoutils/geoviewer.py"],

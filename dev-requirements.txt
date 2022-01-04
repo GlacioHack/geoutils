@@ -1,8 +1,9 @@
 rasterio
-geopandas
+geopandas >= 0.10.0
 pyproj
 flake8
 pytest
+pytest-lazy-fixture
 sphinx
 sphinx_rtd_theme
 pylint
@@ -12,3 +13,6 @@ matplotlib
 scipy
 pre-commit
 typing-extensions; python_version < '3.8'
+sphinx-gallery
+scikit-image
+

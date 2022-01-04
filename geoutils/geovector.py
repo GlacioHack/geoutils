@@ -39,7 +39,10 @@ class Vector:
         """
 
         if isinstance(filename, str):
-            ds = gpd.read_file(filename)
+            with warnings.catch_warnings():
+                # This warning shows up in numpy 1.21 (2021-07-09)
+                warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
+                ds = gpd.read_file(filename)
             self.ds = ds
             self.name: str | gpd.GeoDataFrame | None = filename
         elif isinstance(filename, gpd.GeoDataFrame):
@@ -230,8 +233,11 @@ the provided raster file.
         :param rst: A raster to be used as reference for the output grid
         :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
         :param xres: Output raster spatial resolution in x. Only is rst is None.
-        :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
-        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
+            Must be in units of crs, if set.
+        :param yres: Output raster spatial resolution in y. Only if rst is None.
+        Must be in units of crs, if set. (Default to xres)
+        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None
+            Must be in same system as crs, if set. (Default to self bounds).
         :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1)
         :param out_value: Value to be burned outside the polygons (Default is 0)
 
@@ -241,7 +247,20 @@ the provided raster file.
         if isinstance(rst, str):
             rst = gu.Raster(rst)  # type: ignore
 
-        # If no rst given, use provided dimensions
+        if (rst is not None) and (crs is not None):
+            raise ValueError("Only one of rst or crs can be provided.")
+
+        # Reproject vector into requested CRS or rst CRS first, if needed
+        # This has to be done first so that width/height calculated below are correct!
+        if crs is None:
+            crs = self.ds.crs
+
+        if rst is not None:
+            crs = rst.crs  # type: ignore
+
+        vect = self.ds.to_crs(crs)
+
+        # If no rst given, now use provided dimensions
         if rst is None:
 
             # At minimum, xres must be set
@@ -250,16 +269,14 @@ the provided raster file.
             if yres is None:
                 yres = xres
 
-            # By default, use self's CRS and bounds
-            if crs is None:
-                crs = self.ds.crs
+            # By default, use self's bounds
             if bounds is None:
-                bounds = self.ds.total_bounds
+                bounds = vect.total_bounds
 
             # Calculate raster shape
             left, bottom, right, top = bounds
-            height = abs((right - left) / xres)
-            width = abs((top - bottom) / yres)
+            width = abs((right - left) / xres)
+            height = abs((top - bottom) / yres)
 
             if width % 1 != 0 or height % 1 != 0:
                 warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
@@ -275,10 +292,6 @@ the provided raster file.
         else:
             out_shape = rst.shape  # type: ignore
             transform = rst.transform  # type: ignore
-            crs = rst.crs  # type: ignore
-
-        # Reproject vector into rst CRS
-        vect = self.ds.to_crs(crs)
 
         # Set default burn value, index from 1 to len(self.ds)
         if in_value is None:
@@ -343,9 +356,9 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         >>> outlines = gu.Vector(gu.datasets.get_path('glacier_outlines'))
         >>> outlines = gu.Vector(outlines.ds.to_crs('EPSG:32645'))
         >>> buffer = outlines.buffer_without_overlap(500)
-        >>> ax = buffer.ds.plot()
-        >>> outlines.ds.plot(ax=ax, ec='k', fc='none')
-        >>> plt.show()
+        >>> ax = buffer.ds.plot()  # doctest: +SKIP
+        >>> outlines.ds.plot(ax=ax, ec='k', fc='none')  # doctest: +SKIP
+        >>> plt.show()  # doctest: +SKIP
 
         :param buffer_size: Buffer size in self's coordinate system units.
         :param plot: Set to True to show intermediate plots, useful for understanding or debugging.
@@ -378,7 +391,7 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
 
         # Split all polygons, and join attributes of original geometries into the Voronoi polygons
         # Splitting, i.e. explode, is needed when Voronoi generate MultiPolygons that may extend over several features.
-        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode())
+        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode(index_parts=True))  # requires geopandas>=0.10
         joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how="right")
 
         # Plot results -> some polygons are duplicated

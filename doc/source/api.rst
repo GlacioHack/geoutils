@@ -5,23 +5,58 @@ API Reference
 
 Full information about geoutils' functionality is provided on this page.
 
-Geovector
----------
+.. currentmodule:: geoutils
 
-.. automodule:: geoutils.geovector
-    :members:
+.. autosummary::
+        :toctree: gen_modules/
+        :template: module.rst
+        :recursive:
 
+        georaster
+        georaster.raster
+        geovector
+        projtools
+        satimg
+        geoviewer
+        datasets
 
-Georaster
----------
+.. automodule geoutils
 
-.. automodule:: geoutils.georaster
-    :special-members: __init__
-    :members:
+   .. contents:: Contents
+      :local:
 
+   Raster
+   ------
+   .. autoclass:: Raster
+        :show-inheritance:
+        :special-members: __init__
+        :members:
 
-Projection Tools
-----------------
+   .. _sphx_glr_backref_geoutils.Raster:
 
-.. automodule:: geoutils.projtools
-    :members:
+   .. minigallery:: geoutils.Raster
+        :add-heading:
+
+   Vector
+   ------
+   .. autoclass:: Vector
+        :show-inheritance:
+        :special-members: __init__
+        :members:
+
+   .. _sphx_glr_backref_geoutils.Vector:
+
+   .. minigallery:: geoutils.Vector
+        :add-heading:
+
+   SatelliteImage
+   --------------
+   .. autoclass:: SatelliteImage
+        :show-inheritance:
+        :special-members: __init__
+        :members:
+
+   .. _sphx_glr_backref_geoutils.SatelliteImage:
+
+   .. minigallery:: geoutils.SatelliteImage
+        :add-heading:

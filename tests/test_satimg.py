@@ -39,7 +39,10 @@ class TestSatelliteImage:
         assert isinstance(img3, si.SatelliteImage)
 
         assert np.logical_and.reduce(
-            (np.array_equal(img.data, img2.data, equal_nan=True), np.array_equal(img2.data, img3.data, equal_nan=True))
+            (
+                geoutils.misc.array_equal(img.data, img2.data, equal_nan=True),
+                geoutils.misc.array_equal(img2.data, img3.data, equal_nan=True),
+            )
         )
 
         assert np.logical_and.reduce(
@@ -141,14 +144,14 @@ class TestSatelliteImage:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert np.array_equal(r.data, r2.data, equal_nan=True)
+        assert geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check dataset_mask array
         assert np.all(r.data.mask == r2.data.mask)
 
         # Check that if r.data is modified, it does not affect r2.data
         r.data += 5
-        assert not np.array_equal(r.data, r2.data, equal_nan=True)
+        assert not geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
 
     def test_filename_parsing(self) -> None:
 
