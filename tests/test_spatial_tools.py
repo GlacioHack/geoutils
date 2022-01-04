@@ -138,6 +138,7 @@ def test_merge_rasters(rasters) -> None:  # type: ignore
     diff = rasters.img.data - merged_img.data
 
     import matplotlib.pyplot as plt
+
     plt.subplot(131)
     plt.imshow(diff.squeeze())
     plt.subplot(132)

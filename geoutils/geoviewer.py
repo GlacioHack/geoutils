@@ -141,7 +141,7 @@ def main() -> None:
 
     # Read image #
     img.load()
-    img = img.reproject(dst_size=new_shape)
+    img = img.reproject(dst_size=new_shape)  # type: ignore
 
     # Set no data value
     if args.nodata == "default":

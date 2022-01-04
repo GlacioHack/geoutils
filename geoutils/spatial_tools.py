@@ -180,7 +180,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             diff_to_ref, _ = get_array_and_mask(diff_to_ref)
             data.append(diff_to_ref)
         else:
-            #img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
+            # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
             data.append(reprojected_raster.data.squeeze())
 
         # Remove unloaded rasters

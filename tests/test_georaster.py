@@ -1073,8 +1073,12 @@ class TestsArithmetic:
     # Create fake rasters with random values in 0-255 and dtype uint8
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-    r1 = gr.Raster.from_array(np.ma.masked_array(np.random.randint(1, 255, (height, width), dtype="uint8")), transform=transform, crs=None)
-    r2 = gr.Raster.from_array(np.ma.masked_array(np.random.randint(1, 255, (height, width), dtype="uint8")), transform=transform, crs=None)
+    r1 = gr.Raster.from_array(
+        np.ma.masked_array(np.random.randint(1, 255, (height, width), dtype="uint8")), transform=transform, crs=None
+    )
+    r2 = gr.Raster.from_array(
+        np.ma.masked_array(np.random.randint(1, 255, (height, width), dtype="uint8")), transform=transform, crs=None
+    )
 
     # Tests with different dtype
     r1_f32 = gr.Raster.from_array(
@@ -1100,7 +1104,9 @@ class TestsArithmetic:
 
     # Create rasters with different shape, crs or transforms for testing errors
     r1_wrong_shape = gr.Raster.from_array(
-        np.ma.masked_array(np.random.randint(0, 255, (height + 1, width))).astype("float32"), transform=transform, crs=None
+        np.ma.masked_array(np.random.randint(0, 255, (height + 1, width))).astype("float32"),
+        transform=transform,
+        crs=None,
     )
 
     r1_wrong_crs = gr.Raster.from_array(
