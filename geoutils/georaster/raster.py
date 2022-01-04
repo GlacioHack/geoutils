@@ -1490,50 +1490,26 @@ to be cleared due to the setting of GCPs."
         # Create rasterio's window for reading
         window = rio.windows.Window(col, row, width, height)
 
-        # Get values for all bands
-        if band is None:
+        if self.is_loaded:
+            data = self.data[slice(None) if band is None else band + 1, row:row + height, col : col + width]
+            value = format_value(data)
+            win: np.ndarray | dict[int, np.ndarray] = data
 
-            # Deal with single band case
+        else:
             if self.nbands == 1:
-                data = self.ds.read(
-                    window=window,
-                    fill_value=self.nodata,
-                    boundless=boundless,
-                    masked=masked,
-                )
+                with rio.open(self.filename) as raster:
+                    data = raster.read(window=window, fill_value=self.nodata, boundless=boundless, masked=masked)
                 value = format_value(data)
                 win = data
-
-            # Deal with multiband case
             else:
                 value = {}
                 win = {}
-
-                for b in self.indexes:
-                    data = self.ds.read(
-                        window=window,
-                        fill_value=self.nodata,
-                        boundless=boundless,
-                        indexes=b,
-                        masked=masked,
-                    )
+                with rio.open(self.filename) as raster:
+                    for b in self.indexes:
+                        data = raster.read(window=window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b)
                     val = format_value(data)
-                    # Store according to GDAL band numbers
                     value[b] = val
                     win[b] = data
-
-        # Or just for specified band in multiband case
-        elif isinstance(band, int):
-            data = self.ds.read(
-                window=window,
-                fill_value=self.nodata,
-                boundless=boundless,
-                indexes=band,
-                masked=masked,
-            )
-            value = format_value(data)
-        else:
-            raise ValueError("Value provided for band was not int or None.")
 
         if return_window:
             return (value, win)
@@ -1790,7 +1766,7 @@ to be cleared due to the setting of GCPs."
                 # Generate a new Raster from a copy of the band's data
                 bands.append(
                     self.from_array(
-                        self.data[band_n, :, :],
+                        self.data[band_n, :, :].copy(),
                         transform=self.transform,
                         crs=self.crs,
                         nodata=self.nodata,
@@ -1803,7 +1779,6 @@ to be cleared due to the setting of GCPs."
                 # Set the data to a slice of the original array
                 raster._data = self.data[band_n, :, :].reshape((1,) + self.data.shape[1:])
                 # Set the nbands
-                raster.nbands = 1
                 bands.append(raster)
 
         return bands
@@ -1869,7 +1844,8 @@ to be cleared due to the setting of GCPs."
         if self.is_loaded:
             pixel_data = self.data[:, rows, cols]
         else:
-            pixel_data = np.array(list(self.ds.sample(zip(x_coords, y_coords)))).T
+            with rio.open(self.filename) as raster:
+                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords)))).T
 
         if isinstance(pixel_data, np.ma.masked_array):
             pixel_data = np.where(pixel_data.mask, np.nan, pixel_data.data)
