@@ -120,11 +120,22 @@ class TestSatelliteImage:
         assert isinstance(r2, geoutils.satimg.SatelliteImage)
 
         # check all immutable attributes are equal
-        georaster_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes', 'nodata',
-                            'res', 'shape', 'transform', 'width']
-        satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime']
+        georaster_attrs = [
+            "bounds",
+            "count",
+            "crs",
+            "dtypes",
+            "height",
+            "indexes",
+            "nodata",
+            "res",
+            "shape",
+            "transform",
+            "width",
+        ]
+        satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
         # using list directly available in Class
-        attrs = [at for at in georaster_attrs + satimg_attrs]
+        attrs = georaster_attrs + satimg_attrs
         all_attrs = attrs + si.satimg_attrs
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)

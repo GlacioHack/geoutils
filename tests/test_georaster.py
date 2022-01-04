@@ -67,14 +67,13 @@ class TestRaster:
         r.data[0, 0, 0] += 5
         assert r2.data[0, 0, 0] == r.data[0, 0, 0]
 
-        #r.nbands = 2
+        # r.nbands = 2
         r._data = np.repeat(r.data, 2).reshape((2,) + r.shape)
         assert r.nbands != r2.nbands
 
     def test_info(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
-
 
         # Check all is good with passing attributes
         default_attrs = [
@@ -126,7 +125,7 @@ class TestRaster:
         assert r.height == 655
         assert r.shape == (r.height, r.width)
         assert r.count == 1
-        #assert r.nbands is None
+        # assert r.nbands is None
         assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
@@ -159,7 +158,7 @@ class TestRaster:
         assert r.count == 3
         assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 1
-        #assert r.bands == (1)
+        # assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
@@ -302,12 +301,22 @@ class TestRaster:
         assert r2.name != r.name
 
         # Check all attributes except name, driver and dataset_mask array
-        default_attrs = ['bounds', 'count', 'crs', 'dtypes', 'height', 'indexes','nodata',
-                          'res', 'shape', 'transform', 'width']
+        default_attrs = [
+            "bounds",
+            "count",
+            "crs",
+            "dtypes",
+            "height",
+            "indexes",
+            "nodata",
+            "res",
+            "shape",
+            "transform",
+            "width",
+        ]
         # using list directly available in Class
-        attrs = [at for at in default_attrs]
+        attrs = default_attrs
         for attr in attrs:
-            print(attr)
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
@@ -380,7 +389,7 @@ class TestRaster:
 
         assert b_minmax == b_crop
 
-    @pytest.mark.skip("TODO: Fix the functionality so this works again")
+    @pytest.mark.skip("TODO: Fix the functionality so this works again")  # type: ignore
     def test_reproj(self) -> None:
         warnings.simplefilter("error")
 
@@ -607,7 +616,7 @@ class TestRaster:
         # z_val = r.value_at_coords(xtest,ytest)
         # assert z == z_val
 
-    @pytest.mark.skip("TODO: Fix this functionality or rethink how set_ndv works")
+    @pytest.mark.skip("TODO: Fix this functionality or rethink how set_ndv works")  # type: ignore
     def test_set_ndv(self) -> None:
         """
         Read Landsat dataset and set 255 to no data. Save mask.
@@ -867,10 +876,10 @@ class TestRaster:
         temp_dir = tempfile.TemporaryDirectory()
         temp_path = os.path.join(temp_dir.name, "code.py")
 
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        # r = gr.Raster(datasets.get_path("landsat_B4"))
 
         # Load the attributes to check
-        attributes = ["transform", "crs", "nodata", "name", "driver","is_loaded", "filename", "nbands", "filename"]
+        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename", "nbands", "filename"]
         # Create some sample code that should be correct
         sample_code = "\n".join(
             [

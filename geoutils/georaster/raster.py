@@ -3,14 +3,13 @@ geoutils.georaster provides a toolset for working with raster data.
 """
 from __future__ import annotations
 
-import copy
 import os
 import warnings
 from collections import abc
-from numbers import Number
-from typing import IO, Any, Callable, TypeVar, overload
 from collections.abc import Iterable
 from contextlib import ExitStack
+from numbers import Number
+from typing import IO, Any, Callable, TypeVar, overload
 
 import geopandas as gpd
 import matplotlib
@@ -26,11 +25,9 @@ from affine import Affine
 from matplotlib import cm, colors
 from rasterio.crs import CRS
 from rasterio.features import shapes
-from rasterio.io import MemoryFile, DatasetReader
 from rasterio.plot import show as rshow
 from rasterio.warp import Resampling
 from scipy.ndimage import map_coordinates
-from shapely.geometry.polygon import Polygon
 
 import geoutils.geovector as gv
 from geoutils.geovector import Vector
@@ -109,7 +106,15 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
     else:
         raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
 
-def _load_rio(dataset: rio.io.DatasetReader, bands: int | list[int] | None = None, masked: bool = False, transform: Affine | None = None, shape: tuple[int, int] | None = None, **kwargs: Any) -> np.ndarray | np.ma.masked_array:
+
+def _load_rio(
+    dataset: rio.io.DatasetReader,
+    bands: int | list[int] | None = None,
+    masked: bool = False,
+    transform: Affine | None = None,
+    shape: tuple[int, int] | None = None,
+    **kwargs: Any,
+) -> np.ndarray | np.ma.masked_array:
     r"""
     Load specific bands of the dataset, using rasterio.read().
     Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
@@ -128,7 +133,7 @@ def _load_rio(dataset: rio.io.DatasetReader, bands: int | list[int] | None = Non
         if transform == dataset.transform:
             row_off, col_off = 0, 0
         else:
-            row_off, col_off = [round(val) for val in dataset.index(transform[2], abs(transform[4]))]
+            row_off, col_off = (round(val) for val in dataset.index(transform[2], abs(transform[4])))
 
         window = rio.windows.Window(col_off, row_off, *shape[::-1])
     else:
@@ -205,7 +210,7 @@ class Raster:
         load_data: bool = True,
         downsample: int | float = 1,
         masked: bool = True,
-        nodata: abc.Sequence[int | float] | int | float | None = None,
+        nodata: int | float | list[int] | list[float] | None = None,
         attrs: list[str] | None = None,
     ) -> None:
         """
@@ -233,7 +238,7 @@ class Raster:
         """
         self.driver: str | None = None
         self.name: str | None = None
-        self.nodata: int | float | None = None
+        self.nodata: int | float | list[int] | list[float] | None = None
         self.filename: str | None = None
         self.tags: dict[str, Any] = {}
 
@@ -266,10 +271,10 @@ class Raster:
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, rio.io.DatasetReader, rio.io.MemoryFile)):
 
-            with ExitStack() as stack:
+            with ExitStack():
                 if isinstance(filename_or_dataset, str):
                     ds: rio.io.DatasetReader = rio.open(filename_or_dataset)
-                    self.filename: str | None = filename_or_dataset
+                    self.filename = filename_or_dataset
                 elif isinstance(filename_or_dataset, rio.io.DatasetReader):
                     ds = filename_or_dataset
                     self.filename = filename_or_dataset.files[0]
@@ -335,7 +340,7 @@ class Raster:
     def nbands(self) -> int:
         if not self.is_loaded and self._disk_shape is not None:
             return self._disk_shape[0]
-        return self.data.shape[0]
+        return int(self.data.shape[0])
 
     @property
     def count(self) -> int:
@@ -346,20 +351,20 @@ class Raster:
     @property
     def height(self) -> int:
         if not self.is_loaded:
-            return self._disk_shape[1]
-        return self.data.shape[1]
+            return self._disk_shape[1]  # type: ignore
+        return int(self.data.shape[1])
 
     @property
     def width(self) -> int:
         if not self.is_loaded:
-            return self._disk_shape[2]
-        return self.data.shape[2]
-    
+            return self._disk_shape[2]  # type: ignore
+        return int(self.data.shape[2])
+
     @property
     def shape(self) -> tuple[int, int]:
         if not self.is_loaded:
-            return self._disk_shape[1], self._disk_shape[2]
-        return self.data.shape[1], self.data.shape[2]
+            return self._disk_shape[1], self._disk_shape[2]  # type: ignore
+        return int(self.data.shape[1]), int(self.data.shape[2])
 
     @property
     def res(self) -> tuple[float | int, float | int]:
@@ -370,7 +375,9 @@ class Raster:
         left = self.transform[2]
         top = self.transform[5]
         res = self.res
-        return rio.coords.BoundingBox(left=left, bottom=top - self.height * res[0], right=left + self.width * res[1], top=top)
+        return rio.coords.BoundingBox(
+            left=left, bottom=top - self.height * res[0], right=left + self.width * res[1], top=top
+        )
 
     @property
     def is_loaded(self) -> bool:
@@ -378,7 +385,7 @@ class Raster:
 
     @property
     def dtypes(self) -> tuple[str, ...]:
-        if not self.is_loaded:
+        if not self.is_loaded and self._disk_dtypes is not None:
             return self._disk_dtypes
         return (str(self.data.dtype),) * self.nbands
 
@@ -386,14 +393,15 @@ class Raster:
     def indexes(self) -> tuple[int, ...]:
         if self._disk_indexes is not None:
             return self._disk_indexes
-        return tuple(list(range(1, self.nbands + 1)))
+        return tuple(range(1, self.nbands + 1))
 
     @property
     def bands(self) -> tuple[int, ...]:
         if self._bands is not None:
-            return self._bands
+            if isinstance(self._bands, int):
+                return (self._bands,)
+            return tuple(self._bands)
         return self.indexes
-
 
     def load(self) -> None:
         if self.is_loaded:
@@ -403,9 +411,9 @@ class Raster:
             raise ValueError("'filename' is not set")
 
         with rio.open(self.filename) as dataset:
-            self.data = _load_rio(dataset, bands=self._bands, masked=self._masked, transform=self.transform, shape=self.shape)
-
-
+            self.data = _load_rio(
+                dataset, bands=self._bands, masked=self._masked, transform=self.transform, shape=self.shape
+            )
 
     @classmethod
     def from_array(
@@ -413,7 +421,7 @@ class Raster:
         data: np.ndarray | np.ma.masked_array,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int,
-        nodata: int | float | None = None,
+        nodata: int | float | list[int] | list[float] | None = None,
     ) -> RasterType:
         """Create a Raster from a numpy array and some geo-referencing information.
 
@@ -586,7 +594,9 @@ class Raster:
 
         """
         if not self._is_modified:
-            new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
+            new_hash = hash(
+                (self._data.tobytes() if self._data is not None else 0, self.transform, self.crs, self.nodata)
+            )
             self._is_modified = not (self._disk_hash == new_hash)
 
         return self._is_modified
@@ -641,9 +651,9 @@ class Raster:
             )
 
         if new_data.shape[1:] != orig_shape:
-            raise ValueError(f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}.")
-
-
+            raise ValueError(
+                f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
+            )
 
         self._data = new_data
 
@@ -717,7 +727,6 @@ class Raster:
 
         return self._data.__array_interface__  # type: ignore
 
-
     def crop(
         self: RasterType,
         cropGeom: Raster | Vector | list[float] | tuple[float, ...],
@@ -750,11 +759,21 @@ class Raster:
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
         if mode == "match_pixel":
-            crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+            # crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
             new_xmin = np.max([xmin - ((xmin - self.bounds.left) % self.res[1]), self.bounds.left])
             new_ymin = np.max([ymin - ((ymin - self.bounds.bottom) % self.res[0]), self.bounds.bottom])
-            new_ymax = np.min([ymax + ((self.res[0] - (ymax - self.bounds.top) % self.res[0]) if (ymax - self.bounds.top) % self.res[0] != 0 else 0), self.bounds.top])
+            new_ymax = np.min(
+                [
+                    ymax
+                    + (
+                        (self.res[0] - (ymax - self.bounds.top) % self.res[0])
+                        if (ymax - self.bounds.top) % self.res[0] != 0
+                        else 0
+                    ),
+                    self.bounds.top,
+                ]
+            )
             new_xmax = np.min([xmax + (self.res[1] - xmax % self.res[1]), self.bounds.right])
             tfm = rio.transform.from_origin(new_xmin, new_ymax, *self.res)
 
@@ -764,20 +783,20 @@ class Raster:
             rowmax = rowmin + int((new_ymax - new_ymin) / self.res[0])
 
             if self.is_loaded:
-                crop_img = self.data[:, rowmin:rowmax, colmin:colmax + 1]
+                crop_img = self.data[:, rowmin:rowmax, colmin : colmax + 1]
             else:
                 with rio.open(self.filename) as raster:
-                    crop_img = raster.read(self._bands, masked=self._masked, window=rio.windows.Window(colmin, rowmin, (colmax - colmin), (colmin - colmax)))
+                    crop_img = raster.read(
+                        self._bands,
+                        masked=self._masked,
+                        window=rio.windows.Window(colmin, rowmin, (colmax - colmin), (colmin - colmax)),
+                    )
 
         else:
             new_tfm = rio.transform.from_origin(xmin, ymax, *self.res)
 
             crop_img, tfm = rio.warp.reproject(
-                self.data,
-                src_transform=self.transform,
-                dst_transform=new_tfm,
-                src_crs=self.crs,
-                dst_crs=self.crs
+                self.data, src_transform=self.transform, dst_transform=new_tfm, src_crs=self.crs, dst_crs=self.crs
             )
 
         if len(crop_img.shape) == 2:
@@ -800,8 +819,8 @@ class Raster:
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | None = None,
-        src_nodata: int | float | None = None,
+        dst_nodata: int | float | list[int] | list[float] | None = None,
+        src_nodata: int | float | list[int] | list[float] | None = None,
         dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
@@ -1032,7 +1051,7 @@ class Raster:
 
         self.transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
 
-    def set_ndv(self, ndv: abc.Sequence[int | float] | int | float, update_array: bool = True) -> None:
+    def set_ndv(self, ndv: int | float | list[int] | list[float], update_array: bool = True) -> None:
         """
         Set new nodata values for bands (and possibly update arrays).
 
@@ -1491,7 +1510,7 @@ to be cleared due to the setting of GCPs."
         window = rio.windows.Window(col, row, width, height)
 
         if self.is_loaded:
-            data = self.data[slice(None) if band is None else band + 1, row:row + height, col : col + width]
+            data = self.data[slice(None) if band is None else band + 1, row : row + height, col : col + width]
             value = format_value(data)
             win: np.ndarray | dict[int, np.ndarray] = data
 
@@ -1506,10 +1525,12 @@ to be cleared due to the setting of GCPs."
                 win = {}
                 with rio.open(self.filename) as raster:
                     for b in self.indexes:
-                        data = raster.read(window=window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b)
-                    val = format_value(data)
-                    value[b] = val
-                    win[b] = data
+                        data = raster.read(
+                            window=window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b
+                        )
+                        val = format_value(data)
+                        value[b] = val
+                        win[b] = data  # type: ignore
 
         if return_window:
             return (value, win)
@@ -1631,8 +1652,7 @@ to be cleared due to the setting of GCPs."
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-         
-        x, y = rio.transform.xy(self.transform,i, j, offset=offset)
+        x, y = rio.transform.xy(self.transform, i, j, offset=offset)
 
         return x, y
 

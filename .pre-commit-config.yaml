@@ -65,6 +65,8 @@ repos:
           rev: 5.8.0
           hooks:
                   - id: isort
+                    additional_dependencies:
+                      - setuptools
 
         # Automatically upgrade syntax to a minimum version
         - repo: https://github.com/asottile/pyupgrade
