@@ -1211,7 +1211,6 @@ Must be a Raster, np.ndarray or single number."
         :param ndv: nodata values
         :param update_array: change the existing nodata in array
         """
-
         if not isinstance(ndv, (abc.Sequence, int, float, np.integer, np.floating)):
             raise ValueError("Type of ndv not understood, must be list or float or int")
 

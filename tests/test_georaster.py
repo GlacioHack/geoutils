@@ -619,7 +619,6 @@ class TestRaster:
         # z_val = r.value_at_coords(xtest,ytest)
         # assert z == z_val
 
-    @pytest.mark.skip("TODO: Fix this functionality or rethink how set_ndv works")  # type: ignore
     def test_set_ndv(self) -> None:
         """
         Read Landsat dataset and set 255 to no data. Save mask.
@@ -650,7 +649,7 @@ class TestRaster:
         assert np.all(ndv_index_2 == ndv_index)
 
         # Check that the number of no data value is correct
-        assert np.count_nonzero(ndv_index.data) == 112088
+        assert np.count_nonzero(ndv_index.data) == 111688
 
         # Check that nodata can also be set upon loading
         r = gr.Raster(datasets.get_path("landsat_B4"), nodata=5)
