@@ -437,10 +437,11 @@ class Raster:
 
     def __repr__(self) -> str:
         """Convert object to formal string representation."""
-        L = [getattr(self, item) for item in self._saved_attrs]
-        s: str = "{}.{}({})".format(type(self).__module__, type(self).__qualname__, ", ".join(map(str, L)))
+        return self.__str__()
+        # L = [getattr(self, item) for item in self._saved_attrs]
+        # s: str = "{}.{}({})".format(type(self).__module__, type(self).__qualname__, ", ".join(map(str, L)))
 
-        return s
+        # return s
 
     def __str__(self) -> str:
         """Provide string of information about Raster."""

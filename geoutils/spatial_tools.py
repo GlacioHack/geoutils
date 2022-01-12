@@ -197,7 +197,6 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         nodata = _default_ndv(data.dtype)
     data[np.isnan(data)] = nodata
 
-
     # Save as gu.Raster - needed as some child classes may not accept multiple bands
     r = gu.Raster.from_array(
         data=data,
