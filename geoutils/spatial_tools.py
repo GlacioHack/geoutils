@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils.georaster import Raster, RasterType
+from geoutils.georaster.raster import _default_ndv
 from geoutils.misc import resampling_method_from_str
 
 
@@ -170,6 +171,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             dst_crs=reference_raster.crs,
             dtype=reference_raster.data.dtype,
             dst_nodata=reference_raster.nodata,
+            silent=True,
         )
 
         # Optionally calculate difference
@@ -185,15 +187,20 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         if not raster.is_loaded:
             raster._data = None
 
-    # Convert to numpy array
-    data = np.asarray(data)
+    # Convert to masked array
+    data = np.ma.asarray(data)
+    if reference_raster.nodata is not None:
+        nodata = reference_raster.nodata
+    else:
+        nodata = _default_ndv(data.dtype)
+    data[np.isnan(data)] = nodata
 
     # Save as gu.Raster - needed as some child classes may not accept multiple bands
     r = gu.Raster.from_array(
         data=data,
         transform=rio.transform.from_bounds(*dst_bounds, width=data[0].shape[1], height=data[0].shape[0]),
         crs=reference_raster.crs,
-        nodata=reference_raster.nodata,
+        nodata=nodata,
     )
 
     return r
@@ -267,6 +274,14 @@ If several algorithms are provided, each result is returned as a separate band.
                 raise exception
             merged_data.append(np.apply_along_axis(algo, axis=0, arr=raster_stack.data))
 
+    # Convert to masked array, and set all Nans to nodata
+    merged_data = np.ma.asarray(merged_data)
+    if reference_raster.nodata is not None:
+        nodata = reference_raster.nodata
+    else:
+        nodata = _default_ndv(merged_data.dtype)
+    merged_data[np.isnan(merged_data)] = nodata
+
     # Save as gu.Raster
     merged_raster = reference_raster.from_array(
         data=np.reshape(merged_data, (len(merged_data),) + merged_data[0].shape),
@@ -274,7 +289,7 @@ If several algorithms are provided, each result is returned as a separate band.
             *raster_stack.bounds, width=merged_data[0].shape[1], height=merged_data[0].shape[0]
         ),
         crs=reference_raster.crs,
-        nodata=reference_raster.nodata,
+        nodata=nodata,
     )
 
     return merged_raster
