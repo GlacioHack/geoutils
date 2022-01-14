@@ -430,9 +430,11 @@ class Raster:
             return tuple(self._bands)
         return self.indexes
 
-    def load(self) -> None:
+    def load(self, **kwargs: Any) -> None:
         """
         Load the data from disk.
+
+        :param **kwargs: Optional keyword arguments sent to '_load_rio()'
 
         :raises ValueError: If the data are already loaded.
         :raises AttributeError: If no 'filename' attribute exists.
@@ -445,7 +447,7 @@ class Raster:
 
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
-                dataset, bands=self._bands, masked=self._masked, transform=self.transform, shape=self.shape
+                dataset, bands=self._bands, masked=self._masked, transform=self.transform, shape=self.shape, **kwargs
             )
 
     @classmethod
