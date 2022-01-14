@@ -27,13 +27,18 @@ DO_PLOT = False
 
 
 class TestRaster:
+
+    landsat_b4_path = datasets.get_path("landsat_B4")
+    landsat_b4_crop_path = datasets.get_path("landsat_B4_crop")
+    landsat_rgb_path = datasets.get_path("landsat_RGB")
+
     def test_init(self) -> None:
         """
         Test that all possible inputs work properly in Raster class init
         """
 
         # first, filename
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
         assert isinstance(r, gr.Raster)
 
         # second, passing a Raster itself (points back to Raster passed)
@@ -41,13 +46,13 @@ class TestRaster:
         assert isinstance(r2, gr.Raster)
 
         # third, rio.Dataset
-        ds = rio.open(datasets.get_path("landsat_B4"))
+        ds = rio.open(self.landsat_b4_path)
         r3 = gr.Raster(ds)
         assert isinstance(r3, gr.Raster)
         assert r3.filename is not None
 
         # finally, as memoryfile
-        memfile = rio.MemoryFile(open(datasets.get_path("landsat_B4"), "rb"))
+        memfile = rio.MemoryFile(open(self.landsat_b4_path, "rb"))
         r4 = gr.Raster(memfile)
         assert isinstance(r4, gr.Raster)
 
@@ -77,7 +82,7 @@ class TestRaster:
 
     def test_info(self) -> None:
 
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
 
         # Check all is good with passing attributes
         default_attrs = [
@@ -95,7 +100,7 @@ class TestRaster:
             "transform",
             "width",
         ]
-        with rio.open(datasets.get_path("landsat_B4")) as dataset:
+        with rio.open(self.landsat_b4_path) as dataset:
             for attr in default_attrs:
                 assert r.__getattribute__(attr) == dataset.__getattribute__(attr)
 
@@ -122,7 +127,7 @@ class TestRaster:
         Test that loading metadata and data works for all possible cases.
         """
         # Test 1 - loading metadata only, single band
-        r = gr.Raster(datasets.get_path("landsat_B4"), load_data=False)
+        r = gr.Raster(self.landsat_b4_path, load_data=False)
 
         assert r.driver == "GTiff"
         assert r.width == 800
@@ -143,13 +148,13 @@ class TestRaster:
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 3 - single band, loading data
-        r = gr.Raster(datasets.get_path("landsat_B4"), load_data=True)
+        r = gr.Raster(self.landsat_b4_path, load_data=True)
         assert r.is_loaded
         assert r.nbands == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 4 - multiple bands, load all bands
-        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True)
+        r = gr.Raster(self.landsat_rgb_path, load_data=True)
         assert r.count == 3
         assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 3
@@ -157,7 +162,7 @@ class TestRaster:
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
-        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=1)
+        r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=1)
         assert r.count == 3
         assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 1
@@ -165,7 +170,7 @@ class TestRaster:
         assert r.data.shape == (r.nbands, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gr.Raster(datasets.get_path("landsat_RGB"), load_data=True, bands=[2, 3])
+        r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=[2, 3])
         assert r.count == 3
         assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 2
@@ -177,13 +182,13 @@ class TestRaster:
         Check that self.data is correct when using downsampling
         """
         # Test single band
-        r = gr.Raster(datasets.get_path("landsat_B4"), downsample=4)
+        r = gr.Raster(self.landsat_b4_path, downsample=4)
         assert r.data.shape == (1, 164, 200)
         assert r.height == 164
         assert r.width == 200
 
         # Test multiple band
-        r = gr.Raster(datasets.get_path("landsat_RGB"), downsample=2)
+        r = gr.Raster(self.landsat_rgb_path, downsample=2)
         assert r.data.shape == (3, 328, 400)
 
         # Test that xy2ij are consistent with new image
@@ -287,7 +292,7 @@ class TestRaster:
         - if r is copied, r.data changed, r2.data should be unchanged
         """
         # Open dataset, update data and make a copy
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
         r.data += 5
         r2 = r.copy()
 
@@ -337,7 +342,7 @@ class TestRaster:
         Test that changing the data updates is_modified as desired
         """
         # after loading, should not be modified
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
         assert not r.is_modified
 
         # this should not trigger the hash
@@ -349,14 +354,14 @@ class TestRaster:
         assert not r.is_modified
 
         # this will
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
         r.data = r.data + 5
         assert r.is_modified
 
     def test_crop(self) -> None:
 
-        r = gr.Raster(datasets.get_path("landsat_B4"))
-        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r = gr.Raster(self.landsat_b4_path)
+        r2 = gr.Raster(self.landsat_b4_crop_path)
 
         # Read a vector and extract only the largest outline within the extent of r
         outlines = gu.Vector(datasets.get_path("glacier_outlines"))
@@ -397,10 +402,10 @@ class TestRaster:
         warnings.simplefilter("error")
 
         # Reference raster to be used
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
 
         # A second raster with different bounds, shape and resolution
-        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r2 = gr.Raster(self.landsat_b4_crop_path)
         r2 = r2.reproject(dst_res=20)
         assert r2.res == (20, 20)
 
@@ -498,8 +503,8 @@ class TestRaster:
 
     def test_inters_img(self) -> None:
 
-        r = gr.Raster(datasets.get_path("landsat_B4"))
-        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r = gr.Raster(self.landsat_b4_path)
+        r2 = gr.Raster(self.landsat_b4_crop_path)
 
         inters = r.intersection(r2)
         print(inters)
@@ -508,7 +513,7 @@ class TestRaster:
 
         # FIRST, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
         # at the center of pixel
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
         assert r.tags["AREA_OR_POINT"] == "Point"
 
         xmin, ymin, xmax, ymax = r.bounds
@@ -561,7 +566,7 @@ class TestRaster:
 
         # SECOND, test after a crop: the Raster now has an Area interpretation, those should fall right on the integer
         # pixel indexes
-        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r2 = gr.Raster(self.landsat_b4_crop_path)
         r.crop(r2)
         assert r.tags["AREA_OR_POINT"] == "Area"
 
@@ -600,8 +605,8 @@ class TestRaster:
 
     def test_value_at_coords(self) -> None:
 
-        r = gr.Raster(datasets.get_path("landsat_B4"))
-        r2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        r = gr.Raster(self.landsat_b4_path)
+        r2 = gr.Raster(self.landsat_b4_crop_path)
         r.crop(r2)
 
         # random test point that raised an error
@@ -626,7 +631,7 @@ class TestRaster:
         Check that both no data masks are identical and have correct number of pixels.
         """
         # Read Landsat image and set no data to 255
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
         r.set_ndv(ndv=[255])
         ndv_index = r.data.mask
 
@@ -652,7 +657,7 @@ class TestRaster:
         assert np.count_nonzero(ndv_index.data) == 111688
 
         # Check that nodata can also be set upon loading
-        r = gr.Raster(datasets.get_path("landsat_B4"), nodata=5)
+        r = gr.Raster(self.landsat_b4_path, nodata=5)
         assert r.nodata == 5
 
         # Check that an error is raised if nodata value is incompatible with dtype
@@ -690,7 +695,7 @@ class TestRaster:
     def test_astype(self) -> None:
         warnings.simplefilter("error")
 
-        r = gr.Raster(datasets.get_path("landsat_B4"))
+        r = gr.Raster(self.landsat_b4_path)
 
         # Test changing dtypes that does not modify the data
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
@@ -732,8 +737,8 @@ class TestRaster:
     def test_plot(self) -> None:
 
         # Read single band raster and RGB raster
-        img = gr.Raster(datasets.get_path("landsat_B4"))
-        img_RGB = gr.Raster(datasets.get_path("landsat_RGB"))
+        img = gr.Raster(self.landsat_b4_path)
+        img_RGB = gr.Raster(self.landsat_rgb_path)
 
         # Test default plot
         ax = plt.subplot(111)
@@ -774,7 +779,7 @@ class TestRaster:
     def test_saving(self) -> None:
 
         # Read single band raster
-        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img = gr.Raster(self.landsat_b4_path)
 
         # Save file to temporary file, with defaults opts
         img.save(TemporaryFile())
@@ -786,7 +791,7 @@ class TestRaster:
 
     def test_coords(self) -> None:
 
-        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img = gr.Raster(self.landsat_b4_path)
         xx, yy = img.coords(offset="corner")
         assert xx.min() == pytest.approx(img.bounds.left)
         assert xx.max() == pytest.approx(img.bounds.right - img.res[0])
@@ -813,8 +818,8 @@ class TestRaster:
 
     def test_eq(self) -> None:
 
-        img = gr.Raster(datasets.get_path("landsat_B4"))
-        img2 = gr.Raster(datasets.get_path("landsat_B4"))
+        img = gr.Raster(self.landsat_b4_path)
+        img2 = gr.Raster(self.landsat_b4_path)
 
         assert geoutils.misc.array_equal(img.data, img2.data, equal_nan=True)
         assert img.transform == img2.transform
@@ -832,7 +837,7 @@ class TestRaster:
         """
         Check that values returned at selected pixels correspond to what is expected, both for original CRS and lat/lon.
         """
-        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img = gr.Raster(self.landsat_b4_path)
 
         # Lower right pixel
         x, y = [img.bounds.right - img.res[0], img.bounds.bottom + img.res[1]]
@@ -853,7 +858,7 @@ class TestRaster:
 
         # Test that from_array works if nothing is changed
         # -> most tests already performed in test_copy, no need for more
-        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img = gr.Raster(self.landsat_b4_path)
         out_img = gr.Raster.from_array(img.data, img.transform, img.crs, nodata=img.nodata)
         assert out_img == img
 
@@ -878,7 +883,7 @@ class TestRaster:
         temp_dir = tempfile.TemporaryDirectory()
         temp_path = os.path.join(temp_dir.name, "code.py")
 
-        # r = gr.Raster(datasets.get_path("landsat_B4"))
+        # r = gr.Raster(self.landsat_b4_path)
 
         # Load the attributes to check
         attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename", "nbands", "filename"]
@@ -913,7 +918,7 @@ class TestRaster:
 
     def test_split_bands(self) -> None:
 
-        img = gr.Raster(datasets.get_path("landsat_RGB"))
+        img = gr.Raster(self.landsat_rgb_path)
 
         red, green, blue = img.split_bands(copy=False)
 
@@ -972,8 +977,8 @@ class TestRaster:
             if "not a valid rasterio.warp.Resampling method" not in str(exception):
                 raise exception
 
-        img1 = gr.Raster(datasets.get_path("landsat_B4"))
-        img2 = gr.Raster(datasets.get_path("landsat_B4_crop"))
+        img1 = gr.Raster(self.landsat_b4_path)
+        img2 = gr.Raster(self.landsat_b4_crop_path)
         img1.set_ndv(0)
         img2.set_ndv(0)
 
@@ -984,7 +989,7 @@ class TestRaster:
 
     def test_polygonize(self) -> None:
         """Test that polygonize doesn't raise errors."""
-        img = gr.Raster(datasets.get_path("landsat_B4"))
+        img = gr.Raster(self.landsat_b4_path)
 
         value = np.unique(img)[0]
 
@@ -1015,7 +1020,7 @@ class TestRaster:
 
         assert img1.to_points(0.2).shape == (5, 3)
 
-        img2 = gu.Raster(datasets.get_path("landsat_RGB"), load_data=False)
+        img2 = gu.Raster(self.landsat_rgb_path, load_data=False)
 
         points = img2.to_points(10)
 
