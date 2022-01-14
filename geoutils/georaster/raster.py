@@ -86,6 +86,42 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
         raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
 
 
+@overload
+def _load_rio(
+    dataset: rio.io.DatasetReader,
+    bands: int | list[int] | None,
+    masked: Literal[False],
+    transform: Affine | None,
+    shape: tuple[int, int] | None,
+    **kwargs: Any,
+) -> np.ndarray:
+    ...
+
+
+@overload
+def _load_rio(
+    dataset: rio.io.DatasetReader,
+    bands: int | list[int] | None,
+    masked: Literal[True],
+    transform: Affine | None,
+    shape: tuple[int, int] | None,
+    **kwargs: Any,
+) -> np.ma.masked_array:
+    ...
+
+
+@overload
+def _load_rio(
+    dataset: rio.io.DatasetReader,
+    bands: int | list[int] | None,
+    masked: bool,
+    transform: Affine | None,
+    shape: tuple[int, int] | None,
+    **kwargs: Any,
+) -> np.ma.masked_array:
+    ...
+
+
 def _load_rio(
     dataset: rio.io.DatasetReader,
     bands: int | list[int] | None = None,
@@ -96,10 +132,18 @@ def _load_rio(
 ) -> np.ndarray | np.ma.masked_array:
     r"""
     Load specific bands of the dataset, using rasterio.read().
+
     Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
 
+    :param dataset: The dataset to read (opened with "rio.open(filename)")
     :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
+    :param masked: Should the data be read as a masked_array?
+    :param transform: Create a window from the given transform (to read only parts of the raster)
+    :param shape: The expected shape of the read ndarray. Must be given together with the 'transform' argument.
 
+    :raises ValueError: If only one of 'transform' and 'shape' are given.
+
+    :returns: A numpy array if masked == False or a masked_array
 
     \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
     Useful ones are:
@@ -115,6 +159,8 @@ def _load_rio(
             row_off, col_off = (round(val) for val in dataset.index(transform[2], abs(transform[4])))
 
         window = rio.windows.Window(col_off, row_off, *shape[::-1])
+    elif sum(param is None for param in [shape, transform]) == 1:
+        raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
     else:
         window = None
 
@@ -245,6 +291,11 @@ class Raster:
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, rio.io.DatasetReader, rio.io.MemoryFile)):
 
+            # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
+            # This is because we might not actually want to open it like that, so this is equivalent
+            # to the pseudocode:
+            # "with rio.open(filename_or_dataset) as ds if isinstance(filename_or_dataset, str) else ds:"
+            # This is slightly black magic, but it works!
             with ExitStack():
                 if isinstance(filename_or_dataset, str):
                     ds: rio.io.DatasetReader = rio.open(filename_or_dataset)
@@ -252,7 +303,7 @@ class Raster:
                 elif isinstance(filename_or_dataset, rio.io.DatasetReader):
                     ds = filename_or_dataset
                     self.filename = filename_or_dataset.files[0]
-                else:
+                else:  # This is if it's a MemoryFile
                     ds = filename_or_dataset.open()
                     self.filename = None
 
@@ -292,8 +343,8 @@ class Raster:
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
 
             if load_data:
-                if load_data:
-                    self._data = _load_rio(ds, bands=bands, masked=masked, out_shape=out_shape)
+                # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
+                self._data = _load_rio(ds, bands=bands, masked=masked, out_shape=out_shape)  # type: ignore
                 if isinstance(filename_or_dataset, str):
                     self._is_modified = False
                     self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
@@ -324,36 +375,43 @@ class Raster:
 
     @property
     def height(self) -> int:
+        """Return the height of the Raster in pixels."""
         if not self.is_loaded:
             return self._disk_shape[1]  # type: ignore
         return int(self.data.shape[1])
 
     @property
     def width(self) -> int:
+        """Return the width of the Raster in pixels."""
         if not self.is_loaded:
             return self._disk_shape[2]  # type: ignore
         return int(self.data.shape[2])
 
     @property
     def shape(self) -> tuple[int, int]:
+        """Return a (height, width) tuple of the data shape in pixels."""
         if not self.is_loaded:
             return self._disk_shape[1], self._disk_shape[2]  # type: ignore
         return int(self.data.shape[1]), int(self.data.shape[2])
 
     @property
     def res(self) -> tuple[float | int, float | int]:
+        """Return the X/Y resolution in georeferenced units of the Raster."""
         return self.transform[0], abs(self.transform[4])
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:
+        """Return the bounding coordinates of the Raster."""
         return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
 
     @property
     def is_loaded(self) -> bool:
+        """Return False if the data attribute is None, and True if data exists."""
         return self._data is not None
 
     @property
     def dtypes(self) -> tuple[str, ...]:
+        """Return the string representations of the data types for each band."""
         if not self.is_loaded and self._disk_dtypes is not None:
             return self._disk_dtypes
         return (str(self.data.dtype),) * self.nbands
@@ -373,11 +431,17 @@ class Raster:
         return self.indexes
 
     def load(self) -> None:
+        """
+        Load the data from disk.
+
+        :raises ValueError: If the data are already loaded.
+        :raises AttributeError: If no 'filename' attribute exists.
+        """
         if self.is_loaded:
             raise ValueError("Data are already loaded")
 
         if self.filename is None:
-            raise ValueError("'filename' is not set")
+            raise AttributeError("'filename' is not set")
 
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
