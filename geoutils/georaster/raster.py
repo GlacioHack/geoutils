@@ -346,12 +346,7 @@ class Raster:
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:
-        left = self.transform[2]
-        top = self.transform[5]
-        res = self.res
-        return rio.coords.BoundingBox(
-            left=left, bottom=top - self.height * res[0], right=left + self.width * res[1], top=top
-        )
+        return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
 
     @property
     def is_loaded(self) -> bool:
