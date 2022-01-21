@@ -1302,13 +1302,16 @@ Must be a Raster, np.ndarray or single number."
         if update_array:
             for i, new_nodata in enumerate(ndv if isinstance(ndv, Iterable) else [ndv]):
                 if np.ma.isMaskedArray(imgdata):
-                    old_nodatas = imgdata.data[i, :, :][imgdata.data[i, :, :] == self.nodata]
-                    if old_nodatas.size > 0:
+                    # The mask may be "False", so this command below works for non-arrays (returning 1)
+                    mask_size = np.ravel([imgdata.mask]).size
+                    if mask_size > 1:
+                        old_nodatas = imgdata.data[i, :, :] == self.nodata
                         imgdata.mask[i, :, :][old_nodatas] = False
 
                     new_nodatas = imgdata[i, :, :] == new_nodata
                     if new_nodatas.size > 0:
-                        if np.ravel([imgdata.mask]).size == 1:
+                        # If the mask was previously just one value (e.g. False), create a new boolean mask array
+                        if mask_size == 1:
                             imgdata.mask = np.zeros(self.shape, dtype=bool)
                         imgdata.mask[i, :, :][new_nodatas] = True
                 else:
