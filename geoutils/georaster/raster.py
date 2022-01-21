@@ -588,7 +588,7 @@ Must be a Raster, np.ndarray or single number."
         out_data = self_data + other_data
 
         # Check that if no ndv was set, a default value is used
-        if (np.sum(getattr(out_data, "mask", 0)) > 0) & (ndv is None):
+        if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
 
         # Save to output Raster
