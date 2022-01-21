@@ -86,42 +86,6 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
         raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
 
 
-@overload
-def _load_rio(
-    dataset: rio.io.DatasetReader,
-    bands: int | list[int] | None,
-    masked: Literal[False],
-    transform: Affine | None,
-    shape: tuple[int, int] | None,
-    **kwargs: Any,
-) -> np.ndarray:
-    ...
-
-
-@overload
-def _load_rio(
-    dataset: rio.io.DatasetReader,
-    bands: int | list[int] | None,
-    masked: Literal[True],
-    transform: Affine | None,
-    shape: tuple[int, int] | None,
-    **kwargs: Any,
-) -> np.ma.masked_array:
-    ...
-
-
-@overload
-def _load_rio(
-    dataset: rio.io.DatasetReader,
-    bands: int | list[int] | None,
-    masked: bool,
-    transform: Affine | None,
-    shape: tuple[int, int] | None,
-    **kwargs: Any,
-) -> np.ma.masked_array:
-    ...
-
-
 def _load_rio(
     dataset: rio.io.DatasetReader,
     bands: int | list[int] | None = None,
@@ -129,7 +93,7 @@ def _load_rio(
     transform: Affine | None = None,
     shape: tuple[int, int] | None = None,
     **kwargs: Any,
-) -> np.ndarray | np.ma.masked_array:
+) -> np.ma.masked_array:
     r"""
     Load specific bands of the dataset, using rasterio.read().
 
@@ -137,7 +101,7 @@ def _load_rio(
 
     :param dataset: The dataset to read (opened with "rio.open(filename)")
     :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
-    :param masked: Should the data be read as a masked_array?
+    :param masked: Should the mask be read (if any exists), and/or should the nodata be used to mask values
     :param transform: Create a window from the given transform (to read only parts of the raster)
     :param shape: The expected shape of the read ndarray. Must be given together with the 'transform' argument.
 
@@ -170,7 +134,7 @@ def _load_rio(
         data = dataset.read(bands, masked=masked, window=window, **kwargs)
     if len(data.shape) == 2:
         data = data[np.newaxis, :, :]
-    return data
+    return np.ma.masked_array(data)
 
 
 class Raster:
@@ -262,7 +226,7 @@ class Raster:
         self.filename: str | None = None
         self.tags: dict[str, Any] = {}
 
-        self._data: np.ndarray | np.ma.masked_array | None = None
+        self._data: np.ma.masked_array | None = None
         self._bands = bands
         self._masked = masked
         self._disk_hash: int | None = None
@@ -812,7 +776,7 @@ Must be a Raster, np.ndarray or single number."
         return self._is_modified
 
     @property
-    def data(self) -> np.ndarray | np.ma.masked_array:
+    def data(self) -> np.ma.masked_array:
         """
         Get data.
 
@@ -865,7 +829,7 @@ Must be a Raster, np.ndarray or single number."
                 f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
             )
 
-        self._data = new_data
+        self._data = np.ma.masked_array(new_data)
 
     def info(self, stats: bool = False) -> str:
         """
@@ -1296,27 +1260,23 @@ Must be a Raster, np.ndarray or single number."
             if not rio.dtypes.can_cast_dtype(ndv, self.dtypes[0]):
                 raise ValueError(f"ndv value {ndv} incompatible with self.dtype {self.dtypes[0]}")
 
+        # Extract the data variable, so the self.data property doesn't have to be called a bunch of times
         imgdata = self.data
-        pre_ndv = self.nodata
 
         if update_array:
             for i, new_nodata in enumerate(ndv if isinstance(ndv, Iterable) else [ndv]):
-                if np.ma.isMaskedArray(imgdata):
-                    # The mask may be "False", so this command below works for non-arrays (returning 1)
-                    mask_size = np.ravel([imgdata.mask]).size
-                    if mask_size > 1:
-                        old_nodatas = imgdata.data[i, :, :] == self.nodata
-                        imgdata.mask[i, :, :][old_nodatas] = False
+                # The mask may be "False", so this command below works for non-arrays (returning 1)
+                mask_size = np.ravel([imgdata.mask]).size
+                if mask_size > 1:
+                    old_nodatas = imgdata.data[i, :, :] == self.nodata
+                    imgdata.mask[i, :, :][old_nodatas] = False
 
-                    new_nodatas = imgdata[i, :, :] == new_nodata
-                    if new_nodatas.size > 0:
-                        # If the mask was previously just one value (e.g. False), create a new boolean mask array
-                        if mask_size == 1:
-                            imgdata.mask = np.zeros(self.shape, dtype=bool)
-                        imgdata.mask[i, :, :][new_nodatas] = True
-                else:
-                    ind = imgdata[:] == pre_ndv
-                    imgdata[ind] = new_nodata
+                new_nodatas = imgdata[i, :, :] == new_nodata
+                if new_nodatas.size > 0:
+                    # If the mask was previously just one value (e.g. False), create a new boolean mask array
+                    if mask_size == 1:
+                        imgdata.mask = np.zeros(self.shape, dtype=bool)
+                    imgdata.mask[i, :, :][new_nodatas] = True
             self.data = imgdata
 
         self.nodata = ndv

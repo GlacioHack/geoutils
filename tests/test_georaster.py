@@ -80,6 +80,10 @@ class TestRaster:
         r._data = np.repeat(r.data, 2).reshape((2,) + r.shape)
         assert r.nbands != r2.nbands
 
+        # Test that loaded data are always masked_arrays (but the mask may be empty, i.e. 'False')
+        assert np.ma.isMaskedArray(gr.Raster(self.landsat_b4_path, masked=True).data)
+        assert np.ma.isMaskedArray(gr.Raster(self.landsat_b4_path, masked=False).data)
+
     def test_info(self) -> None:
 
         r = gr.Raster(self.landsat_b4_path)
