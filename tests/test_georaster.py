@@ -807,7 +807,7 @@ class TestRaster:
         img = gr.Raster(datasets.get_path("landsat_B4"))
 
         # Save file to temporary file, with defaults opts
-        tempfile = NamedTemporaryFile()
+        tempfile = NamedTemporaryFile(mode='w', delete=False)
         img.save(tempfile.name)
         saved = gr.Raster(tempfile.name)
         assert gu.misc.array_equal(img.data, saved.data)
