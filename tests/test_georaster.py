@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import tempfile
 import warnings
-from tempfile import TemporaryFile, NamedTemporaryFile
+from tempfile import NamedTemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -818,7 +818,7 @@ class TestRaster:
         img.save(tempfile.name, co_opts=co_opts, metadata=metadata)
         saved = gr.Raster(tempfile.name)
         assert gu.misc.array_equal(img.data, saved.data)
-        assert saved.ds.tags()['Type'] == 'test'
+        assert saved.ds.tags()["Type"] == "test"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
         img.save(tempfile.name, nodata=0)
