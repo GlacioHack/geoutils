@@ -353,19 +353,19 @@ class TestRaster:
         r = gr.Raster(datasets.get_path(dataset))
         mask = (r.data == np.min(r.data))
         r.set_mask(mask)
-        assert (np.count_nonzero(mask) > 0) & (np.count_nonzero(mask) == np.count_nonzero(r.data.mask))
+        assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
 
         # Test non boolean mask with values > 0
         r = gr.Raster(datasets.get_path(dataset))
         mask = np.where(r.data == np.min(r.data), 32, 0)
         r.set_mask(mask)
-        assert (np.count_nonzero(mask) > 0) & (np.count_nonzero(mask) == np.count_nonzero(r.data.mask))
+        assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
 
         # Test that previous mask is also preserved
         mask2 = (r.data == np.max(r.data))
         assert np.count_nonzero(mask2) > 0
         r.set_mask(mask2)
-        assert (np.count_nonzero(mask) + np.count_nonzero(mask2) == np.count_nonzero(r.data.mask))
+        assert np.array_equal((mask > 0) | (mask2 > 0), r.data.mask)
         assert np.count_nonzero(~r.data.mask[mask > 0]) == 0
 
         # Test that shape of first dimension is ignored if equal to 1
@@ -373,7 +373,7 @@ class TestRaster:
         if r.data.shape[0] == 1:
             mask = (r.data == np.min(r.data)).squeeze()
             r.set_mask(mask)
-            assert (np.count_nonzero(mask) > 0) & (np.count_nonzero(mask) == np.count_nonzero(r.data.mask))
+            assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
 
         # Test that proper issue is raised if shape is incorrect
         r = gr.Raster(datasets.get_path(dataset))
