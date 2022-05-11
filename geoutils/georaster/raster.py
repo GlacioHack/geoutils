@@ -785,6 +785,34 @@ Must be a Raster, np.ndarray or single number."
 
         self._is_modified = True
 
+    def set_mask(self, mask: np.ndarray) -> None:
+        """
+        Mask all pixels of self.data where `mask` is set to True or > 0.
+
+        Masking is performed in place.
+        `mask` must have the same shape as loaded data, unless the first dimension is 1, then it is ignored.
+
+        :param mask: The data mask
+        """
+        # Check that mask is a Numpy array
+        if not isinstance(mask, np.ndarray):
+            raise ValueError("mask must be a numpy array.")
+
+        # Check that new_data has correct shape
+        if self.is_loaded:
+            orig_shape = self._data.shape
+        else:
+            raise AttributeError("self.data must be loaded first, with e.g. self.load()")
+
+        if mask.shape != orig_shape:
+            # In case first dimension is empty and other dimensions match -> reshape mask
+            if (orig_shape[0] == 1) & (orig_shape[1:] == mask.shape):
+                mask = mask.reshape(orig_shape)
+            else:
+                raise ValueError(f"mask must be of the same shape as existing data: {orig_shape}.")
+
+        self.data[mask > 0] = np.ma.masked
+
     def info(self, stats: bool = False) -> str:
         """
         Returns string of information about the raster (filename, coordinate system, number of columns/rows, etc.).
