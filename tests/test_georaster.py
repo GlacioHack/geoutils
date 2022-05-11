@@ -373,7 +373,7 @@ class TestRaster:
         if r.data.shape[0] == 1:
             mask = (r.data == np.min(r.data)).squeeze()
             r.set_mask(mask)
-            assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
+            assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask.squeeze())
 
         # Test that proper issue is raised if shape is incorrect
         r = gr.Raster(datasets.get_path(dataset))
