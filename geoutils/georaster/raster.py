@@ -1358,7 +1358,7 @@ Must be a Raster, np.ndarray or single number."
 
             # if masked array, save with masked values replaced by nodata
             # In this case, nodata = None is not compatible, so revert to default values
-            if isinstance(save_data, np.ma.masked_array):
+            if isinstance(save_data, np.ma.masked_array) & (np.count_nonzero(save_data.mask) > 0):
                 if nodata is None:
                     nodata = _default_ndv(save_data.dtype)
                     warnings.warn(f"No nodata set, will use default value of {nodata}")
