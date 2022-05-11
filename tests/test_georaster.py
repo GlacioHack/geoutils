@@ -345,13 +345,13 @@ class TestRaster:
         assert r.is_modified
 
     @pytest.mark.parametrize("dataset", ["landsat_B4", "landsat_RGB"])  # type: ignore
-    def test_masking(self, dataset) -> None:
+    def test_masking(self, dataset: str) -> None:
         """
         Test self.set_mask
         """
         # Test boolean mask
         r = gr.Raster(datasets.get_path(dataset))
-        mask = (r.data == np.min(r.data))
+        mask = r.data == np.min(r.data)
         r.set_mask(mask)
         assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
 
@@ -362,7 +362,7 @@ class TestRaster:
         assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
 
         # Test that previous mask is also preserved
-        mask2 = (r.data == np.max(r.data))
+        mask2 = r.data == np.max(r.data)
         assert np.count_nonzero(mask2) > 0
         r.set_mask(mask2)
         assert np.array_equal((mask > 0) | (mask2 > 0), r.data.mask)
@@ -1452,5 +1452,5 @@ class TestsArithmetic:
     def test_power(self, power: float | int) -> None:
 
         if power > 0:  # Integers to negative integer powers are not allowed.
-            assert self.r1 ** power == self.from_array(self.r1.data ** power, rst_ref=self.r1)
-        assert self.r1_f32 ** power == self.from_array(self.r1_f32.data ** power, rst_ref=self.r1_f32)
+            assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
+        assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)

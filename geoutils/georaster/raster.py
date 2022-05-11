@@ -620,7 +620,7 @@ Must be a Raster, np.ndarray or single number."
             raise ValueError("Power needs to be a number.")
 
         # Calculate the product of arrays and save to new Raster
-        out_data = self.data ** power
+        out_data = self.data**power
         ndv = self.nodata
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
