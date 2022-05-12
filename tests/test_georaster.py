@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import tempfile
 import warnings
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -815,12 +815,14 @@ class TestRaster:
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
+        tempfile = NamedTemporaryFile(mode="w", delete=False)
         img.save(tempfile.name, co_opts=co_opts, metadata=metadata)
         saved = gr.Raster(tempfile.name)
         assert gu.misc.array_equal(img.data, saved.data)
         assert saved.ds.tags()["Type"] == "test"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
+        tempfile = NamedTemporaryFile(mode="w", delete=False)
         img.save(tempfile.name, nodata=0)
         saved = gr.Raster(tempfile.name)
         assert gu.misc.array_equal(img.data, saved.data)
@@ -829,13 +831,14 @@ class TestRaster:
         # Test that mask is preserved
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
+        tempfile = NamedTemporaryFile(mode="w", delete=False)
         img.save(tempfile.name, nodata=0)
         saved = gr.Raster(tempfile.name)
         assert gu.misc.array_equal(img.data, saved.data)
 
         # Test that a warning is raised if nodata is not set
         with pytest.warns(UserWarning):
-            img.save(tempfile.name)
+            img.save(TemporaryFile())
 
     def test_coords(self) -> None:
 
