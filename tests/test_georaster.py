@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import tempfile
 import warnings
+from tempfile import NamedTemporaryFile, TemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -805,41 +806,39 @@ class TestRaster:
         # Read single band raster
         img = gr.Raster(datasets.get_path("landsat_B4"))
 
-        # Temporary output file
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_path = os.path.join(temp_dir.name, "temp.tif")
-
         # Save file to temporary file, with defaults opts
-        img.save(temp_path)
-        saved = gr.Raster(temp_path)
+        temp_file = NamedTemporaryFile(mode="w")
+        img.save(temp_file.name)
+        saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
-        img.save(temp_path, co_opts=co_opts, metadata=metadata)
-        saved = gr.Raster(temp_path)
+        temp_file = NamedTemporaryFile(mode="w")
+        img.save(temp_file.name, co_opts=co_opts, metadata=metadata)
+        saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
         assert saved.ds.tags()["Type"] == "test"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
-        img.save(temp_path, nodata=0)
-        saved = gr.Raster(temp_path)
+        temp_file = NamedTemporaryFile(mode="w")
+        img.save(temp_file.name, nodata=0)
+        saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
         assert saved.nodata == 0
 
         # Test that mask is preserved
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
-        img.save(temp_path, nodata=0)
-        saved = gr.Raster(temp_path)
+        temp_file = NamedTemporaryFile(mode="w")
+        img.save(temp_file.name, nodata=0)
+        saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
 
         # Test that a warning is raised if nodata is not set
         with pytest.warns(UserWarning):
-            img.save(temp_path)
-
-        temp_dir.cleanup()
+            img.save(TemporaryFile())
 
     def test_coords(self) -> None:
 
