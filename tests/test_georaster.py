@@ -806,8 +806,11 @@ class TestRaster:
         # Read single band raster
         img = gr.Raster(datasets.get_path("landsat_B4"))
 
+        # Temporary folder
+        temp_dir = tempfile.TemporaryDirectory()
+
         # Save file to temporary file, with defaults opts
-        temp_file = NamedTemporaryFile(mode="w")
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name)
         saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
@@ -815,14 +818,14 @@ class TestRaster:
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
-        temp_file = NamedTemporaryFile(mode="w")
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name, co_opts=co_opts, metadata=metadata)
         saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
         assert saved.ds.tags()["Type"] == "test"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
-        temp_file = NamedTemporaryFile(mode="w")
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name, nodata=0)
         saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
@@ -831,7 +834,7 @@ class TestRaster:
         # Test that mask is preserved
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
-        temp_file = NamedTemporaryFile(mode="w")
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name, nodata=0)
         saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
@@ -839,6 +842,8 @@ class TestRaster:
         # Test that a warning is raised if nodata is not set
         with pytest.warns(UserWarning):
             img.save(TemporaryFile())
+
+        temp_dir.cleanup()
 
     def test_coords(self) -> None:
 
