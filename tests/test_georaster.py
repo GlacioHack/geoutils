@@ -846,7 +846,7 @@ class TestRaster:
         # Clean up teporary folder - fails on Windows
         try:
             temp_dir.cleanup()
-        except NotADirectoryError:
+        except (NotADirectoryError, PermissionError):
             pass
 
     def test_coords(self) -> None:
