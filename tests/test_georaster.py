@@ -843,7 +843,11 @@ class TestRaster:
         with pytest.warns(UserWarning):
             img.save(TemporaryFile())
 
-        temp_dir.cleanup()
+        # Clean up teporary folder - fails on Windows
+        try:
+            temp_dir.cleanup()
+        except NotADirectoryError:
+            pass
 
     def test_coords(self) -> None:
 
