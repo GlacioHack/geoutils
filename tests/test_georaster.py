@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import tempfile
 import warnings
-from tempfile import TemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -343,6 +343,48 @@ class TestRaster:
         r = gr.Raster(datasets.get_path("landsat_B4"))
         r.data = r.data + 5
         assert r.is_modified
+
+    @pytest.mark.parametrize("dataset", ["landsat_B4", "landsat_RGB"])  # type: ignore
+    def test_masking(self, dataset: str) -> None:
+        """
+        Test self.set_mask
+        """
+        # Test boolean mask
+        r = gr.Raster(datasets.get_path(dataset))
+        mask = r.data == np.min(r.data)
+        r.set_mask(mask)
+        assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
+
+        # Test non boolean mask with values > 0
+        r = gr.Raster(datasets.get_path(dataset))
+        mask = np.where(r.data == np.min(r.data), 32, 0)
+        r.set_mask(mask)
+        assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
+
+        # Test that previous mask is also preserved
+        mask2 = r.data == np.max(r.data)
+        assert np.count_nonzero(mask2) > 0
+        r.set_mask(mask2)
+        assert np.array_equal((mask > 0) | (mask2 > 0), r.data.mask)
+        assert np.count_nonzero(~r.data.mask[mask > 0]) == 0
+
+        # Test that shape of first dimension is ignored if equal to 1
+        r = gr.Raster(datasets.get_path(dataset))
+        if r.data.shape[0] == 1:
+            mask = (r.data == np.min(r.data)).squeeze()
+            r.set_mask(mask)
+            assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask.squeeze())
+
+        # Test that proper issue is raised if shape is incorrect
+        r = gr.Raster(datasets.get_path(dataset))
+        wrong_shape = np.array(r.data.shape) + 1
+        mask = np.zeros(wrong_shape)
+        with pytest.raises(ValueError, match="mask must be of the same shape as existing data*"):
+            r.set_mask(mask)
+
+        # Test that proper issue is raised if mask is not a numpy array
+        with pytest.raises(ValueError, match="mask must be a numpy array"):
+            r.set_mask(1)
 
     def test_crop(self) -> None:
 
@@ -764,13 +806,48 @@ class TestRaster:
         # Read single band raster
         img = gr.Raster(datasets.get_path("landsat_B4"))
 
+        # Temporary folder
+        temp_dir = tempfile.TemporaryDirectory()
+
         # Save file to temporary file, with defaults opts
-        img.save(TemporaryFile())
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+        img.save(temp_file.name)
+        saved = gr.Raster(temp_file.name)
+        assert gu.misc.array_equal(img.data, saved.data)
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
-        img.save(TemporaryFile(), co_opts=co_opts, metadata=metadata)
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+        img.save(temp_file.name, co_opts=co_opts, metadata=metadata)
+        saved = gr.Raster(temp_file.name)
+        assert gu.misc.array_equal(img.data, saved.data)
+        assert saved.ds.tags()["Type"] == "test"
+
+        # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+        img.save(temp_file.name, nodata=0)
+        saved = gr.Raster(temp_file.name)
+        assert gu.misc.array_equal(img.data, saved.data)
+        assert saved.nodata == 0
+
+        # Test that mask is preserved
+        mask = img.data == np.min(img.data)
+        img.set_mask(mask)
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+        img.save(temp_file.name, nodata=0)
+        saved = gr.Raster(temp_file.name)
+        assert gu.misc.array_equal(img.data, saved.data)
+
+        # Test that a warning is raised if nodata is not set
+        with pytest.warns(UserWarning):
+            img.save(TemporaryFile())
+
+        # Clean up teporary folder - fails on Windows
+        try:
+            temp_dir.cleanup()
+        except (NotADirectoryError, PermissionError):
+            pass
 
     def test_coords(self) -> None:
 
@@ -1410,5 +1487,5 @@ class TestsArithmetic:
     def test_power(self, power: float | int) -> None:
 
         if power > 0:  # Integers to negative integer powers are not allowed.
-            assert self.r1 ** power == self.from_array(self.r1.data ** power, rst_ref=self.r1)
-        assert self.r1_f32 ** power == self.from_array(self.r1_f32.data ** power, rst_ref=self.r1_f32)
+            assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
+        assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)

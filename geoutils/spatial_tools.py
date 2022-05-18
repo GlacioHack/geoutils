@@ -320,7 +320,7 @@ def _get_closest_rectangle(size: int) -> tuple[int, int]:
     close_cube = int(np.sqrt(size))
 
     # If size has an integer root, return the respective cube.
-    if close_cube ** 2 == size:
+    if close_cube**2 == size:
         return (close_cube, close_cube)
 
     # One of these rectangles/cubes will cover all cells, so return the first that does.
