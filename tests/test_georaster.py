@@ -499,7 +499,8 @@ class TestRaster:
         assert r.nodata is None
         assert r3.nodata == 255
 
-        # Particularly crucial if nodata falls outside the original image range -> check range is preserved (with nearest interpolation)
+        # Particularly crucial if nodata falls outside the original image range
+        # -> check range is preserved (with nearest interpolation)
         r_float = r.astype("float32")  # type: ignore
         assert r_float.nodata is None
         r3 = r_float.reproject(dst_bounds=dst_bounds, resampling="nearest")
