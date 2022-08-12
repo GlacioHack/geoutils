@@ -996,7 +996,7 @@ Must be a Raster, np.ndarray or single number."
         dst_nodata: int | float | None = None,
         src_nodata: int | float | None = None,
         dtype: np.dtype | None = None,
-        resampling: Resampling | str = Resampling.nearest,
+        resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
