@@ -502,7 +502,7 @@ class TestRaster:
         # Particularly crucial if nodata falls outside the original image range -> check range is preserved (with nearest interpolation)
         r_float = r.astype("float32")  # type: ignore
         assert r_float.nodata is None
-        r3 = r_float.reproject(dst_bounds=dst_bounds, resampling='nearest')
+        r3 = r_float.reproject(dst_bounds=dst_bounds, resampling="nearest")
         assert r3.nodata == -99999
         assert np.min(r3.data.data) == r3.nodata
         assert np.min(r3.data) == np.min(r_float.data)
