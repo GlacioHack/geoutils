@@ -1197,10 +1197,19 @@ Must be a Raster, np.ndarray or single number."
             num_threads = n_threads
         reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
 
-        # Currently reprojects all in-memory bands at once.
-        # This may need to be improved to allow reprojecting from-disk.
-        # See rio.warp.reproject docstring for more info.
-        dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+        # If data is loaded, reproject the numpy array directly
+        if self.data is not None:
+            dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+
+        # If not, uses the dataset instead
+        else:
+            dst_data = []
+            for k in range(self.count):
+                band = rio.band(self.ds, k + 1)
+                dst_band, dst_transformed = rio.warp.reproject(band, **reproj_kwargs)
+                dst_data.append(dst_band.squeeze())
+
+            dst_data = np.array(dst_data)
 
         # Enforce output type
         dst_data = dst_data.astype(dtype)

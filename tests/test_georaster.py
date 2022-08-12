@@ -527,6 +527,13 @@ class TestRaster:
         r3 = r.reproject(dst_crs=out_crs)
         assert r3.crs.to_epsg() == 4326
 
+        # Test that reproject works from self.ds and yield same result as from in-memory array
+        # TO DO: fix issue that default behavior sets nodata to 255 and masks valid values
+        r3 = r.reproject(dst_crs=out_crs, dst_nodata=0)
+        r = gr.Raster(datasets.get_path("landsat_B4"), load_data=False)
+        r4 = r.reproject(dst_crs=out_crs, dst_nodata=0)
+        assert gu.misc.array_equal(r3.data, r4.data)
+
     def test_inters_img(self) -> None:
 
         r = gr.Raster(datasets.get_path("landsat_B4"))
