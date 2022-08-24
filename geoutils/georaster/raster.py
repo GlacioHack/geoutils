@@ -1037,9 +1037,6 @@ Must be a Raster, np.ndarray or single number."
         resolution (with `dst_size`) and/or bounds (`dst_bounds`).
         Any resampling algorithm implemented in rasterio can be used.
 
-        Currently: requires image data to have been loaded into memory.
-        NOT SUITABLE for large datasets yet! This requires work...
-
         To reproject a Raster with different source bounds, first run Raster.crop.
 
         :param dst_ref: a reference raster. If set will use the attributes of this
