@@ -1383,9 +1383,10 @@ Must be a Raster, np.ndarray or single number."
             save_data = self.data
 
             # if masked array, save with masked values replaced by nodata
-            # In this case, nodata = None is not compatible, so revert to default values
-            if isinstance(save_data, np.ma.masked_array) & (np.count_nonzero(save_data.mask) > 0):
-                if nodata is None:
+            if isinstance(save_data, np.ma.masked_array):
+
+                # In this case, nodata = None is not compatible, so revert to default values, but only if masked values exist
+                if (nodata is None)  & (np.count_nonzero(save_data.mask) > 0):
                     nodata = _default_ndv(save_data.dtype)
                     warnings.warn(f"No nodata set, will use default value of {nodata}")
                 save_data = save_data.filled(nodata)
@@ -1400,7 +1401,7 @@ Must be a Raster, np.ndarray or single number."
             dtype=save_data.dtype,
             crs=self.crs,
             transform=self.transform,
-            nodata=self.nodata,
+            nodata=nodata,
             compress=compress,
             tiled=tiled,
             **co_opts,
