@@ -847,7 +847,7 @@ class TestRaster:
         img.save(temp_file.name, co_opts=co_opts, metadata=metadata)
         saved = gr.Raster(temp_file.name)
         assert gu.misc.array_equal(img.data, saved.data)
-        assert saved.ds.tags()["Type"] == "test"
+        assert saved.tags["Type"] == "test"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
         temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
