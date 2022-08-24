@@ -1233,9 +1233,10 @@ Must be a Raster, np.ndarray or single number."
         else:
             dst_data = []
             for k in range(self.count):
-                band = rio.band(self.ds, k + 1)
-                dst_band, dst_transformed = rio.warp.reproject(band, **reproj_kwargs)
-                dst_data.append(dst_band.squeeze())
+                with rio.open(self.filename) as ds:
+                    band = rio.band(ds, k + 1)
+                    dst_band, dst_transformed = rio.warp.reproject(band, **reproj_kwargs)
+                    dst_data.append(dst_band.squeeze())
 
             dst_data = np.array(dst_data)
 
