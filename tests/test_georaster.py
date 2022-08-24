@@ -443,7 +443,6 @@ class TestRaster:
 
         assert b_minmax == b_crop
 
-    @pytest.mark.skip("TODO: Fix the functionality so this works again")  # type: ignore
     def test_reproj(self) -> None:
         warnings.simplefilter("error")
 

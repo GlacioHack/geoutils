@@ -886,7 +886,7 @@ Must be a Raster, np.ndarray or single number."
         ]
 
         if stats:
-            if self.data is not None:
+            if self.is_loaded:
                 if self.nbands == 1:
                     as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
                     as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
@@ -1226,7 +1226,7 @@ Must be a Raster, np.ndarray or single number."
         reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
 
         # If data is loaded, reproject the numpy array directly
-        if self.data is not None:
+        if self.is_loaded:
             dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
 
         # If not, uses the dataset instead
