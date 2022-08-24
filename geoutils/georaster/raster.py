@@ -717,7 +717,7 @@ Must be a Raster, np.ndarray or single number."
             raise ValueError("Power needs to be a number.")
 
         # Calculate the product of arrays and save to new Raster
-        out_data = self.data ** power
+        out_data = self.data**power
         ndv = self.nodata
         if (np.sum(out_data.mask) > 0) & (ndv is None):
             ndv = _default_ndv(out_data.dtype)
@@ -830,6 +830,34 @@ Must be a Raster, np.ndarray or single number."
             )
 
         self._data = np.ma.masked_array(new_data)
+
+    def set_mask(self, mask: np.ndarray) -> None:
+        """
+        Mask all pixels of self.data where `mask` is set to True or > 0.
+
+        Masking is performed in place.
+        `mask` must have the same shape as loaded data, unless the first dimension is 1, then it is ignored.
+
+        :param mask: The data mask
+        """
+        # Check that mask is a Numpy array
+        if not isinstance(mask, np.ndarray):
+            raise ValueError("mask must be a numpy array.")
+
+        # Check that new_data has correct shape
+        if self.is_loaded:
+            orig_shape = self._data.shape
+        else:
+            raise AttributeError("self.data must be loaded first, with e.g. self.load()")
+
+        if mask.shape != orig_shape:
+            # In case first dimension is empty and other dimensions match -> reshape mask
+            if (orig_shape[0] == 1) & (orig_shape[1:] == mask.shape):
+                mask = mask.reshape(orig_shape)
+            else:
+                raise ValueError(f"mask must be of the same shape as existing data: {orig_shape}.")
+
+        self.data[mask > 0] = np.ma.masked
 
     def info(self, stats: bool = False) -> str:
         """
@@ -996,7 +1024,7 @@ Must be a Raster, np.ndarray or single number."
         dst_nodata: int | float | list[int] | list[float] | None = None,
         src_nodata: int | float | list[int] | list[float] | None = None,
         dtype: np.dtype | None = None,
-        resampling: Resampling | str = Resampling.nearest,
+        resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -1197,10 +1225,19 @@ Must be a Raster, np.ndarray or single number."
             num_threads = n_threads
         reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
 
-        # Currently reprojects all in-memory bands at once.
-        # This may need to be improved to allow reprojecting from-disk.
-        # See rio.warp.reproject docstring for more info.
-        dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+        # If data is loaded, reproject the numpy array directly
+        if self.data is not None:
+            dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+
+        # If not, uses the dataset instead
+        else:
+            dst_data = []
+            for k in range(self.count):
+                band = rio.band(self.ds, k + 1)
+                dst_band, dst_transformed = rio.warp.reproject(band, **reproj_kwargs)
+                dst_data.append(dst_band.squeeze())
+
+            dst_data = np.array(dst_data)
 
         # Enforce output type
         dst_data = np.ma.masked_array(dst_data.astype(dtype))
@@ -1286,6 +1323,7 @@ Must be a Raster, np.ndarray or single number."
         filename: str | IO[bytes],
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
+        nodata: AnyNumber | None = None,
         compress: str = "deflate",
         tiled: bool = False,
         blank_value: None | int | float = None,
@@ -1306,6 +1344,7 @@ Must be a Raster, np.ndarray or single number."
         :param filename: Filename to write the file to.
         :param driver: the 'GDAL' driver to use to write the file as.
         :param dtype: Data Type to write the image as (defaults to dtype of image data)
+        :param nodata: nodata value to be used.
         :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE)
         :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
                       but increases file size.
@@ -1329,6 +1368,9 @@ Must be a Raster, np.ndarray or single number."
         if gcps is None:
             gcps = []
 
+        # Use nodata set by user, otherwise default to self's
+        nodata = nodata if nodata is not None else self.nodata
+
         if (self.data is None) & (blank_value is None):
             raise AttributeError("No data loaded, and alternative blank_value not set.")
         elif blank_value is not None:
@@ -1339,6 +1381,14 @@ Must be a Raster, np.ndarray or single number."
                 raise ValueError("blank_values must be one of int, float (or None).")
         else:
             save_data = self.data
+
+            # if masked array, save with masked values replaced by nodata
+            # In this case, nodata = None is not compatible, so revert to default values
+            if isinstance(save_data, np.ma.masked_array) & (np.count_nonzero(save_data.mask) > 0):
+                if nodata is None:
+                    nodata = _default_ndv(save_data.dtype)
+                    warnings.warn(f"No nodata set, will use default value of {nodata}")
+                save_data = save_data.filled(nodata)
 
         with rio.open(
             filename,
