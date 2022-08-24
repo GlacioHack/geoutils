@@ -846,7 +846,7 @@ Must be a Raster, np.ndarray or single number."
 
         # Check that new_data has correct shape
         if self.is_loaded:
-            orig_shape = self._data.shape
+            orig_shape = self.data.shape
         else:
             raise AttributeError("self.data must be loaded first, with e.g. self.load()")
 
@@ -1386,8 +1386,8 @@ Must be a Raster, np.ndarray or single number."
             # if masked array, save with masked values replaced by nodata
             if isinstance(save_data, np.ma.masked_array):
 
-                # In this case, nodata = None is not compatible, so revert to default values, but only if masked values exist
-                if (nodata is None)  & (np.count_nonzero(save_data.mask) > 0):
+                # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
+                if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
                     nodata = _default_ndv(save_data.dtype)
                     warnings.warn(f"No nodata set, will use default value of {nodata}")
                 save_data = save_data.filled(nodata)
