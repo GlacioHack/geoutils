@@ -20,7 +20,7 @@ import geoutils.geovector as gv
 import geoutils.misc
 import geoutils.projtools as pt
 from geoutils import datasets
-from geoutils.georaster.raster import _default_ndv
+from geoutils.georaster.raster import _default_ndv, _default_rio_attrs
 from geoutils.misc import resampling_method_from_str
 
 DO_PLOT = False
@@ -89,23 +89,8 @@ class TestRaster:
         r = gr.Raster(self.landsat_b4_path)
 
         # Check all is good with passing attributes
-        default_attrs = [
-            "bounds",
-            "count",
-            "crs",
-            "driver",
-            "dtypes",
-            "height",
-            "indexes",
-            "name",
-            "nodata",
-            "res",
-            "shape",
-            "transform",
-            "width",
-        ]
         with rio.open(self.landsat_b4_path) as dataset:
-            for attr in default_attrs:
+            for attr in _default_rio_attrs:
                 assert r.__getattribute__(attr) == dataset.__getattribute__(attr)
 
         # Check summary matches that of RIO
@@ -313,19 +298,10 @@ class TestRaster:
         assert r2.name != r.name
 
         # Check all attributes except name, driver and dataset_mask array
-        default_attrs = [
-            "bounds",
-            "count",
-            "crs",
-            "dtypes",
-            "height",
-            "indexes",
-            "nodata",
-            "res",
-            "shape",
-            "transform",
-            "width",
-        ]
+        default_attrs = _default_rio_attrs
+        for attr in ["name", "driver"]:
+            default_attrs.remove(attr)
+
         # using list directly available in Class
         attrs = default_attrs
         for attr in attrs:
