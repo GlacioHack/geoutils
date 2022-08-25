@@ -86,6 +86,24 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
         raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
 
 
+# Set default attributes to be kept from rasterio's DatasetReader
+_default_rio_attrs = [
+    "bounds",
+    "count",
+    "crs",
+    "driver",
+    "dtypes",
+    "height",
+    "indexes",
+    "name",
+    "nodata",
+    "res",
+    "shape",
+    "transform",
+    "width",
+]
+
+
 def _load_rio(
     dataset: rio.io.DatasetReader,
     bands: int | list[int] | None = None,
@@ -164,8 +182,6 @@ class Raster:
 
         crs
 
-        dataset_mask
-
         driver
 
         dtypes
@@ -213,7 +229,8 @@ class Raster:
         :param nodata: nodata to be used (overwrites the metadata). Default is None, i.e. reads from metadata.
 
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
-            Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
+            Default list is set by geoutils.georaster.raster._default_rio_attrs, i.e.
+            ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
 
         :param as_memfile: open the dataset via a rio.MemoryFile.
