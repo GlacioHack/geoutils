@@ -242,7 +242,6 @@ class SatelliteImage(Raster):  # type: ignore
         attrs: list[str] | None = None,
         load_data: bool = True,
         bands: int | list[int] | None = None,
-        as_memfile: bool = False,
         read_from_fn: bool = True,
         datetime: dt.datetime | None = None,
         tile_name: str | None = None,
@@ -264,7 +263,6 @@ class SatelliteImage(Raster):  # type: ignore
            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         :param load_data: Load the raster data into the object. Default is True.
         :param bands: The band(s) to load into the object. Default is to load all bands.
-        :param as_memfile: open the dataset via a rio.MemoryFile.
         :param read_from_fn: Try to read metadata from the filename
         :param datetime: Provide datetime attribute
         :param tile_name: Provide tile name
@@ -286,7 +284,7 @@ class SatelliteImage(Raster):  # type: ignore
             return
         # Else rely on parent Raster class options (including raised errors)
         else:
-            super().__init__(filename_or_dataset, attrs=attrs, load_data=load_data, bands=bands, as_memfile=as_memfile)
+            super().__init__(filename_or_dataset, attrs=attrs, load_data=load_data, bands=bands)
 
         # priority to user input
         self.datetime = datetime

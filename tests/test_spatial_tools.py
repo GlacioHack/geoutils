@@ -129,7 +129,9 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
 def test_merge_rasters(rasters) -> None:  # type: ignore
     """Test merge_rasters"""
     # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
-    merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2])
+
+    merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
+
     assert rasters.img.data.shape == merged_img.data.shape
     assert rasters.img.bounds == merged_img.bounds
     assert np.count_nonzero(np.isnan(merged_img.data)) == 0  # Check no NaNs introduced

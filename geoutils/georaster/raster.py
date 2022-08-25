@@ -3,10 +3,11 @@ geoutils.georaster provides a toolset for working with raster data.
 """
 from __future__ import annotations
 
-import copy
 import os
 import warnings
 from collections import abc
+from collections.abc import Iterable
+from contextlib import ExitStack
 from numbers import Number
 from typing import IO, Any, Callable, TypeVar, overload
 
@@ -24,11 +25,9 @@ from affine import Affine
 from matplotlib import cm, colors
 from rasterio.crs import CRS
 from rasterio.features import shapes
-from rasterio.io import MemoryFile
 from rasterio.plot import show as rshow
 from rasterio.warp import Resampling
 from scipy.ndimage import map_coordinates
-from shapely.geometry.polygon import Polygon
 
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
@@ -87,6 +86,75 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
         raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
 
 
+# Set default attributes to be kept from rasterio's DatasetReader
+_default_rio_attrs = [
+    "bounds",
+    "count",
+    "crs",
+    "driver",
+    "dtypes",
+    "height",
+    "indexes",
+    "name",
+    "nodata",
+    "res",
+    "shape",
+    "transform",
+    "width",
+]
+
+
+def _load_rio(
+    dataset: rio.io.DatasetReader,
+    bands: int | list[int] | None = None,
+    masked: bool = False,
+    transform: Affine | None = None,
+    shape: tuple[int, int] | None = None,
+    **kwargs: Any,
+) -> np.ma.masked_array:
+    r"""
+    Load specific bands of the dataset, using rasterio.read().
+
+    Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
+
+    :param dataset: The dataset to read (opened with "rio.open(filename)")
+    :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
+    :param masked: Should the mask be read (if any exists), and/or should the nodata be used to mask values
+    :param transform: Create a window from the given transform (to read only parts of the raster)
+    :param shape: The expected shape of the read ndarray. Must be given together with the 'transform' argument.
+
+    :raises ValueError: If only one of 'transform' and 'shape' are given.
+
+    :returns: A numpy array if masked == False or a masked_array
+
+    \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
+    Useful ones are:
+    .. hlist::
+    * out_shape : to load a subsampled version
+    * window : to load a cropped version
+    * resampling : to set the resampling algorithm
+    """
+    if transform is not None and shape is not None:
+        if transform == dataset.transform:
+            row_off, col_off = 0, 0
+        else:
+            row_off, col_off = (round(val) for val in dataset.index(transform[2], abs(transform[4])))
+
+        window = rio.windows.Window(col_off, row_off, *shape[::-1])
+    elif sum(param is None for param in [shape, transform]) == 1:
+        raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
+    else:
+        window = None
+
+    if bands is None:
+        data = dataset.read(masked=masked, window=window, **kwargs)
+    else:
+        data = dataset.read(bands, masked=masked, window=window, **kwargs)
+    if len(data.shape) == 2:
+        data = data[np.newaxis, :, :]
+    return np.ma.masked_array(data)
+
+
 class Raster:
     """
     Create a Raster object from a rasterio-supported raster dataset.
@@ -114,8 +182,6 @@ class Raster:
 
         crs
 
-        dataset_mask
-
         driver
 
         dtypes
@@ -137,40 +203,15 @@ class Raster:
         width
     """
 
-    # This only gets set if a disk-based file is read in.
-    # If the Raster is created with from_array, from_mem etc, this stays as None.
-    filename = None
-    _is_modified: bool | None = None
-    _disk_hash: int | None = None
-
-    # Rasterio-inherited names and types are defined here to get proper type hints.
-    # Maybe these don't have to be hard-coded in the future?
-    _data: np.ndarray | np.ma.masked_array
-    transform: Affine
-    crs: CRS
-    nodata: int | float | None
-    res: tuple[float, float]
-    bounds: rio.coords.BoundingBox
-    height: int
-    width: int
-    shape: tuple[int, int]
-    indexes: list[int]
-    count: int
-    dataset_mask: np.ndarray | None
-    driver: str
-    dtypes: list[str]
-    name: str
-
     def __init__(
         self,
-        filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
+        filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
         bands: None | int | list[int] = None,
         load_data: bool = True,
         downsample: AnyNumber = 1,
         masked: bool = True,
-        nodata: abc.Sequence[int | float] | int | float | None = None,
+        nodata: int | float | list[int] | list[float] | None = None,
         attrs: list[str] | None = None,
-        as_memfile: bool = False,
     ) -> None:
         """
         Load a rasterio-supported dataset, given a filename.
@@ -188,38 +229,110 @@ class Raster:
         :param nodata: nodata to be used (overwrites the metadata). Default is None, i.e. reads from metadata.
 
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
-            Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
+            Default list is set by geoutils.georaster.raster._default_rio_attrs, i.e.
+            ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
 
         :param as_memfile: open the dataset via a rio.MemoryFile.
 
         :return: A Raster object
         """
+        self.driver: str | None = None
+        self.name: str | None = None
+        self.nodata: int | float | list[int] | list[float] | None = None
+        self.filename: str | None = None
+        self.tags: dict[str, Any] = {}
+
+        self._data: np.ma.masked_array | None = None
+        self._bands = bands
+        self._masked = masked
+        self._disk_hash: int | None = None
+        self._is_modified = True
+        self._disk_shape: tuple[int, int, int] | None = None
+        self._disk_indexes: tuple[int] | None = None
+        self._disk_dtypes: tuple[str] | None = None
+
+        # This is for Raster.from_array to work.
+        if isinstance(filename_or_dataset, dict):
+            self.data = filename_or_dataset["data"]
+            self.transform: rio.transform.Affine = filename_or_dataset["transform"]
+            self.crs: rio.crs.CRS = filename_or_dataset["crs"]
+            self.nodata = filename_or_dataset["nodata"]
+            for key in filename_or_dataset:
+                if key in ["data", "transform", "crs", "nodata"]:
+                    continue
+                setattr(self, key, filename_or_dataset[key])
+            return
+
         # If Raster is passed, simply point back to Raster
         if isinstance(filename_or_dataset, Raster):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
             return
         # Image is a file on disk.
-        elif isinstance(filename_or_dataset, str):
-            # Save the absolute on-disk filename
-            self.filename = os.path.abspath(filename_or_dataset)
-            if as_memfile:
-                # open the file in memory
-                memfile = MemoryFile(open(filename_or_dataset, "rb"))
-                # Read the file as a rasterio dataset
-                self.ds = memfile.open()
+        elif isinstance(filename_or_dataset, (str, rio.io.DatasetReader, rio.io.MemoryFile)):
+
+            # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
+            # This is because we might not actually want to open it like that, so this is equivalent
+            # to the pseudocode:
+            # "with rio.open(filename_or_dataset) as ds if isinstance(filename_or_dataset, str) else ds:"
+            # This is slightly black magic, but it works!
+            with ExitStack():
+                if isinstance(filename_or_dataset, str):
+                    ds: rio.io.DatasetReader = rio.open(filename_or_dataset)
+                    self.filename = filename_or_dataset
+                elif isinstance(filename_or_dataset, rio.io.DatasetReader):
+                    ds = filename_or_dataset
+                    self.filename = filename_or_dataset.files[0]
+                else:  # This is if it's a MemoryFile
+                    ds = filename_or_dataset.open()
+                    self.filename = None
+
+                self.transform = ds.transform
+                self.crs = ds.crs
+                self.nodata = ds.nodata
+                self.name = ds.name
+                self.driver = ds.driver
+                self.tags.update(ds.tags())
+
+                self._disk_shape = (ds.count, ds.height, ds.width)
+                self._disk_indexes = ds.indexes
+                self._disk_dtypes = ds.dtypes
+
+                if attrs is not None:
+                    for attr in attrs:
+                        self.__setattr__(attr, ds.__getattr__(attr))
+
+            # Check number of bands to be loaded
+            if bands is None:
+                nbands = self.nbands
+            elif isinstance(bands, int):
+                nbands = 1
+            elif isinstance(bands, abc.Iterable):
+                nbands = len(bands)
+
+            # Downsampled image size
+            if not isinstance(downsample, (int, float)):
+                raise ValueError("downsample must be of type int or float")
+            if downsample == 1:
+                out_shape = (nbands, self.height, self.width)
             else:
-                self.ds = rio.open(filename_or_dataset, "r")
+                down_width = int(np.ceil(self.width / downsample))
+                down_height = int(np.ceil(self.height / downsample))
+                out_shape = (nbands, down_height, down_width)
+                res = tuple(np.asarray(self.res) * downsample)
+                self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
 
-        # If rio.Dataset is passed
-        elif isinstance(filename_or_dataset, rio.io.DatasetReader):
-            self.filename = filename_or_dataset.files[0]
-            self.ds = filename_or_dataset
+            if load_data:
+                # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
+                self._data = _load_rio(ds, bands=bands, masked=masked, out_shape=out_shape)  # type: ignore
+                if isinstance(filename_or_dataset, str):
+                    self._is_modified = False
+                    self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
 
-        # Or, image is already a Memory File.
-        elif isinstance(filename_or_dataset, rio.io.MemoryFile):
-            self.ds = filename_or_dataset.open()
+            # Set nodata
+            if nodata is not None:
+                self.set_ndv(nodata)
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename_or_dataset, np.ndarray):
@@ -229,61 +342,94 @@ class Raster:
         else:
             raise ValueError("filename argument not recognised.")
 
-        self._read_attrs(attrs)
+    @property
+    def nbands(self) -> int:
+        if not self.is_loaded and self._disk_shape is not None:
+            return self._disk_shape[0]
+        return int(self.data.shape[0])
 
-        # Save _masked attribute to be used by self.load()
-        self._masked = masked
+    @property
+    def count(self) -> int:
+        if self._disk_shape is not None:
+            return self._disk_shape[0]
+        return self.nbands
 
-        # Check number of bands to be loaded
-        if bands is None:
-            nbands = self.count
-        elif isinstance(bands, int):
-            nbands = 1
-        elif isinstance(bands, abc.Iterable):
-            nbands = len(bands)
+    @property
+    def height(self) -> int:
+        """Return the height of the Raster in pixels."""
+        if not self.is_loaded:
+            return self._disk_shape[1]  # type: ignore
+        return int(self.data.shape[1])
 
-        # Downsampled image size
-        if not isinstance(downsample, (int, float)):
-            raise ValueError("downsample must be of type int or float")
-        if downsample == 1:
-            out_shape = (nbands, self.height, self.width)
-        else:
-            down_width = int(np.ceil(self.width / downsample))
-            down_height = int(np.ceil(self.height / downsample))
-            out_shape = (nbands, down_height, down_width)
+    @property
+    def width(self) -> int:
+        """Return the width of the Raster in pixels."""
+        if not self.is_loaded:
+            return self._disk_shape[2]  # type: ignore
+        return int(self.data.shape[2])
 
-        if load_data:
-            self.load(bands=bands, out_shape=out_shape)
-            self.nbands = self._data.shape[0]
-            self.is_loaded = True
-            if isinstance(filename_or_dataset, str):
-                self._is_modified = False
-                self._disk_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
-        else:
-            self._data = None
-            self.nbands = None
-            self.is_loaded = False
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Return a (height, width) tuple of the data shape in pixels."""
+        if not self.is_loaded:
+            return self._disk_shape[1], self._disk_shape[2]  # type: ignore
+        return int(self.data.shape[1]), int(self.data.shape[2])
 
-        # update attributes when downsample is not 1
-        if downsample != 1:
+    @property
+    def res(self) -> tuple[float | int, float | int]:
+        """Return the X/Y resolution in georeferenced units of the Raster."""
+        return self.transform[0], abs(self.transform[4])
 
-            # Original attributes
-            meta = self.ds.meta
+    @property
+    def bounds(self) -> rio.coords.BoundingBox:
+        """Return the bounding coordinates of the Raster."""
+        return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
 
-            # width and height must be same as data
-            meta.update({"width": down_width, "height": down_height})
+    @property
+    def is_loaded(self) -> bool:
+        """Return False if the data attribute is None, and True if data exists."""
+        return self._data is not None
 
-            # Resolution is set, transform must be updated accordingly
-            res = tuple(np.asarray(self.res) * downsample)
-            transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
-            meta.update({"transform": transform})
+    @property
+    def dtypes(self) -> tuple[str, ...]:
+        """Return the string representations of the data types for each band."""
+        if not self.is_loaded and self._disk_dtypes is not None:
+            return self._disk_dtypes
+        return (str(self.data.dtype),) * self.nbands
 
-            # Update metadata
-            self._update(self.data, metadata=meta)
+    @property
+    def indexes(self) -> tuple[int, ...]:
+        if self._disk_indexes is not None:
+            return self._disk_indexes
+        return tuple(range(1, self.nbands + 1))
 
-        # Set nodata
-        if nodata is not None:
-            self.set_ndv(nodata)
+    @property
+    def bands(self) -> tuple[int, ...]:
+        if self._bands is not None:
+            if isinstance(self._bands, int):
+                return (self._bands,)
+            return tuple(self._bands)
+        return self.indexes
+
+    def load(self, **kwargs: Any) -> None:
+        """
+        Load the data from disk.
+
+        :param **kwargs: Optional keyword arguments sent to '_load_rio()'
+
+        :raises ValueError: If the data are already loaded.
+        :raises AttributeError: If no 'filename' attribute exists.
+        """
+        if self.is_loaded:
+            raise ValueError("Data are already loaded")
+
+        if self.filename is None:
+            raise AttributeError("'filename' is not set")
+
+        with rio.open(self.filename) as dataset:
+            self.data = _load_rio(
+                dataset, bands=self._bands, masked=self._masked, transform=self.transform, shape=self.shape, **kwargs
+            )
 
     @classmethod
     def from_array(
@@ -291,7 +437,7 @@ class Raster:
         data: np.ndarray | np.ma.masked_array,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int,
-        nodata: int | float | None = None,
+        nodata: int | float | list[int] | list[float] | None = None,
     ) -> RasterType:
         """Create a Raster from a numpy array and some geo-referencing information.
 
@@ -329,47 +475,15 @@ class Raster:
         if isinstance(crs, int):
             crs = CRS.from_epsg(crs)
 
-        # If a 2-D ('single-band') array is passed in, give it a band dimension.
-        if len(data.shape) < 3:
-            data = np.expand_dims(data, 0)
-
-        # Preserves input mask
-        if isinstance(data, np.ma.masked_array):
-            if nodata is None:
-                if np.sum(data.mask) > 0:
-                    raise ValueError("For masked arrays, a nodata value must be set")
-            else:
-                data.data[data.mask] = nodata
-
-        # Open handle to new memory file
-        mfh = MemoryFile()
-
-        # Create the memory file
-        with rio.open(
-            mfh,
-            "w",
-            height=data.shape[1],
-            width=data.shape[2],
-            count=data.shape[0],
-            dtype=data.dtype,
-            crs=crs,
-            transform=transform,
-            nodata=nodata,
-            driver="GTiff",
-        ) as ds:
-
-            ds.write(data)
-
-        # Initialise a Raster object created with MemoryFile.
-        # (i.e., __init__ will now be run.)
-        return cls(mfh)
+        return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
 
     def __repr__(self) -> str:
         """Convert object to formal string representation."""
-        L = [getattr(self, item) for item in self._saved_attrs]
-        s: str = "{}.{}({})".format(type(self).__module__, type(self).__qualname__, ", ".join(map(str, L)))
+        return self.__str__()
+        # L = [getattr(self, item) for item in self._saved_attrs]
+        # s: str = "{}.{}({})".format(type(self).__module__, type(self).__qualname__, ", ".join(map(str, L)))
 
-        return s
+        # return s
 
     def __str__(self) -> str:
         """Provide string of information about Raster."""
@@ -395,7 +509,7 @@ class Raster:
 
     def _overloading_check(
         self: RasterType, other: RasterType | np.ndarray | Number
-    ) -> tuple[np.ndarray, np.ndarray | Number, float | int | None]:
+    ) -> tuple[np.ndarray, np.ndarray | Number, float | int | list[int] | list[float] | None]:
         """
         Before any operation overloading, check input data type and return both self and other data as either \
 a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
@@ -658,42 +772,10 @@ Must be a Raster, np.ndarray or single number."
 
         out_data = self.data.astype(dtype)
         if inplace:
-            meta = self.ds.meta
-            meta.update({"dtype": dtype})
-            self._update(imgdata=out_data, metadata=meta)
+            self._data = out_data
             return None
         else:
             return self.from_array(out_data, self.transform, self.crs, nodata=self.nodata)
-
-    def _get_rio_attrs(self) -> list[str]:
-        """Get the attributes that have the same name in rio.DatasetReader and Raster."""
-        rio_attrs: list[str] = []
-        for attr in Raster.__annotations__.keys():
-            if "__" in attr or attr not in dir(self.ds):
-                continue
-            rio_attrs.append(attr)
-        return rio_attrs
-
-    def _read_attrs(self, attrs: list[str] | str | None = None) -> None:
-        # Copy most used attributes/methods
-        rio_attrs = self._get_rio_attrs()
-        for attr in self.__annotations__.keys():
-            if "__" in attr or attr not in dir(self.ds):
-                continue
-            rio_attrs.append(attr)
-        if attrs is None:
-            self._saved_attrs = rio_attrs
-            attrs = rio_attrs
-        else:
-            if isinstance(attrs, str):
-                attrs = [attrs]
-            for attr in rio_attrs:
-                if attr not in attrs:
-                    attrs.append(attr)
-            self._saved_attrs = attrs
-
-        for attr in attrs:
-            setattr(self, attr, getattr(self.ds, attr))
 
     @property
     def is_modified(self) -> bool:
@@ -703,19 +785,23 @@ Must be a Raster, np.ndarray or single number."
 
         """
         if not self._is_modified:
-            new_hash = hash((self._data.tobytes(), self.transform, self.crs, self.nodata))
+            new_hash = hash(
+                (self._data.tobytes() if self._data is not None else 0, self.transform, self.crs, self.nodata)
+            )
             self._is_modified = not (self._disk_hash == new_hash)
 
         return self._is_modified
 
     @property
-    def data(self) -> np.ndarray | np.ma.masked_array:
+    def data(self) -> np.ma.masked_array:
         """
         Get data.
 
         :returns: data array.
 
         """
+        if not self.is_loaded and self._data is None:
+            raise ValueError("Data are not loaded")
         return self._data
 
     @data.setter
@@ -732,58 +818,35 @@ Must be a Raster, np.ndarray or single number."
         if not isinstance(new_data, np.ndarray):
             raise ValueError("New data must be a numpy array.")
 
-        # Check that new_data has correct shape
-        if self.is_loaded:
-            orig_shape = self._data.shape
-        else:
-            orig_shape = (self.count, self.height, self.width)
+        if len(new_data.shape) == 2:
+            new_data = new_data[np.newaxis, :, :]
 
-        if new_data.shape != orig_shape:
-            raise ValueError(f"New data must be of the same shape as existing data: {orig_shape}.")
+        # Check that new_data has correct shape
+        if self._data is not None:
+            dtype = str(self._data.dtype)
+            orig_shape = self._data.shape[1:]
+        elif self.filename is not None:
+            dtype = self.dtypes[0]
+            orig_shape = self.shape
+        else:
+            dtype = str(new_data.dtype)
+            orig_shape = new_data.shape[1:]
 
         # Check that new_data has the right type
-        if new_data.dtype != self._data.dtype:
+        if str(new_data.dtype) != dtype:
             raise ValueError(
                 "New data must be of the same type as existing\
  data: {}".format(
-                    self.data.dtype
+                    dtype
                 )
             )
 
-        self._data = new_data
+        if new_data.shape[1:] != orig_shape:
+            raise ValueError(
+                f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
+            )
 
-    def _update(
-        self,
-        imgdata: np.ndarray | None = None,
-        metadata: dict[str, Any] | None = None,
-        vrt_to_driver: str = "GTiff",
-    ) -> None:
-        """
-        Update the object with a new image or metadata.
-
-        :param imgdata: image data to update with.
-        :param metadata: metadata to update with.
-        :param vrt_to_driver: name of driver to coerce a VRT to. This is required
-        because rasterio does not support writing to to a VRTSourcedRasterBand.
-        """
-        memfile = MemoryFile()
-        if imgdata is None:
-            imgdata = self.data
-        if metadata is None:
-            metadata = self.ds.meta
-
-        if metadata["driver"] == "VRT":
-            metadata["driver"] = vrt_to_driver
-
-        with memfile.open(**metadata) as ds:
-            ds.write(imgdata)
-
-        self.ds = memfile.open()
-        self._read_attrs()
-        if self.is_loaded:
-            self.load()
-
-        self._is_modified = True
+        self._data = np.ma.masked_array(new_data)
 
     def set_mask(self, mask: np.ndarray) -> None:
         """
@@ -800,7 +863,7 @@ Must be a Raster, np.ndarray or single number."
 
         # Check that new_data has correct shape
         if self.is_loaded:
-            orig_shape = self._data.shape
+            orig_shape = self.data.shape
         else:
             raise AttributeError("self.data must be loaded first, with e.g. self.load()")
 
@@ -840,7 +903,7 @@ Must be a Raster, np.ndarray or single number."
         ]
 
         if stats:
-            if self.data is not None:
+            if self.is_loaded:
                 if self.nbands == 1:
                     as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
                     as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
@@ -870,7 +933,7 @@ Must be a Raster, np.ndarray or single number."
         if new_array is not None:
             data = new_array
         else:
-            data = self.data
+            data = self.data.copy()
 
         cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata)
 
@@ -878,41 +941,10 @@ Must be a Raster, np.ndarray or single number."
 
     @property
     def __array_interface__(self) -> dict[str, Any]:
-        if self._data is None:
+        if not self.is_loaded:
             self.load()
 
         return self._data.__array_interface__  # type: ignore
-
-    def load(self, bands: int | list[int] | None = None, **kwargs: Any) -> None:
-        r"""
-        Load specific bands of the dataset, using rasterio.read().
-        Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
-
-        :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
-
-
-        \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
-        Useful ones are:
-        .. hlist::
-        * out_shape : to load a subsampled version
-        * window : to load a cropped version
-        * resampling : to set the resampling algorithm
-        """
-        if bands is None:
-            self._data = self.ds.read(masked=self._masked, **kwargs)
-            bands = self.ds.indexes
-        else:
-            self._data = self.ds.read(bands, masked=self._masked, **kwargs)
-            if type(bands) is int:
-                bands = bands
-
-        # If ndim is 2, expand to 3
-        if self._data.ndim == 2:
-            self._data = np.expand_dims(self._data, 0)
-
-        self.nbands = self._data.shape[0]
-        self.is_loaded = True
-        self.bands = bands
 
     def crop(
         self: RasterType,
@@ -945,46 +977,59 @@ Must be a Raster, np.ndarray or single number."
         else:
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
-        meta = copy.copy(self.ds.meta)
-
         if mode == "match_pixel":
-            crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+            # crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
-            crop_img, tfm = rio.mask.mask(self.ds, [crop_bbox], crop=True, all_touched=True)
-            meta.update(
-                {
-                    "height": crop_img.shape[1],
-                    "width": crop_img.shape[2],
-                    "transform": tfm,
-                }
+            new_xmin = np.max([xmin - ((xmin - self.bounds.left) % self.res[1]), self.bounds.left])
+            new_ymin = np.max([ymin - ((ymin - self.bounds.bottom) % self.res[0]), self.bounds.bottom])
+            new_ymax = np.min(
+                [
+                    ymax
+                    + (
+                        (self.res[0] - (ymax - self.bounds.top) % self.res[0])
+                        if (ymax - self.bounds.top) % self.res[0] != 0
+                        else 0
+                    ),
+                    self.bounds.top,
+                ]
             )
+            new_xmax = np.min([xmax + (self.res[1] - xmax % self.res[1]), self.bounds.right])
+            tfm = rio.transform.from_origin(new_xmin, new_ymax, *self.res)
 
-        else:
-            window = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
-            new_height = int(window.height)
-            new_width = int(window.width)
-            new_tfm = rio.transform.from_bounds(xmin, ymin, xmax, ymax, width=new_width, height=new_height)
+            colmin = int((new_xmin - self.bounds.left) / self.res[1])
+            rowmin = int((self.bounds.top - new_ymax) / self.res[0])
+            colmax = colmin + int((new_xmax - new_xmin) / self.res[1])
+            rowmax = rowmin + int((new_ymax - new_ymin) / self.res[0])
 
             if self.is_loaded:
-                new_img = np.zeros((self.nbands, new_height, new_width), dtype=self.data.dtype)
+                crop_img = self.data[:, rowmin:rowmax, colmin : colmax + 1]
             else:
-                new_img = np.zeros((self.count, new_height, new_width), dtype=self.data.dtype)
+                with rio.open(self.filename) as raster:
+                    crop_img = raster.read(
+                        self._bands,
+                        masked=self._masked,
+                        window=rio.windows.Window(colmin, rowmin, (colmax - colmin), (colmin - colmax)),
+                    )
+
+        else:
+            new_tfm = rio.transform.from_origin(xmin, ymax, *self.res)
 
             crop_img, tfm = rio.warp.reproject(
-                self.data,
-                new_img,
-                src_transform=self.transform,
-                dst_transform=new_tfm,
-                src_crs=self.crs,
-                dst_crs=self.crs,
+                self.data, src_transform=self.transform, dst_transform=new_tfm, src_crs=self.crs, dst_crs=self.crs
             )
-            meta.update({"height": new_height, "width": new_width, "transform": tfm})
+
+        if len(crop_img.shape) == 2:
+            crop_img = crop_img[np.newaxis, :, :]
 
         if inplace:
-            self._update(crop_img, meta)
+            self._data = crop_img
+            self.transform = tfm
+            self.tags["AREA_OR_POINT"] = "Area"  # TODO: Explain why this should have an area interpretation now
             return None
         else:
-            return self.from_array(crop_img, meta["transform"], meta["crs"], meta["nodata"])
+            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata)
+            newraster.tags["AREA_OR_POINT"] = "Area"
+            return newraster
 
     def reproject(
         self: RasterType,
@@ -993,8 +1038,8 @@ Must be a Raster, np.ndarray or single number."
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | None = None,
-        src_nodata: int | float | None = None,
+        dst_nodata: int | float | list[int] | list[float] | None = None,
+        src_nodata: int | float | list[int] | list[float] | None = None,
         dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
@@ -1008,9 +1053,6 @@ Must be a Raster, np.ndarray or single number."
         or by manually providing the output CRS (`dst_crs`), dimensions (`dst_size`),
         resolution (with `dst_size`) and/or bounds (`dst_bounds`).
         Any resampling algorithm implemented in rasterio can be used.
-
-        Currently: requires image data to have been loaded into memory.
-        NOT SUITABLE for large datasets yet! This requires work...
 
         To reproject a Raster with different source bounds, first run Raster.crop.
 
@@ -1198,21 +1240,25 @@ Must be a Raster, np.ndarray or single number."
         reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
 
         # If data is loaded, reproject the numpy array directly
-        if self.data is not None:
+        if self.is_loaded:
             dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
 
         # If not, uses the dataset instead
         else:
             dst_data = []
             for k in range(self.count):
-                band = rio.band(self.ds, k + 1)
-                dst_band, dst_transformed = rio.warp.reproject(band, **reproj_kwargs)
-                dst_data.append(dst_band.squeeze())
+                with rio.open(self.filename) as ds:
+                    band = rio.band(ds, k + 1)
+                    dst_band, dst_transformed = rio.warp.reproject(band, **reproj_kwargs)
+                    dst_data.append(dst_band.squeeze())
 
             dst_data = np.array(dst_data)
 
         # Enforce output type
-        dst_data = dst_data.astype(dtype)
+        dst_data = np.ma.masked_array(dst_data.astype(dtype))
+
+        if dst_nodata is not None:
+            dst_data.mask = dst_data == dst_nodata
 
         # Check for funny business.
         if dst_transform is not None:
@@ -1232,23 +1278,17 @@ Must be a Raster, np.ndarray or single number."
 
 
         """
-        # Check that data is loaded, as it is necessary for this method
-        assert self.is_loaded, "Data must be loaded, use self.load"
-
-        meta = self.ds.meta
         dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
 
-        meta.update({"transform": rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)})
-        self._update(metadata=meta)
+        self.transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
 
-    def set_ndv(self, ndv: abc.Sequence[int | float] | int | float, update_array: bool = False) -> None:
+    def set_ndv(self, ndv: int | float | list[int] | list[float], update_array: bool = True) -> None:
         """
         Set new nodata values for bands (and possibly update arrays).
 
         :param ndv: nodata values
         :param update_array: change the existing nodata in array
         """
-
         if not isinstance(ndv, (abc.Sequence, int, float, np.integer, np.floating)):
             raise ValueError("Type of ndv not understood, must be list or float or int")
 
@@ -1272,34 +1312,26 @@ Must be a Raster, np.ndarray or single number."
             if not rio.dtypes.can_cast_dtype(ndv, self.dtypes[0]):
                 raise ValueError(f"ndv value {ndv} incompatible with self.dtype {self.dtypes[0]}")
 
-        meta = self.ds.meta
+        # Extract the data variable, so the self.data property doesn't have to be called a bunch of times
         imgdata = self.data
-        pre_ndv = self.nodata
 
-        meta.update({"nodata": ndv})
+        if update_array:
+            for i, new_nodata in enumerate(ndv if isinstance(ndv, Iterable) else [ndv]):
+                # The mask may be "False", so this command below works for non-arrays (returning 1)
+                mask_size = np.ravel([imgdata.mask]).size
+                if mask_size > 1:
+                    old_nodatas = imgdata.data[i, :, :] == self.nodata
+                    imgdata.mask[i, :, :][old_nodatas] = False
 
-        if update_array and pre_ndv is not None:
-            # nodata values are specific to each band
+                new_nodatas = imgdata[i, :, :] == new_nodata
+                if new_nodatas.size > 0:
+                    # If the mask was previously just one value (e.g. False), create a new boolean mask array
+                    if mask_size == 1:
+                        imgdata.mask = np.zeros(self.shape, dtype=bool)
+                    imgdata.mask[i, :, :][new_nodatas] = True
+            self.data = imgdata
 
-            # let's do a loop then
-            if self.count == 1:
-                if np.ma.isMaskedArray(imgdata):
-                    imgdata.data[imgdata.mask] = ndv  # type: ignore
-                else:
-                    ind = imgdata[:] == pre_ndv
-                    imgdata[ind] = ndv
-            else:
-                # At this point, ndv is definitely iterable, but mypy doesn't understand that.
-                for i in range(self.count):
-                    if np.ma.isMaskedArray(imgdata):
-                        imgdata.data[i, imgdata.mask[i, :]] = ndv[i]  # type: ignore
-                    else:
-                        ind = imgdata[i, :] == pre_ndv[i]  # type: ignore
-                        imgdata[i, ind] = ndv[i]  # type: ignore
-        else:
-            imgdata = None
-
-        self._update(metadata=meta, imgdata=imgdata)
+        self.nodata = ndv
 
     def save(
         self,
@@ -1358,7 +1390,7 @@ Must be a Raster, np.ndarray or single number."
             raise AttributeError("No data loaded, and alternative blank_value not set.")
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
-                save_data = np.zeros((self.ds.count, self.ds.height, self.ds.width))
+                save_data = np.zeros(self.data.shape)
                 save_data[:, :, :] = blank_value
             else:
                 raise ValueError("blank_values must be one of int, float (or None).")
@@ -1366,9 +1398,10 @@ Must be a Raster, np.ndarray or single number."
             save_data = self.data
 
             # if masked array, save with masked values replaced by nodata
-            # In this case, nodata = None is not compatible, so revert to default values
-            if isinstance(save_data, np.ma.masked_array) & (np.count_nonzero(save_data.mask) > 0):
-                if nodata is None:
+            if isinstance(save_data, np.ma.masked_array):
+
+                # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
+                if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
                     nodata = _default_ndv(save_data.dtype)
                     warnings.warn(f"No nodata set, will use default value of {nodata}")
                 save_data = save_data.filled(nodata)
@@ -1377,12 +1410,12 @@ Must be a Raster, np.ndarray or single number."
             filename,
             "w",
             driver=driver,
-            height=self.ds.height,
-            width=self.ds.width,
-            count=self.ds.count,
+            height=self.height,
+            width=self.width,
+            count=self.count,
             dtype=save_data.dtype,
-            crs=self.ds.crs,
-            transform=self.ds.transform,
+            crs=self.crs,
+            transform=self.transform,
             nodata=nodata,
             compress=compress,
             tiled=tiled,
@@ -1696,7 +1729,7 @@ to be cleared due to the setting of GCPs."
             x, y = projtools.reproject_from_latlon((y, x), self.crs)
 
         # Convert coordinates to pixel space
-        row, col = self.ds.index(x, y, op=round)
+        row, col = rio.transform.rowcol(self.transform, x, y, op=round)
 
         # Decide what pixel coordinates to read:
         if window is not None:
@@ -1719,50 +1752,28 @@ to be cleared due to the setting of GCPs."
         # Create rasterio's window for reading
         window = rio.windows.Window(col, row, width, height)
 
-        # Get values for all bands
-        if band is None:
+        if self.is_loaded:
+            data = self.data[slice(None) if band is None else band + 1, row : row + height, col : col + width]
+            value = format_value(data)
+            win: np.ndarray | dict[int, np.ndarray] = data
 
-            # Deal with single band case
+        else:
             if self.nbands == 1:
-                data = self.ds.read(
-                    window=window,
-                    fill_value=self.nodata,
-                    boundless=boundless,
-                    masked=masked,
-                )
+                with rio.open(self.filename) as raster:
+                    data = raster.read(window=window, fill_value=self.nodata, boundless=boundless, masked=masked)
                 value = format_value(data)
                 win = data
-
-            # Deal with multiband case
             else:
                 value = {}
                 win = {}
-
-                for b in self.indexes:
-                    data = self.ds.read(
-                        window=window,
-                        fill_value=self.nodata,
-                        boundless=boundless,
-                        indexes=b,
-                        masked=masked,
-                    )
-                    val = format_value(data)
-                    # Store according to GDAL band numbers
-                    value[b] = val
-                    win[b] = data
-
-        # Or just for specified band in multiband case
-        elif isinstance(band, int):
-            data = self.ds.read(
-                window=window,
-                fill_value=self.nodata,
-                boundless=boundless,
-                indexes=band,
-                masked=masked,
-            )
-            value = format_value(data)
-        else:
-            raise ValueError("Value provided for band was not int or None.")
+                with rio.open(self.filename) as raster:
+                    for b in self.indexes:
+                        data = raster.read(
+                            window=window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b
+                        )
+                        val = format_value(data)
+                        value[b] = val
+                        win[b] = data  # type: ignore
 
         if return_window:
             return (value, win)
@@ -1832,7 +1843,7 @@ to be cleared due to the setting of GCPs."
                 'Argument "area_or_point" must be either None (falls back to GDAL metadata), "Point" or "Area".'
             )
 
-        i, j = self.ds.index(x, y, op=op, precision=precision)
+        i, j = rio.transform.rowcol(self.transform, x, y, op=op, precision=precision)
 
         # # necessary because rio.Dataset.index does not return abc.Iterable for a single point
         if not isinstance(i, abc.Iterable):
@@ -1858,7 +1869,7 @@ to be cleared due to the setting of GCPs."
 
         # if input is None, default to GDAL METADATA
         if area_or_point is None:
-            area_or_point = self.ds.tags()["AREA_OR_POINT"]
+            area_or_point = self.tags.get("AREA_OR_POINT", "Point")
 
         if area_or_point == "Point":
             if not isinstance(i.flat[0], np.floating):
@@ -1884,7 +1895,7 @@ to be cleared due to the setting of GCPs."
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-        x, y = self.ds.xy(i, j, offset=offset)
+        x, y = rio.transform.xy(self.transform, i, j, offset=offset)
 
         return x, y
 
@@ -2018,7 +2029,7 @@ to be cleared due to the setting of GCPs."
                 # Generate a new Raster from a copy of the band's data
                 bands.append(
                     self.from_array(
-                        self.data[band_n, :, :],
+                        self.data[band_n, :, :].copy(),
                         transform=self.transform,
                         crs=self.crs,
                         nodata=self.nodata,
@@ -2031,7 +2042,6 @@ to be cleared due to the setting of GCPs."
                 # Set the data to a slice of the original array
                 raster._data = self.data[band_n, :, :].reshape((1,) + self.data.shape[1:])
                 # Set the nbands
-                raster.nbands = 1
                 bands.append(raster)
 
         return bands
@@ -2097,7 +2107,8 @@ to be cleared due to the setting of GCPs."
         if self.is_loaded:
             pixel_data = self.data[:, rows, cols]
         else:
-            pixel_data = np.array(list(self.ds.sample(zip(x_coords, y_coords)))).T
+            with rio.open(self.filename) as raster:
+                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords)))).T
 
         if isinstance(pixel_data, np.ma.masked_array):
             pixel_data = np.where(pixel_data.mask, np.nan, pixel_data.data)
