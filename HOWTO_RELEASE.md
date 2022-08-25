@@ -7,7 +7,7 @@
 2. Follow the steps to [create a new release](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository) on GitHub.
 Use the same release number and tag as in setup.py.
 
-An automatic GitHub action will start to push and publish the new release to PyPI. 
+An automatic GitHub action will start to push and publish the new release to PyPI.
 
 **Note**: A tag and a release can easily be deleted if doing a mistake, but if the release is pushed to PyPI, it will not be possible to re-use the same version number anymore.
 
