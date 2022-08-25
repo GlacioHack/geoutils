@@ -1,0 +1,18 @@
+rasterio
+geopandas >= 0.10.0
+pyproj
+flake8
+pytest
+pytest-lazy-fixture
+sphinx
+sphinx_rtd_theme
+pylint
+sphinxcontrib_programoutput
+sphinx_autodoc_typehints
+matplotlib
+scipy
+pre-commit
+typing-extensions; python_version < '3.8'
+sphinx-gallery
+scikit-image
+

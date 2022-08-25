@@ -140,4 +140,8 @@ geoutils/version.py
 
 # End of https://www.gitignore.io/api/python
 geoutils/datasets/glacier_outlines.gpkg-shm
-geoutils/datasets/glacier_outlines.gpkg-wal
+geoutils/datasets/glacier_outlines.gpkg-wal.
+.vim/
+doc/source/file.txt
+doc/source/auto_examples/
+doc/source/gen_modules/

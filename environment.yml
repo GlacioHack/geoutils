@@ -3,17 +3,13 @@ channels:
   - conda-forge
 dependencies:
   - python=3
-  - geopandas
+  - geopandas >= 0.10.0
   - matplotlib
   - pyproj
   - rasterio
-  - rioxarray
-
-  # code checks
-  - flake8
-
-  # testing
-  - pytest
-
-  # development
+  - scipy
   - pip
+  - tqdm
+  - pip:
+
+    - "typing-extensions; python_version < '3.8'"

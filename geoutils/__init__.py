@@ -2,20 +2,19 @@
 GeoUtils is a python package of raster and vector tools.
 """
 
-from . import georaster
-from . import geovector
-from . import datasets
-from . import satimg
-
-from .georaster import Raster
-from .geovector import Vector
-from .satimg import SatelliteImage
+from geoutils import spatial_tools  # noqa
+from geoutils import datasets, georaster, geovector, projtools, satimg  # noqa
+from geoutils.georaster import Raster  # noqa
+from geoutils.geovector import Vector  # noqa
+from geoutils.satimg import SatelliteImage  # noqa
 
 try:
-    from geoutils.version import version as __version__
+    from geoutils.version import version as __version__  # noqa
 except ImportError:  # pragma: no cover
-    raise ImportError('geoutils is not properly installed. If you are '
-                      'running from the source directory, please instead '
-                      'create a new virtual environment (using conda or '
-                      'virtualenv) and then install it in-place by running: '
-                      'pip install -e .')
+    raise ImportError(
+        "geoutils is not properly installed. If you are "
+        "running from the source directory, please instead "
+        "create a new virtual environment (using conda or "
+        "virtualenv) and then install it in-place by running: "
+        "pip install -e ."
+    )
