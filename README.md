@@ -1,8 +1,8 @@
-# GeoUtils
+# geoutils
 Set of tools to handle raster and vector data sets in Python.
 
 ![](https://readthedocs.org/projects/geoutils/badge/?version=latest)
-[![build](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml/badge.svg)](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml)
+[![build](https://github.com/GlacioHack/geoutils/actions/workflows/python-app.yml/badge.svg)](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
 [![Conda Platforms](https://img.shields.io/conda/pn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
 [![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
@@ -28,7 +28,7 @@ pip install geoutils
 
 Or from the repository tarball: make sure GDAL and PROJ are properly installed, then:
 ```bash
-pip install https://github.com/GlacioHack/GeoUtils/tarball/main
+pip install https://github.com/GlacioHack/geoutils/tarball/main
 ```
 
 ## Documentation
@@ -37,7 +37,7 @@ See the full documentation at https://geoutils.readthedocs.io.
 
 ## Structure
 
-GeoUtils are composed of three libraries:
+GeoUtils is composed of three libraries:
 - `georaster.py` to handle raster data set. In particular, a Raster class to load a raster file along with metadata.
 - `geovector.py` to handle vector data set. In particular, a Vector class to load a raster file along with metadata.
 - `projtools.py` with various tools around projections.
@@ -45,7 +45,7 @@ GeoUtils are composed of three libraries:
 
 ## How to contribute
 
-You can find ways to improve the libraries in the [issues](https://github.com/GlacioHack/GeoUtils/issues) section. All contributions are welcome.
+You can find ways to improve the libraries in the [issues](https://github.com/GlacioHack/geoutils/issues) section. All contributions are welcome.
 
 1. Fork the repository to your personal GitHub account, clone to your computer.
 2. (Optional but preferred:) Make a feature branch.
