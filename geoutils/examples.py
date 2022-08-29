@@ -32,7 +32,7 @@ def download_examples(overwrite: bool = False):
         return
 
     # Static commit hash to be bumped every time it needs to be.
-    commit = "846d35119537cd8d6a1b2ac22ea6b79df881386f"
+    commit = "3121f37e8de767cb7ea21cbd93b4dd59a81b1ced"
     # The URL from which to download the repository
     url = f"https://github.com/GlacioHack/geoutils-data/tarball/main#commit={commit}"
 
