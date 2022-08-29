@@ -65,7 +65,7 @@ def get_path(name: str) -> str:
     """
     Get path of example data. List of available files can be found in "examples.available".
 
-    :param name: Name of test data (listed in xdem/examples.py)
+    :param name: Name of test data.
     :return:
     """
     if name in list(_FILEPATHS_DATA.keys()):

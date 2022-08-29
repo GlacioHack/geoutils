@@ -703,7 +703,7 @@ class TestRaster:
         Then, set the value minus one as new no data (e.g., 254 or -10000), after rewriting the previous nodata to 0. Save mask.
         Check that both no data masks are identical and have correct number of pixels.
         """
-        # Read image and set no data to 255
+        # Read image
         r = gr.Raster(example, masked=True)
 
         # Copy the original data to validate the mask later
@@ -713,9 +713,9 @@ class TestRaster:
         # Save the mask for validation
         ndv_index = r.data.mask.copy()
 
-        # Now set to 254, after changing 254 to 0.
+        # Now set to the notadata value minus 1 (e.g., 254), after changing this value to 0.
         r.data[r.data == _default_ndv(r.dtypes[0]) - 1] = 0
-        # This will unset the mask of all masked 255 values
+        # This will unset the mask of all masked with default nodata
         # The new nodata has no values, since they were changed in the command above. The mask is therefore empty
         r.set_ndv(ndv=_default_ndv(r.dtypes[0]) - 1, update_array=True)
         ndv_index_2 = r.data.mask

@@ -33,7 +33,7 @@ original_sha256 = {
 
 
 @pytest.mark.parametrize(
-    "example", examples.FILEPATHS_DATA
+    "example", examples.available
                         )  # type: ignore
 def test_data_integrity(example: str) -> None:
     """
