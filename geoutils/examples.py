@@ -8,18 +8,19 @@ import urllib.request
 from distutils.dir_util import copy_tree
 
 # Define the location of the data in the example directory
-EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
+_EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
 
 # Absolute filepaths to the example files.
-FILEPATHS_DATA = {
-    "everest_landsat_rgb": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_RGB.tif"),
-    "everest_landsat_b4": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4.tif"),
-    "everest_landsat_b4_cropped": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4_cropped.tif"),
-    "everest_rgi_outlines": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat", "15_rgi60_glacier_outlines.gpkg"),
-    "exploradores_aster_dem": os.path.join(EXAMPLES_DIRECTORY, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z.tif"),
-    "exploradores_rgi_outlines": os.path.join(EXAMPLES_DIRECTORY, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg")
+_FILEPATHS_DATA = {
+    "everest_landsat_rgb": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_RGB.tif"),
+    "everest_landsat_b4": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4.tif"),
+    "everest_landsat_b4_cropped": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4_cropped.tif"),
+    "everest_rgi_outlines": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat", "15_rgi60_glacier_outlines.gpkg"),
+    "exploradores_aster_dem": os.path.join(_EXAMPLES_DIRECTORY, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z.tif"),
+    "exploradores_rgi_outlines": os.path.join(_EXAMPLES_DIRECTORY, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg")
                  }
 
+available = list(_FILEPATHS_DATA.keys())
 
 def download_examples(overwrite: bool = False):
     """
@@ -27,7 +28,7 @@ def download_examples(overwrite: bool = False):
 
     :param overwrite: Do not download the files again if they already exist.
     """
-    if not overwrite and all(map(os.path.isfile, list(FILEPATHS_DATA.values()))):
+    if not overwrite and all(map(os.path.isfile, list(_FILEPATHS_DATA.values()))):
         # print("Datasets exist")
         return
 
@@ -58,17 +59,18 @@ def download_examples(overwrite: bool = False):
         "data", dir_name)
 
         # Copy the temporary extracted data to the example directory.
-        copy_tree(tmp_dir_name, os.path.join(EXAMPLES_DIRECTORY, dir_name))
+        copy_tree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name))
 
 def get_path(name: str) -> str:
     """
-    Get path of example data
+    Get path of example data. List of available files can be found in "examples.available".
+
     :param name: Name of test data (listed in xdem/examples.py)
     :return:
     """
-    if name in list(FILEPATHS_DATA.keys()):
+    if name in list(_FILEPATHS_DATA.keys()):
         download_examples()
-        return FILEPATHS_DATA[name]
+        return _FILEPATHS_DATA[name]
     else:
-        raise ValueError('Data name should be one of "'+'" , "'.join(list(FILEPATHS_DATA.keys()))+'".')
+        raise ValueError('Data name should be one of "'+'" , "'.join(list(_FILEPATHS_DATA.keys()))+'".')
 
