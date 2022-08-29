@@ -58,8 +58,8 @@ sphinx_gallery_conf = {
 }
 
 extlinks = {
-    "issue": ("https://github.com/GlacioHack/GeoUtils/issues/%s", "GH"),
-    "pull": ("https://github.com/GlacioHack/GeoUtils/pull/%s", "PR"),
+    "issue": ("https://github.com/GlacioHack/geoutils/issues/%s", "GH"),
+    "pull": ("https://github.com/GlacioHack/geoutils/pull/%s", "PR"),
 }
 
 # Add any paths that contain templates here, relative to this directory.
