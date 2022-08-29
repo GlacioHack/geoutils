@@ -2,7 +2,7 @@
 import geoutils as gu
 
 # Fetch an example file
-filename = gu.datasets.get_path("landsat_B4")
+filename = gu.examples.get_path("everest_landsat_b4")
 
 # Open the file
 image = gu.Raster(filename)
