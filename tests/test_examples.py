@@ -9,8 +9,10 @@ import pytest
 import geoutils as gu
 from geoutils import examples
 
-@pytest.mark.parametrize("example", ["everest_landsat_b4", "everest_landsat_b4_cropped",
-                                          "everest_landsat_rgb", "exploradores_aster_dem"])  # type: ignore
+
+@pytest.mark.parametrize(
+    "example", ["everest_landsat_b4", "everest_landsat_b4_cropped", "everest_landsat_rgb", "exploradores_aster_dem"]
+)  # type: ignore
 def test_read_paths_raster(example: str) -> None:
     assert isinstance(gu.Raster(examples.get_path(example)), gu.Raster)
 
@@ -28,13 +30,11 @@ original_sha256 = {
     "everest_landsat_rgb": "7d0505a8610fd7784cb71c03e5b242715cd1574e978c2c86553d60fd82372c30",
     "everest_rgi_outlines": "d1a5bcd4bd4731a24c2398c016a6f5a8064160fedd5bab10609adacda9ba41ef",
     "exploradores_aster_dem": "dcb0d708d042553cdd2bb4fd82c55b5674a5e0bd6ea46f1a021b396b7d300033",
-    "exploradores_rgi_outlines": "19c2dac089ce57373355213fdf2fd72f601bf97f21b04c4920edb1e4384ae2b2"
+    "exploradores_rgi_outlines": "19c2dac089ce57373355213fdf2fd72f601bf97f21b04c4920edb1e4384ae2b2",
 }
 
 
-@pytest.mark.parametrize(
-    "example", examples.available
-                        )  # type: ignore
+@pytest.mark.parametrize("example", examples.available)  # type: ignore
 def test_data_integrity(example: str) -> None:
     """
     Test that input data is not corrupted by checking sha265 sum

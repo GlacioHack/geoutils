@@ -19,10 +19,10 @@ DO_PLOT = False
 
 class TestSatelliteImage:
 
-    landsat_b4 = examples.get_path('everest_landsat_b4')
-    aster_dem = examples.get_path('exploradores_aster_dem')
+    landsat_b4 = examples.get_path("everest_landsat_b4")
+    aster_dem = examples.get_path("exploradores_aster_dem")
 
-    @pytest.mark.parametrize('example', [landsat_b4, aster_dem])
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_init(self, example: str) -> None:
         """
         Test that inputs work properly in SatelliteImage class init
@@ -53,7 +53,7 @@ class TestSatelliteImage:
             (np.all(img.data.mask == img2.data.mask), np.all(img2.data.mask == img3.data.mask))
         )
 
-    @pytest.mark.parametrize('example', [landsat_b4, aster_dem])
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_silent(self, example: str) -> None:
         """
         Test that the silent method does not return any output in console
@@ -108,7 +108,7 @@ class TestSatelliteImage:
         sat_out = satimg1 - satimg2  # type: ignore
         assert isinstance(sat_out, si.SatelliteImage)
 
-    @pytest.mark.parametrize('example', [landsat_b4, aster_dem])
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_copy(self, example: str) -> None:
         """
         Test that the copy method works as expected for SatelliteImage. In particular

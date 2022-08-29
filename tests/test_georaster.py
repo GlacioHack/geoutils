@@ -33,7 +33,7 @@ class TestRaster:
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
 
-    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
         """Test that all possible inputs work properly in Raster class init"""
 
@@ -84,8 +84,8 @@ class TestRaster:
         assert np.ma.isMaskedArray(gr.Raster(example, masked=True).data)
         assert np.ma.isMaskedArray(gr.Raster(example, masked=False).data)
 
-    @pytest.mark.skip('Test failing because of an issue in set_ndv')
-    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path])
+    @pytest.mark.skip("Test failing because of an issue in set_ndv")  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
 
@@ -105,12 +105,12 @@ class TestRaster:
             stats = r.info(stats=True)
 
         # Check the stats adapt to nodata values
-        if r.dtypes[0] == 'uint8':
+        if r.dtypes[0] == "uint8":
             # Validate that the mask is respected by adding 0 values (there are none to begin with.)
             r.data.ravel()[:1000] = 0
             # Set the nodata value to 0, then validate that they are excluded from the new minimum
             r.set_ndv(0)
-        elif r.dtypes[0] == 'float32':
+        elif r.dtypes[0] == "float32":
             # We do the same with -99999 here
             r.data.ravel()[:1000] = -99999
             # And replace the nodata value
@@ -299,7 +299,7 @@ class TestRaster:
         with pytest.raises(ValueError, match=expected_message):
             r1.__sub__(r2)
 
-    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_copy(self, example: str) -> None:
         """
         Test that the copy method works as expected for Raster. In particular
@@ -345,7 +345,7 @@ class TestRaster:
         r.data += 5
         assert not geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
 
-    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_is_modified(self, example: str) -> None:
         """
         Test that changing the data updates is_modified as desired
@@ -409,8 +409,10 @@ class TestRaster:
         with pytest.raises(ValueError, match="mask must be a numpy array"):
             r.set_mask(1)
 
-    @pytest.mark.skip('Issue: the cropping is off by 30 m for the right bound (where the cropped raster used to be '
-                      'larger than the original, so the check was useless).')
+    @pytest.mark.skip(
+        "Issue: the cropping is off by 30 m for the right bound (where the cropped raster used to be "
+        "larger than the original, so the check was useless)."
+    )  # type: ignore
     def test_crop(self) -> None:
 
         r = gr.Raster(self.landsat_b4_path)
@@ -450,19 +452,25 @@ class TestRaster:
 
         assert b_minmax == b_crop
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
         warnings.simplefilter("error")
 
         # Reference raster to be used
         r = gr.Raster(example)
 
-        # Create an artifical raster with different bounds, shape and resolution
+        # Create an artificial raster with different bounds, shape and resolution
         new_data = np.ones(r.shape)
         transform = list(r.transform)
-        new_transform = rio.transform.Affine(transform[0], transform[1], (r.bounds.left + r.bounds.right)/2,
-                                             transform[4], transform[5], (r.bounds.bottom + r.bounds.top)/2)
-        r2 = gr.Raster.from_array(data=np.ones(r.shape), transform=r.transform, crs=r.crs, nodata=r.nodata)
+        new_transform = rio.transform.Affine(
+            transform[0] / 2,
+            transform[1],
+            (r.bounds.left + r.bounds.right) / 2,
+            transform[4] / 2,
+            transform[5],
+            (r.bounds.bottom + r.bounds.top) / 2,
+        )
+        r2 = gr.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
         r2 = r2.reproject(dst_res=20)
         assert r2.res == (20, 20)
 
@@ -696,11 +704,12 @@ class TestRaster:
         z = r.data.data[0, itest, jtest]
         assert z == z_val
 
-    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_ndv(self, example: str) -> None:
         """
         Read dataset and set a certain value (e.g., 255 or -9999) to no data. Save mask.
-        Then, set the value minus one as new no data (e.g., 254 or -10000), after rewriting the previous nodata to 0. Save mask.
+        Then, set the value minus one as new no data (e.g., 254 or -10000), after rewriting the previous nodata to 0.
+        Save mask again.
         Check that both no data masks are identical and have correct number of pixels.
         """
         # Read image

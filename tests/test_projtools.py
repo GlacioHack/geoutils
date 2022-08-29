@@ -8,6 +8,7 @@ import geoutils as gu
 import geoutils.projtools as pt
 from geoutils import examples
 
+
 class TestProjTools:
 
     landsat_b4_path = examples.get_path("everest_landsat_b4")
@@ -15,7 +16,7 @@ class TestProjTools:
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
 
-    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_latlon_reproject(self, example: str) -> None:
         """
         Check that to and from latlon projections are self consistent within tolerated rounding errors
