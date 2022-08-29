@@ -466,8 +466,8 @@ class TestRaster:
             transform[0] / 2,
             transform[1],
             (r.bounds.left + r.bounds.right) / 2,
-            transform[4] / 2,
-            transform[5],
+            transform[3] / 2,
+            transform[4],
             (r.bounds.bottom + r.bounds.top) / 2,
         )
         r2 = gr.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
