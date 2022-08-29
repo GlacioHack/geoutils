@@ -2,18 +2,26 @@
 Test projtools
 """
 import numpy as np
+import pytest
 
 import geoutils as gu
 import geoutils.projtools as pt
-
+from geoutils import examples
 
 class TestProjTools:
-    def test_latlon_reproject(self) -> None:
+
+    landsat_b4_path = examples.get_path("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path("everest_landsat_B4_cropped")
+    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    aster_dem_path = examples.get_path("exploradores_aster_dem")
+
+    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path])
+    def test_latlon_reproject(self, example: str) -> None:
         """
         Check that to and from latlon projections are self consistent within tolerated rounding errors
         """
 
-        img = gu.Raster(gu.datasets.get_path("landsat_B4"))
+        img = gu.Raster(example)
 
         # Test on random points
         nsample = 100
@@ -30,8 +38,8 @@ class TestProjTools:
         """
         Check that merge_bounds and bounds2poly work as expected for all kinds of bounds objects.
         """
-        img1 = gu.Raster(gu.datasets.get_path("landsat_B4"))
-        img2 = gu.Raster(gu.datasets.get_path("landsat_B4_crop"))
+        img1 = gu.Raster(self.landsat_b4_path)
+        img2 = gu.Raster(self.landsat_b4_crop_path)
 
         # Check union (default) - with Raster objects
         out_bounds = pt.merge_bounds((img1, img2))
