@@ -13,10 +13,10 @@ EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..
 # Absolute filepaths to the example files.
 FILEPATHS_DATA = {
     "everest_landsat_rgb": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_RGB.tif"),
-    "everest_landsat_b4": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4"),
-    "everest_landsat_b4_cropped": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4_cropped"),
+    "everest_landsat_b4": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4.tif"),
+    "everest_landsat_b4_cropped": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat","LE71400412000304SGS00_B4_cropped.tif"),
     "everest_rgi_outlines": os.path.join(EXAMPLES_DIRECTORY, "Everest_Landsat", "15_rgi60_glacier_outlines.gpkg"),
-    "exploradores_aster_dem": os.path.join(EXAMPLES_DIRECTORY, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z"),
+    "exploradores_aster_dem": os.path.join(EXAMPLES_DIRECTORY, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z.tif"),
     "exploradores_rgi_outlines": os.path.join(EXAMPLES_DIRECTORY, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg")
                  }
 
@@ -58,7 +58,7 @@ def download_examples(overwrite: bool = False):
         "data", dir_name)
 
         # Copy the temporary extracted data to the example directory.
-        copy_tree(dir_name, os.path.join(EXAMPLES_DIRECTORY, dir_name))
+        copy_tree(tmp_dir_name, os.path.join(EXAMPLES_DIRECTORY, dir_name))
 
 def get_path(name: str) -> str:
     """
