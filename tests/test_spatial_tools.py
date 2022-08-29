@@ -11,7 +11,7 @@ import pytest
 import rasterio as rio
 
 import geoutils as gu
-from geoutils import datasets
+from geoutils import examples
 from geoutils.georaster import RasterType
 
 # def test_dem_subtraction():
@@ -33,7 +33,7 @@ class stack_merge_images:
     """
 
     def __init__(self, image: str, cls: Callable[[str], RasterType] = gu.Raster) -> None:
-        img = cls(datasets.get_path(image))
+        img = cls(examples.get_path(image))
         self.img = img
 
         # Find the easting midpoint of the img
@@ -68,17 +68,17 @@ class stack_merge_images:
 
 @pytest.fixture
 def images_1d():  # type: ignore
-    return stack_merge_images("landsat_B4")
+    return stack_merge_images("everest_landsat_b4")
 
 
 @pytest.fixture
 def sat_images():  # type: ignore
-    return stack_merge_images("landsat_B4", cls=gu.SatelliteImage)
+    return stack_merge_images("everest_landsat_b4", cls=gu.SatelliteImage)
 
 
 @pytest.fixture
 def images_3d():  # type: ignore
-    return stack_merge_images("landsat_RGB")
+    return stack_merge_images("everest_landsat_rgb")
 
 
 @pytest.mark.parametrize(

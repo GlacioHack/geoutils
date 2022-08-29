@@ -353,7 +353,7 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         It could be implemented in GeoPandas in the future: https://github.com/geopandas/geopandas/issues/2015
 
         :examples:
-        >>> outlines = gu.Vector(gu.datasets.get_path('glacier_outlines'))
+        >>> outlines = gu.Vector(gu.examples.get_path('everest_rgi_outlines'))
         >>> outlines = gu.Vector(outlines.ds.to_crs('EPSG:32645'))
         >>> buffer = outlines.buffer_without_overlap(500)
         >>> ax = buffer.ds.plot()  # doctest: +SKIP

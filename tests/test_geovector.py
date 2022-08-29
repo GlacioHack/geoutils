@@ -60,7 +60,7 @@ class TestVector:
 
     def test_rasterize_unproj(self) -> None:
         """Test rasterizing an EPSG:3426 dataset into a projection."""
-        v = gu.Vector(gu.datasets.get_path("glacier_outlines"))
+        v = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
         # Use Web Mercator at 30 m.
         burned = v.rasterize(xres=30, crs=3857)
 
