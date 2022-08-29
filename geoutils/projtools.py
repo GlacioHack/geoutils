@@ -1,5 +1,5 @@
 """
-GeoUtils.projtools provides a toolset for dealing with different coordinate reference systems (CRS).
+projtools provides a toolset for dealing with different coordinate reference systems (CRS).
 """
 from __future__ import annotations
 

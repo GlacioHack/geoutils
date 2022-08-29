@@ -51,7 +51,7 @@ An automatic GitHub action will start to push and publish the new release to PyP
       git push origin master
     You're done pushing to master!
 12. Issue the release on GitHub. Click on "Draft a new release" at
-    https://github.com/GeoUtils/geoutils/releases. Type in the version number, but
+    https://github.com/geoutils/geoutils/releases. Type in the version number, but
     don't bother to describe it -- we maintain that on the docs instead.
 13. Update the docs. Login to https://readthedocs.org/projects/geoutils/versions/
     and switch your new release tag (at the bottom) from "Inactive" to "Active".
