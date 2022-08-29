@@ -15,7 +15,7 @@ An automatic GitHub action will start to push and publish the new release to PyP
 
 - PyPI will block the upload, so the GitHub action failed. All is fine.
 - You can now edit the version number on the main branch.
-- Before releasing, you need to delete **both** the tag and the release of the previous release. If you release with the same tag without deletion, it will ignore your commit changing the version number, and PyPI will block the upload again. You're stuck in a circle. 
+- Before releasing, you need to delete **both** the tag and the release of the previous release. If you release with the same tag without deletion, it will ignore your commit changing the version number, and PyPI will block the upload again. You're stuck in a circle.
 
 
 ## The hard way
@@ -27,7 +27,7 @@ An automatic GitHub action will start to push and publish the new release to PyP
     (check the date!) and add a brief summary note describing the release at the
     top.
  3. If you have any doubts, run the full test suite one final time!
-      pytest --run-slow --mpl . 
+      pytest --run-slow --mpl .
  4. Increment the version number "FULLVERSION" in setup.py for PyPI and conda.
  5. On the master branch, commit the release in git:
       git commit -a -m 'Release v1.X.Y'
