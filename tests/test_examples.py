@@ -24,7 +24,7 @@ def test_read_paths_vector(example: str) -> None:
 # Original sha256 obtained with `sha256sum filename`
 original_sha256 = {
     "everest_landsat_b4": "271fa34e248f016f87109c8e81960caaa737558fbae110ec9e0d9e2d30d80c26",
-    "everest_landsat_b4_cropped": "8d4cf05377957bec9fe9a9ec0c24ea93255e17b529368e8338b1e1865c8b0c83",
+    "everest_landsat_b4_cropped": "0e63d8e9c4770534a1ec267c91e80cd9266732184a114f0bd1aadb5a613215e6",
     "everest_landsat_rgb": "7d0505a8610fd7784cb71c03e5b242715cd1574e978c2c86553d60fd82372c30",
     "everest_rgi_outlines": "d1a5bcd4bd4731a24c2398c016a6f5a8064160fedd5bab10609adacda9ba41ef",
     "exploradores_aster_dem": "dcb0d708d042553cdd2bb4fd82c55b5674a5e0bd6ea46f1a021b396b7d300033",
