@@ -996,20 +996,21 @@ Must be a Raster, np.ndarray or single number."
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
         if mode == "match_pixel":
-            window = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
-            window = window.round_lengths().round_offsets()
-            new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(window, transform=self.transform)
+            ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
+            self_win = rio.windows.from_bounds(*self.bounds, transform=self.transform)
+            final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
+            new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=self.transform)
             tfm = rio.transform.from_origin(new_xmin, new_ymax, *self.res)
 
             if self.is_loaded:
-                (rowmin, rowmax), (colmin, colmax) = window.toranges()
+                (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
                 crop_img = self.data[:, rowmin:rowmax, colmin:colmax]
             else:
                 with rio.open(self.filename) as raster:
                     crop_img = raster.read(
                         self._bands,
                         masked=self._masked,
-                        window=window,
+                        window=final_window,
                     )
 
         else:
