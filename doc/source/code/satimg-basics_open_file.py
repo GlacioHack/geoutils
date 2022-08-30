@@ -1,6 +1,6 @@
 """Example script to load a satellite image."""
 import geoutils as gu
 
-filename = gu.datasets.get_path("landsat_B4_crop")
+filename = gu.examples.get_path("everest_landsat_b4_cropped")
 
 satimg = gu.SatelliteImage(filename)

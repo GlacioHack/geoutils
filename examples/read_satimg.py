@@ -10,7 +10,7 @@ import geoutils as gu
 
 # %%
 # Example raster:
-img = gu.Raster(gu.datasets.get_path("landsat_B4_crop"))
+img = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
 
 # %%
 # Info:

@@ -11,7 +11,7 @@ import geoutils as gu
 
 # %%
 # Example raster:
-glaciers = gu.Vector(gu.datasets.get_path("glacier_outlines"))
+glaciers = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 
 # %%
 # Info:

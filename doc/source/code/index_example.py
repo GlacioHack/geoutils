@@ -1,6 +1,6 @@
 import geoutils as gu
 
-filename = gu.datasets.get_path("landsat_B4")
+filename = gu.examples.get_path("everest_landsat_b4")
 
 raster = gu.Raster(filename)
 

@@ -6,27 +6,31 @@ import sys
 from io import StringIO
 
 import numpy as np
+import pytest
 import rasterio as rio
 
 import geoutils
 import geoutils.georaster as gr
 import geoutils.satimg as si
-from geoutils import datasets
+from geoutils import examples
 
 DO_PLOT = False
 
 
 class TestSatelliteImage:
-    def test_init(self) -> None:
+
+    landsat_b4 = examples.get_path("everest_landsat_b4")
+    aster_dem = examples.get_path("exploradores_aster_dem")
+
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    def test_init(self, example: str) -> None:
         """
         Test that inputs work properly in SatelliteImage class init
         """
 
-        fn_img = datasets.get_path("landsat_B4")
-
         # from filename, checking option
-        img = si.SatelliteImage(fn_img, read_from_fn=False)
-        img = si.SatelliteImage(fn_img)
+        img = si.SatelliteImage(example, read_from_fn=False)
+        img = si.SatelliteImage(example)
         assert isinstance(img, si.SatelliteImage)
 
         # from SatelliteImage
@@ -34,7 +38,7 @@ class TestSatelliteImage:
         assert isinstance(img2, si.SatelliteImage)
 
         # from Raster
-        r = gr.Raster(fn_img)
+        r = gr.Raster(example)
         img3 = si.SatelliteImage(r)
         assert isinstance(img3, si.SatelliteImage)
 
@@ -49,11 +53,11 @@ class TestSatelliteImage:
             (np.all(img.data.mask == img2.data.mask), np.all(img2.data.mask == img3.data.mask))
         )
 
-    def test_silent(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    def test_silent(self, example: str) -> None:
         """
         Test that the silent method does not return any output in console
         """
-        fn_img = datasets.get_path("landsat_B4")
 
         # let's capture stdout
         # cf https://stackoverflow.com/questions/16571150/how-to-capture-stdout-output-from-a-python-function-call
@@ -69,13 +73,13 @@ class TestSatelliteImage:
                 sys.stdout = self._stdout
 
         with Capturing() as output1:
-            si.SatelliteImage(fn_img, silent=False)
+            si.SatelliteImage(example, silent=False)
 
         # check the metadata reading outputs to console
         assert len(output1) > 0
 
         with Capturing() as output2:
-            si.SatelliteImage(fn_img, silent=True)
+            si.SatelliteImage(example, silent=True)
 
         # check nothing outputs to console
         assert len(output2) == 0
@@ -104,7 +108,8 @@ class TestSatelliteImage:
         sat_out = satimg1 - satimg2  # type: ignore
         assert isinstance(sat_out, si.SatelliteImage)
 
-    def test_copy(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    def test_copy(self, example: str) -> None:
         """
         Test that the copy method works as expected for SatelliteImage. In particular
         when copying r to r2:
@@ -112,7 +117,7 @@ class TestSatelliteImage:
         - if r is copied, r.data changed, r2.data should be unchanged
         """
         # Open dataset, update data and make a copy
-        r = si.SatelliteImage(datasets.get_path("landsat_B4"))
+        r = si.SatelliteImage(example)
         r.data += 5
         r2 = r.copy()
 
