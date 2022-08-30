@@ -13,6 +13,11 @@ GLACIER_OUTLINES_URL = "http://public.data.npolar.no/cryoclim/CryoClim_GAO_SJ_19
 
 
 class TestVector:
+
+    landsat_b4_crop_path = gu.examples.get_path("everest_landsat_b4_cropped")
+    everest_outlines_path = gu.examples.get_path("everest_rgi_outlines")
+    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
+    aster_outlines_path = gu.examples.get_path("exploradores_rgi_outlines")
     glacier_outlines = gu.Vector(GLACIER_OUTLINES_URL)
 
     def test_init(self) -> None:
@@ -66,6 +71,42 @@ class TestVector:
 
         assert burned.shape[0] == 1251
         assert burned.shape[1] == 1522
+
+    test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
+
+    @pytest.mark.parametrize("data", test_data)  # type: ignore
+    def test_crop2raster(self, data: list[str]) -> None:
+
+        # Load data
+        raster_path, outlines_path = data
+        rst = gu.Raster(raster_path)
+        outlines = gu.Vector(outlines_path)
+
+        # Need to reproject to r.crs. Otherwise, crop2raster will work but will be approximate
+        # Because outlines might be warped in a different crs
+        outlines.ds = outlines.ds.to_crs(rst.crs)
+
+        # Crop
+        outlines_new = outlines.copy()
+        outlines_new.crop2raster(rst)
+
+        # Verify that geometries intersect with raster bound
+        rst_poly = gu.projtools.bounds2poly(rst.bounds)
+        intersects_new = []
+        for poly in outlines_new.ds.geometry:
+            intersects_new.append(poly.intersects(rst_poly))
+
+        assert np.all(intersects_new)
+
+        # Check that some of the original outlines did not intersect and were removed
+        intersects_old = []
+        for poly in outlines.ds.geometry:
+            intersects_old.append(poly.intersects(rst_poly))
+
+        assert np.sum(intersects_old) == np.sum(intersects_new)
+
+        # Check that some features were indeed removed
+        assert np.sum(~np.array(intersects_old)) > 0
 
 
 class TestSynthetic:

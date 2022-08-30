@@ -528,9 +528,8 @@ class TestRaster:
         # -- Test with CropGeom being a Vector -- #
         outlines = gu.Vector(outlines_path)
         outlines.ds = outlines.ds.to_crs(r.crs)
-        # outlines.crop2raster(r)
-        # outlines = outlines.query(f"index == {np.argmax(outlines.ds.geometry.area)}")
         r_cropped = r.crop(outlines, inplace=False)
+
         # Calculate intersection of the two bounding boxes and make sure crop has same bounds
         win_outlines = rio.windows.from_bounds(*outlines.bounds, transform=r.transform)
         win_raster = rio.windows.from_bounds(*r.bounds, transform=r.transform)
