@@ -525,33 +525,13 @@ class TestRaster:
         outlines.ds = outlines.ds.to_crs(r.crs)
         # outlines.crop2raster(r)
         # outlines = outlines.query(f"index == {np.argmax(outlines.ds.geometry.area)}")
-        # Crop and validate that it got smaller
         r_cropped = r.crop(outlines, inplace=False)
-        assert r.data.size > r_cropped.data.size  # type: ignore
-
-        # b = r.bounds
-        # b2 = r2.bounds
-
-        # b_minmax = (max(b[0], b2[0]), max(b[1], b2[1]), min(b[2], b2[2]), min(b[3], b2[3]))
-
-        # r_init = r.copy()
-
-        # # Cropping overwrites the current Raster object
-        # r.crop(r2)
-        # b_crop = tuple(r.bounds)
-
-        # if DO_PLOT:
-        #     fig1, ax1 = plt.subplots()
-        #     r_init.show(ax=ax1, title="Raster 1")
-
-        #     fig2, ax2 = plt.subplots()
-        #     r2.show(ax=ax2, title="Raster 2")
-
-        #     fig3, ax3 = plt.subplots()
-        #     r.show(ax=ax3, title="Raster 1 cropped to Raster 2")
-        #     plt.show()
-
-        # assert b_minmax == b_crop
+        # Calculate intersection of the two bounding boxes and make sure crop has same bounds
+        win_outlines = rio.windows.from_bounds(*outlines.bounds, transform=r.transform)
+        win_raster = rio.windows.from_bounds(*r.bounds, transform=r.transform)
+        final_window = win_outlines.intersection(win_raster).round_lengths().round_offsets()
+        new_bounds = rio.windows.bounds(final_window, transform=r.transform)
+        assert list(r_cropped.bounds) == list(new_bounds)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
