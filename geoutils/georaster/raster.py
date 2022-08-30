@@ -946,11 +946,14 @@ Must be a Raster, np.ndarray or single number."
 
         return self._data.__array_interface__  # type: ignore
 
+    # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
+    # Then the final overload must be duplicated
     @overload
     def crop(
         self: RasterType,
-        cropGeom: Raster | Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"],
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
         inplace: Literal[True],
     ) -> None:
         ...
@@ -958,16 +961,26 @@ Must be a Raster, np.ndarray or single number."
     @overload
     def crop(
         self: RasterType,
-        cropGeom: Raster | Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"],
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
         inplace: Literal[False],
     ) -> RasterType:
         ...
 
+    @overload
     def crop(
         self: RasterType,
-        cropGeom: Raster | Vector | list[float] | tuple[float, ...],
-        mode: str = "match_pixel",
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        inplace: bool = True,
+    ) -> RasterType | None:
+        ...
+
+    def crop(
+        self: RasterType,
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         inplace: bool = True,
     ) -> RasterType | None:
         """

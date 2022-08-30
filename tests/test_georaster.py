@@ -420,7 +420,7 @@ class TestRaster:
         r = gr.Raster(raster_path)
 
         # -- Test with cropGeom being a list/tuple -- ##
-        cropGeom = list(r.bounds)
+        cropGeom: list[float] = list(r.bounds)
 
         # Test with same bounds -> should be the same #
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3]]
@@ -456,9 +456,14 @@ class TestRaster:
         assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
 
         # same but tuple
-        cropGeom2 = (cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_int * r.res[0])
-        r_cropped = r.crop(cropGeom2, inplace=False)
-        assert list(r_cropped.bounds) == list(cropGeom2)
+        cropGeom3: tuple[float, float, float, float] = (
+            cropGeom[0],
+            cropGeom[1],
+            cropGeom[2],
+            cropGeom[3] - rand_int * r.res[0],
+        )
+        r_cropped = r.crop(cropGeom3, inplace=False)
+        assert list(r_cropped.bounds) == list(cropGeom3)
         assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
 
         # -- Test with CropGeom being a Raster -- #
