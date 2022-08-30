@@ -995,14 +995,10 @@ Must be a Raster, np.ndarray or single number."
                     )
 
         else:
-            new_tfm = rio.transform.from_origin(xmin, ymax, *self.res)
-
-            crop_img, tfm = rio.warp.reproject(
-                self.data, src_transform=self.transform, dst_transform=new_tfm, src_crs=self.crs, dst_crs=self.crs
-            )
-
-        if len(crop_img.shape) == 2:
-            crop_img = crop_img[np.newaxis, :, :]
+            bbox = rio.coords.BoundingBox(left=xmin, bottom=ymin, right=xmax, top=ymax)
+            out_rst = self.reproject(dst_bounds=bbox)  # should we instead raise an issue and point to reproject?
+            crop_img = out_rst.data
+            tfm = out_rst.transform
 
         if inplace:
             self._data = crop_img
