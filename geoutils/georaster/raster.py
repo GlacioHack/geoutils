@@ -978,37 +978,20 @@ Must be a Raster, np.ndarray or single number."
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
         if mode == "match_pixel":
-            # crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
-
-            new_xmin = np.max([xmin - ((xmin - self.bounds.left) % self.res[1]), self.bounds.left])
-            new_ymin = np.max([ymin - ((ymin - self.bounds.bottom) % self.res[0]), self.bounds.bottom])
-            new_ymax = np.min(
-                [
-                    ymax
-                    + (
-                        (self.res[0] - (ymax - self.bounds.top) % self.res[0])
-                        if (ymax - self.bounds.top) % self.res[0] != 0
-                        else 0
-                    ),
-                    self.bounds.top,
-                ]
-            )
-            new_xmax = np.min([xmax + (self.res[1] - xmax % self.res[1]), self.bounds.right])
+            window = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
+            window = window.round_lengths().round_offsets()
+            new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(window, transform=self.transform)
             tfm = rio.transform.from_origin(new_xmin, new_ymax, *self.res)
 
-            colmin = int((new_xmin - self.bounds.left) / self.res[1])
-            rowmin = int((self.bounds.top - new_ymax) / self.res[0])
-            colmax = colmin + int((new_xmax - new_xmin) / self.res[1])
-            rowmax = rowmin + int((new_ymax - new_ymin) / self.res[0])
-
             if self.is_loaded:
-                crop_img = self.data[:, rowmin:rowmax, colmin : colmax + 1]
+                (rowmin, rowmax), (colmin, colmax) = window.toranges()
+                crop_img = self.data[:, rowmin:rowmax, colmin:colmax]
             else:
                 with rio.open(self.filename) as raster:
                     crop_img = raster.read(
                         self._bands,
                         masked=self._masked,
-                        window=rio.windows.Window(colmin, rowmin, (colmax - colmin), (colmin - colmax)),
+                        window=window,
                     )
 
         else:

@@ -409,10 +409,6 @@ class TestRaster:
         with pytest.raises(ValueError, match="mask must be a numpy array"):
             r.set_mask(1)
 
-    @pytest.mark.skip(
-        "Issue: the cropping is off by 30 m for the right bound (where the cropped raster used to be "
-        "larger than the original, so the check was useless)."
-    )  # type: ignore
     def test_crop(self) -> None:
 
         r = gr.Raster(self.landsat_b4_path)
