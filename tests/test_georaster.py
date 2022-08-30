@@ -31,7 +31,9 @@ class TestRaster:
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path("everest_rgi_outlines")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
@@ -409,44 +411,147 @@ class TestRaster:
         with pytest.raises(ValueError, match="mask must be a numpy array"):
             r.set_mask(1)
 
-    def test_crop(self) -> None:
+    test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
-        r = gr.Raster(self.landsat_b4_path)
-        r2 = gr.Raster(self.landsat_b4_crop_path)
+    @pytest.mark.parametrize("data", test_data)  # type: ignore
+    def test_crop(self, data: list[str]) -> None:
 
-        # Read a vector and extract only the largest outline within the extent of r
-        outlines = gu.Vector(examples.get_path("everest_rgi_outlines"))
+        raster_path, outlines_path = data
+        r = gr.Raster(raster_path)
+
+        # -- Test with cropGeom being a list/tuple -- ##
+        cropGeom = list(r.bounds)
+
+        # Test with same bounds -> should be the same #
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r_cropped.bounds == r.bounds
+        assert gu.misc.array_equal(r.data, r_cropped.data)
+
+        # - Test cropping each side by a random integer of pixels - #
+        rand_int = np.random.randint(1, min(r.shape) - 1)
+
+        # left
+        cropGeom2 = [cropGeom[0] + rand_int * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, :, rand_int:], r_cropped.data)
+
+        # right
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_int * r.res[0], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, :, :-rand_int], r_cropped.data)
+
+        # bottom
+        cropGeom2 = [cropGeom[0], cropGeom[1] + rand_int * abs(r.res[1]), cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, :-rand_int, :], r_cropped.data)
+
+        # top
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_int * abs(r.res[1])]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
+
+        # same but tuple
+        cropGeom2 = (cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_int * r.res[0])
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == list(cropGeom2)
+        assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
+
+        # -- Test with CropGeom being a Raster -- #
+        r_cropped2 = r.crop(r_cropped, inplace=False)
+        assert r_cropped2.bounds == r_cropped.bounds
+        assert gu.misc.array_equal(r_cropped2.data, r_cropped)
+
+        # -- Test with inplace=False (Default) -- #
+        r_copy = r.copy()
+        r_copy.crop(r_cropped)
+        assert r_copy.bounds == r_cropped.bounds
+        assert gu.misc.array_equal(r_copy.data, r_cropped)
+
+        # - Test cropping each side with a non integer pixel, mode='match_pixel' - #
+        rand_float = np.random.randint(1, min(r.shape) - 1) + 0.25
+
+        # left
+        cropGeom2 = [cropGeom[0] + rand_float * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, :, int(rand_float) :], r_cropped.data)
+
+        # right
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_float * r.res[0], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, :, : -int(rand_float)], r_cropped.data)
+
+        # bottom
+        cropGeom2 = [cropGeom[0], cropGeom[1] + rand_float * abs(r.res[1]), cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, : -int(rand_float), :], r_cropped.data)
+
+        # top
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_float * abs(r.res[1])]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, int(rand_float) :, :], r_cropped.data)
+
+        # -- Test with mode='match_extent' -- #
+        # Test all sides at once, with rand_float less than half the smallest extent
+        # The cropped extent should exactly match the requested extent, res will be changed accordingly
+        rand_float = np.random.randint(1, min(r.shape) / 2 - 1) + 0.25
+        cropGeom2 = [
+            cropGeom[0] + rand_float * r.res[0],
+            cropGeom[1] + rand_float * abs(r.res[1]),
+            cropGeom[2] - rand_float * r.res[0],
+            cropGeom[3] - rand_float * abs(r.res[1]),
+        ]
+        r_cropped = r.crop(cropGeom2, inplace=False, mode="match_extent")
+        assert list(r_cropped.bounds) == cropGeom2
+        # The change in resolution should be less than what would occur with +/- 1 pixel
+        assert np.all(
+            abs(np.array(r.res) - np.array(r_cropped.res)) < np.array(r.res) / np.array(r_cropped.shape)[::-1]
+        )
+
+        r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
+        assert r_cropped2.bounds == r_cropped.bounds
+        assert gu.misc.array_equal(r_cropped2.data, r_cropped.data)
+
+        # -- Test with CropGeom being a Vector -- #
+        outlines = gu.Vector(outlines_path)
         outlines.ds = outlines.ds.to_crs(r.crs)
-        outlines.crop2raster(r)
-        outlines = outlines.query(f"index == {np.argmax(outlines.ds.geometry.area)}")
+        # outlines.crop2raster(r)
+        # outlines = outlines.query(f"index == {np.argmax(outlines.ds.geometry.area)}")
+        # Crop and validate that it got smaller
+        r_cropped = r.crop(outlines, inplace=False)
+        assert r.data.size > r_cropped.data.size  # type: ignore
 
-        # Crop the raster to the outline and validate that it got smaller
-        r_outline_cropped = r.crop(outlines, inplace=False)
-        assert r.data.size > r_outline_cropped.data.size  # type: ignore
+        # b = r.bounds
+        # b2 = r2.bounds
 
-        b = r.bounds
-        b2 = r2.bounds
+        # b_minmax = (max(b[0], b2[0]), max(b[1], b2[1]), min(b[2], b2[2]), min(b[3], b2[3]))
 
-        b_minmax = (max(b[0], b2[0]), max(b[1], b2[1]), min(b[2], b2[2]), min(b[3], b2[3]))
+        # r_init = r.copy()
 
-        r_init = r.copy()
+        # # Cropping overwrites the current Raster object
+        # r.crop(r2)
+        # b_crop = tuple(r.bounds)
 
-        # Cropping overwrites the current Raster object
-        r.crop(r2)
-        b_crop = tuple(r.bounds)
+        # if DO_PLOT:
+        #     fig1, ax1 = plt.subplots()
+        #     r_init.show(ax=ax1, title="Raster 1")
 
-        if DO_PLOT:
-            fig1, ax1 = plt.subplots()
-            r_init.show(ax=ax1, title="Raster 1")
+        #     fig2, ax2 = plt.subplots()
+        #     r2.show(ax=ax2, title="Raster 2")
 
-            fig2, ax2 = plt.subplots()
-            r2.show(ax=ax2, title="Raster 2")
+        #     fig3, ax3 = plt.subplots()
+        #     r.show(ax=ax3, title="Raster 1 cropped to Raster 2")
+        #     plt.show()
 
-            fig3, ax3 = plt.subplots()
-            r.show(ax=ax3, title="Raster 1 cropped to Raster 2")
-            plt.show()
-
-        assert b_minmax == b_crop
+        # assert b_minmax == b_crop
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
