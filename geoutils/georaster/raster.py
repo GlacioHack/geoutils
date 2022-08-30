@@ -946,6 +946,24 @@ Must be a Raster, np.ndarray or single number."
 
         return self._data.__array_interface__  # type: ignore
 
+    @overload
+    def crop(
+        self: RasterType,
+        cropGeom: Raster | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"],
+        inplace: Literal[True],
+    ) -> None:
+        ...
+
+    @overload
+    def crop(
+        self: RasterType,
+        cropGeom: Raster | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"],
+        inplace: Literal[False],
+    ) -> RasterType:
+        ...
+
     def crop(
         self: RasterType,
         cropGeom: Raster | Vector | list[float] | tuple[float, ...],
