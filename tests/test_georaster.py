@@ -466,7 +466,7 @@ class TestRaster:
         assert r_cropped2.bounds == r_cropped.bounds
         assert gu.misc.array_equal(r_cropped2.data, r_cropped)
 
-        # -- Test with inplace=False (Default) -- #
+        # -- Test with inplace=True (Default) -- #
         r_copy = r.copy()
         r_copy.crop(r_cropped)
         assert r_copy.bounds == r_cropped.bounds
