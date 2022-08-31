@@ -846,7 +846,7 @@ Must be a Raster, np.ndarray or single number."
                 f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
             )
 
-        self._data = np.ma.masked_array(new_data)
+        self._data = np.ma.masked_array(new_data, fill_value=self.nodata)
 
     def set_mask(self, mask: np.ndarray) -> None:
         """
