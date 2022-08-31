@@ -544,33 +544,77 @@ class TestRaster:
         # Reference raster to be used
         r = gr.Raster(example)
 
-        # Create an artificial raster with different bounds, shape and resolution
-        new_data = np.ones(r.shape)
-        transform = list(r.transform)
-        new_transform = rio.transform.Affine(
-            transform[0] / 2,
-            transform[1],
-            (r.bounds.left + r.bounds.right) / 2,
-            transform[3] / 2,
-            transform[4],
-            (r.bounds.bottom + r.bounds.top) / 2,
-        )
-        r2 = gr.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
-        r2 = r2.reproject(dst_res=20)
-        assert r2.res == (20, 20)
+        # -- Check proper errors are raised if nodata are not set -- #
+        r_ndv = r.copy()
+        r_ndv.nodata = None
+        default_ndv = _default_ndv(r_ndv.dtypes[0])
+        r_ndv.data.data[~r_ndv.data.mask][0] = default_ndv
+
+        # 1 - if no src_nodata is set and masked values exist, raises an error
+        if np.sum(r_ndv.data.mask) > 0:
+            with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
+                r_ndv.reproject(dst_res=r_ndv.res[0]/2, dst_nodata=0)
+
+        # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
+        with pytest.warns(UserWarning, match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. This may have unexpected consequences. Consider setting a different nodata with self.set_ndv."):
+            r_ndv.reproject(dst_res=r_ndv.res[0]/2, src_nodata=default_ndv)
+
+        if r.nodata is None:  # specific for the landsat test case, default nodata 255 cannot be used, so use 0
+            r.set_ndv(0)
+
+        # -- Additional tests -- #
+
+        # - Create 2 artificial rasters -
+        # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
+        # for r2, resolution is also set to 2/3 the input res
+        min_size = min(r.shape)
+        rand_int = np.random.randint(min_size/10, min(r.shape) - min_size/10)
+        new_transform = rio.transform.from_origin(r.bounds.left + rand_int * r.res[0], r.bounds.top - rand_int * abs(r.res[1]), r.res[0], r.res[1])
+
+        # data is cropped to the same extent
+        new_data = r.data[:, rand_int::, rand_int::]
+        r2b = gr.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
+
+        # Create a raster with different resolution
+        dst_res = r.res[0] * 2/3
+        r2 = r2b.reproject(dst_res=dst_res, resampling='nearest')
+        assert r2.res == (dst_res, dst_res)
 
         # Assert the initial rasters are different
+        assert r.bounds != r2b.bounds
+        assert r.shape != r2b.shape
         assert r.bounds != r2.bounds
         assert r.shape != r2.shape
         assert r.res != r2.res
 
-        # Test reprojecting to dst_ref
-        # Reproject raster should have same dimensions/georeferences as r2
+        # Test reprojecting with dst_ref=r2b (i.e. crop) -> output should have same shape, bounds and data
+        r3 = r.reproject(r2b)
+        assert r3.bounds == r2b.bounds
+        assert r3.shape == r2b.shape
+        assert r3.bounds == r2b.bounds
+        assert r3.transform == r2b.transform
+        assert gu.misc.array_equal(r3.data, r2b.data)
+
+        if DO_PLOT:
+            fig1, ax1 = plt.subplots()
+            r.show(ax=ax1, title="Raster 1")
+
+            fig2, ax2 = plt.subplots()
+            r2b.show(ax=ax2, title="Raster 2")
+
+            fig3, ax3 = plt.subplots()
+            r3.show(ax=ax3, title="Raster 1 reprojected to Raster 2")
+
+            plt.show()
+
+        # Test reprojecting with dst_ref=r2 -> output should have same shape, bounds and transform
+        # Data should be slightly different due to difference in input resolution
         r3 = r.reproject(r2)
         assert r3.bounds == r2.bounds
         assert r3.shape == r2.shape
         assert r3.bounds == r2.bounds
         assert r3.transform == r2.transform
+        assert not gu.misc.array_equal(r3.data, r2.data)
 
         if DO_PLOT:
             fig1, ax1 = plt.subplots()

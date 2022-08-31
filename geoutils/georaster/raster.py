@@ -1136,6 +1136,9 @@ Must be a Raster, np.ndarray or single number."
             dst_nodata = self.nodata
             if dst_nodata is None:
                 dst_nodata = _default_ndv(dtype)
+                # if dst_nodata is already being used, raise a warning.
+                # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
+                warnings.warn(f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exist in self.data. This may have unexpected consequences. Consider setting a different nodata with self.set_ndv.")
 
         from geoutils.misc import resampling_method_from_str
 
@@ -1252,6 +1255,12 @@ Must be a Raster, np.ndarray or single number."
 
         # If data is loaded, reproject the numpy array directly
         if self.is_loaded:
+
+            # All masked values must be set to a nodata value for rasterio's reproject to work properly
+            # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
+            if src_nodata is None and np.sum(self.data.mask) > 0:
+                raise ValueError("No nodata set, use `src_nodata`.")
+
             dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
 
         # If not, uses the dataset instead
