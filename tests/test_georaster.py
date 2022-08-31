@@ -553,11 +553,15 @@ class TestRaster:
         # 1 - if no src_nodata is set and masked values exist, raises an error
         if np.sum(r_ndv.data.mask) > 0:
             with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
-                r_ndv.reproject(dst_res=r_ndv.res[0]/2, dst_nodata=0)
+                r_ndv.reproject(dst_res=r_ndv.res[0] / 2, dst_nodata=0)
 
         # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
-        with pytest.warns(UserWarning, match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. This may have unexpected consequences. Consider setting a different nodata with self.set_ndv."):
-            r_ndv.reproject(dst_res=r_ndv.res[0]/2, src_nodata=default_ndv)
+        with pytest.warns(
+            UserWarning,
+            match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. \
+This may have unexpected consequences. Consider setting a different nodata with self.set_ndv.",
+        ):
+            r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
 
         if r.nodata is None:  # specific for the landsat test case, default nodata 255 cannot be used, so use 0
             r.set_ndv(0)
@@ -568,15 +572,17 @@ class TestRaster:
         # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
         # for r2, resolution is also set to 2/3 the input res
         min_size = min(r.shape)
-        rand_int = np.random.randint(min_size/10, min(r.shape) - min_size/10)
-        new_transform = rio.transform.from_origin(r.bounds.left + rand_int * r.res[0], r.bounds.top - rand_int * abs(r.res[1]), r.res[0], r.res[1])
+        rand_int = np.random.randint(min_size / 10, min(r.shape) - min_size / 10)
+        new_transform = rio.transform.from_origin(
+            r.bounds.left + rand_int * r.res[0], r.bounds.top - rand_int * abs(r.res[1]), r.res[0], r.res[1]
+        )
 
         # data is cropped to the same extent
         new_data = r.data[:, rand_int::, rand_int::]
         r2b = gr.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
 
         # Create a raster with different resolution
-        dst_res = r.res[0] * 2/3
+        dst_res = r.res[0] * 2 / 3
         r2 = r2b.reproject(dst_res=dst_res)
         assert r2.res == (dst_res, dst_res)
 
@@ -640,9 +646,11 @@ class TestRaster:
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
         # reproject raster, and reproject mask. Check that both have same number of masked pixels
-        r_gaps_reproj = r_gaps.reproject(dst_res=dst_res, resampling='nearest')
-        mask = gu.Raster.from_array(r_gaps.data.mask.astype('uint8'), crs=r_gaps.crs, transform=r_gaps.transform, nodata = None)
-        mask_reproj = mask.reproject(dst_res=dst_res, dst_nodata=255, resampling='nearest')
+        r_gaps_reproj = r_gaps.reproject(dst_res=dst_res, resampling="nearest")
+        mask = gu.Raster.from_array(
+            r_gaps.data.mask.astype("uint8"), crs=r_gaps.crs, transform=r_gaps.transform, nodata=None
+        )
+        mask_reproj = mask.reproject(dst_res=dst_res, dst_nodata=255, resampling="nearest")
         tot_masked_true = np.sum(mask_reproj.data.mask) + np.sum(mask_reproj.data == 1)
         assert np.sum(r_gaps_reproj.data.mask) == tot_masked_true
 
