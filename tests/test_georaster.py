@@ -577,7 +577,7 @@ class TestRaster:
 
         # Create a raster with different resolution
         dst_res = r.res[0] * 2/3
-        r2 = r2b.reproject(dst_res=dst_res, resampling='nearest')
+        r2 = r2b.reproject(dst_res=dst_res)
         assert r2.res == (dst_res, dst_res)
 
         # Assert the initial rasters are different
@@ -627,6 +627,24 @@ class TestRaster:
             r3.show(ax=ax3, title="Raster 1 reprojected to Raster 2")
 
             plt.show()
+
+        # - Check that if mask is modified afterwards, it is taken into account during reproject - #
+        # Create a raster with (additional) random gaps
+        r_gaps = r.copy()
+        data_1d = r_gaps.data.reshape(-1)
+        valids = np.where(~np.ma.atleast_1d(data_1d).mask)[0]
+        assert len(valids) > 0  # sanity check
+        nsamples = 200
+        data_1d[np.random.choice(valids, nsamples, replace=False)] = np.ma.masked
+        r_gaps.data = data_1d.reshape(r.data.shape)
+        assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
+
+        # reproject raster, and reproject mask. Check that both have same number of masked pixels
+        r_gaps_reproj = r_gaps.reproject(dst_res=dst_res, resampling='nearest')
+        mask = gu.Raster.from_array(r_gaps.data.mask.astype('uint8'), crs=r_gaps.crs, transform=r_gaps.transform, nodata = None)
+        mask_reproj = mask.reproject(dst_res=dst_res, dst_nodata=255, resampling='nearest')
+        tot_masked_true = np.sum(mask_reproj.data.mask) + np.sum(mask_reproj.data == 1)
+        assert np.sum(r_gaps_reproj.data.mask) == tot_masked_true
 
         # If a nodata is set, make sure it is preserved
         r_ndv = r.copy()
