@@ -38,7 +38,7 @@ class stack_merge_images:
 
         # Find the easting midpoint of the img
         x_midpoint = np.mean([img.bounds.right, img.bounds.left])
-        x_midpoint -= x_midpoint % img.res[0]
+        x_midpoint -= (x_midpoint - img.bounds.left) % img.res[0]
 
         # Cut the img into two imgs that slightly overlap each other.
         self.img1 = img.copy()
