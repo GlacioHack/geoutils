@@ -1261,7 +1261,8 @@ Must be a Raster, np.ndarray or single number."
             if src_nodata is None and np.sum(self.data.mask) > 0:
                 raise ValueError("No nodata set, use `src_nodata`.")
 
-            dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+            # Mask not taken into account by rasterio, need to fill with src_nodata
+            dst_data, dst_transformed = rio.warp.reproject(self.data.filled(src_nodata), **reproj_kwargs)
 
         # If not, uses the dataset instead
         else:
@@ -1275,7 +1276,7 @@ Must be a Raster, np.ndarray or single number."
             dst_data = np.array(dst_data)
 
         # Enforce output type
-        dst_data = np.ma.masked_array(dst_data.astype(dtype))
+        dst_data = np.ma.masked_array(dst_data.astype(dtype), fill_value=dst_nodata)
 
         if dst_nodata is not None:
             dst_data.mask = dst_data == dst_nodata
