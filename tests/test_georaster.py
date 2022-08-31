@@ -646,6 +646,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
         # reproject raster, and reproject mask. Check that both have same number of masked pixels
+        # TODO: should test other resampling algo
         r_gaps_reproj = r_gaps.reproject(dst_res=dst_res, resampling="nearest")
         mask = gu.Raster.from_array(
             r_gaps.data.mask.astype("uint8"), crs=r_gaps.crs, transform=r_gaps.transform, nodata=None
