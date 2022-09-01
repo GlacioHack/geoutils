@@ -2,7 +2,7 @@ name: geoutils
 channels:
   - conda-forge
 dependencies:
-  - python=3
+  - python >= 3.8
   - geopandas >= 0.10.0
   - matplotlib
   - pyproj
