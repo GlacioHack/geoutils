@@ -547,13 +547,21 @@ class TestRaster:
         # -- Check proper errors are raised if nodata are not set -- #
         r_ndv = r.copy()
         r_ndv.nodata = None
+
+        # Make sure at least one pixel is masked for test 1
+        rand_indices = gu.spatial_tools.subsample_raster(r_ndv.data, 10, return_indices=True)
+        r_ndv.data[rand_indices] = np.ma.masked
+        assert np.count_nonzero(r_ndv.data.mask) > 0
+
+        # make sure at least one pixel is set at default ndv for test
         default_ndv = _default_ndv(r_ndv.dtypes[0])
-        r_ndv.data.data[~r_ndv.data.mask][0] = default_ndv
+        rand_indices = gu.spatial_tools.subsample_raster(r_ndv.data, 10, return_indices=True)
+        r_ndv.data[rand_indices] = default_ndv
+        assert np.count_nonzero(r_ndv.data == default_ndv) > 0
 
         # 1 - if no src_nodata is set and masked values exist, raises an error
-        if np.sum(r_ndv.data.mask) > 0:
-            with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
-                r_ndv.reproject(dst_res=r_ndv.res[0] / 2, dst_nodata=0)
+        with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
+            _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, dst_nodata=0)
 
         # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
         with pytest.warns(
@@ -561,12 +569,17 @@ class TestRaster:
             match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. \
 This may have unexpected consequences. Consider setting a different nodata with self.set_ndv.",
         ):
-            r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
+            _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
 
-        if r.nodata is None:  # specific for the landsat test case, default nodata 255 cannot be used, so use 0
-            r.set_ndv(0)
+        # 3 - if default nodata does not conflict, should not raise a warning
+        r_ndv.data[r_ndv.data == default_ndv] = 3
+        _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
 
         # -- Additional tests -- #
+
+        # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
+        if r.nodata is None:
+            r.set_ndv(0)
 
         # - Create 2 artificial rasters -
         # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
