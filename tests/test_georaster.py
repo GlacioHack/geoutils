@@ -662,8 +662,9 @@ This may have unexpected consequences. Consider setting a different nodata with 
             r_gaps.data.mask.astype("uint8"), crs=r_gaps.crs, transform=r_gaps.transform, nodata=None
         )
         mask_reproj = mask.reproject(dst_res=dst_res, dst_nodata=255, resampling="nearest")
-        tot_masked_true = np.sum(mask_reproj.data.mask) + np.sum(mask_reproj.data == 1)
-        assert np.sum(r_gaps_reproj.data.mask) == tot_masked_true
+        # Final masked pixels are those originally masked (=1) and the values masked during reproject, e.g. edges
+        tot_masked_true = np.count_nonzero(mask_reproj.data.mask) + np.count_nonzero(mask_reproj.data == 1)
+        assert np.count_nonzero(r_gaps_reproj.data.mask) == tot_masked_true
 
         # If a nodata is set, make sure it is preserved
         r_ndv = r.copy()
