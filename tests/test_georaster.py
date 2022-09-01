@@ -650,12 +650,9 @@ This may have unexpected consequences. Consider setting a different nodata with 
         # - Check that if mask is modified afterwards, it is taken into account during reproject - #
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
-        data_1d = r_gaps.data.reshape(-1)
-        valids = np.where(~np.ma.atleast_1d(data_1d).mask)[0]
-        assert len(valids) > 0  # sanity check
         nsamples = 200
-        data_1d[np.random.choice(valids, nsamples, replace=False)] = np.ma.masked
-        r_gaps.data = data_1d.reshape(r.data.shape)
+        rand_indices = gu.spatial_tools.subsample_raster(r_gaps.data, nsamples, return_indices=True)
+        r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
         # reproject raster, and reproject mask. Check that both have same number of masked pixels
