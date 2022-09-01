@@ -31,7 +31,9 @@ class TestRaster:
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path("everest_rgi_outlines")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
@@ -409,48 +411,131 @@ class TestRaster:
         with pytest.raises(ValueError, match="mask must be a numpy array"):
             r.set_mask(1)
 
-    @pytest.mark.skip(
-        "Issue: the cropping is off by 30 m for the right bound (where the cropped raster used to be "
-        "larger than the original, so the check was useless)."
-    )  # type: ignore
-    def test_crop(self) -> None:
+    test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
-        r = gr.Raster(self.landsat_b4_path)
-        r2 = gr.Raster(self.landsat_b4_crop_path)
+    @pytest.mark.parametrize("data", test_data)  # type: ignore
+    def test_crop(self, data: list[str]) -> None:
 
-        # Read a vector and extract only the largest outline within the extent of r
-        outlines = gu.Vector(examples.get_path("everest_rgi_outlines"))
+        raster_path, outlines_path = data
+        r = gr.Raster(raster_path)
+
+        # -- Test with cropGeom being a list/tuple -- ##
+        cropGeom: list[float] = list(r.bounds)
+
+        # Test with same bounds -> should be the same #
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r_cropped.bounds == r.bounds
+        assert gu.misc.array_equal(r.data, r_cropped.data)
+
+        # - Test cropping each side by a random integer of pixels - #
+        rand_int = np.random.randint(1, min(r.shape) - 1)
+
+        # left
+        cropGeom2 = [cropGeom[0] + rand_int * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, :, rand_int:], r_cropped.data)
+
+        # right
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_int * r.res[0], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, :, :-rand_int], r_cropped.data)
+
+        # bottom
+        cropGeom2 = [cropGeom[0], cropGeom[1] + rand_int * abs(r.res[1]), cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, :-rand_int, :], r_cropped.data)
+
+        # top
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_int * abs(r.res[1])]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert list(r_cropped.bounds) == cropGeom2
+        assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
+
+        # same but tuple
+        cropGeom3: tuple[float, float, float, float] = (
+            cropGeom[0],
+            cropGeom[1],
+            cropGeom[2],
+            cropGeom[3] - rand_int * r.res[0],
+        )
+        r_cropped = r.crop(cropGeom3, inplace=False)
+        assert list(r_cropped.bounds) == list(cropGeom3)
+        assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
+
+        # -- Test with CropGeom being a Raster -- #
+        r_cropped2 = r.crop(r_cropped, inplace=False)
+        assert r_cropped2.bounds == r_cropped.bounds
+        assert gu.misc.array_equal(r_cropped2.data, r_cropped)
+
+        # -- Test with inplace=True (Default) -- #
+        r_copy = r.copy()
+        r_copy.crop(r_cropped)
+        assert r_copy.bounds == r_cropped.bounds
+        assert gu.misc.array_equal(r_copy.data, r_cropped)
+
+        # - Test cropping each side with a non integer pixel, mode='match_pixel' - #
+        rand_float = np.random.randint(1, min(r.shape) - 1) + 0.25
+
+        # left
+        cropGeom2 = [cropGeom[0] + rand_float * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, :, int(rand_float) :], r_cropped.data)
+
+        # right
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_float * r.res[0], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, :, : -int(rand_float)], r_cropped.data)
+
+        # bottom
+        cropGeom2 = [cropGeom[0], cropGeom[1] + rand_float * abs(r.res[1]), cropGeom[2], cropGeom[3]]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, : -int(rand_float), :], r_cropped.data)
+
+        # top
+        cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_float * abs(r.res[1])]
+        r_cropped = r.crop(cropGeom2, inplace=False)
+        assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
+        assert gu.misc.array_equal(r.data[:, int(rand_float) :, :], r_cropped.data)
+
+        # -- Test with mode='match_extent' -- #
+        # Test all sides at once, with rand_float less than half the smallest extent
+        # The cropped extent should exactly match the requested extent, res will be changed accordingly
+        rand_float = np.random.randint(1, min(r.shape) / 2 - 1) + 0.25
+        cropGeom2 = [
+            cropGeom[0] + rand_float * r.res[0],
+            cropGeom[1] + rand_float * abs(r.res[1]),
+            cropGeom[2] - rand_float * r.res[0],
+            cropGeom[3] - rand_float * abs(r.res[1]),
+        ]
+        r_cropped = r.crop(cropGeom2, inplace=False, mode="match_extent")
+        assert list(r_cropped.bounds) == cropGeom2
+        # The change in resolution should be less than what would occur with +/- 1 pixel
+        assert np.all(
+            abs(np.array(r.res) - np.array(r_cropped.res)) < np.array(r.res) / np.array(r_cropped.shape)[::-1]
+        )
+
+        r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
+        assert r_cropped2.bounds == r_cropped.bounds
+        assert gu.misc.array_equal(r_cropped2.data, r_cropped.data)
+
+        # -- Test with CropGeom being a Vector -- #
+        outlines = gu.Vector(outlines_path)
         outlines.ds = outlines.ds.to_crs(r.crs)
-        outlines.crop2raster(r)
-        outlines = outlines.query(f"index == {np.argmax(outlines.ds.geometry.area)}")
+        r_cropped = r.crop(outlines, inplace=False)
 
-        # Crop the raster to the outline and validate that it got smaller
-        r_outline_cropped = r.crop(outlines, inplace=False)
-        assert r.data.size > r_outline_cropped.data.size  # type: ignore
-
-        b = r.bounds
-        b2 = r2.bounds
-
-        b_minmax = (max(b[0], b2[0]), max(b[1], b2[1]), min(b[2], b2[2]), min(b[3], b2[3]))
-
-        r_init = r.copy()
-
-        # Cropping overwrites the current Raster object
-        r.crop(r2)
-        b_crop = tuple(r.bounds)
-
-        if DO_PLOT:
-            fig1, ax1 = plt.subplots()
-            r_init.show(ax=ax1, title="Raster 1")
-
-            fig2, ax2 = plt.subplots()
-            r2.show(ax=ax2, title="Raster 2")
-
-            fig3, ax3 = plt.subplots()
-            r.show(ax=ax3, title="Raster 1 cropped to Raster 2")
-            plt.show()
-
-        assert b_minmax == b_crop
+        # Calculate intersection of the two bounding boxes and make sure crop has same bounds
+        win_outlines = rio.windows.from_bounds(*outlines.bounds, transform=r.transform)
+        win_raster = rio.windows.from_bounds(*r.bounds, transform=r.transform)
+        final_window = win_outlines.intersection(win_raster).round_lengths().round_offsets()
+        new_bounds = rio.windows.bounds(final_window, transform=r.transform)
+        assert list(r_cropped.bounds) == list(new_bounds)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
@@ -459,33 +544,96 @@ class TestRaster:
         # Reference raster to be used
         r = gr.Raster(example)
 
-        # Create an artificial raster with different bounds, shape and resolution
-        new_data = np.ones(r.shape)
-        transform = list(r.transform)
-        new_transform = rio.transform.Affine(
-            transform[0] / 2,
-            transform[1],
-            (r.bounds.left + r.bounds.right) / 2,
-            transform[3] / 2,
-            transform[4],
-            (r.bounds.bottom + r.bounds.top) / 2,
+        # -- Check proper errors are raised if nodata are not set -- #
+        r_ndv = r.copy()
+        r_ndv.nodata = None
+
+        # Make sure at least one pixel is masked for test 1
+        rand_indices = gu.spatial_tools.subsample_raster(r_ndv.data, 10, return_indices=True)
+        r_ndv.data[rand_indices] = np.ma.masked
+        assert np.count_nonzero(r_ndv.data.mask) > 0
+
+        # make sure at least one pixel is set at default ndv for test
+        default_ndv = _default_ndv(r_ndv.dtypes[0])
+        rand_indices = gu.spatial_tools.subsample_raster(r_ndv.data, 10, return_indices=True)
+        r_ndv.data[rand_indices] = default_ndv
+        assert np.count_nonzero(r_ndv.data == default_ndv) > 0
+
+        # 1 - if no src_nodata is set and masked values exist, raises an error
+        with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
+            _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, dst_nodata=0)
+
+        # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
+        with pytest.warns(
+            UserWarning,
+            match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. \
+This may have unexpected consequences. Consider setting a different nodata with self.set_ndv.",
+        ):
+            _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
+
+        # 3 - if default nodata does not conflict, should not raise a warning
+        r_ndv.data[r_ndv.data == default_ndv] = 3
+        _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
+
+        # -- Additional tests -- #
+
+        # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
+        if r.nodata is None:
+            r.set_ndv(0)
+
+        # - Create 2 artificial rasters -
+        # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
+        # for r2, resolution is also set to 2/3 the input res
+        min_size = min(r.shape)
+        rand_int = np.random.randint(min_size / 10, min(r.shape) - min_size / 10)
+        new_transform = rio.transform.from_origin(
+            r.bounds.left + rand_int * r.res[0], r.bounds.top - rand_int * abs(r.res[1]), r.res[0], r.res[1]
         )
-        r2 = gr.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
-        r2 = r2.reproject(dst_res=20)
-        assert r2.res == (20, 20)
+
+        # data is cropped to the same extent
+        new_data = r.data[:, rand_int::, rand_int::]
+        r2b = gr.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
+
+        # Create a raster with different resolution
+        dst_res = r.res[0] * 2 / 3
+        r2 = r2b.reproject(dst_res=dst_res)
+        assert r2.res == (dst_res, dst_res)
 
         # Assert the initial rasters are different
+        assert r.bounds != r2b.bounds
+        assert r.shape != r2b.shape
         assert r.bounds != r2.bounds
         assert r.shape != r2.shape
         assert r.res != r2.res
 
-        # Test reprojecting to dst_ref
-        # Reproject raster should have same dimensions/georeferences as r2
+        # Test reprojecting with dst_ref=r2b (i.e. crop) -> output should have same shape, bounds and data
+        r3 = r.reproject(r2b)
+        assert r3.bounds == r2b.bounds
+        assert r3.shape == r2b.shape
+        assert r3.bounds == r2b.bounds
+        assert r3.transform == r2b.transform
+        assert gu.misc.array_equal(r3.data, r2b.data)
+
+        if DO_PLOT:
+            fig1, ax1 = plt.subplots()
+            r.show(ax=ax1, title="Raster 1")
+
+            fig2, ax2 = plt.subplots()
+            r2b.show(ax=ax2, title="Raster 2")
+
+            fig3, ax3 = plt.subplots()
+            r3.show(ax=ax3, title="Raster 1 reprojected to Raster 2")
+
+            plt.show()
+
+        # Test reprojecting with dst_ref=r2 -> output should have same shape, bounds and transform
+        # Data should be slightly different due to difference in input resolution
         r3 = r.reproject(r2)
         assert r3.bounds == r2.bounds
         assert r3.shape == r2.shape
         assert r3.bounds == r2.bounds
         assert r3.transform == r2.transform
+        assert not gu.misc.array_equal(r3.data, r2.data)
 
         if DO_PLOT:
             fig1, ax1 = plt.subplots()
@@ -498,6 +646,25 @@ class TestRaster:
             r3.show(ax=ax3, title="Raster 1 reprojected to Raster 2")
 
             plt.show()
+
+        # - Check that if mask is modified afterwards, it is taken into account during reproject - #
+        # Create a raster with (additional) random gaps
+        r_gaps = r.copy()
+        nsamples = 200
+        rand_indices = gu.spatial_tools.subsample_raster(r_gaps.data, nsamples, return_indices=True)
+        r_gaps.data[rand_indices] = np.ma.masked
+        assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
+
+        # reproject raster, and reproject mask. Check that both have same number of masked pixels
+        # TODO: should test other resampling algo
+        r_gaps_reproj = r_gaps.reproject(dst_res=dst_res, resampling="nearest")
+        mask = gu.Raster.from_array(
+            r_gaps.data.mask.astype("uint8"), crs=r_gaps.crs, transform=r_gaps.transform, nodata=None
+        )
+        mask_reproj = mask.reproject(dst_res=dst_res, dst_nodata=255, resampling="nearest")
+        # Final masked pixels are those originally masked (=1) and the values masked during reproject, e.g. edges
+        tot_masked_true = np.count_nonzero(mask_reproj.data.mask) + np.count_nonzero(mask_reproj.data == 1)
+        assert np.count_nonzero(r_gaps_reproj.data.mask) == tot_masked_true
 
         # If a nodata is set, make sure it is preserved
         r_ndv = r.copy()

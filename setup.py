@@ -42,6 +42,7 @@ setup(
     author="The GlacioHack Team",
     license="BSD-3",
     packages=["geoutils", "geoutils.georaster"],
+    python_requires=">=3.8",
     install_requires=[
         "rasterio",
         "geopandas >= 0.10.0",
