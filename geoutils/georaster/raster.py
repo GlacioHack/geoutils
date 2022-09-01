@@ -846,7 +846,7 @@ Must be a Raster, np.ndarray or single number."
                 f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
             )
 
-        self._data = np.ma.masked_array(new_data)
+        self._data = np.ma.masked_array(new_data, fill_value=self.nodata)
 
     def set_mask(self, mask: np.ndarray) -> None:
         """
@@ -946,10 +946,41 @@ Must be a Raster, np.ndarray or single number."
 
         return self._data.__array_interface__  # type: ignore
 
+    # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
+    # Then the final overload must be duplicated
+    @overload
     def crop(
         self: RasterType,
-        cropGeom: Raster | Vector | list[float] | tuple[float, ...],
-        mode: str = "match_pixel",
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
+        inplace: Literal[True],
+    ) -> None:
+        ...
+
+    @overload
+    def crop(
+        self: RasterType,
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
+        inplace: Literal[False],
+    ) -> RasterType:
+        ...
+
+    @overload
+    def crop(
+        self: RasterType,
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        inplace: bool = True,
+    ) -> RasterType | None:
+        ...
+
+    def crop(
+        self: RasterType,
+        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         inplace: bool = True,
     ) -> RasterType | None:
         """
@@ -978,48 +1009,28 @@ Must be a Raster, np.ndarray or single number."
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
         if mode == "match_pixel":
-            # crop_bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
-
-            new_xmin = np.max([xmin - ((xmin - self.bounds.left) % self.res[1]), self.bounds.left])
-            new_ymin = np.max([ymin - ((ymin - self.bounds.bottom) % self.res[0]), self.bounds.bottom])
-            new_ymax = np.min(
-                [
-                    ymax
-                    + (
-                        (self.res[0] - (ymax - self.bounds.top) % self.res[0])
-                        if (ymax - self.bounds.top) % self.res[0] != 0
-                        else 0
-                    ),
-                    self.bounds.top,
-                ]
-            )
-            new_xmax = np.min([xmax + (self.res[1] - xmax % self.res[1]), self.bounds.right])
+            ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
+            self_win = rio.windows.from_bounds(*self.bounds, transform=self.transform)
+            final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
+            new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=self.transform)
             tfm = rio.transform.from_origin(new_xmin, new_ymax, *self.res)
 
-            colmin = int((new_xmin - self.bounds.left) / self.res[1])
-            rowmin = int((self.bounds.top - new_ymax) / self.res[0])
-            colmax = colmin + int((new_xmax - new_xmin) / self.res[1])
-            rowmax = rowmin + int((new_ymax - new_ymin) / self.res[0])
-
             if self.is_loaded:
-                crop_img = self.data[:, rowmin:rowmax, colmin : colmax + 1]
+                (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+                crop_img = self.data[:, rowmin:rowmax, colmin:colmax]
             else:
                 with rio.open(self.filename) as raster:
                     crop_img = raster.read(
                         self._bands,
                         masked=self._masked,
-                        window=rio.windows.Window(colmin, rowmin, (colmax - colmin), (colmin - colmax)),
+                        window=final_window,
                     )
 
         else:
-            new_tfm = rio.transform.from_origin(xmin, ymax, *self.res)
-
-            crop_img, tfm = rio.warp.reproject(
-                self.data, src_transform=self.transform, dst_transform=new_tfm, src_crs=self.crs, dst_crs=self.crs
-            )
-
-        if len(crop_img.shape) == 2:
-            crop_img = crop_img[np.newaxis, :, :]
+            bbox = rio.coords.BoundingBox(left=xmin, bottom=ymin, right=xmax, top=ymax)
+            out_rst = self.reproject(dst_bounds=bbox)  # should we instead raise an issue and point to reproject?
+            crop_img = out_rst.data
+            tfm = out_rst.transform
 
         if inplace:
             self._data = crop_img
@@ -1125,6 +1136,14 @@ Must be a Raster, np.ndarray or single number."
             dst_nodata = self.nodata
             if dst_nodata is None:
                 dst_nodata = _default_ndv(dtype)
+                # if dst_nodata is already being used, raise a warning.
+                # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
+                if dst_nodata in self.data:
+                    warnings.warn(
+                        f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exist in \
+self.data. This may have unexpected consequences. Consider setting a different nodata with \
+self.set_ndv."
+                    )
 
         from geoutils.misc import resampling_method_from_str
 
@@ -1241,7 +1260,14 @@ Must be a Raster, np.ndarray or single number."
 
         # If data is loaded, reproject the numpy array directly
         if self.is_loaded:
-            dst_data, dst_transformed = rio.warp.reproject(self.data, **reproj_kwargs)
+
+            # All masked values must be set to a nodata value for rasterio's reproject to work properly
+            # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
+            if src_nodata is None and np.sum(self.data.mask) > 0:
+                raise ValueError("No nodata set, use `src_nodata`.")
+
+            # Mask not taken into account by rasterio, need to fill with src_nodata
+            dst_data, dst_transformed = rio.warp.reproject(self.data.filled(src_nodata), **reproj_kwargs)
 
         # If not, uses the dataset instead
         else:
@@ -1255,7 +1281,7 @@ Must be a Raster, np.ndarray or single number."
             dst_data = np.array(dst_data)
 
         # Enforce output type
-        dst_data = np.ma.masked_array(dst_data.astype(dtype))
+        dst_data = np.ma.masked_array(dst_data.astype(dtype), fill_value=dst_nodata)
 
         if dst_nodata is not None:
             dst_data.mask = dst_data == dst_nodata

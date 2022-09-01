@@ -28,14 +28,6 @@ short_version = '%s'
 if write_version:
     write_version_py()
 
-# get all data in the datasets module
-
-data_files = []
-
-for item in glob("geoutils/datasets/*"):
-    bname = path.basename(item)
-    if not bname.startswith("__"):
-        data_files.append(path.join("datasets", bname))
 
 with open("README.md", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -49,8 +41,8 @@ setup(
     url="https://www.github.com/GlacioHack/geoutils/",
     author="The GlacioHack Team",
     license="BSD-3",
-    packages=["geoutils", "geoutils.datasets", "geoutils.georaster"],
-    package_data={"geoutils": data_files},
+    packages=["geoutils", "geoutils.georaster"],
+    python_requires=">=3.8",
     install_requires=[
         "rasterio",
         "geopandas >= 0.10.0",
