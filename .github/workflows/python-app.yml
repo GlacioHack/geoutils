@@ -26,6 +26,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    # Install project with environment.yml
     - name: Setup environment
       uses: conda-incubator/setup-miniconda@v2
       with:
@@ -34,12 +35,23 @@ jobs:
         mamba-version: "*"
         channels: conda-forge
         channel-priority: strict
-        environment-file: dev-environment.yml
+        environment-file: environment.yml
         activate-environment: geoutils
 
     - name: Install project
       run: |
         pip install -e . --no-dependencies
+
+    # This steps allows us to check the "import geoutils" with the base environment provided to users, before adding
+    # development-specific dependencies by differencing the env and dev-env yml files
+    - name: Check environment import and install dev dependencies
+      run: |
+        pkgs_conda_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'conda')"`
+        pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
+        mamba install $pkgs_conda_dev
+        if [[ "$pkgs_pip_dev" != "None" ]]; then
+          pip install $pkgs_pip_dev
+        fi
 
     - name: Lint with flake8
       run: |
