@@ -44,7 +44,7 @@ def download_examples(overwrite: bool = False) -> None:
 
     # Create a temporary directory to extract the tarball in.
     with tempfile.TemporaryDirectory() as tmp_dir:
-        tar_path = os.path.join(tmp_dir.name, "data.tar.gz")
+        tar_path = os.path.join(tmp_dir, "data.tar.gz")
 
         response = urllib.request.urlopen(url)
         # If the response was right, download the tarball to the temporary directory
@@ -56,13 +56,13 @@ def download_examples(overwrite: bool = False) -> None:
 
         # Extract the tarball
         with tarfile.open(tar_path) as tar:
-            tar.extractall(tmp_dir.name)
+            tar.extractall(tmp_dir)
 
         # Find the first directory in the temp_dir (should only be one) and construct the example data dir paths.
         for dir_name in ["Everest_Landsat", "Exploradores_ASTER"]:
             tmp_dir_name = os.path.join(
-                tmp_dir.name,
-                [dirname for dirname in os.listdir(tmp_dir.name) if os.path.isdir(os.path.join(tmp_dir.name, dirname))][
+                tmp_dir,
+                [dirname for dirname in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, dirname))][
                     0
                 ],
                 "data",
