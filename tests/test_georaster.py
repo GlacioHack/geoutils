@@ -259,9 +259,9 @@ class TestRaster:
 
         # Compare the consistency of the data setter whether it is passed a masked_array or an unmasked one
         assert np.array_equal(r1.data.data, arr)
-        assert r1.data.mask is False
+        assert not r1.data.mask
         assert np.array_equal(r2.data.data, arr)
-        assert r2.data.mask is False
+        assert not r2.data.mask
         assert np.array_equal(r3.data.data, arr)
         assert np.array_equal(r3.data.mask, mask)
 
@@ -281,9 +281,9 @@ class TestRaster:
 
         # Check the shape has been adjusted back to 3D
         assert np.array_equal(r1.data.data, arr)
-        assert r1.data.mask is False
+        assert not r1.data.mask
         assert np.array_equal(r2.data.data, arr)
-        assert r2.data.mask is False
+        assert not r2.data.mask
         assert np.array_equal(r3.data.data, arr)
         assert np.array_equal(r3.data.mask, mask)
 
