@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import functools
 import warnings
-import yaml
 
 import numpy as np
 import rasterio as rio
+import yaml
 
 import geoutils
 from geoutils._typing import ArrayLike
@@ -154,7 +154,8 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
 
     return deprecator_func
 
-def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = 'both') -> tuple[str, str]:
+
+def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -> tuple[str, str]:
     """
     Compute the difference between environment.yml and dev-environment.yml for setup of continuous integration,
     while checking that all the dependencies listed in environment.yml are also in dev-environment.yml
@@ -171,8 +172,8 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = 'both') -
     yaml_devenv = yaml.safe_load(open(fn_devenv))
 
     # Extract the dependencies values
-    conda_dep_env = yaml_env['dependencies']
-    conda_dep_devenv = yaml_devenv['dependencies']
+    conda_dep_env = yaml_env["dependencies"]
+    conda_dep_devenv = yaml_devenv["dependencies"]
 
     # Check if there is any pip dependency, if yes pop it from the end of the list
     if isinstance(conda_dep_devenv[-1], dict):
@@ -186,14 +187,16 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = 'both') -
             # It should be empty, otherwise we raise an error
             diff_pip_check = list(set(pip_dep_env) - set(pip_dep_devenv))
             if len(diff_pip_check) != 0:
-                raise ValueError('The following pip dependencies are listed in env but not dev-env: '+ ','.join(diff_pip_check))
+                raise ValueError(
+                    "The following pip dependencies are listed in env but not dev-env: " + ",".join(diff_pip_check)
+                )
 
             # The diff below computes the dependencies that are in dev-env but not in env, to add during CI
             diff_pip_dep = list(set(pip_dep_devenv) - set(pip_dep_env))
 
         # If there is no pip dependency in env, all the ones of dev-env need to be added during CI
         else:
-            diff_pip_dep = list(pip_dep_devenv['pip'])
+            diff_pip_dep = list(pip_dep_devenv["pip"])
 
     # If there is no pip dependency, we ignore this step
     else:
@@ -202,25 +205,25 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = 'both') -
     # We do the same for the conda dependency, first a sanity check that everything that is in env is also in dev-ev
     diff_conda_check = list(set(conda_dep_env) - set(conda_dep_devenv))
     if len(diff_conda_check) != 0:
-        raise ValueError('The following dependencies are listed in env but not dev-env: '+ ','.join(diff_conda_check))
+        raise ValueError("The following dependencies are listed in env but not dev-env: " + ",".join(diff_conda_check))
 
     # Then the difference to add during CI
     diff_conda_dep = list(set(conda_dep_devenv) - set(conda_dep_env))
 
     # Join the lists
-    joined_list_conda_dep = ' '.join(diff_conda_dep)
+    joined_list_conda_dep = " ".join(diff_conda_dep)
     if diff_pip_dep is not None:
-        joined_list_pip_dep = ' '.join(diff_pip_dep)
+        joined_list_pip_dep = " ".join(diff_pip_dep)
     else:
-        joined_list_pip_dep = 'None'
+        joined_list_pip_dep = "None"
 
     # Print to be captured in bash
-    if print_dep == 'both':
+    if print_dep == "both":
         print(joined_list_conda_dep)
         print(joined_list_pip_dep)
-    elif print_dep == 'conda':
+    elif print_dep == "conda":
         print(joined_list_conda_dep)
-    elif print_dep == 'pip':
+    elif print_dep == "pip":
         print(joined_list_pip_dep)
     else:
         raise ValueError('The argument "print_dep" can only be "conda", "pip" or "both".')
