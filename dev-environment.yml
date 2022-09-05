@@ -10,7 +10,7 @@ dependencies:
   - scipy
   - pip
   - tqdm
-  - yaml
+  - pyyaml
 
   # Development-specific
   - sphinx

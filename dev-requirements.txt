@@ -1,7 +1,7 @@
 rasterio
 geopandas >= 0.10.0
 pyproj
-yaml
+pyyaml
 flake8
 pytest
 pytest-xdist
