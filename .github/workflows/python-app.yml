@@ -44,14 +44,13 @@ jobs:
 
     # This steps allows us to check the "import geoutils" with the base environment provided to users, before adding
     # development-specific dependencies by differencing the env and dev-env yml files
-    - name: Check environment import and install dev dependencies
+    - name: Check normal environment import
       run: |
-        pkgs_conda_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'conda')"`
-        pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
-        mamba install $pkgs_conda_dev
-        if [[ "$pkgs_pip_dev" != "None" ]]; then
-          pip install $pkgs_pip_dev
-        fi
+        python -c "import geoutils"
+
+    - name: Update environment with dev dependencies
+      run: |
+        mamba env update --name geoutils --file dev-environment.yml
 
     - name: Lint with flake8
       run: |
