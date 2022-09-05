@@ -195,11 +195,10 @@ class TestRaster:
         assert geoutils.misc.array_equal(r.bands, (2, 3))
         assert r.data.shape == (r.nbands, r.height, r.width)
 
-    @pytest.mark.parametrize('nodata_init', [None, 'type_default']) # type : ignore
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
-        'dtype',
-        ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "float128"]
-    ) # type : ignore
+        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "float128"]
+    )  # type: ignore
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
         Test that the behaviour of data setter, which is triggered directly using from_array, is as expected.
@@ -211,22 +210,22 @@ class TestRaster:
         4. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array,
         """
 
-        nodata_init=None
-        dtype='float32'
+        nodata_init = None
+        dtype = "float32"
 
         # Initiate a random array for testing
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
 
         # Create random values between the lower and upper limit of the data type, max absolute 99999 for floats
-        if 'int' in dtype:
+        if "int" in dtype:
             val_min = np.iinfo(int_type=dtype).min
             val_max = np.iinfo(int_type=dtype).max
             randint_dtype = dtype
         else:
             val_min = -99999
             val_max = 99999
-            randint_dtype = 'int32'
+            randint_dtype = "int32"
 
         # Fix the random seed
         np.random.seed(42)
@@ -237,12 +236,12 @@ class TestRaster:
         assert np.count_nonzero(mask) > 0
 
         # Add a random floating point value if the data type is float
-        if 'float' in dtype:
+        if "float" in dtype:
             arr += np.random.normal(size=(1, width, height))
 
         # Use either the default nodata or None
-        if nodata_init == 'default':
-            nodata = _default_ndv(dtype)
+        if nodata_init == "default":
+            nodata: int | None = _default_ndv(dtype)
         else:
             nodata = None
 
@@ -260,9 +259,9 @@ class TestRaster:
 
         # Compare the consistency of the data setter whether it is passed a masked_array or an unmasked one
         assert np.array_equal(r1.data.data, arr)
-        assert r1.data.mask == False
+        assert r1.data.mask is False
         assert np.array_equal(r2.data.data, arr)
-        assert r2.data.mask == False
+        assert r2.data.mask is False
         assert np.array_equal(r3.data.data, arr)
         assert np.array_equal(r3.data.mask, mask)
 
@@ -271,7 +270,9 @@ class TestRaster:
         # 3 cases: classic array without mask, masked_array without mask and masked_array with mask
         r1 = gr.Raster.from_array(data=arr.squeeze(), transform=transform, crs=None, nodata=nodata)
         r2 = gr.Raster.from_array(data=np.ma.masked_array(arr).squeeze(), transform=transform, crs=None, nodata=nodata)
-        r3 = gr.Raster.from_array(data=np.ma.masked_array(arr, mask=mask).squeeze(), transform=transform, crs=None, nodata=nodata)
+        r3 = gr.Raster.from_array(
+            data=np.ma.masked_array(arr, mask=mask).squeeze(), transform=transform, crs=None, nodata=nodata
+        )
 
         # Check nodata is correct
         assert r1.nodata == nodata
@@ -280,27 +281,31 @@ class TestRaster:
 
         # Check the shape has been adjusted back to 3D
         assert np.array_equal(r1.data.data, arr)
-        assert r1.data.mask == False
+        assert r1.data.mask is False
         assert np.array_equal(r2.data.data, arr)
-        assert r2.data.mask == False
+        assert r2.data.mask is False
         assert np.array_equal(r3.data.data, arr)
         assert np.array_equal(r3.data.mask, mask)
 
         # -- Third and fourth test: the function sets a new nodata/mask only with unmasked non-finite values --
         arr_with_unmasked_nodata = np.copy(arr)
-        if 'float' in dtype:
+        if "float" in dtype:
             # We set one random unmasked value to NaN
             indices = np.indices(np.shape(arr))
             ind_nm = indices[:, ~mask]
             rand_ind = np.random.randint(low=0, high=ind_nm.shape[1], size=1)[0]
             arr_with_unmasked_nodata[ind_nm[0, rand_ind], ind_nm[1, rand_ind], ind_nm[2, rand_ind]] = np.nan
 
-            r1 = gr.Raster.from_array(data=arr_with_unmasked_nodata, transform=transform, crs=None,
-                                      nodata=nodata)
-            r2 = gr.Raster.from_array(data=np.ma.masked_array(arr_with_unmasked_nodata), transform=transform,
-                                      crs=None, nodata=nodata)
-            r3 = gr.Raster.from_array(data=np.ma.masked_array(arr_with_unmasked_nodata, mask=mask),
-                                      transform=transform, crs=None, nodata=nodata)
+            r1 = gr.Raster.from_array(data=arr_with_unmasked_nodata, transform=transform, crs=None, nodata=nodata)
+            r2 = gr.Raster.from_array(
+                data=np.ma.masked_array(arr_with_unmasked_nodata), transform=transform, crs=None, nodata=nodata
+            )
+            r3 = gr.Raster.from_array(
+                data=np.ma.masked_array(arr_with_unmasked_nodata, mask=mask),
+                transform=transform,
+                crs=None,
+                nodata=nodata,
+            )
 
             # Check nodata is correct
             if nodata is None:
@@ -318,8 +323,6 @@ class TestRaster:
             assert np.array_equal(r2.data.mask, ~np.isfinite(arr_with_unmasked_nodata))
             assert np.array_equal(r3.data.data, arr_with_unmasked_nodata, equal_nan=True)
             assert np.array_equal(r3.data.mask, np.logical_or(mask, ~np.isfinite(arr_with_unmasked_nodata)))
-
-
 
     def test_downsampling(self) -> None:
         """

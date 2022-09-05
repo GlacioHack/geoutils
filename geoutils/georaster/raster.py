@@ -836,9 +836,11 @@ Must be a Raster, np.ndarray or single number."
             )
 
         # If the new data is not masked and has non-finite values, we define a fill_value
-        if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) \
-                or (np.ma.is_masked(new_data) and self.nodata is None and
-                    np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0):
+        if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
+            np.ma.is_masked(new_data)
+            and self.nodata is None
+            and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0
+        ):
             self._nodata = _default_ndv(dtype)
 
         # If the new data is not masked (a classic ndarray) and contains non-finite values such as NaNs, define a mask
@@ -846,12 +848,11 @@ Must be a Raster, np.ndarray or single number."
             self._data = np.ma.masked_array(data=new_data, mask=~np.isfinite(new_data), fill_value=self.nodata)
         # If the new data is masked but some non-finite values aren't masked, add them to the mask
         elif np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0:
-            self._data = np.ma.masked_array(data=new_data,
-                                            mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask),
-                                            fill_value=self.nodata)
+            self._data = np.ma.masked_array(
+                data=new_data, mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask), fill_value=self.nodata
+            )
         else:
             self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
-
 
     def set_mask(self, mask: np.ndarray) -> None:
         """
