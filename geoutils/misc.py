@@ -6,7 +6,6 @@ import warnings
 
 import numpy as np
 import rasterio as rio
-import yaml  # type: ignore
 
 import geoutils
 from geoutils._typing import ArrayLike
