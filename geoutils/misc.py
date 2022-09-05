@@ -6,7 +6,7 @@ import warnings
 
 import numpy as np
 import rasterio as rio
-import yaml
+import yaml  # type: ignore
 
 import geoutils
 from geoutils._typing import ArrayLike
@@ -155,7 +155,7 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
     return deprecator_func
 
 
-def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -> tuple[str, str]:
+def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -> None:
     """
     Compute the difference between environment.yml and dev-environment.yml for setup of continuous integration,
     while checking that all the dependencies listed in environment.yml are also in dev-environment.yml
@@ -163,8 +163,6 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
     :param fn_env: Filename path to environment.yml
     :param fn_devenv: Filename path to dev-environment.yml
     :param print_dep: Whether to print conda differences "conda", pip differences "pip" or both.
-
-    :return Joined list of conda packages to add for dev-env, Joined list of pip packages to add for dev-env
     """
 
     # Load the yml as dictionaries
@@ -200,7 +198,7 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
 
     # If there is no pip dependency, we ignore this step
     else:
-        diff_pip_dep = None
+        diff_pip_dep = ["None"]
 
     # We do the same for the conda dependency, first a sanity check that everything that is in env is also in dev-ev
     diff_conda_check = list(set(conda_dep_env) - set(conda_dep_devenv))
@@ -212,10 +210,7 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
 
     # Join the lists
     joined_list_conda_dep = " ".join(diff_conda_dep)
-    if diff_pip_dep is not None:
-        joined_list_pip_dep = " ".join(diff_pip_dep)
-    else:
-        joined_list_pip_dep = "None"
+    joined_list_pip_dep = " ".join(diff_pip_dep)
 
     # Print to be captured in bash
     if print_dep == "both":
