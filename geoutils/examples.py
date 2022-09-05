@@ -43,34 +43,32 @@ def download_examples(overwrite: bool = False) -> None:
     url = f"https://github.com/GlacioHack/geoutils-data/tarball/main#commit={commit}"
 
     # Create a temporary directory to extract the tarball in.
-    temp_dir = tempfile.TemporaryDirectory()
-    tar_path = os.path.join(temp_dir.name, "data.tar.gz")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tar_path = os.path.join(tmp_dir, "data.tar.gz")
 
-    response = urllib.request.urlopen(url)
-    # If the response was right, download the tarball to the temporary directory
-    if response.getcode() == 200:
-        with open(tar_path, "wb") as outfile:
-            outfile.write(response.read())
-    else:
-        raise ValueError(f"Example data fetch gave non-200 response: {response.status_code}")
+        response = urllib.request.urlopen(url)
+        # If the response was right, download the tarball to the temporary directory
+        if response.getcode() == 200:
+            with open(tar_path, "wb") as outfile:
+                outfile.write(response.read())
+        else:
+            raise ValueError(f"Example data fetch gave non-200 response: {response.status_code}")
 
-    # Extract the tarball
-    with tarfile.open(tar_path) as tar:
-        tar.extractall(temp_dir.name)
+        # Extract the tarball
+        with tarfile.open(tar_path) as tar:
+            tar.extractall(tmp_dir)
 
-    # Find the first directory in the temp_dir (should only be one) and construct the example data dir paths.
-    for dir_name in ["Everest_Landsat", "Exploradores_ASTER"]:
-        tmp_dir_name = os.path.join(
-            temp_dir.name,
-            [dirname for dirname in os.listdir(temp_dir.name) if os.path.isdir(os.path.join(temp_dir.name, dirname))][
-                0
-            ],
-            "data",
-            dir_name,
-        )
+        # Find the first directory in the temp_dir (should only be one) and construct the example data dir paths.
+        for dir_name in ["Everest_Landsat", "Exploradores_ASTER"]:
+            tmp_dir_name = os.path.join(
+                tmp_dir,
+                [dirname for dirname in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, dirname))][0],
+                "data",
+                dir_name,
+            )
 
-        # Copy the temporary extracted data to the example directory.
-        copy_tree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name))
+            # Copy the temporary extracted data to the example directory.
+            copy_tree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name))
 
 
 def get_path(name: str) -> str:
