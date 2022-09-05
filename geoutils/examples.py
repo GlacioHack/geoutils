@@ -62,9 +62,7 @@ def download_examples(overwrite: bool = False) -> None:
         for dir_name in ["Everest_Landsat", "Exploradores_ASTER"]:
             tmp_dir_name = os.path.join(
                 tmp_dir,
-                [dirname for dirname in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, dirname))][
-                    0
-                ],
+                [dirname for dirname in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, dirname))][0],
                 "data",
                 dir_name,
             )
