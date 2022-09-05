@@ -50,7 +50,7 @@ jobs:
     - name: Test with pytest
       run: |
         pip install pytest-cov coveralls
-        pytest -ra -n=auto --cov=geoutils/
+        pytest -ra --cov=geoutils/
 
     - name: Converting coverage to LCOV format
       run: |
