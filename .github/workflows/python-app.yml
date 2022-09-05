@@ -10,7 +10,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  test:
     name: ${{ matrix.os }}, python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
 
@@ -34,12 +34,11 @@ jobs:
         mamba-version: "*"
         channels: conda-forge
         channel-priority: strict
-        environment-file: environment.yml
+        environment-file: dev-environment.yml
         activate-environment: geoutils
 
-    - name: Install development dependencies and package
+    - name: Install project
       run: |
-        mamba install sphinx numpydoc sphinx_rtd_theme sphinx-autodoc-typehints sphinxcontrib-programoutput flake8 pytest pytest-lazy-fixture matplotlib pylint typing-extensions sphinx-gallery scikit-image
         pip install -e . --no-dependencies
 
     - name: Lint with flake8
@@ -50,4 +49,28 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest -ra
+        pip install pytest-cov coveralls
+        pytest -ra --cov=geoutils/
+
+    - name: Converting coverage to LCOV format
+      run: |
+        pip install coveragepy-lcov
+        coveragepy-lcov --data_file_path .coverage --output_file_path coverage.info
+
+    - name: Upload coverage to Coveralls
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.github_token }}
+        flag-name: run-${{ matrix.test_number }}
+        path-to-lcov: coverage.info
+        parallel: true
+
+  finish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+    - name: Upload to Coveralls finished
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.github_token }}
+        parallel-finished: true
