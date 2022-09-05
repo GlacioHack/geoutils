@@ -347,6 +347,24 @@ class TestRaster:
         r.data += 5
         assert not geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
 
+        # Check the new array parameter works with either ndarray filled with NaNs, or masked arrays
+
+        # First, we pass the new array as the masked array, mask and data of the new Raster object should be identical
+        r2 = r.copy(new_array=r.data)
+        assert np.array_equal(r.data.data, r2.data.data)
+        assert np.array_equal(r.data.mask, r2.data.mask)
+
+        # Same when passing the new array as a NaN ndarray
+        r_arr = gu.spatial_tools.get_array_and_mask(r)[0]
+        r2 = r.copy(new_array=r_arr)
+        assert np.array_equal(r.data.data, r2.data.data)
+        assert np.array_equal(r.data.mask, r2.data.mask)
+
+
+
+
+
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_is_modified(self, example: str) -> None:
         """
