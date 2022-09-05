@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 
-import yaml  #type: ignore
+import yaml  # type: ignore
+
 
 class TestMisc:
-
     def test_environment_files(self) -> None:
         """Check that environment yml files are properly written: all dependencies of env are also in dev-env"""
 
@@ -36,6 +36,3 @@ class TestMisc:
         # We do the same for the conda dependency, first a sanity check that everything that is in env is also in dev-ev
         diff_conda_check = list(set(conda_dep_env) - set(conda_dep_devenv))
         assert len(diff_conda_check) == 0
-
-
-
