@@ -25,3 +25,4 @@ dependencies:
   - typing-extensions
   - sphinx-gallery
   - scikit-image
+  - pyyaml
