@@ -4,8 +4,8 @@ Test functions for georaster
 from __future__ import annotations
 
 import os
-import tempfile
 import re
+import tempfile
 import warnings
 from tempfile import NamedTemporaryFile, TemporaryFile
 
@@ -328,22 +328,29 @@ class TestRaster:
         # Check that setting data with a different data type results in an error
         rst = gr.Raster.from_array(data=arr, transform=transform, crs=None, nodata=nodata)
         if "int" in dtype:
-            new_dtype = 'float32'
+            new_dtype = "float32"
         else:
-            new_dtype = 'uint8'
+            new_dtype = "uint8"
 
-        with pytest.raises(ValueError,
-                           match=re.escape("New data must be of the same type as existing data: {}. Use copy() to set a new array "
-                                 "with different dtype, or astype() to change type.".format(dtype))):
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "New data must be of the same type as existing data: {}. Use copy() to set a new array "
+                "with different dtype, or astype() to change type.".format(dtype)
+            ),
+        ):
             rst.data = rst.data.astype(new_dtype)
 
         # Check that setting data with a different shape results in an error
         new_shape = (1, 25)
-        with pytest.raises(ValueError,
-                           match=re.escape("New data must be of the same shape as existing data: ({}, {}). Given: "
-                                           "{}.".format(str(width), str(height), str(new_shape)))):
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "New data must be of the same shape as existing data: ({}, {}). Given: "
+                "{}.".format(str(width), str(height), str(new_shape))
+            ),
+        ):
             rst.data = rst.data.reshape(new_shape)
-
 
     def test_downsampling(self) -> None:
         """
@@ -460,7 +467,7 @@ class TestRaster:
         2. If r.data is modified and r copied, the updated data is copied
         3. If r is copied, r.data changed, r2.data should be unchanged
         Then, we check the new_array argument of copy():
-        4. Check that ouput Rasters are equal whether the input array is a NaN np.ndarray or a masked_array
+        4. Check that output Rasters are equal whether the input array is a NaN np.ndarray or a masked_array
         5. Check that the new_array argument works when providing a different data type
         """
 
@@ -513,14 +520,13 @@ class TestRaster:
         assert r == r2
 
         # -- Fifth test: check that the new_array argument works when providing a new dtype ##
-        if "int" in  r.dtypes[0]:
-            new_dtype = 'float32'
+        if "int" in r.dtypes[0]:
+            new_dtype = "float32"
         else:
-            new_dtype = 'uint8'
+            new_dtype = "uint8"
         r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
 
         assert r2.dtypes[0] == new_dtype
-
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_is_modified(self, example: str) -> None:
