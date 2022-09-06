@@ -198,7 +198,7 @@ class TestRaster:
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "float128"]
+        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
     )  # type: ignore
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
@@ -356,7 +356,7 @@ class TestRaster:
             ValueError,
             match=re.escape(
                 "New data must be of the same type as existing data: {}. Use copy() to set a new array "
-                "with different dtype, or astype() to change type.".format(dtype)
+                "with different dtype, or astype() to change type.".format(str(np.dtype(dtype)))
             ),
         ):
             rst.data = rst.data.astype(new_dtype)
@@ -1122,7 +1122,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert _default_ndv("uint16") == np.iinfo("uint16").max
         assert _default_ndv("int16") == np.iinfo("int16").min
         assert _default_ndv("uint32") == 99999
-        for dtype in ["int32", "float32", "float64", "float128"]:
+        for dtype in ["int32", "float32", "float64", "longdouble"]:
             assert _default_ndv(dtype) == -99999
 
         # Check it works with most frequent np.dtypes too

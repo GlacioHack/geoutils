@@ -66,7 +66,7 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
         "int32": -99999,
         "float32": -99999,
         "float64": -99999,
-        "float128": -99999,
+        "longdouble": -99999,
     }
     # Check argument dtype is as expected
     if not isinstance(dtype, (str, np.dtype, type)):
