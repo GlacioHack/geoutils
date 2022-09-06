@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import re
 import warnings
 from tempfile import NamedTemporaryFile, TemporaryFile
 
@@ -324,6 +325,26 @@ class TestRaster:
             assert np.array_equal(r3.data.data, arr_with_unmasked_nodata, equal_nan=True)
             assert np.array_equal(r3.data.mask, np.logical_or(mask, ~np.isfinite(arr_with_unmasked_nodata)))
 
+        # Check that setting data with a different data type results in an error
+        rst = gr.Raster.from_array(data=arr, transform=transform, crs=None, nodata=nodata)
+        if "int" in dtype:
+            new_dtype = 'float32'
+        else:
+            new_dtype = 'uint8'
+
+        with pytest.raises(ValueError,
+                           match=re.escape("New data must be of the same type as existing data: {}. Use copy() to set a new array "
+                                 "with different dtype, or astype() to change type.".format(dtype))):
+            rst.data = rst.data.astype(new_dtype)
+
+        # Check that setting data with a different shape results in an error
+        new_shape = (1, 25)
+        with pytest.raises(ValueError,
+                           match=re.escape("New data must be of the same shape as existing data: ({}, {}). Given: "
+                                           "{}.".format(str(width), str(height), str(new_shape)))):
+            rst.data = rst.data.reshape(new_shape)
+
+
     def test_downsampling(self) -> None:
         """
         Check that self.data is correct when using downsampling
@@ -433,13 +454,19 @@ class TestRaster:
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_copy(self, example: str) -> None:
         """
-        Test that the copy method works as expected for Raster. In particular
-        when copying r to r2:
-        - creates a new memory file
-        - if r.data is modified and r copied, the updated data is copied
-        - if r is copied, r.data changed, r2.data should be unchanged
+        Test that the copy method works as expected for Raster.
+        We check that:
+        1. Copying creates a new memory file
+        2. If r.data is modified and r copied, the updated data is copied
+        3. If r is copied, r.data changed, r2.data should be unchanged
+        Then, we check the new_array argument of copy():
+        4. Check that ouput Rasters are equal whether the input array is a NaN np.ndarray or a masked_array
+        5. Check that the new_array argument works when providing a different data type
         """
-        # Open dataset, update data and make a copy
+
+        # -- First and second test: copying create a new memory file that has all the same attributes --
+
+        # Open data, modify, and copy
         r = gr.Raster(example)
         r.data += 5
         r2 = r.copy()
@@ -453,15 +480,13 @@ class TestRaster:
         # Copy should have no filename
         assert r2.filename is None
 
-        # check a temporary memory file different than original disk file was created
+        # Check a temporary memory file different than original disk file was created
         assert r2.name != r.name
 
         # Check all attributes except name and driver
         default_attrs = _default_rio_attrs.copy()
         for attr in ["name", "driver"]:
             default_attrs.remove(attr)
-
-        # using list directly available in Class
         attrs = default_attrs
         for attr in attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
@@ -472,11 +497,11 @@ class TestRaster:
         # Check dataset_mask array
         assert np.all(r.data.mask == r2.data.mask)
 
-        # Check that if r.data is modified, it does not affect r2.data
+        # -- Third test: if r.data is modified, it does not affect r2.data --
         r.data += 5
         assert not geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
 
-        # Check the new array parameter works with either ndarray filled with NaNs, or masked arrays
+        # -- Fourth test: check the new array parameter works with either ndarray filled with NaNs, or masked arrays --
 
         # First, we pass the new array as the masked array, mask and data of the new Raster object should be identical
         r2 = r.copy(new_array=r.data)
@@ -486,6 +511,16 @@ class TestRaster:
         r_arr = gu.spatial_tools.get_array_and_mask(r)[0]
         r2 = r.copy(new_array=r_arr)
         assert r == r2
+
+        # -- Fifth test: check that the new_array argument works when providing a new dtype ##
+        if "int" in  r.dtypes[0]:
+            new_dtype = 'float32'
+        else:
+            new_dtype = 'uint8'
+        r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
+
+        assert r2.dtypes[0] == new_dtype
+
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_is_modified(self, example: str) -> None:

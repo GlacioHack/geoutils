@@ -825,7 +825,7 @@ Must be a Raster, np.ndarray or single number."
         if str(new_data.dtype) != dtype:
             raise ValueError(
                 "New data must be of the same type as existing\
- data: {}".format(
+ data: {}. Use copy() to set a new array with different dtype, or astype() to change type.".format(
                     dtype
                 )
             )
