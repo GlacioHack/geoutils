@@ -1,8 +1,10 @@
 rasterio
 geopandas >= 0.10.0
 pyproj
+pyyaml
 flake8
 pytest
+pytest-xdist
 pytest-lazy-fixture
 sphinx
 sphinx_rtd_theme
