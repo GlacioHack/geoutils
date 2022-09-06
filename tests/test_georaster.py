@@ -39,6 +39,7 @@ class TestRaster:
     def test_init(self, example: str) -> None:
         """Test that all possible inputs work properly in Raster class init"""
 
+        example = aster_dem_path
         # First, filename
         r = gr.Raster(example)
         assert isinstance(r, gr.Raster)

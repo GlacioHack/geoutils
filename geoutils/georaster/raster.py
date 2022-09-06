@@ -939,12 +939,36 @@ Must be a Raster, np.ndarray or single number."
 
         return cp
 
-    @property
-    def __array_interface__(self) -> dict[str, Any]:
+    # Not sure yet how this behaves with __array__, __array_ufunc__ and __array_function__ implemented
+    # @property
+    # def __array_interface__(self) -> dict[str, Any]:
+    #     if not self.is_loaded:
+    #         self.load()
+    #
+    #     return self._data.__array_interface__  # type: ignore
+
+    # Set up array interface for our class container
+    # Inspired from https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch
+    def __array__(self):
+
+        return self._data
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs) -> RasterType:
+
         if not self.is_loaded:
             self.load()
 
-        return self._data.__array_interface__  # type: ignore
+        return  self.__class__({"data": ufunc(self._data, *inputs, **kwargs),
+                               "transform": self.transform,
+                               "crs": self.crs,
+                               "nodata": self.nodata}) # type: ignore
+
+    def __array_function__(self, func, types, args, kwargs):
+
+        if not self.is_loaded:
+            self.load()
+
+        return func(self._data, *kwargs) # type: ignore
 
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
