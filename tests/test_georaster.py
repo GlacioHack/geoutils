@@ -1352,7 +1352,7 @@ def test_numpy_functions(dtype: str) -> None:
     assert np.median(raster) == 26.0
 
 
-class TestsArithmetic:
+class TestArithmetic:
     """
     Test that all arithmetic overloading functions work as expected.
     """
@@ -1609,7 +1609,7 @@ class TestsArithmetic:
 
     @classmethod
     def from_array(
-        cls: type[TestsArithmetic],
+        cls: type[TestArithmetic],
         data: np.ndarray | np.ma.masked_array,
         rst_ref: gr.RasterType,
         nodata: int | float | list[int] | list[float] | None = None,
@@ -1713,3 +1713,32 @@ class TestsArithmetic:
         if power > 0:  # Integers to negative integer powers are not allowed.
             assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
         assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
+
+
+class TestArrayInterface:
+    """Test that the array interface of Raster works as expected for ufuncs and array functions"""
+
+    # All universal functions of NumPy, about 90 in 2022. See list: https://numpy.org/doc/stable/reference/ufuncs.html
+    ufuncs = [ufunc for ufunc in np.core.umath.__all__ if (ufunc[0] != '_' and ufunc.islower())]
+
+    @pytest.mark.parametrize("ufunc", ufuncs)
+    @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
+                                       "float32", "float64", "float128"])
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])
+    def test_array_ufunc(self, ufunc, nodata_init, dtype):
+        """Test that ufuncs consistently return the same result as for the np.ma.masked_array"""
+
+        if nodata_init == "type_default":
+            nodata: int | None = _default_ndv(dtype)
+        else:
+            nodata = None
+
+        width = height = 5
+        transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
+        np.random.seed(42)
+        r1 = gr.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform,
+                                  crs=None)
+        r2 = gr.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform,
+                                  crs=None)
+
+
