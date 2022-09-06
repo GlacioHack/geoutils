@@ -798,7 +798,15 @@ Must be a Raster, np.ndarray or single number."
         """
         Set the contents of .data.
 
-        new_data must have the same shape as existing data! (bands dimension included)
+        The data setter behaviour is the following:
+
+        1. Writes the data in a masked array, whether the input is a classic array or a masked_array,
+        2. Reshapes the data in a 3D array if it is 2D that can be broadcasted, raises an error otherwise,
+        3. Raises an error if the dtype is different from that of the Raster, and points towards .copy() or .astype(),
+        4. Sets a new nodata value to the Raster if none is set and if the provided array contains non-finite values
+            that are unmasked (including if there is no mask at all, e.g. NaNs in a classic array),
+        5. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array. Note that
+            these values are not overwritten and can still be accessed in .data.data.
 
         :param new_data: New data to assign to this instance of Raster
 
@@ -841,6 +849,11 @@ Must be a Raster, np.ndarray or single number."
             and self.nodata is None
             and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0
         ):
+            warnings.warn(
+                "Setting default nodata {:.0f} to mask non-finite values found in the array, as "
+                "no nodata value was defined.".format(_default_ndv(dtype)),
+                UserWarning,
+            )
             self._nodata = _default_ndv(dtype)
 
         # If the new data is not masked (a classic ndarray) and contains non-finite values such as NaNs, define a mask
@@ -901,7 +914,7 @@ Must be a Raster, np.ndarray or single number."
             f"Size:                 {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtypes}\n",
-            f"Coordinate System:    {self.crs}\n",
+            f"Coordinate System:    {[self.crs.to_string() if self.crs is not None else None]}\n",
             f"NoData Value:         {self.nodata}\n",
             "Pixel Size:           {}, {}\n".format(*self.res),
             "Upper Left Corner:    {}, {}\n".format(*self.bounds[:2]),

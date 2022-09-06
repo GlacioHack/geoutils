@@ -203,12 +203,16 @@ class TestRaster:
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
         Test that the behaviour of data setter, which is triggered directly using from_array, is as expected.
+
         In details, we check that the data setter:
 
         1. Writes the data in a masked array, whether the input is a classic array or a masked_array,
         2. Reshapes the data in a 3D array if it is 2D,
-        3. Sets a new nodata value only if the provided array is not a masked_array and contains non-finite values,
+        3. Sets a new nodata value only if the provided array has non-finite values that are unmasked (including if
+            there is no mask defined at all, e.g. for classic array with NaNs),
         4. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array,
+        5. Raises an error if the new data does not have the right shape,
+        6. Raises an error if the new data does not have the dtype of the Raster.
         """
 
         nodata_init = None
@@ -297,16 +301,35 @@ class TestRaster:
             rand_ind = np.random.randint(low=0, high=ind_nm.shape[1], size=1)[0]
             arr_with_unmasked_nodata[ind_nm[0, rand_ind], ind_nm[1, rand_ind], ind_nm[2, rand_ind]] = np.nan
 
-            r1 = gr.Raster.from_array(data=arr_with_unmasked_nodata, transform=transform, crs=None, nodata=nodata)
-            r2 = gr.Raster.from_array(
-                data=np.ma.masked_array(arr_with_unmasked_nodata), transform=transform, crs=None, nodata=nodata
-            )
-            r3 = gr.Raster.from_array(
-                data=np.ma.masked_array(arr_with_unmasked_nodata, mask=mask),
-                transform=transform,
-                crs=None,
-                nodata=nodata,
-            )
+            if nodata is None:
+                with pytest.warns(
+                    UserWarning,
+                    match="Setting default nodata {:.0f} to mask non-finite values found in the array, as "
+                    "no nodata value was defined.".format(_default_ndv(dtype)),
+                ):
+                    r1 = gr.Raster.from_array(
+                        data=arr_with_unmasked_nodata, transform=transform, crs=None, nodata=nodata
+                    )
+                    r2 = gr.Raster.from_array(
+                        data=np.ma.masked_array(arr_with_unmasked_nodata), transform=transform, crs=None, nodata=nodata
+                    )
+                    r3 = gr.Raster.from_array(
+                        data=np.ma.masked_array(arr_with_unmasked_nodata, mask=mask),
+                        transform=transform,
+                        crs=None,
+                        nodata=nodata,
+                    )
+            else:
+                r1 = gr.Raster.from_array(data=arr_with_unmasked_nodata, transform=transform, crs=None, nodata=nodata)
+                r2 = gr.Raster.from_array(
+                    data=np.ma.masked_array(arr_with_unmasked_nodata), transform=transform, crs=None, nodata=nodata
+                )
+                r3 = gr.Raster.from_array(
+                    data=np.ma.masked_array(arr_with_unmasked_nodata, mask=mask),
+                    transform=transform,
+                    crs=None,
+                    nodata=nodata,
+                )
 
             # Check nodata is correct
             if nodata is None:
