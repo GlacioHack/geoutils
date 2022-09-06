@@ -922,7 +922,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert _default_ndv("uint16") == np.iinfo("uint16").max
         assert _default_ndv("int16") == np.iinfo("int16").min
         assert _default_ndv("uint32") == 99999
-        for dtype in ["int32", "float32", "float64", "float128"]:
+        for dtype in ["int32", "float32", "float64", "longdouble"]:
             assert _default_ndv(dtype) == -99999
 
         # Check it works with most frequent np.dtypes too
@@ -1732,7 +1732,7 @@ class TestArrayInterface:
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str)
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
-                                       "float32", "float64", "float128"])
+                                       "float32", "float64", "longdouble"])
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])
     def test_array_ufunc(self, ufunc_str: str, nodata_init: None | str, dtype: str):
         """Test that ufuncs consistently return the same result as for the np.ma.masked_array"""
