@@ -1719,26 +1719,39 @@ class TestArrayInterface:
     """Test that the array interface of Raster works as expected for ufuncs and array functions"""
 
     # All universal functions of NumPy, about 90 in 2022. See list: https://numpy.org/doc/stable/reference/ufuncs.html
-    ufuncs = [ufunc for ufunc in np.core.umath.__all__ if (ufunc[0] != '_' and ufunc.islower())]
+    ufuncs_str = [ufunc for ufunc in np.core.umath.__all__ if (ufunc[0] != '_' and ufunc.islower() and 'seterr' not in ufunc)]
 
-    @pytest.mark.parametrize("ufunc", ufuncs)
+    max_val = np.iinfo("int32").max
+    min_val = np.iinfo("int32").min
+       # We create two random array of varying dtype
+    np.random.seed(42)
+    width = height = 5
+    transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
+    arr1 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
+    arr2 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
+
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str)
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
                                        "float32", "float64", "float128"])
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])
-    def test_array_ufunc(self, ufunc, nodata_init, dtype):
+    def test_array_ufunc(self, ufunc_str: str, nodata_init: None | str, dtype: str):
         """Test that ufuncs consistently return the same result as for the np.ma.masked_array"""
 
+        # We set the default nodata
         if nodata_init == "type_default":
             nodata: int | None = _default_ndv(dtype)
         else:
             nodata = None
 
-        width = height = 5
-        transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-        np.random.seed(42)
-        r1 = gr.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform,
-                                  crs=None)
-        r2 = gr.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform,
-                                  crs=None)
+        r1 = gr.Raster.from_array(self.arr1.astype(dtype), transform=self.transform, crs=None, nodata=nodata)
+        r2 = gr.Raster.from_array(self.arr2.astype(dtype), transform=self.transform, crs=None, nodata=nodata)
+
+        ufunc = getattr(np, ufunc_str)
+        # If ufunc takes only one argument
+        if ufunc.nin == 1:
+            assert np.ma.allequal(ufunc(r1.data, casting="unsafe"), ufunc(r1, casting="unsafe").data)
+        elif ufunc.nin == 2:
+            assert np.ma.allequal(ufunc(r1.data, r2.data), ufunc(r1, r2).data)
+
 
 

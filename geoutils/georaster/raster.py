@@ -895,7 +895,7 @@ Must be a Raster, np.ndarray or single number."
             f"Size:                 {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtypes}\n",
-            f"Coordinate System:    EPSG:{self.crs.to_epsg()}\n",
+            f"Coordinate System:    EPSG:{[self.crs.to_string() if self.crs is not None else None]}\n",
             f"NoData Value:         {self.nodata}\n",
             "Pixel Size:           {}, {}\n".format(*self.res),
             "Upper Left Corner:    {}, {}\n".format(*self.bounds[:2]),
@@ -943,7 +943,7 @@ Must be a Raster, np.ndarray or single number."
     # @property
     # def __array_interface__(self) -> dict[str, Any]:
     #     if not self.is_loaded:
-    #         self.load()
+    #         self.load()__array
     #
     #     return self._data.__array_interface__  # type: ignore
 
@@ -958,10 +958,16 @@ Must be a Raster, np.ndarray or single number."
         if not self.is_loaded:
             self.load()
 
-        return  self.__class__({"data": ufunc(self._data, *inputs, **kwargs),
-                               "transform": self.transform,
-                               "crs": self.crs,
-                               "nodata": self.nodata}) # type: ignore
+        if ufunc.nin == 1:
+            return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, **kwargs),
+                                   "transform": self.transform,
+                                   "crs": self.crs,
+                                   "nodata": self.nodata})
+        else:
+            return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),
+                                   "transform": self.transform,
+                                   "crs": self.crs,
+                                   "nodata": self.nodata})
 
     def __array_function__(self, func, types, args, kwargs):
 
