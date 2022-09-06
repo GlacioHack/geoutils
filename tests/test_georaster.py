@@ -215,9 +215,6 @@ class TestRaster:
         6. Raises an error if the new data does not have the dtype of the Raster.
         """
 
-        nodata_init = None
-        dtype = "float32"
-
         # Initiate a random array for testing
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
@@ -245,7 +242,7 @@ class TestRaster:
             arr += np.random.normal(size=(1, width, height))
 
         # Use either the default nodata or None
-        if nodata_init == "default":
+        if nodata_init == "type_default":
             nodata: int | None = _default_ndv(dtype)
         else:
             nodata = None
