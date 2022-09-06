@@ -10,7 +10,6 @@ dependencies:
   - scipy
   - pip
   - tqdm
-  - pyyaml
 
   # Development-specific
   - sphinx
@@ -26,3 +25,4 @@ dependencies:
   - typing-extensions
   - sphinx-gallery
   - scikit-image
+  - pyyaml

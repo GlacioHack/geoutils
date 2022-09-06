@@ -1,7 +1,6 @@
 rasterio
 geopandas >= 0.10.0
 pyproj
-pyyaml
 flake8
 pytest
 pytest-xdist
@@ -17,4 +16,5 @@ pre-commit
 typing-extensions; python_version < '3.8'
 sphinx-gallery
 scikit-image
+pyyaml
 
