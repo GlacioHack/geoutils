@@ -64,3 +64,40 @@ An automatic GitHub action will start to push and publish the new release to PyP
      and switch your new release tag (at the bottom) from "Inactive" to "Active".
      It should now build automatically.
  15. Issue the release announcement!
+
+
+## conda-forge
+To update the conda-forge distribution of geoutils, a few steps have to be performed manually.
+The process **should** be automatic, but at the moment (September 2022), the automatic process does not function!
+conda-forge distributions work by having a "feedstock" version of the package, containing instructions on how to bundle it for conda.
+The geoutils feedstock is available at [https://github.com/conda-forge/geoutils-feedstock](https://github.com/conda-forge/geoutils-feedstock).
+
+Assuming the dependencies have not changed, only two lines have to be changed in the `meta.yaml` file of the feedstock.
+The new version number has to be specified, as well as the new sha256 checksum for the package.
+The most straightforward way to obtain the new sha256 checksum is to run `conda-build` (see below) with the old checksum which will fail, and then copying the new hash of the "SHA256 mismatch: ..." error that arises!
+
+First, the geoutils-feedstock repo has to be forked on GitHub.
+Then, follow these steps for `NEW_VERSION` (substitute with the actual version name):
+```bash
+
+>>> conda install conda-build
+
+>>> git clone https://github.com/your_username/geoutils-feedstock  # or git pull (and make sure the fork is up to date with the upstream repo) if the repo is already cloned
+
+>>> cd geoutils-feedstock/recipe
+
+# Update meta.yaml:
+# {% set version = "NEW_VERSION" %}
+# sha256: NEW_SHA256
+
+>>> conda-build .  # This is to validate that the build process works, but is technically optional.
+
+>>> git add -u && git commit -m "Updated version to NEW_VERSION"  #  Or whatever you want to tell us :)
+
+>>> git push -u origin master
+```
+Now, a PR can be made from your personal fork to the upstream geoutils-feedstock.
+An automatic linter will say whether the updates conform to the syntax and a CI action will build the package to validate it.
+Note that you have to be a maintainer or have the PR be okayed by a maintainer for the CI action to run.
+If this works, the PR can be merged, and the conda-forge version will be updated within a few hours!
+
