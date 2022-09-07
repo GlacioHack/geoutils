@@ -48,6 +48,43 @@ else:
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
+# List of numpy functions that are handled: nan statistics function, normal statistics function and sorting/counting
+_HANDLED_FUNCTIONS = (
+    [
+        "nansum",
+        "nanmax",
+        "nanmin",
+        "nanargmax",
+        "nanargmin",
+        "nanmean",
+        "nanmedian",
+        "nanpercentile",
+        "nanvar",
+        "nanstd",
+        "nanprod",
+        "nancumsum",
+        "nancumprod",
+        "nanquantile",
+    ]
+    + [
+        "sum",
+        "amax",
+        "amin",
+        "argmax",
+        "argmin",
+        "mean",
+        "median",
+        "percentile",
+        "var",
+        "std",
+        "prod",
+        "cumsum",
+        "cumprod",
+        "quantile",
+    ]
+    + ["sort", "count_nonzero", "unique"]
+)
+
 
 # Function to set the default nodata values for any given dtype
 # Similar to GDAL for int types, but without absurdly long nodata values for floats.
@@ -68,7 +105,7 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
         "float32": -99999,
         "float64": -99999,
         "float128": -99999,
-        "longdouble": -99999, # This is float64 on Windows, float128 on other systems, for compatibility
+        "longdouble": -99999,  # This is float64 on Windows, float128 on other systems, for compatibility
     }
     # Check argument dtype is as expected
     if not isinstance(dtype, (str, np.dtype, type)):
@@ -960,13 +997,18 @@ Must be a Raster, np.ndarray or single number."
 
         return cp
 
-
-    def __array__(self):
+    def __array__(self) -> np.ndarray:
         """Method to cast np.array() or np.asarray() function directly on Raster classes."""
 
         return self._data
 
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs) -> RasterType | tuple[RasterType, RasterType]:
+    def __array_ufunc__(
+        self,
+        ufunc: Callable[[np.ndarray | tuple[np.ndarray, np.ndarray]], np.ndarray | tuple[np.ndarray, np.ndarray]],
+        method: str,
+        *inputs: Raster | tuple[Raster, Raster],
+        **kwargs: Any,
+    ) -> Raster | tuple[Raster, Raster]:
         """
         Method to cast NumPy universal functions directly on Raster classes, by passing to the masked array.
         This function basically applies the ufunc (with its method and kwargs) to .data, and rebuilds the Raster from
@@ -979,53 +1021,77 @@ Must be a Raster, np.ndarray or single number."
         if ufunc.nin == 1:
             # If the universal function has only one output
             if ufunc.nout == 1:
-                return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, **kwargs),
-                                       "transform": self.transform,
-                                       "crs": self.crs,
-                                       "nodata": self.nodata})
+                return self.__class__(
+                    {
+                        "data": getattr(ufunc, method)(inputs[0].data, **kwargs),  # type: ignore
+                        "transform": self.transform,
+                        "crs": self.crs,
+                        "nodata": self.nodata,
+                    }
+                )
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
-            elif ufunc.nout ==2:
-                output = getattr(ufunc, method)(inputs[0].data, **kwargs)
-                return self.__class__({"data": output[0],
-                                       "transform": self.transform,
-                                       "crs": self.crs,
-                                       "nodata": self.nodata}), \
-                       self.__class__({"data": output[1],
-                                       "transform": self.transform,
-                                       "crs": self.crs,
-                                       "nodata": self.nodata})
+            else:
+                output = getattr(ufunc, method)(inputs[0].data, **kwargs)  # type: ignore
+                return self.__class__(
+                    {"data": output[0], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                ), self.__class__(
+                    {"data": output[1], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                )
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
-        elif ufunc.nin == 2:
+        else:
             if ufunc.nout == 1:
-                return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),
-                                       "transform": self.transform,
-                                       "crs": self.crs,
-                                       "nodata": self.nodata})
+                return self.__class__(
+                    {
+                        "data": getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
+                        "transform": self.transform,
+                        "crs": self.crs,
+                        "nodata": self.nodata,
+                    }
+                )
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
-            elif ufunc.nout == 2:
-                output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)
-                return self.__class__({"data": output[0],
-                                       "transform": self.transform,
-                                       "crs": self.crs,
-                                       "nodata": self.nodata}),\
-                       self.__class__({"data": output[1],
-                                       "transform": self.transform,
-                                       "crs": self.crs,
-                                       "nodata": self.nodata})
+            else:
+                output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
+                return self.__class__(
+                    {"data": output[0], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                ), self.__class__(
+                    {"data": output[1], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                )
 
-    def __array_function__(self, func, types, args, kwargs) -> Any:
+    def __array_function__(self, func: Callable[[np.ndarray, Any], Any], types: type, args: Any, kwargs: Any) -> Any:
         """
         Method to cast NumPy array function directly on a Raster object by applying it to the masked array.
         A limited number of function is supported, listed in XXX.
         """
+
+        # If function is not implemented
+        if func.__name__ not in _HANDLED_FUNCTIONS:
+            return NotImplemented
+
         # For subclassing
         if not all(issubclass(t, self.__class__) for t in types):
             return NotImplemented
 
-        return func(args[0].data, *args[1:], **kwargs)
+        # We now choose the behaviour of array functions
+        # For median, np.median ignores masks of masked array, so we force np.ma.median
+        if func.__name__ in ["median", "nanmedian"]:
+            func = np.ma.median
+            first_arg = args[0].data
+
+        # For percentiles and quantiles, there exist no masked array version, so we compute on the valid data directly
+        elif func.__name__ in ["percentile", "nanpercentile"]:
+            first_arg = args[0].data.data[~args[0].data.mask]
+
+        elif func.__name__ in ["quantile", "nanquantile"]:
+            first_arg = args[0].data.data[~args[0].data.mask]
+
+        # Otherwise, we run the numpy function normally (most take masks into account)
+        else:
+            first_arg = args[0].data
+
+        return func(first_arg, *args[1:], **kwargs)  # type: ignore
 
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
