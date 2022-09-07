@@ -1918,6 +1918,8 @@ class TestArithmetic:
 class TestArrayInterface:
     """Test that the array interface of Raster works as expected for ufuncs and array functions"""
 
+    # -- First, we list all universal NumPy functions, or "ufuncs" --
+
     # All universal functions of NumPy, about 90 in 2022. See list: https://numpy.org/doc/stable/reference/ufuncs.html
     ufuncs_str = [ufunc for ufunc in np.core.umath.__all__
                   if (ufunc[0] != '_' and ufunc.islower()
@@ -1949,6 +1951,32 @@ class TestArrayInterface:
     # These correspond to: ['divmod']
     ufuncs_str_2nin_2nout = [ufunc for ufunc in ufuncs_str
                           if (getattr(np, ufunc).nin == 2 and getattr(np, ufunc).nout == 2)]
+
+    # -- Second, we list array functions we intend to support in the array interface --
+
+    # To my knowledge, there is no list that includes all numpy functions (and we probably don't want to test them all)
+    # Let's include manually the important ones:
+    # - statistics: normal, for NaNs, and for masked_arrays;
+    # - sorting and counting;
+    # Most other math functions are already universal functions
+
+    # NaN functions: [f for f in np.lib.nanfunctions.__all__]
+    nanstatfuncs = ['nansum', 'nanmax', 'nanmin', 'nanargmax', 'nanargmin', 'nanmean', 'nanmedian', 'nanpercentile',
+                'nanvar', 'nanstd', 'nanprod', 'nancumsum', 'nancumprod', 'nanquantile']
+
+    # Statistics and sorting matching NaN functions: https://numpy.org/doc/stable/reference/routines.statistics.html
+    # and https://numpy.org/doc/stable/reference/routines.sort.html
+    statfuncs = ['sum', 'max', 'min', 'argmax', 'argmin', 'mean', 'median', 'percentile', 'var', 'std', 'prod',
+                 'cumsum', 'cumprod', 'quantile']
+
+    # Sorting and counting ounting with single array input:
+    sortfuncs = ['sort', 'count_nonzero']
+
+    # Masked array functions that match the naming of normal functions
+    mastatsfuncs = statfuncs
+
+
+    # --  Third, we define the test data --
 
     # We create two random array of varying dtype
     width = height = 5
@@ -2091,3 +2119,76 @@ class TestArrayInterface:
                     ufunc(rst1.data, rst2.data)
                 with pytest.raises(TypeError):
                     ufunc(rst1, rst2)
+
+    @pytest.mark.parametrize("arrfunc_str", nanstatfuncs + statfuncs + sortfuncs)
+    @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
+                                       "float32", "float64", "longdouble"])
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])
+    def test_array_functions(self, arrfunc_str, dtype, nodata_init):
+        """Test that array functions that we support give the same output as they would on the masked array"""
+
+        # We set the default nodata
+        if nodata_init == "type_default":
+            nodata: int | None = _default_ndv(dtype)
+        else:
+            nodata = None
+
+        # Create Raster
+        ma1 = np.ma.masked_array(data=self.arr1.astype(dtype), mask=self.mask1)
+        rst = gr.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata)
+
+        # Get array func
+        arrfunc = getattr(np, arrfunc_str)
+
+        # Find the common dtype between the Raster and the most constrained input type (first character is the input)
+        # com_dtype = np.find_common_type([dtype] + [arrfunc.types[0][0]], [])
+
+        # Catch warnings
+        # with warnings.catch_warnings():
+
+            # warnings.filterwarnings("ignore", category=RuntimeWarning)
+            # warnings.filterwarnings("ignore", category=UserWarning)
+
+            # Check if our input dtype is possible on this array function, if yes check that outputs are identical
+            # if com_dtype in [str(np.dtype(t[0])) for t in ufunc.types]:
+
+        # Pass an argument for functions that require it (nanpercentile, percentile, quantile and nanquantile)
+        if 'percentile' in arrfunc_str:
+            arg = 80
+            output_rst = arrfunc(rst, arg)
+            output_ma = arrfunc(rst.data, arg)
+        elif 'quantile' in arrfunc_str:
+            arg = 0.8
+            output_rst = arrfunc(rst, arg)
+            output_ma = arrfunc(rst.data, arg)
+        else:
+            output_rst = arrfunc(rst)
+            output_ma = arrfunc(rst.data)
+
+        if isinstance(output_rst, np.ndarray):
+            assert np.ma.allequal(output_rst, output_ma)
+        else:
+            assert output_rst == output_ma
+
+        # If the array function also exists for masked array, run a test from np.ma as well
+        if arrfunc_str in self.mastatsfuncs:
+
+            mafunc = getattr(np.ma, arrfunc_str)
+
+            if 'percentile' in arrfunc_str:
+                arg = 80
+                output_rst = mafunc(rst, arg)
+                output_ma = mafunc(rst.data, arg)
+            elif 'quantile' in arrfunc_str:
+                arg = 0.8
+                output_rst = mafunc(rst, arg)
+                output_ma = mafunc(rst.data, arg)
+            else:
+                output_rst = mafunc(rst)
+                output_ma = mafunc(rst.data)
+
+            if isinstance(output_rst, np.ndarray):
+                assert np.ma.allequal(output_rst, output_ma)
+            else:
+                assert output_rst == output_ma
+

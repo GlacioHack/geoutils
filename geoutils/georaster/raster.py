@@ -960,24 +960,20 @@ Must be a Raster, np.ndarray or single number."
 
         return cp
 
-    # Not sure yet how this behaves with __array__, __array_ufunc__ and __array_function__ implemented
-    # @property
-    # def __array_interface__(self) -> dict[str, Any]:
-    #     if not self.is_loaded:
-    #         self.load()__array
-    #
-    #     return self._data.__array_interface__  # type: ignore
 
-    # Set up array interface for our class container
-    # Inspired from https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch
     def __array__(self):
+        """Method to cast np.array() or np.asarray() function directly on Raster classes."""
 
         return self._data
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs) -> RasterType | tuple[RasterType, RasterType]:
-
-        if not self.is_loaded:
-            self.load()
+        """
+        Method to cast NumPy universal functions directly on Raster classes, by passing to the masked array.
+        This function basically applies the ufunc (with its method and kwargs) to .data, and rebuilds the Raster from
+        self.__class__. The cases separate the number of input nin and output nout, to properly feed .data and return
+        Raster objects.
+        See more details in NumPy doc, e.g., https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch.
+        """
 
         # If the universal function takes only one input
         if ufunc.nin == 1:
@@ -1020,12 +1016,16 @@ Must be a Raster, np.ndarray or single number."
                                        "crs": self.crs,
                                        "nodata": self.nodata})
 
-    def __array_function__(self, func, types, args, kwargs):
+    def __array_function__(self, func, types, args, kwargs) -> Any:
+        """
+        Method to cast NumPy array function directly on a Raster object by applying it to the masked array.
+        A limited number of function is supported, listed in XXX.
+        """
+        # For subclassing
+        if not all(issubclass(t, self.__class__) for t in types):
+            return NotImplemented
 
-        if not self.is_loaded:
-            self.load()
-
-        return func(self._data, *kwargs) # type: ignore
+        return func(args[0].data, *args[1:], **kwargs)
 
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
