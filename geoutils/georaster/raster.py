@@ -64,9 +64,11 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
         "int16": -32768,
         "uint32": 99999,
         "int32": -99999,
+        "float16": -99999,
         "float32": -99999,
         "float64": -99999,
-        "longdouble": -99999,
+        "float128": -99999,
+        "longdouble": -99999, # This is float64 on Windows, float128 on other systems, for compatibility
     }
     # Check argument dtype is as expected
     if not isinstance(dtype, (str, np.dtype, type)):
@@ -972,21 +974,51 @@ Must be a Raster, np.ndarray or single number."
 
         return self._data
 
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs) -> RasterType:
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs) -> RasterType | tuple[RasterType, RasterType]:
 
         if not self.is_loaded:
             self.load()
 
+        # If the universal function takes only one input
         if ufunc.nin == 1:
-            return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, **kwargs),
-                                   "transform": self.transform,
-                                   "crs": self.crs,
-                                   "nodata": self.nodata})
-        else:
-            return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),
-                                   "transform": self.transform,
-                                   "crs": self.crs,
-                                   "nodata": self.nodata})
+            # If the universal function has only one output
+            if ufunc.nout == 1:
+                return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, **kwargs),
+                                       "transform": self.transform,
+                                       "crs": self.crs,
+                                       "nodata": self.nodata})
+
+            # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
+            elif ufunc.nout ==2:
+                output = getattr(ufunc, method)(inputs[0].data, **kwargs)
+                return self.__class__({"data": output[0],
+                                       "transform": self.transform,
+                                       "crs": self.crs,
+                                       "nodata": self.nodata}), \
+                       self.__class__({"data": output[1],
+                                       "transform": self.transform,
+                                       "crs": self.crs,
+                                       "nodata": self.nodata})
+
+        # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
+        elif ufunc.nin == 2:
+            if ufunc.nout == 1:
+                return self.__class__({"data": getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),
+                                       "transform": self.transform,
+                                       "crs": self.crs,
+                                       "nodata": self.nodata})
+
+            # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
+            elif ufunc.nout == 2:
+                output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)
+                return self.__class__({"data": output[0],
+                                       "transform": self.transform,
+                                       "crs": self.crs,
+                                       "nodata": self.nodata}),\
+                       self.__class__({"data": output[1],
+                                       "transform": self.transform,
+                                       "crs": self.crs,
+                                       "nodata": self.nodata})
 
     def __array_function__(self, func, types, args, kwargs):
 

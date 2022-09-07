@@ -1923,11 +1923,32 @@ class TestArrayInterface:
                   if (ufunc[0] != '_' and ufunc.islower()
                       and 'err' not in ufunc and ufunc not in ['e', 'pi', 'frompyfunc', 'euler_gamma'])]
 
-    # Universal functions with single input argument
-    ufuncs_str_one_nin = [ufunc for ufunc in ufuncs_str if getattr(np, ufunc).nin == 1]
+    # Universal functions with one input argument and one output, corresponding to (in NumPy 1.22.4):
+    # ['absolute', 'arccos', 'arccosh', 'arcsin', 'arcsinh', 'arctan', 'arctanh', 'cbrt', 'ceil', 'conj', 'conjugate',
+    # 'cos', 'cosh', 'deg2rad', 'degrees', 'exp', 'exp2', 'expm1', 'fabs', 'floor', 'invert', 'isfinite', 'isinf',
+    # 'isnan', 'isnat', 'log', 'log10', 'log1p', 'log2', 'logical_not', 'negative', 'positive', 'rad2deg', 'radians',
+    # 'reciprocal', 'rint', 'sign', 'signbit', 'sin', 'sinh', 'spacing', 'sqrt', 'square', 'tan', 'tanh', 'trunc']
+    ufuncs_str_1nin_1nout = [ufunc for ufunc in ufuncs_str
+                          if (getattr(np, ufunc).nin == 1 and getattr(np, ufunc).nout == 1)]
 
-    # Universal functions with two input arguments
-    ufuncs_str_two_nin = [ufunc for ufunc in ufuncs_str if getattr(np, ufunc).nin == 2]
+    # Universal functions with one input argument and two output (Note: none exist for three outputs or above)
+    # Those correspond to: ['frexp', 'modf']
+    ufuncs_str_1nin_2nout = [ufunc for ufunc in ufuncs_str
+                          if (getattr(np, ufunc).nin == 1 and getattr(np, ufunc).nout == 2)]
+
+    # Universal functions with two input arguments and one output, corresponding to:
+    # ['add', 'arctan2', 'bitwise_and', 'bitwise_or', 'bitwise_xor', 'copysign', 'divide', 'equal', 'floor_divide',
+    #  'float_power', 'fmax', 'fmin', 'fmod', 'gcd', 'greater', 'greater_equal', 'heaviside', 'hypot', 'lcm', 'ldexp',
+    #  'left_shift', 'less', 'less_equal', 'logaddexp', 'logaddexp2', 'logical_and', 'logical_or', 'logical_xor',
+    #  'maximum', 'minimum', 'mod', 'multiply', 'nextafter', 'not_equal', 'power', 'remainder', 'right_shift',
+    #  'subtract', 'true_divide']
+    ufuncs_str_2nin_1nout = [ufunc for ufunc in ufuncs_str
+                          if (getattr(np, ufunc).nin == 2 and getattr(np, ufunc).nout == 1)]
+
+    # Universal functions with two input arguments and two outputs (Note: none exist for three outputs or above)
+    # These correspond to: ['divmod']
+    ufuncs_str_2nin_2nout = [ufunc for ufunc in ufuncs_str
+                          if (getattr(np, ufunc).nin == 2 and getattr(np, ufunc).nout == 2)]
 
     # We create two random array of varying dtype
     width = height = 5
@@ -1938,12 +1959,12 @@ class TestArrayInterface:
     arr1 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
     arr2 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
 
-    @pytest.mark.parametrize("ufunc_str", ufuncs_str_one_nin)
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
                                        "float32", "float64", "longdouble"])
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])
-    def test_array_ufunc_one_nin(self, ufunc_str: str, nodata_init: None | str, dtype: str):
-        """Test that ufuncs with a single input argument consistently return the same result as for masked arrays."""
+    def test_array_ufunc_1nin_1nout(self, ufunc_str: str, nodata_init: None | str, dtype: str):
+        """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
 
         # We set the default nodata
         if nodata_init == "type_default":
@@ -1957,26 +1978,44 @@ class TestArrayInterface:
         # Get ufunc
         ufunc = getattr(np, ufunc_str)
 
-        # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
-        if dtype in [str(np.dtype(t[0])) for t in ufunc.types]:
-            assert np.ma.allequal(ufunc(rst.data), ufunc(rst).data)
-        # If the input dtype is not possible, check that NumPy raises a TypeError
-        else:
-            with pytest.raises(TypeError):
-                ufunc(rst.data)
-            with pytest.raises(TypeError):
-                ufunc(rst)
+        # Find the common dtype between the Raster and the most constrained input type (first character is the input)
+        com_dtype = np.find_common_type([dtype] + [ufunc.types[0][0]], [])
+
+        # Catch warnings
+        with warnings.catch_warnings():
+
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
+
+            # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
+            if com_dtype in [str(np.dtype(t[0])) for t in ufunc.types]:
+
+                # For a single output
+                if ufunc.nout == 1:
+                    assert np.ma.allequal(ufunc(rst.data), ufunc(rst).data)
+
+                # For two outputs
+                elif ufunc.nout == 2:
+                    assert (np.ma.allequal(ufunc(rst.data)[0], ufunc(rst)[0].data)
+                            and np.ma.allequal(ufunc(rst.data)[1], ufunc(rst)[1].data))
+
+            # If the input dtype is not possible, check that NumPy raises a TypeError
+            else:
+                with pytest.raises(TypeError):
+                    ufunc(rst.data)
+                with pytest.raises(TypeError):
+                    ufunc(rst)
 
 
-    @pytest.mark.parametrize("ufunc_str", ufuncs_str_two_nin)
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)
     @pytest.mark.parametrize("dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
                                        "float32", "float64", "longdouble"])
     @pytest.mark.parametrize("dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
                                        "float32", "float64", "longdouble"])
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])
-    def test_array_ufunc_two_nin(self, ufunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str):
-        """Test that ufuncs with a single input argument consistently return the same result as for masked arrays."""
+    def test_array_ufunc_2nin_1nout(self, ufunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str):
+        """Test that ufuncs with two input arguments consistently return the same result as for masked arrays."""
 
         # We set the default nodatas
         if nodata1_init == "type_default":
@@ -1993,18 +2032,51 @@ class TestArrayInterface:
 
         ufunc = getattr(np, ufunc_str)
 
-        # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
-        if (dtype1, dtype2) in [(str(np.dtype(t[0])), str(np.dtype(t[1]))) for t in ufunc.types]:
-            assert np.ma.allequal(ufunc(rst1.data, rst2.data, casting="unsafe"), ufunc(rst1, rst2, casting="unsafe").data)
+        # Find the common dtype between the Raster and the most constrained input type (first character is the input)
+        com_dtype1 = np.find_common_type([dtype1] + [ufunc.types[0][0]], [])
+        com_dtype2 = np.find_common_type([dtype2] + [ufunc.types[0][1]], [])
+
+        # If the two input types can be the same type, pass a tuple with the common type of both
+        # Below we ignore datetime and timedelta types "m" and "M"
+        if all([t[0]==t[1] for t in ufunc.types if not ("m" or "M") in t[0:2]]):
+            com_dtype_both = np.find_common_type([com_dtype1, com_dtype2], [])
+            com_dtype_tuple = (com_dtype_both, com_dtype_both)
+
+        # Otherwise, pass the tuple with each common type
         else:
-            print('Ufunc '+ufunc_str+' should fail with dtypes '+str(dtype1)+" and "+str(dtype2))
+            com_dtype_tuple = (com_dtype1, com_dtype2)
 
-            with pytest.raises(TypeError):
-                ufunc(rst1.data, rst2.data, casting="unsafe")
-            with pytest.raises(TypeError):
-                ufunc(rst1, rst2, casting="unsafe")
+        # Catch warnings
+        with warnings.catch_warnings():
 
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
 
+            # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
+            if com_dtype_tuple in [(str(np.dtype(t[0])), str(np.dtype(t[1]))) for t in ufunc.types]:
 
+                # For a single output
+                if ufunc.nout == 1:
 
+                    # There exists a single exception due to negative integers as exponent of integers in "power"
+                    if ufunc_str == 'power' and 'int' in dtype1 and 'int' in dtype2 and np.min(rst2.data) < 0:
+                        with pytest.raises(ValueError, match='Integers to negative integer powers are not allowed.'):
+                            ufunc(rst1, rst2)
+                        with pytest.raises(ValueError, match='Integers to negative integer powers are not allowed.'):
+                            ufunc(rst1.data, rst2.data)
 
+                    # Otherwise, run the normal assertion for a single output
+                    else:
+                        assert np.ma.allequal(ufunc(rst1.data, rst2.data), ufunc(rst1, rst2).data)
+
+                # For two outputs
+                elif ufunc.nout == 2:
+                    assert (np.ma.allequal(ufunc(rst1.data, rst2.data)[0], ufunc(rst1, rst2)[0].data) and
+                            np.ma.allequal(ufunc(rst1.data, rst2.data)[1], ufunc(rst1, rst2)[1].data))
+
+            # If the input dtype is not possible, check that NumPy raises a TypeError
+            else:
+                with pytest.raises(TypeError):
+                    ufunc(rst1.data, rst2.data)
+                with pytest.raises(TypeError):
+                    ufunc(rst1, rst2)
