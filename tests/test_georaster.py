@@ -40,7 +40,6 @@ class TestRaster:
     def test_init(self, example: str) -> None:
         """Test that all possible inputs work properly in Raster class init"""
 
-        example = aster_dem_path
         # First, filename
         r = gr.Raster(example)
         assert isinstance(r, gr.Raster)
@@ -1920,23 +1919,31 @@ class TestArrayInterface:
     """Test that the array interface of Raster works as expected for ufuncs and array functions"""
 
     # All universal functions of NumPy, about 90 in 2022. See list: https://numpy.org/doc/stable/reference/ufuncs.html
-    ufuncs_str = [ufunc for ufunc in np.core.umath.__all__ if (ufunc[0] != '_' and ufunc.islower() and 'seterr' not in ufunc)]
+    ufuncs_str = [ufunc for ufunc in np.core.umath.__all__
+                  if (ufunc[0] != '_' and ufunc.islower()
+                      and 'err' not in ufunc and ufunc not in ['e', 'pi', 'frompyfunc', 'euler_gamma'])]
 
-    max_val = np.iinfo("int32").max
-    min_val = np.iinfo("int32").min
-       # We create two random array of varying dtype
-    np.random.seed(42)
+    # Universal functions with single input argument
+    ufuncs_str_one_nin = [ufunc for ufunc in ufuncs_str if getattr(np, ufunc).nin == 1]
+
+    # Universal functions with two input arguments
+    ufuncs_str_two_nin = [ufunc for ufunc in ufuncs_str if getattr(np, ufunc).nin == 2]
+
+    # We create two random array of varying dtype
     width = height = 5
+    min_val = np.iinfo("int32").min
+    max_val = np.iinfo("int32").max
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
+    np.random.seed(42)
     arr1 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
     arr2 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
 
-    @pytest.mark.parametrize("ufunc_str", ufuncs_str)
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_one_nin)
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
                                        "float32", "float64", "longdouble"])
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])
-    def test_array_ufunc(self, ufunc_str: str, nodata_init: None | str, dtype: str):
-        """Test that ufuncs consistently return the same result as for the np.ma.masked_array"""
+    def test_array_ufunc_one_nin(self, ufunc_str: str, nodata_init: None | str, dtype: str):
+        """Test that ufuncs with a single input argument consistently return the same result as for masked arrays."""
 
         # We set the default nodata
         if nodata_init == "type_default":
@@ -1944,15 +1951,60 @@ class TestArrayInterface:
         else:
             nodata = None
 
-        r1 = gr.Raster.from_array(self.arr1.astype(dtype), transform=self.transform, crs=None, nodata=nodata)
-        r2 = gr.Raster.from_array(self.arr2.astype(dtype), transform=self.transform, crs=None, nodata=nodata)
+        # Create Raster
+        rst = gr.Raster.from_array(self.arr1.astype(dtype), transform=self.transform, crs=None, nodata=nodata)
+
+        # Get ufunc
+        ufunc = getattr(np, ufunc_str)
+
+        # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
+        if dtype in [str(np.dtype(t[0])) for t in ufunc.types]:
+            assert np.ma.allequal(ufunc(rst.data), ufunc(rst).data)
+        # If the input dtype is not possible, check that NumPy raises a TypeError
+        else:
+            with pytest.raises(TypeError):
+                ufunc(rst.data)
+            with pytest.raises(TypeError):
+                ufunc(rst)
+
+
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_two_nin)
+    @pytest.mark.parametrize("dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
+                                       "float32", "float64", "longdouble"])
+    @pytest.mark.parametrize("dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
+                                       "float32", "float64", "longdouble"])
+    @pytest.mark.parametrize("nodata1_init", [None, "type_default"])
+    @pytest.mark.parametrize("nodata2_init", [None, "type_default"])
+    def test_array_ufunc_two_nin(self, ufunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str):
+        """Test that ufuncs with a single input argument consistently return the same result as for masked arrays."""
+
+        # We set the default nodatas
+        if nodata1_init == "type_default":
+            nodata1: int | None = _default_ndv(dtype1)
+        else:
+            nodata1 = None
+        if nodata2_init == "type_default":
+            nodata2: int | None = _default_ndv(dtype2)
+        else:
+            nodata2 = None
+
+        rst1 = gr.Raster.from_array(self.arr1.astype(dtype1), transform=self.transform, crs=None, nodata=nodata1)
+        rst2 = gr.Raster.from_array(self.arr2.astype(dtype2), transform=self.transform, crs=None, nodata=nodata2)
 
         ufunc = getattr(np, ufunc_str)
-        # If ufunc takes only one argument
-        if ufunc.nin == 1:
-            assert np.ma.allequal(ufunc(r1.data, casting="unsafe"), ufunc(r1, casting="unsafe").data)
-        elif ufunc.nin == 2:
-            assert np.ma.allequal(ufunc(r1.data, r2.data), ufunc(r1, r2).data)
+
+        # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
+        if (dtype1, dtype2) in [(str(np.dtype(t[0])), str(np.dtype(t[1]))) for t in ufunc.types]:
+            assert np.ma.allequal(ufunc(rst1.data, rst2.data, casting="unsafe"), ufunc(rst1, rst2, casting="unsafe").data)
+        else:
+            print('Ufunc '+ufunc_str+' should fail with dtypes '+str(dtype1)+" and "+str(dtype2))
+
+            with pytest.raises(TypeError):
+                ufunc(rst1.data, rst2.data, casting="unsafe")
+            with pytest.raises(TypeError):
+                ufunc(rst1, rst2, casting="unsafe")
+
+
 
 
 
