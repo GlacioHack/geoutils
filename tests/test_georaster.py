@@ -1959,6 +1959,14 @@ class TestArrayInterface:
     arr1 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
     arr2 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
 
+    # Create two random masks
+    mask1 = np.random.randint(0, 2, size=(width, height), dtype=bool)
+    mask2 = np.random.randint(0, 2, size=(width, height), dtype=bool)
+
+    # Assert that there is at least one unmasked value
+    assert np.count_nonzero(~mask1) > 0
+    assert np.count_nonzero(~mask2) > 0
+
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32",
                                        "float32", "float64", "longdouble"])
@@ -1973,7 +1981,8 @@ class TestArrayInterface:
             nodata = None
 
         # Create Raster
-        rst = gr.Raster.from_array(self.arr1.astype(dtype), transform=self.transform, crs=None, nodata=nodata)
+        ma1 = np.ma.masked_array(data = self.arr1.astype(dtype), mask=self.mask1)
+        rst = gr.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata)
 
         # Get ufunc
         ufunc = getattr(np, ufunc_str)
@@ -2027,8 +2036,10 @@ class TestArrayInterface:
         else:
             nodata2 = None
 
-        rst1 = gr.Raster.from_array(self.arr1.astype(dtype1), transform=self.transform, crs=None, nodata=nodata1)
-        rst2 = gr.Raster.from_array(self.arr2.astype(dtype2), transform=self.transform, crs=None, nodata=nodata2)
+        ma1 = np.ma.masked_array(data = self.arr1.astype(dtype1), mask=self.mask1)
+        ma2 = np.ma.masked_array(data = self.arr2.astype(dtype2), mask=self.mask2)
+        rst1 = gr.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata1)
+        rst2 = gr.Raster.from_array(ma2, transform=self.transform, crs=None, nodata=nodata2)
 
         ufunc = getattr(np, ufunc_str)
 
