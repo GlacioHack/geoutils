@@ -3,7 +3,7 @@ from __future__ import annotations
 import geopandas as gpd
 import numpy as np
 import pytest
-from scipy.ndimage.morphology import binary_erosion
+from scipy.ndimage import binary_erosion
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
 from shapely.geometry.multipolygon import MultiPolygon
