@@ -100,4 +100,3 @@ Now, a PR can be made from your personal fork to the upstream geoutils-feedstock
 An automatic linter will say whether the updates conform to the syntax and a CI action will build the package to validate it.
 Note that you have to be a maintainer or have the PR be okayed by a maintainer for the CI action to run.
 If this works, the PR can be merged, and the conda-forge version will be updated within a few hours!
-
