@@ -21,8 +21,7 @@ import geoutils.geovector as gv
 import geoutils.misc
 import geoutils.projtools as pt
 from geoutils import examples
-from geoutils.georaster.raster import (_HANDLED_FUNCTIONS, _default_ndv,
-                                       _default_rio_attrs)
+from geoutils.georaster.raster import _default_ndv, _default_rio_attrs
 from geoutils.misc import resampling_method_from_str
 
 DO_PLOT = False
@@ -1973,7 +1972,7 @@ class TestArrayInterface:
     # Most other math functions are already universal functions
 
     # The full list exists in Raster
-    handled_functions = _HANDLED_FUNCTIONS
+    handled_functions = gu.georaster.raster._HANDLED_FUNCTIONS
 
     # Details below:
     # NaN functions: [f for f in np.lib.nanfunctions.__all__]
