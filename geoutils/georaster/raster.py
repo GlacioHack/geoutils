@@ -1063,7 +1063,7 @@ Must be a Raster, np.ndarray or single number."
     def __array_function__(self, func: Callable[[np.ndarray, Any], Any], types: type, args: Any, kwargs: Any) -> Any:
         """
         Method to cast NumPy array function directly on a Raster object by applying it to the masked array.
-        A limited number of function is supported, listed in XXX.
+        A limited number of function is supported, listed in raster._HANDLED_FUNCTIONS.
         """
 
         # If function is not implemented

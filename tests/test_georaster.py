@@ -1968,7 +1968,7 @@ class TestArrayInterface:
 
     # To my knowledge, there is no list that includes all numpy functions (and we probably don't want to test them all)
     # Let's include manually the important ones:
-    # - statistics: normal, for NaNs, and for masked_arrays;
+    # - statistics: normal and for NaNs;
     # - sorting and counting;
     # Most other math functions are already universal functions
 
