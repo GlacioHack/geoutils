@@ -598,12 +598,17 @@ Must be a Raster, np.ndarray or single number."
         # Case 2 - other is a numpy array
         elif isinstance(other, np.ndarray):
             # Check that both array have the same shape
-            if self.data.shape == other.shape:
+
+            if len(other.shape) == 2:
+                other_data = other[np.newaxis, :, :]
+            else:
+                other_data = other
+
+            if self.data.shape == other_data.shape:
                 pass
             else:
                 raise ValueError("Both rasters must have the same shape.")
 
-            other_data = other
             ndv2 = None
             dtype2 = other_data.dtype
 

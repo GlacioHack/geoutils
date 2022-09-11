@@ -1828,18 +1828,21 @@ class TestArithmetic:
         """
         warnings.filterwarnings("ignore", message="invalid value encountered")
 
-        # Test various inputs: Raster with different dtypes, np.ndarray, single number
+        # Test various inputs: Raster with different dtypes, np.ndarray with 2D or 3D shape, single number
         r1 = self.r1
         r1_f32 = self.r1_f32
         r2 = self.r2
-        array = np.random.randint(1, 255, (1, self.height, self.width)).astype("uint8")
+        array_3d = np.random.randint(1, 255, (1, self.height, self.width)).astype("uint8")
+        array_2d = np.random.randint(1, 255, (self.height, self.width)).astype("uint8")
         floatval = 3.14
 
         # Addition
         assert r1 + r2 == self.from_array(r1.data + r2.data, rst_ref=r1)
         assert r1_f32 + r2 == self.from_array(r1_f32.data + r2.data, rst_ref=r1)
-        # assert array + r2 == self.from_array(array + r2.data, rst_ref=r1)  # this case fails as using numpy's add...
-        assert r2 + array == self.from_array(r2.data + array, rst_ref=r1)
+        assert array_3d + r2 == self.from_array(array_3d + r2.data, rst_ref=r1)
+        assert r2 + array_3d == self.from_array(r2.data + array_3d, rst_ref=r1)
+        assert array_2d + r2 == self.from_array(array_2d[np.newaxis, :, :] + r2.data, rst_ref=r1)
+        assert r2 + array_2d == self.from_array(r2.data + array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 + floatval == self.from_array(r1.data.astype("float32") + floatval, rst_ref=r1)
         assert floatval + r1 == self.from_array(floatval + r1.data.astype("float32"), rst_ref=r1)
         assert r1 + r2 == r2 + r1
@@ -1847,8 +1850,10 @@ class TestArithmetic:
         # Multiplication
         assert r1 * r2 == self.from_array(r1.data * r2.data, rst_ref=r1)
         assert r1_f32 * r2 == self.from_array(r1_f32.data * r2.data, rst_ref=r1)
-        # assert array * r2 == self.from_array(array * r2.data, rst_ref=r1)  # this case fails as using numpy's mul...
-        assert r2 * array == self.from_array(r2.data * array, rst_ref=r1)
+        assert array_3d * r2 == self.from_array(array_3d * r2.data, rst_ref=r1)
+        assert r2 * array_3d == self.from_array(r2.data * array_3d, rst_ref=r1)
+        assert array_2d * r2 == self.from_array(array_2d[np.newaxis, :, :] * r2.data, rst_ref=r1)
+        assert r2 * array_2d == self.from_array(r2.data * array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 * floatval == self.from_array(r1.data.astype("float32") * floatval, rst_ref=r1)
         assert floatval * r1 == self.from_array(floatval * r1.data.astype("float32"), rst_ref=r1)
         assert r1 * r2 == r2 * r1
@@ -1856,32 +1861,40 @@ class TestArithmetic:
         # Subtraction
         assert r1 - r2 == self.from_array(r1.data - r2.data, rst_ref=r1)
         assert r1_f32 - r2 == self.from_array(r1_f32.data - r2.data, rst_ref=r1)
-        # assert array - r2 == self.from_array(array - r2.data, rst_ref=r1)  # this case fails
-        assert r2 - array == self.from_array(r2.data - array, rst_ref=r1)
+        assert array_3d - r2 == self.from_array(array_3d - r2.data, rst_ref=r1)
+        assert r2 - array_3d == self.from_array(r2.data - array_3d, rst_ref=r1)
+        assert array_2d - r2 == self.from_array(array_2d[np.newaxis, :, :] - r2.data, rst_ref=r1)
+        assert r2 - array_2d == self.from_array(r2.data - array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 - floatval == self.from_array(r1.data.astype("float32") - floatval, rst_ref=r1)
         assert floatval - r1 == self.from_array(floatval - r1.data.astype("float32"), rst_ref=r1)
 
         # True division
         assert r1 / r2 == self.from_array(r1.data / r2.data, rst_ref=r1)
         assert r1_f32 / r2 == self.from_array(r1_f32.data / r2.data, rst_ref=r1)
-        # assert array / r2 == self.from_array(array / r2.data, rst_ref=r1)  # this case fails
-        assert r2 / array == self.from_array(r2.data / array, rst_ref=r2)
+        assert array_3d / r2 == self.from_array(array_3d / r2.data, rst_ref=r1)
+        assert r2 / array_3d == self.from_array(r2.data / array_3d, rst_ref=r2)
+        assert array_2d / r2 == self.from_array(array_2d[np.newaxis, :, :] / r2.data, rst_ref=r1)
+        assert r2 / array_2d == self.from_array(r2.data / array_2d[np.newaxis, :, :], rst_ref=r2)
         assert r1 / floatval == self.from_array(r1.data.astype("float32") / floatval, rst_ref=r1)
         assert floatval / r1 == self.from_array(floatval / r1.data.astype("float32"), rst_ref=r1)
 
         # Floor division
         assert r1 // r2 == self.from_array(r1.data // r2.data, rst_ref=r1)
         assert r1_f32 // r2 == self.from_array(r1_f32.data // r2.data, rst_ref=r1)
-        # assert array // r2 == self.from_array(array // r2.data, rst_ref=r1)  # this case fails
-        assert r2 // array == self.from_array(r2.data // array, rst_ref=r1)
+        assert array_3d // r2 == self.from_array(array_3d // r2.data, rst_ref=r1)
+        assert r2 // array_3d == self.from_array(r2.data // array_3d, rst_ref=r1)
+        assert array_2d // r2 == self.from_array(array_2d[np.newaxis, :, :] // r2.data, rst_ref=r1)
+        assert r2 // array_2d == self.from_array(r2.data // array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 // floatval == self.from_array(r1.data // floatval, rst_ref=r1)
         assert floatval // r1 == self.from_array(floatval // r1.data, rst_ref=r1)
 
         # Modulo
         assert r1 % r2 == self.from_array(r1.data % r2.data, rst_ref=r1)
         assert r1_f32 % r2 == self.from_array(r1_f32.data % r2.data, rst_ref=r1)
-        # assert array % r2 == self.from_array(array % r2.data, rst_ref=r1)  # this case fails
-        assert r2 % array == self.from_array(r2.data % array, rst_ref=r1)
+        assert array_3d % r2 == self.from_array(array_3d % r2.data, rst_ref=r1)
+        assert r2 % array_3d == self.from_array(r2.data % array_3d, rst_ref=r1)
+        assert array_2d % r2 == self.from_array(array_2d[np.newaxis, :, :] % r2.data, rst_ref=r1)
+        assert r2 % array_2d == self.from_array(r2.data % array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 % floatval == self.from_array(r1.data.astype("float32") % floatval, rst_ref=r1)
 
     @pytest.mark.parametrize("op", ops_2args)  # type: ignore
