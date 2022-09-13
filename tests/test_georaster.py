@@ -1439,7 +1439,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         red_c = img.split_bands(copy=True, subset=0)[0]
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
-        assert not np.shares_memory(red_c, img)
+        assert not np.shares_memory(red_c.data, img.data)
 
         # Modify the copy, and make sure the original data is not modified.
         red_c.data += 1
@@ -1552,7 +1552,7 @@ def test_numpy_functions(dtype: str) -> None:
     assert np.median(raster) == 26.0
 
 
-class TestsArithmetic:
+class TestArithmetic:
     """
     Test that all arithmetic overloading functions work as expected.
     """
@@ -1809,7 +1809,7 @@ class TestsArithmetic:
 
     @classmethod
     def from_array(
-        cls: type[TestsArithmetic],
+        cls: type[TestArithmetic],
         data: np.ndarray | np.ma.masked_array,
         rst_ref: gr.RasterType,
         nodata: int | float | list[int] | list[float] | None = None,
@@ -1828,18 +1828,21 @@ class TestsArithmetic:
         """
         warnings.filterwarnings("ignore", message="invalid value encountered")
 
-        # Test various inputs: Raster with different dtypes, np.ndarray, single number
+        # Test various inputs: Raster with different dtypes, np.ndarray with 2D or 3D shape, single number
         r1 = self.r1
         r1_f32 = self.r1_f32
         r2 = self.r2
-        array = np.random.randint(1, 255, (1, self.height, self.width)).astype("uint8")
+        array_3d = np.random.randint(1, 255, (1, self.height, self.width)).astype("uint8")
+        array_2d = np.random.randint(1, 255, (self.height, self.width)).astype("uint8")
         floatval = 3.14
 
         # Addition
         assert r1 + r2 == self.from_array(r1.data + r2.data, rst_ref=r1)
         assert r1_f32 + r2 == self.from_array(r1_f32.data + r2.data, rst_ref=r1)
-        # assert array + r2 == self.from_array(array + r2.data, rst_ref=r1)  # this case fails as using numpy's add...
-        assert r2 + array == self.from_array(r2.data + array, rst_ref=r1)
+        assert array_3d + r2 == self.from_array(array_3d + r2.data, rst_ref=r1)
+        assert r2 + array_3d == self.from_array(r2.data + array_3d, rst_ref=r1)
+        assert array_2d + r2 == self.from_array(array_2d[np.newaxis, :, :] + r2.data, rst_ref=r1)
+        assert r2 + array_2d == self.from_array(r2.data + array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 + floatval == self.from_array(r1.data.astype("float32") + floatval, rst_ref=r1)
         assert floatval + r1 == self.from_array(floatval + r1.data.astype("float32"), rst_ref=r1)
         assert r1 + r2 == r2 + r1
@@ -1847,8 +1850,10 @@ class TestsArithmetic:
         # Multiplication
         assert r1 * r2 == self.from_array(r1.data * r2.data, rst_ref=r1)
         assert r1_f32 * r2 == self.from_array(r1_f32.data * r2.data, rst_ref=r1)
-        # assert array * r2 == self.from_array(array * r2.data, rst_ref=r1)  # this case fails as using numpy's mul...
-        assert r2 * array == self.from_array(r2.data * array, rst_ref=r1)
+        assert array_3d * r2 == self.from_array(array_3d * r2.data, rst_ref=r1)
+        assert r2 * array_3d == self.from_array(r2.data * array_3d, rst_ref=r1)
+        assert array_2d * r2 == self.from_array(array_2d[np.newaxis, :, :] * r2.data, rst_ref=r1)
+        assert r2 * array_2d == self.from_array(r2.data * array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 * floatval == self.from_array(r1.data.astype("float32") * floatval, rst_ref=r1)
         assert floatval * r1 == self.from_array(floatval * r1.data.astype("float32"), rst_ref=r1)
         assert r1 * r2 == r2 * r1
@@ -1856,32 +1861,40 @@ class TestsArithmetic:
         # Subtraction
         assert r1 - r2 == self.from_array(r1.data - r2.data, rst_ref=r1)
         assert r1_f32 - r2 == self.from_array(r1_f32.data - r2.data, rst_ref=r1)
-        # assert array - r2 == self.from_array(array - r2.data, rst_ref=r1)  # this case fails
-        assert r2 - array == self.from_array(r2.data - array, rst_ref=r1)
+        assert array_3d - r2 == self.from_array(array_3d - r2.data, rst_ref=r1)
+        assert r2 - array_3d == self.from_array(r2.data - array_3d, rst_ref=r1)
+        assert array_2d - r2 == self.from_array(array_2d[np.newaxis, :, :] - r2.data, rst_ref=r1)
+        assert r2 - array_2d == self.from_array(r2.data - array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 - floatval == self.from_array(r1.data.astype("float32") - floatval, rst_ref=r1)
         assert floatval - r1 == self.from_array(floatval - r1.data.astype("float32"), rst_ref=r1)
 
         # True division
         assert r1 / r2 == self.from_array(r1.data / r2.data, rst_ref=r1)
         assert r1_f32 / r2 == self.from_array(r1_f32.data / r2.data, rst_ref=r1)
-        # assert array / r2 == self.from_array(array / r2.data, rst_ref=r1)  # this case fails
-        assert r2 / array == self.from_array(r2.data / array, rst_ref=r2)
+        assert array_3d / r2 == self.from_array(array_3d / r2.data, rst_ref=r1)
+        assert r2 / array_3d == self.from_array(r2.data / array_3d, rst_ref=r2)
+        assert array_2d / r2 == self.from_array(array_2d[np.newaxis, :, :] / r2.data, rst_ref=r1)
+        assert r2 / array_2d == self.from_array(r2.data / array_2d[np.newaxis, :, :], rst_ref=r2)
         assert r1 / floatval == self.from_array(r1.data.astype("float32") / floatval, rst_ref=r1)
         assert floatval / r1 == self.from_array(floatval / r1.data.astype("float32"), rst_ref=r1)
 
         # Floor division
         assert r1 // r2 == self.from_array(r1.data // r2.data, rst_ref=r1)
         assert r1_f32 // r2 == self.from_array(r1_f32.data // r2.data, rst_ref=r1)
-        # assert array // r2 == self.from_array(array // r2.data, rst_ref=r1)  # this case fails
-        assert r2 // array == self.from_array(r2.data // array, rst_ref=r1)
+        assert array_3d // r2 == self.from_array(array_3d // r2.data, rst_ref=r1)
+        assert r2 // array_3d == self.from_array(r2.data // array_3d, rst_ref=r1)
+        assert array_2d // r2 == self.from_array(array_2d[np.newaxis, :, :] // r2.data, rst_ref=r1)
+        assert r2 // array_2d == self.from_array(r2.data // array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 // floatval == self.from_array(r1.data // floatval, rst_ref=r1)
         assert floatval // r1 == self.from_array(floatval // r1.data, rst_ref=r1)
 
         # Modulo
         assert r1 % r2 == self.from_array(r1.data % r2.data, rst_ref=r1)
         assert r1_f32 % r2 == self.from_array(r1_f32.data % r2.data, rst_ref=r1)
-        # assert array % r2 == self.from_array(array % r2.data, rst_ref=r1)  # this case fails
-        assert r2 % array == self.from_array(r2.data % array, rst_ref=r1)
+        assert array_3d % r2 == self.from_array(array_3d % r2.data, rst_ref=r1)
+        assert r2 % array_3d == self.from_array(r2.data % array_3d, rst_ref=r1)
+        assert array_2d % r2 == self.from_array(array_2d[np.newaxis, :, :] % r2.data, rst_ref=r1)
+        assert r2 % array_2d == self.from_array(r2.data % array_2d[np.newaxis, :, :], rst_ref=r1)
         assert r1 % floatval == self.from_array(r1.data.astype("float32") % floatval, rst_ref=r1)
 
     @pytest.mark.parametrize("op", ops_2args)  # type: ignore
@@ -1913,3 +1926,283 @@ class TestsArithmetic:
         if power > 0:  # Integers to negative integer powers are not allowed.
             assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
         assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
+
+
+class TestArrayInterface:
+    """Test that the array interface of Raster works as expected for ufuncs and array functions"""
+
+    # -- First, we list all universal NumPy functions, or "ufuncs" --
+
+    # All universal functions of NumPy, about 90 in 2022. See list: https://numpy.org/doc/stable/reference/ufuncs.html
+    ufuncs_str = [
+        ufunc
+        for ufunc in np.core.umath.__all__
+        if (
+            ufunc[0] != "_"
+            and ufunc.islower()
+            and "err" not in ufunc
+            and ufunc not in ["e", "pi", "frompyfunc", "euler_gamma"]
+        )
+    ]
+
+    # Universal functions with one input argument and one output, corresponding to (in NumPy 1.22.4):
+    # ['absolute', 'arccos', 'arccosh', 'arcsin', 'arcsinh', 'arctan', 'arctanh', 'cbrt', 'ceil', 'conj', 'conjugate',
+    # 'cos', 'cosh', 'deg2rad', 'degrees', 'exp', 'exp2', 'expm1', 'fabs', 'floor', 'invert', 'isfinite', 'isinf',
+    # 'isnan', 'isnat', 'log', 'log10', 'log1p', 'log2', 'logical_not', 'negative', 'positive', 'rad2deg', 'radians',
+    # 'reciprocal', 'rint', 'sign', 'signbit', 'sin', 'sinh', 'spacing', 'sqrt', 'square', 'tan', 'tanh', 'trunc']
+    ufuncs_str_1nin_1nout = [
+        ufunc for ufunc in ufuncs_str if (getattr(np, ufunc).nin == 1 and getattr(np, ufunc).nout == 1)
+    ]
+
+    # Universal functions with one input argument and two output (Note: none exist for three outputs or above)
+    # Those correspond to: ['frexp', 'modf']
+    ufuncs_str_1nin_2nout = [
+        ufunc for ufunc in ufuncs_str if (getattr(np, ufunc).nin == 1 and getattr(np, ufunc).nout == 2)
+    ]
+
+    # Universal functions with two input arguments and one output, corresponding to:
+    # ['add', 'arctan2', 'bitwise_and', 'bitwise_or', 'bitwise_xor', 'copysign', 'divide', 'equal', 'floor_divide',
+    #  'float_power', 'fmax', 'fmin', 'fmod', 'gcd', 'greater', 'greater_equal', 'heaviside', 'hypot', 'lcm', 'ldexp',
+    #  'left_shift', 'less', 'less_equal', 'logaddexp', 'logaddexp2', 'logical_and', 'logical_or', 'logical_xor',
+    #  'maximum', 'minimum', 'mod', 'multiply', 'nextafter', 'not_equal', 'power', 'remainder', 'right_shift',
+    #  'subtract', 'true_divide']
+    ufuncs_str_2nin_1nout = [
+        ufunc for ufunc in ufuncs_str if (getattr(np, ufunc).nin == 2 and getattr(np, ufunc).nout == 1)
+    ]
+
+    # Universal functions with two input arguments and two outputs (Note: none exist for three outputs or above)
+    # These correspond to: ['divmod']
+    ufuncs_str_2nin_2nout = [
+        ufunc for ufunc in ufuncs_str if (getattr(np, ufunc).nin == 2 and getattr(np, ufunc).nout == 2)
+    ]
+
+    # -- Second, we list array functions we intend to support in the array interface --
+
+    # To my knowledge, there is no list that includes all numpy functions (and we probably don't want to test them all)
+    # Let's include manually the important ones:
+    # - statistics: normal and for NaNs;
+    # - sorting and counting;
+    # Most other math functions are already universal functions
+
+    # The full list exists in Raster
+    handled_functions = gu.georaster.raster._HANDLED_FUNCTIONS
+
+    # Details below:
+    # NaN functions: [f for f in np.lib.nanfunctions.__all__]
+    # nanstatfuncs = ['nansum', 'nanmax', 'nanmin', 'nanargmax', 'nanargmin', 'nanmean', 'nanmedian', 'nanpercentile',
+    #             'nanvar', 'nanstd', 'nanprod', 'nancumsum', 'nancumprod', 'nanquantile']
+
+    # Statistics and sorting matching NaN functions: https://numpy.org/doc/stable/reference/routines.statistics.html
+    # and https://numpy.org/doc/stable/reference/routines.sort.html
+    # statfuncs = ['sum', 'max', 'min', 'argmax', 'argmin', 'mean', 'median', 'percentile', 'var', 'std', 'prod',
+    #              'cumsum', 'cumprod', 'quantile']
+
+    # Sorting and counting ounting with single array input:
+    # sortfuncs = ['sort', 'count_nonzero', 'unique]
+
+    # --  Third, we define the test data --
+
+    # We create two random array of varying dtype
+    width = height = 5
+    min_val = np.iinfo("int32").min
+    max_val = np.iinfo("int32").max
+    transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
+    np.random.seed(42)
+    arr1 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
+    arr2 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
+
+    # Create two random masks
+    mask1 = np.random.randint(0, 2, size=(width, height), dtype=bool)
+    mask2 = np.random.randint(0, 2, size=(width, height), dtype=bool)
+
+    # Assert that there is at least one unmasked value
+    assert np.count_nonzero(~mask1) > 0
+    assert np.count_nonzero(~mask2) > 0
+
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
+    @pytest.mark.parametrize(
+        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+    )  # type: ignore
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
+    def test_array_ufunc_1nin_1nout(self, ufunc_str: str, nodata_init: None | str, dtype: str) -> None:
+        """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
+
+        # We set the default nodata
+        if nodata_init == "type_default":
+            nodata: int | None = _default_ndv(dtype)
+        else:
+            nodata = None
+
+        # Create Raster
+        ma1 = np.ma.masked_array(data=self.arr1.astype(dtype), mask=self.mask1)
+        rst = gr.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata)
+
+        # Get ufunc
+        ufunc = getattr(np, ufunc_str)
+
+        # Find the common dtype between the Raster and the most constrained input type (first character is the input)
+        com_dtype = np.find_common_type([dtype] + [ufunc.types[0][0]], [])
+
+        # Catch warnings
+        with warnings.catch_warnings():
+
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
+
+            # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
+            if com_dtype in (str(np.dtype(t[0])) for t in ufunc.types):
+
+                # For a single output
+                if ufunc.nout == 1:
+                    assert np.ma.allequal(ufunc(rst.data), ufunc(rst).data)
+
+                # For two outputs
+                elif ufunc.nout == 2:
+                    outputs_rst = ufunc(rst)
+                    outputs_ma = ufunc(rst.data)
+                    assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
+                        outputs_ma[1], outputs_rst[1].data
+                    )
+
+            # If the input dtype is not possible, check that NumPy raises a TypeError
+            else:
+                with pytest.raises(TypeError):
+                    ufunc(rst.data)
+                with pytest.raises(TypeError):
+                    ufunc(rst)
+
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
+    @pytest.mark.parametrize(
+        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+    )  # type: ignore
+    @pytest.mark.parametrize(
+        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+    )  # type: ignore
+    @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
+    @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
+    def test_array_ufunc_2nin_1nout(
+        self, ufunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str
+    ) -> None:
+        """Test that ufuncs with two input arguments consistently return the same result as for masked arrays."""
+
+        # We set the default nodatas
+        if nodata1_init == "type_default":
+            nodata1: int | None = _default_ndv(dtype1)
+        else:
+            nodata1 = None
+        if nodata2_init == "type_default":
+            nodata2: int | None = _default_ndv(dtype2)
+        else:
+            nodata2 = None
+
+        ma1 = np.ma.masked_array(data=self.arr1.astype(dtype1), mask=self.mask1)
+        ma2 = np.ma.masked_array(data=self.arr2.astype(dtype2), mask=self.mask2)
+        rst1 = gr.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata1)
+        rst2 = gr.Raster.from_array(ma2, transform=self.transform, crs=None, nodata=nodata2)
+
+        ufunc = getattr(np, ufunc_str)
+
+        # Find the common dtype between the Raster and the most constrained input type (first character is the input)
+        com_dtype1 = np.find_common_type([dtype1] + [ufunc.types[0][0]], [])
+        com_dtype2 = np.find_common_type([dtype2] + [ufunc.types[0][1]], [])
+
+        # If the two input types can be the same type, pass a tuple with the common type of both
+        # Below we ignore datetime and timedelta types "m" and "M"
+        if all(t[0] == t[1] for t in ufunc.types if not ("m" or "M") in t[0:2]):
+            com_dtype_both = np.find_common_type([com_dtype1, com_dtype2], [])
+            com_dtype_tuple = (com_dtype_both, com_dtype_both)
+
+        # Otherwise, pass the tuple with each common type
+        else:
+            com_dtype_tuple = (com_dtype1, com_dtype2)
+
+        # Catch warnings
+        with warnings.catch_warnings():
+
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
+
+            # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
+            if com_dtype_tuple in ((str(np.dtype(t[0])), str(np.dtype(t[1]))) for t in ufunc.types):
+
+                # For a single output
+                if ufunc.nout == 1:
+
+                    # There exists a single exception due to negative integers as exponent of integers in "power"
+                    if ufunc_str == "power" and "int" in dtype1 and "int" in dtype2 and np.min(rst2.data) < 0:
+                        with pytest.raises(ValueError, match="Integers to negative integer powers are not allowed."):
+                            ufunc(rst1, rst2)
+                        with pytest.raises(ValueError, match="Integers to negative integer powers are not allowed."):
+                            ufunc(rst1.data, rst2.data)
+
+                    # Otherwise, run the normal assertion for a single output
+                    else:
+                        assert np.ma.allequal(ufunc(rst1.data, rst2.data), ufunc(rst1, rst2).data)
+
+                # For two outputs
+                elif ufunc.nout == 2:
+                    outputs_rst = ufunc(rst1, rst2)
+                    outputs_ma = ufunc(rst1.data, rst2.data)
+                    assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
+                        outputs_ma[1], outputs_rst[1].data
+                    )
+
+            # If the input dtype is not possible, check that NumPy raises a TypeError
+            else:
+                with pytest.raises(TypeError):
+                    ufunc(rst1.data, rst2.data)
+                with pytest.raises(TypeError):
+                    ufunc(rst1, rst2)
+
+    @pytest.mark.parametrize("arrfunc_str", handled_functions)  # type: ignore
+    @pytest.mark.parametrize(
+        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+    )  # type: ignore
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
+    def test_array_functions(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
+        """Test that array functions that we support give the same output as they would on the masked array"""
+
+        # We set the default nodata
+        if nodata_init == "type_default":
+            nodata: int | None = _default_ndv(dtype)
+        else:
+            nodata = None
+
+        # Create Raster
+        ma1 = np.ma.masked_array(data=self.arr1.astype(dtype), mask=self.mask1)
+        rst = gr.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata)
+
+        # Get array func
+        arrfunc = getattr(np, arrfunc_str)
+
+        # Find the common dtype between the Raster and the most constrained input type (first character is the input)
+        # com_dtype = np.find_common_type([dtype] + [arrfunc.types[0][0]], [])
+
+        # Catch warnings
+        with warnings.catch_warnings():
+
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+            # Pass an argument for functions that require it (nanpercentile, percentile, quantile and nanquantile) and
+            # define specific behaviour
+            if "percentile" in arrfunc_str:
+                arg = 80.0
+                # For percentiles and quantiles, the statistic is computed after removing the masked values
+                output_rst = arrfunc(rst, arg)
+                output_ma = arrfunc(rst.data.compressed(), arg)
+            elif "quantile" in arrfunc_str:
+                arg = 0.8
+                output_rst = arrfunc(rst, arg)
+                output_ma = arrfunc(rst.data.compressed(), arg)
+            elif "median" in arrfunc_str:
+                # For the median, the statistic is computed by masking the values through np.ma.median
+                output_rst = arrfunc(rst)
+                output_ma = np.ma.median(rst.data)
+            else:
+                output_rst = arrfunc(rst)
+                output_ma = arrfunc(rst.data)
+
+            if isinstance(output_rst, np.ndarray):
+                assert np.ma.allequal(output_rst, output_ma)
+            else:
+                assert output_rst == output_ma
