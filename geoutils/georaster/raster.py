@@ -1284,7 +1284,13 @@ Must be a Raster, np.ndarray or single number."
                 dst_nodata = _default_ndv(dtype)
                 # if dst_nodata is already being used, raise a warning.
                 # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
-                if dst_nodata in self.data:
+                if not self.is_loaded:
+                    warnings.warn(
+                        f"For reprojection, dst_nodata must be set. Setting default nodata to {dst_nodata}. \
+You may set a different nodata with `dst_nodata`."
+                    )
+
+                elif dst_nodata in self.data:
                     warnings.warn(
                         f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exist in \
 self.data. This may have unexpected consequences. Consider setting a different nodata with \
