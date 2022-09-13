@@ -2058,8 +2058,10 @@ class TestArrayInterface:
 
                 # For two outputs
                 elif ufunc.nout == 2:
-                    assert np.ma.allequal(ufunc(rst.data)[0], ufunc(rst)[0].data) and np.ma.allequal(
-                        ufunc(rst.data)[1], ufunc(rst)[1].data
+                    outputs_rst = ufunc(rst)
+                    outputs_ma = ufunc(rst.data)
+                    assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
+                        outputs_ma[1], outputs_rst[1].data
                     )
 
             # If the input dtype is not possible, check that NumPy raises a TypeError
@@ -2139,8 +2141,10 @@ class TestArrayInterface:
 
                 # For two outputs
                 elif ufunc.nout == 2:
-                    assert np.ma.allequal(ufunc(rst1.data, rst2.data)[0], ufunc(rst1, rst2)[0].data) and np.ma.allequal(
-                        ufunc(rst1.data, rst2.data)[1], ufunc(rst1, rst2)[1].data
+                    outputs_rst = ufunc(rst1, rst2)
+                    outputs_ma = ufunc(rst1.data, rst2.data)
+                    assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
+                        outputs_ma[1], outputs_rst[1].data
                     )
 
             # If the input dtype is not possible, check that NumPy raises a TypeError
@@ -2185,11 +2189,11 @@ class TestArrayInterface:
                 arg = 80.0
                 # For percentiles and quantiles, the statistic is computed after removing the masked values
                 output_rst = arrfunc(rst, arg)
-                output_ma = arrfunc(rst.data.data[~rst.data.mask], arg)
+                output_ma = arrfunc(rst.data.compressed(), arg)
             elif "quantile" in arrfunc_str:
                 arg = 0.8
                 output_rst = arrfunc(rst, arg)
-                output_ma = arrfunc(rst.data.data[~rst.data.mask], arg)
+                output_ma = arrfunc(rst.data.compressed(), arg)
             elif "median" in arrfunc_str:
                 # For the median, the statistic is computed by masking the values through np.ma.median
                 output_rst = arrfunc(rst)

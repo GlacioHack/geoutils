@@ -1065,7 +1065,7 @@ Must be a Raster, np.ndarray or single number."
                     {"data": output[1], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
                 )
 
-    def __array_function__(self, func: Callable[[np.ndarray, Any], Any], types: type, args: Any, kwargs: Any) -> Any:
+    def __array_function__(self, func: Callable[[np.ndarray, Any], Any], types: tuple[type], args: Any, kwargs: Any) -> Any:
         """
         Method to cast NumPy array function directly on a Raster object by applying it to the masked array.
         A limited number of function is supported, listed in raster._HANDLED_FUNCTIONS.
@@ -1087,10 +1087,10 @@ Must be a Raster, np.ndarray or single number."
 
         # For percentiles and quantiles, there exist no masked array version, so we compute on the valid data directly
         elif func.__name__ in ["percentile", "nanpercentile"]:
-            first_arg = args[0].data.data[~args[0].data.mask]
+            first_arg = args[0].data.compressed()
 
         elif func.__name__ in ["quantile", "nanquantile"]:
-            first_arg = args[0].data.data[~args[0].data.mask]
+            first_arg = args[0].data.compressed()
 
         # Otherwise, we run the numpy function normally (most take masks into account)
         else:
