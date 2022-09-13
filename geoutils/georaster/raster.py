@@ -1026,7 +1026,7 @@ Must be a Raster, np.ndarray or single number."
         if ufunc.nin == 1:
             # If the universal function has only one output
             if ufunc.nout == 1:
-                return self.__class__(
+                return self.from_array(
                     {
                         "data": getattr(ufunc, method)(inputs[0].data, **kwargs),  # type: ignore
                         "transform": self.transform,
@@ -1038,16 +1038,16 @@ Must be a Raster, np.ndarray or single number."
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
                 output = getattr(ufunc, method)(inputs[0].data, **kwargs)  # type: ignore
-                return self.__class__(
+                return self.from_array(
                     {"data": output[0], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
-                ), self.__class__(
+                ), self.from_array(
                     {"data": output[1], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
                 )
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
             if ufunc.nout == 1:
-                return self.__class__(
+                return self.from_array(
                     {
                         "data": getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
                         "transform": self.transform,
@@ -1059,9 +1059,9 @@ Must be a Raster, np.ndarray or single number."
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
                 output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
-                return self.__class__(
+                return self.from_array(
                     {"data": output[0], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
-                ), self.__class__(
+                ), self.from_array(
                     {"data": output[1], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
                 )
 
