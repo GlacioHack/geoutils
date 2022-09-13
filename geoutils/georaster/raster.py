@@ -1027,42 +1027,37 @@ Must be a Raster, np.ndarray or single number."
             # If the universal function has only one output
             if ufunc.nout == 1:
                 return self.from_array(
-                    {
-                        "data": getattr(ufunc, method)(inputs[0].data, **kwargs),  # type: ignore
-                        "transform": self.transform,
-                        "crs": self.crs,
-                        "nodata": self.nodata,
-                    }
-                )
+                        data=getattr(ufunc, method)(inputs[0].data, **kwargs),
+                        transform=self.transform,
+                        crs=self.crs,
+                        nodata=self.nodata)
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = getattr(ufunc, method)(inputs[0].data, **kwargs)  # type: ignore
+                output = getattr(ufunc, method)(inputs[0].data, **kwargs)
                 return self.from_array(
-                    {"data": output[0], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                    data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
                 ), self.from_array(
-                    {"data": output[1], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                    data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata
                 )
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
             if ufunc.nout == 1:
                 return self.from_array(
-                    {
-                        "data": getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
-                        "transform": self.transform,
-                        "crs": self.crs,
-                        "nodata": self.nodata,
-                    }
+                    data=getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),
+                        transform=self.transform,
+                        crs=self.crs,
+                        nodata=self.nodata
                 )
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
+                output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)
                 return self.from_array(
-                    {"data": output[0], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                    data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
                 ), self.from_array(
-                    {"data": output[1], "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+                    data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata
                 )
 
     def __array_function__(
