@@ -1706,7 +1706,8 @@ to be cleared due to the setting of GCPs."
         if match_ref:
             intersection = projtools.align_bounds(self.transform, intersection)
 
-        return intersection
+        # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
+        return intersection  # type: ignore
 
     def show(
         self,
