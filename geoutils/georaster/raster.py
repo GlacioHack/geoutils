@@ -1699,7 +1699,7 @@ to be cleared due to the setting of GCPs."
 
         # check that intersection is not void, otherwise return 0 everywhere
         if intersection == ():
-            warnings.warn("Warning: Intersection is void")
+            warnings.warn("Intersection is void")
             return (0.0, 0.0, 0.0, 0.0)
 
         # if required, ensure the intersection is aligned with self's georeferences
