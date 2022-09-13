@@ -1,5 +1,5 @@
 """
-projtools provides a toolset for dealing with different coordinate reference systems (CRS).
+projtools provides a set of tools for dealing with different coordinate reference systems (CRS) and bounds.
 """
 from __future__ import annotations
 
