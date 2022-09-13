@@ -1,7 +1,6 @@
 rasterio
 geopandas >= 0.10.0
 pyproj
-pyyaml
 flake8
 pytest
 pytest-xdist
@@ -14,7 +13,8 @@ sphinx_autodoc_typehints
 matplotlib
 scipy
 pre-commit
-typing-extensions; python_version < '3.8'
+typing-extensions
 sphinx-gallery
 scikit-image
+pyyaml
 

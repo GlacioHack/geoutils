@@ -6,11 +6,10 @@ dependencies:
   - geopandas >= 0.10.0
   - matplotlib
   - pyproj
-  - rasterio
+  - rasterio >= 1.3
   - scipy
   - pip
   - tqdm
-  - pyyaml
 
   # Development-specific
   - sphinx
@@ -26,3 +25,4 @@ dependencies:
   - typing-extensions
   - sphinx-gallery
   - scikit-image
+  - pyyaml
