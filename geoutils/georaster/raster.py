@@ -1663,17 +1663,18 @@ to be cleared due to the setting of GCPs."
         # Calculate new bounds
         left, bottom, right, top = self.bounds
         new_bounds = rio.warp.transform_bounds(self.crs, out_crs, left, bottom, right, top, densify_pts)
+        new_bounds = rio.coords.BoundingBox(*new_bounds)
 
         return new_bounds
 
-    def intersection(self, rst: str | Raster) -> tuple[float, float, float, float]:
+    def intersection(self, rst: str | Raster, match_ref: bool = True) -> tuple[float, float, float, float]:
         """
         Returns the bounding box of intersection between this image and another.
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
         :param rst : path to the second image (or another Raster instance)
-
+        :param match_ref: if set to True, returns the smallest intersection that is a multiple of self's georeferences
         :returns: extent of the intersection between the 2 images \
         (xmin, ymin, xmax, ymax) in self's coordinate system.
 
@@ -1684,32 +1685,22 @@ to be cleared due to the setting of GCPs."
         if isinstance(rst, str):
             rst = Raster(rst, load_data=False)
 
-        # Check if both files have the same projection
-        # To be implemented
-        same_proj = True
+        # Reproject the bounds of rst to self's
+        rst_bounds_sameproj = rst.get_bounds_projected(self.crs)
 
-        # Find envelope of rasters' intersections
-        poly1 = projtools.bounds2poly(self.bounds)
-        # poly1.AssignSpatialReference(self.crs)
+        # Calculate intersection of bounding boxes
+        intersection = projtools.merge_bounds([self.bounds, rst_bounds_sameproj], merging_algorithm="intersection")
 
-        # Create a polygon of the envelope of the second image
-        poly2 = projtools.bounds2poly(rst.bounds)
-        # poly2.AssignSpatialReference(rst.srs)
-
-        # If coordinate system is different, reproject poly2 into poly1
-        if not same_proj:
-            raise NotImplementedError()
-
-        # Compute intersection envelope
-        intersect = poly1.intersection(poly2)
-        extent: tuple[float, float, float, float] = intersect.envelope.bounds
-
-        # check that intersection is not void
-        if intersect.area == 0:
+        # check that intersection is not void, otherwise return 0 everywhere
+        if intersection == ():
             warnings.warn("Warning: Intersection is void")
             return (0.0, 0.0, 0.0, 0.0)
 
-        return extent
+        # if required, ensure the intersection is aligned with self's georeferences
+        if match_ref:
+            intersection = projtools.align_bounds(self.transform, intersection)
+
+        return intersection
 
     def show(
         self,
