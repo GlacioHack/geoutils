@@ -372,8 +372,8 @@ class TestRaster:
         ):
             rst.data = rst.data.reshape(new_shape)
 
-    @pytest.mark.parametrize('example', [aster_dem_path, landsat_b4_path, landsat_rgb_path])
-    def test_get_nanarray(self, example) -> None:
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
+    def test_get_nanarray(self, example: str) -> None:
         """
         Check that self.get_nanarray behaves as expected for examples with invalid data or not, and with several bands
         or a single one.
@@ -399,7 +399,6 @@ class TestRaster:
         rst_arr, mask = rst.get_nanarray(return_mask=True)
 
         assert np.array_equal(mask, np.ma.getmaskarray(rst.data).squeeze())
-
 
     def test_downsampling(self) -> None:
         """
