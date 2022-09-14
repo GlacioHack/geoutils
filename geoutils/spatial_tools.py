@@ -88,7 +88,9 @@ def get_valid_extent(array: np.ndarray | np.ma.masked_array) -> tuple[int, ...]:
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
 
 
-def load_multiple_rasters(raster_paths: list[str], crop: bool = True, ref_grid: int | None = None, **kwargs: Any) -> list[RasterType]:
+def load_multiple_rasters(
+    raster_paths: list[str], crop: bool = True, ref_grid: int | None = None, **kwargs: Any
+) -> list[RasterType]:
     """
     Function to load multiple rasters at once in a memory efficient way.
     First load metadata only.
@@ -164,7 +166,9 @@ def load_multiple_rasters(raster_paths: list[str], crop: bool = True, ref_grid: 
 
         # Reproject all rasters
         for index, rst in enumerate(output_rst):
-            output_rst[index] = rst.reproject(dst_crs=ref_rst.crs, dst_bounds=new_bounds, dst_res=ref_rst.res, silent=True, **kwargs)
+            output_rst[index] = rst.reproject(
+                dst_crs=ref_rst.crs, dst_bounds=new_bounds, dst_res=ref_rst.res, silent=True, **kwargs
+            )
 
     # if no crop or reproject option, simply load the rasters
     if (not crop) & (not reproject):
