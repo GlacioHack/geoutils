@@ -1292,7 +1292,7 @@ You may set a different nodata with `dst_nodata`."
 
                 elif dst_nodata in self.data:
                     warnings.warn(
-                        f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exist in \
+                        f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exists in \
 self.data. This may have unexpected consequences. Consider setting a different nodata with \
 self.set_ndv."
                     )

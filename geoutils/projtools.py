@@ -104,7 +104,7 @@ def align_bounds(
 ) -> tuple[float, float, float, float]:
     """
     Aligns the bounds in src_bounds so that it matches the georeferences in ref_transform
-    i.e. the distance between the upper-left pixels or ref and src is a multiple of resolution and
+    i.e. the distance between the upper-left pixels of ref and src is a multiple of resolution and
     the width/height of the bounds are a multiple of resolution.
     The bounds are padded so that the output bounds always contain the input bounds.
 

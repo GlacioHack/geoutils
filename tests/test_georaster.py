@@ -767,7 +767,7 @@ class TestRaster:
         # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
         with pytest.warns(
             UserWarning,
-            match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. \
+            match="For reprojection, dst_nodata must be set. Default chosen value .* exists in self.data. \
 This may have unexpected consequences. Consider setting a different nodata with self.set_ndv.",
         ):
             _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)

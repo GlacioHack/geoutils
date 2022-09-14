@@ -134,6 +134,7 @@ def load_multiple_rasters(raster_paths: list[str], ref_grid: int | None = None, 
 
     for rst in output_rst:
         # Calculate bounds in rst's CRS
+        # rasterio's default for densify_pts is too low for very large images, set a default of 5000
         new_bounds = rio.warp.transform_bounds(
             ref_crs, rst.crs, intersection[0], intersection[1], intersection[2], intersection[3], densify_pts=5000
         )
