@@ -87,7 +87,6 @@ class TestRaster:
         assert np.ma.isMaskedArray(gr.Raster(example, masked=True).data)
         assert np.ma.isMaskedArray(gr.Raster(example, masked=False).data)
 
-    @pytest.mark.skip("Test failing because of an issue in set_ndv")  # type: ignore
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
@@ -112,12 +111,12 @@ class TestRaster:
             # Validate that the mask is respected by adding 0 values (there are none to begin with.)
             r.data.ravel()[:1000] = 0
             # Set the nodata value to 0, then validate that they are excluded from the new minimum
-            r.set_ndv(0)
+            r.set_nodata(0)
         elif r.dtypes[0] == "float32":
             # We do the same with -99999 here
             r.data.ravel()[:1000] = -99999
             # And replace the nodata value
-            r.set_ndv(-99999)
+            r.set_nodata(-99999)
 
         new_stats = r.info(stats=True)
         for i, line in enumerate(stats.splitlines()):
@@ -747,7 +746,7 @@ class TestRaster:
 
         # -- Check proper errors are raised if nodata are not set -- #
         r_ndv = r.copy()
-        r_ndv.set_ndv(None)
+        r_ndv.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
         rand_indices = gu.spatial_tools.subsample_raster(r_ndv.data, 10, return_indices=True)
@@ -768,7 +767,7 @@ class TestRaster:
         with pytest.warns(
             UserWarning,
             match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. \
-This may have unexpected consequences. Consider setting a different nodata with self.set_ndv.",
+This may have unexpected consequences. Consider setting a different nodata with self.set_nodata.",
         ):
             _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
 
@@ -780,7 +779,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
         if r.nodata is None:
-            r.set_ndv(0)
+            r.set_nodata(0)
 
         # - Create 2 artificial rasters -
         # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
@@ -869,7 +868,16 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         # If a nodata is set, make sure it is preserved
         r_ndv = r.copy()
-        r_ndv.set_ndv(255)
+
+        # Exception with the Landsat example
+        if np.count_nonzero(r_ndv.data.data == 255) > 0:
+            with pytest.warns(UserWarning, match=re.escape('New nodata value already found in the data array, the corresponding grid cells '
+                                      'will be indistinguishable from that updated from the old nodata value, and will '
+                                      'be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.')):
+                r_ndv.set_nodata(255)
+        else:
+            r_ndv.set_nodata(255)
+
         r3 = r_ndv.reproject(r2)
         assert r_ndv.nodata == r3.nodata
 
@@ -1073,9 +1081,9 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert z == z_val
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_set_ndv(self, example: str) -> None:
+    def test_set_nodata(self, example: str) -> None:
         """
-        Read dataset and set a certain value (e.g., 255 or -9999) to no data. Save mask.
+        Read dataset and set a certain value (e.g., 255 or -9999) to nodata. Save mask.
         Then, set the value minus one as new no data (e.g., 254 or -10000), after rewriting the previous nodata to 0.
         Save mask again.
         Check that both no data masks are identical and have correct number of pixels.
@@ -1086,7 +1094,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         # Copy the original data to validate the mask later
         original_data = r.data.copy()
         # Set the nodata value to default ndv (e.g., 255) and update the mask accordingly.
-        r.set_ndv(ndv=_default_ndv(r.dtypes[0]), update_array=True)
+        r.set_nodata(nodata=_default_ndv(r.dtypes[0]), update_array=True)
         # Save the mask for validation
         ndv_index = r.data.mask.copy()
 
@@ -1094,11 +1102,11 @@ This may have unexpected consequences. Consider setting a different nodata with 
         r.data[r.data == _default_ndv(r.dtypes[0]) - 1] = 0
         # This will unset the mask of all masked with default nodata
         # The new nodata has no values, since they were changed in the command above. The mask is therefore empty
-        r.set_ndv(ndv=_default_ndv(r.dtypes[0]) - 1, update_array=True)
+        r.set_nodata(nodata=_default_ndv(r.dtypes[0]) - 1, update_array=False)
         ndv_index_2 = r.data.mask
 
-        # The first mask should be as big as the amount of 255 values
-        assert np.count_nonzero(ndv_index) == (np.count_nonzero(original_data == 255))
+        # The first mask should be as big as the amount of 255 values or already masked values
+        assert np.count_nonzero(ndv_index) == (np.count_nonzero(np.logical_or(original_data == 255, original_data.mask)))
         # The second mask should be empty, as the 255 values are unset and no 254 values exist anymore.
         assert np.count_nonzero(ndv_index_2) == 0
 
@@ -1111,7 +1119,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         if r.dtypes[0] == "uint8":
             with pytest.raises(ValueError, match=expected_message):
                 # Feed a floating numeric to an integer type
-                r.set_ndv(0.5)
+                r.set_nodata(0.5)
 
     def test_default_ndv(self) -> None:
         """
@@ -1175,7 +1183,13 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert not np.any(r2.data == 0)
         r2 = r.copy()
         r2.data[0, 0] = 0
-        r2.set_ndv(0)
+
+        with pytest.warns(UserWarning, match=re.escape(
+                'New nodata value already found in the data array, the corresponding grid cells '
+                'will be indistinguishable from that updated from the old nodata value, and will '
+                'be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.')):
+            r2.set_nodata(0)
+
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
             rout = r2.astype(dtype)  # type: ignore
             assert rout == r2
@@ -1462,8 +1476,8 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         img1 = gr.Raster(self.landsat_b4_path)
         img2 = gr.Raster(self.landsat_b4_crop_path)
-        img1.set_ndv(0)
-        img2.set_ndv(0)
+        img1.set_nodata(0)
+        img2.set_nodata(0)
 
         # Resample the rasters using a new resampling method and see that the string and enum gives the same result.
         img3a = img1.reproject(img2, resampling="q1")
@@ -1632,7 +1646,7 @@ class TestArithmetic:
 
         # Change ndv
         r2 = r1.copy()
-        r2.set_ndv(34)
+        r2.set_nodata(34)
         assert r1 != r2
 
     # List of operations with two operands
