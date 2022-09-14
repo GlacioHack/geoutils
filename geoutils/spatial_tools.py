@@ -88,23 +88,26 @@ def get_valid_extent(array: np.ndarray | np.ma.masked_array) -> tuple[int, ...]:
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
 
 
-def load_multiple_rasters(raster_paths: list[str], ref_grid: int | None = None, **kwargs: Any) -> list[RasterType]:
+def load_multiple_rasters(raster_paths: list[str], crop: bool = True, ref_grid: int | None = None, **kwargs: Any) -> list[RasterType]:
     """
     Function to load multiple rasters at once in a memory efficient way.
-    First the area of overlap is estimated from metadata only.
-    The rasters are cropped to this area of overlap and loaded into memory.
-    Optionally, the rasters are all reprojected to the grid of one raster set as reference.
+    First load metadata only.
+    Optionally, crop all rasters to their intersection (default).
+    Optionally, reproject all rasters to the grid of one raster set as reference (after optional crop).
+    Otherwise, simply load the full rasters.
 
     :param raster_paths: List of paths to the rasters to be loaded
+    :param crop: if set to True, will only load rasters in the area they intersect
     :param ref_grid: If set to an integer value, the raster with that index will be considered as the reference
-    and all other rasters will be reprojected on the same grid
+    and all other rasters will be reprojected on the same grid (after optional crop)
     :param kwargs: optional arguments to be passed to Raster.reproject, e.g. the resampling method
 
     :returns: a list of loaded Raster instances
     """
-    # Check ref_grid value. If None, use first raster for reference CRS, but does not reproject
+    # If ref_grid is provided, need to reproject
     if isinstance(ref_grid, int):
         reproject = True
+    # if no ref_grid provided, still need a reference CRS, use first by default
     elif ref_grid is None:
         ref_grid = 0
         reproject = False
@@ -126,28 +129,47 @@ def load_multiple_rasters(raster_paths: list[str], ref_grid: int | None = None, 
         bound = rst.get_bounds_projected(ref_crs)
         bounds.append(bound)
 
-    # Second get the intersection of all raster bounds and crop rasters accordingly
+    # Second get the intersection of all raster bounds
     intersection = gu.projtools.merge_bounds(bounds, "intersection")
-    if intersection == ():
-        warnings.warn("No intersection found, returning unloaded rasters")
-        return output_rst
 
-    for rst in output_rst:
-        # Calculate bounds in rst's CRS
-        # rasterio's default for densify_pts is too low for very large images, set a default of 5000
-        new_bounds = rio.warp.transform_bounds(
-            ref_crs, rst.crs, intersection[0], intersection[1], intersection[2], intersection[3], densify_pts=5000
-        )
-        # Ensure bounds align with the original ones, to avoid resampling at this stage
-        new_bounds = gu.projtools.align_bounds(rst.transform, new_bounds)
-        rst.crop(new_bounds, mode="match_pixel")
+    # Optionally, crop the rasters
+    if crop:
+        # Check that intersection is not void
+        if intersection == ():
+            warnings.warn("Intersection is void, returning unloaded rasters")
+            return output_rst
+
+        for rst in output_rst:
+            # Calculate bounds in rst's CRS
+            # rasterio's default for densify_pts is too low for very large images, set a default of 5000
+            new_bounds = rio.warp.transform_bounds(
+                ref_crs, rst.crs, intersection[0], intersection[1], intersection[2], intersection[3], densify_pts=5000
+            )
+            # Ensure bounds align with the original ones, to avoid resampling at this stage
+            new_bounds = gu.projtools.align_bounds(rst.transform, new_bounds)
+            rst.crop(new_bounds, mode="match_pixel")
 
     # Optionally, reproject all rasters to the reference grid
     if reproject:
+
+        ref_rst = output_rst[ref_grid]
+
+        # Set output bounds - intersection if crop is True, otherwise use that of ref_grid
+        if crop:
+            # make sure new bounds align with reference's bounds (to avoid resampling ref)
+            new_bounds = intersection
+            new_bounds = gu.projtools.align_bounds(ref_rst.transform, intersection)
+        else:
+            new_bounds = ref_rst.bounds
+
+        # Reproject all rasters
         for index, rst in enumerate(output_rst):
-            if index == ref_grid:
-                continue
-            output_rst[index] = rst.reproject(dst_ref=output_rst[ref_grid], silent=True, **kwargs)
+            output_rst[index] = rst.reproject(dst_crs=ref_rst.crs, dst_bounds=new_bounds, dst_res=ref_rst.res, silent=True, **kwargs)
+
+    # if no crop or reproject option, simply load the rasters
+    if (not crop) & (not reproject):
+        for rst in output_rst:
+            rst.load()
 
     return output_rst
 
