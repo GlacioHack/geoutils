@@ -1002,6 +1002,22 @@ Must be a Raster, np.ndarray or single number."
 
         return cp
 
+    def get_nanarray(self, return_mask: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        """
+        Method to return a squeezed array filled with NaN and the associated mask from the masked array in .data
+
+        :param return_mask: Whether to return the mask of valid data
+
+        :returns Array with masked data as NaNs, (Optional) Mask of valid data
+        """
+
+        nanarray = self.data.filled(fill_value=np.nan).squeeze()
+
+        if return_mask:
+            return nanarray, np.ma.getmaskarray(self.data).squeeze()
+        else:
+            return nanarray
+
     def __array__(self) -> np.ndarray:
         """Method to cast np.array() or np.asarray() function directly on Raster classes."""
 
