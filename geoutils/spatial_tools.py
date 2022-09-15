@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils.georaster import Raster, RasterType
-from geoutils.georaster.raster import _default_ndv
+from geoutils.georaster.raster import _default_nodata
 from geoutils.misc import resampling_method_from_str
 
 
@@ -257,7 +257,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             raster.load()
             raster.is_loaded = False
 
-        ndv = reference_raster.nodata or gu.georaster.raster._default_ndv(reference_raster.data.dtype)
+        nodata = reference_raster.nodata or gu.georaster.raster._default_nodata(reference_raster.data.dtype)
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
             dst_bounds=dst_bounds,
@@ -267,7 +267,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             dst_nodata=reference_raster.nodata,
             silent=True,
         )
-        reprojected_raster.set_nodata(ndv)
+        reprojected_raster.set_nodata(nodata)
 
         # Optionally calculate difference
         if diff:
@@ -287,7 +287,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     if reference_raster.nodata is not None:
         nodata = reference_raster.nodata
     else:
-        nodata = _default_ndv(data.dtype)
+        nodata = _default_nodata(data.dtype)
     data[np.isnan(data)] = nodata
 
     # Save as gu.Raster - needed as some child classes may not accept multiple bands
@@ -374,7 +374,7 @@ If several algorithms are provided, each result is returned as a separate band.
     if reference_raster.nodata is not None:
         nodata = reference_raster.nodata
     else:
-        nodata = _default_ndv(merged_data.dtype)
+        nodata = _default_nodata(merged_data.dtype)
     merged_data[np.isnan(merged_data)] = nodata
 
     # Save as gu.Raster

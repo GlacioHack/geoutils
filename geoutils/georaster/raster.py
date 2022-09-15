@@ -90,11 +90,11 @@ _HANDLED_FUNCTIONS = (
 # Similar to GDAL for int types, but without absurdly long nodata values for floats.
 # For unsigned types, the maximum value is chosen (with a max of 99999).
 # For signed types, the minimum value is chosen (with a min of -99999).
-def _default_ndv(dtype: str | np.dtype | type) -> int:
+def _default_nodata(dtype: str | np.dtype | type) -> int:
     """
     Set the default nodata value for any given dtype, when this is not provided.
     """
-    default_ndv_lookup = {
+    default_nodata_lookup = {
         "uint8": 255,
         "int8": -128,
         "uint16": 65535,
@@ -119,8 +119,8 @@ def _default_ndv(dtype: str | np.dtype | type) -> int:
     if isinstance(dtype, np.dtype):
         dtype = dtype.name
 
-    if dtype in default_ndv_lookup.keys():
-        return default_ndv_lookup[dtype]
+    if dtype in default_nodata_lookup.keys():
+        return default_nodata_lookup[dtype]
     else:
         raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
 
@@ -572,7 +572,7 @@ Must be a Raster, np.ndarray or single number."
             )
 
         # Get self's dtype and nodata
-        ndv1 = self.nodata
+        nodata1 = self.nodata
         dtype1 = self.data.dtype
 
         # Case 1 - other is a Raster
@@ -588,7 +588,7 @@ Must be a Raster, np.ndarray or single number."
                 raise ValueError("Both rasters must have the same shape, transform and CRS.")
 
             other_data = other.data
-            ndv2 = other.nodata
+            nodata2 = other.nodata
             dtype2 = other_data.dtype
 
         # Case 2 - other is a numpy array
@@ -605,24 +605,24 @@ Must be a Raster, np.ndarray or single number."
             else:
                 raise ValueError("Both rasters must have the same shape.")
 
-            ndv2 = None
+            nodata2 = None
             dtype2 = other_data.dtype
 
         # Case 3 - other is a single number
         else:
             other_data = other
-            ndv2 = None
+            nodata2 = None
             dtype2 = rio.dtypes.get_minimum_dtype(other_data)
 
         # Figure out output dtype
         out_dtype = np.find_common_type([dtype1, dtype2], [])
 
         # Figure output nodata
-        out_ndv = None
-        if (ndv2 is not None) and (out_dtype == dtype2):
-            out_ndv = ndv2
-        if (ndv1 is not None) and (out_dtype == dtype1):
-            out_ndv = ndv1
+        out_nodata = None
+        if (nodata2 is not None) and (out_dtype == dtype2):
+            out_nodata = nodata2
+        if (nodata1 is not None) and (out_dtype == dtype1):
+            out_nodata = nodata1
 
         # Convert output data to correct dtype and masked_array
         if isinstance(other_data, np.ndarray):
@@ -630,7 +630,7 @@ Must be a Raster, np.ndarray or single number."
 
         self_data = self.data.astype(out_dtype)
 
-        return self_data, other_data, out_ndv
+        return self_data, other_data, out_nodata
 
     def __add__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
@@ -640,13 +640,13 @@ Must be a Raster, np.ndarray or single number."
         Otherwise, other must be a single number.
         """
         # Check inputs and return compatible data, output dtype and nodata value
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
 
         # Run calculation
         out_data = self_data + other_data
 
         # Save to output Raster
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
 
         return out_rst
 
@@ -664,17 +664,17 @@ Must be a Raster, np.ndarray or single number."
         """
         Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data - other_data
-        return self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
 
     def __rsub__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
         Subtraction overloading when other is first item in the operation (e.g. 1 - rst).
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data - self_data
-        return self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
 
     def __mul__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
@@ -683,9 +683,9 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data * other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
     def __rmul__(self: RasterType, other: np.ndarray | Number) -> RasterType:
@@ -701,18 +701,18 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data / other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
     def __rtruediv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
         True division overloading when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data / self_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
     def __floordiv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
@@ -722,18 +722,18 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data // other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
     def __rfloordiv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
         Floor division overloading when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data // self_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
     def __mod__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
@@ -743,9 +743,9 @@ Must be a Raster, np.ndarray or single number."
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, ndv = self._overloading_check(other)
+        self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data % other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
     def __pow__(self: RasterType, power: int | float) -> RasterType:
@@ -758,8 +758,8 @@ Must be a Raster, np.ndarray or single number."
 
         # Calculate the product of arrays and save to new Raster
         out_data = self.data**power
-        ndv = self.nodata
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=ndv)
+        nodata = self.nodata
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
     @overload
@@ -858,7 +858,7 @@ Must be a Raster, np.ndarray or single number."
         :param update_mask: Update the old mask into a new mask in the data mask
         """
         if nodata is not None and not isinstance(nodata, (list, int, float, np.integer, np.floating)):
-            raise ValueError("Type of ndv not understood, must be list or float or int")
+            raise ValueError("Type of nodata not understood, must be list or float or int")
 
         elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
             print("Several raster band: using nodata value for all bands")
@@ -872,17 +872,17 @@ Must be a Raster, np.ndarray or single number."
             self._nodata = None
             return
 
-        # Check that ndv has same length as number of bands in self
+        # Check that nodata has same length as number of bands in self
         if isinstance(nodata, list):
             if len(nodata) != self.count:
-                raise ValueError(f"Length of ndv ({len(nodata)}) incompatible with number of bands ({self.count})")
-            # Check that ndv value is compatible with dtype
+                raise ValueError(f"Length of nodata ({len(nodata)}) incompatible with number of bands ({self.count})")
+            # Check that nodata value is compatible with dtype
             for k in range(len(nodata)):
                 if not rio.dtypes.can_cast_dtype(nodata[k], self.dtypes[k]):
-                    raise ValueError(f"ndv value {nodata[k]} incompatible with self.dtype {self.dtypes[k]}")
+                    raise ValueError(f"nodata value {nodata[k]} incompatible with self.dtype {self.dtypes[k]}")
         elif isinstance(nodata, (int, float, np.integer, np.floating)):
             if not rio.dtypes.can_cast_dtype(nodata, self.dtypes[0]):
-                raise ValueError(f"ndv value {nodata} incompatible with self.dtype {self.dtypes[0]}")
+                raise ValueError(f"nodata value {nodata} incompatible with self.dtype {self.dtypes[0]}")
 
         # If we update mask or array, get the masked array
         if update_array or update_mask:
@@ -1011,10 +1011,10 @@ Must be a Raster, np.ndarray or single number."
         ):
             warnings.warn(
                 "Setting default nodata {:.0f} to mask non-finite values found in the array, as "
-                "no nodata value was defined.".format(_default_ndv(dtype)),
+                "no nodata value was defined.".format(_default_nodata(dtype)),
                 UserWarning,
             )
-            self._nodata = _default_ndv(dtype)
+            self._nodata = _default_nodata(dtype)
 
         # If the new data is not masked (a classic ndarray) and contains non-finite values such as NaNs, define a mask
         if not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
@@ -1427,7 +1427,7 @@ Must be a Raster, np.ndarray or single number."
         if dst_nodata is None:
             dst_nodata = self.nodata
             if dst_nodata is None:
-                dst_nodata = _default_ndv(dtype)
+                dst_nodata = _default_nodata(dtype)
                 # if dst_nodata is already being used, raise a warning.
                 # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
                 if not self.is_loaded:
@@ -1675,7 +1675,7 @@ self.set_nodata()."
 
                 # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
                 if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
-                    nodata = _default_ndv(save_data.dtype)
+                    nodata = _default_nodata(save_data.dtype)
                     warnings.warn(f"No nodata set, will use default value of {nodata}")
                 save_data = save_data.filled(nodata)
 
