@@ -813,13 +813,133 @@ Must be a Raster, np.ndarray or single number."
         return self._is_modified
 
     @property
-    def nodata(self) -> int | np.integer | float | np.floating | None:
+    def nodata(self) -> int | float | list[int] | list[float] | None:
         """
-        Get nodata value
+        Get nodata value.
 
-        :returns: nodata value
+        :returns: Nodata value
         """
         return self._nodata
+
+    @nodata.setter
+    def nodata(self, new_nodata: int | float | list[int] | list[float] | None) -> None:
+        """
+        Set .nodata and update .data by calling set_nodata() with default parameters.
+
+        :param new_nodata: New nodata to assign to this instance of Raster
+        """
+
+        self.set_nodata(nodata=new_nodata)
+
+    def set_nodata(
+        self, nodata: int | float | list[int] | list[float] | None, update_array: bool = True, update_mask: bool = True
+    ) -> None:
+        """
+        Set a new nodata value for each band. This updates the old nodata into a new nodata value in the metadata,
+        replaces the nodata values in the data of the masked array, and updates the mask of the masked array.
+
+        Careful! If the new nodata value already exists in the array, the related grid cells will be masked by default.
+
+        If the nodata value was not defined in the raster, run this function with a new nodata value corresponding to
+        the value of nodata that exists in the data array and is not yet accounted for. All those values will be masked.
+
+        If a nodata value was correctly defined in the raster, and you wish to change it to a new value, run
+        this function with that new value. All values having either the old or new nodata value will be masked.
+
+        If the nodata value was wrongly defined in the raster, and you wish to change it to a new value without
+        affecting data that might have the value of the old nodata, run this function with the update_array
+        argument as False. Only the values of the new nodata will be masked.
+
+        If you wish to set nodata value without updating the mask, run this function with the update_mask argument as
+        False.
+
+        :param nodata: Nodata values
+        :param update_array: Update the old nodata values into new nodata values in the data array
+        :param update_mask: Update the old mask into a new mask in the data mask
+        """
+        if nodata is not None and not isinstance(nodata, (list, int, float, np.integer, np.floating)):
+            raise ValueError("Type of ndv not understood, must be list or float or int")
+
+        elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
+            print("Several raster band: using nodata value for all bands")
+            nodata = [nodata] * self.count
+
+        elif isinstance(nodata, list) and self.count == 1:
+            print("Only one raster band: using first nodata value provided")
+            nodata = list(nodata)[0]
+
+        elif nodata is None:
+            self._nodata = None
+            return
+
+        # Check that ndv has same length as number of bands in self
+        if isinstance(nodata, list):
+            if len(nodata) != self.count:
+                raise ValueError(f"Length of ndv ({len(nodata)}) incompatible with number of bands ({self.count})")
+            # Check that ndv value is compatible with dtype
+            for k in range(len(nodata)):
+                if not rio.dtypes.can_cast_dtype(nodata[k], self.dtypes[k]):
+                    raise ValueError(f"ndv value {nodata[k]} incompatible with self.dtype {self.dtypes[k]}")
+        elif isinstance(nodata, (int, float, np.integer, np.floating)):
+            if not rio.dtypes.can_cast_dtype(nodata, self.dtypes[0]):
+                raise ValueError(f"ndv value {nodata} incompatible with self.dtype {self.dtypes[0]}")
+
+        # If we update mask or array, get the masked array
+        if update_array or update_mask:
+
+            # Extract the data variable, so the self.data property doesn't have to be called a bunch of times
+            imgdata = self.data
+
+            # Loop through the bands
+            for i, new_nodata in enumerate(nodata if isinstance(nodata, Iterable) else [nodata]):
+
+                # Get the index of old nodatas
+                index_old_nodatas = imgdata.data[i, :, :] == self.nodata
+
+                # Get the index of new nodatas
+                index_new_nodatas = imgdata.data[i, :, :] == new_nodata
+
+                if np.count_nonzero(index_new_nodatas) > 0:
+                    if update_array and update_mask:
+                        warnings.warn(
+                            message="New nodata value already found in the data array, the corresponding grid cells "
+                            "will be indistinguishable from that updated from the old nodata value, and will "
+                            "be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.",
+                            category=UserWarning,
+                        )
+                    elif update_array:
+                        warnings.warn(
+                            "New nodata value already found in the data array, the corresponding grid cells "
+                            "will be indistinguishable from that updated from the old nodata value. Use "
+                            "set_nodata(..., update_array=False) to avoid this behaviour.",
+                            category=UserWarning,
+                        )
+                    elif update_mask:
+                        warnings.warn(
+                            "New nodata value already found in the data array, the corresponding grid cells "
+                            "will be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.",
+                            category=UserWarning,
+                        )
+
+                if update_array:
+                    # Replace the nodata value in the Raster
+                    imgdata.data[i, index_old_nodatas] = new_nodata
+
+                if update_mask:
+                    # If a mask already exists and nodata is not updated in array, unmask the old nodata values
+                    # before masking the new ones
+                    if np.ma.is_masked(imgdata) and not update_array:
+                        # No way to unmask a value from the masked array, so we modify the mask directly
+                        imgdata.mask[i, index_old_nodatas] = False
+
+                    # Masking like this works from the masked array directly, whether a mask previously existed or not
+                    imgdata[i, index_new_nodatas] = np.ma.masked
+
+            # Update the data
+            self._data = imgdata
+
+        # Update the nodata value
+        self._nodata = nodata
 
     @property
     def data(self) -> np.ma.masked_array:
@@ -836,7 +956,7 @@ Must be a Raster, np.ndarray or single number."
     @data.setter
     def data(self, new_data: np.ndarray | np.ma.masked_array) -> None:
         """
-        Set the contents of .data.
+        Set the contents of .data and possibly update .nodata.
 
         The data setter behaviour is the following:
 
@@ -1479,116 +1599,6 @@ self.set_nodata()."
         dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
 
         self.transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
-
-    @nodata.setter
-    def nodata(self, new_nodata):
-        """Setter for nodata which calls set_nodata() with default parameters."""
-
-        self.set_nodata(nodata=new_nodata)
-
-    def set_nodata(self, nodata: int | float | list[int] | list[float] | None,
-                   update_array: bool = True,
-                   update_mask: bool = True) -> None:
-        """
-        Set a new nodata value for each band. This updates the old nodata into a new nodata value in the metadata,
-        replaces the nodata values in the data of the masked array, and updates the mask of the masked array.
-
-        Careful! If the new nodata value already exists in the array, the related grid cells will be masked by default.
-
-        If the nodata value was not defined in the raster, run this function with a new nodata value corresponding to
-        the value of nodata that exists in the data array and is not yet accounted for. All those values will be masked.
-
-        If a nodata value was correctly defined in the raster, and you wish to change it to a new value, run
-        this function with that new value. All values having either the old or new nodata value will be masked.
-
-        If the nodata value was wrongly defined in the raster, and you wish to change it to a new value without
-        affecting data that might have the value of the old nodata, run this function with the update_array
-        argument as False. Only the values of the new nodata will be masked.
-
-        If you wish to set nodata value without updating the mask, run this function with the update_mask argment as
-        False.
-
-        :param nodata: Nodata values
-        :param update_array: Update the old nodata values into new nodata values in the data array
-        :param update_mask: Update the old mask into a new mask in the data mask
-        """
-        if nodata is not None and not isinstance(nodata, (list, int, float, np.integer, np.floating)):
-            raise ValueError("Type of ndv not understood, must be list or float or int")
-
-        elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
-            print("Several raster band: using nodata value for all bands")
-            nodata = [nodata] * self.count
-
-        elif isinstance(nodata, list) and self.count == 1:
-            print("Only one raster band: using first nodata value provided")
-            nodata = list(nodata)[0]
-
-        elif nodata is None:
-            self._nodata = None
-            return
-
-        # Check that ndv has same length as number of bands in self
-        if isinstance(nodata, list):
-            if len(nodata) != self.count:
-                raise ValueError(f"Length of ndv ({len(nodata)}) incompatible with number of bands ({self.count})")
-            # Check that ndv value is compatible with dtype
-            for k in range(len(nodata)):
-                if not rio.dtypes.can_cast_dtype(nodata[k], self.dtypes[k]):
-                    raise ValueError(f"ndv value {nodata[k]} incompatible with self.dtype {self.dtypes[k]}")
-        elif isinstance(nodata, (int, float, np.integer, np.floating)):
-            if not rio.dtypes.can_cast_dtype(nodata, self.dtypes[0]):
-                raise ValueError(f"ndv value {nodata} incompatible with self.dtype {self.dtypes[0]}")
-
-        # If we update mask or array, get the masked array
-        if update_array or update_mask:
-
-            # Extract the data variable, so the self.data property doesn't have to be called a bunch of times
-            imgdata = self.data
-
-            # Loop through the bands
-            for i, new_nodata in enumerate(nodata if isinstance(nodata, Iterable) else [nodata]):
-
-                # Get the index of old nodatas
-                index_old_nodatas = imgdata.data[i, :, :] == self.nodata
-
-                # Get the index of new nodatas
-                index_new_nodatas = imgdata.data[i, :, :] == new_nodata
-
-                if np.count_nonzero(index_new_nodatas) > 0:
-                    if update_array and update_mask:
-                        warnings.warn(message='New nodata value already found in the data array, the corresponding grid cells '
-                                      'will be indistinguishable from that updated from the old nodata value, and will '
-                                      'be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.',
-                                       category=UserWarning)
-                    elif update_array:
-                        warnings.warn('New nodata value already found in the data array, the corresponding grid cells '
-                                      'will be indistinguishable from that updated from the old nodata value. Use '
-                                      'set_nodata(..., update_array=False) to avoid this behaviour.',
-                                      category=UserWarning)
-                    elif update_mask:
-                        warnings.warn('New nodata value already found in the data array, the corresponding grid cells '
-                                      'will be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.',
-                                      category=UserWarning)
-
-                if update_array:
-                    # Replace the nodata value in the Raster
-                    imgdata.data[i, index_old_nodatas] = new_nodata
-
-                if update_mask:
-                    # If a mask already exists and nodata is not updated in array, unmask the old nodata values
-                    # before masking the new ones
-                    if np.ma.is_masked(imgdata) and not update_array:
-                        # No way to unmask a value from the masked array, so we modify the mask directly
-                        imgdata.mask[i, index_old_nodatas] = False
-
-                    # Masking like this works from the masked array directly, whether a mask previously existed or not
-                    imgdata[i, index_new_nodatas] = np.ma.masked
-
-            # Update the data
-            self._data = imgdata
-
-        # Update the nodata value
-        self._nodata = nodata
 
     def save(
         self,

@@ -1130,20 +1130,20 @@ This may have unexpected consequences. Consider setting a different nodata with 
         old_nodata = r.nodata
         # We chose nodata that doesn't exist in the raster yet for both our examples (for uint8, the default value of
         # 255 exist, so we replace by 0)
-        new_nodata = (_default_ndv(r.dtypes[0]) if not r.dtypes[0]=='uint8' else 0)
+        new_nodata = _default_ndv(r.dtypes[0]) if not r.dtypes[0] == "uint8" else 0
 
         # -- First, test set_nodata() with default parameters --
 
         # Check that the new_nodata does not exist in the raster yet, and set it
         assert np.count_nonzero(r_copy.data.data == new_nodata) == 0
-        r.set_nodata(nodata = new_nodata)
+        r.set_nodata(nodata=new_nodata)
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
 
         # By default, the array should have been updated
         if old_nodata is not None:
-            index_old_nodata = (r_copy.data.data == old_nodata)
+            index_old_nodata = r_copy.data.data == old_nodata
             assert all(r.data.data[index_old_nodata] == new_nodata)
         else:
             index_old_nodata = np.zeros(np.shape(r.data), dtype=bool)
@@ -1165,31 +1165,40 @@ This may have unexpected consequences. Consider setting a different nodata with 
         # Check the value is valid in the masked array
         assert np.count_nonzero(r_copy.data == new_nodata) >= 0
         # A warning should be raised when setting the nodata
-        with pytest.warns(UserWarning, match=re.escape('New nodata value already found in the data array, the corresponding grid cells '
-                                      'will be indistinguishable from that updated from the old nodata value, and will '
-                                      'be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.')):
-            r.set_nodata(nodata = new_nodata)
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                "New nodata value already found in the data array, the corresponding grid cells "
+                "will be indistinguishable from that updated from the old nodata value, and will "
+                "be masked. Use set_nodata(..., update_array=False) to avoid this behaviour."
+            ),
+        ):
+            r.set_nodata(nodata=new_nodata)
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
 
         # By default, the array should have been updated similarly for the old nodata
         if old_nodata is not None:
-            index_old_nodata = (r_copy.data.data == old_nodata)
+            index_old_nodata = r_copy.data.data == old_nodata
             assert all(r.data.data[index_old_nodata] == new_nodata)
         else:
             index_old_nodata = np.zeros(np.shape(r.data.data), dtype=bool)
 
         # The rest of the array is similarly unchanged
         index_unchanged = np.logical_and(~index_old_nodata, ~mask_pixel_artificially_set)
-        assert np.array_equal(r.data.data[index_unchanged] , r_copy.data.data[index_unchanged])
+        assert np.array_equal(r.data.data[index_unchanged], r_copy.data.data[index_unchanged])
         # But, this time, the mask is only unchanged outside of the pixel artificially has changed
-        assert np.array_equal(np.ma.getmaskarray(r.data)[~mask_pixel_artificially_set],
-                              np.ma.getmaskarray(r_copy.data)[~mask_pixel_artificially_set])
+        assert np.array_equal(
+            np.ma.getmaskarray(r.data)[~mask_pixel_artificially_set],
+            np.ma.getmaskarray(r_copy.data)[~mask_pixel_artificially_set],
+        )
 
         # More specifically, it has changed for that pixel
-        assert np.ma.getmaskarray(r.data)[mask_pixel_artificially_set] == \
-               ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
+        assert (
+            np.ma.getmaskarray(r.data)[mask_pixel_artificially_set]
+            == ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
+        )
 
         # -- Second, test set_nodata() with update_array=False --
         r = r_copy.copy()
@@ -1199,9 +1208,13 @@ This may have unexpected consequences. Consider setting a different nodata with 
         r.data[mask_pixel_artificially_set] = np.ma.masked
         r.data.mask[mask_pixel_artificially_set] = False
 
-        with pytest.warns(UserWarning, match=re.escape(
-                'New nodata value already found in the data array, the corresponding grid cells '
-                'will be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.')):
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                "New nodata value already found in the data array, the corresponding grid cells "
+                "will be masked. Use set_nodata(..., update_array=False) to avoid this behaviour."
+            ),
+        ):
             r.set_nodata(nodata=new_nodata, update_array=False)
 
         # The nodata value should have been set in the metadata
@@ -1210,8 +1223,10 @@ This may have unexpected consequences. Consider setting a different nodata with 
         # Now, the array should not have been updated, so the entire array should be unchanged except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
         # But the mask should have been updated on the pixel
-        assert np.ma.getmaskarray(r.data)[mask_pixel_artificially_set] == \
-               ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
+        assert (
+            np.ma.getmaskarray(r.data)[mask_pixel_artificially_set]
+            == ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
+        )
 
         # -- Third, test set_nodata() with update_mask=False --
         r = r_copy.copy()
@@ -1221,9 +1236,14 @@ This may have unexpected consequences. Consider setting a different nodata with 
         r.data[mask_pixel_artificially_set] = np.ma.masked
         r.data.mask[mask_pixel_artificially_set] = False
 
-        with pytest.warns(UserWarning, match=re.escape('New nodata value already found in the data array, the corresponding grid cells '
-                                      'will be indistinguishable from that updated from the old nodata value. Use '
-                                      'set_nodata(..., update_array=False) to avoid this behaviour.')):
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                "New nodata value already found in the data array, the corresponding grid cells "
+                "will be indistinguishable from that updated from the old nodata value. Use "
+                "set_nodata(..., update_array=False) to avoid this behaviour."
+            ),
+        ):
             r.set_nodata(nodata=new_nodata, update_mask=False)
 
         # The nodata value should have been set in the metadata
@@ -1231,7 +1251,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         # The array should have been updated
         if old_nodata is not None:
-            index_old_nodata = (r_copy.data.data == old_nodata)
+            index_old_nodata = r_copy.data.data == old_nodata
             assert all(r.data.data[index_old_nodata] == new_nodata)
         else:
             index_old_nodata = np.zeros(np.shape(r.data.data), dtype=bool)
@@ -1264,17 +1284,17 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         # A ValueError if input nodata is neither a list, tuple, integer, floating
         with pytest.raises(ValueError, match="Type of ndv not understood, must be list or float or int"):
-            r.set_nodata(nodata='this_should_not_work')
+            r.set_nodata(nodata="this_should_not_work")  # type: ignore
 
         # A ValueError if nodata value is incompatible with dtype
         expected_message = r"ndv value .* incompatible with self.dtype .*"
-        if 'int' in r.dtypes[0]:
+        if "int" in r.dtypes[0]:
             with pytest.raises(ValueError, match=expected_message):
                 # Feed a floating numeric to an integer type
                 r.set_nodata(0.5)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_nodata_setter(self, example) -> None:
+    def test_nodata_setter(self, example: str) -> None:
         """Check that the nodata setter gives the same result as set_nodata with default parameters"""
 
         r = gu.Raster(example)
@@ -1284,7 +1304,6 @@ This may have unexpected consequences. Consider setting a different nodata with 
         r_copy.nodata = _default_ndv(r.dtypes[0])
 
         assert r == r_copy
-
 
     def test_default_ndv(self) -> None:
         """
