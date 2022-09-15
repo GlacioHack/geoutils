@@ -1120,23 +1120,17 @@ This may have unexpected consequences. Consider setting a different nodata with 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:
         """
-        Two series of tests:
-        1. Run set_nodata() with all possible input parameters and check that only expected values are updated.
-
-        2. Check
-        Read dataset and set a certain value (e.g., 255 or -9999) to nodata. Save mask.
-        Then, set the value minus one as new no data (e.g., 254 or -10000), after rewriting the previous nodata to 0.
-        Save mask again.
-        Check that both no data masks are identical and have correct number of pixels.
+        We test set_nodata() with all possible input parameters, check expected behaviour for updating array and mask,
+        and that errors and warnings are raised when they should be.
         """
 
         # Read raster and save a copy to compare later
         r = gr.Raster(example)
         r_copy = r.copy()
         old_nodata = r.nodata
-        # We choose the default (e.g., 255) as nodata to work with either uint8 or float data types
-        # (it doesn't exist in the raster yet for both our examples)
-        new_nodata = _default_ndv(r.dtypes[0])
+        # We chose nodata that doesn't exist in the raster yet for both our examples (for uint8, the default value of
+        # 255 exist, so we replace by 0)
+        new_nodata = (_default_ndv(r.dtypes[0]) if not r.dtypes[0]=='uint8' else 0)
 
         # -- First, test set_nodata() with default parameters --
 
@@ -1156,13 +1150,16 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         # The rest of the array and mask should be unchanged
         assert np.array_equal(r.data.data[~index_old_nodata], r_copy.data.data[~index_old_nodata])
-        assert np.array_equal(r.data.mask, r_copy.data.mask)
+        # We call np.ma.getmaskarray to always compare a full boolean array
+        assert np.array_equal(np.ma.getmaskarray(r.data), np.ma.getmaskarray(r_copy.data))
 
         # Then, we repeat for a nodata that already existed, we artificially introduce the value on an unmasked pixel
         r = r_copy.copy()
         mask_pixel_artificially_set = np.zeros(np.shape(r.data), dtype=bool)
         mask_pixel_artificially_set[0, 0, 0] = True
         r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
         r.data.mask[mask_pixel_artificially_set] = False
 
         # Check the value is valid in the masked array
@@ -1187,15 +1184,19 @@ This may have unexpected consequences. Consider setting a different nodata with 
         index_unchanged = np.logical_and(~index_old_nodata, ~mask_pixel_artificially_set)
         assert np.array_equal(r.data.data[index_unchanged] , r_copy.data.data[index_unchanged])
         # But, this time, the mask is only unchanged outside of the pixel artificially has changed
-        assert np.array_equal(r.data.mask[~mask_pixel_artificially_set], r_copy.data.mask[~mask_pixel_artificially_set])
+        assert np.array_equal(np.ma.getmaskarray(r.data)[~mask_pixel_artificially_set],
+                              np.ma.getmaskarray(r_copy.data)[~mask_pixel_artificially_set])
 
         # More specifically, it has changed for that pixel
-        assert r.data.mask[mask_pixel_artificially_set] == ~r_copy.data.mask[mask_pixel_artificially_set]
+        assert np.ma.getmaskarray(r.data)[mask_pixel_artificially_set] == \
+               ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
 
         # -- Second, test set_nodata() with update_array=False --
         r = r_copy.copy()
 
         r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
         r.data.mask[mask_pixel_artificially_set] = False
 
         with pytest.warns(UserWarning, match=re.escape(
@@ -1209,12 +1210,15 @@ This may have unexpected consequences. Consider setting a different nodata with 
         # Now, the array should not have been updated, so the entire array should be unchanged except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
         # But the mask should have been updated on the pixel
-        assert r.data.mask[mask_pixel_artificially_set] == ~r_copy.data.mask[mask_pixel_artificially_set]
+        assert np.ma.getmaskarray(r.data)[mask_pixel_artificially_set] == \
+               ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
 
         # -- Third, test set_nodata() with update_mask=False --
         r = r_copy.copy()
 
         r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
         r.data.mask[mask_pixel_artificially_set] = False
 
         with pytest.warns(UserWarning, match=re.escape('New nodata value already found in the data array, the corresponding grid cells '
@@ -1237,13 +1241,15 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert np.array_equal(r.data.data[index_unchanged], r_copy.data.data[index_unchanged])
 
         # But the mask should still be the same
-        assert np.array_equal(r.data.mask, r_copy.data.mask)
+        assert np.array_equal(np.ma.getmaskarray(r.data), np.ma.getmaskarray(r_copy.data))
 
         # -- Fourth, test set_nodata() with both update_array=False and update_mask=False --
         r = r_copy.copy()
 
         r.set_nodata(nodata=new_nodata, update_array=False, update_mask=False)
         r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
         r.data.mask[mask_pixel_artificially_set] = False
 
         # The nodata value should have been set in the metadata
@@ -1252,7 +1258,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         # The array should not have been updated except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
         # And the mask neither
-        assert np.array_equal(r.data.mask, r_copy.data.mask)
+        assert np.array_equal(np.ma.getmaskarray(r.data), np.ma.getmaskarray(r_copy.data))
 
         # -- Fifth, let's check that errors are raised when they should --
 
