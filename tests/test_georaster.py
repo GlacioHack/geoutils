@@ -911,12 +911,7 @@ self.set_nodata()."
         # If a nodata is set, make sure it is preserved
         r_nodata = r.copy()
 
-        # Exception with the Landsat example
-        if np.count_nonzero(r_nodata.data.data == 255) > 0:
-            with pytest.warns(UserWarning):
-                r_nodata.set_nodata(255)
-        else:
-            r_nodata.set_nodata(255)
+        r_nodata.set_nodata(0)
 
         r3 = r_nodata.reproject(r2)
         assert r_nodata.nodata == r3.nodata
