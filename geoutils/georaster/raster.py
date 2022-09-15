@@ -1959,7 +1959,7 @@ to be cleared due to the setting of GCPs."
 
         :examples:
 
-            >>> self.value_at_coords(-48.125,67.8901,window=3)  # doctest: +SKIP
+            >>> self.value_at_coords(-48.125, 67.8901, window=3)  # doctest: +SKIP
             Returns mean of a 3*3 window:
                 v v v \
                 v c v  | = float(mean)

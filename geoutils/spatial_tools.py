@@ -174,7 +174,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             dst_nodata=reference_raster.nodata,
             silent=True,
         )
-        reprojected_raster.set_ndv(ndv)
+        reprojected_raster.set_nodata(ndv)
 
         # Optionally calculate difference
         if diff:
