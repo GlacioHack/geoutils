@@ -34,9 +34,6 @@ def bounds2poly(
 
     :returns: Output polygon
     """
-    if in_crs is not None:
-        raise NotImplementedError
-
     # If boundsGeom is a GeoPandas or Vector object (warning, has both total_bounds and bounds attributes)
     if hasattr(boundsGeom, "total_bounds"):
         xmin, ymin, xmax, ymax = boundsGeom.total_bounds  # type: ignore
@@ -53,10 +50,12 @@ def bounds2poly(
             "boundsGeom must a list/tuple of coordinates or an object with attributes bounds or total_bounds."
         )
 
-    bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+    corners = ((xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax))
 
-    if out_crs is not None:
-        raise NotImplementedError()
+    if (in_crs is not None) & (out_crs is not None):
+        corners = np.transpose(reproject_points(np.transpose(corners), in_crs, out_crs))
+
+    bbox = Polygon(corners)
 
     return bbox
 
