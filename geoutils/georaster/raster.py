@@ -1002,19 +1002,37 @@ Must be a Raster, np.ndarray or single number."
 
         return cp
 
+    @overload
+    def get_nanarray(self, return_mask: Literal[False]) -> np.ndarray:
+        ...
+
+    @overload
+    def get_nanarray(self, return_mask: Literal[True]) -> tuple[np.ndarray, np.ndarray]:
+        ...
+
+    @overload
+    def get_nanarray(self, return_mask: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        ...
+
     def get_nanarray(self, return_mask: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
-        Method to return a squeezed array filled with NaN and the associated mask from the masked array in .data
+        Method to return the squeezed masked array filled with NaNs and associated squeezed mask, both as a copy.
 
         :param return_mask: Whether to return the mask of valid data
 
         :returns Array with masked data as NaNs, (Optional) Mask of valid data
         """
 
+        # Get the array with masked value fill with NaNs
         nanarray = self.data.filled(fill_value=np.nan).squeeze()
 
+        # The function np.ma.filled() only returns a copy if the array is masked, copy the array if it's not the case
+        if not np.ma.is_masked(self.data):
+            nanarray = np.copy(nanarray)
+
+        # Return the NaN array, and possibly the mask as well
         if return_mask:
-            return nanarray, np.ma.getmaskarray(self.data).squeeze()
+            return nanarray, np.copy(np.ma.getmaskarray(self.data).squeeze())
         else:
             return nanarray
 
