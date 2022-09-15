@@ -138,7 +138,7 @@ def load_multiple_rasters(
     if crop:
         # Check that intersection is not void
         if intersection == ():
-            warnings.warn("Intersection is void, returning unloaded rasters")
+            warnings.warn("Intersection is void, returning unloaded rasters.")
             return output_rst
 
         for rst in output_rst:
@@ -166,9 +166,12 @@ def load_multiple_rasters(
 
         # Reproject all rasters
         for index, rst in enumerate(output_rst):
-            output_rst[index] = rst.reproject(
+            out_rst = rst.reproject(
                 dst_crs=ref_rst.crs, dst_bounds=new_bounds, dst_res=ref_rst.res, silent=True, **kwargs
             )
+            if not out_rst.is_loaded:
+                out_rst.load()
+            output_rst[index] = out_rst
 
     # if no crop or reproject option, simply load the rasters
     if (not crop) & (not reproject):
