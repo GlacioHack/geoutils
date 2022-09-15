@@ -877,7 +877,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             nodata = list(nodata)[0]
 
         elif nodata is None:
-            self._nodata = None
+            nodata = None
 
         # Check that nodata has same length as number of bands in self
         if isinstance(nodata, list):
@@ -904,29 +904,28 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 index_old_nodatas = imgdata.data[i, :, :] == self.nodata
 
                 # Get the index of new nodatas, if it is defined
-                if nodata is not None:
-                    index_new_nodatas = imgdata.data[i, :, :] == new_nodata
+                index_new_nodatas = imgdata.data[i, :, :] == new_nodata
 
-                    if np.count_nonzero(index_new_nodatas) > 0:
-                        if update_array and update_mask:
-                            warnings.warn(
-                                message="New nodata value found in the data array. Those will be masked, and the old "
-                                "nodata cells will now take the same value. Use set_nodata() with update_array=False "
-                                "and/or update_mask=False to change this behaviour.",
-                                category=UserWarning,
-                            )
-                        elif update_array:
-                            warnings.warn(
-                                "New nodata value found in the data array. The old nodata cells will now take the same "
-                                "value. Use set_nodata() with update_array=False to change this behaviour.",
-                                category=UserWarning,
-                            )
-                        elif update_mask:
-                            warnings.warn(
-                                "New nodata value found in the data array. Those will be masked. Use set_nodata() "
-                                "with update_mask=False to change this behaviour.",
-                                category=UserWarning,
-                            )
+                if np.count_nonzero(index_new_nodatas) > 0:
+                    if update_array and update_mask:
+                        warnings.warn(
+                            message="New nodata value found in the data array. Those will be masked, and the old "
+                            "nodata cells will now take the same value. Use set_nodata() with update_array=False "
+                            "and/or update_mask=False to change this behaviour.",
+                            category=UserWarning,
+                        )
+                    elif update_array:
+                        warnings.warn(
+                            "New nodata value found in the data array. The old nodata cells will now take the same "
+                            "value. Use set_nodata() with update_array=False to change this behaviour.",
+                            category=UserWarning,
+                        )
+                    elif update_mask:
+                        warnings.warn(
+                            "New nodata value found in the data array. Those will be masked. Use set_nodata() "
+                            "with update_mask=False to change this behaviour.",
+                            category=UserWarning,
+                        )
 
                 if update_array:
                     # Only update array with new nodata if it is defined
@@ -935,16 +934,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                         imgdata.data[i, index_old_nodatas] = new_nodata
 
                 if update_mask:
-                    # If a mask already exists and nodata is not updated in array, unmask the old nodata values
-                    # before masking the new ones
-                    if np.ma.is_masked(imgdata) and not update_array:
+                    # If a mask already exists, unmask the old nodata values before masking the new ones
+                    # Can be skipped if array is updated (nodata is transfered from old to new, this part of the mask
+                    # stays the same)
+                    if np.ma.is_masked(imgdata) and (not update_array or nodata is None):
                         # No way to unmask a value from the masked array, so we modify the mask directly
                         imgdata.mask[i, index_old_nodatas] = False
 
-                    # Only update mask with new nodata if it is defined
-                    if nodata is not None:
-                        # Masking like this works from the masked array directly, whether a mask exists or not
-                        imgdata[i, index_new_nodatas] = np.ma.masked
+                    # Masking like this works from the masked array directly, whether a mask exists or not
+                    imgdata[i, index_new_nodatas] = np.ma.masked
 
             # Update the data
             self._data = imgdata

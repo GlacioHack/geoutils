@@ -1407,6 +1407,28 @@ self.set_nodata()."
             with pytest.raises(ValueError, match=expected_message):
                 r.set_nodata(np.finfo("longdouble").min)
 
+        # -- Sixth, check the special behaviour with None
+        r = r_copy.copy()
+        r.set_nodata(None)
+
+        # The metadata should be updated to None
+        assert r.nodata is None
+
+        # The array cannot be updated, so it is left as is
+        assert np.array_equal(r.data.data, r_copy.data.data)
+        # However, the old nodata values are unset by default, let's check this
+        if old_nodata is not None:
+            index_old_nodata = r_copy.data.data == old_nodata
+            # The arrays on this index should be booleans opposites
+            assert np.array_equal(np.ma.getmaskarray(r.data)[index_old_nodata],
+                           ~np.ma.getmaskarray(r_copy.data)[index_old_nodata])
+        else:
+            index_old_nodata = np.zeros(np.shape(r.data.data), dtype=bool)
+        # The rest should be equal
+        assert np.array_equal(np.ma.getmaskarray(r.data)[~index_old_nodata],
+                              np.ma.getmaskarray(r_copy.data)[~index_old_nodata])
+
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_nodata_setter(self, example: str) -> None:
         """Check that the nodata setter gives the same result as set_nodata with default parameters"""
