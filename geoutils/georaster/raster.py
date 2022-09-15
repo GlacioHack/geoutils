@@ -826,6 +826,13 @@ Must be a Raster, np.ndarray or single number."
         """
         Set .nodata and update .data by calling set_nodata() with default parameters.
 
+        By default, the old nodata values are updated into the new nodata in the data array .data.data, and the
+        mask .data.mask is updated to mask all new nodata values (i.e., the mask from old nodata stays and is extended
+        to potential new values of new nodata found in the array).
+
+        To set nodata for more complex cases (e.g., redefining a wrong nodata that has a valid value in the array),
+        call the function set_nodata() directly to set the arguments update_array and update_mask adequately.
+
         :param new_nodata: New nodata to assign to this instance of Raster
         """
 
@@ -855,7 +862,8 @@ Must be a Raster, np.ndarray or single number."
 
         :param nodata: Nodata values
         :param update_array: Update the old nodata values into new nodata values in the data array
-        :param update_mask: Update the old mask into a new mask in the data mask
+        :param update_mask: Update the old mask by unmasking old nodata and masking new nodata (if array is updated,
+            old nodata are changed to new nodata and thus stay masked)
         """
         if nodata is not None and not isinstance(nodata, (list, int, float, np.integer, np.floating)):
             raise ValueError("Type of nodata not understood, must be list or float or int")
