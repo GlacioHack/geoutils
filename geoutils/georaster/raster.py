@@ -202,7 +202,7 @@ class Raster:
     to the attributes defined by rasterio.
 
     Attributes:
-        filename : str
+        filename_or_dataset : str
             The path/filename of the loaded, file, only set if a disk-based file is read in.
         data : np.array
             Loaded image. Dimensions correspond to (bands, height, width).
@@ -212,8 +212,6 @@ class Raster:
             The indexes of the opened dataset which correspond to the bands loaded into data.
         is_loaded : bool
             True if the image data have been loaded into this Raster.
-        ds : rio.io.DatasetReader
-            Link to underlying DatasetReader object.
 
         bounds
 
@@ -271,8 +269,6 @@ class Raster:
             Default list is set by geoutils.georaster.raster._default_rio_attrs, i.e.
             ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
-
-        :param as_memfile: open the dataset via a rio.MemoryFile.
 
         :return: A Raster object
         """
@@ -455,7 +451,7 @@ class Raster:
         """
         Load the data from disk.
 
-        :param **kwargs: Optional keyword arguments sent to '_load_rio()'
+        :param kwargs: Optional keyword arguments sent to '_load_rio()'
 
         :raises ValueError: If the data are already loaded.
         :raises AttributeError: If no 'filename' attribute exists.
@@ -1516,14 +1512,14 @@ self.set_nodata()."
         :param update_array: Update the old nodata values into new nodata values in the data array
         :param update_mask: Update the old mask into a new mask in the data mask
         """
-        if nodata is not None and not isinstance(nodata, (abc.Sequence, int, float, np.integer, np.floating)):
+        if nodata is not None and not isinstance(nodata, (list, int, float, np.integer, np.floating)):
             raise ValueError("Type of ndv not understood, must be list or float or int")
 
         elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
             print("Several raster band: using nodata value for all bands")
             nodata = [nodata] * self.count
 
-        elif isinstance(nodata, abc.Sequence) and self.count == 1:
+        elif isinstance(nodata, list) and self.count == 1:
             print("Only one raster band: using first nodata value provided")
             nodata = list(nodata)[0]
 
@@ -1532,7 +1528,7 @@ self.set_nodata()."
             return
 
         # Check that ndv has same length as number of bands in self
-        if isinstance(nodata, abc.Sequence):
+        if isinstance(nodata, list):
             if len(nodata) != self.count:
                 raise ValueError(f"Length of ndv ({len(nodata)}) incompatible with number of bands ({self.count})")
             # Check that ndv value is compatible with dtype
