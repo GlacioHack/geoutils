@@ -1273,6 +1273,18 @@ This may have unexpected consequences. Consider setting a different nodata with 
                 # Feed a floating numeric to an integer type
                 r.set_nodata(0.5)
 
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_nodata_setter(self, example) -> None:
+        """Check that the nodata setter gives the same result as set_nodata with default parameters"""
+
+        r = gu.Raster(example)
+        r_copy = r.copy()
+
+        r.set_nodata(_default_ndv(r.dtypes[0]))
+        r_copy.nodata = _default_ndv(r.dtypes[0])
+
+        assert r == r_copy
+
 
     def test_default_ndv(self) -> None:
         """
