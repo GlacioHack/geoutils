@@ -1264,7 +1264,7 @@ self.set_nodata()."
         # We call np.ma.getmaskarray to always compare a full boolean array
         assert np.array_equal(np.ma.getmaskarray(r.data), np.ma.getmaskarray(r_copy.data))
 
-        # Then, we repeat for a nodata that already existed, we artificially introduce the value on an unmasked pixel
+        # Then, we repeat for a nodata that already existed, we artificially modify the value on an unmasked pixel
         r = r_copy.copy()
         mask_pixel_artificially_set = np.zeros(np.shape(r.data), dtype=bool)
         mask_pixel_artificially_set[0, 0, 0] = True
@@ -1299,7 +1299,7 @@ self.set_nodata()."
         # The rest of the array is similarly unchanged
         index_unchanged = np.logical_and(~index_old_nodata, ~mask_pixel_artificially_set)
         assert np.array_equal(r.data.data[index_unchanged], r_copy.data.data[index_unchanged])
-        # But, this time, the mask is only unchanged outside of the pixel artificially has changed
+        # But, this time, the mask is only unchanged for the array excluding the pixel artificially modified
         assert np.array_equal(
             np.ma.getmaskarray(r.data)[~mask_pixel_artificially_set],
             np.ma.getmaskarray(r_copy.data)[~mask_pixel_artificially_set],
@@ -1403,6 +1403,10 @@ self.set_nodata()."
             with pytest.raises(ValueError, match=expected_message):
                 # Feed a floating numeric to an integer type
                 r.set_nodata(0.5)
+        elif "float" in r.dtypes[0]:
+                # Feed a floating value not supported by our example data
+            with pytest.raises(ValueError, match=expected_message):
+                r.set_nodata(np.finfo('longdouble').min)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_nodata_setter(self, example: str) -> None:

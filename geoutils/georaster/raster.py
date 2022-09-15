@@ -860,6 +860,8 @@ Must be a Raster, np.ndarray or single number."
         If you wish to set nodata value without updating the mask, run this function with the update_mask argument as
         False.
 
+        If None is passed as nodata, only the metadata is updated and the mask of oldnodata unset.
+
         :param nodata: Nodata values
         :param update_array: Update the old nodata values into new nodata values in the data array
         :param update_mask: Update the old mask by unmasking old nodata and masking new nodata (if array is updated,
@@ -869,16 +871,13 @@ Must be a Raster, np.ndarray or single number."
             raise ValueError("Type of nodata not understood, must be list or float or int")
 
         elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
-            print("Several raster band: using nodata value for all bands")
             nodata = [nodata] * self.count
 
         elif isinstance(nodata, list) and self.count == 1:
-            print("Only one raster band: using first nodata value provided")
             nodata = list(nodata)[0]
 
         elif nodata is None:
             self._nodata = None
-            return
 
         # Check that nodata has same length as number of bands in self
         if isinstance(nodata, list):
@@ -904,34 +903,36 @@ Must be a Raster, np.ndarray or single number."
                 # Get the index of old nodatas
                 index_old_nodatas = imgdata.data[i, :, :] == self.nodata
 
-                # Get the index of new nodatas
-                index_new_nodatas = imgdata.data[i, :, :] == new_nodata
+                # Get the index of new nodatas, if it is defined
+                if nodata is not None:
+                    index_new_nodatas = imgdata.data[i, :, :] == new_nodata
 
-                if np.count_nonzero(index_new_nodatas) > 0:
-                    if update_array and update_mask:
-                        warnings.warn(
-                            message="New nodata value already found in the data array, the corresponding grid cells "
-                            "will be indistinguishable from that updated from the old nodata value, and will "
-                            "be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.",
-                            category=UserWarning,
-                        )
-                    elif update_array:
-                        warnings.warn(
-                            "New nodata value already found in the data array, the corresponding grid cells "
-                            "will be indistinguishable from that updated from the old nodata value. Use "
-                            "set_nodata(..., update_array=False) to avoid this behaviour.",
-                            category=UserWarning,
-                        )
-                    elif update_mask:
-                        warnings.warn(
-                            "New nodata value already found in the data array, the corresponding grid cells "
-                            "will be masked. Use set_nodata(..., update_array=False) to avoid this behaviour.",
-                            category=UserWarning,
-                        )
+                    if np.count_nonzero(index_new_nodatas) > 0:
+                        if update_array and update_mask:
+                            warnings.warn(
+                                message="New nodata value found in the data array. Those will be masked, and the old nodata "
+                                        "cells will now take the same value. Use set_nodata() with update_array=False and/or "
+                                        "update_mask=False to change this behaviour",
+                                category=UserWarning,
+                            )
+                        elif update_array:
+                            warnings.warn(
+                                "New nodata value found in the data array. The old nodata cells will now take the same value. "
+                                "Use set_nodata() with update_array=False to change this behaviour",
+                                category=UserWarning,
+                            )
+                        elif update_mask:
+                            warnings.warn(
+                                "New nodata value found in the data array. Those will be masked. Use set_nodata() with "
+                                "update_mask=False to change this behaviour",
+                                category=UserWarning,
+                            )
 
                 if update_array:
-                    # Replace the nodata value in the Raster
-                    imgdata.data[i, index_old_nodatas] = new_nodata
+                    # Only update array with new nodata if it is defined
+                    if nodata is not None:
+                        # Replace the nodata value in the Raster
+                        imgdata.data[i, index_old_nodatas] = new_nodata
 
                 if update_mask:
                     # If a mask already exists and nodata is not updated in array, unmask the old nodata values
@@ -940,8 +941,10 @@ Must be a Raster, np.ndarray or single number."
                         # No way to unmask a value from the masked array, so we modify the mask directly
                         imgdata.mask[i, index_old_nodatas] = False
 
-                    # Masking like this works from the masked array directly, whether a mask previously existed or not
-                    imgdata[i, index_new_nodatas] = np.ma.masked
+                    # Only update mask with new nodata if it is defined
+                    if nodata is not None:
+                        # Masking like this works from the masked array directly, whether a mask previously existed or not
+                        imgdata[i, index_new_nodatas] = np.ma.masked
 
             # Update the data
             self._data = imgdata
