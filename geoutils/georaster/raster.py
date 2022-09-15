@@ -1464,7 +1464,7 @@ self.set_nodata()."
                    update_array: bool = True,
                    update_mask: bool = True) -> None:
         """
-        Set a new nodata values for each band. This updates the old nodata into a new nodata value in the metadata,
+        Set a new nodata value for each band. This updates the old nodata into a new nodata value in the metadata,
         replaces the nodata values in the data of the masked array, and updates the mask of the masked array.
 
         Careful! If the new nodata value already exists in the array, the related grid cells will be masked by default.
@@ -1478,6 +1478,9 @@ self.set_nodata()."
         If the nodata value was wrongly defined in the raster, and you wish to change it to a new value without
         affecting data that might have the value of the old nodata, run this function with the update_array
         argument as False. Only the values of the new nodata will be masked.
+
+        If you wish to set nodata value without updating the mask, run this function with the update_mask argment as
+        False.
 
         :param nodata: Nodata values
         :param update_array: Update the old nodata values into new nodata values in the data array
