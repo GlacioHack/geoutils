@@ -807,7 +807,6 @@ class TestRaster:
             UserWarning,
             match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. \
             This may have unexpected consequences. Consider setting a different nodata with self.set_nodata.",
-
         ):
             _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
 
