@@ -1003,15 +1003,11 @@ Must be a Raster, np.ndarray or single number."
         return cp
 
     @overload
-    def get_nanarray(self, return_mask: Literal[False]) -> np.ndarray:
+    def get_nanarray(self, return_mask: Literal[False] = False) -> np.ndarray:
         ...
 
     @overload
     def get_nanarray(self, return_mask: Literal[True]) -> tuple[np.ndarray, np.ndarray]:
-        ...
-
-    @overload
-    def get_nanarray(self, return_mask: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         ...
 
     def get_nanarray(self, return_mask: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
