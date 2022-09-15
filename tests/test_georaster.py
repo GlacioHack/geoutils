@@ -1279,9 +1279,9 @@ self.set_nodata()."
         with pytest.warns(
             UserWarning,
             match=re.escape(
-                "New nodata value already found in the data array, the corresponding grid cells "
-                "will be indistinguishable from that updated from the old nodata value, and will "
-                "be masked. Use set_nodata(..., update_array=False) to avoid this behaviour."
+                "New nodata value found in the data array. Those will be masked, and the old "
+                "nodata cells will now take the same value. Use set_nodata() with update_array=False "
+                "and/or update_mask=False to change this behaviour."
             ),
         ):
             r.set_nodata(nodata=new_nodata)
@@ -1322,8 +1322,8 @@ self.set_nodata()."
         with pytest.warns(
             UserWarning,
             match=re.escape(
-                "New nodata value already found in the data array, the corresponding grid cells "
-                "will be masked. Use set_nodata(..., update_array=False) to avoid this behaviour."
+                "New nodata value found in the data array. Those will be masked. Use set_nodata() "
+                "with update_mask=False to change this behaviour."
             ),
         ):
             r.set_nodata(nodata=new_nodata, update_array=False)
@@ -1350,9 +1350,8 @@ self.set_nodata()."
         with pytest.warns(
             UserWarning,
             match=re.escape(
-                "New nodata value already found in the data array, the corresponding grid cells "
-                "will be indistinguishable from that updated from the old nodata value. Use "
-                "set_nodata(..., update_array=False) to avoid this behaviour."
+                "New nodata value found in the data array. The old nodata cells will now take the same "
+                "value. Use set_nodata() with update_array=False to change this behaviour."
             ),
         ):
             r.set_nodata(nodata=new_nodata, update_mask=False)

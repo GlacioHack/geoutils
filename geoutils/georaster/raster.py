@@ -912,19 +912,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                             warnings.warn(
                                 message="New nodata value found in the data array. Those will be masked, and the old "
                                 "nodata cells will now take the same value. Use set_nodata() with update_array=False "
-                                "and/or update_mask=False to change this behaviour",
+                                "and/or update_mask=False to change this behaviour.",
                                 category=UserWarning,
                             )
                         elif update_array:
                             warnings.warn(
                                 "New nodata value found in the data array. The old nodata cells will now take the same "
-                                "value. Use set_nodata() with update_array=False to change this behaviour",
+                                "value. Use set_nodata() with update_array=False to change this behaviour.",
                                 category=UserWarning,
                             )
                         elif update_mask:
                             warnings.warn(
                                 "New nodata value found in the data array. Those will be masked. Use set_nodata() "
-                                "with update_mask=False to change this behaviour",
+                                "with update_mask=False to change this behaviour.",
                                 category=UserWarning,
                             )
 
