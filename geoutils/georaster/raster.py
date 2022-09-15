@@ -1680,7 +1680,8 @@ to be cleared due to the setting of GCPs."
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
         :param rst : path to the second image (or another Raster instance)
-        :param match_ref: if set to True, returns the smallest intersection that is a multiple of self's georeferences
+        :param match_ref: if set to True, returns the smallest intersection that aligns with that of self, i.e. same \
+        resolution and offset with self's origin is a multiple of the resolution
         :returns: extent of the intersection between the 2 images \
         (xmin, ymin, xmax, ymax) in self's coordinate system.
 
