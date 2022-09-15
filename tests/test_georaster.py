@@ -372,6 +372,45 @@ class TestRaster:
         ):
             rst.data = rst.data.reshape(new_shape)
 
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
+    def test_get_nanarray(self, example: str) -> None:
+        """
+        Check that self.get_nanarray behaves as expected for examples with invalid data or not, and with several bands
+        or a single one.
+        """
+
+        # -- First, we test without returning a mask --
+
+        # Get nanarray
+        rst = gr.Raster(example)
+        rst_copy = rst.copy()
+        rst_arr = rst.get_nanarray()
+
+        # If there is no mask in the masked array, the array should not have NaNs and be equal to that of data.data
+        if not np.ma.is_masked(rst.data):
+            assert np.count_nonzero(np.isnan(rst_arr)) == 0
+            assert np.array_equal(rst.data.data.squeeze(), rst_arr)
+
+        # Otherwise, the arrays should be equal with a fill_value of NaN
+        else:
+            assert np.count_nonzero(np.isnan(rst_arr)) > 0
+            assert np.ma.allequal(rst.data.squeeze(), rst_arr, fill_value=np.nan)
+
+        # Check that modifying the NaN array does not back-propagate to the original array (np.ma.filled returns a view
+        # when there is no invalid data, but in this case get_nanarray should copy the data).
+        rst_arr += 5
+        assert rst == rst_copy
+
+        # -- Then, we test with a mask returned --
+        rst_arr, mask = rst.get_nanarray(return_mask=True)
+
+        assert np.array_equal(mask, np.ma.getmaskarray(rst.data).squeeze())
+
+        # Also check for back-propagation here with the mask and array
+        rst_arr += 5
+        mask = ~mask
+        assert rst == rst_copy
+
     def test_downsampling(self) -> None:
         """
         Check that self.data is correct when using downsampling
