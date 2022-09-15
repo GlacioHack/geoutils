@@ -935,7 +935,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
                 if update_mask:
                     # If a mask already exists, unmask the old nodata values before masking the new ones
-                    # Can be skipped if array is updated (nodata is transfered from old to new, this part of the mask
+                    # Can be skipped if array is updated (nodata is transferred from old to new, this part of the mask
                     # stays the same)
                     if np.ma.is_masked(imgdata) and (not update_array or nodata is None):
                         # No way to unmask a value from the masked array, so we modify the mask directly

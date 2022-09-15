@@ -1415,14 +1415,15 @@ self.set_nodata()."
         if old_nodata is not None:
             index_old_nodata = r_copy.data.data == old_nodata
             # The arrays on this index should be booleans opposites
-            assert np.array_equal(np.ma.getmaskarray(r.data)[index_old_nodata],
-                           ~np.ma.getmaskarray(r_copy.data)[index_old_nodata])
+            assert np.array_equal(
+                np.ma.getmaskarray(r.data)[index_old_nodata], ~np.ma.getmaskarray(r_copy.data)[index_old_nodata]
+            )
         else:
             index_old_nodata = np.zeros(np.shape(r.data.data), dtype=bool)
         # The rest should be equal
-        assert np.array_equal(np.ma.getmaskarray(r.data)[~index_old_nodata],
-                              np.ma.getmaskarray(r_copy.data)[~index_old_nodata])
-
+        assert np.array_equal(
+            np.ma.getmaskarray(r.data)[~index_old_nodata], np.ma.getmaskarray(r_copy.data)[~index_old_nodata]
+        )
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_nodata_setter(self, example: str) -> None:
