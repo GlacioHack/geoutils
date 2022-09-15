@@ -806,7 +806,8 @@ class TestRaster:
         with pytest.warns(
             UserWarning,
             match="For reprojection, dst_nodata must be set. Default chosen value .* exist in self.data. \
-This may have unexpected consequences. Consider setting a different nodata with self.set_nodata.",
+            This may have unexpected consequences. Consider setting a different nodata with self.set_nodata.",
+
         ):
             _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
 
@@ -987,20 +988,128 @@ This may have unexpected consequences. Consider setting a different nodata with 
         r4 = r.reproject(dst_crs=out_crs, dst_nodata=0)
         assert gu.misc.array_equal(r3.data, r4.data)
 
-    def test_intersection(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_intersection(self, example: list[str]) -> None:
         """Check the behaviour of the intersection function"""
+        # Load input raster
+        r = gr.Raster(example)
+        bounds_orig: list[float] = list(r.bounds)
 
-        r = gr.Raster(self.landsat_b4_path)
-        r2 = gr.Raster(self.landsat_b4_crop_path)
+        # For the Landsat dataset, to avoid warnings with crop
+        if r.nodata is None:
+            r.set_nodata(0)
 
-        inters = r.intersection(r2)
+        # -- Test with same bounds -> should be the same -- #
+        r_cropped = r.copy()
+        intersection = r.intersection(r_cropped)
+        assert intersection == r.bounds
 
-        left = max(r.bounds.left, r2.bounds.left)
-        right = min(r.bounds.right, r2.bounds.right)
-        top = min(r.bounds.top, r2.bounds.top)
-        bottom = max(r.bounds.bottom, r2.bounds.bottom)
+        # -- Test with a second raster cropped to a smaller extent -- #
+        # First with integer pixel cropped -> intersection should match smaller raster
+        rand_int = np.random.randint(1, min(r.shape) / 2 - 1)
+        bounds_new = [
+            bounds_orig[0] + rand_int * r.res[0],
+            bounds_orig[1] + rand_int * abs(r.res[1]),
+            bounds_orig[2] - rand_int * r.res[0],
+            bounds_orig[3] - rand_int * abs(r.res[1]),
+        ]
+        r_cropped = r.crop(bounds_new, inplace=False, mode="match_pixel")
+        intersection = r.intersection(r_cropped, match_ref=False)
+        assert intersection == r_cropped.bounds
 
-        assert inters == (left, bottom, right, top)
+        # Second with non-matching resolution, two cases
+        rand_float = np.random.randint(1, min(r.shape) / 2 - 1) + 0.25
+        bounds_new = [
+            bounds_orig[0] + rand_float * r.res[0],
+            bounds_orig[1] + rand_float * abs(r.res[1]),
+            bounds_orig[2] - rand_float * r.res[0],
+            bounds_orig[3] - rand_float * abs(r.res[1]),
+        ]
+        r_cropped = r.crop(bounds_new, inplace=False, mode="match_extent")
+
+        # Case 1 - with match_ref = False -> intersection should match smaller raster bounds
+        intersection = r.intersection(r_cropped, match_ref=False)
+        assert intersection == r_cropped.bounds
+
+        # Case 2 - with match_ref = True, 3 checks are made
+        intersection_match = r.intersection(r_cropped, match_ref=True)
+
+        # A - intersection should be larger than without match_ref
+        poly1 = gu.projtools.bounds2poly(intersection_match)
+        poly2 = gu.projtools.bounds2poly(intersection)
+        assert poly1.contains(poly2)
+
+        # B - the difference between both should be less than self's resolution
+        diff = np.array(intersection) - np.array(intersection_match)
+        assert max(abs(diff[0]), abs(diff[2])) < r.res[0]  # along x direction
+        assert max(abs(diff[1]), abs(diff[3])) < r.res[1]  # along y direction
+
+        # C - intersection bounds are a multiple of the reference pixel positions
+        assert (intersection_match[0] - r.bounds[0]) % r.res[0] == 0
+        assert (intersection_match[2] - r.bounds[0]) % r.res[0] == 0
+        assert (intersection_match[1] - r.bounds[3]) % r.res[0] == 0
+        assert (intersection_match[3] - r.bounds[3]) % r.res[1] == 0
+
+        # -- Test with a second raster shifted right and up, integer shift -- #
+        transform_shifted = (
+            r.transform.a,
+            r.transform.b,
+            r.transform.c + rand_int * r.res[0],
+            r.transform.d,
+            r.transform.e,
+            r.transform.f + rand_int * abs(r.res[1]),
+        )
+        r_shifted = gu.Raster.from_array(r.data, crs=r.crs, transform=transform_shifted, nodata=r.nodata)
+        intersection = r.intersection(r_shifted)
+
+        # left and bottom bounds should correspond to shifted raster
+        assert intersection[0] == r_shifted.bounds[0]
+        assert intersection[1] == r_shifted.bounds[1]
+
+        # right and top bounds should correspond to original raster
+        assert intersection[2] == r.bounds[2]
+        assert intersection[3] == r.bounds[3]
+
+        # -- Test with a second raster shifted right and up, float shift -- #
+        transform_shifted = (
+            r.transform.a,
+            r.transform.b,
+            r.transform.c + rand_float * r.res[0],
+            r.transform.d,
+            r.transform.e,
+            r.transform.f + rand_float * abs(r.res[1]),
+        )
+        r_shifted = gu.Raster.from_array(r.data, crs=r.crs, transform=transform_shifted, nodata=r.nodata)
+
+        # With match_ref = False, same as with integer
+        intersection = r.intersection(r_shifted, match_ref=False)
+        assert intersection[0] == r_shifted.bounds[0]
+        assert intersection[1] == r_shifted.bounds[1]
+        assert intersection[2] == r.bounds[2]
+        assert intersection[3] == r.bounds[3]
+
+        # With match_ref = True, right and top should match ref, left and bottom should match shifted +/- res
+        intersection = r.intersection(r_shifted, match_ref=True)
+        assert abs(intersection[0] - r_shifted.bounds[0]) < r.res[0]
+        assert abs(intersection[1] - r_shifted.bounds[1]) < r.res[1]
+        assert intersection[2] == r.bounds[2]
+        assert intersection[3] == r.bounds[3]
+
+        # -- Test with a non overlapping raster -- #
+        warnings.simplefilter("error")
+        transform_shifted = (
+            r.transform.a,
+            r.transform.b,
+            r.transform.c + (r.width + 1) * r.res[0],
+            r.transform.d,
+            r.transform.e,
+            r.transform.f,
+        )
+        r_nonoverlap = gu.Raster.from_array(r.data, crs=r.crs, transform=transform_shifted, nodata=r.nodata)
+
+        with pytest.warns(UserWarning, match="Intersection is void"):
+            intersection = r.intersection(r_nonoverlap)
+            assert intersection == (0.0, 0.0, 0.0, 0.0)
 
     def test_interp(self) -> None:
 

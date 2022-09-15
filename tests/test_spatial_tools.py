@@ -14,15 +14,115 @@ import geoutils as gu
 from geoutils import examples
 from geoutils.georaster import RasterType
 
-# def test_dem_subtraction():
-#     """Test that the DEM subtraction script gives reasonable numbers."""
-#     with warnings.catch_warnings():
-#         warnings.filterwarnings("ignore", category=DeprecationWarning)
-#         diff = gu.georaster.spatial_tools.subtract_rasters(
-#             examples.get_path("longyearbyen_ref_dem"),
-#             examples.get_path("longyearbyen_tba_dem"))
+# Group rasters for for testing `load_multiple_rasters`
+# two overlapping, single band rasters
+# two overlapping, 1 and 3 band rasters
+# three overlapping rasters
+# TODO: add a case with different CRS - issue raised #310
+raster_groups = [
+    [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("everest_landsat_b4_cropped")],
+    [gu.examples.get_path("everest_landsat_rgb"), gu.examples.get_path("everest_landsat_b4_cropped")],
+    [
+        gu.examples.get_path("everest_landsat_b4"),
+        gu.examples.get_path("everest_landsat_rgb"),
+        gu.examples.get_path("everest_landsat_b4_cropped"),
+    ],
+]
 
-#     assert np.nanmean(np.abs(diff.data)) < 100
+
+@pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore
+def test_load_multiple_overlap(raster_paths: list[str]) -> None:
+    """
+    Test load_multiple_rasters functionalities, when rasters overlap -> no warning is raised
+    """
+    # - Test that with crop=False and ref_grid=None, rasters are simply loaded - #
+    output_rst: list[gu.Raster] = gu.spatial_tools.load_multiple_rasters(raster_paths, crop=False, ref_grid=None)
+    for k, rst in enumerate(output_rst):
+        assert rst.is_loaded
+        rst2 = gu.Raster(raster_paths[k])
+        assert rst == rst2
+
+    # - Test that with crop=True and ref_grid=None, rasters are cropped only in area of overlap - #
+    output_rst = gu.spatial_tools.load_multiple_rasters(raster_paths, crop=True, ref_grid=None)
+    ref_crs = gu.Raster(raster_paths[0], load_data=False).crs
+
+    # Save original and new bounds (as polygons) in the reference CRS
+    orig_poly_bounds = []
+    new_poly_bounds = []
+    for k, rst in enumerate(output_rst):
+        assert rst.is_loaded
+        rst2 = gu.Raster(raster_paths[k], load_data=False)
+        assert rst.crs == rst2.crs  # CRS should not have been changed
+        orig_poly_bounds.append(gu.projtools.bounds2poly(rst2.bounds, rst.crs, ref_crs))
+        new_poly_bounds.append(gu.projtools.bounds2poly(rst.bounds, rst.crs, ref_crs))
+
+    # Check that the new bounds are contained in the original bounds of all rasters
+    for poly1 in new_poly_bounds:
+        for poly2 in orig_poly_bounds:
+            assert poly2.contains(poly1)
+
+    # - Test that with crop=False and ref_grid=0, rasters all have the same grid as the reference - #
+    # For the landsat test case, a warning will be raised because nodata is None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        output_rst = gu.spatial_tools.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
+
+    ref_rst = gu.Raster(raster_paths[0], load_data=False)
+    for k, rst in enumerate(output_rst):
+        rst2 = gu.Raster(raster_paths[k], load_data=False)
+        assert rst.is_loaded
+        # Georeferences are forced to ref
+        assert rst.crs == ref_rst.crs
+        assert rst.shape == ref_rst.shape
+        assert rst.transform == ref_rst.transform
+        # Original number of bounds and nodata must be preserved
+        assert rst.count == rst2.count
+        if rst2.nodata is not None:  # if none, reprojection with set a default value
+            assert rst.nodata == rst2.nodata
+
+
+raster_groups = [
+    [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")],
+]
+
+
+@pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore
+def test_load_multiple_no_overlap(raster_paths: list[str]) -> None:
+    """
+    Test load_multiple_rasters functionalities with rasters that do not overlap -> raises warning in certain cases
+    """
+    # - With crop=False and ref_grid=None, rasters are simply loaded - #
+    output_rst: list[gu.Raster] = gu.spatial_tools.load_multiple_rasters(raster_paths, crop=False, ref_grid=None)
+    for k, rst in enumerate(output_rst):
+        assert rst.is_loaded
+        rst2 = gu.Raster(raster_paths[k])
+        assert rst == rst2
+
+    # - With crop=True -> should raise a warning - #
+    with pytest.warns(UserWarning, match="Intersection is void, returning unloaded rasters."):
+        output_rst = gu.spatial_tools.load_multiple_rasters(raster_paths, crop=True, ref_grid=None)
+
+    # - Should work with crop=False and ref_grid=0 - #
+    # For the landsat test case, a warning will be raised because nodata is None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        output_rst = gu.spatial_tools.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
+
+    ref_rst = gu.Raster(raster_paths[0], load_data=False)
+    for k, rst in enumerate(output_rst):
+        rst2 = gu.Raster(raster_paths[k], load_data=False)
+        assert rst.is_loaded
+        # Georeferences are forced to ref
+        assert rst.crs == ref_rst.crs
+        assert rst.shape == ref_rst.shape
+        assert rst.transform == ref_rst.transform
+        # Original number of bounds and nodata must be preserved
+        assert rst.count == rst2.count
+        if rst2.nodata is not None:  # if none, reprojection with set a default value
+            assert rst.nodata == rst2.nodata
+        # Logically, the non overlapping raster should have only masked values
+        if k != 0:
+            assert np.count_nonzero(~rst.data.mask) == 0
 
 
 class stack_merge_images:
