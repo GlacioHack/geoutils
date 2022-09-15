@@ -567,8 +567,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # See https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
         if not isinstance(other, (Raster, np.ndarray, Number)):
             raise NotImplementedError(
-                f"Operation between an object of type {type(other)} and a Raster impossible. \
-Must be a Raster, np.ndarray or single number."
+                f"Operation between an object of type {type(other)} and a Raster impossible. Must be a Raster, "
+                f"np.ndarray or single number."
             )
 
         # Get self's dtype and nodata
@@ -910,21 +910,21 @@ Must be a Raster, np.ndarray or single number."
                     if np.count_nonzero(index_new_nodatas) > 0:
                         if update_array and update_mask:
                             warnings.warn(
-                                message="New nodata value found in the data array. Those will be masked, and the old nodata "
-                                        "cells will now take the same value. Use set_nodata() with update_array=False and/or "
-                                        "update_mask=False to change this behaviour",
+                                message="New nodata value found in the data array. Those will be masked, and the old "
+                                "nodata cells will now take the same value. Use set_nodata() with update_array=False "
+                                "and/or update_mask=False to change this behaviour",
                                 category=UserWarning,
                             )
                         elif update_array:
                             warnings.warn(
-                                "New nodata value found in the data array. The old nodata cells will now take the same value. "
-                                "Use set_nodata() with update_array=False to change this behaviour",
+                                "New nodata value found in the data array. The old nodata cells will now take the same "
+                                "value. Use set_nodata() with update_array=False to change this behaviour",
                                 category=UserWarning,
                             )
                         elif update_mask:
                             warnings.warn(
-                                "New nodata value found in the data array. Those will be masked. Use set_nodata() with "
-                                "update_mask=False to change this behaviour",
+                                "New nodata value found in the data array. Those will be masked. Use set_nodata() "
+                                "with update_mask=False to change this behaviour",
                                 category=UserWarning,
                             )
 
@@ -943,7 +943,7 @@ Must be a Raster, np.ndarray or single number."
 
                     # Only update mask with new nodata if it is defined
                     if nodata is not None:
-                        # Masking like this works from the masked array directly, whether a mask previously existed or not
+                        # Masking like this works from the masked array directly, whether a mask exists or not
                         imgdata[i, index_new_nodatas] = np.ma.masked
 
             # Update the data
@@ -1003,10 +1003,8 @@ Must be a Raster, np.ndarray or single number."
         # Check that new_data has the right type
         if str(new_data.dtype) != dtype:
             raise ValueError(
-                "New data must be of the same type as existing\
- data: {}. Use copy() to set a new array with different dtype, or astype() to change type.".format(
-                    dtype
-                )
+                "New data must be of the same type as existing data: {}. Use copy() to set a new array with "
+                "different dtype, or astype() to change type.".format(dtype)
             )
 
         if new_data.shape[1:] != orig_shape:
@@ -1443,15 +1441,15 @@ Must be a Raster, np.ndarray or single number."
                 # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
                 if not self.is_loaded:
                     warnings.warn(
-                        f"For reprojection, dst_nodata must be set. Setting default nodata to {dst_nodata}. \
-You may set a different nodata with `dst_nodata`."
+                        f"For reprojection, dst_nodata must be set. Setting default nodata to {dst_nodata}. You may "
+                        f"set a different nodata with `dst_nodata`."
                     )
 
                 elif dst_nodata in self.data:
                     warnings.warn(
-                        f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exists in \
-self.data. This may have unexpected consequences. Consider setting a different nodata with \
-self.set_nodata()."
+                        f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exists in "
+                        f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
+                        f"self.set_nodata()."
                     )
 
         from geoutils.misc import resampling_method_from_str
@@ -1722,10 +1720,7 @@ self.set_nodata()."
 
                 # Warning: this will overwrite the transform
                 if dst.transform != rio.transform.Affine(1, 0, 0, 0, 1, 0):
-                    warnings.warn(
-                        "A geotransform previously set is going \
-to be cleared due to the setting of GCPs."
-                    )
+                    warnings.warn("A geotransform previously set is going to be cleared due to the setting of GCPs.")
 
                 dst.gcps = (rio_gcps, gcps_crs)
 

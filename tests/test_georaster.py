@@ -1404,9 +1404,9 @@ self.set_nodata()."
                 # Feed a floating numeric to an integer type
                 r.set_nodata(0.5)
         elif "float" in r.dtypes[0]:
-                # Feed a floating value not supported by our example data
+            # Feed a floating value not supported by our example data
             with pytest.raises(ValueError, match=expected_message):
-                r.set_nodata(np.finfo('longdouble').min)
+                r.set_nodata(np.finfo("longdouble").min)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_nodata_setter(self, example: str) -> None:
