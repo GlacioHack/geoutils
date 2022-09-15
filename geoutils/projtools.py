@@ -1,9 +1,10 @@
 """
-projtools provides a toolset for dealing with different coordinate reference systems (CRS).
+projtools provides a set of tools for dealing with different coordinate reference systems (CRS) and bounds.
 """
 from __future__ import annotations
 
 from collections import abc
+from math import ceil, floor
 
 import geopandas as gpd
 import numpy as np
@@ -33,9 +34,6 @@ def bounds2poly(
 
     :returns: Output polygon
     """
-    if in_crs is not None:
-        raise NotImplementedError
-
     # If boundsGeom is a GeoPandas or Vector object (warning, has both total_bounds and bounds attributes)
     if hasattr(boundsGeom, "total_bounds"):
         xmin, ymin, xmax, ymax = boundsGeom.total_bounds  # type: ignore
@@ -52,10 +50,12 @@ def bounds2poly(
             "boundsGeom must a list/tuple of coordinates or an object with attributes bounds or total_bounds."
         )
 
-    bbox = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+    corners = ((xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax))
 
-    if out_crs is not None:
-        raise NotImplementedError()
+    if (in_crs is not None) & (out_crs is not None):
+        corners = np.transpose(reproject_points(np.transpose(corners), in_crs, out_crs))
+
+    bbox = Polygon(corners)
 
     return bbox
 
@@ -71,7 +71,7 @@ def merge_bounds(
 a rasterio/Raster object, a geoPandas/Vector object.
     :param merging_algorithm: the algorithm to use for merging, either "union" or "intersection"
 
-    :returns: Output bounds (xmin, ymin, xmax, ymax)
+    :returns: Output bounds (xmin, ymin, xmax, ymax) or empty tuple
     """
     # Check that bounds_list is a list of bounds objects
     assert isinstance(bounds_list, (list, tuple)), "bounds_list must be a list/tuple"
@@ -95,6 +95,36 @@ a rasterio/Raster object, a geoPandas/Vector object.
 
     new_bounds: tuple[float] = output_poly.bounds
     return new_bounds
+
+
+def align_bounds(
+    ref_transform: rio.transform.Affine,
+    src_bounds: rio.coords.BoundingBox | tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """
+    Aligns the bounds in src_bounds so that it matches the georeferences in ref_transform
+    i.e. the distance between the upper-left pixels of ref and src is a multiple of resolution and
+    the width/height of the bounds are a multiple of resolution.
+    The bounds are padded so that the output bounds always contain the input bounds.
+
+    :param ref_transform: The transform of the dataset to be used as reference
+    :param src_bounds: The initial bounds that needs to be aligned to ref_transform. \
+    Must be a rasterio BoundingBox or list or tuple with coordinates (left, bottom, right, top).
+
+    :returns: the aligned bounding box (left, bottom, right, top)
+    """
+    left, bottom, right, top = src_bounds
+    xres = ref_transform.a
+    yres = ref_transform.e
+    ref_left = ref_transform.xoff
+    ref_top = ref_transform.yoff
+
+    left = ref_left + floor((left - ref_left) / xres) * xres
+    right = left + ceil((right - left) / xres) * xres
+    top = ref_top + floor((top - ref_top) / yres) * yres
+    bottom = top + ceil((bottom - top) / yres) * yres
+
+    return (left, bottom, right, top)
 
 
 def reproject_points(pts: list[list[float]] | np.ndarray, in_crs: CRS, out_crs: CRS) -> tuple[list[float], list[float]]:
