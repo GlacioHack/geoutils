@@ -8,6 +8,7 @@ import rasterio as rio
 
 import geoutils
 
+
 def deprecate(removal_version: str | None = None, details: str | None = None):  # type: ignore
     """
     Trigger a DeprecationWarning for the decorated function.
