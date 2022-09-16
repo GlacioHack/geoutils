@@ -527,13 +527,15 @@ class Raster:
 
     def __eq__(self, other: object) -> bool:
         """Check if a Raster's data and georeferencing is equal to another."""
-        from geoutils.misc import array_equal
 
         if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
             return NotImplemented
         return all(
             [
-                array_equal(self.data, other.data, equal_nan=True),
+                np.array_equal(self.data.data, other.data.data, equal_nan=True),
+                np.array_equal(self.data.mask, other.data.mask),
+                self.data.fill_value == other.data.fill_value,
+                self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
                 self.crs == other.crs,
                 self.nodata == other.nodata,
@@ -545,7 +547,7 @@ class Raster:
 
     def _overloading_check(
         self: RasterType, other: RasterType | np.ndarray | Number
-    ) -> tuple[np.ndarray, np.ndarray | Number, float | int | list[int] | list[float] | None]:
+    ) -> tuple[np.ma.masked_array, np.ma.masked_array | Number, float | int | list[int] | list[float] | None]:
         """
         Before any operation overloading, check input data type and return both self and other data as either \
 a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
@@ -624,11 +626,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if (nodata1 is not None) and (out_dtype == dtype1):
             out_nodata = nodata1
 
-        # Convert output data to correct dtype and masked_array
-        if isinstance(other_data, np.ndarray):
-            other_data = np.ma.asarray(other_data).astype(out_dtype, copy=False)
-
-        self_data = self.data.astype(out_dtype)
+        self_data = self.data
 
         return self_data, other_data, out_nodata
 
@@ -703,7 +701,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data / other_data
+        print(out_data.mask)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        print(out_rst.data.mask)
         return out_rst
 
     def __rtruediv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
@@ -712,7 +712,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data / self_data
+        print(out_data.mask)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        print(out_rst.data.mask)
         return out_rst
 
     def __floordiv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
@@ -1010,7 +1012,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
             )
 
-        # If the new data is not masked and has non-finite values, we define a fill_value
+        # If the new data is not masked and has non-finite values, we define a default nodata value
         if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
             np.ma.is_masked(new_data)
             and self.nodata is None
@@ -1023,16 +1025,33 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             )
             self._nodata = _default_nodata(dtype)
 
-        # If the new data is not masked (a classic ndarray) and contains non-finite values such as NaNs, define a mask
+        # Now comes the important part, the data setting!
+        # Several cases to consider:
+
+        # 1/ If the new data is not masked (either classic array or masked array with no mask, hence the use of
+        # as array) and contains non-finite values such as NaNs, define a mask
         if not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
-            self._data = np.ma.masked_array(data=new_data, mask=~np.isfinite(new_data), fill_value=self.nodata)
-        # If the new data is masked but some non-finite values aren't masked, add them to the mask
+            self._data = np.ma.masked_array(data=np.asarray(new_data),
+                                            mask=~np.isfinite(new_data.data),
+                                            fill_value=self.nodata)
+
+        # 2/ If the new data is masked but some non-finite values aren't masked, add them to the mask
         elif np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0:
             self._data = np.ma.masked_array(
-                data=new_data, mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask), fill_value=self.nodata
+                data=new_data.data,
+                mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask),
+                fill_value=self.nodata
             )
+
+        # 3/ If the new data is a Masked Array, we pass data.data and data.mask independently (passing directly the
+        # masked array to data= has a strange behaviour that redefines fill_value)
+        elif np.ma.isMaskedArray(new_data):
+            self._data = np.ma.masked_array(data=new_data.data, mask=new_data.mask, fill_value=self.nodata)
+
+        # 4/ If the new data is classic ndarray
         else:
             self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
+
 
     def set_mask(self, mask: np.ndarray) -> None:
         """
