@@ -18,7 +18,6 @@ from pylint import epylint
 import geoutils as gu
 import geoutils.georaster as gr
 import geoutils.geovector as gv
-import geoutils.misc
 import geoutils.projtools as pt
 from geoutils import examples
 from geoutils.georaster.raster import _default_nodata, _default_rio_attrs
@@ -1594,20 +1593,21 @@ self.set_nodata()."
         assert np.ma.allequal(img.data, saved.data)
         assert saved.nodata == 0
 
-        # Test that mask is preserved
+        # Test that mask is preserved if nodata value is valid
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
-        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-        img.save(temp_file.name)
-        saved = gr.Raster(temp_file.name)
-        assert np.array_equal(img.data.mask, saved.data.mask)
+        if img.nodata is not None:
+            temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+            img.save(temp_file.name)
+            saved = gr.Raster(temp_file.name)
+            assert np.array_equal(img.data.mask, saved.data.mask)
 
-        # Test that a warning is raised if nodata is not set
+        # Test that a warning is raised if nodata is not set and a mask exists (defined above)
         if img.nodata is None:
             with pytest.warns(UserWarning):
                 img.save(TemporaryFile())
 
-        # Clean up teporary folder - fails on Windows
+        # Clean up temporary folder - fails on Windows
         try:
             temp_dir.cleanup()
         except (NotADirectoryError, PermissionError):
