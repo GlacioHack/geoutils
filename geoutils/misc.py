@@ -11,7 +11,7 @@ import geoutils
 from geoutils._typing import ArrayLike
 from geoutils.georaster import Raster, RasterType
 
-
+@deprecate('0.0.10', 'This function is deprecated and will be removed in 0.0.10, use np.ma.allequal for similar behaviour.')
 def array_equal(
     array1: RasterType | ArrayLike,
     array2: RasterType | ArrayLike,
