@@ -21,7 +21,7 @@ import geoutils.geovector as gv
 import geoutils.misc
 import geoutils.projtools as pt
 from geoutils import examples
-from geoutils.georaster.raster import _default_ndv, _default_rio_attrs
+from geoutils.georaster.raster import _default_nodata, _default_rio_attrs
 from geoutils.misc import resampling_method_from_str
 
 DO_PLOT = False
@@ -87,7 +87,6 @@ class TestRaster:
         assert np.ma.isMaskedArray(gr.Raster(example, masked=True).data)
         assert np.ma.isMaskedArray(gr.Raster(example, masked=False).data)
 
-    @pytest.mark.skip("Test failing because of an issue in set_ndv")  # type: ignore
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
@@ -112,12 +111,12 @@ class TestRaster:
             # Validate that the mask is respected by adding 0 values (there are none to begin with.)
             r.data.ravel()[:1000] = 0
             # Set the nodata value to 0, then validate that they are excluded from the new minimum
-            r.set_ndv(0)
+            r.set_nodata(0)
         elif r.dtypes[0] == "float32":
             # We do the same with -99999 here
             r.data.ravel()[:1000] = -99999
             # And replace the nodata value
-            r.set_ndv(-99999)
+            r.set_nodata(-99999)
 
         new_stats = r.info(stats=True)
         for i, line in enumerate(stats.splitlines()):
@@ -243,7 +242,7 @@ class TestRaster:
 
         # Use either the default nodata or None
         if nodata_init == "type_default":
-            nodata: int | None = _default_ndv(dtype)
+            nodata: int | None = _default_nodata(dtype)
         else:
             nodata = None
 
@@ -302,7 +301,7 @@ class TestRaster:
                 with pytest.warns(
                     UserWarning,
                     match="Setting default nodata {:.0f} to mask non-finite values found in the array, as "
-                    "no nodata value was defined.".format(_default_ndv(dtype)),
+                    "no nodata value was defined.".format(_default_nodata(dtype)),
                 ):
                     r1 = gr.Raster.from_array(
                         data=arr_with_unmasked_nodata, transform=transform, crs=None, nodata=nodata
@@ -330,7 +329,7 @@ class TestRaster:
 
             # Check nodata is correct
             if nodata is None:
-                new_nodata = _default_ndv(dtype)
+                new_nodata = _default_nodata(dtype)
             else:
                 new_nodata = nodata
             assert r1.nodata == new_nodata
@@ -785,41 +784,44 @@ class TestRaster:
         r = gr.Raster(example)
 
         # -- Check proper errors are raised if nodata are not set -- #
-        r_ndv = r.copy()
-        r_ndv.set_ndv(None)
+        r_nodata = r.copy()
+        r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.spatial_tools.subsample_raster(r_ndv.data, 10, return_indices=True)
-        r_ndv.data[rand_indices] = np.ma.masked
-        assert np.count_nonzero(r_ndv.data.mask) > 0
+        rand_indices = gu.spatial_tools.subsample_raster(r_nodata.data, 10, return_indices=True)
+        r_nodata.data[rand_indices] = np.ma.masked
+        assert np.count_nonzero(r_nodata.data.mask) > 0
 
-        # make sure at least one pixel is set at default ndv for test
-        default_ndv = _default_ndv(r_ndv.dtypes[0])
-        rand_indices = gu.spatial_tools.subsample_raster(r_ndv.data, 10, return_indices=True)
-        r_ndv.data[rand_indices] = default_ndv
-        assert np.count_nonzero(r_ndv.data == default_ndv) > 0
+        # make sure at least one pixel is set at default nodata for test
+        default_nodata = _default_nodata(r_nodata.dtypes[0])
+        rand_indices = gu.spatial_tools.subsample_raster(r_nodata.data, 10, return_indices=True)
+        r_nodata.data[rand_indices] = default_nodata
+        assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
         # 1 - if no src_nodata is set and masked values exist, raises an error
         with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
-            _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, dst_nodata=0)
+            _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, dst_nodata=0)
 
         # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
         with pytest.warns(
             UserWarning,
-            match="For reprojection, dst_nodata must be set. Default chosen value .* exists in self.data. \
-This may have unexpected consequences. Consider setting a different nodata with self.set_ndv.",
+            match=re.escape(
+                f"For reprojection, dst_nodata must be set. Default chosen value {_default_nodata(r_nodata.dtypes[0])} exists in \
+self.data. This may have unexpected consequences. Consider setting a different nodata with \
+self.set_nodata()."
+            ),
         ):
-            _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
+            _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, src_nodata=default_nodata)
 
         # 3 - if default nodata does not conflict, should not raise a warning
-        r_ndv.data[r_ndv.data == default_ndv] = 3
-        _ = r_ndv.reproject(dst_res=r_ndv.res[0] / 2, src_nodata=default_ndv)
+        r_nodata.data[r_nodata.data == default_nodata] = 3
+        _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, src_nodata=default_nodata)
 
         # -- Additional tests -- #
 
         # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
         if r.nodata is None:
-            r.set_ndv(0)
+            r.set_nodata(0)
 
         # - Create 2 artificial rasters -
         # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
@@ -907,10 +909,12 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert np.count_nonzero(r_gaps_reproj.data.mask) == tot_masked_true
 
         # If a nodata is set, make sure it is preserved
-        r_ndv = r.copy()
-        r_ndv.set_ndv(255)
-        r3 = r_ndv.reproject(r2)
-        assert r_ndv.nodata == r3.nodata
+        r_nodata = r.copy()
+
+        r_nodata.set_nodata(0)
+
+        r3 = r_nodata.reproject(r2)
+        assert r_nodata.nodata == r3.nodata
 
         # Test dst_size - this should modify the shape, and hence resolution, but not the bounds
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
@@ -943,7 +947,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         # Assert that when reprojection creates nodata (voids), if no nodata is set, a default value is set
         r3 = r.reproject(dst_bounds=dst_bounds)
         if r.nodata is None:
-            assert r3.nodata == _default_ndv(r.dtypes[0])
+            assert r3.nodata == _default_nodata(r.dtypes[0])
 
         # Particularly crucial if nodata falls outside the original image range
         # -> check range is preserved (with nearest interpolation)
@@ -990,7 +994,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         # For the Landsat dataset, to avoid warnings with crop
         if r.nodata is None:
-            r.set_ndv(0)
+            r.set_nodata(0)
 
         # -- Test with same bounds -> should be the same -- #
         r_cropped = r.copy()
@@ -1010,7 +1014,7 @@ This may have unexpected consequences. Consider setting a different nodata with 
         intersection = r.intersection(r_cropped, match_ref=False)
         assert intersection == r_cropped.bounds
 
-        # Second with non matching resolution, two cases
+        # Second with non-matching resolution, two cases
         rand_float = np.random.randint(1, min(r.shape) / 2 - 1) + 0.25
         bounds_new = [
             bounds_orig[0] + rand_float * r.res[0],
@@ -1220,72 +1224,245 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert z == z_val
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_set_ndv(self, example: str) -> None:
+    def test_set_nodata(self, example: str) -> None:
         """
-        Read dataset and set a certain value (e.g., 255 or -9999) to no data. Save mask.
-        Then, set the value minus one as new no data (e.g., 254 or -10000), after rewriting the previous nodata to 0.
-        Save mask again.
-        Check that both no data masks are identical and have correct number of pixels.
+        We test set_nodata() with all possible input parameters, check expected behaviour for updating array and mask,
+        and that errors and warnings are raised when they should be.
         """
-        # Read image
-        r = gr.Raster(example, masked=True)
 
-        # Copy the original data to validate the mask later
-        original_data = r.data.copy()
-        # Set the nodata value to default ndv (e.g., 255) and update the mask accordingly.
-        r.set_ndv(ndv=_default_ndv(r.dtypes[0]), update_array=True)
-        # Save the mask for validation
-        ndv_index = r.data.mask.copy()
+        # Read raster and save a copy to compare later
+        r = gr.Raster(example)
+        r_copy = r.copy()
+        old_nodata = r.nodata
+        # We chose nodata that doesn't exist in the raster yet for both our examples (for uint8, the default value of
+        # 255 exist, so we replace by 0)
+        new_nodata = _default_nodata(r.dtypes[0]) if not r.dtypes[0] == "uint8" else 0
 
-        # Now set to the notadata value minus 1 (e.g., 254), after changing this value to 0.
-        r.data[r.data == _default_ndv(r.dtypes[0]) - 1] = 0
-        # This will unset the mask of all masked with default nodata
-        # The new nodata has no values, since they were changed in the command above. The mask is therefore empty
-        r.set_ndv(ndv=_default_ndv(r.dtypes[0]) - 1, update_array=True)
-        ndv_index_2 = r.data.mask
+        # -- First, test set_nodata() with default parameters --
 
-        # The first mask should be as big as the amount of 255 values
-        assert np.count_nonzero(ndv_index) == (np.count_nonzero(original_data == 255))
-        # The second mask should be empty, as the 255 values are unset and no 254 values exist anymore.
-        assert np.count_nonzero(ndv_index_2) == 0
+        # Check that the new_nodata does not exist in the raster yet, and set it
+        assert np.count_nonzero(r_copy.data.data == new_nodata) == 0
+        r.set_nodata(nodata=new_nodata)
 
-        # Check that nodata can also be set upon loading
-        r = gr.Raster(example, nodata=5)
-        assert r.nodata == 5
+        # The nodata value should have been set in the metadata
+        assert r.nodata == new_nodata
 
-        # Check that an error is raised if nodata value is incompatible with dtype
-        expected_message = r"ndv value .* incompatible with self.dtype .*"
-        if r.dtypes[0] == "uint8":
+        # By default, the array should have been updated
+        if old_nodata is not None:
+            index_old_nodata = r_copy.data.data == old_nodata
+            assert all(r.data.data[index_old_nodata] == new_nodata)
+        else:
+            index_old_nodata = np.zeros(np.shape(r.data), dtype=bool)
+
+        # The rest of the array and mask should be unchanged
+        assert np.array_equal(r.data.data[~index_old_nodata], r_copy.data.data[~index_old_nodata])
+        # We call np.ma.getmaskarray to always compare a full boolean array
+        assert np.array_equal(np.ma.getmaskarray(r.data), np.ma.getmaskarray(r_copy.data))
+
+        # Then, we repeat for a nodata that already existed, we artificially modify the value on an unmasked pixel
+        r = r_copy.copy()
+        mask_pixel_artificially_set = np.zeros(np.shape(r.data), dtype=bool)
+        mask_pixel_artificially_set[0, 0, 0] = True
+        r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
+        r.data.mask[mask_pixel_artificially_set] = False
+
+        # Check the value is valid in the masked array
+        assert np.count_nonzero(r_copy.data == new_nodata) >= 0
+        # A warning should be raised when setting the nodata
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                "New nodata value found in the data array. Those will be masked, and the old "
+                "nodata cells will now take the same value. Use set_nodata() with update_array=False "
+                "and/or update_mask=False to change this behaviour."
+            ),
+        ):
+            r.set_nodata(nodata=new_nodata)
+
+        # The nodata value should have been set in the metadata
+        assert r.nodata == new_nodata
+
+        # By default, the array should have been updated similarly for the old nodata
+        if old_nodata is not None:
+            index_old_nodata = r_copy.data.data == old_nodata
+            assert all(r.data.data[index_old_nodata] == new_nodata)
+        else:
+            index_old_nodata = np.zeros(np.shape(r.data.data), dtype=bool)
+
+        # The rest of the array is similarly unchanged
+        index_unchanged = np.logical_and(~index_old_nodata, ~mask_pixel_artificially_set)
+        assert np.array_equal(r.data.data[index_unchanged], r_copy.data.data[index_unchanged])
+        # But, this time, the mask is only unchanged for the array excluding the pixel artificially modified
+        assert np.array_equal(
+            np.ma.getmaskarray(r.data)[~mask_pixel_artificially_set],
+            np.ma.getmaskarray(r_copy.data)[~mask_pixel_artificially_set],
+        )
+
+        # More specifically, it has changed for that pixel
+        assert (
+            np.ma.getmaskarray(r.data)[mask_pixel_artificially_set]
+            == ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
+        )
+
+        # -- Second, test set_nodata() with update_array=False --
+        r = r_copy.copy()
+
+        r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
+        r.data.mask[mask_pixel_artificially_set] = False
+
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                "New nodata value found in the data array. Those will be masked. Use set_nodata() "
+                "with update_mask=False to change this behaviour."
+            ),
+        ):
+            r.set_nodata(nodata=new_nodata, update_array=False)
+
+        # The nodata value should have been set in the metadata
+        assert r.nodata == new_nodata
+
+        # Now, the array should not have been updated, so the entire array should be unchanged except for the pixel
+        assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
+        # But the mask should have been updated on the pixel
+        assert (
+            np.ma.getmaskarray(r.data)[mask_pixel_artificially_set]
+            == ~np.ma.getmaskarray(r_copy.data)[mask_pixel_artificially_set]
+        )
+
+        # -- Third, test set_nodata() with update_mask=False --
+        r = r_copy.copy()
+
+        r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
+        r.data.mask[mask_pixel_artificially_set] = False
+
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                "New nodata value found in the data array. The old nodata cells will now take the same "
+                "value. Use set_nodata() with update_array=False to change this behaviour."
+            ),
+        ):
+            r.set_nodata(nodata=new_nodata, update_mask=False)
+
+        # The nodata value should have been set in the metadata
+        assert r.nodata == new_nodata
+
+        # The array should have been updated
+        if old_nodata is not None:
+            index_old_nodata = r_copy.data.data == old_nodata
+            assert all(r.data.data[index_old_nodata] == new_nodata)
+        else:
+            index_old_nodata = np.zeros(np.shape(r.data.data), dtype=bool)
+
+        index_unchanged = np.logical_and(~index_old_nodata, ~mask_pixel_artificially_set)
+        # The rest of the array should be similarly unchanged
+        assert np.array_equal(r.data.data[index_unchanged], r_copy.data.data[index_unchanged])
+
+        # But the mask should still be the same
+        assert np.array_equal(np.ma.getmaskarray(r.data), np.ma.getmaskarray(r_copy.data))
+
+        # -- Fourth, test set_nodata() with both update_array=False and update_mask=False --
+        r = r_copy.copy()
+
+        r.set_nodata(nodata=new_nodata, update_array=False, update_mask=False)
+        r.data.data[mask_pixel_artificially_set] = new_nodata
+        # We set the value as masked before unmasking to create the mask if it does not exist yet
+        r.data[mask_pixel_artificially_set] = np.ma.masked
+        r.data.mask[mask_pixel_artificially_set] = False
+
+        # The nodata value should have been set in the metadata
+        assert r.nodata == new_nodata
+
+        # The array should not have been updated except for the pixel
+        assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
+        # And the mask neither
+        assert np.array_equal(np.ma.getmaskarray(r.data), np.ma.getmaskarray(r_copy.data))
+
+        # -- Fifth, let's check that errors are raised when they should --
+
+        # A ValueError if input nodata is neither a list, tuple, integer, floating
+        with pytest.raises(ValueError, match="Type of nodata not understood, must be list or float or int"):
+            r.set_nodata(nodata="this_should_not_work")  # type: ignore
+
+        # A ValueError if nodata value is incompatible with dtype
+        expected_message = r"nodata value .* incompatible with self.dtype .*"
+        if "int" in r.dtypes[0]:
             with pytest.raises(ValueError, match=expected_message):
                 # Feed a floating numeric to an integer type
-                r.set_ndv(0.5)
+                r.set_nodata(0.5)
+        elif "float" in r.dtypes[0]:
+            # Feed a floating value not supported by our example data
+            with pytest.raises(ValueError, match=expected_message):
+                r.set_nodata(np.finfo("longdouble").min)
 
-    def test_default_ndv(self) -> None:
+        # -- Sixth, check the special behaviour with None
+        r = r_copy.copy()
+        r.set_nodata(None)
+
+        # The metadata should be updated to None
+        assert r.nodata is None
+
+        # The array cannot be updated, so it is left as is
+        assert np.array_equal(r.data.data, r_copy.data.data)
+        # However, the old nodata values are unset by default, let's check this
+        if old_nodata is not None:
+            index_old_nodata = r_copy.data.data == old_nodata
+            # The arrays on this index should be booleans opposites
+            assert np.array_equal(
+                np.ma.getmaskarray(r.data)[index_old_nodata], ~np.ma.getmaskarray(r_copy.data)[index_old_nodata]
+            )
+        else:
+            index_old_nodata = np.zeros(np.shape(r.data.data), dtype=bool)
+        # The rest should be equal
+        assert np.array_equal(
+            np.ma.getmaskarray(r.data)[~index_old_nodata], np.ma.getmaskarray(r_copy.data)[~index_old_nodata]
+        )
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_nodata_setter(self, example: str) -> None:
+        """Check that the nodata setter gives the same result as set_nodata with default parameters"""
+
+        r = gu.Raster(example)
+        r_copy = r.copy()
+
+        r.set_nodata(_default_nodata(r.dtypes[0]))
+        r_copy.nodata = _default_nodata(r.dtypes[0])
+
+        assert r == r_copy
+
+    def test_default_nodata(self) -> None:
         """
         Test that the default nodata values are as expected.
         """
-        assert _default_ndv("uint8") == np.iinfo("uint8").max
-        assert _default_ndv("int8") == np.iinfo("int8").min
-        assert _default_ndv("uint16") == np.iinfo("uint16").max
-        assert _default_ndv("int16") == np.iinfo("int16").min
-        assert _default_ndv("uint32") == 99999
+        assert _default_nodata("uint8") == np.iinfo("uint8").max
+        assert _default_nodata("int8") == np.iinfo("int8").min
+        assert _default_nodata("uint16") == np.iinfo("uint16").max
+        assert _default_nodata("int16") == np.iinfo("int16").min
+        assert _default_nodata("uint32") == 99999
         for dtype in ["int32", "float32", "float64", "longdouble"]:
-            assert _default_ndv(dtype) == -99999
+            assert _default_nodata(dtype) == -99999
 
         # Check it works with most frequent np.dtypes too
-        assert _default_ndv(np.dtype("uint8")) == np.iinfo("uint8").max
+        assert _default_nodata(np.dtype("uint8")) == np.iinfo("uint8").max
         for dtype in [np.dtype("int32"), np.dtype("float32"), np.dtype("float64")]:
-            assert _default_ndv(dtype) == -99999
+            assert _default_nodata(dtype) == -99999
 
         # Check it works with most frequent types too
-        assert _default_ndv(np.uint8) == np.iinfo("uint8").max
+        assert _default_nodata(np.uint8) == np.iinfo("uint8").max
         for dtype in [np.int32, np.float32, np.float64]:
-            assert _default_ndv(dtype) == -99999
+            assert _default_nodata(dtype) == -99999
 
         # Check that an error is raised for other types
         expected_message = "No default nodata value set for dtype"
         with pytest.raises(NotImplementedError, match=expected_message):
-            _default_ndv("bla")
+            _default_nodata("bla")
 
     def test_astype(self) -> None:
         warnings.simplefilter("error")
@@ -1322,7 +1499,10 @@ This may have unexpected consequences. Consider setting a different nodata with 
         assert not np.any(r2.data == 0)
         r2 = r.copy()
         r2.data[0, 0] = 0
-        r2.set_ndv(0)
+
+        with pytest.warns(UserWarning):
+            r2.set_nodata(0)
+
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
             rout = r2.astype(dtype)  # type: ignore
             assert rout == r2
@@ -1609,8 +1789,8 @@ This may have unexpected consequences. Consider setting a different nodata with 
 
         img1 = gr.Raster(self.landsat_b4_path)
         img2 = gr.Raster(self.landsat_b4_crop_path)
-        img1.set_ndv(0)
-        img2.set_ndv(0)
+        img1.set_nodata(0)
+        img2.set_nodata(0)
 
         # Resample the rasters using a new resampling method and see that the string and enum gives the same result.
         img3a = img1.reproject(img2, resampling="q1")
@@ -1715,12 +1895,12 @@ class TestArithmetic:
         np.random.randint(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
     )
 
-    # Test with ndv value set
-    r1_ndv = gr.Raster.from_array(
+    # Test with nodata value set
+    r1_nodata = gr.Raster.from_array(
         np.random.randint(1, 255, (height, width)).astype("float32"),
         transform=transform,
         crs=None,
-        nodata=_default_ndv("float32"),
+        nodata=_default_nodata("float32"),
     )
 
     # Test with 0 values
@@ -1728,7 +1908,7 @@ class TestArithmetic:
         np.random.randint(1, 255, (height, width)).astype("float32"),
         transform=transform,
         crs=None,
-        nodata=_default_ndv("float32"),
+        nodata=_default_nodata("float32"),
     )
     r2_zero.data[0, 0, 0] = 0
 
@@ -1777,9 +1957,9 @@ class TestArithmetic:
         r2.crs = rio.crs.CRS.from_epsg(4326)
         assert r1 != r2
 
-        # Change ndv
+        # Change nodata
         r2 = r1.copy()
-        r2.set_ndv(34)
+        r2.set_nodata(34)
         assert r1 != r2
 
     # List of operations with two operands
@@ -1807,7 +1987,7 @@ class TestArithmetic:
         # Test various inputs: Raster with different dtypes, np.ndarray, single number
         r1 = self.r1
         r1_f32 = self.r1_f32
-        r1_ndv = self.r1_ndv
+        r1_nodata = self.r1_nodata
         r2 = self.r2
         r2_zero = self.r2_zero
         satimg = self.satimg
@@ -1827,7 +2007,7 @@ class TestArithmetic:
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
         else:
-            assert r3.nodata == _default_ndv(ctype)
+            assert r3.nodata == _default_nodata(ctype)
         assert r3.crs == r1.crs
         assert r3.transform == r1.transform
 
@@ -1848,16 +2028,16 @@ class TestArithmetic:
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
         else:
-            assert r3.nodata == _default_ndv("float32")
+            assert r3.nodata == _default_nodata("float32")
 
-        # Test with ndv set
+        # Test with nodata set
         r1 = self.r1
-        r3 = getattr(r1_ndv, op)(r2)
-        assert np.all(r3.data == getattr(r1_ndv.data, op)(r2.data))
+        r3 = getattr(r1_nodata, op)(r2)
+        assert np.all(r3.data == getattr(r1_nodata.data, op)(r2.data))
         if np.sum(r3.data.mask) == 0:
-            assert r3.nodata == r1_ndv.nodata
+            assert r3.nodata == r1_nodata.nodata
         else:
-            assert r3.nodata == _default_ndv(r1_ndv.data.dtype)
+            assert r3.nodata == _default_nodata(r1_nodata.data.dtype)
 
         # Test with zeros values (e.g. division)
         r1 = self.r1
@@ -1866,7 +2046,7 @@ class TestArithmetic:
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata == r2_zero.nodata
         else:
-            assert r3.nodata == _default_ndv(r1_ndv.data.dtype)
+            assert r3.nodata == _default_nodata(r1_nodata.data.dtype)
 
         # Test with a numpy array
         r1 = self.r1_f32
@@ -1876,7 +2056,7 @@ class TestArithmetic:
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
         else:
-            assert r3.nodata == _default_ndv("float32")
+            assert r3.nodata == _default_nodata("float32")
 
         # Test with an integer
         r3 = getattr(r1, op)(intval)
@@ -1885,7 +2065,7 @@ class TestArithmetic:
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
         else:
-            assert r3.nodata == _default_ndv("uint8")
+            assert r3.nodata == _default_nodata("uint8")
 
         # Test with a float value
         r3 = getattr(r1, op)(floatval)
@@ -1896,7 +2076,7 @@ class TestArithmetic:
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata is None
         else:
-            assert r3.nodata == _default_ndv(dtype)
+            assert r3.nodata == _default_nodata(dtype)
 
         # Test with child class
         r3 = getattr(satimg, op)(intval)
@@ -1929,9 +2109,9 @@ class TestArithmetic:
         r4 = getattr(self.r1_f32, op2)(self.r2)
         assert r3 == r4
 
-        # Test with ndv set
-        r3 = getattr(self.r1_ndv, op1)(self.r2)
-        r4 = getattr(self.r1_ndv, op2)(self.r2)
+        # Test with nodata set
+        r3 = getattr(self.r1_nodata, op1)(self.r2)
+        r4 = getattr(self.r1_nodata, op2)(self.r2)
         assert r3 == r4
 
         # Test with zeros values (e.g. division)
@@ -2176,7 +2356,7 @@ class TestArrayInterface:
 
         # We set the default nodata
         if nodata_init == "type_default":
-            nodata: int | None = _default_ndv(dtype)
+            nodata: int | None = _default_nodata(dtype)
         else:
             nodata = None
 
@@ -2234,11 +2414,11 @@ class TestArrayInterface:
 
         # We set the default nodatas
         if nodata1_init == "type_default":
-            nodata1: int | None = _default_ndv(dtype1)
+            nodata1: int | None = _default_nodata(dtype1)
         else:
             nodata1 = None
         if nodata2_init == "type_default":
-            nodata2: int | None = _default_ndv(dtype2)
+            nodata2: int | None = _default_nodata(dtype2)
         else:
             nodata2 = None
 
@@ -2311,7 +2491,7 @@ class TestArrayInterface:
 
         # We set the default nodata
         if nodata_init == "type_default":
-            nodata: int | None = _default_ndv(dtype)
+            nodata: int | None = _default_nodata(dtype)
         else:
             nodata = None
 
