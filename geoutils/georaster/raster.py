@@ -1193,10 +1193,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # In addition to running ufuncs, this function takes over arithmetic operations (__add__, __multiply__, etc...)
         # when the first input provided is a NumPy array and second input a Raster.
 
-        # The Raster ufuncs behave exactly as arithmetic operations (+, *, .) of NumPy that call np.ma  instead of np
-        # when available, which sometimes returns a full boolean mask even when there is no invalid value (true_divide
-        # and floor_divide). We find one exception, however, for modulo: np.ma.remainder is not called but np.remainder
-        # instead (an inconsistency in NumPy?!), so we mirror it below:
+        # The Raster ufuncs behave exactly as arithmetic operations (+, *, .) of NumPy masked array (call np.ma instead
+        # of np when available). There is an inconsistency when calling np.ma: operations return a full boolean mask
+        # even when there is no invalid value (true_divide and floor_divide).
+        # We find one exception, however, for modulo: np.ma.remainder is not called but np.remainder instead one the
+        # masked array is the second input (an inconsistency in NumPy!), so we mirror this exception below:
         if 'remainder' in ufunc.__name__:
             final_ufunc = getattr(ufunc, method)
         else:
