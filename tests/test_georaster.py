@@ -717,7 +717,7 @@ class TestRaster:
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
         assert np.array_equal(r.data[:, :, int(rand_float) :].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, :, int(rand_float):].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:, :, int(rand_float) :].mask, r_cropped.data.mask)
 
         # right
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_float * r.res[0], cropGeom[3]]
@@ -990,7 +990,6 @@ self.set_nodata()."
         for i in range(len(astype_funcs)):
             for j in range(len(astype_funcs)):
                 r.reproject(dst_res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), dst_nodata=0)
-
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
@@ -1562,7 +1561,7 @@ self.set_nodata()."
             plt.close()
         assert True
 
-    @pytest.mark.parametrize('example', [landsat_b4_path, aster_dem_path]) # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_saving(self, example: str) -> None:
 
         # Read single band raster
@@ -1639,7 +1638,6 @@ self.set_nodata()."
             # Currently not covered by test image
             assert yy.min() == pytest.approx(img.bounds.top + hy)
             assert yy.max() == pytest.approx(img.bounds.bottom - hy)
-
 
     def test_value_at_coords2(self) -> None:
         """
@@ -1757,15 +1755,15 @@ self.set_nodata()."
         assert red != img
 
         # Test that the red band corresponds to the first band of the img
-        assert np.array_equal(red.data.data.squeeze().astype("float32"),
-                              img.data.data[0, :, :].astype("float32"),
-                              equal_nan=True)
+        assert np.array_equal(
+            red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
+        )
 
         # Modify the red band and make sure it propagates to the original img (it's not a copy)
         red.data += 1
-        assert np.array_equal(red.data.data.squeeze().astype("float32"),
-                              img.data.data[0, :, :].astype("float32"),
-                              equal_nan=True)
+        assert np.array_equal(
+            red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
+        )
 
         # Copy the bands instead of pointing to the same memory.
         red_c = img.split_bands(copy=True, subset=0)[0]

@@ -11,6 +11,7 @@ import geoutils
 from geoutils._typing import ArrayLike
 from geoutils.georaster import Raster, RasterType
 
+
 def array_equal(
     array1: RasterType | ArrayLike,
     array2: RasterType | ArrayLike,
