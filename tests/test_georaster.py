@@ -18,7 +18,6 @@ from pylint import epylint
 import geoutils as gu
 import geoutils.georaster as gr
 import geoutils.geovector as gv
-import geoutils.misc
 import geoutils.projtools as pt
 from geoutils import examples
 from geoutils.georaster.raster import _default_nodata, _default_rio_attrs
@@ -59,21 +58,7 @@ class TestRaster:
         r4 = gr.Raster(memfile)
         assert isinstance(r4, gr.Raster)
 
-        assert np.logical_and.reduce(
-            (
-                geoutils.misc.array_equal(r.data, r2.data, equal_nan=True),
-                geoutils.misc.array_equal(r2.data, r3.data, equal_nan=True),
-                geoutils.misc.array_equal(r3.data, r4.data, equal_nan=True),
-            )
-        )
-
-        assert np.logical_and.reduce(
-            (
-                np.all(r.data.mask == r2.data.mask),
-                np.all(r2.data.mask == r3.data.mask),
-                np.all(r3.data.mask == r4.data.mask),
-            )
-        )
+        assert r == r2 == r3 == r4
 
         # The data will not be copied, immutable objects will
         r.data[0, 0, 0] += 5
@@ -137,9 +122,9 @@ class TestRaster:
         assert r.height == 655
         assert r.shape == (r.height, r.width)
         assert r.count == 1
-        assert geoutils.misc.array_equal(r.dtypes, ["uint8"])
+        assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
-        assert geoutils.misc.array_equal(r.res, [30.0, 30.0])
+        assert np.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
         assert not r.is_loaded
@@ -152,9 +137,9 @@ class TestRaster:
         assert r2.height == 618
         assert r2.shape == (r2.height, r2.width)
         assert r2.count == 1
-        assert geoutils.misc.array_equal(r2.dtypes, ["float32"])
+        assert np.array_equal(r2.dtypes, ["float32"])
         assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
-        assert geoutils.misc.array_equal(r2.res, [30.0, 30.0])
+        assert np.array_equal(r2.res, [30.0, 30.0])
         assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
         assert r2.crs == rio.crs.CRS.from_epsg(32718)
         assert not r2.is_loaded
@@ -174,15 +159,15 @@ class TestRaster:
         # Test 4 - multiple bands, load all bands
         r = gr.Raster(self.landsat_rgb_path, load_data=True)
         assert r.count == 3
-        assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
+        assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 3
-        assert geoutils.misc.array_equal(r.bands, [1, 2, 3])
+        assert np.array_equal(r.bands, [1, 2, 3])
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
         r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=1)
         assert r.count == 3
-        assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
+        assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 1
         # assert r.bands == (1)
         assert r.data.shape == (r.nbands, r.height, r.width)
@@ -190,9 +175,9 @@ class TestRaster:
         # Test 6 - multiple bands, load a list of bands
         r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=[2, 3])
         assert r.count == 3
-        assert geoutils.misc.array_equal(r.indexes, [1, 2, 3])
+        assert np.array_equal(r.indexes, [1, 2, 3])
         assert r.nbands == 2
-        assert geoutils.misc.array_equal(r.bands, (2, 3))
+        assert np.array_equal(r.bands, (2, 3))
         assert r.data.shape == (r.nbands, r.height, r.width)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
@@ -451,17 +436,17 @@ class TestRaster:
         # Test negation
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert geoutils.misc.array_equal(r3.dtypes, ["uint8"])
+        assert np.array_equal(r3.dtypes, ["uint8"])
 
         # Test addition
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert geoutils.misc.array_equal(r3.dtypes, ["uint8"])
+        assert np.array_equal(r3.dtypes, ["uint8"])
 
         # Test subtraction
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert geoutils.misc.array_equal(r3.dtypes, ["uint8"])
+        assert np.array_equal(r3.dtypes, ["uint8"])
 
         # Test with dtype Float32
         r1 = gr.Raster.from_array(
@@ -469,15 +454,15 @@ class TestRaster:
         )
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert geoutils.misc.array_equal(r3.dtypes, ["float32"])
+        assert np.array_equal(r3.dtypes, ["float32"])
 
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert geoutils.misc.array_equal(r3.dtypes, ["float32"])
+        assert np.array_equal(r3.dtypes, ["float32"])
 
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert geoutils.misc.array_equal(r3.dtypes, ["float32"])
+        assert np.array_equal(r3.dtypes, ["float32"])
 
         # Check that errors are properly raised
         # different shapes
@@ -557,14 +542,14 @@ class TestRaster:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
         # Check data array
-        assert geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
+        assert np.array_equal(r.data, r2.data, equal_nan=True)
 
         # Check dataset_mask array
-        assert np.all(r.data.mask == r2.data.mask)
+        assert np.array_equal(r.data.mask, r2.data.mask)
 
         # -- Third test: if r.data is modified, it does not affect r2.data --
         r.data += 5
-        assert not geoutils.misc.array_equal(r.data, r2.data, equal_nan=True)
+        assert not np.array_equal(r.data.data, r2.data.data, equal_nan=True)
 
         # -- Fourth test: check the new array parameter works with either ndarray filled with NaNs, or masked arrays --
 
@@ -572,9 +557,15 @@ class TestRaster:
         r2 = r.copy(new_array=r.data)
         assert r == r2
 
-        # Same when passing the new array as a NaN ndarray
+        # When passing the new array as a NaN ndarray, only the valid data is equal, because masked data is NaN in one
+        # case, and -9999 in the other
         r_arr = gu.spatial_tools.get_array_and_mask(r)[0]
         r2 = r.copy(new_array=r_arr)
+        assert np.ma.allequal(r.data, r2.data)
+        # If a nodata value exists, and we update the NaN pixels to be that nodata value, then the two Rasters should
+        # be perfectly equal
+        if r2.nodata is not None:
+            r2.data.data[np.isnan(r2.data.data)] = r2.nodata
         assert r == r2
 
         # -- Fifth test: check that the new_array argument works when providing a new dtype ##
@@ -664,8 +655,7 @@ class TestRaster:
         # Test with same bounds -> should be the same #
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
-        assert r_cropped.bounds == r.bounds
-        assert gu.misc.array_equal(r.data, r_cropped.data)
+        assert r_cropped == r
 
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(r.shape) - 1)
@@ -674,25 +664,29 @@ class TestRaster:
         cropGeom2 = [cropGeom[0] + rand_int * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
-        assert gu.misc.array_equal(r.data[:, :, rand_int:], r_cropped.data)
+        assert np.array_equal(r.data[:, :, rand_int:].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, :, rand_int:].mask, r_cropped.data.mask)
 
         # right
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_int * r.res[0], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
-        assert gu.misc.array_equal(r.data[:, :, :-rand_int], r_cropped.data)
+        assert np.array_equal(r.data[:, :, :-rand_int].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, :, :-rand_int].mask, r_cropped.data.mask)
 
         # bottom
         cropGeom2 = [cropGeom[0], cropGeom[1] + rand_int * abs(r.res[1]), cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
-        assert gu.misc.array_equal(r.data[:, :-rand_int, :], r_cropped.data)
+        assert np.array_equal(r.data[:, :-rand_int, :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, :-rand_int, :].mask, r_cropped.data.mask)
 
         # top
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_int * abs(r.res[1])]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
-        assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
+        assert np.array_equal(r.data[:, rand_int:, :].data, r_cropped.data, equal_nan=True)
+        assert np.array_equal(r.data[:, rand_int:, :].mask, r_cropped.data.mask)
 
         # same but tuple
         cropGeom3: tuple[float, float, float, float] = (
@@ -703,18 +697,17 @@ class TestRaster:
         )
         r_cropped = r.crop(cropGeom3, inplace=False)
         assert list(r_cropped.bounds) == list(cropGeom3)
-        assert gu.misc.array_equal(r.data[:, rand_int:, :], r_cropped.data)
+        assert np.array_equal(r.data[:, rand_int:, :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, rand_int:, :].mask, r_cropped.data.mask)
 
         # -- Test with CropGeom being a Raster -- #
         r_cropped2 = r.crop(r_cropped, inplace=False)
-        assert r_cropped2.bounds == r_cropped.bounds
-        assert gu.misc.array_equal(r_cropped2.data, r_cropped)
+        assert r_cropped2 == r_cropped
 
         # -- Test with inplace=True (Default) -- #
         r_copy = r.copy()
         r_copy.crop(r_cropped)
-        assert r_copy.bounds == r_cropped.bounds
-        assert gu.misc.array_equal(r_copy.data, r_cropped)
+        assert r_copy == r_cropped
 
         # - Test cropping each side with a non integer pixel, mode='match_pixel' - #
         rand_float = np.random.randint(1, min(r.shape) - 1) + 0.25
@@ -723,25 +716,29 @@ class TestRaster:
         cropGeom2 = [cropGeom[0] + rand_float * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
-        assert gu.misc.array_equal(r.data[:, :, int(rand_float) :], r_cropped.data)
+        assert np.array_equal(r.data[:, :, int(rand_float) :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, :, int(rand_float) :].mask, r_cropped.data.mask)
 
         # right
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_float * r.res[0], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
-        assert gu.misc.array_equal(r.data[:, :, : -int(rand_float)], r_cropped.data)
+        assert np.array_equal(r.data[:, :, : -int(rand_float)].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, :, : -int(rand_float)].mask, r_cropped.data.mask)
 
         # bottom
         cropGeom2 = [cropGeom[0], cropGeom[1] + rand_float * abs(r.res[1]), cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
-        assert gu.misc.array_equal(r.data[:, : -int(rand_float), :], r_cropped.data)
+        assert np.array_equal(r.data[:, : -int(rand_float), :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, : -int(rand_float), :].mask, r_cropped.data.mask)
 
         # top
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_float * abs(r.res[1])]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
-        assert gu.misc.array_equal(r.data[:, int(rand_float) :, :], r_cropped.data)
+        assert np.array_equal(r.data[:, int(rand_float) :, :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, int(rand_float) :, :].mask, r_cropped.data.mask)
 
         # -- Test with mode='match_extent' -- #
         # Test all sides at once, with rand_float less than half the smallest extent
@@ -761,8 +758,7 @@ class TestRaster:
         )
 
         r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
-        assert r_cropped2.bounds == r_cropped.bounds
-        assert gu.misc.array_equal(r_cropped2.data, r_cropped.data)
+        assert r_cropped2 == r_cropped
 
         # -- Test with CropGeom being a Vector -- #
         outlines = gu.Vector(outlines_path)
@@ -848,13 +844,15 @@ self.set_nodata()."
         assert r.shape != r2.shape
         assert r.res != r2.res
 
-        # Test reprojecting with dst_ref=r2b (i.e. crop) -> output should have same shape, bounds and data
+        # Test reprojecting with dst_ref=r2b (i.e. crop) -> output should have same shape, bounds and data, i.e. be the
+        # same object
         r3 = r.reproject(r2b)
         assert r3.bounds == r2b.bounds
         assert r3.shape == r2b.shape
         assert r3.bounds == r2b.bounds
         assert r3.transform == r2b.transform
-        assert gu.misc.array_equal(r3.data, r2b.data)
+        assert np.array_equal(r3.data.data, r2b.data.data, equal_nan=True)
+        assert np.array_equal(r3.data.mask, r2b.data.mask)
 
         if DO_PLOT:
             fig1, ax1 = plt.subplots()
@@ -875,7 +873,7 @@ self.set_nodata()."
         assert r3.shape == r2.shape
         assert r3.bounds == r2.bounds
         assert r3.transform == r2.transform
-        assert not gu.misc.array_equal(r3.data, r2.data)
+        assert not np.array_equal(r3.data.data, r2.data.data, equal_nan=True)
 
         if DO_PLOT:
             fig1, ax1 = plt.subplots()
@@ -983,7 +981,15 @@ self.set_nodata()."
         r3 = r.reproject(dst_crs=out_crs, dst_nodata=0)
         r = gr.Raster(example, load_data=False)
         r4 = r.reproject(dst_crs=out_crs, dst_nodata=0)
-        assert gu.misc.array_equal(r3.data, r4.data)
+        assert r3 == r4
+
+        # Test that reproject does not fail with resolution as np.integer or np.float types, single value or tuple
+        astype_funcs = [int, np.int32, float, np.float64]
+        for astype_func in astype_funcs:
+            r.reproject(dst_res=astype_func(20.5), dst_nodata=0)
+        for i in range(len(astype_funcs)):
+            for j in range(len(astype_funcs)):
+                r.reproject(dst_res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), dst_nodata=0)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
@@ -1155,7 +1161,7 @@ self.set_nodata()."
         # First order interpolation
         rpts = r.interp_points(pts, order=1, area_or_point="Area")
         # The values interpolated should be equal
-        assert geoutils.misc.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
+        assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
         # Test there is no failure with random coordinates (edge effects, etc)
         xrand = np.random.uniform(low=xmin, high=xmax, size=(1000,))
@@ -1188,7 +1194,7 @@ self.set_nodata()."
 
         rpts = r.interp_points(pts, order=1)
 
-        assert geoutils.misc.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
+        assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
         # Test for an invidiual point (shape can be tricky at 1 dimension)
         x = 493120.0
@@ -1472,7 +1478,8 @@ self.set_nodata()."
         # Test changing dtypes that does not modify the data
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
             rout = r.astype(dtype)  # type: ignore
-            assert rout == r
+            assert np.array_equal(r.data.data, rout.data.data)
+            assert np.array_equal(r.data.mask, rout.data.mask)
             assert np.dtype(rout.dtypes[0]) == dtype
             assert rout.data.dtype == dtype
 
@@ -1480,7 +1487,8 @@ self.set_nodata()."
         with pytest.warns(UserWarning, match="dtype conversion will result in a loss"):
             dtype = np.int8
             rout = r.astype(dtype)  # type: ignore
-            assert rout != r
+            assert not np.array_equal(r.data.data, rout.data.data)
+            assert np.array_equal(r.data.mask, rout.data.mask)
             assert np.dtype(rout.dtypes[0]) == dtype
             assert rout.data.dtype == dtype
 
@@ -1489,7 +1497,8 @@ self.set_nodata()."
             r2 = r.copy()
             out = r2.astype(dtype, inplace=True)
             assert out is None
-            assert r2 == r
+            assert np.array_equal(r.data.data, r2.data.data)
+            assert np.array_equal(r.data.mask, r2.data.mask)
             assert np.dtype(r2.dtypes[0]) == dtype
             assert r2.data.dtype == dtype
 
@@ -1505,7 +1514,8 @@ self.set_nodata()."
 
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
             rout = r2.astype(dtype)  # type: ignore
-            assert rout == r2
+            assert np.array_equal(r2.data.data, rout.data.data)
+            assert np.array_equal(r2.data.mask, rout.data.mask)
             assert np.dtype(rout.dtypes[0]) == dtype
             assert rout.data.dtype == dtype
 
@@ -1551,10 +1561,11 @@ self.set_nodata()."
             plt.close()
         assert True
 
-    def test_saving(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_saving(self, example: str) -> None:
 
         # Read single band raster
-        img = gr.Raster(self.landsat_b4_path)
+        img = gr.Raster(example)
 
         # Temporary folder
         temp_dir = tempfile.TemporaryDirectory()
@@ -1563,7 +1574,7 @@ self.set_nodata()."
         temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name)
         saved = gr.Raster(temp_file.name)
-        assert gu.misc.array_equal(img.data, saved.data)
+        assert img == saved
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
@@ -1571,29 +1582,31 @@ self.set_nodata()."
         temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name, co_opts=co_opts, metadata=metadata)
         saved = gr.Raster(temp_file.name)
-        assert gu.misc.array_equal(img.data, saved.data)
+        assert img == saved
         assert saved.tags["Type"] == "test"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
         temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name, nodata=0)
         saved = gr.Raster(temp_file.name)
-        assert gu.misc.array_equal(img.data, saved.data)
+        assert np.ma.allequal(img.data, saved.data)
         assert saved.nodata == 0
 
-        # Test that mask is preserved
+        # Test that mask is preserved if nodata value is valid
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
-        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-        img.save(temp_file.name, nodata=0)
-        saved = gr.Raster(temp_file.name)
-        assert gu.misc.array_equal(img.data, saved.data)
+        if img.nodata is not None:
+            temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+            img.save(temp_file.name)
+            saved = gr.Raster(temp_file.name)
+            assert np.array_equal(img.data.mask, saved.data.mask)
 
-        # Test that a warning is raised if nodata is not set
-        with pytest.warns(UserWarning):
-            img.save(TemporaryFile())
+        # Test that a warning is raised if nodata is not set and a mask exists (defined above)
+        if img.nodata is None:
+            with pytest.warns(UserWarning):
+                img.save(TemporaryFile())
 
-        # Clean up teporary folder - fails on Windows
+        # Clean up temporary folder - fails on Windows
         try:
             temp_dir.cleanup()
         except (NotADirectoryError, PermissionError):
@@ -1625,23 +1638,6 @@ self.set_nodata()."
             # Currently not covered by test image
             assert yy.min() == pytest.approx(img.bounds.top + hy)
             assert yy.max() == pytest.approx(img.bounds.bottom - hy)
-
-    def test_eq(self) -> None:
-
-        img = gr.Raster(self.landsat_b4_path)
-        img2 = gr.Raster(self.landsat_b4_path)
-
-        assert geoutils.misc.array_equal(img.data, img2.data, equal_nan=True)
-        assert img.transform == img2.transform
-        assert img.crs == img2.crs
-        assert img.nodata == img2.nodata
-
-        assert img.__eq__(img2)
-        assert img == img2
-
-        img2.data += 1
-
-        assert img != img2
 
     def test_value_at_coords2(self) -> None:
         """
@@ -1675,7 +1671,7 @@ self.set_nodata()."
         # Test that changes to data are taken into account
         bias = 5
         out_img = gr.Raster.from_array(img.data + bias, img.transform, img.crs, nodata=img.nodata)
-        assert geoutils.misc.array_equal(out_img.data, img.data + bias)
+        assert np.ma.allequal(out_img.data, img.data + bias)
 
         # Test that nodata is properly taken into account
         out_img = gr.Raster.from_array(img.data + 5, img.transform, img.crs, nodata=0)
@@ -1745,9 +1741,12 @@ self.set_nodata()."
         blue2, green2 = img.split_bands(copy=False, subset=[2, 1])
 
         # Check that the subset functionality works as expected.
-        assert geoutils.misc.array_equal(red.data.astype("float32"), red2.data.astype("float32"))
-        assert geoutils.misc.array_equal(blue.data.astype("float32"), blue2.data.astype("float32"))
-        assert geoutils.misc.array_equal(green.data.astype("float32"), green2.data.astype("float32"))
+        assert np.array_equal(red.data.data.astype("float32"), red2.data.data.astype("float32"), equal_nan=True)
+        assert np.array_equal(red.data.mask, red2.data.mask)
+        assert np.array_equal(blue.data.data.astype("float32"), blue2.data.data.astype("float32"), equal_nan=True)
+        assert np.array_equal(blue.data.mask, blue2.data.mask)
+        assert np.array_equal(green.data.data.astype("float32"), green2.data.data.astype("float32"), equal_nan=True)
+        assert np.array_equal(green.data.mask, green2.data.mask)
 
         # Check that the red channel and the rgb data shares memory
         assert np.shares_memory(red.data, img.data)
@@ -1756,11 +1755,15 @@ self.set_nodata()."
         assert red != img
 
         # Test that the red band corresponds to the first band of the img
-        assert geoutils.misc.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+        assert np.array_equal(
+            red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
+        )
 
         # Modify the red band and make sure it propagates to the original img (it's not a copy)
         red.data += 1
-        assert geoutils.misc.array_equal(red.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32"))
+        assert np.array_equal(
+            red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
+        )
 
         # Copy the bands instead of pointing to the same memory.
         red_c = img.split_bands(copy=True, subset=0)[0]
@@ -1770,8 +1773,8 @@ self.set_nodata()."
 
         # Modify the copy, and make sure the original data is not modified.
         red_c.data += 1
-        assert not geoutils.misc.array_equal(
-            red_c.data.squeeze().astype("float32"), img.data[0, :, :].astype("float32")
+        assert not np.array_equal(
+            red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
     def test_resampling_str(self) -> None:
@@ -1826,7 +1829,7 @@ self.set_nodata()."
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
         assert isinstance(points, np.ndarray)
         assert points.shape == (25, 3)
-        assert geoutils.misc.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
+        assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
 
         assert img1.to_points(0.2).shape == (5, 3)
 
@@ -1839,7 +1842,7 @@ self.set_nodata()."
 
         points_frame = img2.to_points(10, as_frame=True)
 
-        assert geoutils.misc.array_equal(points_frame.columns, ["b1", "b2", "b3", "geometry"])
+        assert np.array_equal(points_frame.columns, ["b1", "b2", "b3", "geometry"])
         assert points_frame.crs == img2.crs
 
 
@@ -1860,11 +1863,8 @@ def test_numpy_functions(dtype: str) -> None:
     assert np.median(raster) == 12.0
     assert np.mean(raster) == 12.0
 
-    # Check that rasters don't  become arrays when using simple arithmetic.
+    # Check that rasters don't become arrays when using simple arithmetic.
     assert isinstance(raster + 1, gr.Raster)
-
-    # Test that array_equal works
-    assert geoutils.misc.array_equal(array, raster)
 
     # Test the data setter method by creating a new array
     raster.data = array + 2
@@ -1885,6 +1885,7 @@ class TestArithmetic:
     """
 
     # Create fake rasters with random values in 0-255 and dtype uint8
+    # TODO: Add the case where a mask exists in the array, as in test_data_setter
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
     r1 = gr.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
@@ -1945,6 +1946,21 @@ class TestArithmetic:
 
         # Change data
         r2.data += 1
+        assert r1 != r2
+
+        # Change mask (False by default)
+        r2 = r1.copy()
+        r2.data[0, 0] = np.ma.masked
+        assert r1 != r2
+
+        # Change fill_value (999999 by default)
+        r2 = r1.copy()
+        r2.data.fill_value = 0
+        assert r1 != r2
+
+        # Change dtype
+        r2 = r1.copy()
+        r2 = r2.astype("float32")
         assert r1 != r2
 
         # Change transform
@@ -2166,44 +2182,44 @@ class TestArithmetic:
         # Addition
         assert r1 + r2 == self.from_array(r1.data + r2.data, rst_ref=r1)
         assert r1_f32 + r2 == self.from_array(r1_f32.data + r2.data, rst_ref=r1)
-        assert array_3d + r2 == self.from_array(array_3d + r2.data, rst_ref=r1)
-        assert r2 + array_3d == self.from_array(r2.data + array_3d, rst_ref=r1)
-        assert array_2d + r2 == self.from_array(array_2d[np.newaxis, :, :] + r2.data, rst_ref=r1)
-        assert r2 + array_2d == self.from_array(r2.data + array_2d[np.newaxis, :, :], rst_ref=r1)
-        assert r1 + floatval == self.from_array(r1.data.astype("float32") + floatval, rst_ref=r1)
-        assert floatval + r1 == self.from_array(floatval + r1.data.astype("float32"), rst_ref=r1)
+        assert array_3d + r2 == self.from_array(array_3d + r2.data, rst_ref=r2)
+        assert r2 + array_3d == self.from_array(r2.data + array_3d, rst_ref=r2)
+        assert array_2d + r2 == self.from_array(array_2d[np.newaxis, :, :] + r2.data, rst_ref=r2)
+        assert r2 + array_2d == self.from_array(r2.data + array_2d[np.newaxis, :, :], rst_ref=r2)
+        assert r1 + floatval == self.from_array(r1.data + floatval, rst_ref=r1)
+        assert floatval + r1 == self.from_array(floatval + r1.data, rst_ref=r1)
         assert r1 + r2 == r2 + r1
 
         # Multiplication
         assert r1 * r2 == self.from_array(r1.data * r2.data, rst_ref=r1)
         assert r1_f32 * r2 == self.from_array(r1_f32.data * r2.data, rst_ref=r1)
-        assert array_3d * r2 == self.from_array(array_3d * r2.data, rst_ref=r1)
-        assert r2 * array_3d == self.from_array(r2.data * array_3d, rst_ref=r1)
-        assert array_2d * r2 == self.from_array(array_2d[np.newaxis, :, :] * r2.data, rst_ref=r1)
-        assert r2 * array_2d == self.from_array(r2.data * array_2d[np.newaxis, :, :], rst_ref=r1)
-        assert r1 * floatval == self.from_array(r1.data.astype("float32") * floatval, rst_ref=r1)
-        assert floatval * r1 == self.from_array(floatval * r1.data.astype("float32"), rst_ref=r1)
+        assert array_3d * r2 == self.from_array(array_3d * r2.data, rst_ref=r2)
+        assert r2 * array_3d == self.from_array(r2.data * array_3d, rst_ref=r2)
+        assert array_2d * r2 == self.from_array(array_2d[np.newaxis, :, :] * r2.data, rst_ref=r2)
+        assert r2 * array_2d == self.from_array(r2.data * array_2d[np.newaxis, :, :], rst_ref=r2)
+        assert r1 * floatval == self.from_array(r1.data * floatval, rst_ref=r1)
+        assert floatval * r1 == self.from_array(floatval * r1.data, rst_ref=r1)
         assert r1 * r2 == r2 * r1
 
         # Subtraction
         assert r1 - r2 == self.from_array(r1.data - r2.data, rst_ref=r1)
         assert r1_f32 - r2 == self.from_array(r1_f32.data - r2.data, rst_ref=r1)
-        assert array_3d - r2 == self.from_array(array_3d - r2.data, rst_ref=r1)
-        assert r2 - array_3d == self.from_array(r2.data - array_3d, rst_ref=r1)
-        assert array_2d - r2 == self.from_array(array_2d[np.newaxis, :, :] - r2.data, rst_ref=r1)
-        assert r2 - array_2d == self.from_array(r2.data - array_2d[np.newaxis, :, :], rst_ref=r1)
-        assert r1 - floatval == self.from_array(r1.data.astype("float32") - floatval, rst_ref=r1)
-        assert floatval - r1 == self.from_array(floatval - r1.data.astype("float32"), rst_ref=r1)
+        assert array_3d - r2 == self.from_array(array_3d - r2.data, rst_ref=r2)
+        assert r2 - array_3d == self.from_array(r2.data - array_3d, rst_ref=r2)
+        assert array_2d - r2 == self.from_array(array_2d[np.newaxis, :, :] - r2.data, rst_ref=r2)
+        assert r2 - array_2d == self.from_array(r2.data - array_2d[np.newaxis, :, :], rst_ref=r2)
+        assert r1 - floatval == self.from_array(r1.data - floatval, rst_ref=r1)
+        assert floatval - r1 == self.from_array(floatval - r1.data, rst_ref=r1)
 
         # True division
         assert r1 / r2 == self.from_array(r1.data / r2.data, rst_ref=r1)
         assert r1_f32 / r2 == self.from_array(r1_f32.data / r2.data, rst_ref=r1)
-        assert array_3d / r2 == self.from_array(array_3d / r2.data, rst_ref=r1)
+        assert array_3d / r2 == self.from_array(array_3d / r2.data, rst_ref=r2)
         assert r2 / array_3d == self.from_array(r2.data / array_3d, rst_ref=r2)
         assert array_2d / r2 == self.from_array(array_2d[np.newaxis, :, :] / r2.data, rst_ref=r1)
         assert r2 / array_2d == self.from_array(r2.data / array_2d[np.newaxis, :, :], rst_ref=r2)
-        assert r1 / floatval == self.from_array(r1.data.astype("float32") / floatval, rst_ref=r1)
-        assert floatval / r1 == self.from_array(floatval / r1.data.astype("float32"), rst_ref=r1)
+        assert r1 / floatval == self.from_array(r1.data / floatval, rst_ref=r1)
+        assert floatval / r1 == self.from_array(floatval / r1.data, rst_ref=r1)
 
         # Floor division
         assert r1 // r2 == self.from_array(r1.data // r2.data, rst_ref=r1)
@@ -2222,7 +2238,7 @@ class TestArithmetic:
         assert r2 % array_3d == self.from_array(r2.data % array_3d, rst_ref=r1)
         assert array_2d % r2 == self.from_array(array_2d[np.newaxis, :, :] % r2.data, rst_ref=r1)
         assert r2 % array_2d == self.from_array(r2.data % array_2d[np.newaxis, :, :], rst_ref=r1)
-        assert r1 % floatval == self.from_array(r1.data.astype("float32") % floatval, rst_ref=r1)
+        assert r1 % floatval == self.from_array(r1.data % floatval, rst_ref=r1)
 
     @pytest.mark.parametrize("op", ops_2args)  # type: ignore
     def test_raise_errors(self, op: str) -> None:

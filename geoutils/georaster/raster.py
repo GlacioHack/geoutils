@@ -527,13 +527,15 @@ class Raster:
 
     def __eq__(self, other: object) -> bool:
         """Check if a Raster's data and georeferencing is equal to another."""
-        from geoutils.misc import array_equal
 
         if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
             return NotImplemented
         return all(
             [
-                array_equal(self.data, other.data, equal_nan=True),
+                np.array_equal(self.data.data, other.data.data, equal_nan=True),
+                np.array_equal(self.data.mask, other.data.mask),
+                self.data.fill_value == other.data.fill_value,
+                self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
                 self.crs == other.crs,
                 self.nodata == other.nodata,
@@ -545,7 +547,7 @@ class Raster:
 
     def _overloading_check(
         self: RasterType, other: RasterType | np.ndarray | Number
-    ) -> tuple[np.ndarray, np.ndarray | Number, float | int | list[int] | list[float] | None]:
+    ) -> tuple[np.ma.masked_array, np.ma.masked_array | Number, float | int | list[int] | list[float] | None]:
         """
         Before any operation overloading, check input data type and return both self and other data as either \
 a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
@@ -624,11 +626,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if (nodata1 is not None) and (out_dtype == dtype1):
             out_nodata = nodata1
 
-        # Convert output data to correct dtype and masked_array
-        if isinstance(other_data, np.ndarray):
-            other_data = np.ma.asarray(other_data).astype(out_dtype, copy=False)
-
-        self_data = self.data.astype(out_dtype)
+        self_data = self.data
 
         return self_data, other_data, out_nodata
 
@@ -763,7 +761,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return out_rst
 
     @overload
-    def astype(self, dtype: DTypeLike, inplace: Literal[False]) -> Raster:
+    def astype(self, dtype: DTypeLike, inplace: Literal[False] = False) -> Raster:
         ...
 
     @overload
@@ -1010,7 +1008,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
             )
 
-        # If the new data is not masked and has non-finite values, we define a fill_value
+        # If the new data is not masked and has non-finite values, we define a default nodata value
         if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
             np.ma.is_masked(new_data)
             and self.nodata is None
@@ -1023,14 +1021,30 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             )
             self._nodata = _default_nodata(dtype)
 
-        # If the new data is not masked (a classic ndarray) and contains non-finite values such as NaNs, define a mask
+        # Now comes the important part, the data setting!
+        # Several cases to consider:
+
+        # 1/ If the new data is not masked (either classic array or masked array with no mask, hence the use of
+        # as array) and contains non-finite values such as NaNs, define a mask
         if not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
-            self._data = np.ma.masked_array(data=new_data, mask=~np.isfinite(new_data), fill_value=self.nodata)
-        # If the new data is masked but some non-finite values aren't masked, add them to the mask
+            self._data = np.ma.masked_array(
+                data=np.asarray(new_data), mask=~np.isfinite(new_data.data), fill_value=self.nodata
+            )
+
+        # 2/ If the new data is masked but some non-finite values aren't masked, add them to the mask
         elif np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0:
             self._data = np.ma.masked_array(
-                data=new_data, mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask), fill_value=self.nodata
+                data=new_data.data,
+                mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask),
+                fill_value=self.nodata,
             )
+
+        # 3/ If the new data is a Masked Array, we pass data.data and data.mask independently (passing directly the
+        # masked array to data= has a strange behaviour that redefines fill_value)
+        elif np.ma.isMaskedArray(new_data):
+            self._data = np.ma.masked_array(data=new_data.data, mask=new_data.mask, fill_value=self.nodata)
+
+        # 4/ If the new data is classic ndarray
         else:
             self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
 
@@ -1164,7 +1178,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         ufunc: Callable[[np.ndarray | tuple[np.ndarray, np.ndarray]], np.ndarray | tuple[np.ndarray, np.ndarray]],
         method: str,
-        *inputs: Raster | tuple[Raster, Raster],
+        *inputs: Raster | tuple[Raster, Raster] | tuple[np.ndarray, Raster] | tuple[Raster, np.ndarray],
         **kwargs: Any,
     ) -> Raster | tuple[Raster, Raster]:
         """
@@ -1175,12 +1189,28 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         See more details in NumPy doc, e.g., https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch.
         """
 
+        # In addition to running ufuncs, this function takes over arithmetic operations (__add__, __multiply__, etc...)
+        # when the first input provided is a NumPy array and second input a Raster.
+
+        # The Raster ufuncs behave exactly as arithmetic operations (+, *, .) of NumPy masked array (call np.ma instead
+        # of np when available). There is an inconsistency when calling np.ma: operations return a full boolean mask
+        # even when there is no invalid value (true_divide and floor_divide).
+        # We find one exception, however, for modulo: np.ma.remainder is not called but np.remainder instead one the
+        # masked array is the second input (an inconsistency in NumPy!), so we mirror this exception below:
+        if "remainder" in ufunc.__name__:
+            final_ufunc = getattr(ufunc, method)
+        else:
+            try:
+                final_ufunc = getattr(getattr(np.ma, ufunc.__name__), method)
+            except AttributeError:
+                final_ufunc = getattr(ufunc, method)
+
         # If the universal function takes only one input
         if ufunc.nin == 1:
             # If the universal function has only one output
             if ufunc.nout == 1:
                 return self.from_array(
-                    data=getattr(ufunc, method)(inputs[0].data, **kwargs),  # type: ignore
+                    data=final_ufunc(inputs[0].data, **kwargs),  # type: ignore
                     transform=self.transform,
                     crs=self.crs,
                     nodata=self.nodata,
@@ -1188,7 +1218,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = getattr(ufunc, method)(inputs[0].data, **kwargs)  # type: ignore
+                output = final_ufunc(inputs[0].data, **kwargs)  # type: ignore
                 return self.from_array(
                     data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
                 ), self.from_array(data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata)
@@ -1197,7 +1227,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             if ufunc.nout == 1:
                 return self.from_array(
-                    data=getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
+                    data=final_ufunc(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
                     transform=self.transform,
                     crs=self.crs,
                     nodata=self.nodata,
@@ -1205,7 +1235,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
+                output = final_ufunc(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
                 return self.from_array(
                     data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
                 ), self.from_array(data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata)
@@ -1538,7 +1568,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 (dst_transform == self.transform) or (dst_transform is None),
                 (dst_crs == self.crs) or (dst_crs is None),
                 (dst_size == self.shape[::-1]) or (dst_size is None),
-                (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
+                np.all(dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
             ]
         ):
             if (dst_nodata == self.nodata) or (dst_nodata is None):
