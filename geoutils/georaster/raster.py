@@ -701,9 +701,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data / other_data
-        print(out_data.mask)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
-        print(out_rst.data.mask)
         return out_rst
 
     def __rtruediv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
@@ -712,9 +710,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data / self_data
-        print(out_data.mask)
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
-        print(out_rst.data.mask)
         return out_rst
 
     def __floordiv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
@@ -1183,7 +1179,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         ufunc: Callable[[np.ndarray | tuple[np.ndarray, np.ndarray]], np.ndarray | tuple[np.ndarray, np.ndarray]],
         method: str,
-        *inputs: Raster | tuple[Raster, Raster],
+        *inputs: Raster | tuple[Raster, Raster] | tuple[np.ndarray, Raster] | tuple[Raster, np.ndarray],
         **kwargs: Any,
     ) -> Raster | tuple[Raster, Raster]:
         """
@@ -1194,12 +1190,27 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         See more details in NumPy doc, e.g., https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch.
         """
 
+        # In addition to running ufuncs, this function takes over arithmetic operations (__add__, __multiply__, etc...)
+        # when the first input provided is a NumPy array and second input a Raster.
+
+        # The Raster ufuncs behave exactly as arithmetic operations (+, *, .) of NumPy that call np.ma  instead of np
+        # when available, which sometimes returns a full boolean mask even when there is no invalid value (true_divide
+        # and floor_divide). We find one exception, however, for modulo: np.ma.remainder is not called but np.remainder
+        # instead (an inconsistency in NumPy?!), so we mirror it below:
+        if 'remainder' in ufunc.__name__:
+            final_ufunc = getattr(ufunc, method)
+        else:
+            try:
+                final_ufunc = getattr(getattr(np.ma, ufunc.__name__), method)
+            except AttributeError:
+                final_ufunc = getattr(ufunc, method)
+
         # If the universal function takes only one input
         if ufunc.nin == 1:
             # If the universal function has only one output
             if ufunc.nout == 1:
                 return self.from_array(
-                    data=getattr(ufunc, method)(inputs[0].data, **kwargs),  # type: ignore
+                    data=final_ufunc(inputs[0].data, **kwargs),  # type: ignore
                     transform=self.transform,
                     crs=self.crs,
                     nodata=self.nodata,
@@ -1207,7 +1218,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = getattr(ufunc, method)(inputs[0].data, **kwargs)  # type: ignore
+                output = final_ufunc(inputs[0].data, **kwargs)  # type: ignore
                 return self.from_array(
                     data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
                 ), self.from_array(data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata)
@@ -1216,7 +1227,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             if ufunc.nout == 1:
                 return self.from_array(
-                    data=getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
+                    data=final_ufunc(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
                     transform=self.transform,
                     crs=self.crs,
                     nodata=self.nodata,
@@ -1224,7 +1235,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = getattr(ufunc, method)(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
+                output = final_ufunc(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
                 return self.from_array(
                     data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
                 ), self.from_array(data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata)
