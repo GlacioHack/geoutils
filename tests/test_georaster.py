@@ -985,6 +985,15 @@ self.set_nodata()."
         r4 = r.reproject(dst_crs=out_crs, dst_nodata=0)
         assert gu.misc.array_equal(r3.data, r4.data)
 
+        # Test that reproject does not fail with resolution as np.integer or np.float types, single value or tuple
+        astype_funcs = [int, np.int32, float, np.float64]
+        for astype_func in astype_funcs:
+            r.reproject(dst_res=astype_func(20.5), dst_nodata=0)
+        for i in range(len(astype_funcs)):
+            for j in range(len(astype_funcs)):
+                r.reproject(dst_res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), dst_nodata=0)
+
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
         """Check the behaviour of the intersection function"""

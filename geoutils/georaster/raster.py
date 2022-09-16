@@ -1538,7 +1538,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 (dst_transform == self.transform) or (dst_transform is None),
                 (dst_crs == self.crs) or (dst_crs is None),
                 (dst_size == self.shape[::-1]) or (dst_size is None),
-                (dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
+                np.all(dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
             ]
         ):
             if (dst_nodata == self.nodata) or (dst_nodata is None):
