@@ -526,7 +526,8 @@ class Raster:
         return self.info()
 
     def __eq__(self, other: object) -> bool:
-        """Check if a Raster's data and georeferencing is equal to another."""
+        """Check if a Raster's data (including unmasked values), mask, nodata, and georeferencing are all equal to
+        another."""
 
         if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
             return NotImplemented
