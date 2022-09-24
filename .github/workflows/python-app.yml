@@ -55,6 +55,8 @@ jobs:
     - name: Re-install project
       run: |
         pip install -e . --no-dependencies
+        echo $PROJ_LIB
+        echo $PROJ_DATA
 
     - name: Lint with flake8
       run: |
