@@ -62,7 +62,6 @@ jobs:
     # development-specific dependencies by differencing the env and dev-env yml files
     - name: Check normal environment import
       run: python -c "import geoutils"
-      if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Update environment with dev dependencies
       run: mamba env update --name geoutils --file dev-environment.yml
