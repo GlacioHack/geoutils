@@ -51,8 +51,8 @@ jobs:
 
     - name: Update environment
       run: |
-        mamba env update -n geoutils python=${{ matrix.python-version }}
-        mamba env update -n geoutils -f environment.yml --freeze-installed
+        mamba update -n geoutils python=${{ matrix.python-version }}
+        mamba update -n geoutils -f environment.yml --no-update-deps
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Install project
@@ -67,7 +67,7 @@ jobs:
 
     - name: Update environment with dev dependencies
       run: |
-        mamba env update --name geoutils --file dev-environment.yml --freeze-installed
+        mamba update --name geoutils --file dev-environment.yml --no-update-deps
 
     - name: Re-install project
       run: |
