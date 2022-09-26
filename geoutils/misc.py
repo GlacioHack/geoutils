@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import functools
 import warnings
-from packaging.version import Version
 
 import rasterio as rio
+from packaging.version import Version
 
 import geoutils
 
