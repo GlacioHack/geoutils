@@ -33,6 +33,7 @@ jobs:
         miniforge-version: latest
         use-mamba: true
         channel-priority: strict
+        python-version: ${{ matrix.python-version }}
         activate-environment: geoutils
 
     - name: Get month for resetting cache
@@ -49,12 +50,8 @@ jobs:
         CACHE_NUMBER: 5 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
-    - name: Set Python version of environment
-      run: mamba env update -n geoutils
-      if: steps.cache.outputs.cache-hit != 'true'
-
     - name: Setup environment
-      run:  mamba update -n geoutils -f environment.yml --no-update-deps
+      run:  mamba env update -n geoutils -f environment.yml
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Install project
@@ -68,7 +65,7 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Update environment with dev dependencies
-      run: mamba update --name geoutils --file dev-environment.yml --no-update-deps
+      run: mamba env update --name geoutils --file dev-environment.yml
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Re-install project
