@@ -26,7 +26,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    # Increase the 0 value manually to reset cache if etc/example-environment.yml has not changed
+    # Increase the 0 cache value manually to reset cache if etc/example-environment.yml has not changed
     - name: Setup environment and cache packages
       uses: actions/cache@v2
       env:
