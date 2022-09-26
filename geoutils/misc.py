@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import warnings
+from packaging.version import Version
 
 import rasterio as rio
 
@@ -29,7 +30,7 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
         @functools.wraps(func)
         def new_func(*args, **kwargs):  # type: ignore
             # True if it should warn, False if it should raise an error
-            should_warn = removal_version is None or removal_version > geoutils.version.version
+            should_warn = removal_version is None or Version(removal_version) > Version(geoutils.version.version)
 
             # Add text depending on the given arguments and 'should_warn'.
             text = (
