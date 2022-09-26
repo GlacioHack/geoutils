@@ -36,6 +36,7 @@ jobs:
         activate-environment: geoutils
 
     - name: Get month for resetting cache
+      id: get-date
       run: echo "::set-output name=month::$(/bin/date -u '+%Y%m')"
       shell: bash
 
