@@ -54,7 +54,9 @@ jobs:
       id: cache
 
     - name: Setup environment
-      run:  mamba env update -n geoutils -f ${{ env.CONDA_FILE }} --force-reinstall
+      run: |
+        mamba remove -n geoutils --all
+        mamba env update -n geoutils -f ${{ env.CONDA_FILE }}
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Install project
