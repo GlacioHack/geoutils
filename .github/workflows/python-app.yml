@@ -50,9 +50,7 @@ jobs:
       id: cache
 
     - name: Update environment
-      run: |
-        mamba update -n geoutils python=${{ matrix.python-version }}
-        mamba update -n geoutils -f environment.yml --no-update-deps
+      run: mamba update -n geoutils -f environment.yml python=${{ matrix.python-version }}
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Install project
