@@ -47,16 +47,15 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}--${{ matrix.python-version }}--${{ steps.get-date.outputs.month }}-${{ hashFiles('environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 5 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 6 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     - name: Setup environment
-      run:  mamba env update -n geoutils -f environment.yml
+      run:  mamba update -n geoutils -f environment.yml --no-update-deps
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Install project
       run: pip install -e . --no-dependencies
-      if: steps.cache.outputs.cache-hit != 'true'
 
     # This steps allows us to check the "import geoutils" with the base environment provided to users, before adding
     # development-specific dependencies by differencing the env and dev-env yml files
@@ -64,12 +63,11 @@ jobs:
       run: python -c "import geoutils"
 
     - name: Update environment with dev dependencies
-      run: mamba env update --name geoutils --file dev-environment.yml
+      run: mamba update --name geoutils --file dev-environment.yml --no-update-deps
       if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Re-install project
       run: pip install -e . --no-dependencies
-      if: steps.cache.outputs.cache-hit != 'true'
 
     - name: Lint with flake8
       run: |
