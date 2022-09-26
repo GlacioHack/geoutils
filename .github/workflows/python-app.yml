@@ -36,7 +36,7 @@ jobs:
         activate-environment: geoutils
 
     - name: Get date for resetting cache
-      run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
+      run: echo "::set-output name=today::$(/bin/date -u '+%Y%m')"
       shell: bash
 
     - name: Cache conda env
