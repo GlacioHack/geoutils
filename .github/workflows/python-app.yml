@@ -29,7 +29,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Setup environment
+    - name: Initiate empty environment
       uses: conda-incubator/setup-miniconda@v2
       with:
         miniforge-variant: Mambaforge
@@ -53,10 +53,23 @@ jobs:
         CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
-    - name: Setup environment
-      run: |
-        mamba env update -n geoutils -f ${{ env.CONDA_FILE }} --prune
+    - name: Remove old environment if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        mamba deactivate
+        mamba remove -n geoutils --all
+
+    - name: Setup new environment if cache does not exist
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        miniforge-variant: Mambaforge
+        miniforge-version: latest
+        auto-update-conda: true
+        use-mamba: true
+        channel-priority: strict
+        activate-environment: geoutils
+        environment-file: environment.yml
 
     - name: Install project
       run: pip install -e . --no-dependencies
