@@ -29,6 +29,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    # We initiate the environment empty, and check if a key for this environment doesn't already exist in the cache
     - name: Initiate empty environment
       uses: conda-incubator/setup-miniconda@v2
       with:
@@ -53,6 +54,7 @@ jobs:
         CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
+    # If a key exists, we skip other environment setup. Otherwise, we re-start the environment from scratch
     - name: Remove old environment if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
@@ -78,9 +80,12 @@ jobs:
     - name: Check import works with base environment
       run: python -c "import geoutils"
 
+    # The trick below is necessary because: 1/ conda update/install does not support a file -f as argument and also
+     # 2/ conda env update/install does not support the --freeze-installed or --no-update-deps arguments
     - name: Update environment with development packages if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
+        mamba install pyyaml
         pkgs_conda_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'conda')"`
         pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
         mamba install $pkgs_conda_dev --freeze-installed
