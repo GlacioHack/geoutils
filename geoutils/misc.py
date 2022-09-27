@@ -5,7 +5,7 @@ import functools
 import warnings
 
 try:
-    import yaml
+    import yaml  # type: ignore
 
     _has_yaml = True
 except ImportError:
@@ -89,6 +89,7 @@ def resampling_method_from_str(method_str: str) -> rio.warp.Resampling:
         )
     return resampling_method
 
+
 def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -> None:
     """
     Compute the difference between environment.yml and dev-environment.yml for setup of continuous integration,
@@ -158,4 +159,3 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
         print(joined_list_pip_dep)
     else:
         raise ValueError('The argument "print_dep" can only be "conda", "pip" or "both".')
-
