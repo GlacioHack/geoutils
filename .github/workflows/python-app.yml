@@ -56,8 +56,8 @@ jobs:
     - name: Remove old environment if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        mamba deactivate
-        mamba remove -n geoutils --all
+        conda deactivate
+        conda remove -n geoutils --all
 
     - name: Setup new environment if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
