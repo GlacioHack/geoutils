@@ -35,7 +35,7 @@ jobs:
         auto-update-conda: true
         use-mamba: true
         channel-priority: strict
-        activate-environment: geoutils
+        activate-environment: geoutils-dev
 
     - name: Get month for resetting cache
       id: get-date
@@ -52,7 +52,7 @@ jobs:
       id: cache
 
     - name: Update like in the GitHub example
-      run: mamba env update -n geoutils -f dev-environment.yml
+      run: mamba env update -n geoutils-dev -f dev-environment.yml
       if: steps.cache.outputs.cache-hit != 'true'
 
 
