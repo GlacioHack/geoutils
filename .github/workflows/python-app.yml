@@ -73,6 +73,7 @@ jobs:
         activate-environment: geoutils
         environment-file: environment.yml
         python-version: ${{ matrix.python-version }}
+        use-only-tar-bz2: true
 
     - name: Install project
       run: pip install -e . --no-dependencies
