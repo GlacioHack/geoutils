@@ -8,7 +8,6 @@ dependencies:
   - pyproj
   - rasterio >= 1.3
   - scipy
-  - pip
   - tqdm
 
   # Development-specific
@@ -18,6 +17,7 @@ dependencies:
   - sphinxcontrib-programoutput
   - numpydoc
   - flake8
+  - pip
   - pytest
   - pytest-xdist
   - pytest-lazy-fixture
