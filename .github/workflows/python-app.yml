@@ -56,8 +56,9 @@ jobs:
     - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        pkgs_conda_base=`python -c "import geoutils; geoutils.misc.environment_yml_nopy('environment.yml', 'conda')"`
-        pkgs_pip_base=`python -c "import geoutils; geoutils.misc.environment_yml_nopy('environment.yml', 'pip')"`
+        mamba install pyyaml
+        pkgs_conda_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "conda"`
+        pkgs_pip_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "pip"`
         mamba install python=${{ matrix.python-version }} $pkgs_conda_dev --force-reinstall
         if [[ "$pkgs_pip_base" != "None" ]]; then
           pip install $pkgs_pip_dev

@@ -89,42 +89,6 @@ def resampling_method_from_str(method_str: str) -> rio.warp.Resampling:
         )
     return resampling_method
 
-def environment_yml_nopy(fn_env: str, print_dep: str = 'both') -> None:
-    """
-    List dependencies in environment.yml without python version for setup of continuous integration.
-
-    :param fn_env: Filename path to environment.yml
-    :param print_dep: Whether to print conda differences "conda", pip differences "pip" or both.
-    """
-
-    if not _has_yaml:
-        raise ValueError("Test dependency needed. Install 'pyyaml'")
-
-    # Load the yml as dictionary
-    yaml_env = yaml.safe_load(open(fn_env))
-    conda_dep_env = list(yaml_env["dependencies"])
-    conda_dep_env_without_python = [dep for dep in conda_dep_env if 'python' not in dep]
-
-    if isinstance(conda_dep_env[-1], dict):
-        pip_dep_env = list(conda_dep_env.pop())
-    else:
-        pip_dep_env = ['None']
-
-    # Join the lists
-    joined_list_conda_dep = " ".join(conda_dep_env_without_python)
-    joined_list_pip_dep = " ".join(pip_dep_env)
-
-    # Print to be captured in bash
-    if print_dep == "both":
-        print(joined_list_conda_dep)
-        print(joined_list_pip_dep)
-    elif print_dep == "conda":
-        print(joined_list_conda_dep)
-    elif print_dep == "pip":
-        print(joined_list_pip_dep)
-    else:
-        raise ValueError('The argument "print_dep" can only be "conda", "pip" or "both".')
-
 
 def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -> None:
     """
