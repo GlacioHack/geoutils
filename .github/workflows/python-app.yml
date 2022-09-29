@@ -79,7 +79,7 @@ jobs:
       run: python -c "import geoutils"
 
     # The trick below is necessary because: 1/ conda update/install does not support a file -f as argument and also
-    # 2/ conda env update/install does not support the --freeze-installed or --no-update-deps arguments
+    # 2/ conda env update/install does not support --freeze-installed or --no-update-deps to fix e.g. Python version
     - name: Update environment with development packages if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
