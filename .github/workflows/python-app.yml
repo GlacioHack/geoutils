@@ -51,7 +51,7 @@ jobs:
         CACHE_NUMBER: 2 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
-    # If a key exists, we skip other environment setup. Otherwise, we re-start the environment from scratch
+    # If a key exists, we skip other environment setup, otherwise, we re-start the environment from scratch
     - name: Remove old environment if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
