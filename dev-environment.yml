@@ -26,3 +26,4 @@ dependencies:
   - sphinx-gallery
   - scikit-image
   - pyyaml
+  - rioxarray
