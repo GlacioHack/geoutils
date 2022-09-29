@@ -19,9 +19,6 @@ jobs:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
         python-version: ["3.8", "3.9", "3.10"]
 
-    env:
-      CONDA_FILE: .github/dev-environment-${{ matrix.python-version }}.yml
-
     defaults:
       run:
         shell: bash -l {0}
@@ -51,7 +48,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}--${{ matrix.python-version }}--${{ steps.get-date.outputs.month }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 1 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # If a key exists, we skip other environment setup. Otherwise, we re-start the environment from scratch
