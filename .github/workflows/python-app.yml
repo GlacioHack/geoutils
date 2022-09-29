@@ -56,7 +56,7 @@ jobs:
     - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        mamba install pyyaml python=${{ matrix.python-version }}
+        mamba install pyyaml --freeze-installed
         pkgs_conda_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "conda"`
         pkgs_pip_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "pip"`
         mamba install python=${{ matrix.python-version }} $pkgs_conda_base --force-reinstall
