@@ -56,7 +56,7 @@ jobs:
     - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        mamba install pyyaml --freeze-installed
+        mamba install pyyaml python=${{ matrix.python-version }}
         pkgs_conda_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "conda"`
         pkgs_pip_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "pip"`
         mamba install python=${{ matrix.python-version }} $pkgs_conda_base --force-reinstall
@@ -75,7 +75,6 @@ jobs:
     - name: Update environment with development packages if cache does not exist
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        mamba install pyyaml
         pkgs_conda_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'conda')"`
         pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
         mamba install $pkgs_conda_dev --freeze-installed
