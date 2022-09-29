@@ -30,10 +30,10 @@ jobs:
     - name: Initiate empty environment
       uses: conda-incubator/setup-miniconda@v2
       with:
-        miniforge-variant: Mambaforge
-        miniforge-version: latest
         auto-update-conda: true
         use-mamba: true
+        mamba-version: "*"
+        channels: conda-forge
         channel-priority: strict
         activate-environment: geoutils
 
@@ -62,8 +62,8 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       uses: conda-incubator/setup-miniconda@v2
       with:
-        miniforge-variant: Mambaforge
-        miniforge-version: latest
+        mamba-version: "*"
+        channels: conda-forge
         auto-update-conda: true
         use-mamba: true
         channel-priority: strict
