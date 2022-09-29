@@ -51,52 +51,36 @@ jobs:
         CACHE_NUMBER: 4 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
-    - name: Update like in the GitHub example
-      run: mamba env update -n geoutils-dev -f dev-environment.yml
+    # The trick below is necessary because the generic environment file does not specify a Python version, and only
+    # "conda env update" can be used to update with an environment file, which upgrades the Python version
+    - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        pkgs_conda_base=`python -c "import geoutils; geoutils.misc.environment_yml_nopy('environment.yml', 'conda')"`
+        pkgs_pip_base=`python -c "import geoutils; geoutils.misc.environment_yml_nopy('environment.yml', 'pip')"`
+        mamba install python=${{ matrix.python-version }} $pkgs_conda_dev --force-reinstall
+        if [[ "$pkgs_pip_base" != "None" ]]; then
+          pip install $pkgs_pip_dev
+        fi
 
-
-    # If a key exists, we skip other environment setup, otherwise, we re-start the environment from scratch
-    #    - name: Remove old environment if cache does not exist
-    #      if: steps.cache.outputs.cache-hit != 'true'
-    #      run: |
-    #        conda deactivate
-    #        conda remove -n geoutils --all
-    #
-    #    - name: Setup new environment if cache does not exist
-    #      if: steps.cache.outputs.cache-hit != 'true'
-    #      uses: conda-incubator/setup-miniconda@v2
-    #      with:
-    #        miniforge-variant: Mambaforge
-    #        miniforge-version: latest
-    #        auto-update-conda: true
-    #        use-mamba: true
-    #        channel-priority: strict
-    #        activate-environment: geoutils
-    #        environment-file: environment.yml
-    #        python-version: ${{ matrix.python-version }}
-    #        use-only-tar-bz2: true
-
-    # Add this
     - name: Install project
       run: pip install -e . --no-dependencies
 
-    #    - name: Check import works with base environment
-    #      run: python -c "import geoutils"
-    #
-    #    # The trick below is necessary because: 1/ conda update/install does not support a file -f as argument and also
-    #    # 2/ conda env update/install does not support --freeze-installed or --no-update-deps to maintain packages version,
-    #    # in particular the Python version we want to test in the environment
-    #    - name: Update environment with development packages if cache does not exist
-    #      if: steps.cache.outputs.cache-hit != 'true'
-    #      run: |
-    #        mamba install pyyaml
-    #        pkgs_conda_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'conda')"`
-    #        pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
-    #        mamba install $pkgs_conda_dev --freeze-installed
-    #        if [[ "$pkgs_pip_dev" != "None" ]]; then
-    #          pip install $pkgs_pip_dev
-    #        fi
+    - name: Check import works with base environment
+      run: python -c "import geoutils"
+
+    # This time, the trick below is necessary because: 1/ "conda update" does not support a file -f as argument
+    # and also 2/ "conda env update" does not support --freeze-installed or --no-update-deps
+    - name: Update environment with development packages if cache does not exist
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        mamba install pyyaml
+        pkgs_conda_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'conda')"`
+        pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
+        mamba install $pkgs_conda_dev --freeze-installed
+        if [[ "$pkgs_pip_dev" != "None" ]]; then
+          pip install $pkgs_pip_dev
+        fi
 
     # Stop the build if there are Python syntax errors or undefined names
     - name: Lint with flake8
