@@ -113,7 +113,6 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
     if isinstance(conda_dep_env[-1], dict):
         pip_dep_env = conda_dep_env.pop()
 
-
     # Check if there is any pip dependency, if yes pop it from the end of the list
     if isinstance(conda_dep_devenv[-1], dict):
         pip_dep_devenv = conda_dep_devenv.pop()
