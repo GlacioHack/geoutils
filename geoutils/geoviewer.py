@@ -151,7 +151,7 @@ def main() -> None:
         except ValueError:
             raise ValueError("ERROR: nodata must be a float, currently set to %s" % args.nodata)
 
-        img.set_ndv(nodata)
+        img.set_nodata(nodata)
 
     # Set default parameters #
 
