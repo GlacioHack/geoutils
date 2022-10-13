@@ -18,7 +18,6 @@ Full information about geoutils' functionality is provided on this page.
         projtools
         satimg
         geoviewer
-        datasets
 
 .. automodule geoutils
 
