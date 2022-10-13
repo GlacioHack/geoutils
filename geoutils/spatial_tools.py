@@ -161,6 +161,7 @@ def load_multiple_rasters(
             # make sure new bounds align with reference's bounds (to avoid resampling ref)
             new_bounds = intersection
             new_bounds = gu.projtools.align_bounds(ref_rst.transform, intersection)
+            new_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
         else:
             new_bounds = ref_rst.bounds
 
