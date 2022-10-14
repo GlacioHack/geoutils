@@ -87,7 +87,7 @@ class Vector:
         """Return a copy of the Vector."""
         # Utilise the copy method of GeoPandas
         new_vector = self.__new__(type(self))
-        new_vector.__init__(self.ds.copy())
+        new_vector.__init__(self.ds.copy())  # type: ignore
         return new_vector  # type: ignore
 
     def crop2raster(self, rst: gu.Raster) -> None:
@@ -335,7 +335,7 @@ the provided raster file.
 
         # Otherwise, create a new Vector from the queried dataset.
         new_vector = self.__new__(type(self))
-        new_vector.__init__(self.ds.query(expression))
+        new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
     def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> np.ndarray:

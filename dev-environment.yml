@@ -2,13 +2,12 @@ name: geoutils-dev
 channels:
   - conda-forge
 dependencies:
-  - python >= 3.8
-  - geopandas >= 0.10.0
+  - python>=3.8
+  - geopandas>=0.10.0
   - matplotlib
   - pyproj
-  - rasterio >= 1.3
+  - rasterio>=1.3
   - scipy
-  - pip
   - tqdm
 
   # Development-specific
@@ -18,6 +17,7 @@ dependencies:
   - sphinxcontrib-programoutput
   - numpydoc
   - flake8
+  - pip
   - pytest
   - pytest-xdist
   - pytest-lazy-fixture
@@ -26,3 +26,4 @@ dependencies:
   - sphinx-gallery
   - scikit-image
   - pyyaml
+  - rioxarray
