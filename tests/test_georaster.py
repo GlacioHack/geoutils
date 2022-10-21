@@ -1730,6 +1730,7 @@ self.set_nodata()."
 
         # Check that the shapes are correct.
         assert red.nbands == 1
+        assert red.count == 1
         assert red.data.shape[0] == 1
         assert img.nbands == 3
         assert img.data.shape[0] == 3
@@ -1741,12 +1742,9 @@ self.set_nodata()."
         blue2, green2 = img.split_bands(copy=False, subset=[2, 1])
 
         # Check that the subset functionality works as expected.
-        assert np.array_equal(red.data.data.astype("float32"), red2.data.data.astype("float32"), equal_nan=True)
-        assert np.array_equal(red.data.mask, red2.data.mask)
-        assert np.array_equal(blue.data.data.astype("float32"), blue2.data.data.astype("float32"), equal_nan=True)
-        assert np.array_equal(blue.data.mask, blue2.data.mask)
-        assert np.array_equal(green.data.data.astype("float32"), green2.data.data.astype("float32"), equal_nan=True)
-        assert np.array_equal(green.data.mask, green2.data.mask)
+        assert red == red2
+        assert green == green2
+        assert blue == blue2
 
         # Check that the red channel and the rgb data shares memory
         assert np.shares_memory(red.data, img.data)
