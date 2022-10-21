@@ -2338,12 +2338,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 )
         else:
             for band_n in indices:
-                # Generate a new instance with the same underlying values.
-                raster = Raster(self)
                 # Set the data to a slice of the original array
-                raster._data = self.data[band_n, :, :].reshape((1,) + self.data.shape[1:])
-                # Set the nbands
-                bands.append(raster)
+                bands.append(
+                    self.from_array(
+                        self.data[band_n, :, :].reshape((1,) + self.data.shape[1:]),
+                        transform=self.transform,
+                        crs=self.crs,
+                        nodata=self.nodata,
+                    )
+                )
 
         return bands
 
