@@ -150,10 +150,12 @@ class TestSatelliteImage:
         assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
     def test_filename_parsing(self) -> None:
-
+        """Test metadata parsing from filenames"""
+        
         copied_names = [
             "TDM1_DEM__30_N00E104_DEM.tif",
             "SETSM_WV02_20141026_1030010037D17F00_10300100380B4000_mosaic5_2m_v3.0_dem.tif",
+            "SETSM_s2s041_WV02_20150615_10300100443C2D00_1030010043373000_seg1_2m_dem.tif",
             "AST_L1A_00303132015224418_final.tif",
             "ILAKS1B_20190928_271_Gilkey-DEM.tif",
             "srtm_06_01.tif",
@@ -162,14 +164,15 @@ class TestSatelliteImage:
             "NASADEM_HGT_n00e041.hgt",
         ]
         # Corresponding data, filled manually
-        satellites = ["TanDEM-X", "WorldView", "Terra", "IceBridge", "SRTM", "Terra", "SRTM", "SRTM"]
-        sensors = ["TanDEM-X", "WV02", "ASTER", "UAF-LS", "SRTM", "ASTER", "SRTM", "SRTM"]
-        products = ["TDM1", "ArcticDEM/REMA", "L1A", "ILAKS1B", "SRTMv4.1", "ASTGTM2", "SRTMGL1", "NASADEM-HGT"]
+        satellites = ["TanDEM-X", "WorldView", "WorldView", "Terra", "IceBridge", "SRTM", "Terra", "SRTM", "SRTM"]
+        sensors = ["TanDEM-X", "WV02", "WV02", "ASTER", "UAF-LS", "SRTM", "ASTER", "SRTM", "SRTM"]
+        products = ["TDM1", "ArcticDEM/REMA/EarthDEM", "ArcticDEM/REMA/EarthDEM", "L1A", "ILAKS1B", "SRTMv4.1", "ASTGTM2", "SRTMGL1", "NASADEM-HGT"]
         # we can skip the version, bit subjective...
-        tiles = ["N00E104", None, None, None, "06_01", "N00E108", "N00E015", "n00e041"]
+        tiles = ["N00E104", None, None, None, None, "06_01", "N00E108", "N00E015", "n00e041"]
         datetimes = [
             None,
             dt.datetime(year=2014, month=10, day=26),
+            dt.datetime(year=2015, month=6, day=15),
             dt.datetime(year=2015, month=3, day=13, hour=22, minute=44, second=18),
             dt.datetime(year=2019, month=9, day=28),
             dt.datetime(year=2000, month=2, day=15),
