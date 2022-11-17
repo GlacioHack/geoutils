@@ -58,7 +58,8 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
         elif re.match("T[0-9]{2}[A-Z]{3}", spl[0]):
             attrs = ("Sentinel-2", "MSI", None, None, spl[0][1:], dt.datetime.strptime(spl[1], "%Y%m%dT%H%M%S"))
         elif spl[0] == "SETSM":
-            # For PGC DEMs: if the second part of the name starts with a "s", it is the new nomenclature (starting at "s2s041") with the version first,
+            # For PGC DEMs: if the second part of the name starts with a "s", it is the new nomenclature
+            # (starting at "s2s041") with the version first,
             # then the rest
             if spl[1][0] == "s":
                 version = spl[1]
@@ -67,7 +68,14 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
             else:
                 version = spl[7]
                 index = 0
-            attrs = ("WorldView", spl[index+1], "ArcticDEM/REMA/EarthDEM", version, None, dt.datetime.strptime(spl[index+2], "%Y%m%d"))
+            attrs = (
+                "WorldView",
+                spl[index + 1],
+                "ArcticDEM/REMA/EarthDEM",
+                version,
+                None,
+                dt.datetime.strptime(spl[index + 2], "%Y%m%d"),
+            )
         elif spl[0] == "SPOT":
             attrs = ("HFS", "SPOT5", None, None, None, dt.datetime.strptime(spl[2], "%Y%m%d"))
         elif spl[0] == "IODEM3":

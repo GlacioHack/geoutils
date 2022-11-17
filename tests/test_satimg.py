@@ -151,7 +151,7 @@ class TestSatelliteImage:
 
     def test_filename_parsing(self) -> None:
         """Test metadata parsing from filenames"""
-        
+
         copied_names = [
             "TDM1_DEM__30_N00E104_DEM.tif",
             "SETSM_WV02_20141026_1030010037D17F00_10300100380B4000_mosaic5_2m_v3.0_dem.tif",
@@ -166,7 +166,17 @@ class TestSatelliteImage:
         # Corresponding data, filled manually
         satellites = ["TanDEM-X", "WorldView", "WorldView", "Terra", "IceBridge", "SRTM", "Terra", "SRTM", "SRTM"]
         sensors = ["TanDEM-X", "WV02", "WV02", "ASTER", "UAF-LS", "SRTM", "ASTER", "SRTM", "SRTM"]
-        products = ["TDM1", "ArcticDEM/REMA/EarthDEM", "ArcticDEM/REMA/EarthDEM", "L1A", "ILAKS1B", "SRTMv4.1", "ASTGTM2", "SRTMGL1", "NASADEM-HGT"]
+        products = [
+            "TDM1",
+            "ArcticDEM/REMA/EarthDEM",
+            "ArcticDEM/REMA/EarthDEM",
+            "L1A",
+            "ILAKS1B",
+            "SRTMv4.1",
+            "ASTGTM2",
+            "SRTMGL1",
+            "NASADEM-HGT",
+        ]
         # we can skip the version, bit subjective...
         tiles = ["N00E104", None, None, None, None, "06_01", "N00E108", "N00E015", "n00e041"]
         datetimes = [
