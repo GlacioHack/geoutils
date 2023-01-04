@@ -32,6 +32,7 @@ from scipy.ndimage import map_coordinates
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
 from geoutils.geovector import Vector
+from geoutils.projtools import _get_bounds_projected
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -1331,8 +1332,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             "match_extent",
             "match_pixel",
         ], "mode must be one of 'match_pixel', 'match_extent'"
+
         if isinstance(cropGeom, (Raster, Vector)):
-            xmin, ymin, xmax, ymax = cropGeom.bounds
+            # For another Vector or Raster, we reproject the bounding box in the same CRS as self
+            xmin, ymin, xmax, ymax = cropGeom.get_bounds_projected(out_crs=self.crs)
         elif isinstance(cropGeom, (list, tuple)):
             xmin, ymin, xmax, ymax = cropGeom
         else:
@@ -1375,13 +1378,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     def reproject(
         self: RasterType,
         dst_ref: RasterType | rio.io.Dataset | str | None = None,
-        dst_crs: CRS | str | None = None,
+        dst_crs: CRS | str | int | None = None,
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
         dst_nodata: int | float | list[int] | list[float] | None = None,
         src_nodata: int | float | list[int] | list[float] | None = None,
-        dtype: np.dtype | None = None,
+        dst_dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
         n_threads: int = 0,
@@ -1399,13 +1402,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :param dst_ref: a reference raster. If set will use the attributes of this
             raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
-        :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
+        :param dst_crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
-        :param dst_bounds: a BoundingBox object or a dictionary containing\
-                left, bottom, right, top bounds in the source CRS.
+        :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the source CRS.
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source, \
+        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source,
         and if source is None, will use GDAL's default.
+        :param dst_dtype: Set data type of output.
         :param src_nodata: nodata value of the source. If set to None, will read from the metadata.
         :param resampling: A rasterio Resampling method
         :param silent: If True, will not print warning statements
@@ -1452,9 +1455,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             dst_crs = CRS.from_user_input(dst_crs)
 
         # Set output dtype
-        if dtype is None:
+        if dst_dtype is None:
             # Warning: this will not work for multiple bands with different dtypes
-            dtype = self.dtypes[0]
+            dst_dtype = self.dtypes[0]
 
         # Set source nodata if provided
         if src_nodata is None:
@@ -1465,7 +1468,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if dst_nodata is None:
             dst_nodata = self.nodata
             if dst_nodata is None:
-                dst_nodata = _default_nodata(dtype)
+                dst_nodata = _default_nodata(dst_dtype)
                 # if dst_nodata is already being used, raise a warning.
                 # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
                 if not self.is_loaded:
@@ -1538,7 +1541,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Set output shape (Note: dst_size is (ncol, nrow))
         if dst_size is not None:
             dst_shape = (self.count, dst_size[1], dst_size[0])
-            dst_data = np.ones(dst_shape, dtype=dtype)
+            dst_data = np.ones(dst_shape, dtype=dst_dtype)
             reproj_kwargs.update({"destination": dst_data})
         else:
             dst_shape = (self.count, self.height, self.width)
@@ -1559,7 +1562,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # Specify the output bounds and shape, let rasterio handle the rest
             reproj_kwargs.update({"dst_transform": dst_transform})
-            dst_data = np.ones((dst_size[1], dst_size[0]), dtype=dtype)
+            dst_data = np.ones((dst_size[1], dst_size[0]), dtype=dst_dtype)
             reproj_kwargs.update({"destination": dst_data})
 
         # Check that reprojection is actually needed
@@ -1617,7 +1620,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             dst_data = np.array(dst_data)
 
         # Enforce output type
-        dst_data = np.ma.masked_array(dst_data.astype(dtype), fill_value=dst_nodata)
+        dst_data = np.ma.masked_array(dst_data.astype(dst_dtype), fill_value=dst_nodata)
 
         if dst_nodata is not None:
             dst_data.mask = dst_data == dst_nodata
@@ -1775,25 +1778,22 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return xr
 
-    def get_bounds_projected(self, out_crs: CRS, densify_pts_max: int = 5000) -> rio.coords.BoundingBox:
+    def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
         """
         Return self's bounds in the given CRS.
 
         :param out_crs: Output CRS
-        :param densify_pts_max: Maximum points to be added between image corners to account for non linear edges.
-                                Reduce if time computation is really critical (ms) or increase if extent is \
-                                        not accurate enough.
+        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+         Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
 
         """
         # Max points to be added between image corners to account for non linear edges
         # rasterio's default is a bit low for very large images
         # instead, use image dimensions, with a maximum of 50000
-        densify_pts = min(max(self.width, self.height), densify_pts_max)
+        densify_pts = min(max(self.width, self.height), densify_pts)
 
         # Calculate new bounds
-        left, bottom, right, top = self.bounds
-        new_bounds = rio.warp.transform_bounds(self.crs, out_crs, left, bottom, right, top, densify_pts)
-        new_bounds = rio.coords.BoundingBox(*new_bounds)
+        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
 
         return new_bounds
 

@@ -704,6 +704,14 @@ class TestRaster:
         r_cropped2 = r.crop(r_cropped, inplace=False)
         assert r_cropped2 == r_cropped
 
+        # Check that bound reprojection is done automatically if the CRS differ
+        r_cropped_reproj = r_cropped.reproject(dst_crs=3857)
+        r_cropped3 = r.crop(r_cropped_reproj, inplace=False)
+
+        # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
+        r_cropped4 = r.crop(cropGeom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs), inplace=False)
+        assert r_cropped3 == r_cropped4
+
         # -- Test with inplace=True (Default) -- #
         r_copy = r.copy()
         r_copy.crop(r_cropped)
@@ -762,15 +770,21 @@ class TestRaster:
 
         # -- Test with CropGeom being a Vector -- #
         outlines = gu.Vector(outlines_path)
-        outlines.ds = outlines.ds.to_crs(r.crs)
-        r_cropped = r.crop(outlines, inplace=False)
+
+        # First, we reproject manually the outline
+        outlines_reproj = gu.Vector(outlines.ds.to_crs(r.crs))
+        r_cropped = r.crop(outlines_reproj, inplace=False)
 
         # Calculate intersection of the two bounding boxes and make sure crop has same bounds
-        win_outlines = rio.windows.from_bounds(*outlines.bounds, transform=r.transform)
+        win_outlines = rio.windows.from_bounds(*outlines_reproj.bounds, transform=r.transform)
         win_raster = rio.windows.from_bounds(*r.bounds, transform=r.transform)
         final_window = win_outlines.intersection(win_raster).round_lengths().round_offsets()
         new_bounds = rio.windows.bounds(final_window, transform=r.transform)
         assert list(r_cropped.bounds) == list(new_bounds)
+
+        # Second, we check that bound reprojection is done automatically if the CRS differ
+        r_cropped2 = r.crop(outlines, inplace=False)
+        assert list(r_cropped2.bounds) == list(new_bounds)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:

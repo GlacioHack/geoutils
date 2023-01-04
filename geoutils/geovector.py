@@ -19,6 +19,7 @@ from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
+from geoutils.projtools import _get_bounds_projected
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -343,15 +344,30 @@ class Vector:
         new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
+    def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
+        """
+        Return self's bounds in the given CRS.
+
+        :param out_crs: Output CRS
+        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        """
+
+        # Calculate new bounds
+        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
+
+        return new_bounds
+
+
     def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> np.ndarray:
         """
         Returns a Vector object containing self's geometries extended by a buffer, without overlapping each other.
 
         The algorithm is based upon this tutorial: https://statnmap.com/2020-07-31-buffer-area-for-nearest-neighbour/.
         The buffered polygons are created using Voronoi polygons in order to delineate the "area of influence" \
-of each geometry.
+        of each geometry.
         The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,\
-hence one geometry "steps" slightly on the neighbor buffer in some cases.
+        hence one geometry "steps" slightly on the neighbor buffer in some cases.
         The algorithm may also yield unexpected results on very simple geometries.
 
         Note: A similar functionality is provided by momepy (http://docs.momepy.org) and is probably more robust.
@@ -443,7 +459,7 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
     :param gdf: The GeoDataFrame from which the vertices need to be extracted.
 
     :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal \
- to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
+    to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
     """
     vertices = []
     # Loop on all geometries within gdf

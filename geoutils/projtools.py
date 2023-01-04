@@ -15,12 +15,9 @@ from rasterio.crs import CRS
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import Polygon
 
-from geoutils.georaster import Raster
-from geoutils.geovector import Vector
-
 
 def bounds2poly(
-    boundsGeom: list[float] | rio.io.DatasetReader | Raster | Vector,
+    boundsGeom: list[float] | rio.io.DatasetReader,
     in_crs: CRS | None = None,
     out_crs: CRS | None = None,
 ) -> Polygon:
@@ -61,7 +58,7 @@ def bounds2poly(
 
 
 def merge_bounds(
-    bounds_list: abc.Iterable[list[float] | Raster | rio.io.DatasetReader | Vector | gpd.GeoDataFrame],
+    bounds_list: abc.Iterable[list[float] | rio.io.DatasetReader | gpd.GeoDataFrame],
     merging_algorithm: str = "union",
 ) -> tuple[float, ...]:
     """
@@ -215,3 +212,12 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 
     same: bool = proj1.is_exact_same(proj2)
     return same
+
+def _get_bounds_projected(bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
+
+    # Calculate new bounds
+    left, bottom, right, top = bounds
+    new_bounds = rio.warp.transform_bounds(in_crs, out_crs, left, bottom, right, top, densify_pts)
+    new_bounds = rio.coords.BoundingBox(*new_bounds)
+
+    return new_bounds
