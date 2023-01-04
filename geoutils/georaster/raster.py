@@ -526,6 +526,10 @@ class Raster:
         """Provide string of information about Raster."""
         return self.info()
 
+    def __getitem__(self, value: Raster | Vector | list[float] | tuple[float, ...]) -> Raster:
+        """Subset the Raster object: calls the crop method with default parameters"""
+        return self.crop(cropGeom=value, inplace=False)
+
     def __eq__(self, other: object) -> bool:
         """Check if a Raster masked array's data (including masked values), mask, fill_value and dtype are equal,
         as well as the Raster's nodata, and georeferencing."""

@@ -644,7 +644,8 @@ class TestRaster:
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)  # type: ignore
-    def test_crop(self, data: list[str]) -> None:
+    def test_crop_and_getitem(self, data: list[str]) -> None:
+        """Test for crop method, also called by square brackets through __getitem__"""
 
         raster_path, outlines_path = data
         r = gr.Raster(raster_path)
@@ -657,38 +658,42 @@ class TestRaster:
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert r_cropped == r
 
+        # Test with bracket call
+        r_cropped_getitem = r[cropGeom2]
+        assert r_cropped_getitem == r_cropped
+
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(r.shape) - 1)
 
-        # left
+        # Left
         cropGeom2 = [cropGeom[0] + rand_int * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, :, rand_int:].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, :, rand_int:].mask, r_cropped.data.mask)
 
-        # right
+        # Right
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_int * r.res[0], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, :, :-rand_int].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, :, :-rand_int].mask, r_cropped.data.mask)
 
-        # bottom
+        # Bottom
         cropGeom2 = [cropGeom[0], cropGeom[1] + rand_int * abs(r.res[1]), cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, :-rand_int, :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, :-rand_int, :].mask, r_cropped.data.mask)
 
-        # top
+        # Top
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_int * abs(r.res[1])]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, rand_int:, :].data, r_cropped.data, equal_nan=True)
         assert np.array_equal(r.data[:, rand_int:, :].mask, r_cropped.data.mask)
 
-        # same but tuple
+        # Same but tuple
         cropGeom3: tuple[float, float, float, float] = (
             cropGeom[0],
             cropGeom[1],
@@ -711,6 +716,10 @@ class TestRaster:
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
         r_cropped4 = r.crop(cropGeom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs), inplace=False)
         assert r_cropped3 == r_cropped4
+
+        # Check with bracket call
+        r_cropped5 = r[r_cropped_reproj]
+        assert r_cropped4 == r_cropped5
 
         # -- Test with inplace=True (Default) -- #
         r_copy = r.copy()
@@ -785,6 +794,10 @@ class TestRaster:
         # Second, we check that bound reprojection is done automatically if the CRS differ
         r_cropped2 = r.crop(outlines, inplace=False)
         assert list(r_cropped2.bounds) == list(new_bounds)
+
+        # Finally, we check with a bracket call
+        r_cropped3 = r[outlines]
+        assert list(r_cropped3.bounds) == list(new_bounds)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
