@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import geopandas as gpd
+from geopandas.testing import assert_geodataframe_equal
 import numpy as np
 import pytest
 from scipy.ndimage import binary_erosion
@@ -94,6 +95,7 @@ class TestVector:
 
         # Check with bracket call
         outlines_new2 = outlines_new[rst]
+        assert_geodataframe_equal(outlines_new.ds, outlines_new2.ds)
 
         # Verify that geometries intersect with raster bound
         rst_poly = gu.projtools.bounds2poly(rst.bounds)

@@ -1849,7 +1849,7 @@ self.set_nodata()."
         # -- Test 2: data types --
 
         # Check that polygonize works as expected for any input dtype (e.g. float64 being not supported by GeoPandas)
-        for dtype in ['uint8', 'int8', 'uint16', 'int16', 'uint32', 'int32', 'float32', 'float64']:
+        for dtype in ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]:
             img_dtype = img.copy()
             img_dtype = img_dtype.astype(dtype)
             value = np.unique(img_dtype)[0]
