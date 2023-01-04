@@ -92,6 +92,9 @@ class TestVector:
         outlines_new = outlines.copy()
         outlines_new.crop(rst)
 
+        # Check with bracket call
+        outlines_new2 = outlines_new[rst]
+
         # Verify that geometries intersect with raster bound
         rst_poly = gu.projtools.bounds2poly(rst.bounds)
         intersects_new = []

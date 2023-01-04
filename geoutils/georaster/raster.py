@@ -2484,9 +2484,23 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             raise ValueError("in_value must be a number, a tuple or a sequence")
 
+        # GeoPandas.from_features() only supports certain dtypes, we find the best common dtype to optimize memory usage
+        # TODO: this should be a function independent of polygonize, reused in several places
+        gpd_dtypes = ["uint8", "uint16", "int16", "int32", "float32"]
+        list_common_dtype_index = []
+        for gpd_type in gpd_dtypes:
+            polygonize_dtype = np.find_common_type([gpd_type, self.dtypes[0]], [])
+            if str(polygonize_dtype) in gpd_dtypes:
+                list_common_dtype_index.append(gpd_dtypes.index(gpd_type))
+        if len(list_common_dtype_index) == 0:
+            final_dtype = "float32"
+        else:
+            final_dtype_index = min(list_common_dtype_index)
+            final_dtype = gpd_dtypes[final_dtype_index]
+
         results = (
             {"properties": {"raster_value": v}, "geometry": s}
-            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk, transform=self.transform))
+            for i, (s, v) in enumerate(shapes(self.data.astype(final_dtype), mask=bool_msk, transform=self.transform))
         )
 
         gdf = gpd.GeoDataFrame.from_features(list(results))

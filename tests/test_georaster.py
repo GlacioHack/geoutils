@@ -1825,21 +1825,39 @@ self.set_nodata()."
         img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
         assert img3a == img3b
 
-    def test_polygonize(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_polygonize(self, example: str) -> None:
         """Test that polygonize doesn't raise errors."""
-        img = gr.Raster(self.landsat_b4_path)
 
+        img = gr.Raster(example)
+
+        # -- Test 1: basic functioning of polygonize --
+
+        # Get unique value for image and the corresponding area
         value = np.unique(img)[0]
-
         pixel_area = np.sum(img == value) * img.res[0] * img.res[1]
 
-        polygonized = img.polygonize(value)
-
+        # Polygonize the raster for this value, and compute the total area
+        polygonized = img.polygonize(in_value=value)
         polygon_area = polygonized.ds.area.sum()
 
+        # Check that these two areas are approximately equal
         assert polygon_area == pytest.approx(pixel_area)
         assert isinstance(polygonized, gv.Vector)
         assert polygonized.crs == img.crs
+
+        # -- Test 2: data types --
+
+        # Check that polygonize works as expected for any input dtype (e.g. float64 being not supported by GeoPandas)
+        for dtype in ['uint8', 'int8', 'uint16', 'int16', 'uint32', 'int32', 'float32', 'float64']:
+            img_dtype = img.copy()
+            img_dtype = img_dtype.astype(dtype)
+            value = np.unique(img_dtype)[0]
+            polygonized = img_dtype.polygonize(in_value=value)
+
+        # And for a boolean object, such as a mask
+        mask = img > value
+        mask.polygonize(in_value=1)
 
     def test_to_points(self) -> None:
         """Test the outputs of the to_points method and that it doesn't load if not needed."""

@@ -61,6 +61,10 @@ class Vector:
         """Provide string of information about Raster."""
         return self.info()
 
+    def __getitem__(self, value: gu.Raster | Vector | list[float] | tuple[float, ...]) -> Vector:
+        """Subset the Raster object: calls the crop method with default parameters"""
+        return self.crop(cropGeom=value, inplace=False)
+
     def info(self) -> str:
         """
         Returns string of information about the vector (filename, coordinate system, number of layers, features, etc.).
