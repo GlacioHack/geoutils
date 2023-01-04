@@ -6,7 +6,7 @@ from __future__ import annotations
 import warnings
 from collections import abc
 from numbers import Number
-from typing import TypeVar, overload, Literal
+from typing import Literal, TypeVar, overload
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -92,30 +92,32 @@ class Vector:
         return new_vector  # type: ignore
 
     @overload
-    def crop(self: VectorType,
-             cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
-             inplace: Literal[True],
-             ) -> None:
+    def crop(
+        self: VectorType,
+        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        inplace: Literal[True] = True,
+    ) -> None:
         ...
 
     @overload
-    def crop(self: VectorType,
-             cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
-             inplace: Literal[False],
-             ) -> VectorType:
+    def crop(
+        self: VectorType,
+        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        inplace: Literal[False],
+    ) -> VectorType:
         ...
 
-
-    def crop(self: VectorType,
-             cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
-             inplace: bool = True,
-             ) -> VectorType | None:
+    def crop(
+        self: VectorType,
+        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        inplace: bool = True,
+    ) -> VectorType | None:
         """
         Crop the Vector to given extent, or bounds of a raster or vector.
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param cropGeom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
+        :param cropGeom: Geometry to crop vector to, as either a Raster object, a Vector object, or a list of
             coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
             Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
@@ -132,6 +134,7 @@ class Vector:
         # Need to separate the two options, inplace update
         if inplace:
             self.ds = self.ds.cx[xmin:xmax, ymin:ymax]
+            return None
         # Or create a copy otherwise
         else:
             new_vector = self.copy()
@@ -386,8 +389,7 @@ class Vector:
 
         return new_bounds
 
-
-    def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> VectorType:
+    def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> Vector:
         """
         Returns a Vector object containing self's geometries extended by a buffer, without overlapping each other.
 
@@ -500,7 +502,7 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
         elif geom.geom_type == "LineString":
             exteriors = [geom]
         elif geom.geom_type == "MultiLineString":
-            exteriors = [p for p in geom.geoms]
+            exteriors = list(geom.geoms)
         else:
             raise NotImplementedError(f"Geometry type {geom.geom_type} not implemented.")
 

@@ -213,7 +213,10 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
     same: bool = proj1.is_exact_same(proj2)
     return same
 
-def _get_bounds_projected(bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
+
+def _get_bounds_projected(
+    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
+) -> rio.coords.BoundingBox:
 
     # Calculate new bounds
     left, bottom, right, top = bounds
