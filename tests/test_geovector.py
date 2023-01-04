@@ -77,20 +77,20 @@ class TestVector:
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)  # type: ignore
-    def test_crop2raster(self, data: list[str]) -> None:
+    def test_crop(self, data: list[str]) -> None:
 
         # Load data
         raster_path, outlines_path = data
         rst = gu.Raster(raster_path)
         outlines = gu.Vector(outlines_path)
 
-        # Need to reproject to r.crs. Otherwise, crop2raster will work but will be approximate
+        # Need to reproject to r.crs. Otherwise, crop will work but will be approximate
         # Because outlines might be warped in a different crs
         outlines.ds = outlines.ds.to_crs(rst.crs)
 
         # Crop
         outlines_new = outlines.copy()
-        outlines_new.crop2raster(rst)
+        outlines_new.crop(rst)
 
         # Verify that geometries intersect with raster bound
         rst_poly = gu.projtools.bounds2poly(rst.bounds)

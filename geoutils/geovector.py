@@ -18,9 +18,8 @@ from rasterio.crs import CRS
 from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
-from geoutils.georaster import Raster, RasterType
+import geoutils as gu
 from geoutils.projtools import _get_bounds_projected, bounds2poly
-
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -93,22 +92,22 @@ class Vector:
         return new_vector  # type: ignore
 
     @overload
-    def crop(self: RasterType,
-             cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+    def crop(self: VectorType,
+             cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
              inplace: Literal[True],
              ) -> None:
         ...
 
     @overload
-    def crop(self: RasterType,
-             cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+    def crop(self: VectorType,
+             cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
              inplace: Literal[False],
              ) -> VectorType:
         ...
 
 
     def crop(self: VectorType,
-             cropGeom: RasterType | VectorType | list[float] | tuple[float, ...],
+             cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
              inplace: bool = True,
              ) -> VectorType | None:
         """
@@ -122,7 +121,7 @@ class Vector:
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param inplace: Update the vector inplace or return copy.
         """
-        if isinstance(cropGeom, (Raster, Vector)):
+        if isinstance(cropGeom, (gu.Raster, Vector)):
             # For another Vector or Raster, we reproject the bounding box in the same CRS as self
             xmin, ymin, xmax, ymax = cropGeom.get_bounds_projected(out_crs=self.crs)
         elif isinstance(cropGeom, (list, tuple)):
@@ -141,7 +140,7 @@ class Vector:
 
     def create_mask(
         self,
-        rst: str | RasterType | None = None,
+        rst: str | gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -207,7 +206,7 @@ class Vector:
             transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
         # otherwise use directly rst's dimensions
-        elif isinstance(rst, Raster):
+        elif isinstance(rst, gu.Raster):
             out_shape = rst.shape
             transform = rst.transform
             crs = rst.crs
@@ -247,7 +246,7 @@ class Vector:
 
     def rasterize(
         self,
-        rst: str | RasterType | None = None,
+        rst: str | gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
