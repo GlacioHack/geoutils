@@ -195,6 +195,13 @@ class TestSynthetic:
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
 
+        # Check that no warning is raised when creating a mask with a xres not multiple of vector bounds
+        vector.create_mask(xres=1.01)
+
+        # Check that a warning is raised if the bounds were passed specifically by the user
+        with pytest.warns(UserWarning):
+            vector.create_mask(xres=1.01, bounds=(0, 0, 21, 21))
+
     def test_extract_vertices(self) -> None:
         """
         Test that extract_vertices works with simple geometries.

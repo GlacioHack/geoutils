@@ -120,7 +120,7 @@ class Vector:
     ) -> np.ndarray:
         """
         Rasterize the vector features into a boolean raster which has the extent/dimensions of \
-the provided raster file.
+        the provided raster file.
 
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
         Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
@@ -154,7 +154,10 @@ the provided raster file.
             if crs is None:
                 crs = self.ds.crs
             if bounds is None:
+                bounds_shp = True
                 bounds = self.ds.total_bounds
+            else:
+                bounds_shp = False
 
             # Calculate raster shape
             left, bottom, right, top = bounds
@@ -162,7 +165,9 @@ the provided raster file.
             width = abs((top - bottom) / yres)
 
             if width % 1 != 0 or height % 1 != 0:
-                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
+                # Only warn if the bounds were provided, and not derived from the vector
+                if not bounds_shp:
+                    warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
 
             width = int(np.round(width))
             height = int(np.round(height))
