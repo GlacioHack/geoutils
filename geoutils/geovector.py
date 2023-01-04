@@ -450,13 +450,13 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
     for geom in gdf.geometry:
         # Extract geometry exterior(s)
         if geom.geom_type == "MultiPolygon":
-            exteriors = [p.exterior for p in geom]
+            exteriors = [p.exterior for p in geom.geoms]
         elif geom.geom_type == "Polygon":
             exteriors = [geom.exterior]
         elif geom.geom_type == "LineString":
             exteriors = [geom]
         elif geom.geom_type == "MultiLineString":
-            exteriors = geom
+            exteriors = [p for p in geom.geoms]
         else:
             raise NotImplementedError(f"Geometry type {geom.geom_type} not implemented.")
 
