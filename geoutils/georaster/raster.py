@@ -1315,7 +1315,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         inplace: bool = True,
     ) -> RasterType | None:
         """
-        Crop the Raster to a given extent.
+        Crop the Raster to a given extent, or bounds of a raster or vector.
+
+        Reprojection is done on the fly if georeferenced objects have different projections.
 
         :param cropGeom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
             coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by

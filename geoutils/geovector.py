@@ -6,7 +6,7 @@ from __future__ import annotations
 import warnings
 from collections import abc
 from numbers import Number
-from typing import TypeVar
+from typing import TypeVar, overload, Literal
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -18,8 +18,9 @@ from rasterio.crs import CRS
 from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
-import geoutils as gu
-from geoutils.projtools import _get_bounds_projected
+from geoutils.georaster import Raster, RasterType
+from geoutils.projtools import _get_bounds_projected, bounds2poly
+
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -91,28 +92,56 @@ class Vector:
         new_vector.__init__(self.ds.copy())  # type: ignore
         return new_vector  # type: ignore
 
-    def crop2raster(self, rst: gu.Raster) -> None:
+    @overload
+    def crop(self: RasterType,
+             cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+             inplace: Literal[True],
+             ) -> None:
+        ...
+
+    @overload
+    def crop(self: RasterType,
+             cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+             inplace: Literal[False],
+             ) -> VectorType:
+        ...
+
+
+    def crop(self: VectorType,
+             cropGeom: RasterType | VectorType | list[float] | tuple[float, ...],
+             inplace: bool = True,
+             ) -> VectorType | None:
         """
-        Update self so that features outside the extent of a raster file are cropped.
+        Crop the Vector to given extent, or bounds of a raster or vector.
 
-        Reprojection is done on the fly if both data set have different projections.
+        Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param rst: A Raster object or string to filename
+        :param cropGeom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
+            coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
+            Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
+            list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
+        :param inplace: Update the vector inplace or return copy.
         """
-        # If input is string, open as Raster
-        if isinstance(rst, str):
-            rst = gu.Raster(rst)
+        if isinstance(cropGeom, (Raster, Vector)):
+            # For another Vector or Raster, we reproject the bounding box in the same CRS as self
+            xmin, ymin, xmax, ymax = cropGeom.get_bounds_projected(out_crs=self.crs)
+        elif isinstance(cropGeom, (list, tuple)):
+            xmin, ymin, xmax, ymax = cropGeom
+        else:
+            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
-        # Convert raster extent into self CRS
-        # Note: could skip this if we could test if rojections are same
-        # Note: should include a method in Raster to get extent in other projections, not only using corners
-        left, bottom, right, top = rst.bounds
-        x1, y1, x2, y2 = warp.transform_bounds(rst.crs, self.ds.crs, left, bottom, right, top)
-        self.ds = self.ds.cx[x1:x2, y1:y2]
+        # Need to separate the two options, inplace update
+        if inplace:
+            self.ds = self.ds.cx[xmin:xmax, ymin:ymax]
+        # Or create a copy otherwise
+        else:
+            new_vector = self.copy()
+            new_vector.ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]
+            return new_vector
 
     def create_mask(
         self,
-        rst: str | gu.georaster.RasterType | None = None,
+        rst: str | RasterType | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -178,7 +207,7 @@ class Vector:
             transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
         # otherwise use directly rst's dimensions
-        elif isinstance(rst, gu.Raster):
+        elif isinstance(rst, Raster):
             out_shape = rst.shape
             transform = rst.transform
             crs = rst.crs
@@ -218,7 +247,7 @@ class Vector:
 
     def rasterize(
         self,
-        rst: str | gu.georaster.RasterType | None = None,
+        rst: str | RasterType | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -359,7 +388,7 @@ class Vector:
         return new_bounds
 
 
-    def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> np.ndarray:
+    def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> VectorType:
         """
         Returns a Vector object containing self's geometries extended by a buffer, without overlapping each other.
 
@@ -397,7 +426,7 @@ class Vector:
         buffer = merged_buffer.difference(merged)
 
         # Crop Voronoi polygons to bound geometry and add missing polygons
-        bound_poly = gu.projtools.bounds2poly(gdf)
+        bound_poly = bounds2poly(gdf)
         bound_poly = bound_poly.buffer(buffer_size)
         voronoi_all = generate_voronoi_with_bounds(gdf, bound_poly)
         if plot:
@@ -444,7 +473,7 @@ class Vector:
             ax4.set_title("Final buffer")
             plt.show()
 
-        return gu.Vector(merged_voronoi)
+        return Vector(merged_voronoi)
 
 
 # -----------------------------------------
