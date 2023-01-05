@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import geopandas as gpd
-from geopandas.testing import assert_geodataframe_equal
 import numpy as np
 import pytest
+from geopandas.testing import assert_geodataframe_equal
 from scipy.ndimage import binary_erosion
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
