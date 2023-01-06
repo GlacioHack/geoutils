@@ -95,13 +95,15 @@ class TestRaster:
         if r.dtypes[0] == "uint8":
             # Validate that the mask is respected by adding 0 values (there are none to begin with.)
             r.data.ravel()[:1000] = 0
-            # Set the nodata value to 0, then validate that they are excluded from the new minimum
-            r.set_nodata(0)
+            # Set the nodata value to 0, then validate that they are excluded from the new minimum, and warning raised
+            with pytest.warns(UserWarning):
+                r.set_nodata(0)
         elif r.dtypes[0] == "float32":
             # We do the same with -99999 here
             r.data.ravel()[:1000] = -99999
-            # And replace the nodata value
-            r.set_nodata(-99999)
+            # And replace the nodata value, and warning raised
+            with pytest.warns(UserWarning):
+                r.set_nodata(-99999)
 
         new_stats = r.info(stats=True)
         for i, line in enumerate(stats.splitlines()):
@@ -710,7 +712,9 @@ class TestRaster:
         assert r_cropped2 == r_cropped
 
         # Check that bound reprojection is done automatically if the CRS differ
-        r_cropped_reproj = r_cropped.reproject(dst_crs=3857)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            r_cropped_reproj = r_cropped.reproject(dst_crs=3857)
         r_cropped3 = r.crop(r_cropped_reproj, inplace=False)
 
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
@@ -767,14 +771,18 @@ class TestRaster:
             cropGeom[2] - rand_float * r.res[0],
             cropGeom[3] - rand_float * abs(r.res[1]),
         ]
-        r_cropped = r.crop(cropGeom2, inplace=False, mode="match_extent")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            r_cropped = r.crop(cropGeom2, inplace=False, mode="match_extent")
         assert list(r_cropped.bounds) == cropGeom2
         # The change in resolution should be less than what would occur with +/- 1 pixel
         assert np.all(
             abs(np.array(r.res) - np.array(r_cropped.res)) < np.array(r.res) / np.array(r_cropped.shape)[::-1]
         )
 
-        r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
         assert r_cropped2 == r_cropped
 
         # -- Test with CropGeom being a Vector -- #
@@ -1465,8 +1473,11 @@ self.set_nodata()."
         r = gu.Raster(example)
         r_copy = r.copy()
 
-        r.set_nodata(_default_nodata(r.dtypes[0]))
-        r_copy.nodata = _default_nodata(r.dtypes[0])
+        with warnings.catch_warnings():
+            # Ignore warning that nodata value is already used in the raster data
+            warnings.filterwarnings("ignore", category=UserWarning)
+            r.set_nodata(_default_nodata(r.dtypes[0]))
+            r_copy.nodata = _default_nodata(r.dtypes[0])
 
         assert r == r_copy
 
@@ -1851,7 +1862,9 @@ self.set_nodata()."
         # Check that polygonize works as expected for any input dtype (e.g. float64 being not supported by GeoPandas)
         for dtype in ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]:
             img_dtype = img.copy()
-            img_dtype = img_dtype.astype(dtype)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                img_dtype = img_dtype.astype(dtype)
             value = np.unique(img_dtype)[0]
             polygonized = img_dtype.polygonize(in_value=value)
 
@@ -2433,7 +2446,6 @@ class TestArrayInterface:
         with warnings.catch_warnings():
 
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            warnings.filterwarnings("ignore", category=UserWarning)
 
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
             if com_dtype in (str(np.dtype(t[0])) for t in ufunc.types):

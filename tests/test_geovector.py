@@ -61,7 +61,9 @@ class TestVector:
 
     def test_rasterize_proj(self) -> None:
 
-        burned = self.glacier_outlines.rasterize(xres=3000)
+        # Capture the warning on resolution not matching exactly bounds
+        with pytest.warns(UserWarning):
+            burned = self.glacier_outlines.rasterize(xres=3000)
 
         assert burned.shape[0] == 146
         assert burned.shape[1] == 115
@@ -70,7 +72,10 @@ class TestVector:
         """Test rasterizing an EPSG:3426 dataset into a projection."""
         v = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
         # Use Web Mercator at 30 m.
-        burned = v.rasterize(xres=30, crs=3857)
+
+        # Capture the warning on resolution not matching exactly bounds
+        with pytest.warns(UserWarning):
+            burned = v.rasterize(xres=30, crs=3857)
 
         assert burned.shape[0] == 1251
         assert burned.shape[1] == 1522
