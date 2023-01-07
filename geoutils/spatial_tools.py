@@ -136,10 +136,8 @@ def load_multiple_rasters(
 
     # Optionally, crop the rasters
     if crop:
-        print(intersection)
-        print(intersection == (np.nan, np.nan, np.nan, np.nan))
         # Check that intersection is not void
-        if intersection == () or intersection == (np.nan, np.nan, np.nan, np.nan):
+        if intersection == () or intersection == (float('nan'), float('nan'), float('nan'), float('nan')):
             warnings.warn("Intersection is void, returning unloaded rasters.")
             return output_rst
 
