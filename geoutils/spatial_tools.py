@@ -133,12 +133,11 @@ def load_multiple_rasters(
 
     # Second get the intersection of all raster bounds
     intersection = gu.projtools.merge_bounds(bounds, "intersection")
-    print(intersection)
 
     # Optionally, crop the rasters
     if crop:
         # Check that intersection is not void
-        if intersection == ():
+        if intersection == () or intersection == (np.nan, np.nan, np.nan, np.nan):
             warnings.warn("Intersection is void, returning unloaded rasters.")
             return output_rst
 

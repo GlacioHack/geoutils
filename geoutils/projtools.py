@@ -116,11 +116,6 @@ def align_bounds(
     ref_left = ref_transform.xoff
     ref_top = ref_transform.yoff
 
-    print(ref_left)
-    print(left)
-    print(ref_left)
-    print(xres)
-
     left = ref_left + floor((left - ref_left) / xres) * xres
     right = left + ceil((right - left) / xres) * xres
     top = ref_top + floor((top - ref_top) / yres) * yres
