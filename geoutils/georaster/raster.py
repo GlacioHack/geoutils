@@ -1830,6 +1830,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, rst_bounds_sameproj], merging_algorithm="intersection")
 
+        print(intersection)
         # check that intersection is not void, otherwise return 0 everywhere
         if intersection == () or intersection == (np.nan, np.nan, np.nan, np.nan):
             warnings.warn("Intersection is void")

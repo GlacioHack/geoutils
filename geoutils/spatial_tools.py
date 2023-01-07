@@ -136,6 +136,7 @@ def load_multiple_rasters(
 
     # Optionally, crop the rasters
     if crop:
+        print(intersection)
         # Check that intersection is not void
         if intersection == () or intersection == (np.nan, np.nan, np.nan, np.nan):
             warnings.warn("Intersection is void, returning unloaded rasters.")
