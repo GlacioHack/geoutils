@@ -133,6 +133,7 @@ def load_multiple_rasters(
 
     # Second get the intersection of all raster bounds
     intersection = gu.projtools.merge_bounds(bounds, "intersection")
+    print(intersection)
 
     # Optionally, crop the rasters
     if crop:
