@@ -14,6 +14,7 @@ from typing import IO, Any, Callable, TypeVar, overload
 import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
+import math
 import numpy as np
 import pyproj
 import rasterio as rio
@@ -1830,8 +1831,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, rst_bounds_sameproj], merging_algorithm="intersection")
 
-        # check that intersection is not void, otherwise return 0 everywhere
-        if intersection == () or intersection == (float('nan'), float('nan'), float('nan'), float('nan')):
+        # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
+        if intersection == () or all(math.isnan(i) for i in intersection):
             warnings.warn("Intersection is void")
             return (0.0, 0.0, 0.0, 0.0)
 
