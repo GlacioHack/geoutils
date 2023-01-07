@@ -6,11 +6,11 @@ Optional dependencies:
 """
 from __future__ import annotations
 
+import math
 import warnings
 from typing import Any, Callable
 
 import numpy as np
-import math
 import rasterio as rio
 import rasterio.warp
 from tqdm import tqdm

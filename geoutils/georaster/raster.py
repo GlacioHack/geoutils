@@ -3,6 +3,7 @@ geoutils.georaster provides a toolset for working with raster data.
 """
 from __future__ import annotations
 
+import math
 import os
 import warnings
 from collections import abc
@@ -14,7 +15,6 @@ from typing import IO, Any, Callable, TypeVar, overload
 import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
-import math
 import numpy as np
 import pyproj
 import rasterio as rio
