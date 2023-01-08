@@ -17,8 +17,11 @@ from rasterio import features, warp
 from rasterio.crs import CRS
 from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
+from scipy.ndimage import distance_transform_edt
 
 import geoutils as gu
+
+from projtools import latlon_to_utm, utm_to_epsg
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -323,7 +326,7 @@ the provided raster file.
         """
         Query the Vector dataset with a valid Pandas expression.
 
-        :param expression: A python-like expression to evaluate. Example: "col1 > col2"
+        :param expression: A python-like expression to evaluate. Example: "col1 > col2".
         :param inplace: Whether the query should modify the data in place or return a modified copy.
 
         :returns: Vector resulting from the provided query expression or itself if inplace=True.
@@ -338,15 +341,86 @@ the provided raster file.
         new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
-    def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> np.ndarray:
+    def proximity(self, raster: gu.Raster, in_or_out: str = 'both') -> gu.Raster:
+        """
+        Proximity to the geometry boundary computed for each cell of a raster grid.
+
+        :param raster: Raster to burn the proximity grid on.
+        :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
+
+        :return: Proximity to geometry boundary.
+        """
+
+        # TODO: We could have an option to pass Raster=None with default rasterization of the vector?
+
+        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists, but is a LinearRing)
+
+        # We create a geodataframe with the boundary geometry
+        boundary_shp = gpd.GeoDataFrame(geometry=self.ds.boundary, crs=self.crs)
+        # We mask the pixels that make up the boundary
+        mask_boundary = Vector(boundary_shp).create_mask(raster).squeeze()
+
+        # 2/ Now, we compute the distance matrix relative to the masked boundary
+        proximity = distance_transform_edt(~mask_boundary, sampling=raster.res)
+
+        if in_or_out == 'both':
+            return proximity
+        elif in_or_out in ['in', 'out']:
+            mask_polygon = Vector(self.ds).create_mask(raster).squeeze()
+            if in_or_out == 'in':
+                proximity[~mask_polygon] = 0
+            else:
+                proximity[mask_polygon] = 0
+        else:
+            raise ValueError('The type of proximity must be one of "in", "out" or "both".')
+
+        return proximity
+
+
+    def buffer_metric(self, buffer_size: float) -> VectorType:
+        """
+        Buffer the vector in a metric.
+
+        The outlines are projected to a local UTM, then reverted to the original projection after buffering.
+
+        :param buffer_size: Buffering distance in meters
+
+        :return: Buffered shapefile
+        """
+
+        # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
+        with warnings.catch_warnings():
+            warnings.simplefilter(action='ignore', category=UserWarning)
+            shp_wgs84 = self.ds.to_crs(epsg=4326)
+            lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+
+        # Get the EPSG code of the local UTM
+        utm = latlon_to_utm(lat, lon)
+        epsg = utm_to_epsg(utm)
+
+        # Reproject the shapefile in the local UTM
+        ds_utm = self.ds.to_crs(epsg=epsg)
+
+        # Buffer the shapefile
+        ds_buffered = ds_utm.buffer(distance=buffer_size)
+
+        # Revert-project the shapefile in the original CRS
+        ds_buffered_origproj = ds_buffered.to_crs(crs=self.ds.crs)
+
+        # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
+        # Return a Vector object of the buffered GeoDataFrame
+        return Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
+
+
+    def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> np.ndarray:
         """
         Returns a Vector object containing self's geometries extended by a buffer, without overlapping each other.
 
         The algorithm is based upon this tutorial: https://statnmap.com/2020-07-31-buffer-area-for-nearest-neighbour/.
-        The buffered polygons are created using Voronoi polygons in order to delineate the "area of influence" \
-of each geometry.
-        The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,\
-hence one geometry "steps" slightly on the neighbor buffer in some cases.
+        The buffered polygons are created using Voronoi polygons in order to delineate the "area of influence"
+        of each geometry.
+        The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,
+        hence one geometry "steps" slightly on the neighbor buffer in some cases.
         The algorithm may also yield unexpected results on very simple geometries.
 
         Note: A similar functionality is provided by momepy (http://docs.momepy.org) and is probably more robust.
@@ -361,12 +435,29 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         >>> plt.show()  # doctest: +SKIP
 
         :param buffer_size: Buffer size in self's coordinate system units.
+        :param metric: Whether to perform the buffering in a local metric system (default: True).
         :param plot: Set to True to show intermediate plots, useful for understanding or debugging.
 
         :returns: A Vector containing the buffered geometries.
         """
+
+        # Project in local UTM if metric is True
+        if metric:
+            # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
+            with warnings.catch_warnings():
+                warnings.simplefilter(action='ignore', category=UserWarning)
+                shp_wgs84 = self.ds.to_crs(epsg=4326)
+                lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+
+            # Get the EPSG code of the local UTM
+            utm = latlon_to_utm(lat, lon)
+            epsg = utm_to_epsg(utm)
+
+            gdf = self.ds.to_crs(epsg=epsg)
+        else:
+            gdf = self.ds
+
         # Dissolve all geometries into one
-        gdf = self.ds
         merged = gdf.dissolve()
 
         # Add buffer around geometries
@@ -422,6 +513,10 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
             merged_voronoi.plot(column=merged_voronoi.index.values, ax=ax4, alpha=0.5)
             ax4.set_title("Final buffer")
             plt.show()
+
+        # Reverse-project to the original CRS if metric is True
+        if metric:
+            merged_voronoi = merged_voronoi.to_crs(crs=self.crs)
 
         return gu.Vector(merged_voronoi)
 
