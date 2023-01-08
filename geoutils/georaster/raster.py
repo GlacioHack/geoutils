@@ -27,7 +27,7 @@ from rasterio.crs import CRS
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from rasterio.warp import Resampling
-from scipy.ndimage import map_coordinates
+from scipy.ndimage import map_coordinates, distance_transform_edt
 
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
@@ -2487,3 +2487,36 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         gdf.set_crs(self.crs, inplace=True)
 
         return gv.Vector(gdf)
+
+    def proximity(self, vector: Vector, in_or_out: str = 'both') -> Raster:
+        """
+        Proximity to the geometry boundary computed for each cell of a raster grid.
+
+        :param vector: Vector for which to compute the proximity to geometry boundary.
+        :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
+
+        :return: Proximity to geometry boundary.
+        """
+
+        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists, but is a LinearRing)
+
+        # We create a geodataframe with the boundary geometry
+        boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.boundary, crs=self.crs)
+        # We mask the pixels that make up the boundary
+        mask_boundary = Vector(boundary_shp).create_mask(self).squeeze()
+
+        # 2/ Now, we compute the distance matrix relative to the masked boundary
+        proximity = distance_transform_edt(~mask_boundary, sampling=self.res)
+
+        if in_or_out == 'both':
+            return proximity
+        elif in_or_out in ['in', 'out']:
+            mask_polygon = Vector(vector.ds).create_mask(self).squeeze()
+            if in_or_out == 'in':
+                proximity[~mask_polygon] = 0
+            else:
+                proximity[mask_polygon] = 0
+        else:
+            raise ValueError('The type of proximity must be one of "in", "out" or "both".')
+
+        return proximity
