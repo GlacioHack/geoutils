@@ -19,6 +19,59 @@ from geoutils.georaster import Raster
 from geoutils.geovector import Vector
 
 
+def latlon_to_utm(lat: float, lon: float) -> str:
+    """
+    Get UTM zone for a given latitude and longitude coordinates.
+
+    :param lat: Latitude coordinate.
+    :param lon: Longitude coordinate.
+
+    :returns: UTM zone.
+    """
+    # The "utm" Python module excludes regions south of 80°S and north of 84°N, unpractical for global vector manipulation
+    # utm_all = utm.from_latlon(lat,lon)
+    # utm_nb=utm_all[2]
+
+    # Get UTM zone from longitude without exclusions
+    if -180 <= lon < 180:
+        utm_nb = int(
+            np.floor((lon + 180) / 6)) + 1  # lon=-180 refers to UTM zone 1 towards East (West corner convention)
+    else:
+        raise ValueError('Longitude value is out of range [-180, 180[.')
+
+    if 0 <= lat < 90:  # lat=0 refers to North (South corner convention)
+        utm_zone = str(utm_nb).zfill(2) + 'N'
+    elif -90 <= lat < 0:
+        utm_zone = str(utm_nb).zfill(2) + 'S'
+    else:
+        raise ValueError('Latitude value is out of range [-90, 90[.')
+
+    return utm_zone
+
+
+def utm_to_epsg(utm: str) -> int:
+    """
+    Get EPSG code of UTM zone.
+
+    :param utm: UTM zone.
+
+    :return: EPSG of UTM zone.
+    """
+
+    if not (isinstance(utm, str) and len(utm) == 3 and utm[:-1].isdigit() and 0<int(utm[-1])<=60 and utm[-1].upper() in ['N', 'S']):
+        raise ValueError('UTM zone should be a 3-character string with 2-digit code between 1 and 60, and 1-letter north or south zone, e.g. "18S" or "54N".')
+
+    utm_digits = utm[:-1]
+    utm_north_south = utm[-1].upper()
+
+    # Code starts with 326 for North, and 327 for South, to which is added the utm zone number
+    if utm_north_south == 'N':
+        epsg = int('326' + utm_digits)
+    else:
+        epsg = int('327' + utm_digits)
+
+    return epsg
+
 def bounds2poly(
     boundsGeom: list[float] | rio.io.DatasetReader | Raster | Vector,
     in_crs: CRS | None = None,
