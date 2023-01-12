@@ -16,6 +16,40 @@ class TestProjTools:
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
 
+    def test_utm_to_epsg(self) -> None:
+        """Check that the EPSG codes derived from UTM zones are correct"""
+
+        # First: Check errors are raised when format is invalid
+
+        # If there isn't 2 digits for the code
+        with pytest.raises(ValueError):
+            pt.utm_to_epsg('100N')
+        # If type is incorrect
+        with pytest.raises(ValueError):
+            pt.utm_to_epsg(['1N'])
+        # If the code digits does not exist
+        with pytest.raises(ValueError):
+            pt.utm_to_epsg('61N')
+        # If the north-south zone letter is incorrect
+        with pytest.raises(ValueError):
+            pt.utm_to_epsg('61E')
+
+        # Second: Check that the EPSG code is correct
+        # https://epsg.io/32601
+        assert pt.utm_to_epsg('01N') == 32601
+        # https://epsg.io/32701
+        assert pt.utm_to_epsg('01S') == 32701
+        # https://epsg.io/32660
+        assert pt.utm_to_epsg('60N') == 32660
+        # https://epsg.io/32760
+        assert pt.utm_to_epsg('60S') == 32760
+
+        # Third: Check that different format work: single digit, lower-case
+        assert pt.utm_to_epsg('1N') == pt.utm_to_epsg('01N') == pt.utm_to_epsg('01n')
+
+        assert pt.utm_to_epsg('08s') == pt.utm_to_epsg('8S') == pt.utm_to_epsg('08S')
+
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_latlon_reproject(self, example: str) -> None:
         """
