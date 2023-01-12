@@ -27,7 +27,7 @@ from rasterio.crs import CRS
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from rasterio.warp import Resampling
-from scipy.ndimage import map_coordinates, distance_transform_edt
+from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
@@ -2488,7 +2488,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return gv.Vector(gdf)
 
-    def proximity(self, vector: Vector, in_or_out: str = 'both') -> Raster:
+    def proximity(self, vector: Vector, in_or_out: str = "both") -> Raster:
         """
         Proximity to the geometry boundary computed for each cell of a raster grid.
 
@@ -2498,7 +2498,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :return: Proximity to geometry boundary.
         """
 
-        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists, but is a LinearRing)
+        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists,
+        # but is a LinearRing)
 
         # We create a geodataframe with the boundary geometry
         boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.boundary, crs=self.crs)
@@ -2508,15 +2509,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # 2/ Now, we compute the distance matrix relative to the masked boundary
         proximity = distance_transform_edt(~mask_boundary, sampling=self.res)
 
-        if in_or_out == 'both':
-            return proximity
-        elif in_or_out in ['in', 'out']:
+        if in_or_out == "both":
+            pass
+        elif in_or_out in ["in", "out"]:
             mask_polygon = Vector(vector.ds).create_mask(self).squeeze()
-            if in_or_out == 'in':
+            if in_or_out == "in":
                 proximity[~mask_polygon] = 0
             else:
                 proximity[mask_polygon] = 0
         else:
             raise ValueError('The type of proximity must be one of "in", "out" or "both".')
 
-        return proximity
+        return self.copy(new_array=proximity)

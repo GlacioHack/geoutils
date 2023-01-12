@@ -15,9 +15,9 @@ import rasterio as rio
 import shapely
 from rasterio import features, warp
 from rasterio.crs import CRS
+from scipy.ndimage import distance_transform_edt
 from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
-from scipy.ndimage import distance_transform_edt
 
 import geoutils as gu
 
@@ -339,7 +339,7 @@ the provided raster file.
         new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
-    def proximity(self, raster: gu.Raster, in_or_out: str = 'both') -> gu.Raster:
+    def proximity(self, raster: gu.Raster, in_or_out: str = "both") -> gu.Raster:
         """
         Proximity to the geometry boundary computed for each cell of a raster grid.
 
@@ -351,7 +351,8 @@ the provided raster file.
 
         # TODO: We could have an option to pass Raster=None with default rasterization of the vector?
 
-        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists, but is a LinearRing)
+        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists,
+        # but is a LinearRing)
 
         # We create a geodataframe with the boundary geometry
         boundary_shp = gpd.GeoDataFrame(geometry=self.ds.boundary, crs=self.crs)
@@ -361,11 +362,11 @@ the provided raster file.
         # 2/ Now, we compute the distance matrix relative to the masked boundary
         proximity = distance_transform_edt(~mask_boundary, sampling=raster.res)
 
-        if in_or_out == 'both':
+        if in_or_out == "both":
             return proximity
-        elif in_or_out in ['in', 'out']:
+        elif in_or_out in ["in", "out"]:
             mask_polygon = Vector(self.ds).create_mask(raster).squeeze()
-            if in_or_out == 'in':
+            if in_or_out == "in":
                 proximity[~mask_polygon] = 0
             else:
                 proximity[mask_polygon] = 0
@@ -374,8 +375,7 @@ the provided raster file.
 
         return proximity
 
-
-    def buffer_metric(self, buffer_size: float) -> VectorType:
+    def buffer_metric(self, buffer_size: float) -> Vector:
         """
         Buffer the vector in a metric.
 
@@ -390,7 +390,7 @@ the provided raster file.
 
         # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
         with warnings.catch_warnings():
-            warnings.simplefilter(action='ignore', category=UserWarning)
+            warnings.simplefilter(action="ignore", category=UserWarning)
             shp_wgs84 = self.ds.to_crs(epsg=4326)
             lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
 
@@ -410,7 +410,6 @@ the provided raster file.
         # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
         # Return a Vector object of the buffered GeoDataFrame
         return Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
-
 
     def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> np.ndarray:
         """
@@ -447,7 +446,7 @@ the provided raster file.
         if metric:
             # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
             with warnings.catch_warnings():
-                warnings.simplefilter(action='ignore', category=UserWarning)
+                warnings.simplefilter(action="ignore", category=UserWarning)
                 shp_wgs84 = self.ds.to_crs(epsg=4326)
                 lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
 

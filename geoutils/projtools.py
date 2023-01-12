@@ -28,25 +28,30 @@ def latlon_to_utm(lat: float, lon: float) -> str:
 
     :returns: UTM zone.
     """
-    if not (isinstance(lat, (float, np.floating, int, np.integer)) and isinstance(lon, (float, np.floating, int, np.integer))):
-        raise ValueError('Latitude and longitude must be floats or integers.')
-    # The "utm" Python module excludes regions south of 80°S and north of 84°N, unpractical for global vector manipulation
+    if not (
+        isinstance(lat, (float, np.floating, int, np.integer))
+        and isinstance(lon, (float, np.floating, int, np.integer))
+    ):
+        raise ValueError("Latitude and longitude must be floats or integers.")
+    # The "utm" Python module excludes regions south of 80°S and north of 84°N,
+    # unpractical for global vector manipulation
     # utm_all = utm.from_latlon(lat,lon)
     # utm_nb=utm_all[2]
 
     # Get UTM zone from longitude without exclusions
     if -180 <= lon < 180:
-        utm_nb = int(
-            np.floor((lon + 180) / 6)) + 1  # lon=-180 refers to UTM zone 1 towards East (West corner convention)
+        utm_nb = (
+            int(np.floor((lon + 180) / 6)) + 1
+        )  # lon=-180 refers to UTM zone 1 towards East (West corner convention)
     else:
-        raise ValueError('Longitude value is out of range [-180, 180[.')
+        raise ValueError("Longitude value is out of range [-180, 180[.")
 
     if 0 <= lat < 90:  # lat=0 refers to North (South corner convention)
-        utm_zone = str(utm_nb).zfill(2) + 'N'
+        utm_zone = str(utm_nb).zfill(2) + "N"
     elif -90 <= lat < 0:
-        utm_zone = str(utm_nb).zfill(2) + 'S'
+        utm_zone = str(utm_nb).zfill(2) + "S"
     else:
-        raise ValueError('Latitude value is out of range [-90, 90[.')
+        raise ValueError("Latitude value is out of range [-90, 90[.")
 
     return utm_zone
 
@@ -60,19 +65,29 @@ def utm_to_epsg(utm: str) -> int:
     :return: EPSG of UTM zone.
     """
 
-    if not (isinstance(utm, str) and 2<=len(utm)<=3 and utm[:-1].isdigit() and 0<int(utm[:-1])<=60 and utm[-1].upper() in ['N', 'S']):
-        raise ValueError('UTM zone should be a 3-character string with 2-digit code between 01 and 60, and 1-letter north or south zone, e.g. "18S" or "54N".')
+    if not (
+        isinstance(utm, str)
+        and 2 <= len(utm) <= 3
+        and utm[:-1].isdigit()
+        and 0 < int(utm[:-1]) <= 60
+        and utm[-1].upper() in ["N", "S"]
+    ):
+        raise ValueError(
+            "UTM zone should be a 3-character string with 2-digit code between 01 and 60, "
+            'and 1-letter north or south zone, e.g. "18S" or "54N".'
+        )
 
     utm_digits = utm[:-1]
     utm_north_south = utm[-1].upper()
 
     # Code starts with 326 for North, and 327 for South, to which is added the utm zone number
-    if utm_north_south == 'N':
-        epsg = int('326' + utm_digits.zfill(2))
+    if utm_north_south == "N":
+        epsg = int("326" + utm_digits.zfill(2))
     else:
-        epsg = int('327' + utm_digits.zfill(2))
+        epsg = int("327" + utm_digits.zfill(2))
 
     return epsg
+
 
 def bounds2poly(
     boundsGeom: list[float] | rio.io.DatasetReader | Raster | Vector,
