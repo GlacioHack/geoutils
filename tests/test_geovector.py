@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import geopandas as gpd
+from geopandas.testing import assert_geodataframe_equal
 import numpy as np
 import pytest
 from scipy.ndimage import binary_erosion
@@ -240,6 +241,53 @@ class TestSynthetic:
         expected_message = "Invalid geometry, cannot generate finite Voronoi polygons"
         with pytest.raises(ValueError, match=expected_message):
             voronoi = gu.geovector.generate_voronoi_polygons(self.vector.ds)
+
+    def test_buffer_metric(self) -> None:
+        """Check that metric buffering works"""
+
+        # Case with two squares: test that the buffered area is without deformations
+        # https://epsg.io/32631
+        utm31_x_center = 500000
+        utm31_y_center = 4649776
+        poly1_utm31 = Polygon([(utm31_x_center, utm31_y_center), (utm31_x_center+1, utm31_y_center),
+                               (utm31_x_center+1, utm31_y_center+1), (utm31_x_center, utm31_y_center+1)])
+
+        poly2_utm31 = Polygon([(utm31_x_center+10, utm31_y_center+10), (utm31_x_center+11, utm31_y_center+10),
+                               (utm31_x_center+11, utm31_y_center+11), (utm31_x_center+10, utm31_y_center+11)])
+
+        # We initiate the squares of size 1x1 in a UTM projection
+        two_squares = gu.Vector(gpd.GeoDataFrame(geometry=[poly1_utm31, poly2_utm31], crs="EPSG:32631"))
+
+        # Their area should now be 1 for each polygon
+        assert two_squares.ds.area.values[0] == 1
+        assert two_squares.ds.area.values[1] == 1
+
+        # We buffer them
+        two_squares_utm_buffered = two_squares.buffer_metric(buffer_size=1.)
+
+        # Their area should now be 1 (square) + 4 (buffer along the sides) + 4*(pi*1**2 /4) (buffer of corners = quarter-disks)
+        expected_area = 1 + 4 + np.pi
+        assert two_squares_utm_buffered.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_utm_buffered.ds.area.values[1] == pytest.approx(expected_area, abs=0.01)
+
+        # And the new GeoDataFrame should exactly match that of one buffer from the original one
+        direct_gpd_buffer = gu.Vector(gpd.GeoDataFrame(geometry=two_squares.ds.buffer(distance=1.).geometry, crs=two_squares.crs))
+        assert_geodataframe_equal(direct_gpd_buffer.ds, two_squares_utm_buffered.ds)
+
+        # Now, if we reproject the original vector in a non-metric system
+        two_squares_geographic = gu.Vector(two_squares.ds.to_crs(epsg=4326))
+        # We buffer directly the Vector object in the non-metric system
+        two_squares_geographic_buffered = two_squares_geographic.buffer_metric(buffer_size=1.)
+        # Then, we reproject that vector in the UTM zone
+        two_squares_geographic_buffered_reproj = gu.Vector(two_squares_geographic_buffered.ds.to_crs(crs=two_squares.crs))
+
+        # Their area should now be the same as before for each polygon
+        assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
+
+        # And this time, it is the reprojected GeoDataFrame that should almost match (within a tolerance of 10e-06)
+        assert all(direct_gpd_buffer.ds.geom_almost_equals(two_squares_geographic_buffered_reproj.ds))
+
 
     def test_buffer_without_overlap(self) -> None:
         """
