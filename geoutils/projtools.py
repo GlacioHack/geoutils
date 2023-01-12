@@ -28,6 +28,8 @@ def latlon_to_utm(lat: float, lon: float) -> str:
 
     :returns: UTM zone.
     """
+    if not (isinstance(lat, (float, np.floating, int, np.integer)) and isinstance(lon, (float, np.floating, int, np.integer))):
+        raise ValueError('Latitude and longitude must be floats or integers.')
     # The "utm" Python module excludes regions south of 80°S and north of 84°N, unpractical for global vector manipulation
     # utm_all = utm.from_latlon(lat,lon)
     # utm_nb=utm_all[2]
