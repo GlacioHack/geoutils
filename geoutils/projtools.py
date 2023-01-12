@@ -58,17 +58,17 @@ def utm_to_epsg(utm: str) -> int:
     :return: EPSG of UTM zone.
     """
 
-    if not (isinstance(utm, str) and len(utm) == 3 and utm[:-1].isdigit() and 0<int(utm[-1])<=60 and utm[-1].upper() in ['N', 'S']):
-        raise ValueError('UTM zone should be a 3-character string with 2-digit code between 1 and 60, and 1-letter north or south zone, e.g. "18S" or "54N".')
+    if not (isinstance(utm, str) and 2<=len(utm)<=3 and utm[:-1].isdigit() and 0<int(utm[:-1])<=60 and utm[-1].upper() in ['N', 'S']):
+        raise ValueError('UTM zone should be a 3-character string with 2-digit code between 01 and 60, and 1-letter north or south zone, e.g. "18S" or "54N".')
 
     utm_digits = utm[:-1]
     utm_north_south = utm[-1].upper()
 
     # Code starts with 326 for North, and 327 for South, to which is added the utm zone number
     if utm_north_south == 'N':
-        epsg = int('326' + utm_digits)
+        epsg = int('326' + utm_digits.zfill(2))
     else:
-        epsg = int('327' + utm_digits)
+        epsg = int('327' + utm_digits.zfill(2))
 
     return epsg
 

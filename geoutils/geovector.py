@@ -21,8 +21,6 @@ from scipy.ndimage import distance_transform_edt
 
 import geoutils as gu
 
-from projtools import latlon_to_utm, utm_to_epsg
-
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
 
@@ -388,6 +386,8 @@ the provided raster file.
         :return: Buffered shapefile
         """
 
+        from geoutils.projtools import latlon_to_utm, utm_to_epsg
+
         # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
         with warnings.catch_warnings():
             warnings.simplefilter(action='ignore', category=UserWarning)
@@ -440,6 +440,8 @@ the provided raster file.
 
         :returns: A Vector containing the buffered geometries.
         """
+
+        from geoutils.projtools import latlon_to_utm, utm_to_epsg
 
         # Project in local UTM if metric is True
         if metric:
