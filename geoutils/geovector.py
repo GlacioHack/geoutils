@@ -339,29 +339,48 @@ the provided raster file.
         new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
-    def proximity(self, raster: gu.Raster, in_or_out: str = "both") -> gu.Raster:
+    def proximity(self, raster: gu.Raster = None, geometry_type: str = "boundary", in_or_out: str = "both") -> gu.Raster:
         """
-        Proximity to the geometry boundary computed for each cell of a raster grid.
+        Proximity to the vector's geometry computed for each cell of a raster grid.
 
-        :param raster: Raster to burn the proximity grid on.
+        :param raster: Raster to burn the proximity grid on, defaults to a 1000 x 1000 pixel raster with vector extent.
+        :param geometry_type: Type of geometry to use for the proximity, defaults to 'boundary'.
         :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
 
-        :return: Proximity to geometry boundary.
+        :return: Proximity raster.
         """
 
-        # TODO: We could have an option to pass Raster=None with default rasterization of the vector?
+        # TODO: (specific to Vector proximity) raster size could passed as argument when
+        #  nothing else is passed (here and in create_mask/rasterize)
 
-        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists,
-        # but is a LinearRing)
+        # 0/ If no Raster is passed, create one on the Vector bounds of size 1000 x 1000
+        if raster is None:
 
-        # We create a geodataframe with the boundary geometry
-        boundary_shp = gpd.GeoDataFrame(geometry=self.ds.boundary, crs=self.crs)
-        # We mask the pixels that make up the boundary
+            # TODO: this bit of code is common in several vector functions (rasterize, etc): move out as common code?
+            # By default, use self's bounds
+            if self.bounds is None:
+                raise ValueError('To automatically rasterize on the vector, bounds need to be defined.')
+
+            # Calculate raster shape
+            left, bottom, right, top = self.bounds
+
+            # Calculate raster transform
+            transform = rio.transform.from_bounds(left, bottom, right, top, 1000, 1000)
+
+            raster = gu.Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
+
+        # 1/ First, if input is a vector, we rasterize the geometry type
+        # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
+
+        # We create a geodataframe with the geometry type
+        boundary_shp = gpd.GeoDataFrame(geometry=self.ds.__getattr__(geometry_type), crs=self.crs)
+        # We mask the pixels that make up the geometry type
         mask_boundary = Vector(boundary_shp).create_mask(raster).squeeze()
 
-        # 2/ Now, we compute the distance matrix relative to the masked boundary
-        proximity = distance_transform_edt(~mask_boundary, sampling=raster.res)
+        # 2/ Now, we compute the distance matrix relative to the masked geometry type
+        proximity = distance_transform_edt(~mask_boundary, sampling=self.res)
 
+        # 3/ Apply the in_and_out argument to optionally mask inside/outside
         if in_or_out == "both":
             return proximity
         elif in_or_out in ["in", "out"]:
@@ -373,7 +392,7 @@ the provided raster file.
         else:
             raise ValueError('The type of proximity must be one of "in", "out" or "both".')
 
-        return proximity
+        return raster.copy(new_array=proximity)
 
     def buffer_metric(self, buffer_size: float) -> Vector:
         """

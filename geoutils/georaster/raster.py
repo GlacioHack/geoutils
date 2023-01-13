@@ -2488,36 +2488,53 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return gv.Vector(gdf)
 
-    def proximity(self, vector: Vector, in_or_out: str = "both") -> Raster:
+    def proximity(self, vector_or_raster: Raster | Vector, vector_geometry_type: str = "boundary", raster_target_values: list[float] = None,
+                  in_or_out: str = "both") -> Raster:
         """
-        Proximity to the geometry boundary computed for each cell of a raster grid.
+        Proximity to a vector's geometry or a raster's target pixels computed for each cell of a raster grid.
 
-        :param vector: Vector for which to compute the proximity to geometry boundary.
-        :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
+        :param vector_or_raster: Vector for which to compute the proximity to geometry, or Raster for which to compute the proximity to target pixels.
+        :param vector_geometry_type: (Only with vector) Type of geometry to use for the proximity, defaults to 'boundary'.
+        :param raster_target_values: (Only with raster) List of target values to use for the proximity, defaults to all non-zero values.
+        :param in_or_out: (Only with vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
 
-        :return: Proximity to geometry boundary.
+        :return: Proximity raster.
         """
 
-        # 1/ First, we rasterize the boundary of vector shape, which is a LineString (also .exterior exists,
-        # but is a LinearRing)
+        # 1/ First, if input is a vector, we rasterize the geometry type
+        # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
 
-        # We create a geodataframe with the boundary geometry
-        boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.boundary, crs=self.crs)
-        # We mask the pixels that make up the boundary
-        mask_boundary = Vector(boundary_shp).create_mask(self).squeeze()
+        if isinstance(vector_or_raster, Vector):
+            # We create a geodataframe with the geometry type
+            boundary_shp = gpd.GeoDataFrame(geometry=vector_or_raster.ds.__getattr__(vector_geometry_type), crs=vector_or_raster.crs)
+            # We mask the pixels that make up the geometry type
+            mask_boundary = Vector(boundary_shp).create_mask(self).squeeze()
 
-        # 2/ Now, we compute the distance matrix relative to the masked boundary
+        elif isinstance(vector_or_raster, Raster):
+            # We mask target pixels
+            if raster_target_values is not None:
+                mask_boundary = np.logical_or.reduce([vector_or_raster.get_nanarray() == target_val for target_val in raster_target_values])
+            # Otherwise, all non-zero values are considered targets
+            else:
+                mask_boundary = vector_or_raster.get_nanarray().astype(bool)
+
+        else:
+            raise ValueError('Input object must be a Raster or Vector class or subclass.')
+
+        # 2/ Now, we compute the distance matrix relative to the masked geometry type
         proximity = distance_transform_edt(~mask_boundary, sampling=self.res)
 
-        if in_or_out == "both":
-            pass
-        elif in_or_out in ["in", "out"]:
-            mask_polygon = Vector(vector.ds).create_mask(self).squeeze()
-            if in_or_out == "in":
-                proximity[~mask_polygon] = 0
+        # 3/ If the input was a vector, apply the in_and_out argument to optionally mask inside/outside
+        if isinstance(vector_or_raster, Vector):
+            if in_or_out == "both":
+                pass
+            elif in_or_out in ["in", "out"]:
+                mask_polygon = Vector(vector_or_raster.ds).create_mask(self).squeeze()
+                if in_or_out == "in":
+                    proximity[~mask_polygon] = 0
+                else:
+                    proximity[mask_polygon] = 0
             else:
-                proximity[mask_polygon] = 0
-        else:
-            raise ValueError('The type of proximity must be one of "in", "out" or "both".')
+                raise ValueError('The type of proximity must be one of "in", "out" or "both".')
 
         return self.copy(new_array=proximity)
