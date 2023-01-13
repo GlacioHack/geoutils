@@ -2488,48 +2488,52 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return gv.Vector(gdf)
 
-    def proximity(self, vector_or_raster: Raster | Vector, vector_geometry_type: str = "boundary", raster_target_values: list[float] = None,
-                  in_or_out: str = "both") -> Raster:
+    def proximity(self, vector: Vector = None, target_values: list[float] = None, geometry_type: str = "boundary", in_or_out: str = "both",
+                  distance_unit: str = 'georeferenced') -> Raster:
         """
-        Proximity to a vector's geometry or a raster's target pixels computed for each cell of a raster grid.
+        Proximity to a vector's geometry or to self's target pixels computed for each cell of a raster grid.
 
-        :param vector_or_raster: Vector for which to compute the proximity to geometry, or Raster for which to compute the proximity to target pixels.
-        :param vector_geometry_type: (Only with vector) Type of geometry to use for the proximity, defaults to 'boundary'.
-        :param raster_target_values: (Only with raster) List of target values to use for the proximity, defaults to all non-zero values.
+        :param vector: Vector for which to compute the proximity to geometry, if not provided computed on self's target pixels.
+        :param target_values: (Only with self) List of target values to use for the proximity, defaults to all non-zero values.
+        :param geometry_type: (Only with vector) Type of geometry to use for the proximity, defaults to 'boundary'.
         :param in_or_out: (Only with vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
+        :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
 
         :return: Proximity raster.
         """
 
-        # 1/ First, if input is a vector, we rasterize the geometry type
+        # 1/ First, if there is a vector input, we rasterize the geometry type
         # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
-
-        if isinstance(vector_or_raster, Vector):
+        if vector is not None:
             # We create a geodataframe with the geometry type
-            boundary_shp = gpd.GeoDataFrame(geometry=vector_or_raster.ds.__getattr__(vector_geometry_type), crs=vector_or_raster.crs)
+            boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
             # We mask the pixels that make up the geometry type
             mask_boundary = Vector(boundary_shp).create_mask(self).squeeze()
 
-        elif isinstance(vector_or_raster, Raster):
+        else:
             # We mask target pixels
-            if raster_target_values is not None:
-                mask_boundary = np.logical_or.reduce([vector_or_raster.get_nanarray() == target_val for target_val in raster_target_values])
+            if target_values is not None:
+                mask_boundary = np.logical_or.reduce([self.get_nanarray() == target_val for target_val in target_values])
             # Otherwise, all non-zero values are considered targets
             else:
-                mask_boundary = vector_or_raster.get_nanarray().astype(bool)
-
-        else:
-            raise ValueError('Input object must be a Raster or Vector class or subclass.')
+                mask_boundary = self.get_nanarray().astype(bool)
 
         # 2/ Now, we compute the distance matrix relative to the masked geometry type
-        proximity = distance_transform_edt(~mask_boundary, sampling=self.res)
+        if distance_unit.lower() == "georeferenced":
+            sampling = self.res
+        elif distance_unit.lower() == "pixel":
+            sampling = 1
+        else:
+            raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
 
-        # 3/ If the input was a vector, apply the in_and_out argument to optionally mask inside/outside
-        if isinstance(vector_or_raster, Vector):
+        proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
+
+        # 3/ If there was a vector input, apply the in_and_out argument to optionally mask inside/outside
+        if vector is not None:
             if in_or_out == "both":
                 pass
             elif in_or_out in ["in", "out"]:
-                mask_polygon = Vector(vector_or_raster.ds).create_mask(self).squeeze()
+                mask_polygon = Vector(vector.ds).create_mask(self).squeeze()
                 if in_or_out == "in":
                     proximity[~mask_polygon] = 0
                 else:
