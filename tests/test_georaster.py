@@ -26,6 +26,41 @@ from geoutils.misc import resampling_method_from_str
 DO_PLOT = False
 
 
+def run_gdal_proximity(input_raster: gu.Raster, target_values: list[float] | None, distunits: str = "GEO"):
+    """Run GDAL's ComputeProximity and return the read numpy array."""
+    # Rasterio strongly recommends against importing gdal along rio, so this is done here instead.
+    from osgeo import gdal, gdalconst
+
+    # Initiate empty GDAL raster for proximity output
+    drv = gdal.GetDriverByName('MEM')
+    proxy_ds = drv.Create('', input_raster.shape[1], input_raster.shape[0], 1, gdal.GetDataTypeByName('Float32'))
+
+    # Save input in temporary file to read with GDAL
+    # (avoids the nightmare of setting nodata, transform, crs in GDAL format...)
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = os.path.join(temp_dir.name, "input.tif")
+    input_raster.save(temp_path)
+    ds_raster_in = gdal.Open(temp_path, gdalconst.GA_ReadOnly)
+
+    # Define GDAL options
+    proximity_options = ["DISTUNITS="+distunits]
+    if target_values is not None:
+        proximity_options.insert(0, "VALUES=" + ','.join([str(tgt) for tgt in target_values]))
+
+    # Compute proximity
+    gdal.ComputeProximity(ds_raster_in.GetRasterBand(1), proxy_ds.GetRasterBand(1), proximity_options)
+    # Save array
+    proxy_array = proxy_ds.GetRasterBand(1).ReadAsArray()
+
+    # Close GDAL datasets
+    proxy_ds = None
+    ds_raster_in = None
+
+    # Clean temporary directory
+    temp_dir.cleanup()
+
+    return proxy_array
+
 class TestRaster:
 
     landsat_b4_path = examples.get_path("everest_landsat_b4")
@@ -1813,6 +1848,82 @@ self.set_nodata()."
         assert polygon_area == pytest.approx(pixel_area)
         assert isinstance(polygonized, gv.Vector)
         assert polygonized.crs == img.crs
+
+
+    # Test all options, with both an artifical Raster (that has all target values) and a real Raster
+    @pytest.mark.parametrize("distunits", ["GEO", "PIXEL"])  # type: ignore
+    @pytest.mark.parametrize("target_values", [[1, 2, 3], [0], None])  # type: ignore
+    @pytest.mark.parametrize("raster", [
+        gu.Raster(landsat_b4_path),
+        gu.Raster.from_array(np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
+    ])# type: ignore
+    def test_proximity_against_gdal(self, distunits: str, target_values: list[float] | None, raster: gu.Raster) -> None:
+        """Test that proximity matches the results of GDAL for any parameter."""
+
+        # We generate proximity with GDAL and GeoUtils
+        gdal_proximity = run_gdal_proximity(raster, target_values=target_values, distunits=distunits)
+        # We translate distunits GDAL option into its GeoUtils equivalent
+        if distunits == "GEO":
+            distance_unit = "georeferenced"
+        else:
+            distance_unit = "pixel"
+        geoutils_proximity = raster.proximity(distance_unit=distance_unit).data.data.squeeze().astype('float32')
+
+        try:
+            # The results should be the same for all "distunits" options, because the resolution of the Raster is 1
+            assert np.array_equal(gdal_proximity, geoutils_proximity)
+
+        # For debugging
+        except Exception as exception:
+
+            print(gdal_proximity)
+            print(geoutils_proximity)
+            print(gdal_proximity.dtype)
+            print(geoutils_proximity.dtype)
+
+            import matplotlib.pyplot as plt
+
+            # Plotting the xdem and GDAL attributes for comparison (plotting "diff" can also help debug)
+            plt.subplot(121)
+            plt.imshow(gdal_proximity.squeeze())
+            plt.colorbar()
+            plt.subplot(122)
+            plt.imshow(geoutils_proximity.squeeze())
+            plt.colorbar()
+            plt.show()
+
+            raise exception
+
+    def test_proximity_parameters(self) -> None:
+        """Test that new (different to GDAL's) proximity parameters work as intended."""
+
+        # -- Test 1: with self's Raster alone --
+        raster1 = gu.Raster(self.landsat_b4_path)
+        prox1 = raster1.proximity()
+
+        # The raster should have the same extent, resolution and CRS
+        assert raster1.crs == prox1.crs
+        assert raster1.transform == prox1.transform
+
+        # It should change with target values specified
+        prox2 = raster1.proximity(target_values=[255])
+        assert not np.array_equal(prox1.data, prox2.data)
+
+        # -- Test 2: with a vector provided --
+        vector = gu.Vector(self.everest_outlines_path)
+
+        # With default options (boundary geometry)
+        prox3 = raster1.proximity(vector=vector)
+
+        # With the base geometry
+        prox4 = raster1.proximity(vector=vector, geometry_type='geometry')
+
+        # With another geometry option
+        prox5 = raster1.proximity(vector=vector, geometry_type='centroid')
+
+        # With only inside proximity
+        prox6 = raster1.proximity(vector=vector, in_or_out='in')
+
 
     def test_to_points(self) -> None:
         """Test the outputs of the to_points method and that it doesn't load if not needed."""

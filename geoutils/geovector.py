@@ -339,13 +339,14 @@ the provided raster file.
         new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
-    def proximity(self, raster: gu.Raster = None, geometry_type: str = "boundary", in_or_out: str = "both") -> gu.Raster:
+    def proximity(self, raster: gu.Raster = None, geometry_type: str = "boundary", in_or_out: str = "both", distance_unit: str = 'georeferenced') -> gu.Raster:
         """
         Proximity to the vector's geometry computed for each cell of a raster grid.
 
         :param raster: Raster to burn the proximity grid on, defaults to a 1000 x 1000 pixel raster with vector extent.
         :param geometry_type: Type of geometry to use for the proximity, defaults to 'boundary'.
         :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
+        :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
 
         :return: Proximity raster.
         """
@@ -378,7 +379,14 @@ the provided raster file.
         mask_boundary = Vector(boundary_shp).create_mask(raster).squeeze()
 
         # 2/ Now, we compute the distance matrix relative to the masked geometry type
-        proximity = distance_transform_edt(~mask_boundary, sampling=self.res)
+        if distance_unit.lower() == "georeferenced":
+            sampling = self.res
+        elif distance_unit.lower() == "pixel":
+            sampling = 1
+        else:
+            raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
+
+        proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
 
         # 3/ Apply the in_and_out argument to optionally mask inside/outside
         if in_or_out == "both":

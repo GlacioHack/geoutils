@@ -196,6 +196,13 @@ class TestSynthetic:
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
 
+    def test_proximity(self) -> None:
+        """
+        The core functionality is already tested against GDAL in test_raster: just verify the vector-specific behaviour.
+        """
+
+
+
     def test_extract_vertices(self) -> None:
         """
         Test that extract_vertices works with simple geometries.
