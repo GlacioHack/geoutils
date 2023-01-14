@@ -2488,13 +2488,21 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return gv.Vector(gdf)
 
-    def proximity(self, vector: Vector = None, target_values: list[float] = None, geometry_type: str = "boundary", in_or_out: str = "both",
-                  distance_unit: str = 'georeferenced') -> Raster:
+    def proximity(
+        self,
+        vector: Vector | None = None,
+        target_values: list[float] | None = None,
+        geometry_type: str = "boundary",
+        in_or_out: str = "both",
+        distance_unit: str = "georeferenced",
+    ) -> Raster:
         """
         Proximity to a vector's geometry or to self's target pixels computed for each cell of a raster grid.
 
-        :param vector: Vector for which to compute the proximity to geometry, if not provided computed on self's target pixels.
-        :param target_values: (Only with self) List of target values to use for the proximity, defaults to all non-zero values.
+        :param vector: Vector for which to compute the proximity to geometry,
+            if not provided computed on self's target pixels.
+        :param target_values: (Only with self) List of target values to use for the proximity,
+            defaults to all non-zero values.
         :param geometry_type: (Only with vector) Type of geometry to use for the proximity, defaults to 'boundary'.
         :param in_or_out: (Only with vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
         :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
@@ -2513,14 +2521,16 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             # We mask target pixels
             if target_values is not None:
-                mask_boundary = np.logical_or.reduce([self.get_nanarray() == target_val for target_val in target_values])
+                mask_boundary = np.logical_or.reduce(
+                    [self.get_nanarray() == target_val for target_val in target_values]
+                )
             # Otherwise, all non-zero values are considered targets
             else:
                 mask_boundary = self.get_nanarray().astype(bool)
 
         # 2/ Now, we compute the distance matrix relative to the masked geometry type
         if distance_unit.lower() == "georeferenced":
-            sampling = self.res
+            sampling: int | tuple[float | int, float | int] = self.res
         elif distance_unit.lower() == "pixel":
             sampling = 1
         else:

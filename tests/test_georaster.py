@@ -26,14 +26,16 @@ from geoutils.misc import resampling_method_from_str
 DO_PLOT = False
 
 
-def run_gdal_proximity(input_raster: gu.Raster, target_values: list[float] | None, distunits: str = "GEO"):
+def run_gdal_proximity(
+    input_raster: gu.Raster, target_values: list[float] | None, distunits: str = "GEO"
+) -> np.ndarray:
     """Run GDAL's ComputeProximity and return the read numpy array."""
     # Rasterio strongly recommends against importing gdal along rio, so this is done here instead.
     from osgeo import gdal, gdalconst
 
     # Initiate empty GDAL raster for proximity output
-    drv = gdal.GetDriverByName('MEM')
-    proxy_ds = drv.Create('', input_raster.shape[1], input_raster.shape[0], 1, gdal.GetDataTypeByName('Float32'))
+    drv = gdal.GetDriverByName("MEM")
+    proxy_ds = drv.Create("", input_raster.shape[1], input_raster.shape[0], 1, gdal.GetDataTypeByName("Float32"))
     proxy_ds.GetRasterBand(1).SetNoDataValue(-9999)
 
     # Save input in temporary file to read with GDAL
@@ -44,14 +46,14 @@ def run_gdal_proximity(input_raster: gu.Raster, target_values: list[float] | Non
     ds_raster_in = gdal.Open(temp_path, gdalconst.GA_ReadOnly)
 
     # Define GDAL options
-    proximity_options = ["DISTUNITS="+distunits]
+    proximity_options = ["DISTUNITS=" + distunits]
     if target_values is not None:
-        proximity_options.insert(0, "VALUES=" + ','.join([str(tgt) for tgt in target_values]))
+        proximity_options.insert(0, "VALUES=" + ",".join([str(tgt) for tgt in target_values]))
 
     # Compute proximity
     gdal.ComputeProximity(ds_raster_in.GetRasterBand(1), proxy_ds.GetRasterBand(1), proximity_options)
     # Save array
-    proxy_array = proxy_ds.GetRasterBand(1).ReadAsArray().astype('float32')
+    proxy_array = proxy_ds.GetRasterBand(1).ReadAsArray().astype("float32")
     proxy_array[proxy_array == -9999] = np.nan
 
     # Close GDAL datasets
@@ -62,6 +64,7 @@ def run_gdal_proximity(input_raster: gu.Raster, target_values: list[float] | Non
     temp_dir.cleanup()
 
     return proxy_array
+
 
 class TestRaster:
 
@@ -1851,15 +1854,19 @@ self.set_nodata()."
         assert isinstance(polygonized, gv.Vector)
         assert polygonized.crs == img.crs
 
-
-    # Test all options, with both an artifical Raster (that has all target values) and a real Raster
+    # Test all options, with both an artificial Raster (that has all target values) and a real Raster
     @pytest.mark.parametrize("distunits", ["GEO", "PIXEL"])  # type: ignore
     # 0 and 1,2,3 are especially useful for the artificial Raster, and 112 for the real Raster
     @pytest.mark.parametrize("target_values", [[1, 2, 3], [0], [112], None])  # type: ignore
-    @pytest.mark.parametrize("raster", [
-        gu.Raster(landsat_b4_path),
-        gu.Raster.from_array(np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
-    ])# type: ignore
+    @pytest.mark.parametrize(
+        "raster",
+        [
+            gu.Raster(landsat_b4_path),
+            gu.Raster.from_array(
+                np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
+            ),
+        ],
+    )  # type: ignore
     def test_proximity_against_gdal(self, distunits: str, target_values: list[float] | None, raster: gu.Raster) -> None:
         """Test that proximity matches the results of GDAL for any parameter."""
 
@@ -1870,12 +1877,18 @@ self.set_nodata()."
             distance_unit = "georeferenced"
         else:
             distance_unit = "pixel"
-        geoutils_proximity = raster.proximity(distance_unit=distance_unit, target_values=target_values).data.data.squeeze().astype('float32')
+        geoutils_proximity = (
+            raster.proximity(distance_unit=distance_unit, target_values=target_values)
+            .data.data.squeeze()
+            .astype("float32")
+        )
 
         # The results should be the same in all cases
         try:
-            # In some cases, the proximity differs slightly (generally <1%) for complex settings (Landsat Raster with target of 112)
-            # It looks like GDAL might not have the right value, so this particular case is treated differently in tests
+            # In some cases, the proximity differs slightly (generally <1%) for complex settings
+            # (Landsat Raster with target of 112)
+            # It looks like GDAL might not have the right value,
+            # so this particular case is treated differently in tests
             if target_values is not None and target_values[0] == 112 and raster.filename is not None:
 
                 # Get index and number of not almost equal point (tolerance of 10-4)
@@ -1885,15 +1898,14 @@ self.set_nodata()."
                 assert nb_not_almost_equal < 0.005 * raster.width * raster.height
 
                 # Replace these exceptions by zero in both
-                gdal_proximity[ind_not_almost_equal] = 0.
-                geoutils_proximity[ind_not_almost_equal] = 0.
+                gdal_proximity[ind_not_almost_equal] = 0.0
+                geoutils_proximity[ind_not_almost_equal] = 0.0
                 # Check that all the rest is almost equal
                 assert np.allclose(gdal_proximity, geoutils_proximity, atol=1e-04, equal_nan=True)
 
             # Otherwise, results are exactly equal
             else:
                 assert np.array_equal(gdal_proximity, geoutils_proximity, equal_nan=True)
-
 
         # For debugging
         except Exception as exception:
@@ -1941,17 +1953,16 @@ self.set_nodata()."
         vector = gu.Vector(self.everest_outlines_path)
 
         # With default options (boundary geometry)
-        prox3 = raster1.proximity(vector=vector)
+        prox3 = raster1.proximity(vector=vector)  # noqa
 
         # With the base geometry
-        prox4 = raster1.proximity(vector=vector, geometry_type='geometry')
+        prox4 = raster1.proximity(vector=vector, geometry_type="geometry")  # noqa
 
         # With another geometry option
-        prox5 = raster1.proximity(vector=vector, geometry_type='centroid')
+        prox5 = raster1.proximity(vector=vector, geometry_type="centroid")  # noqa
 
         # With only inside proximity
-        prox6 = raster1.proximity(vector=vector, in_or_out='in')
-
+        prox6 = raster1.proximity(vector=vector, in_or_out="in")  # noqa
 
     def test_to_points(self) -> None:
         """Test the outputs of the to_points method and that it doesn't load if not needed."""

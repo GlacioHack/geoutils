@@ -339,7 +339,13 @@ the provided raster file.
         new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
-    def proximity(self, raster: gu.Raster = None, geometry_type: str = "boundary", in_or_out: str = "both", distance_unit: str = 'georeferenced') -> gu.Raster:
+    def proximity(
+        self,
+        raster: gu.Raster = None,
+        geometry_type: str = "boundary",
+        in_or_out: str = "both",
+        distance_unit: str = "georeferenced",
+    ) -> gu.Raster:
         """
         Proximity to the vector's geometry computed for each cell of a raster grid.
 
@@ -360,7 +366,7 @@ the provided raster file.
             # TODO: this bit of code is common in several vector functions (rasterize, etc): move out as common code?
             # By default, use self's bounds
             if self.bounds is None:
-                raise ValueError('To automatically rasterize on the vector, bounds need to be defined.')
+                raise ValueError("To automatically rasterize on the vector, bounds need to be defined.")
 
             # Calculate raster shape
             left, bottom, right, top = self.bounds
