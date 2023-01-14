@@ -2526,7 +2526,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
 
-        proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
+        # If not all pixels are targets, then we compute the distance
+        non_targets = np.count_nonzero(mask_boundary)
+        if non_targets > 0:
+            proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
+        # Otherwise, pass an array full of nodata
+        else:
+            proximity = np.ones(np.shape(mask_boundary)) * np.nan
 
         # 3/ If there was a vector input, apply the in_and_out argument to optionally mask inside/outside
         if vector is not None:
