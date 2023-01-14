@@ -410,7 +410,7 @@ the provided raster file.
 
     def buffer_metric(self, buffer_size: float) -> Vector:
         """
-        Buffer the vector in a metric.
+        Buffer the vector in a metric system (UTM only).
 
         The outlines are projected to a local UTM, then reverted to the original projection after buffering.
 
