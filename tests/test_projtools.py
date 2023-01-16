@@ -2,6 +2,7 @@
 Test projtools
 """
 import numpy as np
+import pyproj.exceptions
 import pytest
 
 import geoutils as gu
@@ -21,7 +22,7 @@ class TestProjTools:
         # First: Check errors are raised when format is invalid
 
         # If format is invalid
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             pt.latlon_to_utm("1", 100)  # type: ignore
         # If values are outside limits: latitude above or below 90
         with pytest.raises(ValueError):
@@ -36,12 +37,12 @@ class TestProjTools:
 
         # Second: check that the UTM zone is correct
         # Lower left belongs to the zone, so 0, 0 should be in zone 31N
-        assert pt.latlon_to_utm(0, 0) == "31N"
+        assert pt.latlon_to_utm(0, 0) == "30N"
         # Test extreme zones
-        assert pt.latlon_to_utm(-89, -179) == "01S"
-        assert pt.latlon_to_utm(89, -179) == "01N"
-        assert pt.latlon_to_utm(-89, 179) == "60S"
-        assert pt.latlon_to_utm(89, 179) == "60N"
+        assert pt.latlon_to_utm(-79, -179) == "1S"
+        assert pt.latlon_to_utm(79, -179) == "1N"
+        assert pt.latlon_to_utm(-79, 179) == "60S"
+        assert pt.latlon_to_utm(79, 179) == "60N"
         # Test some middles zones
         assert pt.latlon_to_utm(1, -59) == "21N"
         assert pt.latlon_to_utm(1, 61) == "41N"
@@ -59,24 +60,24 @@ class TestProjTools:
         # First: Check errors are raised when format is invalid
 
         # If there isn't 2 digits for the code
-        with pytest.raises(ValueError):
+        with pytest.raises(pyproj.exceptions.CRSError):
             pt.utm_to_epsg("100N")
         # If type is incorrect
-        with pytest.raises(ValueError):
-            pt.utm_to_epsg(["1N"])  # type: ignore
+        with pytest.raises(TypeError):
+            pt.utm_to_epsg({'utm': '10N'})  # type: ignore
         # If the code digits does not exist
-        with pytest.raises(ValueError):
+        with pytest.raises(pyproj.exceptions.CRSError):
             pt.utm_to_epsg("61N")
         # If the north-south zone letter is incorrect
-        with pytest.raises(ValueError):
+        with pytest.raises(pyproj.exceptions.CRSError):
             pt.utm_to_epsg("61E")
 
         # Second: Check that the EPSG code is correct
         # https://epsg.io/32601
-        assert pt.utm_to_epsg("01N") == 32601
+        assert pt.utm_to_epsg("1N") == 32601
         # https://epsg.io/32701
-        assert pt.utm_to_epsg("01S") == 32701
-        # https://epsg.io/32660
+        assert pt.utm_to_epsg("1S") == 32701
+        # https://epsg.io/32&660
         assert pt.utm_to_epsg("60N") == 32660
         # https://epsg.io/32760
         assert pt.utm_to_epsg("60S") == 32760

@@ -2493,68 +2493,104 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         vector: Vector | None = None,
         target_values: list[float] | None = None,
         geometry_type: str = "boundary",
-        in_or_out: str = "both",
-        distance_unit: str = "georeferenced",
+        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
+        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
     ) -> Raster:
         """
-        Proximity to a vector's geometry or to self's target pixels computed for each cell of a raster grid.
+        Proximity to this Raster's target pixels, or to a Vector's geometry, computed for each cell of this Raster's grid.
+
+        When passing a Vector, by default, the boundary of the geometry will be used. The full geometry can be used by
+        passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
+        See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
 
         :param vector: Vector for which to compute the proximity to geometry,
-            if not provided computed on self's target pixels.
-        :param target_values: (Only with self) List of target values to use for the proximity,
+            if not provided computed on this Raster target pixels.
+        :param target_values: (Only with Raster) List of target values to use for the proximity,
             defaults to all non-zero values.
-        :param geometry_type: (Only with vector) Type of geometry to use for the proximity, defaults to 'boundary'.
-        :param in_or_out: (Only with vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
+        :param geometry_type: (Only with a Vector) Type of geometry to use for the proximity, defaults to 'boundary'.
+        :param in_or_out: (Only with a Vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
         :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
 
         :return: Proximity raster.
         """
 
-        # 1/ First, if there is a vector input, we rasterize the geometry type
-        # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
-        if vector is not None:
-            # We create a geodataframe with the geometry type
-            boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
-            # We mask the pixels that make up the geometry type
-            mask_boundary = Vector(boundary_shp).create_mask(self).squeeze()
-
-        else:
-            # We mask target pixels
-            if target_values is not None:
-                mask_boundary = np.logical_or.reduce(
-                    [self.get_nanarray() == target_val for target_val in target_values]
-                )
-            # Otherwise, all non-zero values are considered targets
-            else:
-                mask_boundary = self.get_nanarray().astype(bool)
-
-        # 2/ Now, we compute the distance matrix relative to the masked geometry type
-        if distance_unit.lower() == "georeferenced":
-            sampling: int | tuple[float | int, float | int] = self.res
-        elif distance_unit.lower() == "pixel":
-            sampling = 1
-        else:
-            raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
-
-        # If not all pixels are targets, then we compute the distance
-        non_targets = np.count_nonzero(mask_boundary)
-        if non_targets > 0:
-            proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
-        # Otherwise, pass an array full of nodata
-        else:
-            proximity = np.ones(np.shape(mask_boundary)) * np.nan
-
-        # 3/ If there was a vector input, apply the in_and_out argument to optionally mask inside/outside
-        if vector is not None:
-            if in_or_out == "both":
-                pass
-            elif in_or_out in ["in", "out"]:
-                mask_polygon = Vector(vector.ds).create_mask(self).squeeze()
-                if in_or_out == "in":
-                    proximity[~mask_polygon] = 0
-                else:
-                    proximity[mask_polygon] = 0
-            else:
-                raise ValueError('The type of proximity must be one of "in", "out" or "both".')
+        proximity = proximity_from_vector_or_raster(raster=self, vector=vector, target_values=target_values, geometry_type=geometry_type,
+                                                    in_or_out=in_or_out, distance_unit=distance_unit)
 
         return self.copy(new_array=proximity)
+
+
+# -----------------------------------------
+# Additional stand-alone utility functions
+# -----------------------------------------
+
+
+def proximity_from_vector_or_raster(
+        raster: Raster | None = None,
+        vector: Vector | None = None,
+        target_values: list[float] | None = None,
+        geometry_type: str = "boundary",
+        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
+        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced") -> np.ndarray:
+    """
+    (This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector)
+    Proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's geometry type rasterized on the Raster.
+
+    :param raster: Raster to burn the proximity grid on.
+    :param vector: Vector for which to compute the proximity to geometry,
+        if not provided computed on the Raster target pixels.
+    :param target_values: (Only with a Raster) List of target values to use for the proximity,
+        defaults to all non-zero values.
+    :param geometry_type: (Only with a Vector) Type of geometry to use for the proximity, defaults to 'boundary'.
+    :param in_or_out: (Only with a Vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
+    :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
+    """
+
+    # 1/ First, if there is a vector input, we rasterize the geometry type
+    # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
+    if vector is not None:
+        # We create a geodataframe with the geometry type
+        boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
+        # We mask the pixels that make up the geometry type
+        mask_boundary = Vector(boundary_shp).create_mask(raster).squeeze()
+
+    else:
+        # We mask target pixels
+        if target_values is not None:
+            mask_boundary = np.logical_or.reduce(
+                [raster.get_nanarray() == target_val for target_val in target_values]
+            )
+        # Otherwise, all non-zero values are considered targets
+        else:
+            mask_boundary = raster.get_nanarray().astype(bool)
+
+    # 2/ Now, we compute the distance matrix relative to the masked geometry type
+    if distance_unit.lower() == "georeferenced":
+        sampling: int | tuple[float | int, float | int] = raster.res
+    elif distance_unit.lower() == "pixel":
+        sampling = 1
+    else:
+        raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
+
+    # If not all pixels are targets, then we compute the distance
+    non_targets = np.count_nonzero(mask_boundary)
+    if non_targets > 0:
+        proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
+    # Otherwise, pass an array full of nodata
+    else:
+        proximity = np.ones(np.shape(mask_boundary)) * np.nan
+
+    # 3/ If there was a vector input, apply the in_and_out argument to optionally mask inside/outside
+    if vector is not None:
+        if in_or_out == "both":
+            pass
+        elif in_or_out in ["in", "out"]:
+            mask_polygon = Vector(vector.ds).create_mask(raster).squeeze()
+            if in_or_out == "in":
+                proximity[~mask_polygon] = 0
+            else:
+                proximity[mask_polygon] = 0
+        else:
+            raise ValueError('The type of proximity must be one of "in", "out" or "both".')
+
+    return proximity

@@ -40,28 +40,25 @@ def run_gdal_proximity(
 
     # Save input in temporary file to read with GDAL
     # (avoids the nightmare of setting nodata, transform, crs in GDAL format...)
-    temp_dir = tempfile.TemporaryDirectory()
-    temp_path = os.path.join(temp_dir.name, "input.tif")
-    input_raster.save(temp_path)
-    ds_raster_in = gdal.Open(temp_path, gdalconst.GA_ReadOnly)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = os.path.join(temp_dir.name, "input.tif")
+        input_raster.save(temp_path)
+        ds_raster_in = gdal.Open(temp_path, gdalconst.GA_ReadOnly)
 
-    # Define GDAL options
-    proximity_options = ["DISTUNITS=" + distunits]
-    if target_values is not None:
-        proximity_options.insert(0, "VALUES=" + ",".join([str(tgt) for tgt in target_values]))
+        # Define GDAL options
+        proximity_options = ["DISTUNITS=" + distunits]
+        if target_values is not None:
+            proximity_options.insert(0, "VALUES=" + ",".join([str(tgt) for tgt in target_values]))
 
-    # Compute proximity
-    gdal.ComputeProximity(ds_raster_in.GetRasterBand(1), proxy_ds.GetRasterBand(1), proximity_options)
-    # Save array
-    proxy_array = proxy_ds.GetRasterBand(1).ReadAsArray().astype("float32")
-    proxy_array[proxy_array == -9999] = np.nan
+        # Compute proximity
+        gdal.ComputeProximity(ds_raster_in.GetRasterBand(1), proxy_ds.GetRasterBand(1), proximity_options)
+        # Save array
+        proxy_array = proxy_ds.GetRasterBand(1).ReadAsArray().astype("float32")
+        proxy_array[proxy_array == -9999] = np.nan
 
-    # Close GDAL datasets
-    proxy_ds = None
-    ds_raster_in = None
-
-    # Clean temporary directory
-    temp_dir.cleanup()
+        # Close GDAL datasets
+        proxy_ds = None
+        ds_raster_in = None
 
     return proxy_array
 
