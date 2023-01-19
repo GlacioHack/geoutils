@@ -2508,7 +2508,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
     ) -> Raster:
         """
-        Proximity to this Raster's target pixels, or to a Vector's geometry, computed for each cell of this Raster's grid.
+        Proximity to this Raster's target pixels, or to a Vector's geometry, computed for each cell of this Raster's
+        grid.
 
         When passing a Vector, by default, the boundary of the geometry will be used. The full geometry can be used by
         passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
@@ -2525,8 +2526,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :return: Proximity raster.
         """
 
-        proximity = proximity_from_vector_or_raster(raster=self, vector=vector, target_values=target_values, geometry_type=geometry_type,
-                                                    in_or_out=in_or_out, distance_unit=distance_unit)
+        proximity = proximity_from_vector_or_raster(
+            raster=self,
+            vector=vector,
+            target_values=target_values,
+            geometry_type=geometry_type,
+            in_or_out=in_or_out,
+            distance_unit=distance_unit,
+        )
 
         return self.copy(new_array=proximity)
 
@@ -2537,15 +2544,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
 
 def proximity_from_vector_or_raster(
-        raster: Raster | None = None,
-        vector: Vector | None = None,
-        target_values: list[float] | None = None,
-        geometry_type: str = "boundary",
-        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
-        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced") -> np.ndarray:
+    raster: Raster,
+    vector: Vector | None = None,
+    target_values: list[float] | None = None,
+    geometry_type: str = "boundary",
+    in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
+    distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+) -> np.ndarray:
     """
     (This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector)
-    Proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's geometry type rasterized on the Raster.
+    Proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's geometry type
+    rasterized on the Raster.
 
     :param raster: Raster to burn the proximity grid on.
     :param vector: Vector for which to compute the proximity to geometry,
@@ -2568,9 +2577,7 @@ def proximity_from_vector_or_raster(
     else:
         # We mask target pixels
         if target_values is not None:
-            mask_boundary = np.logical_or.reduce(
-                [raster.get_nanarray() == target_val for target_val in target_values]
-            )
+            mask_boundary = np.logical_or.reduce([raster.get_nanarray() == target_val for target_val in target_values])
         # Otherwise, all non-zero values are considered targets
         else:
             mask_boundary = raster.get_nanarray().astype(bool)

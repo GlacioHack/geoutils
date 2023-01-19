@@ -41,9 +41,11 @@ def latlon_to_utm(lat: float, lon: float) -> str:
         raise ValueError("Latitude value is out of range [-90, 90[.")
 
     # Get UTM zone from name string of crs info
-    utm_zone = pyproj.database.query_utm_crs_info("WGS 84", area_of_interest=pyproj.aoi.AreaOfInterest(lon, lat, lon, lat))[0].name.split(" ")[-1]
+    utm_zone = pyproj.database.query_utm_crs_info(
+        "WGS 84", area_of_interest=pyproj.aoi.AreaOfInterest(lon, lat, lon, lat)
+    )[0].name.split(" ")[-1]
 
-    return utm_zone
+    return str(utm_zone)
 
 
 def utm_to_epsg(utm: str) -> int:
@@ -61,7 +63,7 @@ def utm_to_epsg(utm: str) -> int:
     # Get corresponding EPSG
     epsg = pyproj.CRS(f"WGS 84 / UTM Zone {utm}").to_epsg()
 
-    return epsg
+    return int(epsg)
 
 
 def bounds2poly(

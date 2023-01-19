@@ -64,7 +64,7 @@ class TestProjTools:
             pt.utm_to_epsg("100N")
         # If type is incorrect
         with pytest.raises(TypeError):
-            pt.utm_to_epsg({'utm': '10N'})  # type: ignore
+            pt.utm_to_epsg({"utm": "10N"})  # type: ignore
         # If the code digits does not exist
         with pytest.raises(pyproj.exceptions.CRSError):
             pt.utm_to_epsg("61N")

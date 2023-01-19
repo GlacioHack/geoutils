@@ -114,7 +114,7 @@ class TestVector:
     def test_proximity(self) -> None:
         """
         The core functionality is already tested against GDAL in test_raster: just verify the vector-specific behaviour.
-        #TODO: add an artifical test as well (mirroring TODO in test_georaster)
+        #TODO: add an artificial test as well (mirroring TODO in test_georaster)
         """
 
         vector = gu.Vector(self.everest_outlines_path)
@@ -227,7 +227,6 @@ class TestSynthetic:
             # Difference between masks should always be thinner than buffer + 1
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
-
 
     def test_extract_vertices(self) -> None:
         """

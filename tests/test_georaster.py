@@ -2174,7 +2174,6 @@ class TestArithmetic:
 
         assert not r1.equal_georeferenced_grid(self.r1_wrong_transform)
 
-
     # List of operations with two operands
     ops_2args = [
         "__add__",

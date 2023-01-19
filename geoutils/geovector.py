@@ -6,7 +6,7 @@ from __future__ import annotations
 import warnings
 from collections import abc
 from numbers import Number
-from typing import TypeVar, Literal
+from typing import Literal, TypeVar
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -15,7 +15,6 @@ import rasterio as rio
 import shapely
 from rasterio import features, warp
 from rasterio.crs import CRS
-from scipy.ndimage import distance_transform_edt
 from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
@@ -348,17 +347,20 @@ the provided raster file.
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
     ) -> gu.Raster:
         """
-        Proximity to this Vector's geometry computed for each cell of a Raster grid, or for a grid size with this Vector's extent.
+        Proximity to this Vector's geometry computed for each cell of a Raster grid, or for a grid size with
+        this Vector's extent.
 
-        If passed, the Raster georeferenced grid will be used to burn the proximity. If not, a grid size can be passed to create
-        a georeferenced grid with the bounds and CRS of this Vector.
+        If passed, the Raster georeferenced grid will be used to burn the proximity. If not, a grid size can be
+        passed to create a georeferenced grid with the bounds and CRS of this Vector.
 
-        By default, the boundary of the Vector's geometry will be used. The full geometry can be used by passing "geometry",
+        By default, the boundary of the Vector's geometry will be used. The full geometry can be used by
+        passing "geometry",
         or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
         See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
 
         :param raster: Raster to burn the proximity grid on.
-        :param grid_size: If no Raster is provided, grid size to use with this Vector's extent and CRS (defaults to 1000 x 1000).
+        :param grid_size: If no Raster is provided, grid size to use with this Vector's extent and CRS
+            (defaults to 1000 x 1000).
         :param geometry_type: Type of geometry to use for the proximity, defaults to 'boundary'.
         :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
         :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
@@ -383,8 +385,7 @@ the provided raster file.
             raster = gu.Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 
         proximity = gu.georaster.raster.proximity_from_vector_or_raster(
-            raster=raster, vector=self, geometry_type=geometry_type,
-            in_or_out=in_or_out, distance_unit=distance_unit
+            raster=raster, vector=self, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit
         )
 
         return raster.copy(new_array=proximity)
