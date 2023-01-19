@@ -405,25 +405,28 @@ the provided raster file.
         # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=UserWarning)
-            with self.ds.to_crs(epsg=4326) as shp_wgs84:
-                lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+            shp_wgs84 = self.ds.to_crs(epsg=4326)
+            lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+            del shp_wgs84
 
         # Get the EPSG code of the local UTM
         utm = latlon_to_utm(lat, lon)
         epsg = utm_to_epsg(utm)
 
         # Reproject the shapefile in the local UTM
-        with self.ds.to_crs(epsg=epsg) as ds_utm:
+        ds_utm = self.ds.to_crs(epsg=epsg)
 
-            # Buffer the shapefile
-            ds_buffered = ds_utm.buffer(distance=buffer_size)
+        # Buffer the shapefile
+        ds_buffered = ds_utm.buffer(distance=buffer_size)
+        del ds_utm
 
         # Revert-project the shapefile in the original CRS
-        with ds_buffered.to_crs(crs=self.ds.crs) as ds_buffered_origproj:
+        ds_buffered_origproj = ds_buffered.to_crs(crs=self.ds.crs)
+        del ds_buffered
 
-            # Return a Vector object of the buffered GeoDataFrame
-            # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
-            vector_buffered = Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
+        # Return a Vector object of the buffered GeoDataFrame
+        # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
+        vector_buffered = Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
 
         return vector_buffered
 
@@ -463,8 +466,9 @@ the provided raster file.
             # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
             with warnings.catch_warnings():
                 warnings.simplefilter(action="ignore", category=UserWarning)
-                with self.ds.to_crs(epsg=4326) as shp_wgs84:
-                    lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+                shp_wgs84 = self.ds.to_crs(epsg=4326)
+                lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+                del shp_wgs84
 
             # Get the EPSG code of the local UTM
             utm = latlon_to_utm(lat, lon)
