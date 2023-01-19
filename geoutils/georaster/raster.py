@@ -1140,6 +1140,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return cp
 
+    def equal_georeferenced_grid(self: RasterType, raster: RasterType) -> bool:
+        """
+        Check that grid shape, geotransform and CRS are equal.
+
+        :param raster: Another Raster object
+
+        :return: Whether the two objects have the same georeferenced grid
+        """
+
+        return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
+
     @overload
     def get_nanarray(self, return_mask: Literal[False] = False) -> np.ndarray:
         ...

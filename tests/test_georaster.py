@@ -1939,8 +1939,7 @@ self.set_nodata()."
         prox1 = raster1.proximity()
 
         # The raster should have the same extent, resolution and CRS
-        assert raster1.crs == prox1.crs
-        assert raster1.transform == prox1.transform
+        assert raster1.equal_georeferenced_grid(prox1)
 
         # It should change with target values specified
         prox2 = raster1.proximity(target_values=[255])
@@ -1950,16 +1949,16 @@ self.set_nodata()."
         vector = gu.Vector(self.everest_outlines_path)
 
         # With default options (boundary geometry)
-        prox3 = raster1.proximity(vector=vector)  # noqa
+        raster1.proximity(vector=vector)
 
         # With the base geometry
-        prox4 = raster1.proximity(vector=vector, geometry_type="geometry")  # noqa
+        raster1.proximity(vector=vector, geometry_type="geometry")
 
         # With another geometry option
-        prox5 = raster1.proximity(vector=vector, geometry_type="centroid")  # noqa
+        raster1.proximity(vector=vector, geometry_type="centroid")
 
         # With only inside proximity
-        prox6 = raster1.proximity(vector=vector, in_or_out="in")  # noqa
+        raster1.proximity(vector=vector, in_or_out="in")
 
     def test_to_points(self) -> None:
         """Test the outputs of the to_points method and that it doesn't load if not needed."""
@@ -2122,6 +2121,50 @@ class TestArithmetic:
         r2 = r1.copy()
         r2.set_nodata(34)
         assert r1 != r2
+
+    def test_equal_georeferenced_grid(self) -> None:
+        """
+        Test that equal for shape, crs and transform work as expected
+        """
+
+        r1 = self.r1
+        r2 = r1.copy()
+        assert r1 == r2
+
+        # Change data
+        r2.data += 1
+        assert r1 == r2
+
+        # Change mask (False by default)
+        r2 = r1.copy()
+        r2.data[0, 0] = np.ma.masked
+        assert r1 == r2
+
+        # Change fill_value (999999 by default)
+        r2 = r1.copy()
+        r2.data.fill_value = 0
+        assert r1 == r2
+
+        # Change dtype
+        r2 = r1.copy()
+        r2 = r2.astype("float32")
+        assert r1 == r2
+
+        # Change transform
+        r2 = r1.copy()
+        r2.transform = rio.transform.from_bounds(0, 0, 1, 1, self.width + 1, self.height)
+        assert r1 != r2
+
+        # Change CRS
+        r2 = r1.copy()
+        r2.crs = rio.crs.CRS.from_epsg(4326)
+        assert r1 != r2
+
+        # Change nodata
+        r2 = r1.copy()
+        r2.set_nodata(34)
+        assert r1 == r2
+
 
     # List of operations with two operands
     ops_2args = [

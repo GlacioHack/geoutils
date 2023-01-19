@@ -342,27 +342,29 @@ the provided raster file.
     def proximity(
         self,
         raster: gu.Raster | None = None,
+        grid_size: tuple[int, int] = (1000, 1000),
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
     ) -> gu.Raster:
         """
-        Proximity to this Vector's geometry computed for each cell of a Raster grid.
+        Proximity to this Vector's geometry computed for each cell of a Raster grid, or for a grid size with this Vector's extent.
+
+        If passed, the Raster georeferenced grid will be used to burn the proximity. If not, a grid size can be passed to create
+        a georeferenced grid with the bounds and CRS of this Vector.
 
         By default, the boundary of the Vector's geometry will be used. The full geometry can be used by passing "geometry",
         or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
         See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
 
-        :param raster: Raster to burn the proximity grid on, defaults to a 1000 x 1000 pixel grid with this Vector's extent.
+        :param raster: Raster to burn the proximity grid on.
+        :param grid_size: If no Raster is provided, grid size to use with this Vector's extent and CRS (defaults to 1000 x 1000).
         :param geometry_type: Type of geometry to use for the proximity, defaults to 'boundary'.
         :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
         :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
 
         :return: Proximity raster.
         """
-
-        # TODO: (specific to Vector proximity) raster size could passed as argument when
-        #  nothing else is passed (here and in create_mask/rasterize)
 
         # 0/ If no Raster is passed, create one on the Vector bounds of size 1000 x 1000
         if raster is None:
@@ -376,7 +378,7 @@ the provided raster file.
             left, bottom, right, top = self.bounds
 
             # Calculate raster transform
-            transform = rio.transform.from_bounds(left, bottom, right, top, 1000, 1000)
+            transform = rio.transform.from_bounds(left, bottom, right, top, grid_size[0], grid_size[1])
 
             raster = gu.Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 
@@ -403,25 +405,27 @@ the provided raster file.
         # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=UserWarning)
-            shp_wgs84 = self.ds.to_crs(epsg=4326)
-            lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+            with self.ds.to_crs(epsg=4326) as shp_wgs84:
+                lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
 
         # Get the EPSG code of the local UTM
         utm = latlon_to_utm(lat, lon)
         epsg = utm_to_epsg(utm)
 
         # Reproject the shapefile in the local UTM
-        ds_utm = self.ds.to_crs(epsg=epsg)
+        with self.ds.to_crs(epsg=epsg) as ds_utm:
 
-        # Buffer the shapefile
-        ds_buffered = ds_utm.buffer(distance=buffer_size)
+            # Buffer the shapefile
+            ds_buffered = ds_utm.buffer(distance=buffer_size)
 
         # Revert-project the shapefile in the original CRS
-        ds_buffered_origproj = ds_buffered.to_crs(crs=self.ds.crs)
+        with ds_buffered.to_crs(crs=self.ds.crs) as ds_buffered_origproj:
 
-        # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
-        # Return a Vector object of the buffered GeoDataFrame
-        return Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
+            # Return a Vector object of the buffered GeoDataFrame
+            # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
+            vector_buffered = Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
+
+        return vector_buffered
 
     def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> np.ndarray:
         """
@@ -459,8 +463,8 @@ the provided raster file.
             # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
             with warnings.catch_warnings():
                 warnings.simplefilter(action="ignore", category=UserWarning)
-                shp_wgs84 = self.ds.to_crs(epsg=4326)
-                lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+                with self.ds.to_crs(epsg=4326) as shp_wgs84:
+                    lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
 
             # Get the EPSG code of the local UTM
             utm = latlon_to_utm(lat, lon)

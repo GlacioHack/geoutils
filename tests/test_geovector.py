@@ -111,6 +111,38 @@ class TestVector:
         # Check that some features were indeed removed
         assert np.sum(~np.array(intersects_old)) > 0
 
+    def test_proximity(self) -> None:
+        """
+        The core functionality is already tested against GDAL in test_raster: just verify the vector-specific behaviour.
+        #TODO: add an artifical test as well (mirroring TODO in test_georaster)
+        """
+
+        vector = gu.Vector(self.everest_outlines_path)
+
+        # -- Test 1: with a Raster provided --
+        raster1 = gu.Raster(self.landsat_b4_crop_path)
+        prox1 = vector.proximity(raster=raster1)
+
+        # The proximity should have the same extent, resolution and CRS
+        assert raster1.equal_georeferenced_grid(prox1)
+
+        # With the base geometry
+        vector.proximity(raster=raster1, geometry_type="geometry")
+
+        # With another geometry option
+        vector.proximity(raster=raster1, geometry_type="centroid")
+
+        # With only inside proximity
+        vector.proximity(raster=raster1, in_or_out="in")
+
+        # -- Test 2: with no Raster provided, just grid size --
+
+        # Default grid size
+        vector.proximity()
+
+        # With specific grid size
+        vector.proximity(grid_size=(100, 100))
+
 
 class TestSynthetic:
 
@@ -196,10 +228,6 @@ class TestSynthetic:
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
 
-    def test_proximity(self) -> None:
-        """
-        The core functionality is already tested against GDAL in test_raster: just verify the vector-specific behaviour.
-        """
 
     def test_extract_vertices(self) -> None:
         """
