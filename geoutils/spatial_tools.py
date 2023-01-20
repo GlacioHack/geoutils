@@ -136,8 +136,8 @@ def load_multiple_rasters(
 
     # Optionally, crop the rasters
     if crop:
-        # Check that intersection is not void
-        if intersection == ():
+        # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
+        if intersection == () or all(np.isnan(i) for i in intersection):
             warnings.warn("Intersection is void, returning unloaded rasters.")
             return output_rst
 
@@ -264,7 +264,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             dst_bounds=dst_bounds,
             dst_res=reference_raster.res,
             dst_crs=reference_raster.crs,
-            dtype=reference_raster.data.dtype,
+            dst_dtype=reference_raster.data.dtype,
             dst_nodata=reference_raster.nodata,
             silent=True,
         )

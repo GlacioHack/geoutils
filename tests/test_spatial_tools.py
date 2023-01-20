@@ -187,6 +187,9 @@ def images_3d():  # type: ignore
 #    pytest.lazy_fixture('images_3d')]) ## Requires Raster.reproject() fix.
 def test_stack_rasters(rasters) -> None:  # type: ignore
     """Test stack_rasters"""
+
+    warnings.filterwarnings("ignore", category=UserWarning)
+
     # Merge the two overlapping DEMs and check that output bounds and shape is correct
     stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
 
@@ -229,6 +232,9 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
 def test_merge_rasters(rasters) -> None:  # type: ignore
     """Test merge_rasters"""
     # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
+
+    # Silence the reprojection warning for default nodata value already taken
+    warnings.filterwarnings("ignore", category=UserWarning)
 
     merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
 
