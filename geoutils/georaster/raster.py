@@ -1409,8 +1409,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :param dst_ref: a reference raster. If set will use the attributes of this
             raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
-        :param dst_crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to
-        self.crs.
+        :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
+            defaults to self.crs.
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
         :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the
         source CRS.
