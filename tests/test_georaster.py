@@ -713,7 +713,9 @@ class TestRaster:
 
         # Check that bound reprojection is done automatically if the CRS differ
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
             r_cropped_reproj = r_cropped.reproject(dst_crs=3857)
         r_cropped3 = r.crop(r_cropped_reproj, inplace=False)
 
@@ -774,7 +776,9 @@ class TestRaster:
 
         # Filter warning about dst_nodata not set in reprojection (because match_extent triggers reproject)
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
             r_cropped = r.crop(cropGeom2, inplace=False, mode="match_extent")
 
         assert list(r_cropped.bounds) == cropGeom2
@@ -785,7 +789,9 @@ class TestRaster:
 
         # Filter warning about dst_nodata not set in reprojection (because match_extent triggers reproject)
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
             r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
         assert r_cropped2 == r_cropped
 
@@ -1479,7 +1485,9 @@ self.set_nodata()."
 
         with warnings.catch_warnings():
             # Ignore warning that nodata value is already used in the raster data
-            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
             r.set_nodata(_default_nodata(r.dtypes[0]))
             r_copy.nodata = _default_nodata(r.dtypes[0])
 
@@ -1867,8 +1875,9 @@ self.set_nodata()."
         for dtype in ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]:
             img_dtype = img.copy()
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning, message='dtype conversion will result in a '
-                                                                                'loss of information.*')
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, message="dtype conversion will result in a " "loss of information.*"
+                )
                 img_dtype = img_dtype.astype(dtype)
             value = np.unique(img_dtype)[0]
             img_dtype.polygonize(in_value=value)
