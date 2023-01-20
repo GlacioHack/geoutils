@@ -1850,7 +1850,7 @@ self.set_nodata()."
 
         # Get unique value for image and the corresponding area
         value = np.unique(img)[0]
-        pixel_area = np.sum(img == value) * img.res[0] * img.res[1]
+        pixel_area = np.count_nonzero(img.data == value) * img.res[0] * img.res[1]
 
         # Polygonize the raster for this value, and compute the total area
         polygonized = img.polygonize(in_value=value)
