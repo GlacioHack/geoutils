@@ -2,6 +2,7 @@
 Test projtools
 """
 import numpy as np
+import pyproj.exceptions
 import pytest
 
 import geoutils as gu
@@ -15,6 +16,75 @@ class TestProjTools:
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
+
+    def test_latlon_to_utm(self) -> None:
+
+        # First: Check errors are raised when format is invalid
+
+        # If format is invalid
+        with pytest.raises(TypeError):
+            pt.latlon_to_utm("1", 100)  # type: ignore
+        # If values are outside limits: latitude above or below 90
+        with pytest.raises(ValueError):
+            pt.latlon_to_utm(91, 0)
+        with pytest.raises(ValueError):
+            pt.latlon_to_utm(-91, 0)
+        # Or longitude above or below 180
+        with pytest.raises(ValueError):
+            pt.latlon_to_utm(0, -181)
+        with pytest.raises(ValueError):
+            pt.latlon_to_utm(0, 181)
+
+        # Second: check that the UTM zone is correct
+        # Lower left belongs to the zone, so 0, 0 should be in zone 31N
+        assert pt.latlon_to_utm(0, 0) == "30N"
+        # Test extreme zones
+        assert pt.latlon_to_utm(-79, -179) == "1S"
+        assert pt.latlon_to_utm(79, -179) == "1N"
+        assert pt.latlon_to_utm(-79, 179) == "60S"
+        assert pt.latlon_to_utm(79, 179) == "60N"
+        # Test some middles zones
+        assert pt.latlon_to_utm(1, -59) == "21N"
+        assert pt.latlon_to_utm(1, 61) == "41N"
+        assert pt.latlon_to_utm(-1, -121) == "10S"
+        assert pt.latlon_to_utm(-1, 119) == "50S"
+
+        # Third, check that any floating or integer type works
+        assert pt.latlon_to_utm(0.1, 0.1)
+        assert pt.latlon_to_utm(np.float32(0.1), np.float32(0.1))
+        assert pt.latlon_to_utm(np.int16(0), np.int16(0))
+
+    def test_utm_to_epsg(self) -> None:
+        """Check that the EPSG codes derived from UTM zones are correct"""
+
+        # First: Check errors are raised when format is invalid
+
+        # If there isn't 2 digits for the code
+        with pytest.raises(pyproj.exceptions.CRSError):
+            pt.utm_to_epsg("100N")
+        # If type is incorrect
+        with pytest.raises(TypeError):
+            pt.utm_to_epsg({"utm": "10N"})  # type: ignore
+        # If the code digits does not exist
+        with pytest.raises(pyproj.exceptions.CRSError):
+            pt.utm_to_epsg("61N")
+        # If the north-south zone letter is incorrect
+        with pytest.raises(pyproj.exceptions.CRSError):
+            pt.utm_to_epsg("61E")
+
+        # Second: Check that the EPSG code is correct
+        # https://epsg.io/32601
+        assert pt.utm_to_epsg("1N") == 32601
+        # https://epsg.io/32701
+        assert pt.utm_to_epsg("1S") == 32701
+        # https://epsg.io/32&660
+        assert pt.utm_to_epsg("60N") == 32660
+        # https://epsg.io/32760
+        assert pt.utm_to_epsg("60S") == 32760
+
+        # Third: Check that different format work: single digit, lower-case
+        assert pt.utm_to_epsg("1N") == pt.utm_to_epsg("01N") == pt.utm_to_epsg("01n")
+        assert pt.utm_to_epsg("08s") == pt.utm_to_epsg("8S") == pt.utm_to_epsg("08S")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_latlon_reproject(self, example: str) -> None:
