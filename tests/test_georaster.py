@@ -132,13 +132,15 @@ class TestRaster:
         if r.dtypes[0] == "uint8":
             # Validate that the mask is respected by adding 0 values (there are none to begin with.)
             r.data.ravel()[:1000] = 0
-            # Set the nodata value to 0, then validate that they are excluded from the new minimum
-            r.set_nodata(0)
+            # Set the nodata value to 0, then validate that they are excluded from the new minimum, and warning raised
+            with pytest.warns(UserWarning):
+                r.set_nodata(0)
         elif r.dtypes[0] == "float32":
             # We do the same with -99999 here
             r.data.ravel()[:1000] = -99999
-            # And replace the nodata value
-            r.set_nodata(-99999)
+            # And replace the nodata value, and warning raised
+            with pytest.warns(UserWarning):
+                r.set_nodata(-99999)
 
         new_stats = r.info(stats=True)
         for i, line in enumerate(stats.splitlines()):
@@ -681,7 +683,8 @@ class TestRaster:
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)  # type: ignore
-    def test_crop(self, data: list[str]) -> None:
+    def test_crop_and_getitem(self, data: list[str]) -> None:
+        """Test for crop method, also called by square brackets through __getitem__"""
 
         raster_path, outlines_path = data
         r = gr.Raster(raster_path)
@@ -694,38 +697,42 @@ class TestRaster:
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert r_cropped == r
 
+        # Test with bracket call
+        r_cropped_getitem = r[cropGeom2]
+        assert r_cropped_getitem == r_cropped
+
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(r.shape) - 1)
 
-        # left
+        # Left
         cropGeom2 = [cropGeom[0] + rand_int * r.res[0], cropGeom[1], cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, :, rand_int:].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, :, rand_int:].mask, r_cropped.data.mask)
 
-        # right
+        # Right
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2] - rand_int * r.res[0], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, :, :-rand_int].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, :, :-rand_int].mask, r_cropped.data.mask)
 
-        # bottom
+        # Bottom
         cropGeom2 = [cropGeom[0], cropGeom[1] + rand_int * abs(r.res[1]), cropGeom[2], cropGeom[3]]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, :-rand_int, :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, :-rand_int, :].mask, r_cropped.data.mask)
 
-        # top
+        # Top
         cropGeom2 = [cropGeom[0], cropGeom[1], cropGeom[2], cropGeom[3] - rand_int * abs(r.res[1])]
         r_cropped = r.crop(cropGeom2, inplace=False)
         assert list(r_cropped.bounds) == cropGeom2
         assert np.array_equal(r.data[:, rand_int:, :].data, r_cropped.data, equal_nan=True)
         assert np.array_equal(r.data[:, rand_int:, :].mask, r_cropped.data.mask)
 
-        # same but tuple
+        # Same but tuple
         cropGeom3: tuple[float, float, float, float] = (
             cropGeom[0],
             cropGeom[1],
@@ -740,6 +747,22 @@ class TestRaster:
         # -- Test with CropGeom being a Raster -- #
         r_cropped2 = r.crop(r_cropped, inplace=False)
         assert r_cropped2 == r_cropped
+
+        # Check that bound reprojection is done automatically if the CRS differ
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
+            r_cropped_reproj = r_cropped.reproject(dst_crs=3857)
+        r_cropped3 = r.crop(r_cropped_reproj, inplace=False)
+
+        # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
+        r_cropped4 = r.crop(cropGeom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs), inplace=False)
+        assert r_cropped3 == r_cropped4
+
+        # Check with bracket call
+        r_cropped5 = r[r_cropped_reproj]
+        assert r_cropped4 == r_cropped5
 
         # -- Test with inplace=True (Default) -- #
         r_copy = r.copy()
@@ -787,27 +810,49 @@ class TestRaster:
             cropGeom[2] - rand_float * r.res[0],
             cropGeom[3] - rand_float * abs(r.res[1]),
         ]
-        r_cropped = r.crop(cropGeom2, inplace=False, mode="match_extent")
+
+        # Filter warning about dst_nodata not set in reprojection (because match_extent triggers reproject)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
+            r_cropped = r.crop(cropGeom2, inplace=False, mode="match_extent")
+
         assert list(r_cropped.bounds) == cropGeom2
         # The change in resolution should be less than what would occur with +/- 1 pixel
         assert np.all(
             abs(np.array(r.res) - np.array(r_cropped.res)) < np.array(r.res) / np.array(r_cropped.shape)[::-1]
         )
 
-        r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
+        # Filter warning about dst_nodata not set in reprojection (because match_extent triggers reproject)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
+            r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
         assert r_cropped2 == r_cropped
 
         # -- Test with CropGeom being a Vector -- #
         outlines = gu.Vector(outlines_path)
-        outlines.ds = outlines.ds.to_crs(r.crs)
-        r_cropped = r.crop(outlines, inplace=False)
+
+        # First, we reproject manually the outline
+        outlines_reproj = gu.Vector(outlines.ds.to_crs(r.crs))
+        r_cropped = r.crop(outlines_reproj, inplace=False)
 
         # Calculate intersection of the two bounding boxes and make sure crop has same bounds
-        win_outlines = rio.windows.from_bounds(*outlines.bounds, transform=r.transform)
+        win_outlines = rio.windows.from_bounds(*outlines_reproj.bounds, transform=r.transform)
         win_raster = rio.windows.from_bounds(*r.bounds, transform=r.transform)
         final_window = win_outlines.intersection(win_raster).round_lengths().round_offsets()
         new_bounds = rio.windows.bounds(final_window, transform=r.transform)
         assert list(r_cropped.bounds) == list(new_bounds)
+
+        # Second, we check that bound reprojection is done automatically if the CRS differ
+        r_cropped2 = r.crop(outlines, inplace=False)
+        assert list(r_cropped2.bounds) == list(new_bounds)
+
+        # Finally, we check with a bracket call
+        r_cropped3 = r[outlines]
+        assert list(r_cropped3.bounds) == list(new_bounds)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
@@ -1475,8 +1520,13 @@ self.set_nodata()."
         r = gu.Raster(example)
         r_copy = r.copy()
 
-        r.set_nodata(_default_nodata(r.dtypes[0]))
-        r_copy.nodata = _default_nodata(r.dtypes[0])
+        with warnings.catch_warnings():
+            # Ignore warning that nodata value is already used in the raster data
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+            )
+            r.set_nodata(_default_nodata(r.dtypes[0]))
+            r_copy.nodata = _default_nodata(r.dtypes[0])
 
         assert r == r_copy
 
@@ -1546,7 +1596,7 @@ self.set_nodata()."
         r2 = r.copy()
         r2.data[0, 0] = 0
 
-        with pytest.warns(UserWarning):
+        with pytest.warns(UserWarning, match="New nodata value found in the data array.*"):
             r2.set_nodata(0)
 
         for dtype in [np.uint8, np.uint16, np.float32, np.float64, "float32"]:
@@ -1835,21 +1885,44 @@ self.set_nodata()."
         img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
         assert img3a == img3b
 
-    def test_polygonize(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_polygonize(self, example: str) -> None:
         """Test that polygonize doesn't raise errors."""
-        img = gr.Raster(self.landsat_b4_path)
 
+        img = gr.Raster(example)
+
+        # -- Test 1: basic functioning of polygonize --
+
+        # Get unique value for image and the corresponding area
         value = np.unique(img)[0]
+        pixel_area = np.count_nonzero(img.data == value) * img.res[0] * img.res[1]
 
-        pixel_area = np.sum(img == value) * img.res[0] * img.res[1]
-
-        polygonized = img.polygonize(value)
-
+        # Polygonize the raster for this value, and compute the total area
+        polygonized = img.polygonize(in_value=value)
         polygon_area = polygonized.ds.area.sum()
 
+        # Check that these two areas are approximately equal
         assert polygon_area == pytest.approx(pixel_area)
         assert isinstance(polygonized, gv.Vector)
         assert polygonized.crs == img.crs
+
+        # -- Test 2: data types --
+
+        # Check that polygonize works as expected for any input dtype (e.g. float64 being not supported by GeoPandas)
+        for dtype in ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]:
+            img_dtype = img.copy()
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, message="dtype conversion will result in a " "loss of information.*"
+                )
+                img_dtype = img_dtype.astype(dtype)
+            value = np.unique(img_dtype)[0]
+            img_dtype.polygonize(in_value=value)
+
+        # And for a boolean object, such as a mask
+        mask = img > value
+        mask.polygonize(in_value=1)
+
 
     # Test all options, with both an artificial Raster (that has all target values) and a real Raster
     @pytest.mark.parametrize("distunits", ["GEO", "PIXEL"])  # type: ignore
@@ -2586,7 +2659,6 @@ class TestArrayInterface:
         with warnings.catch_warnings():
 
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            warnings.filterwarnings("ignore", category=UserWarning)
 
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
             if com_dtype in (str(np.dtype(t[0])) for t in ufunc.types):

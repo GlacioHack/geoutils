@@ -61,7 +61,9 @@ class TestVector:
 
     def test_rasterize_proj(self) -> None:
 
-        burned = self.glacier_outlines.rasterize(xres=3000)
+        # Capture the warning on resolution not matching exactly bounds
+        with pytest.warns(UserWarning):
+            burned = self.glacier_outlines.rasterize(xres=3000)
 
         assert burned.shape[0] == 146
         assert burned.shape[1] == 115
@@ -70,7 +72,10 @@ class TestVector:
         """Test rasterizing an EPSG:3426 dataset into a projection."""
         v = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
         # Use Web Mercator at 30 m.
-        burned = v.rasterize(xres=30, crs=3857)
+
+        # Capture the warning on resolution not matching exactly bounds
+        with pytest.warns(UserWarning):
+            burned = v.rasterize(xres=30, crs=3857)
 
         assert burned.shape[0] == 1251
         assert burned.shape[1] == 1522
@@ -78,20 +83,24 @@ class TestVector:
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)  # type: ignore
-    def test_crop2raster(self, data: list[str]) -> None:
+    def test_crop(self, data: list[str]) -> None:
 
         # Load data
         raster_path, outlines_path = data
         rst = gu.Raster(raster_path)
         outlines = gu.Vector(outlines_path)
 
-        # Need to reproject to r.crs. Otherwise, crop2raster will work but will be approximate
+        # Need to reproject to r.crs. Otherwise, crop will work but will be approximate
         # Because outlines might be warped in a different crs
         outlines.ds = outlines.ds.to_crs(rst.crs)
 
         # Crop
         outlines_new = outlines.copy()
-        outlines_new.crop2raster(rst)
+        outlines_new.crop(rst)
+
+        # Check with bracket call
+        outlines_new2 = outlines_new[rst]
+        assert_geodataframe_equal(outlines_new.ds, outlines_new2.ds)
 
         # Verify that geometries intersect with raster bound
         rst_poly = gu.projtools.bounds2poly(rst.bounds)
@@ -227,6 +236,13 @@ class TestSynthetic:
             # Difference between masks should always be thinner than buffer + 1
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
+
+        # Check that no warning is raised when creating a mask with a xres not multiple of vector bounds
+        vector.create_mask(xres=1.01)
+
+        # Check that a warning is raised if the bounds were passed specifically by the user
+        with pytest.warns(UserWarning):
+            vector.create_mask(xres=1.01, bounds=(0, 0, 21, 21))
 
     def test_extract_vertices(self) -> None:
         """
