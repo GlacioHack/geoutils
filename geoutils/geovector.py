@@ -486,7 +486,6 @@ class Vector:
 
         return new_bounds
 
-
     def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> Vector:
         """
         Returns a Vector object containing self's geometries extended by a buffer, without overlapping each other.

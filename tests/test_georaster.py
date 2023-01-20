@@ -1923,7 +1923,6 @@ self.set_nodata()."
         mask = img > value
         mask.polygonize(in_value=1)
 
-
     # Test all options, with both an artificial Raster (that has all target values) and a real Raster
     @pytest.mark.parametrize("distunits", ["GEO", "PIXEL"])  # type: ignore
     # 0 and 1,2,3 are especially useful for the artificial Raster, and 112 for the real Raster
