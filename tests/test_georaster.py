@@ -1340,17 +1340,17 @@ self.set_nodata()."
         # 3/ Masked argument
         r_multi.data[:, itest, jtest] = np.ma.masked
         z_not_ma = r_multi.value_at_coords(xtest0, ytest0, band=1)
-        assert np.ma.is_masked(z_not_ma)
+        assert not np.ma.is_masked(z_not_ma)
         z_ma = r_multi.value_at_coords(xtest0, ytest0, band=1, masked=True)
         assert np.ma.is_masked(z_ma)
 
         # 4/ Window argument
-        val_window, z_window = r_multi.value_at_coords(xtest0, ytest0, band=0, window=3, return_window=True)
+        val_window, z_window = r_multi.value_at_coords(xtest0, ytest0, band=0, window=3, masked=True, return_window=True)
         assert val_window == np.ma.mean(r_multi.data[0, itest-1:itest+2, jtest-1:jtest+2]) == np.ma.mean(z_window)
         assert np.array_equal(z_window, r_multi.data[0, itest-1:itest+2, jtest-1:jtest+2])
 
         # 5/ Reducer function argument
-        val_window2 = r_multi.value_at_coords(xtest0, ytest0, band=0, window=3, reducer_function=np.ma.median)
+        val_window2 = r_multi.value_at_coords(xtest0, ytest0, band=0, window=3, masked=True, reducer_function=np.ma.median)
         assert val_window2 == np.ma.median(r_multi.data[0, itest-1:itest+2, jtest-1:jtest+2])
 
         # -- Tests 3: check that errors are raised when supposed for non-boolean arguments --

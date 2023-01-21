@@ -2078,6 +2078,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         if self.is_loaded:
             data = self.data[slice(None) if band is None else band, row : row + height, col : col + width]
+            if not masked:
+                data = data.filled()
             value = format_value(data)
             win: np.ndarray | dict[int, np.ndarray] = data
 
