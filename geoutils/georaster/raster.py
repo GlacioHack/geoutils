@@ -2029,8 +2029,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
         if window is not None:
+            if not float(window).is_integer():
+                raise ValueError("Window must be a whole number.")
             if window % 2 != 1:
                 raise ValueError("Window must be an odd number.")
+            window = int(window)
 
         def format_value(value: Any) -> Any:
             """Check if valid value has been extracted"""
@@ -2074,7 +2077,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         window = rio.windows.Window(col, row, width, height)
 
         if self.is_loaded:
-            data = self.data[slice(None) if band is None else band + 1, row : row + height, col : col + width]
+            data = self.data[slice(None) if band is None else band, row : row + height, col : col + width]
             value = format_value(data)
             win: np.ndarray | dict[int, np.ndarray] = data
 
@@ -2166,7 +2169,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         i, j = rio.transform.rowcol(self.transform, x, y, op=op, precision=precision)
 
-        # # necessary because rio.Dataset.index does not return abc.Iterable for a single point
+        # Necessary because rio.Dataset.index does not return abc.Iterable for a single point
         if not isinstance(i, abc.Iterable):
             i, j = (
                 np.asarray(
@@ -2188,7 +2191,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # This has no influence on georeferencing, it's only about the interpretation of the raster values,
         # and thus only affects sub-pixel interpolation
 
-        # if input is None, default to GDAL METADATA
+        # If input is None, default to GDAL METADATA
         if area_or_point is None:
             area_or_point = self.tags.get("AREA_OR_POINT", "Point")
 
@@ -2198,10 +2201,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     "Operator must return np.floating values to perform AREA_OR_POINT subpixel index shifting"
                 )
 
-            # if point, shift index by half a pixel
+            # If point, shift index by half a pixel
             i += 0.5
             j += 0.5
-            # otherwise, leave as is
+            # Otherwise, leave as is
+
+        # Convert output indexes to integer if they are all whole numbers
+        if np.all(np.mod(i, 1) == 0) and np.all(np.mod(j, 1) == 0):
+            i = i.astype(int)
+            j = j.astype(int)
 
         return i, j
 
