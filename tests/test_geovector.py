@@ -3,6 +3,7 @@ from __future__ import annotations
 import geopandas as gpd
 import numpy as np
 import pytest
+from geopandas.testing import assert_geodataframe_equal
 from scipy.ndimage import binary_erosion
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
@@ -60,7 +61,9 @@ class TestVector:
 
     def test_rasterize_proj(self) -> None:
 
-        burned = self.glacier_outlines.rasterize(xres=3000)
+        # Capture the warning on resolution not matching exactly bounds
+        with pytest.warns(UserWarning):
+            burned = self.glacier_outlines.rasterize(xres=3000)
 
         assert burned.shape[0] == 146
         assert burned.shape[1] == 115
@@ -69,7 +72,10 @@ class TestVector:
         """Test rasterizing an EPSG:3426 dataset into a projection."""
         v = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
         # Use Web Mercator at 30 m.
-        burned = v.rasterize(xres=30, crs=3857)
+
+        # Capture the warning on resolution not matching exactly bounds
+        with pytest.warns(UserWarning):
+            burned = v.rasterize(xres=30, crs=3857)
 
         assert burned.shape[0] == 1251
         assert burned.shape[1] == 1522
@@ -77,20 +83,24 @@ class TestVector:
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)  # type: ignore
-    def test_crop2raster(self, data: list[str]) -> None:
+    def test_crop(self, data: list[str]) -> None:
 
         # Load data
         raster_path, outlines_path = data
         rst = gu.Raster(raster_path)
         outlines = gu.Vector(outlines_path)
 
-        # Need to reproject to r.crs. Otherwise, crop2raster will work but will be approximate
+        # Need to reproject to r.crs. Otherwise, crop will work but will be approximate
         # Because outlines might be warped in a different crs
         outlines.ds = outlines.ds.to_crs(rst.crs)
 
         # Crop
         outlines_new = outlines.copy()
-        outlines_new.crop2raster(rst)
+        outlines_new.crop(rst)
+
+        # Check with bracket call
+        outlines_new2 = outlines_new[rst]
+        assert_geodataframe_equal(outlines_new.ds, outlines_new2.ds)
 
         # Verify that geometries intersect with raster bound
         rst_poly = gu.projtools.bounds2poly(rst.bounds)
@@ -109,6 +119,38 @@ class TestVector:
 
         # Check that some features were indeed removed
         assert np.sum(~np.array(intersects_old)) > 0
+
+    def test_proximity(self) -> None:
+        """
+        The core functionality is already tested against GDAL in test_raster: just verify the vector-specific behaviour.
+        #TODO: add an artificial test as well (mirroring TODO in test_georaster)
+        """
+
+        vector = gu.Vector(self.everest_outlines_path)
+
+        # -- Test 1: with a Raster provided --
+        raster1 = gu.Raster(self.landsat_b4_crop_path)
+        prox1 = vector.proximity(raster=raster1)
+
+        # The proximity should have the same extent, resolution and CRS
+        assert raster1.equal_georeferenced_grid(prox1)
+
+        # With the base geometry
+        vector.proximity(raster=raster1, geometry_type="geometry")
+
+        # With another geometry option
+        vector.proximity(raster=raster1, geometry_type="centroid")
+
+        # With only inside proximity
+        vector.proximity(raster=raster1, in_or_out="in")
+
+        # -- Test 2: with no Raster provided, just grid size --
+
+        # Default grid size
+        vector.proximity()
+
+        # With specific grid size
+        vector.proximity(grid_size=(100, 100))
 
 
 class TestSynthetic:
@@ -195,6 +237,13 @@ class TestSynthetic:
             eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
             assert np.count_nonzero(eroded_diff) == 0
 
+        # Check that no warning is raised when creating a mask with a xres not multiple of vector bounds
+        vector.create_mask(xres=1.01)
+
+        # Check that a warning is raised if the bounds were passed specifically by the user
+        with pytest.warns(UserWarning):
+            vector.create_mask(xres=1.01, bounds=(0, 0, 21, 21))
+
     def test_extract_vertices(self) -> None:
         """
         Test that extract_vertices works with simple geometries.
@@ -241,6 +290,69 @@ class TestSynthetic:
         with pytest.raises(ValueError, match=expected_message):
             voronoi = gu.geovector.generate_voronoi_polygons(self.vector.ds)
 
+    def test_buffer_metric(self) -> None:
+        """Check that metric buffering works"""
+
+        # Case with two squares: test that the buffered area is without deformations
+        # https://epsg.io/32631
+        utm31_x_center = 500000
+        utm31_y_center = 4649776
+        poly1_utm31 = Polygon(
+            [
+                (utm31_x_center, utm31_y_center),
+                (utm31_x_center + 1, utm31_y_center),
+                (utm31_x_center + 1, utm31_y_center + 1),
+                (utm31_x_center, utm31_y_center + 1),
+            ]
+        )
+
+        poly2_utm31 = Polygon(
+            [
+                (utm31_x_center + 10, utm31_y_center + 10),
+                (utm31_x_center + 11, utm31_y_center + 10),
+                (utm31_x_center + 11, utm31_y_center + 11),
+                (utm31_x_center + 10, utm31_y_center + 11),
+            ]
+        )
+
+        # We initiate the squares of size 1x1 in a UTM projection
+        two_squares = gu.Vector(gpd.GeoDataFrame(geometry=[poly1_utm31, poly2_utm31], crs="EPSG:32631"))
+
+        # Their area should now be 1 for each polygon
+        assert two_squares.ds.area.values[0] == 1
+        assert two_squares.ds.area.values[1] == 1
+
+        # We buffer them
+        two_squares_utm_buffered = two_squares.buffer_metric(buffer_size=1.0)
+
+        # Their area should now be 1 (square) + 4 (buffer along the sides) + 4*(pi*1**2 /4)
+        # (buffer of corners = quarter-disks)
+        expected_area = 1 + 4 + np.pi
+        assert two_squares_utm_buffered.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_utm_buffered.ds.area.values[1] == pytest.approx(expected_area, abs=0.01)
+
+        # And the new GeoDataFrame should exactly match that of one buffer from the original one
+        direct_gpd_buffer = gu.Vector(
+            gpd.GeoDataFrame(geometry=two_squares.ds.buffer(distance=1.0).geometry, crs=two_squares.crs)
+        )
+        assert_geodataframe_equal(direct_gpd_buffer.ds, two_squares_utm_buffered.ds)
+
+        # Now, if we reproject the original vector in a non-metric system
+        two_squares_geographic = gu.Vector(two_squares.ds.to_crs(epsg=4326))
+        # We buffer directly the Vector object in the non-metric system
+        two_squares_geographic_buffered = two_squares_geographic.buffer_metric(buffer_size=1.0)
+        # Then, we reproject that vector in the UTM zone
+        two_squares_geographic_buffered_reproj = gu.Vector(
+            two_squares_geographic_buffered.ds.to_crs(crs=two_squares.crs)
+        )
+
+        # Their area should now be the same as before for each polygon
+        assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
+
+        # And this time, it is the reprojected GeoDataFrame that should almost match (within a tolerance of 10e-06)
+        assert all(direct_gpd_buffer.ds.geom_almost_equals(two_squares_geographic_buffered_reproj.ds))
+
     def test_buffer_without_overlap(self) -> None:
         """
         Check that non-overlapping buffer feature works. Does not work on simple geometries, so test on MultiPolygon.
@@ -252,7 +364,7 @@ class TestSynthetic:
         # Check with buffers that should not overlap
         # ------------------------------------------
         buffer_size = 2
-        buffer = two_squares.buffer_without_overlap(buffer_size)
+        buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
         assert len(buffer.ds) == len(two_squares.ds)
@@ -280,7 +392,7 @@ class TestSynthetic:
         # Case 2 - Check with buffers that overlap -> this case is actually not the expected result !
         # -------------------------------
         buffer_size = 5
-        buffer = two_squares.buffer_without_overlap(buffer_size)
+        buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
         assert len(buffer.ds) == len(two_squares.ds)

@@ -6,7 +6,7 @@ from __future__ import annotations
 import warnings
 from collections import abc
 from numbers import Number
-from typing import TypeVar
+from typing import Literal, TypeVar, overload
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -19,6 +19,7 @@ from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
+from geoutils.projtools import _get_bounds_projected, bounds2poly
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -60,6 +61,10 @@ class Vector:
         """Provide string of information about Raster."""
         return self.info()
 
+    def __getitem__(self, value: gu.Raster | Vector | list[float] | tuple[float, ...]) -> Vector:
+        """Subset the Raster object: calls the crop method with default parameters"""
+        return self.crop(cropGeom=value, inplace=False)
+
     def info(self) -> str:
         """
         Returns string of information about the vector (filename, coordinate system, number of layers, features, etc.).
@@ -90,28 +95,59 @@ class Vector:
         new_vector.__init__(self.ds.copy())  # type: ignore
         return new_vector  # type: ignore
 
-    def crop2raster(self, rst: gu.Raster) -> None:
+    @overload
+    def crop(
+        self: VectorType,
+        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        inplace: Literal[True] = True,
+    ) -> None:
+        ...
+
+    @overload
+    def crop(
+        self: VectorType,
+        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        inplace: Literal[False],
+    ) -> VectorType:
+        ...
+
+    def crop(
+        self: VectorType,
+        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        inplace: bool = True,
+    ) -> VectorType | None:
         """
-        Update self so that features outside the extent of a raster file are cropped.
+        Crop the Vector to given extent, or bounds of a raster or vector.
 
-        Reprojection is done on the fly if both data set have different projections.
+        Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param rst: A Raster object or string to filename
+        :param cropGeom: Geometry to crop vector to, as either a Raster object, a Vector object, or a list of
+            coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
+            Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
+            list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
+        :param inplace: Update the vector inplace or return copy.
         """
-        # If input is string, open as Raster
-        if isinstance(rst, str):
-            rst = gu.Raster(rst)
+        if isinstance(cropGeom, (gu.Raster, Vector)):
+            # For another Vector or Raster, we reproject the bounding box in the same CRS as self
+            xmin, ymin, xmax, ymax = cropGeom.get_bounds_projected(out_crs=self.crs)
+        elif isinstance(cropGeom, (list, tuple)):
+            xmin, ymin, xmax, ymax = cropGeom
+        else:
+            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
-        # Convert raster extent into self CRS
-        # Note: could skip this if we could test if rojections are same
-        # Note: should include a method in Raster to get extent in other projections, not only using corners
-        left, bottom, right, top = rst.bounds
-        x1, y1, x2, y2 = warp.transform_bounds(rst.crs, self.ds.crs, left, bottom, right, top)
-        self.ds = self.ds.cx[x1:x2, y1:y2]
+        # Need to separate the two options, inplace update
+        if inplace:
+            self.ds = self.ds.cx[xmin:xmax, ymin:ymax]
+            return None
+        # Or create a copy otherwise
+        else:
+            new_vector = self.copy()
+            new_vector.ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]
+            return new_vector
 
     def create_mask(
         self,
-        rst: str | gu.georaster.RasterType | None = None,
+        rst: str | gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -120,7 +156,7 @@ class Vector:
     ) -> np.ndarray:
         """
         Rasterize the vector features into a boolean raster which has the extent/dimensions of \
-the provided raster file.
+        the provided raster file.
 
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
         Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
@@ -154,7 +190,10 @@ the provided raster file.
             if crs is None:
                 crs = self.ds.crs
             if bounds is None:
+                bounds_shp = True
                 bounds = self.ds.total_bounds
+            else:
+                bounds_shp = False
 
             # Calculate raster shape
             left, bottom, right, top = bounds
@@ -162,7 +201,9 @@ the provided raster file.
             width = abs((top - bottom) / yres)
 
             if width % 1 != 0 or height % 1 != 0:
-                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
+                # Only warn if the bounds were provided, and not derived from the vector
+                if not bounds_shp:
+                    warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
 
             width = int(np.round(width))
             height = int(np.round(height))
@@ -212,7 +253,7 @@ the provided raster file.
 
     def rasterize(
         self,
-        rst: str | gu.georaster.RasterType | None = None,
+        rst: str | gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -323,7 +364,7 @@ the provided raster file.
         """
         Query the Vector dataset with a valid Pandas expression.
 
-        :param expression: A python-like expression to evaluate. Example: "col1 > col2"
+        :param expression: A python-like expression to evaluate. Example: "col1 > col2".
         :param inplace: Whether the query should modify the data in place or return a modified copy.
 
         :returns: Vector resulting from the provided query expression or itself if inplace=True.
@@ -338,15 +379,122 @@ the provided raster file.
         new_vector.__init__(self.ds.query(expression))  # type: ignore
         return new_vector  # type: ignore
 
-    def buffer_without_overlap(self, buffer_size: int | float, plot: bool = False) -> np.ndarray:
+    def proximity(
+        self,
+        raster: gu.Raster | None = None,
+        grid_size: tuple[int, int] = (1000, 1000),
+        geometry_type: str = "boundary",
+        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
+        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+    ) -> gu.Raster:
+        """
+        Proximity to this Vector's geometry computed for each cell of a Raster grid, or for a grid size with
+        this Vector's extent.
+
+        If passed, the Raster georeferenced grid will be used to burn the proximity. If not, a grid size can be
+        passed to create a georeferenced grid with the bounds and CRS of this Vector.
+
+        By default, the boundary of the Vector's geometry will be used. The full geometry can be used by
+        passing "geometry",
+        or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
+        See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
+
+        :param raster: Raster to burn the proximity grid on.
+        :param grid_size: If no Raster is provided, grid size to use with this Vector's extent and CRS
+            (defaults to 1000 x 1000).
+        :param geometry_type: Type of geometry to use for the proximity, defaults to 'boundary'.
+        :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
+        :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
+
+        :return: Proximity raster.
+        """
+
+        # 0/ If no Raster is passed, create one on the Vector bounds of size 1000 x 1000
+        if raster is None:
+
+            # TODO: this bit of code is common in several vector functions (rasterize, etc): move out as common code?
+            # By default, use self's bounds
+            if self.bounds is None:
+                raise ValueError("To automatically rasterize on the vector, bounds need to be defined.")
+
+            # Calculate raster shape
+            left, bottom, right, top = self.bounds
+
+            # Calculate raster transform
+            transform = rio.transform.from_bounds(left, bottom, right, top, grid_size[0], grid_size[1])
+
+            raster = gu.Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
+
+        proximity = gu.georaster.raster.proximity_from_vector_or_raster(
+            raster=raster, vector=self, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit
+        )
+
+        return raster.copy(new_array=proximity)
+
+    def buffer_metric(self, buffer_size: float) -> Vector:
+        """
+        Buffer the vector in a metric system (UTM only).
+
+        The outlines are projected to a local UTM, then reverted to the original projection after buffering.
+
+        :param buffer_size: Buffering distance in meters
+
+        :return: Buffered shapefile
+        """
+
+        from geoutils.projtools import latlon_to_utm, utm_to_epsg
+
+        # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=UserWarning)
+            shp_wgs84 = self.ds.to_crs(epsg=4326)
+            lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+            del shp_wgs84
+
+        # Get the EPSG code of the local UTM
+        utm = latlon_to_utm(lat, lon)
+        epsg = utm_to_epsg(utm)
+
+        # Reproject the shapefile in the local UTM
+        ds_utm = self.ds.to_crs(epsg=epsg)
+
+        # Buffer the shapefile
+        ds_buffered = ds_utm.buffer(distance=buffer_size)
+        del ds_utm
+
+        # Revert-project the shapefile in the original CRS
+        ds_buffered_origproj = ds_buffered.to_crs(crs=self.ds.crs)
+        del ds_buffered
+
+        # Return a Vector object of the buffered GeoDataFrame
+        # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
+        vector_buffered = Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
+
+        return vector_buffered
+
+    def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
+        """
+        Return self's bounds in the given CRS.
+
+        :param out_crs: Output CRS
+        :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
+        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        """
+
+        # Calculate new bounds
+        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
+
+        return new_bounds
+
+    def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> Vector:
         """
         Returns a Vector object containing self's geometries extended by a buffer, without overlapping each other.
 
         The algorithm is based upon this tutorial: https://statnmap.com/2020-07-31-buffer-area-for-nearest-neighbour/.
-        The buffered polygons are created using Voronoi polygons in order to delineate the "area of influence" \
-of each geometry.
-        The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,\
-hence one geometry "steps" slightly on the neighbor buffer in some cases.
+        The buffered polygons are created using Voronoi polygons in order to delineate the "area of influence"
+        of each geometry.
+        The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,
+        hence one geometry "steps" slightly on the neighbor buffer in some cases.
         The algorithm may also yield unexpected results on very simple geometries.
 
         Note: A similar functionality is provided by momepy (http://docs.momepy.org) and is probably more robust.
@@ -361,12 +509,32 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         >>> plt.show()  # doctest: +SKIP
 
         :param buffer_size: Buffer size in self's coordinate system units.
+        :param metric: Whether to perform the buffering in a local metric system (default: True).
         :param plot: Set to True to show intermediate plots, useful for understanding or debugging.
 
         :returns: A Vector containing the buffered geometries.
         """
+
+        from geoutils.projtools import latlon_to_utm, utm_to_epsg
+
+        # Project in local UTM if metric is True
+        if metric:
+            # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
+            with warnings.catch_warnings():
+                warnings.simplefilter(action="ignore", category=UserWarning)
+                shp_wgs84 = self.ds.to_crs(epsg=4326)
+                lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+                del shp_wgs84
+
+            # Get the EPSG code of the local UTM
+            utm = latlon_to_utm(lat, lon)
+            epsg = utm_to_epsg(utm)
+
+            gdf = self.ds.to_crs(epsg=epsg)
+        else:
+            gdf = self.ds
+
         # Dissolve all geometries into one
-        gdf = self.ds
         merged = gdf.dissolve()
 
         # Add buffer around geometries
@@ -376,7 +544,7 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
         buffer = merged_buffer.difference(merged)
 
         # Crop Voronoi polygons to bound geometry and add missing polygons
-        bound_poly = gu.projtools.bounds2poly(gdf)
+        bound_poly = bounds2poly(gdf)
         bound_poly = bound_poly.buffer(buffer_size)
         voronoi_all = generate_voronoi_with_bounds(gdf, bound_poly)
         if plot:
@@ -423,7 +591,11 @@ hence one geometry "steps" slightly on the neighbor buffer in some cases.
             ax4.set_title("Final buffer")
             plt.show()
 
-        return gu.Vector(merged_voronoi)
+        # Reverse-project to the original CRS if metric is True
+        if metric:
+            merged_voronoi = merged_voronoi.to_crs(crs=self.crs)
+
+        return Vector(merged_voronoi)
 
 
 # -----------------------------------------
@@ -438,20 +610,20 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
     :param gdf: The GeoDataFrame from which the vertices need to be extracted.
 
     :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal \
- to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
+    to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
     """
     vertices = []
     # Loop on all geometries within gdf
     for geom in gdf.geometry:
         # Extract geometry exterior(s)
         if geom.geom_type == "MultiPolygon":
-            exteriors = [p.exterior for p in geom]
+            exteriors = [p.exterior for p in geom.geoms]
         elif geom.geom_type == "Polygon":
             exteriors = [geom.exterior]
         elif geom.geom_type == "LineString":
             exteriors = [geom]
         elif geom.geom_type == "MultiLineString":
-            exteriors = geom
+            exteriors = list(geom.geoms)
         else:
             raise NotImplementedError(f"Geometry type {geom.geom_type} not implemented.")
 

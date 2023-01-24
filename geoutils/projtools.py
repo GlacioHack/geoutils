@@ -15,12 +15,56 @@ from rasterio.crs import CRS
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import Polygon
 
-from geoutils.georaster import Raster
-from geoutils.geovector import Vector
+
+def latlon_to_utm(lat: float, lon: float) -> str:
+    """
+    Get UTM zone for a given latitude and longitude coordinates.
+
+    :param lat: Latitude coordinate.
+    :param lon: Longitude coordinate.
+
+    :returns: UTM zone.
+    """
+
+    if not (
+        isinstance(lat, (float, np.floating, int, np.integer))
+        and isinstance(lon, (float, np.floating, int, np.integer))
+    ):
+        raise TypeError("Latitude and longitude must be floats or integers.")
+
+    if not -180 <= lon < 180:
+        raise ValueError("Longitude value is out of range [-180, 180[.")
+    if not -90 <= lat < 90:
+        raise ValueError("Latitude value is out of range [-90, 90[.")
+
+    # Get UTM zone from name string of crs info
+    utm_zone = pyproj.database.query_utm_crs_info(
+        "WGS 84", area_of_interest=pyproj.aoi.AreaOfInterest(lon, lat, lon, lat)
+    )[0].name.split(" ")[-1]
+
+    return str(utm_zone)
+
+
+def utm_to_epsg(utm: str) -> int:
+    """
+    Get EPSG code of UTM zone.
+
+    :param utm: UTM zone.
+
+    :return: EPSG of UTM zone.
+    """
+
+    # Whether UTM is passed as single or double digits, homogenize to single-digit
+    utm = str(int(utm[:-1])) + utm[-1].upper()
+
+    # Get corresponding EPSG
+    epsg = pyproj.CRS(f"WGS 84 / UTM Zone {utm}").to_epsg()
+
+    return int(epsg)
 
 
 def bounds2poly(
-    boundsGeom: list[float] | rio.io.DatasetReader | Raster | Vector,
+    boundsGeom: list[float] | rio.io.DatasetReader,
     in_crs: CRS | None = None,
     out_crs: CRS | None = None,
 ) -> Polygon:
@@ -61,7 +105,7 @@ def bounds2poly(
 
 
 def merge_bounds(
-    bounds_list: abc.Iterable[list[float] | Raster | rio.io.DatasetReader | Vector | gpd.GeoDataFrame],
+    bounds_list: abc.Iterable[list[float] | rio.io.DatasetReader | gpd.GeoDataFrame],
     merging_algorithm: str = "union",
 ) -> tuple[float, ...]:
     """
@@ -215,3 +259,15 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 
     same: bool = proj1.is_exact_same(proj2)
     return same
+
+
+def _get_bounds_projected(
+    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
+) -> rio.coords.BoundingBox:
+
+    # Calculate new bounds
+    left, bottom, right, top = bounds
+    new_bounds = rio.warp.transform_bounds(in_crs, out_crs, left, bottom, right, top, densify_pts)
+    new_bounds = rio.coords.BoundingBox(*new_bounds)
+
+    return new_bounds

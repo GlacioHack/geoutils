@@ -3,6 +3,7 @@ geoutils.georaster provides a toolset for working with raster data.
 """
 from __future__ import annotations
 
+import math
 import os
 import warnings
 from collections import abc
@@ -27,11 +28,12 @@ from rasterio.crs import CRS
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from rasterio.warp import Resampling
-from scipy.ndimage import map_coordinates
+from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
 from geoutils.geovector import Vector
+from geoutils.projtools import _get_bounds_projected
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -524,6 +526,10 @@ class Raster:
     def __str__(self) -> str:
         """Provide string of information about Raster."""
         return self.info()
+
+    def __getitem__(self, value: Raster | Vector | list[float] | tuple[float, ...]) -> Raster:
+        """Subset the Raster object: calls the crop method with default parameters"""
+        return self.crop(cropGeom=value, inplace=False)
 
     def __eq__(self, other: object) -> bool:
         """Check if a Raster masked array's data (including masked values), mask, fill_value and dtype are equal,
@@ -1140,6 +1146,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return cp
 
+    def equal_georeferenced_grid(self: RasterType, raster: RasterType) -> bool:
+        """
+        Check that grid shape, geotransform and CRS are equal.
+
+        :param raster: Another Raster object
+
+        :return: Whether the two objects have the same georeferenced grid
+        """
+
+        return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
+
     @overload
     def get_nanarray(self, return_mask: Literal[False] = False) -> np.ndarray:
         ...
@@ -1314,7 +1331,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         inplace: bool = True,
     ) -> RasterType | None:
         """
-        Crop the Raster to a given extent.
+        Crop the Raster to a given extent, or bounds of a raster or vector.
+
+        Reprojection is done on the fly if georeferenced objects have different projections.
 
         :param cropGeom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
             coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
@@ -1331,8 +1350,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             "match_extent",
             "match_pixel",
         ], "mode must be one of 'match_pixel', 'match_extent'"
+
         if isinstance(cropGeom, (Raster, Vector)):
-            xmin, ymin, xmax, ymax = cropGeom.bounds
+            # For another Vector or Raster, we reproject the bounding box in the same CRS as self
+            xmin, ymin, xmax, ymax = cropGeom.get_bounds_projected(out_crs=self.crs)
         elif isinstance(cropGeom, (list, tuple)):
             xmin, ymin, xmax, ymax = cropGeom
         else:
@@ -1375,13 +1396,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     def reproject(
         self: RasterType,
         dst_ref: RasterType | rio.io.Dataset | str | None = None,
-        dst_crs: CRS | str | None = None,
+        dst_crs: CRS | str | int | None = None,
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
         dst_nodata: int | float | list[int] | list[float] | None = None,
         src_nodata: int | float | list[int] | list[float] | None = None,
-        dtype: np.dtype | None = None,
+        dst_dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
         n_threads: int = 0,
@@ -1399,13 +1420,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :param dst_ref: a reference raster. If set will use the attributes of this
             raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
-        :param crs: Specify the Coordinate Reference System to reproject to. If dst_ref not set, defaults to self.crs.
+        :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
+            defaults to self.crs.
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
-        :param dst_bounds: a BoundingBox object or a dictionary containing\
-                left, bottom, right, top bounds in the source CRS.
+        :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the
+        source CRS.
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
-        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source, \
+        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source,
         and if source is None, will use GDAL's default.
+        :param dst_dtype: Set data type of output.
         :param src_nodata: nodata value of the source. If set to None, will read from the metadata.
         :param resampling: A rasterio Resampling method
         :param silent: If True, will not print warning statements
@@ -1452,9 +1475,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             dst_crs = CRS.from_user_input(dst_crs)
 
         # Set output dtype
-        if dtype is None:
+        if dst_dtype is None:
             # Warning: this will not work for multiple bands with different dtypes
-            dtype = self.dtypes[0]
+            dst_dtype = self.dtypes[0]
 
         # Set source nodata if provided
         if src_nodata is None:
@@ -1465,7 +1488,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if dst_nodata is None:
             dst_nodata = self.nodata
             if dst_nodata is None:
-                dst_nodata = _default_nodata(dtype)
+                dst_nodata = _default_nodata(dst_dtype)
                 # if dst_nodata is already being used, raise a warning.
                 # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
                 if not self.is_loaded:
@@ -1538,7 +1561,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Set output shape (Note: dst_size is (ncol, nrow))
         if dst_size is not None:
             dst_shape = (self.count, dst_size[1], dst_size[0])
-            dst_data = np.ones(dst_shape, dtype=dtype)
+            dst_data = np.ones(dst_shape, dtype=dst_dtype)
             reproj_kwargs.update({"destination": dst_data})
         else:
             dst_shape = (self.count, self.height, self.width)
@@ -1559,7 +1582,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # Specify the output bounds and shape, let rasterio handle the rest
             reproj_kwargs.update({"dst_transform": dst_transform})
-            dst_data = np.ones((dst_size[1], dst_size[0]), dtype=dtype)
+            dst_data = np.ones((dst_size[1], dst_size[0]), dtype=dst_dtype)
             reproj_kwargs.update({"destination": dst_data})
 
         # Check that reprojection is actually needed
@@ -1617,7 +1640,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             dst_data = np.array(dst_data)
 
         # Enforce output type
-        dst_data = np.ma.masked_array(dst_data.astype(dtype), fill_value=dst_nodata)
+        dst_data = np.ma.masked_array(dst_data.astype(dst_dtype), fill_value=dst_nodata)
 
         if dst_nodata is not None:
             dst_data.mask = dst_data == dst_nodata
@@ -1775,25 +1798,22 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return xr
 
-    def get_bounds_projected(self, out_crs: CRS, densify_pts_max: int = 5000) -> rio.coords.BoundingBox:
+    def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
         """
         Return self's bounds in the given CRS.
 
         :param out_crs: Output CRS
-        :param densify_pts_max: Maximum points to be added between image corners to account for non linear edges.
-                                Reduce if time computation is really critical (ms) or increase if extent is \
-                                        not accurate enough.
+        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+         Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
 
         """
         # Max points to be added between image corners to account for non linear edges
         # rasterio's default is a bit low for very large images
         # instead, use image dimensions, with a maximum of 50000
-        densify_pts = min(max(self.width, self.height), densify_pts_max)
+        densify_pts = min(max(self.width, self.height), densify_pts)
 
         # Calculate new bounds
-        left, bottom, right, top = self.bounds
-        new_bounds = rio.warp.transform_bounds(self.crs, out_crs, left, bottom, right, top, densify_pts)
-        new_bounds = rio.coords.BoundingBox(*new_bounds)
+        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
 
         return new_bounds
 
@@ -1822,8 +1842,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, rst_bounds_sameproj], merging_algorithm="intersection")
 
-        # check that intersection is not void, otherwise return 0 everywhere
-        if intersection == ():
+        # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
+        if intersection == () or all(math.isnan(i) for i in intersection):
             warnings.warn("Intersection is void")
             return (0.0, 0.0, 0.0, 0.0)
 
@@ -2338,12 +2358,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 )
         else:
             for band_n in indices:
-                # Generate a new instance with the same underlying values.
-                raster = Raster(self)
                 # Set the data to a slice of the original array
-                raster._data = self.data[band_n, :, :].reshape((1,) + self.data.shape[1:])
-                # Set the nbands
-                bands.append(raster)
+                bands.append(
+                    self.from_array(
+                        self.data[band_n, :, :].reshape((1,) + self.data.shape[1:]),
+                        transform=self.transform,
+                        crs=self.crs,
+                        nodata=self.nodata,
+                    )
+                )
 
         return bands
 
@@ -2473,9 +2496,23 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             raise ValueError("in_value must be a number, a tuple or a sequence")
 
+        # GeoPandas.from_features() only supports certain dtypes, we find the best common dtype to optimize memory usage
+        # TODO: this should be a function independent of polygonize, reused in several places
+        gpd_dtypes = ["uint8", "uint16", "int16", "int32", "float32"]
+        list_common_dtype_index = []
+        for gpd_type in gpd_dtypes:
+            polygonize_dtype = np.find_common_type([gpd_type, self.dtypes[0]], [])
+            if str(polygonize_dtype) in gpd_dtypes:
+                list_common_dtype_index.append(gpd_dtypes.index(gpd_type))
+        if len(list_common_dtype_index) == 0:
+            final_dtype = "float32"
+        else:
+            final_dtype_index = min(list_common_dtype_index)
+            final_dtype = gpd_dtypes[final_dtype_index]
+
         results = (
             {"properties": {"raster_value": v}, "geometry": s}
-            for i, (s, v) in enumerate(shapes(self.data, mask=bool_msk, transform=self.transform))
+            for i, (s, v) in enumerate(shapes(self.data.astype(final_dtype), mask=bool_msk, transform=self.transform))
         )
 
         gdf = gpd.GeoDataFrame.from_features(list(results))
@@ -2484,3 +2521,117 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         gdf.set_crs(self.crs, inplace=True)
 
         return gv.Vector(gdf)
+
+    def proximity(
+        self,
+        vector: Vector | None = None,
+        target_values: list[float] | None = None,
+        geometry_type: str = "boundary",
+        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
+        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+    ) -> Raster:
+        """
+        Proximity to this Raster's target pixels, or to a Vector's geometry, computed for each cell of this Raster's
+        grid.
+
+        When passing a Vector, by default, the boundary of the geometry will be used. The full geometry can be used by
+        passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
+        See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
+
+        :param vector: Vector for which to compute the proximity to geometry,
+            if not provided computed on this Raster target pixels.
+        :param target_values: (Only with Raster) List of target values to use for the proximity,
+            defaults to all non-zero values.
+        :param geometry_type: (Only with a Vector) Type of geometry to use for the proximity, defaults to 'boundary'.
+        :param in_or_out: (Only with a Vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
+        :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
+
+        :return: Proximity raster.
+        """
+
+        proximity = proximity_from_vector_or_raster(
+            raster=self,
+            vector=vector,
+            target_values=target_values,
+            geometry_type=geometry_type,
+            in_or_out=in_or_out,
+            distance_unit=distance_unit,
+        )
+
+        return self.copy(new_array=proximity)
+
+
+# -----------------------------------------
+# Additional stand-alone utility functions
+# -----------------------------------------
+
+
+def proximity_from_vector_or_raster(
+    raster: Raster,
+    vector: Vector | None = None,
+    target_values: list[float] | None = None,
+    geometry_type: str = "boundary",
+    in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
+    distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+) -> np.ndarray:
+    """
+    (This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector)
+    Proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's geometry type
+    rasterized on the Raster.
+
+    :param raster: Raster to burn the proximity grid on.
+    :param vector: Vector for which to compute the proximity to geometry,
+        if not provided computed on the Raster target pixels.
+    :param target_values: (Only with a Raster) List of target values to use for the proximity,
+        defaults to all non-zero values.
+    :param geometry_type: (Only with a Vector) Type of geometry to use for the proximity, defaults to 'boundary'.
+    :param in_or_out: (Only with a Vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
+    :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
+    """
+
+    # 1/ First, if there is a vector input, we rasterize the geometry type
+    # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
+    if vector is not None:
+        # We create a geodataframe with the geometry type
+        boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
+        # We mask the pixels that make up the geometry type
+        mask_boundary = Vector(boundary_shp).create_mask(raster).squeeze()
+
+    else:
+        # We mask target pixels
+        if target_values is not None:
+            mask_boundary = np.logical_or.reduce([raster.get_nanarray() == target_val for target_val in target_values])
+        # Otherwise, all non-zero values are considered targets
+        else:
+            mask_boundary = raster.get_nanarray().astype(bool)
+
+    # 2/ Now, we compute the distance matrix relative to the masked geometry type
+    if distance_unit.lower() == "georeferenced":
+        sampling: int | tuple[float | int, float | int] = raster.res
+    elif distance_unit.lower() == "pixel":
+        sampling = 1
+    else:
+        raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
+
+    # If not all pixels are targets, then we compute the distance
+    non_targets = np.count_nonzero(mask_boundary)
+    if non_targets > 0:
+        proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
+    # Otherwise, pass an array full of nodata
+    else:
+        proximity = np.ones(np.shape(mask_boundary)) * np.nan
+
+    # 3/ If there was a vector input, apply the in_and_out argument to optionally mask inside/outside
+    if vector is not None:
+        if in_or_out == "both":
+            pass
+        elif in_or_out in ["in", "out"]:
+            mask_polygon = Vector(vector.ds).create_mask(raster).squeeze()
+            if in_or_out == "in":
+                proximity[~mask_polygon] = 0
+            else:
+                proximity[mask_polygon] = 0
+        else:
+            raise ValueError('The type of proximity must be one of "in", "out" or "both".')
+
+    return proximity
