@@ -1374,8 +1374,8 @@ self.set_nodata()."
         # -- Tests 4: check that passing an array-like object works
 
         # For simple coordinates
-        x_coords = [xtest0, xtest0+100]
-        y_coords = [ytest0, ytest0-100]
+        x_coords = [xtest0, xtest0 + 100]
+        y_coords = [ytest0, ytest0 - 100]
         vals = r_multi.value_at_coords(x=x_coords, y=y_coords)
         val0, win0 = r_multi.value_at_coords(x=x_coords[0], y=y_coords[0], return_window=True)
         val1, win1 = r_multi.value_at_coords(x=x_coords[1], y=y_coords[1], return_window=True)

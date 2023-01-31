@@ -2026,12 +2026,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         """
         # Check for array-like inputs
-        if not isinstance(x, (float, np.floating, int, np.integer)) and isinstance(y, (float, np.floating, int, np.integer))\
-            or isinstance(x, (float, np.floating, int, np.integer)) and not isinstance(y, (float, np.floating, int, np.integer)):
-                raise TypeError("Coordinates must be of the same type.")
+        if (
+            not isinstance(x, (float, np.floating, int, np.integer))
+            and isinstance(y, (float, np.floating, int, np.integer))
+            or isinstance(x, (float, np.floating, int, np.integer))
+            and not isinstance(y, (float, np.floating, int, np.integer))
+        ):
+            raise TypeError("Coordinates must be both numbers or both array-like.")
 
         # If for a single value, wrap in a list
-        if isinstance(x, (float, np.floating, int, np.integer)) and isinstance(y, (float, np.floating, int, np.integer)):
+        if isinstance(x, (float, np.floating, int, np.integer)) and isinstance(
+            y, (float, np.floating, int, np.integer)
+        ):
             x = [x]
             y = [y]
             # For the end of the function
@@ -2039,7 +2045,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             unwrap = False
             # Check that array-like objects are the same length
-            if len(x) != len(y):
+            if len(x) != len(y):  # type: ignore
                 raise ValueError("Coordinates must be of the same length.")
 
         # Check window parameter
@@ -2068,17 +2074,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             list_windows = []
 
         # Loop over all coordinates passed
-        for k in range(len(x)):
+        for k in range(len(x)):  # type: ignore
 
             value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
 
             if latlon:
                 from geoutils import projtools
 
-                x0, y0 = projtools.reproject_from_latlon((y[k], x[k]), self.crs)
+                x0, y0 = projtools.reproject_from_latlon((y[k], x[k]), self.crs)  # type: ignore
             else:
-                x0 = x[k]
-                y0 = y[k]
+                x0 = x[k]  # type: ignore
+                y0 = y[k]  # type: ignore
 
             # Convert coordinates to pixel space
             row, col = rio.transform.rowcol(self.transform, x0, y0, op=round)
@@ -2114,7 +2120,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             else:
                 if self.nbands == 1:
                     with rio.open(self.filename) as raster:
-                        data = raster.read(window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked)
+                        data = raster.read(
+                            window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked
+                        )
                     value = format_value(data)
                     win = data
                 else:
@@ -2139,7 +2147,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             if return_window:
                 output_win = list_windows[0]
         else:
-            output_val = list_values
+            output_val = list_values  # type: ignore
             if return_window:
                 output_win = list_windows
 
