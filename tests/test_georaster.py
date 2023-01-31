@@ -1260,7 +1260,7 @@ self.set_nodata()."
 
         xmin, ymin, xmax, ymax = r.bounds
 
-        # We can test with several method for the exact indexes: interp, value_at_coords, and simple read should
+        # We can test with several method for the exact indexes: interp, and simple read should
         # give back the same values that fall right on the coordinates
         xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
         yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
@@ -1272,7 +1272,6 @@ self.set_nodata()."
         for k in range(len(xrand)):
             # We directly sample the values
             z_ind = img[0, int(i[k]), int(j[k])]
-            # We can also compare with the value_at_coords() functionality
             list_z_ind.append(z_ind)
 
         rpts = r.interp_points(pts, order=1)
@@ -1371,6 +1370,25 @@ self.set_nodata()."
             r.value_at_coords(xtest0, ytest0, window=4)
         # But a window that is a whole number as a float works
         r.value_at_coords(xtest0, ytest0, window=3.0)  # type: ignore
+
+        # -- Tests 4: check that passing an array-like object works
+
+        # For simple coordinates
+        x_coords = [xtest0, xtest0+100]
+        y_coords = [ytest0, ytest0-100]
+        vals = r_multi.value_at_coords(x=x_coords, y=y_coords)
+        val0, win0 = r_multi.value_at_coords(x=x_coords[0], y=y_coords[0], return_window=True)
+        val1, win1 = r_multi.value_at_coords(x=x_coords[1], y=y_coords[1], return_window=True)
+
+        assert len(vals) == len(x_coords)
+        assert vals[0] == val0
+        assert vals[1] == val1
+
+        # With a return window argument
+        vals, windows = r_multi.value_at_coords(x=x_coords, y=y_coords, return_window=True)
+        assert len(windows) == len(x_coords)
+        assert np.array_equal(windows[0], win0, equal_nan=True)
+        assert np.array_equal(windows[1], win1, equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:
