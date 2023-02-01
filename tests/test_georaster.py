@@ -1664,14 +1664,14 @@ self.set_nodata()."
         temp_dir = tempfile.TemporaryDirectory()
 
         # Save file to temporary file, with defaults opts
-        with NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name) as temp_file:
-            img.save(temp_file.name)
-            saved = gr.Raster(temp_file.name)
-            assert img == saved
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+        img.save(temp_file.name)
+        saved = gr.Raster(temp_file.name)
+        assert img == saved
 
-            # Try to save with a pathlib path
-            path = pathlib.Path(temp_file.name)
-            img.save(path)
+        # Try to save with a pathlib path
+        path = pathlib.Path(temp_file.name)
+        img.save(path)
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
