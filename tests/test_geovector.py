@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import geopandas as gpd
 import pathlib
+
+import geopandas as gpd
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal

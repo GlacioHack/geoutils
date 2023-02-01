@@ -4,11 +4,11 @@ Test functions for georaster
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import tempfile
 import warnings
 from tempfile import NamedTemporaryFile, TemporaryFile
-import pathlib
 
 import matplotlib.pyplot as plt
 import numpy as np

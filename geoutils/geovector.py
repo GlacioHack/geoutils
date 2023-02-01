@@ -3,11 +3,11 @@ geoutils.vectortools provides a toolset for working with vector data.
 """
 from __future__ import annotations
 
+import pathlib
 import warnings
 from collections import abc
 from numbers import Number
 from typing import Literal, TypeVar, overload
-import pathlib
 
 import geopandas as gpd
 import matplotlib.pyplot as plt

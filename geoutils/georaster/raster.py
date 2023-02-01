@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import math
 import os
+import pathlib
 import warnings
 from collections import abc
 from collections.abc import Iterable
 from contextlib import ExitStack
 from numbers import Number
 from typing import IO, Any, Callable, TypeVar, overload
-import pathlib
 
 import geopandas as gpd
 import matplotlib
@@ -26,9 +26,9 @@ import rasterio.windows
 from affine import Affine
 from matplotlib import cm, colors
 from rasterio.crs import CRS
+from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
-from rasterio.enums import Resampling
 from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.geovector as gv
@@ -245,7 +245,12 @@ class Raster:
 
     def __init__(
         self,
-        filename_or_dataset: str | pathlib.Path | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
+        filename_or_dataset: str
+        | pathlib.Path
+        | RasterType
+        | rio.io.DatasetReader
+        | rio.io.MemoryFile
+        | dict[str, Any],
         bands: None | int | list[int] = None,
         load_data: bool = True,
         downsample: AnyNumber = 1,
@@ -319,7 +324,7 @@ class Raster:
             with ExitStack():
                 if isinstance(filename_or_dataset, (str, pathlib.Path)):
                     ds: rio.io.DatasetReader = rio.open(filename_or_dataset)
-                    self.filename = filename_or_dataset
+                    self.filename = str(filename_or_dataset)
                 elif isinstance(filename_or_dataset, rio.io.DatasetReader):
                     ds = filename_or_dataset
                     self.filename = filename_or_dataset.files[0]
