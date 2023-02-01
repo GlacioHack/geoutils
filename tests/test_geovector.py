@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import geopandas as gpd
+import pathlib
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
@@ -24,10 +25,24 @@ class TestVector:
     glacier_outlines = gu.Vector(GLACIER_OUTLINES_URL)
 
     def test_init(self) -> None:
+        """Test class initiation works as intended"""
 
-        vector = gu.Vector(GLACIER_OUTLINES_URL)
+        # First, with a URL filename
+        v = gu.Vector(GLACIER_OUTLINES_URL)
+        assert isinstance(v, gu.Vector)
 
-        assert isinstance(vector, gu.Vector)
+        # Second, with a string filename
+        v0 = gu.Vector(self.aster_outlines_path)
+        assert isinstance(v0, gu.Vector)
+
+        # Second, with a pathlib path
+        path = pathlib.Path(self.aster_outlines_path)
+        v1 = gu.Vector(path)
+        assert isinstance(v1, gu.Vector)
+
+        # Third, with a geopandas dataframe
+        v2 = gu.Vector(gpd.read_file(self.aster_outlines_path))
+        assert isinstance(v2, gu.Vector)
 
     def test_copy(self) -> None:
 

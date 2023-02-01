@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from contextlib import ExitStack
 from numbers import Number
 from typing import IO, Any, Callable, TypeVar, overload
+import pathlib
 
 import geopandas as gpd
 import matplotlib
@@ -27,7 +28,7 @@ from matplotlib import cm, colors
 from rasterio.crs import CRS
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
-from rasterio.warp import Resampling
+from rasterio.enums import Resampling
 from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.geovector as gv
@@ -244,7 +245,7 @@ class Raster:
 
     def __init__(
         self,
-        filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
+        filename_or_dataset: str | pathlib.Path | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
         bands: None | int | list[int] = None,
         load_data: bool = True,
         downsample: AnyNumber = 1,
@@ -308,7 +309,7 @@ class Raster:
                 setattr(self, key, filename_or_dataset.__dict__[key])
             return
         # Image is a file on disk.
-        elif isinstance(filename_or_dataset, (str, rio.io.DatasetReader, rio.io.MemoryFile)):
+        elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
 
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
             # This is because we might not actually want to open it like that, so this is equivalent
@@ -316,7 +317,7 @@ class Raster:
             # "with rio.open(filename_or_dataset) as ds if isinstance(filename_or_dataset, str) else ds:"
             # This is slightly black magic, but it works!
             with ExitStack():
-                if isinstance(filename_or_dataset, str):
+                if isinstance(filename_or_dataset, (str, pathlib.Path)):
                     ds: rio.io.DatasetReader = rio.open(filename_or_dataset)
                     self.filename = filename_or_dataset
                 elif isinstance(filename_or_dataset, rio.io.DatasetReader):
@@ -1669,7 +1670,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def save(
         self,
-        filename: str | IO[bytes],
+        filename: str | pathlib.Path | IO[bytes],
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: AnyNumber | None = None,
