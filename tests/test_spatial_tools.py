@@ -182,7 +182,7 @@ def images_3d():  # type: ignore
 
 
 @pytest.mark.parametrize(
-    "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images"), pytest.lazy_fixture('images_3d')]
+    "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images"), pytest.lazy_fixture("images_3d")]
 )  # type: ignore
 def test_stack_rasters(rasters) -> None:  # type: ignore
     """Test stack_rasters"""
@@ -194,14 +194,20 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
     # Merge the two overlapping DEMs and check that output bounds and shape is correct
     if rasters.img1.count > 1:
         # Check warning is raised once
-        with pytest.warns(expected_warning=UserWarning, match="Some input Rasters have multiple bands, only their first band will be used."):
+        with pytest.warns(
+            expected_warning=UserWarning,
+            match="Some input Rasters have multiple bands, only their first band will be used.",
+        ):
             stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
         # Then ignore the other ones
-        warnings.filterwarnings("ignore", category=UserWarning, message="Some input Rasters have multiple bands, only their first band will be used.")
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message="Some input Rasters have multiple bands, only their first band will be used.",
+        )
 
     else:
         stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
-
 
     assert stacked_img.count == 2
     assert rasters.img.shape == stacked_img.shape
@@ -237,7 +243,9 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
     assert stacked_img2.bounds == rasters.img.bounds
 
 
-@pytest.mark.parametrize("rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture('images_3d')])  # type: ignore
+@pytest.mark.parametrize(
+    "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("images_3d")]
+)  # type: ignore
 def test_merge_rasters(rasters) -> None:  # type: ignore
     """Test merge_rasters"""
     # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
@@ -248,8 +256,11 @@ def test_merge_rasters(rasters) -> None:  # type: ignore
 
     # Ignore warning already checked in test_stack_rasters
     if rasters.img1.count > 1:
-        warnings.filterwarnings("ignore", category=UserWarning, message="Some input Rasters have multiple bands, only their first band will be used.")
-
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message="Some input Rasters have multiple bands, only their first band will be used.",
+        )
 
     merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
 

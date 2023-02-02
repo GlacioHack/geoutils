@@ -236,7 +236,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
 
     # Check raster has a single band
     if any(r.count > 1 for r in rasters):
-        warnings.warn('Some input Rasters have multiple bands, only their first band will be used.')
+        warnings.warn("Some input Rasters have multiple bands, only their first band will be used.")
 
     # Select reference raster
     if isinstance(reference, int):
