@@ -1669,8 +1669,9 @@ self.set_nodata()."
         saved = gr.Raster(temp_file.name)
         assert img == saved
 
-        # Try to save with a pathlib path
-        path = pathlib.Path(temp_file.name)
+        # Try to save with a pathlib path (create a new temp file for Windows)
+        temp_file_1 = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+        path = pathlib.Path(temp_file_1.name)
         img.save(path)
 
         # Test additional options
