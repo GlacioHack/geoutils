@@ -105,20 +105,25 @@ def bounds2poly(
 
 
 def merge_bounds(
-    bounds_list: abc.Iterable[list[float] | rio.io.DatasetReader | gpd.GeoDataFrame],
+    bounds_list: abc.Iterable[list[float] | tuple[float] | rio.coords.BoundingBox | rio.io.DatasetReader | gpd.GeoDataFrame],
+    resolution: float = None,
     merging_algorithm: str = "union",
-) -> tuple[float, ...]:
+    return_rio_bbox: bool = False,
+) -> tuple[float, ...] | rio.coords.BoundingBox:
     """
     Merge a list of bounds into single bounds, using either the union or intersection.
 
-    :param bounds_list: A list of geometries with bounds, i.e. a list of coordinates (xmin, ymin, xmax, ymax), \
-a rasterio/Raster object, a geoPandas/Vector object.
-    :param merging_algorithm: the algorithm to use for merging, either "union" or "intersection"
+    :param bounds_list: List of geometries with bounds, i.e. list of coordinates (xmin, ymin, xmax, ymax),
+        rasterio bounds, a rasterio Dataset (or Raster), a geopandas object (or Vector).
+    :param resolution: (For Rasters) Resolution, to make sure extent is a multiple of it.
+    :param merging_algorithm: Algorithm to use for merging, either "union" or "intersection".
+    :param return_rio_bbox: Whether to return a rio.coords.BoundingBox object instead of a tuple.
 
     :returns: Output bounds (xmin, ymin, xmax, ymax) or empty tuple
     """
     # Check that bounds_list is a list of bounds objects
     assert isinstance(bounds_list, (list, tuple)), "bounds_list must be a list/tuple"
+
     for bounds in bounds_list:
         assert hasattr(bounds, "bounds") or hasattr(bounds, "total_bounds") or isinstance(bounds, (list, tuple)), (
             "bounds_list must be a list of lists/tuples of coordinates or an object with attributes bounds "
@@ -138,7 +143,24 @@ a rasterio/Raster object, a geoPandas/Vector object.
             raise ValueError("merging_algorithm must be 'union' or 'intersection'")
 
     new_bounds: tuple[float] = output_poly.bounds
-    return new_bounds
+
+    rio_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
+
+    print(rio_bounds)
+
+    # Make sure that extent is a multiple of resolution
+    if resolution is not None:
+        for key1, key2 in zip(("left", "bottom"), ("right", "top")):
+            modulo = (rio_bounds[key2] - rio_bounds[key1]) % resolution
+            rio_bounds[key2] += modulo
+
+    # Format output
+    if return_rio_bbox:
+        final_bounds = rio.coords.BoundingBox(**rio_bounds)
+    else:
+        final_bounds = tuple(rio_bounds.values())
+
+    return final_bounds
 
 
 def align_bounds(
