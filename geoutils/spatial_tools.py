@@ -19,6 +19,7 @@ from geoutils.georaster import Raster, RasterType
 from geoutils.georaster.raster import _default_nodata
 from geoutils.misc import resampling_method_from_str
 
+
 def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
     """
     Return the mask of invalid values, whether array is a ndarray with NaNs or a np.ma.masked_array.
@@ -180,6 +181,7 @@ def load_multiple_rasters(
 
     return output_rst
 
+
 def stack_rasters(
     rasters: list[RasterType],
     reference: int | gu.Raster = 0,
@@ -228,9 +230,9 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     if use_ref_bounds:
         dst_bounds = reference_raster.bounds
     else:
-        dst_bounds = gu.projtools.merge_bounds([raster.bounds for raster in rasters],
-                                               resolution=reference_raster.res[0],
-                                               return_rio_bbox=True)
+        dst_bounds = gu.projtools.merge_bounds(
+            [raster.bounds for raster in rasters], resolution=reference_raster.res[0], return_rio_bbox=True
+        )
 
     # Make a data list and add all of the reprojected rasters into it.
     data: list[np.ndarray] = []

@@ -105,8 +105,10 @@ def bounds2poly(
 
 
 def merge_bounds(
-    bounds_list: abc.Iterable[list[float] | tuple[float] | rio.coords.BoundingBox | rio.io.DatasetReader | gpd.GeoDataFrame],
-    resolution: float = None,
+    bounds_list: abc.Iterable[
+        list[float] | tuple[float] | rio.coords.BoundingBox | rio.io.DatasetReader | gpd.GeoDataFrame
+    ],
+    resolution: float | None = None,
     merging_algorithm: str = "union",
     return_rio_bbox: bool = False,
 ) -> tuple[float, ...] | rio.coords.BoundingBox:
@@ -142,7 +144,7 @@ def merge_bounds(
         else:
             raise ValueError("merging_algorithm must be 'union' or 'intersection'")
 
-    new_bounds: tuple[float] = output_poly.bounds
+    new_bounds = output_poly.bounds
 
     rio_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
 
