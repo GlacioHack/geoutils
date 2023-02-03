@@ -2148,6 +2148,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Return row, column indices for a given x,y coordinate pair.
 
+        Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
+        to ensure that the indexes of points represent the right location. See parameter description of
+        shift_area_or_point for more details.
+
         :param x: X coordinates.
         :param y: Y coordinates.
         :param op: Operator to compute index.
@@ -2263,6 +2267,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         """
          Interpolate raster values at a given point, or sets of points.
+
+         Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
+         to ensure that the interpolation of points is done at the right location. See parameter description
+         of shift_area_or_point for more details.
 
         :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
         value returned is nan. Shape should be (N,2)'.
