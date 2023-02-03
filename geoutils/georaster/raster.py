@@ -2188,25 +2188,33 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # about the interpretation of the raster values, and thus can affect sub-pixel interpolation,
         # for more details see: https://gdal.org/user/raster_data_model.html#metadata
 
-        # If input is None, default to GDAL METADATA
-        if shift_area_or_point and self.tags.get("AREA_OR_POINT") is None:
-            area_or_point = "Area"
-            raise UserWarning('Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).')
-        else:
-            area_or_point = self.tags.get("AREA_OR_POINT")
-
-        # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
-        if area_or_point == "Point":
-            if not isinstance(i.flat[0], (np.floating | float)):
-                raise ValueError(
-                    "Operator must return np.floating values to perform AREA_OR_POINT subpixel index shifting"
+        # If the user wants to shift according to the interpretation
+        if shift_area_or_point:
+            # If AREA_OR_POINT attribute does not exist, use the most typical "Area"
+            if self.tags.get("AREA_OR_POINT") is not None:
+                area_or_point = self.tags.get("AREA_OR_POINT")
+                if not isinstance(area_or_point, str):
+                    raise TypeError('Attribute self.tags["AREA_OR_POINT"] must be a string.')
+                if area_or_point not in ["Area", "Point"]:
+                    raise ValueError('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
+            else:
+                area_or_point = "Area"
+                warnings.warn(
+                    category=UserWarning,
+                    message='Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).',
                 )
 
-            i += 0.5
-            j += 0.5
+            # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
+            if area_or_point == "Point":
+                if not isinstance(i.flat[0], (np.floating | float)):
+                    raise ValueError(
+                        "Operator must return np.floating values to perform area_or_point subpixel index shifting."
+                    )
+
+                i += 0.5
+                j += 0.5
 
         return i, j
-
 
     def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "center") -> tuple[np.ndarray, np.ndarray]:
         """
@@ -2225,13 +2233,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
-        Check whether a given point falls outside of the raster.
+        Check whether a given point falls outside the raster.
 
         :param xi: Indices (or coordinates) of x direction to check.
         :param yj: Indices (or coordinates) of y direction to check.
         :param index: Interpret ij as raster indices (default is True). If False, assumes ij is coordinates.
 
-        :returns is_outside: True if ij is outside of the image.
+        :returns is_outside: True if ij is outside the image.
         """
         if not index:
             xi, xj = self.xy2ij(xi, yj)
