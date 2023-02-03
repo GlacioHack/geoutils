@@ -1240,12 +1240,17 @@ self.set_nodata()."
             r0.xy2ij(xrand, yrand, shift_area_or_point=True)
         # When the tag is not "Area" or "Point"
         r0.tags.update({"AREA_OR_POINT": "Pt"})
-        with pytest.raises(ValueError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')):
+        with pytest.raises(
+            ValueError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
+        ):
             r0.xy2ij(xrand, yrand, shift_area_or_point=True)
 
         # Check that the function warns when no tag is defined
         r0.tags.pop("AREA_OR_POINT")
-        with pytest.warns(UserWarning, match=re.escape('Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).')):
+        with pytest.warns(
+            UserWarning,
+            match=re.escape('Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).'),
+        ):
             i0, j0 = r0.xy2ij(xrand, yrand, shift_area_or_point=True)
         # And that it defaults to "Area"
         assert all(i == i0)
