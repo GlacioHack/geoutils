@@ -454,7 +454,12 @@ class Raster:
 
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
-                dataset, indexes=self._indexes, masked=self._masked, transform=self.transform, shape=self.shape, **kwargs
+                dataset,
+                indexes=self._indexes,
+                masked=self._masked,
+                transform=self.transform,
+                shape=self.shape,
+                **kwargs,
             )
 
     @classmethod
@@ -1887,7 +1892,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # rshow takes care of image dimensions
         # if self.count=3 (4) => plotted as RGB(A)
         if index is None:
-            index = np.arange(1, self.count+1)
+            index = np.arange(1, self.count + 1)
         elif isinstance(index, int):
             if index >= self.count:
                 raise ValueError(f"Index must be in range 1-{self.count:d}")
@@ -1911,10 +1916,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Set colorbar min/max values (needed for ScalarMappable)
         if vmin is None:
-            vmin = np.nanmin(self.data[index-1, :, :])
+            vmin = np.nanmin(self.data[index - 1, :, :])
 
         if vmax is None:
-            vmax = np.nanmax(self.data[index-1, :, :])
+            vmax = np.nanmax(self.data[index - 1, :, :])
 
         # Make sure they are numbers, to avoid mpl error
         try:
@@ -1934,7 +1939,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Use data array directly, as rshow on self.ds will re-load data
         rshow(
-            self.data[index-1, :, :],
+            self.data[index - 1, :, :],
             transform=self.transform,
             ax=ax0,
             cmap=cmap,
@@ -2276,7 +2281,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
-        rpts = map_coordinates(self.data[index-1, :, :].astype(np.float32), [i, j], **kwargs)
+        rpts = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
         rpts = np.array(rpts, dtype=np.float32)
         rpts[np.array(ind_invalid)] = np.nan
 
