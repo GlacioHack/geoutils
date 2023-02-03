@@ -1202,33 +1202,34 @@ self.set_nodata()."
             intersection = r.intersection(r_nonoverlap)
             assert intersection == (0.0, 0.0, 0.0, 0.0)
 
-    def test_interp(self) -> None:
+    def test_xy2ij_and_interp(self) -> None:
+        """Test xy2ij and interp functions"""
 
         # First, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
         # at the center of pixel
         r = gr.Raster(self.landsat_b4_path)
         assert r.tags["AREA_OR_POINT"] == "Point"
-
         xmin, ymin, xmax, ymax = r.bounds
 
         # We generate random points within the boundaries of the image
-
         xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
         yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
-        # Get decimal indexes based on Point GDAL METADATA
+
+        # Get decimal indexes based on "Point"
         # Those should all be .5 because values refer to the center
-        i, j = r.xy2ij(xrand, yrand, area_or_point=None)
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=False)
         assert np.all(i % 1 == 0.5)
         assert np.all(j % 1 == 0.5)
 
-        # Force point
-        i, j = r.xy2ij(xrand, yrand, area_or_point="Point")
+        # With "Point"
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0.5)
         assert np.all(j % 1 == 0.5)
 
-        # Force area
-        i, j = r.xy2ij(xrand, yrand, area_or_point="Area")
+        # Force "Area"
+        r.tags.update({"AREA_OR_POINT": "Area"})
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0)
         assert np.all(j % 1 == 0)
 
@@ -1247,7 +1248,7 @@ self.set_nodata()."
             list_z_ind.append(z_ind)
 
         # First order interpolation
-        rpts = r.interp_points(pts, order=1, area_or_point="Area")
+        rpts = r.interp_points(pts, order=1, shift_area_or_point=True)
         # The values interpolated should be equal
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
@@ -1271,7 +1272,7 @@ self.set_nodata()."
         yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
         # By default, i and j are returned as integers
-        i, j = r.xy2ij(xrand, yrand, op=np.float32, area_or_point="Area")
+        i, j = r.xy2ij(xrand, yrand, op=np.float32)
         list_z_ind = []
         img = r.data
         for k in range(len(xrand)):
@@ -1287,7 +1288,7 @@ self.set_nodata()."
         # Test for an invidiual point (shape can be tricky at 1 dimension)
         x = 493120.0
         y = 3101000.0
-        i, j = r.xy2ij(x, y, area_or_point="Area")
+        i, j = r.xy2ij(x, y)
         assert img[0, int(i), int(j)] == r.interp_points([(x, y)], order=1)[0]
 
         # TODO: understand why there is this:
