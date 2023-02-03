@@ -3,6 +3,7 @@ geoutils.vectortools provides a toolset for working with vector data.
 """
 from __future__ import annotations
 
+import pathlib
 import warnings
 from collections import abc
 from numbers import Number
@@ -30,7 +31,7 @@ class Vector:
     Create a Vector object from a fiona-supported vector dataset.
     """
 
-    def __init__(self, filename: str | gpd.GeoDataFrame):
+    def __init__(self, filename: str | pathlib.Path | gpd.GeoDataFrame):
         """
         Load a fiona-supported dataset, given a filename.
 
@@ -39,7 +40,7 @@ class Vector:
         :return: A Vector object
         """
 
-        if isinstance(filename, str):
+        if isinstance(filename, (str, pathlib.Path)):
             with warnings.catch_warnings():
                 # This warning shows up in numpy 1.21 (2021-07-09)
                 warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
