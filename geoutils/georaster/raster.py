@@ -515,6 +515,30 @@ class Raster:
 
         return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
 
+    def to_rio_dataset(self) -> rio.io.DatasetReader:
+        """Export to a rasterio in-memory dataset."""
+
+        # Create handle to new memory file
+        mfh = rio.io.MemoryFile()
+
+        # Write info to the memory file
+        with rio.open(
+            mfh,
+            "w",
+            height=self.height,
+            width=self.width,
+            count=self.count,
+            dtype=self.dtypes[0],
+            crs=self.crs,
+            transform=self.transform,
+            nodata=self.nodata,
+            driver="GTiff",
+        ) as ds:
+            ds.write(self.data)
+
+        # Then open as a DatasetReader
+        return mfh.open()
+
     def __repr__(self) -> str:
         """Convert object to formal string representation."""
         return self.__str__()
