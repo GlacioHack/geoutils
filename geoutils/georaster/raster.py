@@ -1446,13 +1446,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
 
         # Check that either dst_ref or dst_crs is provided
-        if dst_ref is not None:
-            if dst_crs is not None:
-                raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
-        else:
-            # In case dst_res or dst_size is set, use original CRS
-            if dst_crs is None:
-                dst_crs = self.crs
+        if (dst_ref is not None and dst_crs is not None) or (dst_ref is None and dst_crs is None):
+            raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
 
         # Case a raster is provided as reference
         if dst_ref is not None:
@@ -1464,11 +1459,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             elif isinstance(dst_ref, rio.io.MemoryFile) or isinstance(dst_ref, rasterio.io.DatasetReader):
                 ds_ref = dst_ref
             elif isinstance(dst_ref, str):
-                assert os.path.exists(dst_ref), "Reference raster does not exist"
+                if not os.path.exists(dst_ref):
+                    raise ValueError("Reference raster does not exist.")
                 ds_ref = Raster(dst_ref, load_data=False)
             else:
-                raise ValueError(
-                    "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set"
+                raise TypeError(
+                    "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set."
                 )
 
             # Read reprojecting params from ref raster

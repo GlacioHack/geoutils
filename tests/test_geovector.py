@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 
 import geopandas as gpd
 import numpy as np
@@ -74,6 +75,47 @@ class TestVector:
         assert bounds.bottom == self.glacier_outlines.ds.total_bounds[1]
         assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
+
+    def test_reproject(self) -> None:
+        """Test that the reproject function works as intended"""
+
+        v0 = gu.Vector(self.aster_outlines_path)
+        r0 = gu.Raster(self.aster_dem_path)
+        v1 = gu.Vector(self.everest_outlines_path)
+
+        # First, test with a EPSG integer
+        v1 = v0.reproject(dst_crs=32617)
+        assert isinstance(v1, gu.Vector)
+        assert v1.crs.to_epsg() == 32617
+
+        # Check that the reprojection is the same as with geopandas
+        gpd1 = v0.ds.to_crs(epsg=32617)
+        assert_geodataframe_equal(gpd1, v1.ds)
+
+        # Second, with a Raster object
+        v2 = v0.reproject(r0)
+        assert v2.crs == r0.crs
+
+        # Third, with a Vector object that has a different CRS
+        assert v0.crs != v1.crs
+        v3 = v0.reproject(v1)
+        assert v3.crs == v1.crs
+
+        # Fourth, check that errors are raised when appropriate
+        # When no destination CRS is defined, or both dst_crs and dst_ref are passed
+        with pytest.raises(ValueError, match=re.escape('Either of `dst_ref` or `dst_crs` must be set. Not both.')):
+            v0.reproject()
+            v0.reproject(dst_ref=r0, dst_crs=32617)
+        # If the path provided does not exist
+        with pytest.raises(ValueError, match=re.escape('Reference raster or vector path does not exist.')):
+            v0.reproject(dst_ref="tmp.lol")
+        # If it exists but cannot be opened by rasterio or fiona
+        with pytest.raises(ValueError, match=re.escape('Could not open raster or vector with rasterio or fiona.')):
+            v0.reproject(dst_ref="geoutils/examples.py")
+        # If input of wrong type
+        with pytest.raises(TypeError, match=re.escape('Type of dst_ref must be string path to file, Raster or Vector.')):
+            v0.reproject(dst_ref=10) # type: ignore
+
 
     def test_rasterize_proj(self) -> None:
 
