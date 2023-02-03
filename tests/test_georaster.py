@@ -1216,22 +1216,40 @@ self.set_nodata()."
         yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
 
-        # Get decimal indexes based on "Point"
-        # Those should all be .5 because values refer to the center
-        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=False)
-        assert np.all(i % 1 == 0.5)
-        assert np.all(j % 1 == 0.5)
+        # Get decimal indexes based on "Point", should refer to the corner still (shift False by default)
+        i, j = r.xy2ij(xrand, yrand)
+        assert np.all(i % 1 == 0)
+        assert np.all(j % 1 == 0)
 
-        # With "Point"
+        # Those should all be .5 because values refer to the center and are shifted
         i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0.5)
         assert np.all(j % 1 == 0.5)
 
-        # Force "Area"
+        # Force "Area", should refer to corner
         r.tags.update({"AREA_OR_POINT": "Area"})
         i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0)
         assert np.all(j % 1 == 0)
+
+        # Check errors are raised when type of tag is incorrect
+        r0 = r.copy()
+        # When the tag is not a string
+        r0.tags.update({"AREA_OR_POINT": 1})
+        with pytest.raises(TypeError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be a string.')):
+            r0.xy2ij(xrand, yrand, shift_area_or_point=True)
+        # When the tag is not "Area" or "Point"
+        r0.tags.update({"AREA_OR_POINT": "Pt"})
+        with pytest.raises(ValueError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')):
+            r0.xy2ij(xrand, yrand, shift_area_or_point=True)
+
+        # Check that the function warns when no tag is defined
+        r0.tags.pop("AREA_OR_POINT")
+        with pytest.warns(UserWarning, match=re.escape('Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).')):
+            i0, j0 = r0.xy2ij(xrand, yrand, shift_area_or_point=True)
+        # And that it defaults to "Area"
+        assert all(i == i0)
+        assert all(j == j0)
 
         # Now, we calculate the mean of values in each 2x2 slices of the data, and compare with interpolation at order 1
         list_z_ind = []

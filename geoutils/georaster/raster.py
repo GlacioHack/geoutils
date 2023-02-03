@@ -2195,7 +2195,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 area_or_point = self.tags.get("AREA_OR_POINT")
                 if not isinstance(area_or_point, str):
                     raise TypeError('Attribute self.tags["AREA_OR_POINT"] must be a string.')
-                if area_or_point not in ["Area", "Point"]:
+                if area_or_point.lower() not in ["area", "point"]:
                     raise ValueError('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
             else:
                 area_or_point = "Area"
@@ -2205,7 +2205,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 )
 
             # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
-            if area_or_point == "Point":
+            if area_or_point.lower() == "point":
                 if not isinstance(i.flat[0], (np.floating | float)):
                     raise ValueError(
                         "Operator must return np.floating values to perform area_or_point subpixel index shifting."
