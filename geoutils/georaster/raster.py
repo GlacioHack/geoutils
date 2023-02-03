@@ -1446,8 +1446,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
 
         # Check that either dst_ref or dst_crs is provided
-        if (dst_ref is not None and dst_crs is not None) or (dst_ref is None and dst_crs is None):
-            raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
+        if dst_ref is not None and dst_crs is not None:
+                raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
+        # If none are provided, simply preserve the CRS
+        elif dst_ref is None and dst_crs is None:
+            dst_crs = self.crs
 
         # Case a raster is provided as reference
         if dst_ref is not None:
