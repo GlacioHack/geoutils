@@ -2210,7 +2210,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
             if area_or_point.lower() == "point":
-                if not isinstance(i.flat[0], (np.floating | float)):
+                if not isinstance(i.flat[0], (np.floating, float)):
                     raise ValueError(
                         "Operator must return np.floating values to perform area_or_point subpixel index shifting."
                     )
