@@ -10,13 +10,13 @@ from collections import abc
 from numbers import Number
 from typing import Literal, TypeVar, overload
 
+import fiona
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio as rio
 import rasterio.errors
 import shapely
-import fiona
 from rasterio import features, warp
 from rasterio.crs import CRS
 from scipy.spatial import Voronoi
@@ -156,10 +156,10 @@ class Vector:
             return new_vector
 
     def reproject(
-        self: VectorType,
+        self: Vector,
         dst_ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
         dst_crs: CRS | str | int | None = None,
-    ) -> VectorType:
+    ) -> Vector:
         """
         Reproject vector to a specified CRS and, optionally, cropped to certain bounds (no cropping by default).
 
@@ -201,9 +201,7 @@ class Vector:
                     except fiona.errors.DriverError:
                         raise ValueError("Could not open raster or vector with rasterio or fiona.")
             else:
-                raise TypeError(
-                    "Type of dst_ref must be string path to file, Raster or Vector."
-                )
+                raise TypeError("Type of dst_ref must be string path to file, Raster or Vector.")
 
             # Read reprojecting params from ref raster
             dst_crs = ds_ref.crs
@@ -212,8 +210,7 @@ class Vector:
             dst_crs = CRS.from_user_input(dst_crs)
 
         return Vector(self.ds.to_crs(crs=dst_crs))
-        
-        
+
     def create_mask(
         self,
         rst: str | gu.Raster | None = None,

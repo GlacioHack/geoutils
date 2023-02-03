@@ -103,19 +103,20 @@ class TestVector:
 
         # Fourth, check that errors are raised when appropriate
         # When no destination CRS is defined, or both dst_crs and dst_ref are passed
-        with pytest.raises(ValueError, match=re.escape('Either of `dst_ref` or `dst_crs` must be set. Not both.')):
+        with pytest.raises(ValueError, match=re.escape("Either of `dst_ref` or `dst_crs` must be set. Not both.")):
             v0.reproject()
             v0.reproject(dst_ref=r0, dst_crs=32617)
         # If the path provided does not exist
-        with pytest.raises(ValueError, match=re.escape('Reference raster or vector path does not exist.')):
+        with pytest.raises(ValueError, match=re.escape("Reference raster or vector path does not exist.")):
             v0.reproject(dst_ref="tmp.lol")
         # If it exists but cannot be opened by rasterio or fiona
-        with pytest.raises(ValueError, match=re.escape('Could not open raster or vector with rasterio or fiona.')):
+        with pytest.raises(ValueError, match=re.escape("Could not open raster or vector with rasterio or fiona.")):
             v0.reproject(dst_ref="geoutils/examples.py")
         # If input of wrong type
-        with pytest.raises(TypeError, match=re.escape('Type of dst_ref must be string path to file, Raster or Vector.')):
-            v0.reproject(dst_ref=10) # type: ignore
-
+        with pytest.raises(
+            TypeError, match=re.escape("Type of dst_ref must be string path to file, Raster or Vector.")
+        ):
+            v0.reproject(dst_ref=10)  # type: ignore
 
     def test_rasterize_proj(self) -> None:
 
