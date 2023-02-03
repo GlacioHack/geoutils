@@ -107,9 +107,9 @@ class TestRaster:
         r0.data[0, 0, 0] += 5
         assert r2.data[0, 0, 0] == r0.data[0, 0, 0]
 
-        # With r.nbands = 2
+        # With r.count = 2
         r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
-        assert r0.nbands != r2.nbands
+        assert r0.count != r2.count
 
         # Test that loaded data are always masked_arrays (but the mask may be empty, i.e. 'False')
         assert np.ma.isMaskedArray(gr.Raster(example, masked=True).data)
@@ -192,38 +192,32 @@ class TestRaster:
         # Test 2 - loading the data afterward
         r.load()
         assert r.is_loaded
-        assert r.nbands == 1
+        assert r.count == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 3 - single band, loading data
         r = gr.Raster(self.landsat_b4_path, load_data=True)
         assert r.is_loaded
-        assert r.nbands == 1
+        assert r.count == 1
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 4 - multiple bands, load all bands
         r = gr.Raster(self.landsat_rgb_path, load_data=True)
         assert r.count == 3
         assert np.array_equal(r.indexes, [1, 2, 3])
-        assert r.nbands == 3
-        assert np.array_equal(r.bands, [1, 2, 3])
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
-        r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=1)
-        assert r.count == 3
+        r = gr.Raster(self.landsat_rgb_path, load_data=True, indexes=1)
+        assert r.count == 1
         assert np.array_equal(r.indexes, [1, 2, 3])
-        assert r.nbands == 1
-        # assert r.bands == (1)
-        assert r.data.shape == (r.nbands, r.height, r.width)
+        assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=[2, 3])
-        assert r.count == 3
+        r = gr.Raster(self.landsat_rgb_path, load_data=True, indexes=[2, 3])
+        assert r.count == 2
         assert np.array_equal(r.indexes, [1, 2, 3])
-        assert r.nbands == 2
-        assert np.array_equal(r.bands, (2, 3))
-        assert r.data.shape == (r.nbands, r.height, r.width)
+        assert r.data.shape == (r.count, r.height, r.width)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
@@ -1638,7 +1632,7 @@ self.set_nodata()."
 
         # Test plotting single band B/W, add_cb
         ax = plt.subplot(111)
-        img_RGB.show(band=0, cmap="gray", ax=ax, add_cb=False, title="Plotting one band B/W")
+        img_RGB.show(index=1, cmap="gray", ax=ax, add_cb=False, title="Plotting one band B/W")
         if DO_PLOT:
             plt.show()
         else:
@@ -1790,7 +1784,7 @@ self.set_nodata()."
         # r = gr.Raster(self.landsat_b4_path)
 
         # Load the attributes to check
-        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename", "nbands", "filename"]
+        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename"]
         # Create some sample code that should be correct
         sample_code = "\n".join(
             [
@@ -1824,20 +1818,19 @@ self.set_nodata()."
 
         img = gr.Raster(self.landsat_rgb_path)
 
-        red, green, blue = img.split_bands(copy=False)
+        red, green, blue = img.split_indexes(copy=False)
 
         # Check that the shapes are correct.
-        assert red.nbands == 1
         assert red.count == 1
         assert red.data.shape[0] == 1
-        assert img.nbands == 3
+        assert img.count == 3
         assert img.data.shape[0] == 3
 
         # Extract only one band (then it will not return a list)
-        red2 = img.split_bands(copy=False, subset=0)[0]
+        red2 = img.split_indexes(copy=False, subset=1)[0]
 
         # Extract a subset with a list in a weird direction
-        blue2, green2 = img.split_bands(copy=False, subset=[2, 1])
+        blue2, green2 = img.split_indexes(copy=False, subset=[3, 2])
 
         # Check that the subset functionality works as expected.
         assert red == red2
@@ -1862,7 +1855,7 @@ self.set_nodata()."
         )
 
         # Copy the bands instead of pointing to the same memory.
-        red_c = img.split_bands(copy=True, subset=0)[0]
+        red_c = img.split_indexes(copy=True, subset=1)[0]
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
         assert not np.shares_memory(red_c.data, img.data)
