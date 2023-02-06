@@ -201,7 +201,7 @@ def merge_bounding_boxes(bounds: list[rio.coords.BoundingBox], resolution: float
 def stack_rasters(
     rasters: list[RasterType],
     reference: int | gu.Raster = 0,
-    resampling_method: str | rio.warp.Resampling = "bilinear",
+    resampling_method: str | rio.enums.Resampling = "bilinear",
     use_ref_bounds: bool = False,
     diff: bool = False,
     progress: bool = True,
@@ -306,7 +306,7 @@ def merge_rasters(
     rasters: list[RasterType],
     reference: int | Raster = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
-    resampling_method: str | rio.warp.Resampling = "bilinear",
+    resampling_method: str | rio.enums.Resampling = "bilinear",
     use_ref_bounds: bool = False,
     progress: bool = True,
 ) -> RasterType:

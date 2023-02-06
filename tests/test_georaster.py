@@ -4,6 +4,7 @@ Test functions for georaster
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import tempfile
 import warnings
@@ -76,15 +77,20 @@ class TestRaster:
     def test_init(self, example: str) -> None:
         """Test that all possible inputs work properly in Raster class init"""
 
-        # First, filename
-        r = gr.Raster(example)
-        assert isinstance(r, gr.Raster)
+        # First, string filename
+        r0 = gr.Raster(example)
+        assert isinstance(r0, gr.Raster)
 
-        # Second, passing a Raster itself (points back to Raster passed)
-        r2 = gr.Raster(r)
+        # Second, filename in a pathlib object
+        path = pathlib.Path(example)
+        r1 = gr.Raster(path)
+        assert isinstance(r1, gr.Raster)
+
+        # Third, passing a Raster itself (points back to Raster passed)
+        r2 = gr.Raster(r0)
         assert isinstance(r2, gr.Raster)
 
-        # Third, rio.Dataset
+        # Fourth, rio.Dataset
         ds = rio.open(example)
         r3 = gr.Raster(ds)
         assert isinstance(r3, gr.Raster)
@@ -95,15 +101,15 @@ class TestRaster:
         r4 = gr.Raster(memfile)
         assert isinstance(r4, gr.Raster)
 
-        assert r == r2 == r3 == r4
+        assert r0 == r1 == r2 == r3 == r4
 
         # The data will not be copied, immutable objects will
-        r.data[0, 0, 0] += 5
-        assert r2.data[0, 0, 0] == r.data[0, 0, 0]
+        r0.data[0, 0, 0] += 5
+        assert r2.data[0, 0, 0] == r0.data[0, 0, 0]
 
         # With r.nbands = 2
-        r._data = np.repeat(r.data, 2).reshape((2,) + r.shape)
-        assert r.nbands != r2.nbands
+        r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
+        assert r0.nbands != r2.nbands
 
         # Test that loaded data are always masked_arrays (but the mask may be empty, i.e. 'False')
         assert np.ma.isMaskedArray(gr.Raster(example, masked=True).data)
@@ -1649,7 +1655,7 @@ self.set_nodata()."
         assert True
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_saving(self, example: str) -> None:
+    def test_save(self, example: str) -> None:
 
         # Read single band raster
         img = gr.Raster(example)
@@ -1662,6 +1668,11 @@ self.set_nodata()."
         img.save(temp_file.name)
         saved = gr.Raster(temp_file.name)
         assert img == saved
+
+        # Try to save with a pathlib path (create a new temp file for Windows)
+        temp_file_1 = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
+        path = pathlib.Path(temp_file_1.name)
+        img.save(path)
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
@@ -1865,14 +1876,14 @@ self.set_nodata()."
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
         warnings.simplefilter("error")
-        assert resampling_method_from_str("nearest") == rio.warp.Resampling.nearest  # noqa
-        assert resampling_method_from_str("cubic_spline") == rio.warp.Resampling.cubic_spline  # noqa
+        assert resampling_method_from_str("nearest") == rio.enums.Resampling.nearest  # noqa
+        assert resampling_method_from_str("cubic_spline") == rio.enums.Resampling.cubic_spline  # noqa
 
         # Check that odd strings return the appropriate error.
         try:
             resampling_method_from_str("CUBIC_SPLINE")  # noqa
         except ValueError as exception:
-            if "not a valid rasterio.warp.Resampling method" not in str(exception):
+            if "not a valid rasterio.enums.Resampling method" not in str(exception):
                 raise exception
 
         img1 = gr.Raster(self.landsat_b4_path)
@@ -1882,7 +1893,7 @@ self.set_nodata()."
 
         # Resample the rasters using a new resampling method and see that the string and enum gives the same result.
         img3a = img1.reproject(img2, resampling="q1")
-        img3b = img1.reproject(img2, resampling=rio.warp.Resampling.q1)
+        img3b = img1.reproject(img2, resampling=rio.enums.Resampling.q1)
         assert img3a == img3b
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
