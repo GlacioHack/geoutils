@@ -519,7 +519,12 @@ class Raster:
         if isinstance(crs, int):
             crs = CRS.from_epsg(crs)
 
-        return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
+        # If the data was transformed into boolean, re-initialize as a Mask subclass
+        if data.dtype == bool:
+            return Mask({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
+        # Otherwise, keep as a given RasterType subclass
+        else:
+            return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
 
     def __repr__(self) -> str:
         """Convert object to formal string representation."""
@@ -533,9 +538,16 @@ class Raster:
         """Provide string of information about Raster."""
         return self.info()
 
-    def __getitem__(self, value: Raster | Vector | list[float] | tuple[float, ...]) -> Raster:
+    def __getitem__(self, value: Raster | Vector | list[float] | tuple[float, ...]) -> np.ndarray | Raster:
         """Subset the Raster object: calls the crop method with default parameters"""
-        return self.crop(cropGeom=value, inplace=False)
+
+        # If input is Mask with the same shape and georeferencing, index in 1D
+        if isinstance(value, Mask) and self.equal_georeferenced_grid(value):
+            return self.data[value.data]
+
+        # Otherwise, subset with crop
+        else:
+            return self.crop(cropGeom=value, inplace=False)
 
     def __eq__(self, other: object) -> bool:
         """Check if a Raster masked array's data (including masked values), mask, fill_value and dtype are equal,
@@ -2567,6 +2579,128 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self.copy(new_array=proximity)
 
 
+# Subclass Mask for manipulating boolean Rasters
+class Mask(Raster):
+
+    def __init__(self, filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict, **kwargs):
+
+        # If a Mask is passed, simply point back to Mask
+        if isinstance(filename_or_dataset, Mask):
+            for key in filename_or_dataset.__dict__:
+                setattr(self, key, filename_or_dataset.__dict__[key])
+            return
+        # Else rely on parent Raster class options (including raised errors)
+        else:
+            super().__init__(filename_or_dataset, **kwargs)
+
+            # If nbands larger than one, use only first band and raise a warning
+            if self.nbands > 1:
+                warnings.warn(category=UserWarning,
+                              message="Multi-band raster provided to create a Mask, only the first band will be used.")
+                self._data = np.reshape(self.data[0, :], (1, self.shape[0], self.shape[1]))
+
+            # Convert masked array to boolean
+            self._data = self.data.astype(bool)
+
+            # Fix nband to one
+            self._nbands = 1
+
+            # Fix nodata to None
+            self._nodata = None
+
+            # Define in dtypes
+            self._dtypes = (bool,)
+
+    def from_array(
+        cls: type[RasterType],
+        data: np.ndarray | np.ma.masked_array,
+        transform: tuple[float, ...] | Affine,
+        crs: CRS | int | None,
+        nodata: int | float | list[int] | list[float] | None = None,
+    ) -> Mask:
+
+        return Mask(Raster.from_array(data=data, transform=transform, crs=crs, nodata=nodata))
+
+
+    def reproject(
+        self: Mask,
+        **kwargs
+    ) -> Mask:
+
+        # Depending on resampling, adjust to rasterio supported types
+        if kwargs["resampling"] in [Resampling.nearest, "nearest"]:
+            self.data = self.data.astype("uint8")
+        else:
+            self.data = self.data.astype("float32")
+
+        # Call Raster.reproject()
+        output = super().reproject(**kwargs)  # type: ignore
+
+        # Transform back to a boolean array
+        output.data = output.data.astype(bool)
+
+        return output
+
+    def crop(
+        self: RasterType,
+        **kwargs
+    ) -> None:
+
+        # If there is resampling involved during cropping, encapsulate type as in reproject()
+        if kwargs["match_extent"]:
+            self.data = self.data.astype("float32")
+            if kwargs["in_place"]:
+                super().crop(**kwargs)
+                self.data = self.data.astype(bool)
+            else:
+                output = super().crop(**kwargs)
+                output.data = output.data.astype(bool)
+                return output.data
+        # Otherwise, run a classic crop
+        else:
+            super().crop(**kwargs)
+
+    def polygonize(
+        self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1
+    ) -> Vector:
+
+        if in_value not in [0, 1]:
+            warnings.warn("In-value converted to boolean for polygonizing mask.")
+            in_value = in_value.astype(bool).astype(int)
+
+        self.data = self.data.astype('uint8')
+        return super().polygonize(in_value=in_value)
+
+    # Logical operations between mask objects: scale to the entire mask
+    def __and__(self, other):
+
+        return self.from_array(data=np.logical_and(self.data, other.data),
+                               transform=self.transform,
+                               crs=self.crs,
+                               nodata=self.nodata)
+
+    def __or__(self, other):
+
+        return self.from_array(data=np.logical_or(self.data, other.data),
+                               transform=self.transform,
+                               crs=self.crs,
+                               nodata=self.nodata)
+
+    def __xor__(self, other):
+
+        return self.from_array(data=np.logical_xor(self.data, other.data),
+                               transform=self.transform,
+                               crs=self.crs,
+                               nodata=self.nodata)
+
+    def __invert__(self):
+
+        return self.from_array(data=np.logical_not(self.data),
+                               transform=self.transform,
+                               crs=self.crs,
+                               nodata=self.nodata)
+
+
 # -----------------------------------------
 # Additional stand-alone utility functions
 # -----------------------------------------
@@ -2641,3 +2775,4 @@ def proximity_from_vector_or_raster(
             raise ValueError('The type of proximity must be one of "in", "out" or "both".')
 
     return proximity
+

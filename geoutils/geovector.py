@@ -154,10 +154,9 @@ class Vector:
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         buffer: int | float | np.number = 0,
-    ) -> np.ndarray:
+    ) -> gu.Mask:
         """
-        Rasterize the vector features into a boolean raster which has the extent/dimensions of \
-        the provided raster file.
+        Rasterize the vector features into a boolean mask matching the georeferencing of a raster.
 
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
         Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
@@ -172,7 +171,7 @@ class Vector:
         :param buffer: Size of buffer to be added around the features, in the raster's projection units.
         If a negative value is set, will erode the features.
 
-        :returns: array containing the mask
+        :returns: A Mask object contain a boolean array
         """
         # If input rst is string, open as Raster
         if isinstance(rst, str):
@@ -250,7 +249,7 @@ class Vector:
         if rst is not None:
             mask = mask.reshape((rst.count, rst.height, rst.width))  # type: ignore
 
-        return mask
+        return gu.Mask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     def rasterize(
         self,
@@ -261,7 +260,7 @@ class Vector:
         bounds: tuple[float, float, float, float] | None = None,
         in_value: int | float | abc.Iterable[int | float] | None = None,
         out_value: int | float = 0,
-    ) -> np.ndarray:
+    ) -> gu.Raster | gu.Mask:
         """
         Return an array with input geometries burned in.
 
@@ -359,7 +358,15 @@ class Vector:
         else:
             raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
-        return mask
+        # We return a mask if there is a single value to burn and this value is ojne
+        if isinstance(in_value, Number) and in_value == 1:
+            output = gu.Mask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+
+        # Otherwise we return a Raster if there are several values to burn
+        else:
+            output = gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+
+        return output
 
     def query(self: VectorType, expression: str, inplace: bool = False) -> VectorType:
         """
