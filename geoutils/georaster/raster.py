@@ -549,7 +549,7 @@ class Raster:
         else:
             return self.crop(cropGeom=value, inplace=False)
 
-    def __eq__(self, other: object) -> bool:
+    def raster_equal(self, other: object) -> bool:
         """Check if a Raster masked array's data (including masked values), mask, fill_value and dtype are equal,
         as well as the Raster's nodata, and georeferencing."""
 
@@ -566,9 +566,6 @@ class Raster:
                 self.nodata == other.nodata,
             ]
         )
-
-    def __ne__(self, other: object) -> bool:
-        return not self.__eq__(other)
 
     def _overloading_check(
         self: RasterType, other: RasterType | np.ndarray | Number

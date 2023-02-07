@@ -42,7 +42,8 @@ class TestSatelliteImage:
         img3 = si.SatelliteImage(r)
         assert isinstance(img3, si.SatelliteImage)
 
-        assert img == img2 == img3
+        assert img.raster_equal(img2)
+        assert img.raster_equal(img3)
 
     @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_silent(self, example: str) -> None:
