@@ -2809,7 +2809,6 @@ class TestArrayInterface:
     # - sorting and counting;
     # Most other math functions are already universal functions
 
-
     # Separate between two lists (single input and double input) for testing
     handled_functions_2in = gu.georaster.raster._HANDLED_FUNCTIONS_2NIN
     handled_functions_1in = gu.georaster.raster._HANDLED_FUNCTIONS_1NIN

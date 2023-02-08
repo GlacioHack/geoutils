@@ -86,10 +86,24 @@ _HANDLED_FUNCTIONS_1NIN = (
         "quantile",
     ]
     + ["sort", "count_nonzero", "unique"]
-    + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"])
+    + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"]
+)
 
-_HANDLED_FUNCTIONS_2NIN = (["logical_and", "logical_or", "logical_xor", "allclose","isclose","array_equal","array_equiv","greater",
-                            "greater_equal",  "less", "less_equal",  "equal", "not_equal"])
+_HANDLED_FUNCTIONS_2NIN = [
+    "logical_and",
+    "logical_or",
+    "logical_xor",
+    "allclose",
+    "isclose",
+    "array_equal",
+    "array_equiv",
+    "greater",
+    "greater_equal",
+    "less",
+    "less_equal",
+    "equal",
+    "not_equal",
+]
 
 
 # Function to set the default nodata values for any given dtype
@@ -1385,7 +1399,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             return func(first_arg, *args[1:], **kwargs)  # type: ignore
         else:
             second_arg = args[1].data
-            return func(first_arg, second_arg, *args[2:], **kwargs) # type: ignore
+            return func(first_arg, second_arg, *args[2:], **kwargs)  # type: ignore
 
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
