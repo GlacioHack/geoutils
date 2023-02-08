@@ -52,7 +52,7 @@ else:
 RasterType = TypeVar("RasterType", bound="Raster")
 
 # List of numpy functions that are handled: nan statistics function, normal statistics function and sorting/counting
-_HANDLED_FUNCTIONS = (
+_HANDLED_FUNCTIONS_1NIN = (
     [
         "nansum",
         "nanmax",
@@ -86,10 +86,10 @@ _HANDLED_FUNCTIONS = (
         "quantile",
     ]
     + ["sort", "count_nonzero", "unique"]
-    + ["all", "any", "isfinite", "isinf", "isnan"]
-    + ["logical_and", "logical_or", "logical_xor", "logical_not", "all_close", "isclose", "array_equal", "array_equiv",
-       "greater", "greater_equal", "less", "less_equal", "equal", "not_equal"]
-)
+    + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"])
+
+_HANDLED_FUNCTIONS_2NIN = (["logical_and", "logical_or", "logical_xor", "allclose","isclose","array_equal","array_equiv","greater",
+                            "greater_equal",  "less", "less_equal",  "equal", "not_equal"])
 
 
 # Function to set the default nodata values for any given dtype
@@ -1357,7 +1357,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
 
         # If function is not implemented
-        if func.__name__ not in _HANDLED_FUNCTIONS:
+        if func.__name__ not in _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN:
             return NotImplemented
 
         # For subclassing
@@ -1381,7 +1381,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             first_arg = args[0].data
 
-        return func(first_arg, *args[1:], **kwargs)  # type: ignore
+        if func.__name__ in _HANDLED_FUNCTIONS_1NIN:
+            return func(first_arg, *args[1:], **kwargs)  # type: ignore
+        else:
+            second_arg = args[1].data
+            return func(first_arg, second_arg, *args[2:], **kwargs) # type: ignore
 
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
@@ -2653,8 +2657,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
 # Subclass Mask for manipulating boolean Rasters
 class Mask(Raster):
-
-    def __init__(self, filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict, **kwargs):
+    def __init__(
+        self, filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict, **kwargs
+    ):
 
         # If a Mask is passed, simply point back to Mask
         if isinstance(filename_or_dataset, Mask):
@@ -2667,8 +2672,10 @@ class Mask(Raster):
 
             # If nbands larger than one, use only first band and raise a warning
             if self.nbands > 1:
-                warnings.warn(category=UserWarning,
-                              message="Multi-band raster provided to create a Mask, only the first band will be used.")
+                warnings.warn(
+                    category=UserWarning,
+                    message="Multi-band raster provided to create a Mask, only the first band will be used.",
+                )
                 self._data = np.reshape(self.data[0, :], (1, self.shape[0], self.shape[1]))
 
             # Convert masked array to boolean
@@ -2683,10 +2690,7 @@ class Mask(Raster):
             # Define in dtypes
             self._dtypes = (bool,)
 
-    def reproject(
-        self: Mask,
-        **kwargs
-    ) -> Mask:
+    def reproject(self: Mask, **kwargs) -> Mask:
 
         # Depending on resampling, adjust to rasterio supported types
         if kwargs["resampling"] in [Resampling.nearest, "nearest"]:
@@ -2702,10 +2706,7 @@ class Mask(Raster):
 
         return output
 
-    def crop(
-        self: RasterType,
-        **kwargs
-    ) -> None:
+    def crop(self: RasterType, **kwargs) -> None:
 
         # If there is resampling involved during cropping, encapsulate type as in reproject()
         if kwargs["match_extent"]:
@@ -2729,37 +2730,33 @@ class Mask(Raster):
             warnings.warn("In-value converted to boolean for polygonizing mask.")
             in_value = in_value.astype(bool).astype(int)
 
-        self.data = self.data.astype('uint8')
+        self._data = self.data.astype("uint8")
         return super().polygonize(in_value=in_value)
 
     # Logical operations between mask objects: scale to the entire mask
     def __and__(self, other):
 
-        return self.from_array(data=np.logical_and(self.data, other.data),
-                               transform=self.transform,
-                               crs=self.crs,
-                               nodata=self.nodata)
+        return self.from_array(
+            data=np.logical_and(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+        )
 
     def __or__(self, other):
 
-        return self.from_array(data=np.logical_or(self.data, other.data),
-                               transform=self.transform,
-                               crs=self.crs,
-                               nodata=self.nodata)
+        return self.from_array(
+            data=np.logical_or(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+        )
 
     def __xor__(self, other):
 
-        return self.from_array(data=np.logical_xor(self.data, other.data),
-                               transform=self.transform,
-                               crs=self.crs,
-                               nodata=self.nodata)
+        return self.from_array(
+            data=np.logical_xor(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+        )
 
     def __invert__(self):
 
-        return self.from_array(data=np.logical_not(self.data),
-                               transform=self.transform,
-                               crs=self.crs,
-                               nodata=self.nodata)
+        return self.from_array(
+            data=np.logical_not(self.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+        )
 
 
 # -----------------------------------------
@@ -2836,4 +2833,3 @@ def proximity_from_vector_or_raster(
             raise ValueError('The type of proximity must be one of "in", "out" or "both".')
 
     return proximity
-

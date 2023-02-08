@@ -101,7 +101,9 @@ class TestRaster:
         r4 = gr.Raster(memfile)
         assert isinstance(r4, gr.Raster)
 
-        assert all([r0.raster_equal(r1), r0.raster_equal(r1), r0.raster_equal(r2), r0.raster_equal(r3), r0.raster_equal(r4)])
+        assert all(
+            [r0.raster_equal(r1), r0.raster_equal(r1), r0.raster_equal(r2), r0.raster_equal(r3), r0.raster_equal(r4)]
+        )
 
         # The data will not be copied, immutable objects will
         r0.data[0, 0, 0] += 5
@@ -2092,14 +2094,15 @@ class TestMask:
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_init(self, example: str):
-        """Test that Mask subclass intialization function as intended."""
+        """Test that Mask subclass initialization function as intended."""
 
         # A warning should be raised when the raster is a multi-band
         if "rgb" not in os.path.basename(example):
             mask = gu.Mask(example)
         else:
-            with pytest.warns(UserWarning, match="Multi-band raster provided to create a Mask, "
-                                                 "only the first band will be used."):
+            with pytest.warns(
+                UserWarning, match="Multi-band raster provided to create a Mask, only the first band will be used."
+            ):
                 mask = gu.Mask(example)
 
         # Check the masked array type
@@ -2806,14 +2809,10 @@ class TestArrayInterface:
     # - sorting and counting;
     # Most other math functions are already universal functions
 
-    # The full list exists in Raster
-    handled_functions = gu.georaster.raster._HANDLED_FUNCTIONS
 
     # Separate between two lists (single input and double input) for testing
-    handled_functions_2in = ["logical_and", "logical_or", "logical_xor", "logical_not", "all_close", "isclose", "array_equal", "array_equiv",
-                             "greater", "greater_equal", "less", "less_equal", "equal", "not_equal"]
-
-    handled_functions_1in = [hf for hf in handled_functions if hf not in handled_functions_2in]
+    handled_functions_2in = gu.georaster.raster._HANDLED_FUNCTIONS_2NIN
+    handled_functions_1in = gu.georaster.raster._HANDLED_FUNCTIONS_1NIN
 
     # Details below:
     # NaN functions: [f for f in np.lib.nanfunctions.__all__]
@@ -2987,7 +2986,9 @@ class TestArrayInterface:
     )  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
-        """Test that single-input array functions that we support give the same output as they would on the masked array"""
+        """
+        Test that single-input array functions that we support give the same output as they would on the masked array.
+        """
 
         # We set the default nodata
         if nodata_init == "type_default":
@@ -3046,9 +3047,11 @@ class TestArrayInterface:
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
     def test_array_functions_2nin(
-            self, arrfunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str
+        self, arrfunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str
     ) -> None:
-        """Test that double-input array functions that we support give the same output as they would on the masked array"""
+        """
+        Test that double-input array functions that we support give the same output as they would on the masked array.
+        """
 
         # We set the default nodatas
         if nodata1_init == "type_default":
@@ -3077,4 +3080,3 @@ class TestArrayInterface:
             output_ma = arrfunc(rst1.data, rst2.data)
 
             assert np.ma.allequal(output_rst, output_ma)
-
