@@ -249,7 +249,7 @@ class Vector:
         if rst is not None:
             mask = mask.reshape((rst.count, rst.height, rst.width))  # type: ignore
 
-        return gu.Mask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+        return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     def rasterize(
         self,

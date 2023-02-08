@@ -86,6 +86,9 @@ _HANDLED_FUNCTIONS = (
         "quantile",
     ]
     + ["sort", "count_nonzero", "unique"]
+    + ["all", "any", "isfinite", "isinf", "isnan"]
+    + ["logical_and", "logical_or", "logical_xor", "logical_not", "all_close", "isclose", "array_equal", "array_equiv",
+       "greater", "greater_equal", "less", "less_equal", "equal", "not_equal"]
 )
 
 
@@ -482,7 +485,7 @@ class Raster:
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
         nodata: int | float | list[int] | list[float] | None = None,
-    ) -> RasterType:
+    ) -> RasterType | Mask:
         """Create a Raster from a numpy array and some geo-referencing information.
 
         :param data: data array
@@ -781,6 +784,78 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         nodata = self.nodata
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
+
+    def __eq__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+        """
+        Element-wise equality cast into a Mask subclass.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, _ = self._overloading_check(other)
+        out_data = self_data == other_data
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        return out_mask
+
+    def __ne__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+        """
+        Element-wise equality cast into a Mask subclass.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, _ = self._overloading_check(other)
+        out_data = self_data != other_data
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        return out_mask
+
+    def __lt__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+        """
+        Element-wise equality cast into a Mask subclass.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, _ = self._overloading_check(other)
+        out_data = self_data < other_data
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        return out_mask
+
+    def __le__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+        """
+        Element-wise equality cast into a Mask subclass.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, _ = self._overloading_check(other)
+        out_data = self_data <= other_data
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        return out_mask
+
+    def __gt__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+        """
+        Element-wise equality cast into a Mask subclass.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, _ = self._overloading_check(other)
+        out_data = self_data > other_data
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        return out_mask
+
+    def __ge__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+        """
+        Element-wise equality cast into a Mask subclass.
+        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
+        """
+        self_data, other_data, _ = self._overloading_check(other)
+        out_data = self_data >= other_data
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        return out_mask
 
     @overload
     def astype(self, dtype: DTypeLike, inplace: Literal[False] = False) -> Raster:
@@ -2608,17 +2683,6 @@ class Mask(Raster):
             # Define in dtypes
             self._dtypes = (bool,)
 
-    def from_array(
-        cls: type[RasterType],
-        data: np.ndarray | np.ma.masked_array,
-        transform: tuple[float, ...] | Affine,
-        crs: CRS | int | None,
-        nodata: int | float | list[int] | list[float] | None = None,
-    ) -> Mask:
-
-        return Mask(Raster.from_array(data=data, transform=transform, crs=crs, nodata=nodata))
-
-
     def reproject(
         self: Mask,
         **kwargs
@@ -2732,7 +2796,7 @@ def proximity_from_vector_or_raster(
         # We create a geodataframe with the geometry type
         boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
         # We mask the pixels that make up the geometry type
-        mask_boundary = Vector(boundary_shp).create_mask(raster).squeeze()
+        mask_boundary = Vector(boundary_shp).create_mask(raster).get_nanarray()
 
     else:
         # We mask target pixels
@@ -2763,7 +2827,7 @@ def proximity_from_vector_or_raster(
         if in_or_out == "both":
             pass
         elif in_or_out in ["in", "out"]:
-            mask_polygon = Vector(vector.ds).create_mask(raster).squeeze()
+            mask_polygon = Vector(vector.ds).create_mask(raster).get_nanarray()
             if in_or_out == "in":
                 proximity[~mask_polygon] = 0
             else:

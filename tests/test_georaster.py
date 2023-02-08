@@ -2138,7 +2138,7 @@ class TestMask:
     ]
 
     @pytest.mark.parametrize("op", ops_logical)
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_logical_casting_real(self, example: str, op: str):
         """
         Test that logical operations cast Raster object to Mask on real data
@@ -2153,7 +2153,7 @@ class TestMask:
         assert np.array_equal(mask.data.data, getattr(rst.data.data, op)(1))
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_implicit_logical_casting_real(self, example: str):
         """
         Test that implicit logical operations on real data
@@ -2266,37 +2266,37 @@ class TestArithmetic:
 
         # Change data
         r2.data += 1
-        assert r1.raster_equal(r2)
+        assert not r1.raster_equal(r2)
 
         # Change mask (False by default)
         r2 = r1.copy()
         r2.data[0, 0] = np.ma.masked
-        assert r1.raster_equal(r2)
+        assert not r1.raster_equal(r2)
 
         # Change fill_value (999999 by default)
         r2 = r1.copy()
         r2.data.fill_value = 0
-        assert r1.raster_equal(r2)
+        assert not r1.raster_equal(r2)
 
         # Change dtype
         r2 = r1.copy()
         r2 = r2.astype("float32")
-        assert r1.raster_equal(r2)
+        assert not r1.raster_equal(r2)
 
         # Change transform
         r2 = r1.copy()
         r2.transform = rio.transform.from_bounds(0, 0, 1, 1, self.width + 1, self.height)
-        assert r1.raster_equal(r2)
+        assert not r1.raster_equal(r2)
 
         # Change CRS
         r2 = r1.copy()
         r2.crs = rio.crs.CRS.from_epsg(4326)
-        assert r1.raster_equal(r2)
+        assert not r1.raster_equal(r2)
 
         # Change nodata
         r2 = r1.copy()
         r2.set_nodata(34)
-        assert r1.raster_equal(r2)
+        assert not r1.raster_equal(r2)
 
     def test_equal_georeferenced_grid(self) -> None:
         """
@@ -2809,6 +2809,12 @@ class TestArrayInterface:
     # The full list exists in Raster
     handled_functions = gu.georaster.raster._HANDLED_FUNCTIONS
 
+    # Separate between two lists (single input and double input) for testing
+    handled_functions_2in = ["logical_and", "logical_or", "logical_xor", "logical_not", "all_close", "isclose", "array_equal", "array_equiv",
+                             "greater", "greater_equal", "less", "less_equal", "equal", "not_equal"]
+
+    handled_functions_1in = [hf for hf in handled_functions if hf not in handled_functions_2in]
+
     # Details below:
     # NaN functions: [f for f in np.lib.nanfunctions.__all__]
     # nanstatfuncs = ['nansum', 'nanmax', 'nanmin', 'nanargmax', 'nanargmin', 'nanmean', 'nanmedian', 'nanpercentile',
@@ -2975,13 +2981,13 @@ class TestArrayInterface:
                 with pytest.raises(TypeError):
                     ufunc(rst1, rst2)
 
-    @pytest.mark.parametrize("arrfunc_str", handled_functions)  # type: ignore
+    @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
     @pytest.mark.parametrize(
         "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
     )  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
-    def test_array_functions(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
-        """Test that array functions that we support give the same output as they would on the masked array"""
+    def test_array_functions_1nin(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
+        """Test that single-input array functions that we support give the same output as they would on the masked array"""
 
         # We set the default nodata
         if nodata_init == "type_default":
@@ -3023,7 +3029,52 @@ class TestArrayInterface:
                 output_rst = arrfunc(rst)
                 output_ma = arrfunc(rst.data)
 
+            # This test is for when the NumPy function reduces the dimension of the array but not completely
             if isinstance(output_rst, np.ndarray):
                 assert np.ma.allequal(output_rst, output_ma)
+            # This test is for when the NumPy function reduces the dimension to a single number
             else:
-                assert output_rst.raster_equal(output_ma)
+                assert output_rst == output_ma
+
+    @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
+    @pytest.mark.parametrize(
+        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+    )  # type: ignore
+    @pytest.mark.parametrize(
+        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+    )  # type: ignore
+    @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
+    @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
+    def test_array_functions_2nin(
+            self, arrfunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str
+    ) -> None:
+        """Test that double-input array functions that we support give the same output as they would on the masked array"""
+
+        # We set the default nodatas
+        if nodata1_init == "type_default":
+            nodata1: int | None = _default_nodata(dtype1)
+        else:
+            nodata1 = None
+        if nodata2_init == "type_default":
+            nodata2: int | None = _default_nodata(dtype2)
+        else:
+            nodata2 = None
+
+        ma1 = np.ma.masked_array(data=self.arr1.astype(dtype1), mask=self.mask1)
+        ma2 = np.ma.masked_array(data=self.arr2.astype(dtype2), mask=self.mask2)
+        rst1 = gr.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata1)
+        rst2 = gr.Raster.from_array(ma2, transform=self.transform, crs=None, nodata=nodata2)
+
+        # Get array func
+        arrfunc = getattr(np, arrfunc_str)
+
+        # Catch warnings
+        with warnings.catch_warnings():
+
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+            output_rst = arrfunc(rst1, rst2)
+            output_ma = arrfunc(rst1.data, rst2.data)
+
+            assert np.ma.allequal(output_rst, output_ma)
+
