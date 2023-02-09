@@ -1213,12 +1213,12 @@ self.set_nodata()."
         # Check ij2xy manually for the four corners
 
         # With offset="center", should be pixel center
-        xmin_center = xmin + rst.res[0]/2
-        ymin_center = ymin + rst.res[1]/2
-        xmax_center = xmax - rst.res[0]/2
-        ymax_center = ymax - rst.res[1]/2
+        xmin_center = xmin + rst.res[0] / 2
+        ymin_center = ymin + rst.res[1] / 2
+        xmax_center = xmax - rst.res[0] / 2
+        ymax_center = ymax - rst.res[1] / 2
         assert rst.ij2xy([0], [0], offset="center") == ([xmin_center], [ymax_center])
-        assert rst.ij2xy([rst.shape[0] - 1], [0], offset="center") == ([xmin_center] , [ymin_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [0], offset="center") == ([xmin_center], [ymin_center])
         assert rst.ij2xy([0], [rst.shape[1] - 1], offset="center") == ([xmax_center], [ymax_center])
         assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], offset="center") == ([xmax_center], [ymin_center])
 
@@ -1359,7 +1359,6 @@ self.set_nodata()."
         y = 3101000.0
         i, j = r.xy2ij(x, y)
         assert img[0, int(i), int(j)] == r.interp_points([(x, y)], order=1)[0]
-
 
     def test_value_at_coords(self) -> None:
 
