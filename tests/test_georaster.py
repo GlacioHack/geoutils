@@ -890,9 +890,9 @@ class TestRaster:
         with pytest.warns(
             UserWarning,
             match=re.escape(
-                f"For reprojection, dst_nodata must be set. Default chosen value {_default_nodata(r_nodata.dtypes[0])} exists in \
-self.data. This may have unexpected consequences. Consider setting a different nodata with \
-self.set_nodata()."
+                f"For reprojection, dst_nodata must be set. Default chosen value "
+                f"{_default_nodata(r_nodata.dtypes[0])} exists in self.data. This may have unexpected "
+                f"consequences. Consider setting a different nodata with self.set_nodata()."
             ),
         ):
             _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, src_nodata=default_nodata)
@@ -1078,6 +1078,20 @@ self.set_nodata()."
         for i in range(len(astype_funcs)):
             for j in range(len(astype_funcs)):
                 r.reproject(dst_res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), dst_nodata=0)
+
+        # Test that reprojection works for several bands
+        for n in [2, 3, 4]:
+            img1 = gu.Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"), transform=rio.transform.from_origin(0, 500, 1, 1), crs=4326
+            )
+
+            img2 = gu.Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"), transform=rio.transform.from_origin(50, 500, 1, 1), crs=4326
+            )
+
+            out_img = img2.reproject(img1)
+            assert np.shape(out_img.data) == (n, 500, 500)
+            assert (out_img.count, *out_img.shape) == (n, 500, 500)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:

@@ -1588,7 +1588,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # Specify the output bounds and shape, let rasterio handle the rest
             reproj_kwargs.update({"dst_transform": dst_transform})
-            dst_data = np.ones((dst_size[1], dst_size[0]), dtype=dst_dtype)
+            dst_data = np.ones((self.count, dst_size[1], dst_size[0]), dtype=dst_dtype)
             reproj_kwargs.update({"destination": dst_data})
 
         # Check that reprojection is actually needed

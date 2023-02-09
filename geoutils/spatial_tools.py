@@ -234,6 +234,10 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     if isinstance(resampling_method, str):
         resampling_method = resampling_method_from_str(resampling_method)
 
+    # Check raster has a single band
+    if any(r.count > 1 for r in rasters):
+        warnings.warn("Some input Rasters have multiple bands, only their first band will be used.")
+
     # Select reference raster
     if isinstance(reference, int):
         reference_raster = rasters[reference]
@@ -277,7 +281,8 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             data.append(diff_to_ref)
         else:
             # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
-            data.append(reprojected_raster.data.squeeze())
+            # Use only first band
+            data.append(reprojected_raster.data[0, :])
 
         # Remove unloaded rasters
         if not raster.is_loaded:
