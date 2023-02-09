@@ -161,16 +161,15 @@ class Vector:
         dst_crs: CRS | str | int | None = None,
     ) -> Vector:
         """
-        Reproject vector to a specified CRS and, optionally, cropped to certain bounds (no cropping by default).
+        Reproject vector to a specified CRS.
 
         The output CRS can either be given by a reference Raster or Vector (using `dst_ref`) or by manually
         providing the output CRS (`dst_crs`)
 
         To reproject a Vector with different source bounds, first run Vector.crop().
 
-        :param dst_ref: A reference raster or vector. If set will reproject to the CRS of this reference, and
-            optionally crop to the same bounds. Can be provided as Raster, Vector, rasterio dataset,
-            geopandas dataframe, or path to the file.
+        :param dst_ref: A reference raster or vector whose CRS to use as a reference for reprojection.
+            Can be provided as Raster, Vector, rasterio dataset, geopandas dataframe, or path to the file.
         :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
             defaults to self.crs.
 
