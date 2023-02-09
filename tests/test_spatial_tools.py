@@ -214,7 +214,7 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
     assert type(stacked_img) == gu.Raster  # Check output object is always Raster, whatever input was given
     assert np.count_nonzero(np.isnan(stacked_img.data)) == 0  # Check no NaNs introduced
 
-    merged_bounds = gu.spatial_tools.merge_bounding_boxes(
+    merged_bounds = gu.projtools.merge_bounds(
         [rasters.img1.bounds, rasters.img2.bounds], resolution=rasters.img1.res[0]
     )
     assert merged_bounds == stacked_img.bounds

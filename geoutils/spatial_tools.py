@@ -132,7 +132,7 @@ def load_multiple_rasters(
         bounds.append(bound)
 
     # Second get the intersection of all raster bounds
-    intersection = gu.projtools.merge_bounds(bounds, "intersection")
+    intersection = gu.projtools.merge_bounds(bounds, merging_algorithm="intersection")
 
     # Optionally, crop the rasters
     if crop:
@@ -180,22 +180,6 @@ def load_multiple_rasters(
             rst.load()
 
     return output_rst
-
-
-def merge_bounding_boxes(bounds: list[rio.coords.BoundingBox], resolution: float) -> rio.coords.BoundingBox:
-    max_bounds = dict(zip(["left", "right", "top", "bottom"], [np.nan] * 4))
-    for bound in bounds:
-        for key in "right", "top":
-            max_bounds[key] = np.nanmax([max_bounds[key], bound.__getattribute__(key)])
-        for key in "bottom", "left":
-            max_bounds[key] = np.nanmin([max_bounds[key], bound.__getattribute__(key)])
-
-    # Make sure that extent is a multiple of resolution
-    for key1, key2 in zip(("left", "bottom"), ("right", "top")):
-        modulo = (max_bounds[key2] - max_bounds[key1]) % resolution
-        max_bounds[key2] += modulo
-
-    return rio.coords.BoundingBox(**max_bounds)
 
 
 def stack_rasters(
@@ -250,7 +234,9 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     if use_ref_bounds:
         dst_bounds = reference_raster.bounds
     else:
-        dst_bounds = merge_bounding_boxes([raster.bounds for raster in rasters], resolution=reference_raster.res[0])
+        dst_bounds = gu.projtools.merge_bounds(
+            [raster.bounds for raster in rasters], resolution=reference_raster.res[0], return_rio_bbox=True
+        )
 
     # Make a data list and add all of the reprojected rasters into it.
     data: list[np.ndarray] = []
