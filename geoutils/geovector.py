@@ -3,16 +3,19 @@ geoutils.vectortools provides a toolset for working with vector data.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import warnings
 from collections import abc
 from numbers import Number
 from typing import Literal, TypeVar, overload
 
+import fiona
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio as rio
+import rasterio.errors
 import shapely
 from rasterio import features, warp
 from rasterio.crs import CRS
@@ -53,7 +56,7 @@ class Vector:
         else:
             raise ValueError("filename argument not recognised.")
 
-        self.crs = self.ds.crs
+        self._crs = self.ds.crs
 
     def __repr__(self) -> str:
         return str(self.ds.__repr__())
@@ -88,6 +91,12 @@ class Vector:
     def bounds(self) -> rio.coords.BoundingBox:
         """Get a bounding box of the total bounds of the Vector."""
         return rio.coords.BoundingBox(*self.ds.total_bounds)
+
+    @property
+    def crs(self) -> rio.crs.CRS:
+        """Ensure CRS cannot be set"""
+        self._crs = self.ds.crs
+        return self._crs
 
     def copy(self: VectorType) -> VectorType:
         """Return a copy of the Vector."""
@@ -145,6 +154,61 @@ class Vector:
             new_vector = self.copy()
             new_vector.ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]
             return new_vector
+
+    def reproject(
+        self: Vector,
+        dst_ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        dst_crs: CRS | str | int | None = None,
+    ) -> Vector:
+        """
+        Reproject vector to a specified CRS.
+
+        The output CRS can either be given by a reference Raster or Vector (using `dst_ref`) or by manually
+        providing the output CRS (`dst_crs`)
+
+        To reproject a Vector with different source bounds, first run Vector.crop().
+
+        :param dst_ref: A reference raster or vector whose CRS to use as a reference for reprojection.
+            Can be provided as Raster, Vector, rasterio dataset, geopandas dataframe, or path to the file.
+        :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
+            defaults to self.crs.
+
+        :returns: Reprojected vector
+        """
+
+        # Check that either dst_ref or dst_crs is provided
+        if (dst_ref is not None and dst_crs is not None) or (dst_ref is None and dst_crs is None):
+            raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
+
+        # Case a raster or vector is provided as reference
+        if dst_ref is not None:
+
+            # Check that dst_ref type is either str, Raster or rasterio data set
+            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
+            if isinstance(dst_ref, (gu.Raster, gu.Vector)):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, (rio.io.DatasetReader, gpd.GeoDataFrame)):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, str):
+                if not os.path.exists(dst_ref):
+                    raise ValueError("Reference raster or vector path does not exist.")
+                try:
+                    ds_ref = gu.Raster(dst_ref, load_data=False)
+                except rasterio.errors.RasterioIOError:
+                    try:
+                        ds_ref = Vector(dst_ref)
+                    except fiona.errors.DriverError:
+                        raise ValueError("Could not open raster or vector with rasterio or fiona.")
+            else:
+                raise TypeError("Type of dst_ref must be string path to file, Raster or Vector.")
+
+            # Read reprojecting params from ref raster
+            dst_crs = ds_ref.crs
+        else:
+            # Determine user-input target CRS
+            dst_crs = CRS.from_user_input(dst_crs)
+
+        return Vector(self.ds.to_crs(crs=dst_crs))
 
     def create_mask(
         self,
