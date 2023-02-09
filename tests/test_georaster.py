@@ -225,6 +225,26 @@ class TestRaster:
         assert np.array_equal(r.bands, (2, 3))
         assert r.data.shape == (r.nbands, r.height, r.width)
 
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_to_rio_dataset(self, example: str):
+        """Test the export to a rasterio dataset"""
+
+        # Open raster and export to rio dataset
+        rst = gr.Raster(example)
+        rio_ds = rst.to_rio_dataset()
+
+        # Check that the output is indeed a MemoryFile
+        assert isinstance(rio_ds, rio.io.DatasetReader)
+
+        # Check that all attributes are equal
+        rio_attrs_conserved = [attr for attr in _default_rio_attrs if attr not in ["name", "driver"]]
+        for attr in rio_attrs_conserved:
+            assert rst.__getattribute__(attr) == rio_ds.__getattribute__(attr)
+
+        # Check that the masked arrays are equal
+        assert np.array_equal(rst.data.data, rio_ds.read().data)
+        assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask)
+
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
         "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
