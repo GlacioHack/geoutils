@@ -1202,7 +1202,7 @@ self.set_nodata()."
             intersection = r.intersection(r_nonoverlap)
             assert intersection == (0.0, 0.0, 0.0, 0.0)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path]) # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_ij2xy_xy2ij(self, example: str) -> None:
         """Test ij2xy and that the two functions are reversible."""
 
