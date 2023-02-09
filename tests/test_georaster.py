@@ -1297,7 +1297,7 @@ self.set_nodata()."
 
         # -- Tests 1: check based on indexed values --
 
-        # Open two rasters and crop the first one
+        # Open raster
         r = gr.Raster(self.landsat_b4_crop_path)
 
         # Random test point that raised an error

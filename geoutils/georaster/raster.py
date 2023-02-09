@@ -2035,9 +2035,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             raise TypeError("Coordinates must be both numbers or both array-like.")
 
         # If for a single value, wrap in a list
-        if isinstance(x, (float, np.floating, int, np.integer)) and isinstance(
-            y, (float, np.floating, int, np.integer)
-        ):
+        if isinstance(x, (float, np.floating, int, np.integer)):
             x = [x]
             y = [y]
             # For the end of the function
@@ -2073,21 +2071,22 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if return_window:
             list_windows = []
 
+        # Convert to latlon if asked
+        if latlon:
+            from geoutils import projtools
+
+            x, y = projtools.reproject_from_latlon((y, x), self.crs)  # type: ignore
+
+        # Convert coordinates to pixel space
+        rows, cols = rio.transform.rowcol(self.transform, x, y, op=round)
+
         # Loop over all coordinates passed
-        for k in range(len(x)):  # type: ignore
+        for k in range(len(rows)):  # type: ignore
 
             value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
 
-            if latlon:
-                from geoutils import projtools
-
-                x0, y0 = projtools.reproject_from_latlon((y[k], x[k]), self.crs)  # type: ignore
-            else:
-                x0 = x[k]  # type: ignore
-                y0 = y[k]  # type: ignore
-
-            # Convert coordinates to pixel space
-            row, col = rio.transform.rowcol(self.transform, x0, y0, op=round)
+            row = rows[k]  # type: ignore
+            col = cols[k]  # type: ignore
 
             # Decide what pixel coordinates to read:
             if window is not None:
