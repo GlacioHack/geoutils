@@ -148,7 +148,7 @@ _default_rio_attrs = [
 
 def _load_rio(
     dataset: rio.io.DatasetReader,
-    indexes: int | list[int] | None = None,
+    indexes: int | tuple[int, ...] | None = None,
     masked: bool = False,
     transform: Affine | None = None,
     shape: tuple[int, int] | None = None,
@@ -284,7 +284,7 @@ class Raster:
         self._data: np.ma.masked_array | None = None
         self._nodata: int | float | list[int] | list[float] | None = nodata
         self._indexes = indexes
-        self._indexes_loaded = None
+        self._indexes_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
         self._disk_hash: int | None = None
         self._is_modified = True
@@ -388,14 +388,15 @@ class Raster:
         """Return the count of bands on disk if it exists."""
         if self._disk_shape is not None:
             return self._disk_shape[0]
-        return
+        return None
 
     @property
-    def count(self) -> None | int:
+    def count(self) -> int:
         """Return the count of bands loaded in memory if they are, otherwise the one on disk."""
         if self.is_loaded:
             return int(self.data.shape[0])
-        return self.count_on_disk
+        #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
+        return self.count_on_disk  # type: ignore
 
     @property
     def height(self) -> int:
@@ -445,18 +446,18 @@ class Raster:
         """Return the indexes of bands on disk if it exists."""
         if self._disk_indexes is not None:
             return self._disk_indexes
-        return
+        return None
 
     @property
     def indexes(self) -> tuple[int, ...]:
         """Return the indexes of bands loaded in memory if they are, otherwise on disk."""
         if self._indexes_loaded is not None:
             if isinstance(self._indexes_loaded, int):
-                return (self._indexes_loaded, )
+                return (self._indexes_loaded,)
             return tuple(self._indexes_loaded)
         if self.is_loaded:
             return tuple(range(1, self.count + 1))
-        return self.indexes_on_disk
+        return self.indexes_on_disk  # type: ignore
 
     def load(self, indexes: None | int | list[int] = None, **kwargs: Any) -> None:
         """
@@ -476,15 +477,19 @@ class Raster:
 
         # If no index is passed, use all of them
         if indexes is None:
-            indexes = self.indexes
+            valid_indexes = self.indexes
+        elif isinstance(indexes, int):
+            valid_indexes = (indexes,)
+        else:
+            valid_indexes = tuple(indexes)
 
         # Save which indexes are loaded
-        self._indexes_loaded = indexes
+        self._indexes_loaded = valid_indexes
 
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
                 dataset,
-                indexes=indexes,
+                indexes=valid_indexes,
                 masked=self._masked,
                 transform=self.transform,
                 shape=self.shape,

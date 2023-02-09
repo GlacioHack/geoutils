@@ -168,8 +168,8 @@ class TestRaster:
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.count_on_disk == 1
-        assert r.indexes == (1, )
-        assert r.indexes_on_disk == (1, )
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
@@ -217,8 +217,16 @@ class TestRaster:
         r = gr.Raster(self.landsat_rgb_path, load_data=True)
         assert r.count == 3
         assert r.count_on_disk == 3
-        assert r.indexes == (1, 2, 3, )
-        assert r.indexes_on_disk == (1, 2, 3, )
+        assert r.indexes == (
+            1,
+            2,
+            3,
+        )
+        assert r.indexes_on_disk == (
+            1,
+            2,
+            3,
+        )
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
