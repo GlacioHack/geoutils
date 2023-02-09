@@ -2220,13 +2220,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return i, j
 
-    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "center") -> tuple[np.ndarray, np.ndarray]:
+    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "ul") -> tuple[np.ndarray, np.ndarray]:
         """
         Return x,y coordinates for a given row, column index pair.
 
-        :param i: row (i) index of pixel.
-        :param j: column (j) index of pixel.
-        :param offset: return coordinates as "corner" or "center" of pixel
+        Defaults to upper-left, for which this functionis fully reversible with xy2ij.
+
+        :param i: Row (i) index of pixel.
+        :param j: Column (j) index of pixel.
+        :param offset: Return coordinates as "center" of pixel, or any corner (upper-left "ul", "ur", "ll", lr").
 
         :returns x, y: x,y coordinates of i,j in reference system.
         """
