@@ -2168,7 +2168,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 win: np.ndarray | dict[int, np.ndarray] = data
 
             else:
-                if self.nbands == 1:
+                if self.count == 1:
                     with rio.open(self.filename) as raster:
                         data = raster.read(
                             window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked
