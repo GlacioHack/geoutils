@@ -134,6 +134,7 @@ def merge_bounds(
 
     output_poly = bounds2poly(boundsGeom=bounds_list[0])
 
+    # Compute the merging
     for boundsGeom in bounds_list[1:]:
         new_poly = bounds2poly(boundsGeom)
 
@@ -144,11 +145,9 @@ def merge_bounds(
         else:
             raise ValueError("merging_algorithm must be 'union' or 'intersection'")
 
+    # Get merged bounds, write as dict to manipulate with resolution in the next step
     new_bounds = output_poly.bounds
-
     rio_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
-
-    print(rio_bounds)
 
     # Make sure that extent is a multiple of resolution
     if resolution is not None:
