@@ -148,7 +148,7 @@ _default_rio_attrs = [
 
 def _load_rio(
     dataset: rio.io.DatasetReader,
-    bands: int | list[int] | None = None,
+    indexes: int | tuple[int, ...] | None = None,
     masked: bool = False,
     transform: Affine | None = None,
     shape: tuple[int, int] | None = None,
@@ -160,7 +160,7 @@ def _load_rio(
     Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
 
     :param dataset: The dataset to read (opened with "rio.open(filename)")
-    :param bands: The band(s) to load. Note that rasterio begins counting at 1, not 0.
+    :param indexes: The band(s) to load. Note that rasterio begins counting at 1, not 0.
     :param masked: Should the mask be read (if any exists), and/or should the nodata be used to mask values
     :param transform: Create a window from the given transform (to read only parts of the raster)
     :param shape: The expected shape of the read ndarray. Must be given together with the 'transform' argument.
@@ -188,10 +188,10 @@ def _load_rio(
     else:
         window = None
 
-    if bands is None:
+    if indexes is None:
         data = dataset.read(masked=masked, window=window, **kwargs)
     else:
-        data = dataset.read(bands, masked=masked, window=window, **kwargs)
+        data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
     if len(data.shape) == 2:
         data = data[np.newaxis, :, :]
     return np.ma.masked_array(data)
@@ -208,17 +208,15 @@ class Raster:
         filename_or_dataset : str
             The path/filename of the loaded, file, only set if a disk-based file is read in.
         data : np.array
-            Loaded image. Dimensions correspond to (bands, height, width).
-        nbands : int
+            Loaded image. Dimensions correspond to (count, height, width).
+        count_loaded : int
             Number of bands loaded into .data
-        bands : tuple
-            The indexes of the opened dataset which correspond to the bands loaded into data.
+        indexes_loaded : tuple
+            The indexes of the bands of the opened dataset loaded into .data.
         is_loaded : bool
             True if the image data have been loaded into this Raster.
 
         bounds
-
-        count
 
         crs
 
@@ -227,8 +225,6 @@ class Raster:
         dtypes
 
         height
-
-        indexes
 
         name
 
@@ -251,7 +247,7 @@ class Raster:
         | rio.io.DatasetReader
         | rio.io.MemoryFile
         | dict[str, Any],
-        bands: None | int | list[int] = None,
+        indexes: None | int | list[int] = None,
         load_data: bool = True,
         downsample: AnyNumber = 1,
         masked: bool = True,
@@ -263,11 +259,11 @@ class Raster:
 
         :param filename_or_dataset: The filename of the dataset.
 
-        :param bands: The band(s) to load into the object. Default is to load all bands.
+        :param indexes: The band(s) to load into the object. Default is to load all bands.
 
         :param load_data: Load the raster data into the object. Default is True.
 
-        :param downsample: Reduce the size of the image loaded by this factor. Default is 1
+        :param downsample: Reduce the size of the image loaded by this factor. Default is 1.
 
         :param masked: the data is loaded as a masked array, with no data values masked. Default is True.
 
@@ -287,7 +283,8 @@ class Raster:
 
         self._data: np.ma.masked_array | None = None
         self._nodata: int | float | list[int] | list[float] | None = nodata
-        self._bands = bands
+        self._indexes = indexes
+        self._indexes_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
         self._disk_hash: int | None = None
         self._is_modified = True
@@ -348,28 +345,28 @@ class Raster:
                         self.__setattr__(attr, ds.__getattr__(attr))
 
             # Check number of bands to be loaded
-            if bands is None:
-                nbands = self.nbands
-            elif isinstance(bands, int):
-                nbands = 1
-            elif isinstance(bands, abc.Iterable):
-                nbands = len(bands)
+            if indexes is None:
+                count = self.count
+            elif isinstance(indexes, int):
+                count = 1
+            elif isinstance(indexes, abc.Iterable):
+                count = len(indexes)
 
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise ValueError("downsample must be of type int or float")
             if downsample == 1:
-                out_shape = (nbands, self.height, self.width)
+                out_shape = (count, self.height, self.width)
             else:
                 down_width = int(np.ceil(self.width / downsample))
                 down_height = int(np.ceil(self.height / downsample))
-                out_shape = (nbands, down_height, down_width)
+                out_shape = (count, down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
 
             if load_data:
                 # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
-                self._data = _load_rio(ds, bands=bands, masked=masked, out_shape=out_shape)  # type: ignore
+                self._data = _load_rio(ds, indexes=indexes, masked=masked, out_shape=out_shape)  # type: ignore
                 if isinstance(filename_or_dataset, str):
                     self._is_modified = False
                     self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
@@ -387,16 +384,19 @@ class Raster:
             raise ValueError("filename argument not recognised.")
 
     @property
-    def nbands(self) -> int:
-        if not self.is_loaded and self._disk_shape is not None:
+    def count_on_disk(self) -> None | int:
+        """Return the count of bands on disk if it exists."""
+        if self._disk_shape is not None:
             return self._disk_shape[0]
-        return int(self.data.shape[0])
+        return None
 
     @property
     def count(self) -> int:
-        if self._disk_shape is not None:
-            return self._disk_shape[0]
-        return self.nbands
+        """Return the count of bands loaded in memory if they are, otherwise the one on disk."""
+        if self.is_loaded:
+            return int(self.data.shape[0])
+        #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
+        return self.count_on_disk  # type: ignore
 
     @property
     def height(self) -> int:
@@ -439,27 +439,32 @@ class Raster:
         """Return the string representations of the data types for each band."""
         if not self.is_loaded and self._disk_dtypes is not None:
             return self._disk_dtypes
-        return (str(self.data.dtype),) * self.nbands
+        return (str(self.data.dtype),) * self.count
+
+    @property
+    def indexes_on_disk(self) -> None | tuple[int, ...]:
+        """Return the indexes of bands on disk if it exists."""
+        if self._disk_indexes is not None:
+            return self._disk_indexes
+        return None
 
     @property
     def indexes(self) -> tuple[int, ...]:
-        if self._disk_indexes is not None:
-            return self._disk_indexes
-        return tuple(range(1, self.nbands + 1))
+        """Return the indexes of bands loaded in memory if they are, otherwise on disk."""
+        if self._indexes_loaded is not None:
+            if isinstance(self._indexes_loaded, int):
+                return (self._indexes_loaded,)
+            return tuple(self._indexes_loaded)
+        if self.is_loaded:
+            return tuple(range(1, self.count + 1))
+        return self.indexes_on_disk  # type: ignore
 
-    @property
-    def bands(self) -> tuple[int, ...]:
-        if self._bands is not None:
-            if isinstance(self._bands, int):
-                return (self._bands,)
-            return tuple(self._bands)
-        return self.indexes
-
-    def load(self, **kwargs: Any) -> None:
+    def load(self, indexes: None | int | list[int] = None, **kwargs: Any) -> None:
         """
         Load the data from disk.
 
-        :param kwargs: Optional keyword arguments sent to '_load_rio()'
+        :param kwargs: Optional keyword arguments sent to '_load_rio()'.
+        :param indexes: The band(s) to load. Note that rasterio begins counting at 1, not 0.
 
         :raises ValueError: If the data are already loaded.
         :raises AttributeError: If no 'filename' attribute exists.
@@ -470,9 +475,25 @@ class Raster:
         if self.filename is None:
             raise AttributeError("'filename' is not set")
 
+        # If no index is passed, use all of them
+        if indexes is None:
+            valid_indexes = self.indexes
+        elif isinstance(indexes, int):
+            valid_indexes = (indexes,)
+        else:
+            valid_indexes = tuple(indexes)
+
+        # Save which indexes are loaded
+        self._indexes_loaded = valid_indexes
+
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
-                dataset, bands=self._bands, masked=self._masked, transform=self.transform, shape=self.shape, **kwargs
+                dataset,
+                indexes=valid_indexes,
+                masked=self._masked,
+                transform=self.transform,
+                shape=self.shape,
+                **kwargs,
             )
 
     @classmethod
@@ -1141,14 +1162,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         if stats:
             if self.is_loaded:
-                if self.nbands == 1:
+                if self.count == 1:
                     as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
                     as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
                     as_str.append(f"[MEDIAN]:           {np.ma.median(self.data):.2f}\n")
                     as_str.append(f"[MEAN]:             {np.nanmean(self.data):.2f}\n")
                     as_str.append(f"[STD DEV]:          {np.nanstd(self.data):.2f}\n")
                 else:
-                    for b in range(self.nbands):
+                    for b in range(self.count):
                         # try to keep with rasterio convention.
                         as_str.append(f"Band {b + 1}:")
                         as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data[b, :, :]):.2f}\n")
@@ -1402,7 +1423,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             else:
                 with rio.open(self.filename) as raster:
                     crop_img = raster.read(
-                        self._bands,
+                        indexes=self._indexes,
                         masked=self._masked,
                         window=final_window,
                     )
@@ -1886,7 +1907,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def show(
         self,
-        band: int | None = None,
+        index: int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -1900,14 +1921,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
         you give this method will be passed to rasterio.plot.show.
 
-        :param band: which band to plot, from 0 to self.count-1 (default is all)
-        :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap']
+        :param index: Which band to plot, from 1 to self.count (default is all).
+        :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
         :param vmax: Colorbar maximum value. Default is data min.
         :param cb_title: Colorbar label. Default is None.
         :param add_cb: Set to True to display a colorbar. Default is True.
-        :param ax: A figure ax to be used for plotting. If None, will create default figure and axes,\
-                and plot figure directly.
+        :param ax: A figure ax to be used for plotting. If None, will create default figure and axes,
+            and plot figure directly.
 
         :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
 
@@ -1928,18 +1949,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Check if specific band selected, or take all
         # rshow takes care of image dimensions
         # if self.count=3 (4) => plotted as RGB(A)
-        if band is None:
-            band = np.arange(self.count)
-        elif isinstance(band, int):
-            if band >= self.count:
-                raise ValueError(f"band must be in range 0-{self.count - 1:d}")
+        if index is None:
+            index = np.arange(1, self.count + 1)
+        elif isinstance(index, int):
+            if index >= self.count:
+                raise ValueError(f"Index must be in range 1-{self.count:d}")
             pass
         else:
-            raise ValueError("band must be int or None")
+            raise ValueError("Index must be int or None")
 
         # If multiple bands (RGB), cbar does not make sense
-        if isinstance(band, abc.Sequence):
-            if len(band) > 1:
+        if isinstance(index, abc.Sequence):
+            if len(index) > 1:
                 add_cb = False
 
         # Create colorbar
@@ -1953,10 +1974,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Set colorbar min/max values (needed for ScalarMappable)
         if vmin is None:
-            vmin = np.nanmin(self.data[band, :, :])
+            vmin = np.nanmin(self.data[index - 1, :, :])
 
         if vmax is None:
-            vmax = np.nanmax(self.data[band, :, :])
+            vmax = np.nanmax(self.data[index - 1, :, :])
 
         # Make sure they are numbers, to avoid mpl error
         try:
@@ -1976,7 +1997,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Use data array directly, as rshow on self.ds will re-load data
         rshow(
-            self.data[band, :, :],
+            self.data[index - 1, :, :],
             transform=self.transform,
             ax=ax0,
             cmap=cmap,
@@ -2009,7 +2030,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         x: float | ArrayLike,
         y: float | ArrayLike,
         latlon: bool = False,
-        band: int | None = None,
+        index: int | None = None,
         masked: bool = False,
         window: int | None = None,
         return_window: bool = False,
@@ -2027,7 +2048,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param x: x (or longitude) coordinate(s).
         :param y: y (or latitude) coordinate(s).
         :param latlon: Set to True if coordinates provided as longitude/latitude.
-        :param band: the band number to extract from.
+        :param index: The band number to extract from (from 1 to self.count).
         :param masked: If `masked` is `True` the return value will be a masked
             array. Otherwise (the default) the return value will be a
             regular array.
@@ -2140,14 +2161,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             rio_window = rio.windows.Window(col, row, width, height)
 
             if self.is_loaded:
-                data = self.data[slice(None) if band is None else band, row : row + height, col : col + width]
+                data = self.data[slice(None) if index is None else index, row : row + height, col : col + width]
                 if not masked:
                     data = data.filled()
                 value = format_value(data)
                 win: np.ndarray | dict[int, np.ndarray] = data
 
             else:
-                if self.nbands == 1:
+                if self.count == 1:
                     with rio.open(self.filename) as raster:
                         data = raster.read(
                             window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked
@@ -2345,7 +2366,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         pts: ArrayLike,
         input_latlon: bool = False,
         mode: str = "linear",
-        band: int = 1,
+        index: int = 1,
         shift_area_or_point: bool = False,
         **kwargs: Any,
     ) -> np.ndarray:
@@ -2363,9 +2384,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
              used to interpolate the raster value at each point. For more information, see
              scipy.interpolate.interp2d. Default is linear.
-        :param band: Raster band to use.
+        :param index: The band to use (from 1 to self.count).
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
+
 
         :returns rpts: Array of raster value(s) for the given points.
         """
@@ -2391,7 +2413,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
-        rpts = map_coordinates(self.data[band - 1, :, :].astype(np.float32), [i, j], **kwargs)
+        rpts = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
         rpts = np.array(rpts, dtype=np.float32)
         rpts[np.array(ind_invalid)] = np.nan
 
@@ -2433,14 +2455,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Split the bands into separate copied rasters.
 
         :param copy: Copy the bands or return slices of the original data.
-        :param subset: Optional. A subset of band indices to extract. Defaults to all.
+        :param subset: Optional. A subset of band indices to extract (from 1 to self.count). Defaults to all.
 
         :returns: A list of Rasters for each band.
         """
         bands: list[Raster] = []
 
         if subset is None:
-            indices = list(range(self.nbands))
+            indices = list(np.arange(1, self.count + 1))
         elif isinstance(subset, int):
             indices = [subset]
         elif isinstance(subset, list):
@@ -2453,7 +2475,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 # Generate a new Raster from a copy of the band's data
                 bands.append(
                     self.from_array(
-                        self.data[band_n, :, :].copy(),
+                        self.data[band_n - 1, :, :].copy(),
                         transform=self.transform,
                         crs=self.crs,
                         nodata=self.nodata,
@@ -2464,7 +2486,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 # Set the data to a slice of the original array
                 bands.append(
                     self.from_array(
-                        self.data[band_n, :, :].reshape((1,) + self.data.shape[1:]),
+                        self.data[band_n - 1, :, :].reshape((1,) + self.data.shape[1:]),
                         transform=self.transform,
                         crs=self.crs,
                         nodata=self.nodata,
@@ -2497,7 +2519,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If the raster is not loaded, sampling will be done from disk without loading the entire Raster.
 
         Formats:
-            * `as_frame` == None | False: A numpy ndarray of shape (N, 2 + nbands) with the columns [x, y, b1, b2..].
+            * `as_frame` == None | False: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
             * `as_frame` == True: A GeoPandas GeoDataFrame with the columns ["b1", "b2", ..., "geometry"]
 
         :param subset: The point count or fraction. If 'subset' > 1, it's parsed as a count.
@@ -2506,7 +2528,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :raises ValueError: If the subset count or fraction is poorly formatted.
 
-        :returns: An ndarray/GeoDataFrame of the shape (N, 2 + nbands) where N is the subset count.
+        :returns: A ndarray/GeoDataFrame of the shape (N, 2 + count) where N is the subset count.
         """
         data_size = self.width * self.height
 

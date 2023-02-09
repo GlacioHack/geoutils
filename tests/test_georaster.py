@@ -108,9 +108,9 @@ class TestRaster:
         r0.data[0, 0, 0] += 5
         assert r2.data[0, 0, 0] == r0.data[0, 0, 0]
 
-        # With r.nbands = 2
+        # With r.count = 2
         r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
-        assert r0.nbands != r2.nbands
+        assert r0.count != r2.count
 
         # Test that loaded data are always masked_arrays (but the mask may be empty, i.e. 'False')
         assert np.ma.isMaskedArray(gr.Raster(example, masked=True).data)
@@ -168,6 +168,9 @@ class TestRaster:
         assert r.height == 655
         assert r.shape == (r.height, r.width)
         assert r.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
@@ -183,6 +186,9 @@ class TestRaster:
         assert r2.height == 618
         assert r2.shape == (r2.height, r2.width)
         assert r2.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert np.array_equal(r2.dtypes, ["float32"])
         assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
@@ -193,38 +199,52 @@ class TestRaster:
         # Test 2 - loading the data afterward
         r.load()
         assert r.is_loaded
-        assert r.nbands == 1
+        assert r.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 3 - single band, loading data
         r = gr.Raster(self.landsat_b4_path, load_data=True)
         assert r.is_loaded
-        assert r.nbands == 1
+        assert r.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 4 - multiple bands, load all bands
         r = gr.Raster(self.landsat_rgb_path, load_data=True)
         assert r.count == 3
-        assert np.array_equal(r.indexes, [1, 2, 3])
-        assert r.nbands == 3
-        assert np.array_equal(r.bands, [1, 2, 3])
+        assert r.count_on_disk == 3
+        assert r.indexes == (
+            1,
+            2,
+            3,
+        )
+        assert r.indexes_on_disk == (
+            1,
+            2,
+            3,
+        )
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
-        r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=1)
-        assert r.count == 3
-        assert np.array_equal(r.indexes, [1, 2, 3])
-        assert r.nbands == 1
-        # assert r.bands == (1)
-        assert r.data.shape == (r.nbands, r.height, r.width)
+        r = gr.Raster(self.landsat_rgb_path, load_data=True, indexes=1)
+        assert r.count == 1
+        assert r.count_on_disk == 3
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gr.Raster(self.landsat_rgb_path, load_data=True, bands=[2, 3])
-        assert r.count == 3
-        assert np.array_equal(r.indexes, [1, 2, 3])
-        assert r.nbands == 2
-        assert np.array_equal(r.bands, (2, 3))
-        assert r.data.shape == (r.nbands, r.height, r.width)
+        r = gr.Raster(self.landsat_rgb_path, load_data=True, indexes=[2, 3])
+        assert r.count == 2
+        assert r.count_on_disk == 3
+        assert r.indexes == (1, 2)
+        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.data.shape == (r.count, r.height, r.width)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_to_rio_dataset(self, example: str):
@@ -1434,22 +1454,22 @@ class TestRaster:
         itest = itest[0]
         jtest = jtest[0]
         # Extract the values
-        z_band1 = r_multi.value_at_coords(xtest0, ytest0, band=0)
-        z_band2 = r_multi.value_at_coords(xtest0, ytest0, band=1)
-        z_band3 = r_multi.value_at_coords(xtest0, ytest0, band=2)
+        z_band1 = r_multi.value_at_coords(xtest0, ytest0, index=0)
+        z_band2 = r_multi.value_at_coords(xtest0, ytest0, index=1)
+        z_band3 = r_multi.value_at_coords(xtest0, ytest0, index=2)
         # Compare to the Raster array slice
         assert list(r_multi.data[:, itest, jtest]) == [z_band1, z_band2, z_band3]
 
         # 3/ Masked argument
         r_multi.data[:, itest, jtest] = np.ma.masked
-        z_not_ma = r_multi.value_at_coords(xtest0, ytest0, band=1)
+        z_not_ma = r_multi.value_at_coords(xtest0, ytest0, index=1)
         assert not np.ma.is_masked(z_not_ma)
-        z_ma = r_multi.value_at_coords(xtest0, ytest0, band=1, masked=True)
+        z_ma = r_multi.value_at_coords(xtest0, ytest0, index=1, masked=True)
         assert np.ma.is_masked(z_ma)
 
         # 4/ Window argument
         val_window, z_window = r_multi.value_at_coords(
-            xtest0, ytest0, band=0, window=3, masked=True, return_window=True
+            xtest0, ytest0, index=0, window=3, masked=True, return_window=True
         )
         assert (
             val_window
@@ -1460,7 +1480,7 @@ class TestRaster:
 
         # 5/ Reducer function argument
         val_window2 = r_multi.value_at_coords(
-            xtest0, ytest0, band=0, window=3, masked=True, reducer_function=np.ma.median
+            xtest0, ytest0, index=0, window=3, masked=True, reducer_function=np.ma.median
         )
         assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
@@ -1815,7 +1835,7 @@ class TestRaster:
 
         # Test plotting single band B/W, add_cb
         ax = plt.subplot(111)
-        img_RGB.show(band=0, cmap="gray", ax=ax, add_cb=False, title="Plotting one band B/W")
+        img_RGB.show(index=1, cmap="gray", ax=ax, add_cb=False, title="Plotting one band B/W")
         if DO_PLOT:
             plt.show()
         else:
@@ -1967,7 +1987,7 @@ class TestRaster:
         # r = gr.Raster(self.landsat_b4_path)
 
         # Load the attributes to check
-        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename", "nbands", "filename"]
+        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename"]
         # Create some sample code that should be correct
         sample_code = "\n".join(
             [
@@ -2004,17 +2024,16 @@ class TestRaster:
         red, green, blue = img.split_bands(copy=False)
 
         # Check that the shapes are correct.
-        assert red.nbands == 1
         assert red.count == 1
         assert red.data.shape[0] == 1
-        assert img.nbands == 3
+        assert img.count == 3
         assert img.data.shape[0] == 3
 
         # Extract only one band (then it will not return a list)
-        red2 = img.split_bands(copy=False, subset=0)[0]
+        red2 = img.split_bands(copy=False, subset=1)[0]
 
         # Extract a subset with a list in a weird direction
-        blue2, green2 = img.split_bands(copy=False, subset=[2, 1])
+        blue2, green2 = img.split_bands(copy=False, subset=[3, 2])
 
         # Check that the subset functionality works as expected.
         assert red == red2
@@ -2039,7 +2058,7 @@ class TestRaster:
         )
 
         # Copy the bands instead of pointing to the same memory.
-        red_c = img.split_bands(copy=True, subset=0)[0]
+        red_c = img.split_bands(copy=True, subset=1)[0]
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
         assert not np.shares_memory(red_c.data, img.data)
