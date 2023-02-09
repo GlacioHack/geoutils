@@ -23,6 +23,7 @@ import geoutils.projtools as pt
 from geoutils import examples
 from geoutils.georaster.raster import _default_nodata, _default_rio_attrs
 from geoutils.misc import resampling_method_from_str
+from geoutils.projtools import reproject_to_latlon
 
 DO_PLOT = False
 
@@ -1299,7 +1300,7 @@ class TestRaster:
 
         xmin, ymin, xmax, ymax = r.bounds
 
-        # We can test with several method for the exact indexes: interp, value_at_coords, and simple read should
+        # We can test with several method for the exact indexes: interp, and simple read should
         # give back the same values that fall right on the coordinates
         xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
         yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
@@ -1311,7 +1312,6 @@ class TestRaster:
         for k in range(len(xrand)):
             # We directly sample the values
             z_ind = img[0, int(i[k]), int(j[k])]
-            # We can also compare with the value_at_coords() functionality
             list_z_ind.append(z_ind)
 
         rpts = r.interp_points(pts, order=1)
@@ -1331,25 +1331,104 @@ class TestRaster:
         # Out[34]: (75.0, 302.0)
 
     def test_value_at_coords(self) -> None:
+        """
+        Test that value at coords works as intended
+        """
 
-        r = gr.Raster(self.landsat_b4_path)
-        r2 = gr.Raster(self.landsat_b4_crop_path)
-        r.crop(r2)
+        # -- Tests 1: check based on indexed values --
+
+        # Open raster
+        r = gr.Raster(self.landsat_b4_crop_path)
 
         # Random test point that raised an error
-        itest = 118
-        jtest = 450
-        xtest = 496930
-        ytest = 3099170
+        itest0 = 118
+        jtest0 = 450
+        xtest0 = 496930
+        ytest0 = 3099170
 
-        # z = r.data[0, itest, jtest]
-        x_out, y_out = r.ij2xy(itest, jtest, offset="ul")
-        assert x_out == xtest
-        assert y_out == ytest
+        # Verify coordinates match indexes
+        x_out, y_out = r.ij2xy(itest0, jtest0, offset="ul")
+        assert x_out == xtest0
+        assert y_out == ytest0
 
-        z_val = r.value_at_coords(xtest, ytest)
-        z = r.data.data[0, itest, jtest]
+        # Check that the value at this coordinate is the same as when indexing
+        z_val = r.value_at_coords(xtest0, ytest0)
+        z = r.data.data[0, itest0, jtest0]
         assert z == z_val
+
+        # -- Tests 2: check arguments work as intended --
+
+        # 1/ Lat-lon argument check by getting the coordinates of our last test point
+        lat, lon = reproject_to_latlon(pts=[xtest0, ytest0], in_crs=r.crs)
+        z_val_2 = r.value_at_coords(lon, lat, latlon=True)
+        assert z_val == z_val_2
+
+        # 2/ Band argument
+        # Get the indexes for the multi-band Raster
+        r_multi = gr.Raster(self.landsat_rgb_path)
+        itest, jtest = r_multi.xy2ij(xtest0, ytest0)
+        itest = itest[0]
+        jtest = jtest[0]
+        # Extract the values
+        z_band1 = r_multi.value_at_coords(xtest0, ytest0, band=0)
+        z_band2 = r_multi.value_at_coords(xtest0, ytest0, band=1)
+        z_band3 = r_multi.value_at_coords(xtest0, ytest0, band=2)
+        # Compare to the Raster array slice
+        assert list(r_multi.data[:, itest, jtest]) == [z_band1, z_band2, z_band3]
+
+        # 3/ Masked argument
+        r_multi.data[:, itest, jtest] = np.ma.masked
+        z_not_ma = r_multi.value_at_coords(xtest0, ytest0, band=1)
+        assert not np.ma.is_masked(z_not_ma)
+        z_ma = r_multi.value_at_coords(xtest0, ytest0, band=1, masked=True)
+        assert np.ma.is_masked(z_ma)
+
+        # 4/ Window argument
+        val_window, z_window = r_multi.value_at_coords(
+            xtest0, ytest0, band=0, window=3, masked=True, return_window=True
+        )
+        assert (
+            val_window
+            == np.ma.mean(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
+            == np.ma.mean(z_window)
+        )
+        assert np.array_equal(z_window, r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
+
+        # 5/ Reducer function argument
+        val_window2 = r_multi.value_at_coords(
+            xtest0, ytest0, band=0, window=3, masked=True, reducer_function=np.ma.median
+        )
+        assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
+
+        # -- Tests 3: check that errors are raised when supposed for non-boolean arguments --
+
+        # Verify that passing a window that is not a whole number fails
+        with pytest.raises(ValueError, match=re.escape("Window must be a whole number.")):
+            r.value_at_coords(xtest0, ytest0, window=3.5)  # type: ignore
+        # Same for an odd number
+        with pytest.raises(ValueError, match=re.escape("Window must be an odd number.")):
+            r.value_at_coords(xtest0, ytest0, window=4)
+        # But a window that is a whole number as a float works
+        r.value_at_coords(xtest0, ytest0, window=3.0)  # type: ignore
+
+        # -- Tests 4: check that passing an array-like object works
+
+        # For simple coordinates
+        x_coords = [xtest0, xtest0 + 100]
+        y_coords = [ytest0, ytest0 - 100]
+        vals = r_multi.value_at_coords(x=x_coords, y=y_coords)
+        val0, win0 = r_multi.value_at_coords(x=x_coords[0], y=y_coords[0], return_window=True)
+        val1, win1 = r_multi.value_at_coords(x=x_coords[1], y=y_coords[1], return_window=True)
+
+        assert len(vals) == len(x_coords)
+        assert vals[0] == val0
+        assert vals[1] == val1
+
+        # With a return window argument
+        vals, windows = r_multi.value_at_coords(x=x_coords, y=y_coords, return_window=True)
+        assert len(windows) == len(x_coords)
+        assert np.array_equal(windows[0], win0, equal_nan=True)
+        assert np.array_equal(windows[1], win1, equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:

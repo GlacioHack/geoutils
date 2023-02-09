@@ -2024,28 +2024,26 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         Optionally, return mean of pixels within a square window.
 
-        :param x: x (or longitude) coordinate.
-        :param y: y (or latitude) coordinate.
+        :param x: x (or longitude) coordinate(s).
+        :param y: y (or latitude) coordinate(s).
         :param latlon: Set to True if coordinates provided as longitude/latitude.
         :param band: the band number to extract from.
         :param masked: If `masked` is `True` the return value will be a masked
             array. Otherwise (the default) the return value will be a
             regular array.
-        :param window: expand area around coordinate to dimensions \
-                  window * window. window must be odd.
-        :param return_window: If True when window=int, returns (mean,array) \
+        :param window: expand area around coordinate to dimensions
+            window * window. window must be odd.
+        :param return_window: If True when window=int, returns (mean,array)
             where array is the dataset extracted via the specified window size.
         :param boundless: If `True`, windows that extend beyond the dataset's extent
             are permitted and partially or completely filled arrays (with self.nodata) will
             be returned as appropriate.
         :param reducer_function: a function to apply to the values in window.
 
-        :returns: When called on a Raster or with a specific band \
-            set, return value of pixel.
-        :returns: If multiple band Raster and the band is not specified, a \
+        :returns: When called on a Raster or with a specific band set, return value of pixel.
+        :returns: If multiple band Raster and the band is not specified, a
             dictionary containing the value of the pixel in each band.
-        :returns: In addition, if return_window=True, return tuple of \
-            (values, arrays)
+        :returns: In addition, if return_window=True, return tuple of (values, arrays)
 
         :examples:
 
@@ -2057,11 +2055,36 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             (c = provided coordinate, v= value of surrounding coordinate)
 
         """
-        value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
+        # Check for array-like inputs
+        if (
+            not isinstance(x, (float, np.floating, int, np.integer))
+            and isinstance(y, (float, np.floating, int, np.integer))
+            or isinstance(x, (float, np.floating, int, np.integer))
+            and not isinstance(y, (float, np.floating, int, np.integer))
+        ):
+            raise TypeError("Coordinates must be both numbers or both array-like.")
+
+        # If for a single value, wrap in a list
+        if isinstance(x, (float, np.floating, int, np.integer)):
+            x = [x]
+            y = [y]
+            # For the end of the function
+            unwrap = True
+        else:
+            unwrap = False
+            # Check that array-like objects are the same length
+            if len(x) != len(y):  # type: ignore
+                raise ValueError("Coordinates must be of the same length.")
+
+        # Check window parameter
         if window is not None:
+            if not float(window).is_integer():
+                raise ValueError("Window must be a whole number.")
             if window % 2 != 1:
                 raise ValueError("Window must be an odd number.")
+            window = int(window)
 
+        # Define subfunction for reducing the window array
         def format_value(value: Any) -> Any:
             """Check if valid value has been extracted"""
             if type(value) in [np.ndarray, np.ma.core.MaskedArray]:
@@ -2073,63 +2096,94 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 value = None
             return value
 
-        # Need to implement latlon option later
+        # Initiate output lists
+        list_values = []
+        if return_window:
+            list_windows = []
+
+        # Convert to latlon if asked
         if latlon:
             from geoutils import projtools
 
-            x, y = projtools.reproject_from_latlon((y, x), self.crs)
+            x, y = projtools.reproject_from_latlon((y, x), self.crs)  # type: ignore
 
         # Convert coordinates to pixel space
-        row, col = rio.transform.rowcol(self.transform, x, y, op=round)
+        rows, cols = rio.transform.rowcol(self.transform, x, y, op=round)
 
-        # Decide what pixel coordinates to read:
-        if window is not None:
-            half_win = (window - 1) / 2
-            # Subtract start coordinates back to top left of window
-            col = col - half_win
-            row = row - half_win
-            # Offset to read to == window
-            width = window
-            height = window
-        else:
-            # Start reading at col,row and read 1px each way
-            width = 1
-            height = 1
+        # Loop over all coordinates passed
+        for k in range(len(rows)):  # type: ignore
 
-        # Make sure coordinates are int
-        col = int(col)
-        row = int(row)
+            value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
 
-        # Create rasterio's window for reading
-        window = rio.windows.Window(col, row, width, height)
+            row = rows[k]  # type: ignore
+            col = cols[k]  # type: ignore
 
-        if self.is_loaded:
-            data = self.data[slice(None) if band is None else band + 1, row : row + height, col : col + width]
-            value = format_value(data)
-            win: np.ndarray | dict[int, np.ndarray] = data
-
-        else:
-            if self.nbands == 1:
-                with rio.open(self.filename) as raster:
-                    data = raster.read(window=window, fill_value=self.nodata, boundless=boundless, masked=masked)
-                value = format_value(data)
-                win = data
+            # Decide what pixel coordinates to read:
+            if window is not None:
+                half_win = (window - 1) / 2
+                # Subtract start coordinates back to top left of window
+                col = col - half_win
+                row = row - half_win
+                # Offset to read to == window
+                width = window
+                height = window
             else:
-                value = {}
-                win = {}
-                with rio.open(self.filename) as raster:
-                    for b in self.indexes:
+                # Start reading at col,row and read 1px each way
+                width = 1
+                height = 1
+
+            # Make sure coordinates are int
+            col = int(col)
+            row = int(row)
+
+            # Create rasterio's window for reading
+            rio_window = rio.windows.Window(col, row, width, height)
+
+            if self.is_loaded:
+                data = self.data[slice(None) if band is None else band, row : row + height, col : col + width]
+                if not masked:
+                    data = data.filled()
+                value = format_value(data)
+                win: np.ndarray | dict[int, np.ndarray] = data
+
+            else:
+                if self.nbands == 1:
+                    with rio.open(self.filename) as raster:
                         data = raster.read(
-                            window=window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b
+                            window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked
                         )
-                        val = format_value(data)
-                        value[b] = val
-                        win[b] = data  # type: ignore
+                    value = format_value(data)
+                    win = data
+                else:
+                    value = {}
+                    win = {}
+                    with rio.open(self.filename) as raster:
+                        for b in self.indexes:
+                            data = raster.read(
+                                window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b
+                            )
+                            val = format_value(data)
+                            value[b] = val
+                            win[b] = data  # type: ignore
+
+            list_values.append(value)
+            if return_window:
+                list_windows.append(win)
+
+        # If for a single value, unwrap output list
+        if unwrap:
+            output_val = list_values[0]
+            if return_window:
+                output_win = list_windows[0]
+        else:
+            output_val = list_values  # type: ignore
+            if return_window:
+                output_win = list_windows
 
         if return_window:
-            return (value, win)
-
-        return value
+            return (output_val, output_win)
+        else:
+            return output_val
 
     def coords(self, offset: str = "corner", grid: bool = True) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -2196,7 +2250,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         i, j = rio.transform.rowcol(self.transform, x, y, op=op, precision=precision)
 
-        # # necessary because rio.Dataset.index does not return abc.Iterable for a single point
+        # Necessary because rio.Dataset.index does not return abc.Iterable for a single point
         if not isinstance(i, abc.Iterable):
             i, j = (
                 np.asarray(
@@ -2218,7 +2272,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # This has no influence on georeferencing, it's only about the interpretation of the raster values,
         # and thus only affects sub-pixel interpolation
 
-        # if input is None, default to GDAL METADATA
+        # If input is None, default to GDAL METADATA
         if area_or_point is None:
             area_or_point = self.tags.get("AREA_OR_POINT", "Point")
 
@@ -2228,10 +2282,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     "Operator must return np.floating values to perform AREA_OR_POINT subpixel index shifting"
                 )
 
-            # if point, shift index by half a pixel
+            # If point, shift index by half a pixel
             i += 0.5
             j += 0.5
-            # otherwise, leave as is
+            # Otherwise, leave as is
+
+        # Convert output indexes to integer if they are all whole numbers
+        if np.all(np.mod(i, 1) == 0) and np.all(np.mod(j, 1) == 0):
+            i = i.astype(int)
+            j = j.astype(int)
 
         return i, j
 
