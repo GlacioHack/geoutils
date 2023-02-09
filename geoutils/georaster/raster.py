@@ -2241,32 +2241,30 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         x: ArrayLike,
         y: ArrayLike,
         op: type = np.float32,
-        area_or_point: str | None = None,
         precision: float | None = None,
+        shift_area_or_point: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Return row, column indices for a given x,y coordinate pair.
 
-        :param x: x coordinates
-        :param y: y coordinates
-        :param op: operator to calculate index
-        :param precision: precision for rio.Dataset.index
-        :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or \
-                force position ('Point' or 'Area') of the interpretation of where the raster value \
-                corresponds to in the pixel ('Area' = lower left or 'Point' = center)
+        Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
+        to ensure that the indexes of points represent the right location. See parameter description of
+        shift_area_or_point for more details.
+
+        :param x: X coordinates.
+        :param y: Y coordinates.
+        :param op: Operator to compute index.
+        :param precision: Precision passed to rio.Dataset.index.
+        :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
+            attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
 
         :returns i, j: indices of x,y in the image.
-
-
         """
+        # Input checks
         if op not in [np.float32, np.float64, float]:
             raise UserWarning(
                 "Operator is not of type float: rio.Dataset.index might "
                 "return unreliable indexes due to rounding issues."
-            )
-        if area_or_point not in [None, "Area", "Point"]:
-            raise ValueError(
-                'Argument "area_or_point" must be either None (falls back to GDAL metadata), "Point" or "Area".'
             )
 
         i, j = rio.transform.rowcol(self.transform, x, y, op=op, precision=precision)
@@ -2288,25 +2286,36 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             i, j = (np.asarray(i), np.asarray(j))
 
-        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the upper left corner (AREA) or
-        # the center of pixel (POINT)
-        # This has no influence on georeferencing, it's only about the interpretation of the raster values,
-        # and thus only affects sub-pixel interpolation
+        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the upper left corner "Area" or
+        # the center of pixel "Point". This normally has no influence on georeferencing, it's only
+        # about the interpretation of the raster values, and thus can affect sub-pixel interpolation,
+        # for more details see: https://gdal.org/user/raster_data_model.html#metadata
 
-        # If input is None, default to GDAL METADATA
-        if area_or_point is None:
-            area_or_point = self.tags.get("AREA_OR_POINT", "Point")
-
-        if area_or_point == "Point":
-            if not isinstance(i.flat[0], np.floating):
-                raise ValueError(
-                    "Operator must return np.floating values to perform AREA_OR_POINT subpixel index shifting"
+        # If the user wants to shift according to the interpretation
+        if shift_area_or_point:
+            # If AREA_OR_POINT attribute does not exist, use the most typical "Area"
+            if self.tags.get("AREA_OR_POINT") is not None:
+                area_or_point = self.tags.get("AREA_OR_POINT")
+                if not isinstance(area_or_point, str):
+                    raise TypeError('Attribute self.tags["AREA_OR_POINT"] must be a string.')
+                if area_or_point.lower() not in ["area", "point"]:
+                    raise ValueError('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
+            else:
+                area_or_point = "Area"
+                warnings.warn(
+                    category=UserWarning,
+                    message='Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).',
                 )
 
-            # If point, shift index by half a pixel
-            i += 0.5
-            j += 0.5
-            # Otherwise, leave as is
+            # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
+            if area_or_point.lower() == "point":
+                if not isinstance(i.flat[0], (np.floating, float)):
+                    raise ValueError(
+                        "Operator must return np.floating values to perform area_or_point subpixel index shifting."
+                    )
+
+                i += 0.5
+                j += 0.5
 
         # Convert output indexes to integer if they are all whole numbers
         if np.all(np.mod(i, 1) == 0) and np.all(np.mod(j, 1) == 0):
@@ -2315,13 +2324,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return i, j
 
-    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "center") -> tuple[np.ndarray, np.ndarray]:
+    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "ul") -> tuple[np.ndarray, np.ndarray]:
         """
         Return x,y coordinates for a given row, column index pair.
 
-        :param i: row (i) index of pixel.
-        :param j: column (j) index of pixel.
-        :param offset: return coordinates as "corner" or "center" of pixel
+        Defaults to upper-left, for which this functionis fully reversible with xy2ij.
+
+        :param i: Row (i) index of pixel.
+        :param j: Column (j) index of pixel.
+        :param offset: Return coordinates as "center" of pixel, or any corner (upper-left "ul", "ur", "ll", lr").
 
         :returns x, y: x,y coordinates of i,j in reference system.
         """
@@ -2356,23 +2367,27 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         input_latlon: bool = False,
         mode: str = "linear",
         index: int = 1,
-        area_or_point: str | None = None,
+        shift_area_or_point: bool = False,
         **kwargs: Any,
     ) -> np.ndarray:
 
         """
          Interpolate raster values at a given point, or sets of points.
 
+         Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
+         to ensure that the interpolation of points is done at the right location. See parameter description
+         of shift_area_or_point for more details.
+
         :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
-        value returned is nan. Shape should be (N,2)'
+        value returned is nan. Shape should be (N,2)'.
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
         :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
              used to interpolate the raster value at each point. For more information, see
              scipy.interpolate.interp2d. Default is linear.
         :param index: The band to use (from 1 to self.count).
-        :param area_or_point: shift index according to GDAL AREA_OR_POINT attribute (None) or force position\
-                ('Point' or 'Area') of the interpretation of where the raster value corresponds to in the pixel\
-                ('Area' = lower left or 'Point' = center)
+        :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
+            attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
+
 
         :returns rpts: Array of raster value(s) for the given points.
         """
@@ -2394,7 +2409,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             transformer = pyproj.Transformer.from_crs(init_crs, dest_crs)
             x, y = transformer.transform(x, y)
 
-        i, j = self.xy2ij(x, y, op=np.float32, area_or_point=area_or_point)
+        i, j = self.xy2ij(x, y, op=np.float32, shift_area_or_point=shift_area_or_point)
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 

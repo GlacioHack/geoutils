@@ -1257,35 +1257,105 @@ class TestRaster:
             intersection = r.intersection(r_nonoverlap)
             assert intersection == (0.0, 0.0, 0.0, 0.0)
 
-    def test_interp(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_ij2xy_xy2ij(self, example: str) -> None:
+        """Test ij2xy and that the two functions are reversible."""
+
+        # Open raster
+        rst = gu.Raster(example)
+        xmin, ymin, xmax, ymax = rst.bounds
+
+        # Check ij2xy manually for the four corners
+
+        # With offset="center", should be pixel center
+        xmin_center = xmin + rst.res[0] / 2
+        ymin_center = ymin + rst.res[1] / 2
+        xmax_center = xmax - rst.res[0] / 2
+        ymax_center = ymax - rst.res[1] / 2
+        assert rst.ij2xy([0], [0], offset="center") == ([xmin_center], [ymax_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [0], offset="center") == ([xmin_center], [ymin_center])
+        assert rst.ij2xy([0], [rst.shape[1] - 1], offset="center") == ([xmax_center], [ymax_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], offset="center") == ([xmax_center], [ymin_center])
+
+        # With offset="ll", lower-left
+        xmin_center = xmin
+        ymin_center = ymin
+        xmax_center = xmax - rst.res[0]
+        ymax_center = ymax - rst.res[1]
+        assert rst.ij2xy([0], [0], offset="ll") == ([xmin_center], [ymax_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [0], offset="ll") == ([xmin_center], [ymin_center])
+        assert rst.ij2xy([0], [rst.shape[1] - 1], offset="ll") == ([xmax_center], [ymax_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], offset="ll") == ([xmax_center], [ymin_center])
+
+        # We generate random points within the boundaries of the image
+        xrand = np.random.randint(low=0, high=rst.width, size=(10,)) * list(rst.transform)[0] + xmin
+        yrand = ymax + np.random.randint(low=0, high=rst.height, size=(10,)) * list(rst.transform)[4]
+
+        # Test reversibility (only works with default upper-left offset)
+        i, j = rst.xy2ij(xrand, yrand)
+        xnew, ynew = rst.ij2xy(i, j)
+        assert all(xnew == xrand)
+        assert all(ynew == yrand)
+
+        # TODO: clarify this weird behaviour of rasterio.index with floats?
+        # r.ds.index(x, y)
+        # Out[33]: (75, 301)
+        # r.ds.index(x, y, op=np.float32)
+        # Out[34]: (75.0, 302.0)
+
+    def test_xy2ij_and_interp(self) -> None:
+        """Test xy2ij with shift_area_or_point argument, and related interp function"""
 
         # First, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
         # at the center of pixel
         r = gr.Raster(self.landsat_b4_path)
         assert r.tags["AREA_OR_POINT"] == "Point"
-
         xmin, ymin, xmax, ymax = r.bounds
 
         # We generate random points within the boundaries of the image
-
         xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
         yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
-        # Get decimal indexes based on Point GDAL METADATA
-        # Those should all be .5 because values refer to the center
-        i, j = r.xy2ij(xrand, yrand, area_or_point=None)
-        assert np.all(i % 1 == 0.5)
-        assert np.all(j % 1 == 0.5)
 
-        # Force point
-        i, j = r.xy2ij(xrand, yrand, area_or_point="Point")
-        assert np.all(i % 1 == 0.5)
-        assert np.all(j % 1 == 0.5)
-
-        # Force area
-        i, j = r.xy2ij(xrand, yrand, area_or_point="Area")
+        # Get decimal indexes based on "Point", should refer to the corner still (shift False by default)
+        i, j = r.xy2ij(xrand, yrand)
         assert np.all(i % 1 == 0)
         assert np.all(j % 1 == 0)
+
+        # Those should all be .5 because values refer to the center and are shifted
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
+        assert np.all(i % 1 == 0.5)
+        assert np.all(j % 1 == 0.5)
+
+        # Force "Area", should refer to corner
+        r.tags.update({"AREA_OR_POINT": "Area"})
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
+        assert np.all(i % 1 == 0)
+        assert np.all(j % 1 == 0)
+
+        # Check errors are raised when type of tag is incorrect
+        r0 = r.copy()
+        # When the tag is not a string
+        r0.tags.update({"AREA_OR_POINT": 1})
+        with pytest.raises(TypeError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be a string.')):
+            r0.xy2ij(xrand, yrand, shift_area_or_point=True)
+        # When the tag is not "Area" or "Point"
+        r0.tags.update({"AREA_OR_POINT": "Pt"})
+        with pytest.raises(
+            ValueError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
+        ):
+            r0.xy2ij(xrand, yrand, shift_area_or_point=True)
+
+        # Check that the function warns when no tag is defined
+        r0.tags.pop("AREA_OR_POINT")
+        with pytest.warns(
+            UserWarning,
+            match=re.escape('Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).'),
+        ):
+            i0, j0 = r0.xy2ij(xrand, yrand, shift_area_or_point=True)
+        # And that it defaults to "Area"
+        assert all(i == i0)
+        assert all(j == j0)
 
         # Now, we calculate the mean of values in each 2x2 slices of the data, and compare with interpolation at order 1
         list_z_ind = []
@@ -1302,7 +1372,7 @@ class TestRaster:
             list_z_ind.append(z_ind)
 
         # First order interpolation
-        rpts = r.interp_points(pts, order=1, area_or_point="Area")
+        rpts = r.interp_points(pts, order=1)
         # The values interpolated should be equal
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
@@ -1326,7 +1396,7 @@ class TestRaster:
         yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
         # By default, i and j are returned as integers
-        i, j = r.xy2ij(xrand, yrand, op=np.float32, area_or_point="Area")
+        i, j = r.xy2ij(xrand, yrand, op=np.float32)
         list_z_ind = []
         img = r.data
         for k in range(len(xrand)):
@@ -1341,14 +1411,8 @@ class TestRaster:
         # Test for an invidiual point (shape can be tricky at 1 dimension)
         x = 493120.0
         y = 3101000.0
-        i, j = r.xy2ij(x, y, area_or_point="Area")
+        i, j = r.xy2ij(x, y)
         assert img[0, int(i), int(j)] == r.interp_points([(x, y)], order=1)[0]
-
-        # TODO: understand why there is this:
-        # r.ds.index(x, y)
-        # Out[33]: (75, 301)
-        # r.ds.index(x, y, op=np.float32)
-        # Out[34]: (75.0, 302.0)
 
     def test_value_at_coords(self) -> None:
         """
