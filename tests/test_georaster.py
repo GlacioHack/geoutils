@@ -167,6 +167,9 @@ class TestRaster:
         assert r.height == 655
         assert r.shape == (r.height, r.width)
         assert r.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1, )
+        assert r.indexes_on_disk == (1, )
         assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
@@ -182,6 +185,9 @@ class TestRaster:
         assert r2.height == 618
         assert r2.shape == (r2.height, r2.width)
         assert r2.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert np.array_equal(r2.dtypes, ["float32"])
         assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
@@ -193,30 +199,42 @@ class TestRaster:
         r.load()
         assert r.is_loaded
         assert r.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 3 - single band, loading data
         r = gr.Raster(self.landsat_b4_path, load_data=True)
         assert r.is_loaded
         assert r.count == 1
+        assert r.count_on_disk == 1
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1,)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 4 - multiple bands, load all bands
         r = gr.Raster(self.landsat_rgb_path, load_data=True)
         assert r.count == 3
-        assert np.array_equal(r.indexes, [1, 2, 3])
+        assert r.count_on_disk == 3
+        assert r.indexes == (1, 2, 3, )
+        assert r.indexes_on_disk == (1, 2, 3, )
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
         r = gr.Raster(self.landsat_rgb_path, load_data=True, indexes=1)
         assert r.count == 1
-        assert np.array_equal(r.indexes, [1, 2, 3])
+        assert r.count_on_disk == 3
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
         r = gr.Raster(self.landsat_rgb_path, load_data=True, indexes=[2, 3])
         assert r.count == 2
-        assert np.array_equal(r.indexes, [1, 2, 3])
+        assert r.count_on_disk == 3
+        assert r.indexes == (1, 2)
+        assert r.indexes_on_disk == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
@@ -1818,7 +1836,7 @@ self.set_nodata()."
 
         img = gr.Raster(self.landsat_rgb_path)
 
-        red, green, blue = img.split_indexes(copy=False)
+        red, green, blue = img.split_bands(copy=False)
 
         # Check that the shapes are correct.
         assert red.count == 1
@@ -1827,10 +1845,10 @@ self.set_nodata()."
         assert img.data.shape[0] == 3
 
         # Extract only one band (then it will not return a list)
-        red2 = img.split_indexes(copy=False, subset=1)[0]
+        red2 = img.split_bands(copy=False, subset=1)[0]
 
         # Extract a subset with a list in a weird direction
-        blue2, green2 = img.split_indexes(copy=False, subset=[3, 2])
+        blue2, green2 = img.split_bands(copy=False, subset=[3, 2])
 
         # Check that the subset functionality works as expected.
         assert red == red2
@@ -1855,7 +1873,7 @@ self.set_nodata()."
         )
 
         # Copy the bands instead of pointing to the same memory.
-        red_c = img.split_indexes(copy=True, subset=1)[0]
+        red_c = img.split_bands(copy=True, subset=1)[0]
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
         assert not np.shares_memory(red_c.data, img.data)

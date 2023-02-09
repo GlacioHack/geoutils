@@ -209,10 +209,10 @@ class Raster:
             The path/filename of the loaded, file, only set if a disk-based file is read in.
         data : np.array
             Loaded image. Dimensions correspond to (count, height, width).
-        count : int
+        count_loaded : int
             Number of bands loaded into .data
-        indexes : tuple
-            The indexes of the opened dataset which correspond to the bands loaded into data.
+        indexes_loaded : tuple
+            The indexes of the bands of the opened dataset loaded into .data.
         is_loaded : bool
             True if the image data have been loaded into this Raster.
 
@@ -284,6 +284,7 @@ class Raster:
         self._data: np.ma.masked_array | None = None
         self._nodata: int | float | list[int] | list[float] | None = nodata
         self._indexes = indexes
+        self._indexes_loaded = None
         self._masked = masked
         self._disk_hash: int | None = None
         self._is_modified = True
@@ -383,10 +384,18 @@ class Raster:
             raise ValueError("filename argument not recognised.")
 
     @property
-    def count(self) -> int:
-        if not self.is_loaded and self._disk_shape is not None:
+    def count_on_disk(self) -> None | int:
+        """Return the count of bands on disk if it exists."""
+        if self._disk_shape is not None:
             return self._disk_shape[0]
-        return int(self.data.shape[0])
+        return
+
+    @property
+    def count(self) -> None | int:
+        """Return the count of bands loaded in memory if they are, otherwise the one on disk."""
+        if self.is_loaded:
+            return int(self.data.shape[0])
+        return self.count_on_disk
 
     @property
     def height(self) -> int:
@@ -432,16 +441,29 @@ class Raster:
         return (str(self.data.dtype),) * self.count
 
     @property
-    def indexes(self) -> tuple[int, ...]:
+    def indexes_on_disk(self) -> None | tuple[int, ...]:
+        """Return the indexes of bands on disk if it exists."""
         if self._disk_indexes is not None:
             return self._disk_indexes
-        return tuple(range(1, self.count + 1))
+        return
 
-    def load(self, **kwargs: Any) -> None:
+    @property
+    def indexes(self) -> tuple[int, ...]:
+        """Return the indexes of bands loaded in memory if they are, otherwise on disk."""
+        if self._indexes_loaded is not None:
+            if isinstance(self._indexes_loaded, int):
+                return (self._indexes_loaded, )
+            return tuple(self._indexes_loaded)
+        if self.is_loaded:
+            return tuple(range(1, self.count + 1))
+        return self.indexes_on_disk
+
+    def load(self, indexes: None | int | list[int] = None, **kwargs: Any) -> None:
         """
         Load the data from disk.
 
-        :param kwargs: Optional keyword arguments sent to '_load_rio()'
+        :param kwargs: Optional keyword arguments sent to '_load_rio()'.
+        :param indexes: The band(s) to load. Note that rasterio begins counting at 1, not 0.
 
         :raises ValueError: If the data are already loaded.
         :raises AttributeError: If no 'filename' attribute exists.
@@ -452,10 +474,17 @@ class Raster:
         if self.filename is None:
             raise AttributeError("'filename' is not set")
 
+        # If no index is passed, use all of them
+        if indexes is None:
+            indexes = self.indexes
+
+        # Save which indexes are loaded
+        self._indexes_loaded = indexes
+
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
                 dataset,
-                indexes=self._indexes,
+                indexes=indexes,
                 masked=self._masked,
                 transform=self.transform,
                 shape=self.shape,
@@ -2318,7 +2347,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         #         rpts.append(zint)
         # rpts = np.array(rpts)
 
-    def split_indexes(self: RasterType, copy: bool = False, subset: list[int] | int | None = None) -> list[Raster]:
+    def split_bands(self: RasterType, copy: bool = False, subset: list[int] | int | None = None) -> list[Raster]:
         """
         Split the bands into separate copied rasters.
 
