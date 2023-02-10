@@ -2310,7 +2310,7 @@ class TestMask:
         # Check the nodata
         assert mask.nodata is None
         # Check the nbands metadata
-        assert mask.nbands == 1
+        assert mask.count == 1
 
         # Check that a mask object is sent back from its own init
         mask2 = gu.Mask(mask)

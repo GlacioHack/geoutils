@@ -2806,7 +2806,7 @@ class Mask(Raster):
             super().__init__(filename_or_dataset, **kwargs)
 
             # If nbands larger than one, use only first band and raise a warning
-            if self.nbands > 1:
+            if self.count > 1:
                 warnings.warn(
                     category=UserWarning,
                     message="Multi-band raster provided to create a Mask, only the first band will be used.",
@@ -2815,9 +2815,6 @@ class Mask(Raster):
 
             # Convert masked array to boolean
             self._data = self.data.astype(bool)
-
-            # Fix nband to one
-            self._nbands = 1
 
             # Fix nodata to None
             self._nodata = None
