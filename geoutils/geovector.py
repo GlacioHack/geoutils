@@ -423,7 +423,7 @@ class Vector:
             raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
         # We return a mask if there is a single value to burn and this value is 1
-        if isinstance(in_value, Number) and in_value == 1:
+        if isinstance(in_value, (int, np.integer, float, np.floating)) and in_value == 1:
             output = gu.Mask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
         # Otherwise we return a Raster if there are several values to burn

@@ -2288,8 +2288,8 @@ class TestMask:
     arr_mask = np.random.randint(0, 2, size=(1, width, height), dtype=bool)
     mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
-    def test_init(self, example: str):
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    def test_init(self, example: str) -> None:
         """Test that Mask subclass initialization function as intended."""
 
         # A warning should be raised when the raster is a multi-band
@@ -2316,7 +2316,7 @@ class TestMask:
         mask2 = gu.Mask(mask)
         assert mask.raster_equal(mask2)
 
-    def test_from_array(self):
+    def test_from_array(self) -> None:
         """Test that Raster.__init__ casts to Mask with dict input of from_array() and a boolean data array."""
 
         mask_rst = gu.Raster.from_array(data=self.mask_ma, transform=self.transform, crs=None, nodata=None)
@@ -2336,9 +2336,9 @@ class TestMask:
         "__ge__",
     ]
 
-    @pytest.mark.parametrize("op", ops_logical)
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    def test_logical_casting_real(self, example: str, op: str):
+    @pytest.mark.parametrize("op", ops_logical)  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_logical_casting_real(self, example: str, op: str) -> None:
         """
         Test that logical operations cast Raster object to Mask on real data
         (synthetic done in TestArithmetic).
@@ -2352,8 +2352,8 @@ class TestMask:
         assert np.array_equal(mask.data.data, getattr(rst.data.data, op)(1))
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    def test_implicit_logical_casting_real(self, example: str):
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_implicit_logical_casting_real(self, example: str) -> None:
         """
         Test that implicit logical operations on real data
         (synthetic done in TestArithmetic).

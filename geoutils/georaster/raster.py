@@ -520,7 +520,7 @@ class Raster:
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
         nodata: int | float | list[int] | list[float] | None = None,
-    ) -> RasterType | Mask:
+    ) -> RasterType:
         """Create a Raster from a numpy array and some geo-referencing information.
 
         :param data: data array
@@ -558,8 +558,9 @@ class Raster:
             crs = CRS.from_epsg(crs)
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
+        # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
         if data.dtype == bool:
-            return Mask({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
+            return Mask({"data": data, "transform": transform, "crs": crs, "nodata": nodata})  # type: ignore
         # Otherwise, keep as a given RasterType subclass
         else:
             return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
@@ -844,7 +845,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
-    def __eq__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+    def __eq__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:  # type: ignore
         """
         Element-wise equality cast into a Mask subclass.
         If other is a Raster, it must have the same data.shape, transform and crs as self.
@@ -856,7 +857,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __ne__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+    def __ne__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:  # type: ignore
         """
         Element-wise equality cast into a Mask subclass.
         If other is a Raster, it must have the same data.shape, transform and crs as self.
@@ -868,7 +869,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __lt__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+    def __lt__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
         Element-wise equality cast into a Mask subclass.
         If other is a Raster, it must have the same data.shape, transform and crs as self.
@@ -880,7 +881,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __le__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+    def __le__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
         Element-wise equality cast into a Mask subclass.
         If other is a Raster, it must have the same data.shape, transform and crs as self.
@@ -892,7 +893,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __gt__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+    def __gt__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
         Element-wise equality cast into a Mask subclass.
         If other is a Raster, it must have the same data.shape, transform and crs as self.
@@ -904,7 +905,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __ge__(self: RasterType, other: RasterType | np.ndarray | Number) -> Mask:
+    def __ge__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
         Element-wise equality cast into a Mask subclass.
         If other is a Raster, it must have the same data.shape, transform and crs as self.
@@ -2790,8 +2791,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 # Subclass Mask for manipulating boolean Rasters
 class Mask(Raster):
     def __init__(
-        self, filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict, **kwargs
-    ):
+        self,
+        filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
+        **kwargs: Any,
+    ) -> None:
 
         # If a Mask is passed, simply point back to Mask
         if isinstance(filename_or_dataset, Mask):
@@ -2822,69 +2825,136 @@ class Mask(Raster):
             # Define in dtypes
             self._dtypes = (bool,)
 
-    def reproject(self: Mask, **kwargs) -> Mask:
+    def reproject(
+        self: Mask,
+        dst_ref: RasterType | rio.io.Dataset | str | None = None,
+        dst_crs: CRS | str | int | None = None,
+        dst_size: tuple[int, int] | None = None,
+        dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+        dst_res: float | abc.Iterable[float] | None = None,
+        dst_nodata: int | float | list[int] | list[float] | None = None,
+        src_nodata: int | float | list[int] | list[float] | None = None,
+        dst_dtype: np.dtype | None = None,
+        resampling: Resampling | str = Resampling.bilinear,
+        silent: bool = False,
+        n_threads: int = 0,
+        memory_limit: int = 64,
+    ) -> Mask:
 
         # Depending on resampling, adjust to rasterio supported types
-        if kwargs["resampling"] in [Resampling.nearest, "nearest"]:
+        if resampling in [Resampling.nearest, "nearest"]:
             self.data = self.data.astype("uint8")
         else:
             self.data = self.data.astype("float32")
 
         # Call Raster.reproject()
-        output = super().reproject(**kwargs)  # type: ignore
+        output = super().reproject(
+            dst_ref=dst_ref,
+            dst_crs=dst_crs,
+            dst_size=dst_size,
+            dst_bounds=dst_bounds,
+            dst_res=dst_res,
+            dst_nodata=dst_nodata,
+            src_nodata=src_nodata,
+            dst_dtype=dst_dtype,
+            resampling=resampling,
+            silent=silent,
+            n_threads=n_threads,
+            memory_limit=memory_limit,
+        )
 
         # Transform back to a boolean array
         output.data = output.data.astype(bool)
 
         return output
 
-    def crop(self: RasterType, **kwargs) -> None:
+    # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
+    # Then the final overload must be duplicated
+    @overload
+    def crop(
+        self: Mask,
+        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
+        inplace: Literal[True],
+    ) -> None:
+        ...
+
+    @overload
+    def crop(
+        self: Mask,
+        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
+        inplace: Literal[False],
+    ) -> Mask:
+        ...
+
+    @overload
+    def crop(
+        self: Mask,
+        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        inplace: bool = True,
+    ) -> Mask | None:
+        ...
+
+    def crop(
+        self: Mask,
+        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        inplace: bool = True,
+    ) -> Mask | None:
 
         # If there is resampling involved during cropping, encapsulate type as in reproject()
-        if kwargs["match_extent"]:
+        if mode == "match_extent":
             self.data = self.data.astype("float32")
-            if kwargs["in_place"]:
-                super().crop(**kwargs)
+            if inplace:
+                super().crop(cropGeom=cropGeom, mode=mode, inplace=inplace)
                 self.data = self.data.astype(bool)
+                return None
             else:
-                output = super().crop(**kwargs)
+                output = super().crop(cropGeom=cropGeom, mode=mode, inplace=inplace)
                 output.data = output.data.astype(bool)
-                return output.data
+                return output
         # Otherwise, run a classic crop
         else:
-            super().crop(**kwargs)
+            if not inplace:
+                return super().crop(cropGeom=cropGeom, mode=mode, inplace=inplace)
+            else:
+                return None
 
     def polygonize(
         self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1
     ) -> Vector:
 
-        if in_value not in [0, 1]:
-            warnings.warn("In-value converted to boolean for polygonizing mask.")
-            in_value = in_value.astype(bool).astype(int)
+        if not isinstance(in_value, (int, np.integer, float, np.floating)) or in_value not in [0, 1]:
+            warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
+            in_value = 1
 
         self._data = self.data.astype("uint8")
         return super().polygonize(in_value=in_value)
 
     # Logical operations between mask objects: scale to the entire mask
-    def __and__(self, other):
+    def __and__(self: Mask, other: Mask) -> Mask:
 
         return self.from_array(
             data=np.logical_and(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
-    def __or__(self, other):
+    def __or__(self: Mask, other: Mask) -> Mask:
 
         return self.from_array(
             data=np.logical_or(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
-    def __xor__(self, other):
+    def __xor__(self: Mask, other: Mask) -> Mask:
 
         return self.from_array(
             data=np.logical_xor(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
-    def __invert__(self):
+    def __invert__(self: Mask) -> Mask:
 
         return self.from_array(
             data=np.logical_not(self.data), transform=self.transform, crs=self.crs, nodata=self.nodata
