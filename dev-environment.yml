@@ -12,7 +12,7 @@ dependencies:
 
   # Development-specific
   - sphinx
-  - sphinx_rtd_theme
+  - myst-parser
   - sphinx-autodoc-typehints
   - sphinxcontrib-programoutput
   - numpydoc
@@ -27,3 +27,6 @@ dependencies:
   - scikit-image
   - pyyaml
   - rioxarray
+
+  - pip:
+    - sphinx-book-theme

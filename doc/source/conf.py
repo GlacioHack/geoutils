@@ -35,6 +35,7 @@ extensions = [
     "sphinxcontrib.programoutput",
     "sphinx_gallery.gen_gallery",  # Examples gallery
     "sphinx.ext.intersphinx",
+    "myst_parser",  # Form of Markdown that works with sphinx, used a lot by the Sphinx Book Theme
 ]
 
 intersphinx_mapping = {
@@ -87,7 +88,16 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_templates"]
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "sphinx_rtd_theme"
+html_theme = "sphinx_book_theme"
+
+html_theme_options = {
+    "use_sidenotes": True,
+    "repository_url": "https://github.com/GlacioHack/xdem",
+    "use_repository_button": True,
+}
+
+# html_logo = "path/to/myimage.png"
+html_title = "GeoUtils"
 
 
 # Add any paths that contain custom static files (such as style sheets) here,

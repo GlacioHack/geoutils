@@ -6,11 +6,12 @@ pytest
 pytest-xdist
 pytest-lazy-fixture
 sphinx
-sphinx_rtd_theme
+sphinx-book-theme
 pylint
 sphinxcontrib_programoutput
 sphinx_autodoc_typehints
 matplotlib
+myst-parser
 scipy
 pre-commit
 typing-extensions
