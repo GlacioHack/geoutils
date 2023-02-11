@@ -1,6 +1,15 @@
-(raster-basics)=
+(raster-class)=
 
-# Raster basics
+# Raster object
+
+A {class}`geoutils.Raster` is a georeferenced raster object read, written or reprojected by `rasterio`.
+
+It contains:
+- an array `.data` as a `np.ma.MaskedArray`,
+- a geotransform `.transform` as a `affine.Affine`,
+- a coordinate reference system(CRS) `.crs` as a `pyproj.CRS`,
+- a nodata value `nodata` as `float` or `int`.
+
 
 ## Opening a raster file
 
@@ -123,6 +132,37 @@ All valid resampling methods can be seen in the [Rasterio documentation](https:/
 
 ```{eval-rst}
 .. minigallery:: geoutils.Raster
+        :add-heading:
+        :heading-level: -
+```
+
+
+# SatImg basics
+
+## Opening a raster file through SatImg
+
+Example with a Landsat image:
+
+```{literalinclude} code/satimg-basics_open_file.py
+:lines: 2-
+```
+
+## What the SatImg class does for you
+
+When reading your file, SatImg will try to load metadata information from the filename.
+For the above filename, this will be printed in the console:
+
+```{eval-rst}
+.. program-output:: $PYTHON -c "exec(open('code/satimg-basics_open_file.py').read())"
+        :shell:
+```
+
+Currently supporting the nomenclatures used for: Landsat, Sentinel-2, ArcticDEM, REMA, ASTER L1A, ASTER GDEM, NASADEM, TanDEM-X, SRTM and SPOT-5
+
+More to come...
+
+```{eval-rst}
+.. minigallery:: geoutils.SatelliteImage
         :add-heading:
         :heading-level: -
 ```

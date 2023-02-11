@@ -22,14 +22,13 @@ We are working on making features fully consistent for the first long-term relea
 
 In details, those mean:
 
-- **Ease-of-use:** all basic operations or methods should only require a few lines of code to be performed;
+- **Ease-of-use:** all basic operations or methods only require a few lines of code to be performed;
 
-- **Robustness:** all DEM methods should be tested within our continuous integration test-suite, to enforce that they always perform as expected;
+- **Robustness:** all methods are tested within our continuous integration test-suite, to enforce that they always perform as expected;
 
-- **Reproducibility:** all code should be version-controlled and release-based, to ensure consistency of dependent
-  packages and works;
+- **Reproducibility:** all code is version-controlled and release-based, to ensure consistency of dependent packages and works;
 
-- **Open-source:** all code should be accessible and re-usable to anyone in the community, for transparency and open governance.
+- **Open-source:** all code is accessible and re-usable to anyone in the community, for transparency and open governance.
 
 ```{note}
 :class: margin

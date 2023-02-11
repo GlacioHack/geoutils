@@ -1,6 +1,6 @@
-(vector-basics)=
+(vector-class)=
 
-# Vector basics
+# Vector object
 
 The Vector class builds upon the great functionalities of [GeoPandas](https://geopandas.org/), with the aim to bridge the gap between vector and raster files.
 It uses `geopandas.GeoDataFrame` as a base driver, accessible through `Vector.ds`.

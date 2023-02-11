@@ -5,38 +5,56 @@
 
 # Welcome to GeoUtils' documentation!
 
-GeoUtils aims to make handling of georeferenced data, either in raster or vector format, easier and available to anyone.
+GeoUtils aims to make the handling and analysis of georeferenced raster and vector data intuitive, robust, and easy-of-use. GeoUtils is built upon `rasterio`, 
+`geopandas` and `pyproj`, and facilitates geospatial operations between rasters and vectors, and the analysis of rasters by interfacing with `numpy` arrays.
 
-:::{important}
-GeoUtils is in early stages of development and its features might evolve rapidly. Note the version you are
-working on for reproducibility!
-We are working on making features fully consistent for the first long-term release `v0.1` (likely sometime in 2023).
-:::
+
+```{important}
+:class: margin
+GeoUtils is in early stages of development and its features might evolve rapidly. Note the version you are working on for
+**reproducibility**!
+We are working on making features fully consistent for the first long-term release ``v0.1`` (likely sometime in 2023).
+```
+
 
 ```{toctree}
 :caption: Getting started
 :maxdepth: 2
 
-about_xdem
+about_geoutils
 how_to_install
 quick_start
 ```
 
-```{literalinclude} code/index_example.py
+```{toctree}
+:caption: Background
+:maxdepth: 2
+
+motivation
+rasterio_geopandas
 ```
 
-```{eval-rst}
-.. program-output:: $PYTHON code/index_example.py
-        :shell:
+
+```{toctree}
+:caption: Features
+:maxdepth: 2
+    
+raster_class
+vector_class
+proj_tools
 ```
 
 ```{toctree}
-:maxdepth: 1
+:caption: Gallery of examples
+:maxdepth: 2
+    
+auto_examples/index.rst 
+```
 
-raster-basics
-satimg-basics
-vector-basics
-auto_examples/index.rst
+```{toctree}
+:caption: API reference
+:maxdepth: 2 
+    
 api
 ```
 
