@@ -36,6 +36,4 @@ mamba activate xdem
 pip install -e .
 ```
 
-After installing, we recommend to check that everything is working by running the tests:
-
-`pytest -rA`
+After installing, check that everything is working by running the tests: `pytest -rA`.

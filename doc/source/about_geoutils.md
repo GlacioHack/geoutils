@@ -24,7 +24,7 @@ and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenc
 [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/) for scientific computing to provide:
 - A **common and consistent framework** for rasters and vectors handling and analysis,
 - A structure following the **principal of least knowledge**<sup>2</sup> to foster accessibility,
-- A **pythonic arithmetic** and **NumPy masked-array interfacing** for intuitive use.
+- A **pythonic arithmetic** and **NumPy masked-array interface** for intuitive use.
 
 ```{margin}
 <sup>2</sup>Or the [Law of Demeter](https://en.wikipedia.org/wiki/Law_of_Demeter) for software development.
