@@ -1,11 +1,13 @@
 (vector-class)=
 
-# Vector object
+# The `Vector` object
+
+## Object definition
 
 The Vector class builds upon the great functionalities of [GeoPandas](https://geopandas.org/), with the aim to bridge the gap between vector and raster files.
 It uses `geopandas.GeoDataFrame` as a base driver, accessible through `Vector.ds`.
 
-## Opening a Vector file
+## Open and save
 
 ```{literalinclude} code/vector-basics_open_file.py
 :lines: 2-6
@@ -47,3 +49,26 @@ TODO: Add rasterize text.
         :add-heading:
         :heading-level: -
 ```
+
+
+## Arithmetic
+
+
+## Reproject
+
+
+## Crop
+
+
+## Rasterize
+
+
+## Proximity
+
+
+## Create a `Mask`
+
+
+## Buffering
+
+

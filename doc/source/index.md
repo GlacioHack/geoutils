@@ -27,25 +27,19 @@ quick_start
 ```
 
 ```{toctree}
-:caption: Background
-:maxdepth: 2
-
-motivation
-rasterio_geopandas
-```
-
-
-```{toctree}
 :caption: Features
 :maxdepth: 2
     
+core_concepts
 raster_class
+mask_class
+satimg_class
 vector_class
 proj_tools
 ```
 
 ```{toctree}
-:caption: Gallery of examples
+:caption: Examples
 :maxdepth: 2
     
 auto_examples/index.rst 

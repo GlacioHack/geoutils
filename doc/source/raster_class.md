@@ -1,6 +1,8 @@
 (raster-class)=
 
-# Raster object
+# The `Raster` object
+
+## Object definition
 
 A {class}`geoutils.Raster` is a georeferenced raster object read, written or reprojected by `rasterio`.
 
@@ -11,13 +13,11 @@ It contains:
 - a nodata value `nodata` as `float` or `int`.
 
 
-## Opening a raster file
+## Open and save
 
 ```{literalinclude} code/raster-basics_open_file.py
 :lines: 2-8
 ```
-
-## Basic information about a Raster
 
 To print information directly to your console:
 
@@ -60,12 +60,14 @@ print(information)
         :shell:
 ```
 
-## Resampling a Raster to fit another
+## Arithmetic
+
+## Array interface
+
+## Crop
 
 Comparing multiple rasters can often be a burden if multiple coordinate systems, bounding boxes, and resolutions are involved.
 The {class}`geoutils.Raster` class simplifies this using two methods: `Raster.crop()` and `Raster.reproject()`.
-
-### Cropping a Raster
 
 {func}`geoutils.Raster.crop`
 
@@ -109,7 +111,7 @@ prints:
         :shell:
 ```
 
-### Reprojecting a Raster
+## Reproject
 
 {func}`geoutils.Raster.reproject`
 
@@ -136,33 +138,10 @@ All valid resampling methods can be seen in the [Rasterio documentation](https:/
         :heading-level: -
 ```
 
+## Polygonize
 
-# SatImg basics
+## Proximity
 
-## Opening a raster file through SatImg
+## Interpolate or extract to point
 
-Example with a Landsat image:
-
-```{literalinclude} code/satimg-basics_open_file.py
-:lines: 2-
-```
-
-## What the SatImg class does for you
-
-When reading your file, SatImg will try to load metadata information from the filename.
-For the above filename, this will be printed in the console:
-
-```{eval-rst}
-.. program-output:: $PYTHON -c "exec(open('code/satimg-basics_open_file.py').read())"
-        :shell:
-```
-
-Currently supporting the nomenclatures used for: Landsat, Sentinel-2, ArcticDEM, REMA, ASTER L1A, ASTER GDEM, NASADEM, TanDEM-X, SRTM and SPOT-5
-
-More to come...
-
-```{eval-rst}
-.. minigallery:: geoutils.SatelliteImage
-        :add-heading:
-        :heading-level: -
-```
+## Export
