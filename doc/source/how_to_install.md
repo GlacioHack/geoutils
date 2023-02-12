@@ -2,23 +2,19 @@
 
 # How to install
 
-## Installing with conda (recommended)
+## Installing with mamba (recommended)
 
 ```bash
-conda install -c conda-forge --strict-channel-priority geoutils
+mamba install -c conda-forge geoutils
 ```
 
-**Notes**
+```{note}
+Solving dependencies can take a long time with `conda`, `mamba` significantly speeds up the process. Install it with:
 
-- The `--strict-channel-priority` flag seems essential for Windows installs to function correctly, and is recommended for UNIX-based systems as well.
+    conda install mamba -n base -c conda-forge
 
-- Solving dependencies can take a long time with `conda`. To speed up this, consider installing `mamba`:
-
-  ```bash
-  conda install mamba -n base -c conda-forge
-  ```
-
-  Once installed, the same commands can be run by simply replacing `conda` by `mamba`. More details available through the [mamba project](https://github.com/mamba-org/mamba).
+Once installed, the same commands can be run by simply replacing `conda` by `mamba`. More details available in the [mamba documentation](https://mamba.readthedocs.io/en/latest/).
+```
 
 ## Installing with pip
 
@@ -26,7 +22,9 @@ conda install -c conda-forge --strict-channel-priority geoutils
 pip install geoutils
 ```
 
-**NOTE**: Setting up GDAL and PROJ may need some extra steps, depending on your operating system and configuration.
+```{note}
+Setting up GDAL and PROJ may need some extra steps, depending on your operating system and configuration.
+```
 
 ## Installing for contributors
 
