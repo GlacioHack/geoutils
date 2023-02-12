@@ -1,16 +1,16 @@
 (raster-class)=
 
-# The `Raster` object
+# The georeferenced raster (`Raster`)
 
 ## Object definition
 
-A {class}`geoutils.Raster` is a georeferenced raster object read, written or reprojected by `rasterio`.
+A {class}`~geoutils.georaster.raster.Raster` is a georeferenced raster read, written or reprojected by `rasterio`.
 
 It contains:
-- an array `.data` as a `np.ma.MaskedArray`,
-- a geotransform `.transform` as a `affine.Affine`,
-- a coordinate reference system(CRS) `.crs` as a `pyproj.CRS`,
-- a nodata value `nodata` as `float` or `int`.
+- an array `.data` as a {class}`numpy.ma.MaskedArray`,
+- a geotransform `.transform` as a {class}`affine.Affine`,
+- a coordinate reference system (CRS) `.crs` as a {class}`pyproj.CRS`,
+- a nodata value `.nodata` as ``float`` or ``int``.
 
 
 ## Open and save

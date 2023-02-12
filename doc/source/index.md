@@ -30,11 +30,9 @@ quick_start
 :caption: Features
 :maxdepth: 2
     
-core_concepts
-raster_class
-mask_class
-satimg_class
-vector_class
+core_index
+rasters_index
+vectors_index
 proj_tools
 ```
 
@@ -46,10 +44,11 @@ auto_examples/index.rst
 ```
 
 ```{toctree}
-:caption: API reference
+:caption: Reference
 :maxdepth: 2 
     
 api
+background
 ```
 
 # Indices and tables

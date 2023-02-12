@@ -42,6 +42,7 @@ intersphinx_mapping = {
     "rasterio": ("https://rasterio.readthedocs.io/en/latest", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "matplotlib": ("https://matplotlib.org/stable", None),
+    "pyproj": ("https://pyproj4.github.io/pyproj/stable", None),
 }
 
 sphinx_gallery_conf = {
@@ -99,6 +100,11 @@ html_theme_options = {
 # html_logo = "path/to/myimage.png"
 html_title = "GeoUtils"
 
+html_static_path = ['_static']
+
+html_css_files = [
+    'css/custom.css',
+]
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

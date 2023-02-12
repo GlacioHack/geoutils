@@ -1,6 +1,6 @@
 (mask-class)=
 
-# The `Mask` object
+# The georeferenced mask (`Mask`)
 
 
 ## Object definition

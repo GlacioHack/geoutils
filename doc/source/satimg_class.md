@@ -1,6 +1,6 @@
 (satimg-class)=
 
-# The `SatelliteImage` object
+# The satellite image (`SatelliteImage`)
 
 ## Object definition
 

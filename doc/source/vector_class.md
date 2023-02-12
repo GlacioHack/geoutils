@@ -1,6 +1,6 @@
 (vector-class)=
 
-# The `Vector` object
+# The georeferenced vector (`Vector`)
 
 ## Object definition
 
