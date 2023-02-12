@@ -5,9 +5,9 @@
 
 # Welcome to GeoUtils' documentation!
 
-GeoUtils aims to make the handling and analysis of georeferenced raster and vector data intuitive, robust, and easy-of-use. GeoUtils is built upon `rasterio`, 
-`geopandas` and `pyproj`, and facilitates geospatial operations between rasters and vectors, and the analysis of rasters by interfacing with `numpy` arrays.
-
+```{epigraph}
+GeoUtils is a **intuitive**, **robust** and **accessible** package to handle and analyze geospatial data.
+```
 
 ```{important}
 :class: margin
