@@ -6,7 +6,7 @@
 # Welcome to GeoUtils' documentation!
 
 ```{epigraph}
-GeoUtils is a **intuitive**, **robust** and **accessible** package to handle and analyze geospatial data.
+GeoUtils is an **intuitive**, **robust** and **accessible** package to handle and analyze geospatial data.
 ```
 
 ```{important}
