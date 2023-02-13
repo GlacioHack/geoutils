@@ -2,7 +2,7 @@
 
 # How to install
 
-## Installing with mamba (recommended)
+## Installing with `mamba` (recommended)
 
 ```bash
 mamba install -c conda-forge geoutils
@@ -16,7 +16,7 @@ Solving dependencies can take a long time with `conda`, `mamba` significantly sp
 Once installed, the same commands can be run by simply replacing `conda` by `mamba`. More details available in the [mamba documentation](https://mamba.readthedocs.io/en/latest/).
 ```
 
-## Installing with pip
+## Installing with `pip`
 
 ```bash
 pip install geoutils

@@ -1,8 +1,8 @@
 (api)=
 
-# API Reference
+# API
 
-Full information about the functionalities of GeoUtils are provided on this page.
+Full information about the functionalities of GeoUtils.
 
 ```{eval-rst}
 .. currentmodule:: geoutils
@@ -10,20 +10,6 @@ Full information about the functionalities of GeoUtils are provided on this page
 
 ## Classes
 
-```{eval-rst}
-.. autoclass:: Raster
-   :show-inheritance:
-   :special-members: __init__
-   :members:
-.. _sphx_glr_backref_geoutils.Raster:
-
-.. minigallery:: geoutils.Raster
-    :add-heading:
-```
-
-automodule geoutils
-% .. contents:: Contents
-%    :local:
 %
 % Raster
 % ------
@@ -60,10 +46,20 @@ automodule geoutils
         :template: module.rst
         :recursive:
 
-        georaster
         georaster.raster
         geovector
         projtools
         satimg
         geoviewer
+```
+
+```{eval-rst}
+.. autoclass:: Raster
+   :show-inheritance:
+   :special-members: __init__
+   :members:
+.. _sphx_glr_backref_geoutils.Raster:
+
+.. minigallery:: geoutils.Raster
+    :add-heading:
 ```

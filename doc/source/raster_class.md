@@ -4,7 +4,7 @@
 
 ## Object definition
 
-A {class}`~geoutils.georaster.raster.Raster` is a georeferenced raster read, written or reprojected by `rasterio`.
+A {class}`geoutils.Raster` is a georeferenced raster read, written or reprojected by `rasterio`.
 
 It contains:
 - an array `.data` as a {class}`numpy.ma.MaskedArray`,
