@@ -12,8 +12,8 @@ documentation.
 **Overview of class inheritance in GeoUtils:**
 
 ```{eval-rst}
-.. inheritance-diagram:: geoutils
-        :top-classes: geoutils.Raster geoutils.Vector
+.. inheritance-diagram:: geoutils.georaster.raster
+        :top-classes: geoutils.georaster.raster.Raster
 ```
 
 
@@ -232,18 +232,23 @@ And reverse operations.
     Mask
 ```
 
-### Booleans
+### Overloaded Raster methods
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
-    Mask.datetime
+    Mask.crop
+    Mask.reproject
+    Mask.polygonize
 ```
 
 ## Vectors
 
-
+```{eval-rst}
+.. minigallery:: geoutils.Vector
+      :add-heading:
+```
 ### Opening a file
 
 ```{eval-rst}

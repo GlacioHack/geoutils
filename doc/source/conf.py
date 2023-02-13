@@ -35,6 +35,8 @@ extensions = [
     "sphinxcontrib.programoutput",
     "sphinx_gallery.gen_gallery",  # Examples gallery
     "sphinx.ext.intersphinx",
+    "sphinx.ext.graphviz", # To render inheritance diagrams
+    "sphinx.ext.inheritance_diagram",  # For class inheritance diagrams
     "myst_parser",  # Form of Markdown that works with sphinx, used a lot by the Sphinx Book Theme
 ]
 

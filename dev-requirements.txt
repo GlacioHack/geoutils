@@ -18,4 +18,4 @@ typing-extensions
 sphinx-gallery
 scikit-image
 pyyaml
-
+autovizwidget
