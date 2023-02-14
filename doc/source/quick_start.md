@@ -2,7 +2,7 @@
 
 # Quick start
 
-The following shows how to quickly get started with GeoUtils, show-casing examples on different aspects of the package.
+The following presents how to quickly get started with GeoUtils, show-casing examples on different core aspects of the package.
 
 For more details, refer to the {ref}`core-index`, {ref}`rasters-index` or {ref}`vectors-index` pages.
 
@@ -31,8 +31,8 @@ Attributes of {class}`~geoutils.Raster` and {class}`~geoutils.Vector` update wit
 
 ## Geospatial handling and match-reference
 
-Geospatial operations are largely based on class methods, for 
-example {func}`geoutils.Raster.crop` or {func}`geoutils.Vector.proximity`. Most of these methods can be solely passed another {class}`~geoutils.Raster` or 
+Geospatial operations are largely based on class methods, such  
+as {func}`geoutils.Raster.crop` or {func}`geoutils.Vector.proximity`. Most of these methods can be solely passed another {class}`~geoutils.Raster` or 
 {class}`~geoutils.Vector` as a **reference to match** during the operation.
 
 ```{literalinclude} code/index_example.py
@@ -50,9 +50,6 @@ Additionally, in GeoUtils, **geospatial handling methods that apply to the same 
 ```{margin}
 <sup>1</sup>The names of geospatial handling methods is largely based on [GDAL and OGR](https://gdal.org/)'s, with the notable exception of {func}`~geoutils.Vector.reproject` that better applies to vectors than `warp`.
 ```
-
-A {func}`~geoutils.Raster.reproject` involves a change in `.crs` or `.transform`, while a {func}`~geoutils.Raster.crop` only involves a change in `.bounds`. 
-Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils.Vector` from a {class}`~geoutils.Raster`, and the other way around for {func}`~geoutils.Vector.rasterize`. 
 
 ```{list-table} 
    :widths: 30 30 30
@@ -74,6 +71,9 @@ Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils
      - {func}`~geoutils.Raster.proximity`
      - {func}`~geoutils.Vector.proximity`
 ```
+
+A {func}`~geoutils.Raster.reproject` involves a change in `.crs` or `.transform`, while a {func}`~geoutils.Raster.crop` only involves a change in `.bounds`. 
+Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils.Vector` from a {class}`~geoutils.Raster`, and the other way around for {func}`~geoutils.Vector.rasterize`. 
 
 
 ## Pythonic arithmetic and NumPy interface
@@ -113,7 +113,7 @@ Masks can then be used for indexing a {class}`~geoutils.Raster`.
 ```
 
 Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean `dtypes`. Using {func}`~geoutils.Raster.polygonize` with a 
-{class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the masked area-of-interest:
+{class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{literalinclude} code/index_example.py
 :lines: 35-36
@@ -133,24 +133,25 @@ For saving, {func}`~geoutils.Raster.save` is used.
 :language: python
 ```
 
-```{admonition} Wrap-up
-In a few lines, we:
- - **easily handled georeferencing** operations on rasters and vectors, 
- - performed raster calculations **inherently respecting unvalid data**, and
- - **naturally derived a vectorized mask** for an area-of-interest.
-
-Our high infrared absorption indexes at least 200 meters away from glaciers near Everest likely corresponds to **perennial snowfields** (see 
-figure below).
-
-For a **bonus** example on parsing satellite metadata and DEMs, continue below.
-
-Otherwise, for more **hands-on** examples, explore GeoUtils' gallery of examples!
-```
-
 ```{eval-rst}
 .. plot:: code/index_example.py
     :caption: High infrared outside of glaciers at Mount Everest (perennial snowfields)
     :width: 90%
+```
+
+```{admonition} Wrap-up
+In a few lines, we:
+ - **easily handled georeferencing** operations on rasters and vectors, 
+ - performed numerical calculations **inherently respecting unvalid data**,
+ - **naturally casted to a mask** from a logical operation on raster, and
+ - **intuitively vectorized a mask** by harnessing overloaded subclass methods.
+
+Our result: a vector of high infrared absorption indexes at least 200 meters away from glaciers 
+near Everest, which likely corresponds to **perennial snowfields**.
+
+For a **bonus** example on parsing satellite metadata and DEMs, continue below.
+
+Otherwise, for more **hands-on** examples, explore GeoUtils' gallery of examples!
 ```
 
 ## **Bonus:** Parsing metadata with {class}`~geoutils.SatelliteImage`

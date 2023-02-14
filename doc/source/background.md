@@ -2,6 +2,7 @@
 
 # Background
 
+More information on the people behind GeoUtils, and the package's mission.
 
 ## Mission
 
