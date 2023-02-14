@@ -13,6 +13,7 @@ dependencies:
   # Development-specific
   - autovizwidget
   - graphviz
+  - jinja2<3.1
   - sphinx
   - myst-parser
   - sphinx-autodoc-typehints
