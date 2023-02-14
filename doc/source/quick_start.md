@@ -29,34 +29,6 @@ A {class}`~geoutils.Vector` is a composition class with a single main attribute:
 
 Attributes of {class}`~geoutils.Raster` and {class}`~geoutils.Vector` update with georeferenced operations on themselves, or one of their subclasses. 
 
-## Parsing image metadata with {class}`~geoutils.SatelliteImage`
-
-In our case, `rast` would be better opened using the {class}`~geoutils.Raster` subclass {class}`~geoutils.SatelliteImage` instead, which tentatively parses 
-metadata recognized from the filename or auxiliary files.
-
-```{literalinclude} code/index_example.py
-:lines: 11-14
-:language: python
-```
-
-```{eval-rst}
-.. program-output:: $PYTHON code/index_example.py
-        :shell:
-```
-
-There are many possible subclass to derive from a {class}`~geoutils.Raster`. Here's an **overview of current {class}`~geoutils.Raster` class inheritance**, which extends into 
-[xDEM](https://xdem.readthedocs.io/en/latest/index.html) through the {class}`~xdem.DEM` class for analyzing digital elevation models: 
-
-```{eval-rst}
-.. inheritance-diagram:: geoutils.georaster.raster geoutils.georaster.satimg xdem.dem.DEM
-    :top-classes: geoutils.georaster.raster.Raster
-```
-```{note}
-The {class}`~xdem.DEM` class of [xDEM](https://xdem.readthedocs.io/en/latest/index.html) re-implements all methods of [gdalDEM](https://gdal.org/programs/gdaldem.html) 
-(and more) to derive topographic attributes (hillshade, slope, aspect, etc), coded directly in Python for scalability and tested to yield the exact same 
-results.
-```
-
 ## Geospatial handling and match-reference
 
 Geospatial operations are largely based on class methods, for 
@@ -170,7 +142,9 @@ In a few lines, we:
 Our high infrared absorption indexes at least 200 meters away from glaciers near Everest likely corresponds to **perennial snowfields** (see 
 figure below).
 
-For more hands-on examples, explore GeoUtils' gallery of examples.
+For a **bonus** example on parsing satellite metadata and DEMs, continue below.
+
+Otherwise, for more **hands-on** examples, explore GeoUtils' gallery of examples!
 ```
 
 ```{eval-rst}
@@ -179,3 +153,30 @@ For more hands-on examples, explore GeoUtils' gallery of examples.
     :width: 90%
 ```
 
+## **Bonus:** Parsing metadata with {class}`~geoutils.SatelliteImage`
+
+In our case, `rast` would be better opened using the {class}`~geoutils.Raster` subclass {class}`~geoutils.SatelliteImage` instead, which tentatively parses 
+metadata recognized from the filename or auxiliary files.
+
+```{literalinclude} code/index_example.py
+:lines: 11-14
+:language: python
+```
+
+```{eval-rst}
+.. program-output:: $PYTHON code/index_example.py
+        :shell:
+```
+
+There are many possible subclass to derive from a {class}`~geoutils.Raster`. Here's an **overview of current {class}`~geoutils.Raster` class inheritance**, which extends into 
+[xDEM](https://xdem.readthedocs.io/en/latest/index.html) through the {class}`~xdem.DEM` class for analyzing digital elevation models: 
+
+```{eval-rst}
+.. inheritance-diagram:: geoutils.georaster.raster geoutils.georaster.satimg xdem.dem.DEM
+    :top-classes: geoutils.georaster.raster.Raster
+```
+```{note}
+The {class}`~xdem.DEM` class of [xDEM](https://xdem.readthedocs.io/en/latest/index.html) re-implements all methods of [gdalDEM](https://gdal.org/programs/gdaldem.html) 
+(and more) to derive topographic attributes (hillshade, slope, aspect, etc), coded directly in Python for scalability and tested to yield the exact same 
+results.
+```

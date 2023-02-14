@@ -26,7 +26,7 @@ rast += 1
 import numpy as np
 rast = (rast - np.min(rast)) / (np.max(rast) - np.min(rast))
 
-# Get mask of an AOI: infrared index above 0.9, at least 200 m from glaciers
+# Get mask of an AOI: infrared index above 0.7, at least 200 m from glaciers
 mask_aoi = np.logical_and(rast > 0.7, rast_proximity_to_vec > 200)
 
 # Index raster with mask to extract a 1-D array
