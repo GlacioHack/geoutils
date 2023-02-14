@@ -25,6 +25,22 @@ print(outlines)
 
 ```
 
+````{margin} 
+**Example of vector from {func}`~geoutils.Vector.info`:**
+
+```{literalinclude} code/index_vect_info.py
+    :lines: 11-12
+    :language: python
+```
+
+```{eval-rst}
+.. program-output:: $PYTHON code/index_vect_info.py
+        :shell:
+```
+
+
+````
+
 Masks can easily be generated for use with Rasters:
 
 ```{literalinclude} code/vector-basics_open_file.py

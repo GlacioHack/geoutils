@@ -30,13 +30,12 @@ extensions = [
     "sphinx.ext.viewcode",  # Create the "[source]" button in the API to show the source code.
     "matplotlib.sphinxext.plot_directive",  # Render matplotlib figures from code.
     "sphinx.ext.autosummary",  # Create API doc summary texts from the docstrings.
-    "sphinx.ext.inheritance_diagram",  # For class inheritance diagrams (see coregistration.rst).
+    "sphinx.ext.inheritance_diagram",  # For class inheritance diagrams.
+    "sphinx.ext.graphviz", # To render graphviz diagrams.
     "sphinx_autodoc_typehints",  # Include type hints in the API documentation.
     "sphinxcontrib.programoutput",
     "sphinx_gallery.gen_gallery",  # Examples gallery
     "sphinx.ext.intersphinx",
-    "sphinx.ext.graphviz", # To render inheritance diagrams
-    "sphinx.ext.inheritance_diagram",  # For class inheritance diagrams
     "myst_parser",  # Form of Markdown that works with sphinx, used a lot by the Sphinx Book Theme
 ]
 
@@ -45,6 +44,8 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable", None),
     "matplotlib": ("https://matplotlib.org/stable", None),
     "pyproj": ("https://pyproj4.github.io/pyproj/stable", None),
+    "geopandas": ("https://geopandas.org/en/stable", None),
+    "xdem": ("https://xdem.readthedocs.io/en/latest", None),
 }
 
 sphinx_gallery_conf = {
@@ -65,6 +66,17 @@ extlinks = {
     "issue": ("https://github.com/GlacioHack/geoutils/issues/%s", "GH"),
     "pull": ("https://github.com/GlacioHack/geoutils/pull/%s", "PR"),
 }
+
+# For matplotlib figures generate with sphinx plot: (suffix, dpi)
+plot_formats = [('.png', 400)]
+
+# To avoid long path names in inheritance diagrams
+inheritance_alias = {"geoutils.georaster.raster.Raster": "geoutils.Raster", "geoutils.georaster.raster.Mask": "geoutils.Mask",
+                     "geoutils.georaster.satimg.SatelliteImage": "geoutils.SatelliteImage", "geoutils.geovector.Vector": "geoutils.Vector",
+                     "xdem.dem.DEM": "xdem.DEM"}
+
+# To avoid fuzzy PNGs
+graphviz_output_format = 'svg'
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = [os.path.join(os.path.dirname(__file__), "_templates")]

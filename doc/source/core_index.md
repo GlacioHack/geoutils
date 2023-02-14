@@ -1,4 +1,4 @@
-(core-concepts)=
+(core-index)=
 # Fundamentals
 
 ```{toctree}

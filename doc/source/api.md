@@ -9,14 +9,6 @@ documentation.
 .. currentmodule:: geoutils
 ```
 
-**Overview of class inheritance in GeoUtils:**
-
-```{eval-rst}
-.. inheritance-diagram:: geoutils.georaster.raster
-        :top-classes: geoutils.georaster.raster.Raster
-```
-
-
 ## Raster
 
 ```{eval-rst}
@@ -91,6 +83,15 @@ documentation.
     Raster.interp_points
 ```
 
+### Plotting
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.show
+```
+
 ### Get or update data methods
 
 ```{eval-rst}
@@ -155,7 +156,7 @@ documentation.
     Raster.__truediv__
     Raster.__floordiv__
     Raster.__mod__
-    Raster.__power__    
+    Raster.__pow__    
 ```
 
 And reverse operations.
@@ -167,13 +168,11 @@ And reverse operations.
     :toctree: gen_modules/
 
     Raster.__eq__
-    Raster.__neq__
+    Raster.__ne__
     Raster.__lt__
     Raster.__le__
     Raster.__gt__
-    Raster.__ge__
-    Raster.__mod__
-    Raster.__power__    
+    Raster.__ge__ 
 ```
 
 ### Array interface with NumPy

@@ -24,7 +24,7 @@ and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenc
 [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/) for scientific computing to provide:
 - A **common and consistent framework** for rasters and vectors handling and analysis,
 - A structure following the **principal of least knowledge**<sup>2</sup> to foster accessibility,
-- A **pythonic arithmetic** and **NumPy masked-array interface** for intuitive use.
+- A **pythonic arithmetic** and **NumPy interfacing** for intuitive use.
 
 ```{margin}
 <sup>2</sup>Or the [Law of Demeter](https://en.wikipedia.org/wiki/Law_of_Demeter) for software development.
@@ -32,11 +32,11 @@ and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenc
 
 In particular, GeoUtils:
 - Rarely requires more than **single-line operations** due to its object-based structure,
-- Allows for **match-reference geospatial operations** to facilitate geospatial handling,
+- Allows for **match-reference operations** to facilitate geospatial handling,
 - Re-implements **several of [GDAL](https://gdal.org/)'s missing features** (Proximity, DEM, Calc, etc),
 - Naturally handles **different `dtypes` and `nodata`** values through its NumPy masked-array interface.
 
 
 ```{note}
-More on these core features of GeoUtils in the {ref}`core-concepts`.
+More on these core features of GeoUtils in the {ref}`quick-start`, or {ref}`core-index` for details.
 ```

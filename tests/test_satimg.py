@@ -11,7 +11,6 @@ import rasterio as rio
 
 import geoutils
 import geoutils.georaster as gr
-import geoutils.satimg as si
 from geoutils import examples
 
 DO_PLOT = False
@@ -29,18 +28,18 @@ class TestSatelliteImage:
         """
 
         # from filename, checking option
-        img = si.SatelliteImage(example, read_from_fn=False)
-        img = si.SatelliteImage(example)
-        assert isinstance(img, si.SatelliteImage)
+        img = gr.SatelliteImage(example, read_from_fn=False)
+        img = gr.SatelliteImage(example)
+        assert isinstance(img, gr.SatelliteImage)
 
         # from SatelliteImage
-        img2 = si.SatelliteImage(img)
-        assert isinstance(img2, si.SatelliteImage)
+        img2 = gr.SatelliteImage(img)
+        assert isinstance(img2, gr.SatelliteImage)
 
         # from Raster
         r = gr.Raster(example)
-        img3 = si.SatelliteImage(r)
-        assert isinstance(img3, si.SatelliteImage)
+        img3 = gr.SatelliteImage(r)
+        assert isinstance(img3, gr.SatelliteImage)
 
         assert img.raster_equal(img2)
         assert img.raster_equal(img3)
@@ -65,13 +64,13 @@ class TestSatelliteImage:
                 sys.stdout = self._stdout
 
         with Capturing() as output1:
-            si.SatelliteImage(example, silent=False)
+            gr.SatelliteImage(example, silent=False)
 
         # check the metadata reading outputs to console
         assert len(output1) > 0
 
         with Capturing() as output2:
-            si.SatelliteImage(example, silent=True)
+            gr.SatelliteImage(example, silent=True)
 
         # check nothing outputs to console
         assert len(output2) == 0
@@ -83,22 +82,22 @@ class TestSatelliteImage:
         # Create fake rasters with random values in 0-255 and dtype uint8
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-        satimg1 = si.SatelliteImage.from_array(
+        satimg1 = gr.SatelliteImage.from_array(
             np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
-        satimg2 = si.SatelliteImage.from_array(
+        satimg2 = gr.SatelliteImage.from_array(
             np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
 
         # Check that output type is same - other tests are in test_georaster.py
         sat_out = -satimg1
-        assert isinstance(sat_out, si.SatelliteImage)
+        assert isinstance(sat_out, gr.SatelliteImage)
 
         sat_out = satimg1 + satimg2
-        assert isinstance(sat_out, si.SatelliteImage)
+        assert isinstance(sat_out, gr.SatelliteImage)
 
         sat_out = satimg1 - satimg2  # type: ignore
-        assert isinstance(sat_out, si.SatelliteImage)
+        assert isinstance(sat_out, gr.SatelliteImage)
 
     @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_copy(self, example: str) -> None:
@@ -109,7 +108,7 @@ class TestSatelliteImage:
         - if r is copied, r.data changed, r2.data should be unchanged
         """
         # Open dataset, update data and make a copy
-        r = si.SatelliteImage(example)
+        r = gr.SatelliteImage(example)
         r.data += 5
         r2 = r.copy()
 
@@ -117,7 +116,7 @@ class TestSatelliteImage:
         assert r is not r2
 
         # Check the object is a SatelliteImage
-        assert isinstance(r2, geoutils.satimg.SatelliteImage)
+        assert isinstance(r2, gr.SatelliteImage)
 
         # check all immutable attributes are equal
         georaster_attrs = [
@@ -136,7 +135,7 @@ class TestSatelliteImage:
         satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
         # using list directly available in Class
         attrs = georaster_attrs + satimg_attrs
-        all_attrs = attrs + si.satimg_attrs
+        all_attrs = attrs + gr.satimg_attrs
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
@@ -193,7 +192,7 @@ class TestSatelliteImage:
         ]
 
         for names in copied_names:
-            attrs = si.parse_metadata_from_fn(names)
+            attrs = geoutils.georaster.satimg.parse_metadata_from_fn(names)
             i = copied_names.index(names)
             assert satellites[i] == attrs[0]
             assert sensors[i] == attrs[1]
@@ -208,17 +207,17 @@ class TestSatelliteImage:
         test_latlon = [(14, -65), (-14, 65), (14, -65), (14, -65), (14, -65), (0, 0)]
 
         for tile in test_tiles:
-            assert si.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
-            assert si.sw_naming_to_latlon(tile)[1] == test_latlon[test_tiles.index(tile)][1]
+            assert geoutils.georaster.satimg.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
+            assert geoutils.georaster.satimg.sw_naming_to_latlon(tile)[1] == test_latlon[test_tiles.index(tile)][1]
 
         for latlon in test_latlon:
-            assert si.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
+            assert geoutils.georaster.satimg.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
 
         # check possible exceptions, rounded lat/lon belong to their southwest border
-        assert si.latlon_to_sw_naming((0, 0)) == "N00E000"
+        assert geoutils.georaster.satimg.latlon_to_sw_naming((0, 0)) == "N00E000"
         # those are the same point, should give same naming
-        assert si.latlon_to_sw_naming((-90, 0)) == "S90E000"
-        assert si.latlon_to_sw_naming((90, 0)) == "S90E000"
+        assert geoutils.georaster.satimg.latlon_to_sw_naming((-90, 0)) == "S90E000"
+        assert geoutils.georaster.satimg.latlon_to_sw_naming((90, 0)) == "S90E000"
         # same here
-        assert si.latlon_to_sw_naming((0, -180)) == "N00W180"
-        assert si.latlon_to_sw_naming((0, 180)) == "N00W180"
+        assert geoutils.georaster.satimg.latlon_to_sw_naming((0, -180)) == "N00W180"
+        assert geoutils.georaster.satimg.latlon_to_sw_naming((0, 180)) == "N00W180"

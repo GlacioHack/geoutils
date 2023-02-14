@@ -3,10 +3,9 @@ GeoUtils is a python package of raster and vector tools.
 """
 
 from geoutils import spatial_tools  # noqa
-from geoutils import examples, georaster, geovector, projtools, satimg  # noqa
-from geoutils.georaster import Mask, Raster  # noqa
+from geoutils import examples, georaster, geovector, projtools  # noqa
+from geoutils.georaster import Mask, Raster, SatelliteImage  # noqa
 from geoutils.geovector import Vector  # noqa
-from geoutils.satimg import SatelliteImage  # noqa
 
 try:
     from geoutils.version import version as __version__  # noqa

@@ -2667,7 +2667,7 @@ class TestArithmetic:
 
         # Test with child class
         r3 = getattr(satimg, op)(intval)
-        assert isinstance(r3, gu.satimg.SatelliteImage)
+        assert isinstance(r3, gr.SatelliteImage)
 
     reflective_ops = [["__add__", "__radd__"], ["__mul__", "__rmul__"]]
 

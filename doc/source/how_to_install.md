@@ -23,7 +23,7 @@ pip install geoutils
 ```
 
 ```{note}
-Setting up GDAL and PROJ may need some extra steps, depending on your operating system and configuration.
+Setting up GDAL and PROJ may require some extra steps, depending on your operating system and configuration.
 ```
 
 ## Installing for contributors

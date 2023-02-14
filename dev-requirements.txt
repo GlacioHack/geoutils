@@ -19,3 +19,4 @@ sphinx-gallery
 scikit-image
 pyyaml
 autovizwidget
+graphviz

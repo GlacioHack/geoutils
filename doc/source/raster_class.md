@@ -19,6 +19,21 @@ It contains:
 :lines: 2-8
 ```
 
+````{margin} 
+**Example of raster from {func}`~geoutils.Raster.info`:**
+
+```{literalinclude} code/index_rast_info.py
+    :lines: 11-12
+    :language: python
+```
+
+```{eval-rst}
+.. program-output:: $PYTHON code/index_rast_info.py
+        :shell:
+```
+
+````
+
 To print information directly to your console:
 
 ```python
