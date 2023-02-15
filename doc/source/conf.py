@@ -36,8 +36,11 @@ extensions = [
     "sphinxcontrib.programoutput",
     "sphinx_gallery.gen_gallery",  # Examples gallery
     "sphinx.ext.intersphinx",
-    "myst_parser",  # Form of Markdown that works with sphinx, used a lot by the Sphinx Book Theme
+    # "myst_parser",  !! Not needed with myst_nb !! # Form of Markdown that works with sphinx, used a lot by the Sphinx Book Theme
+    "myst_nb" # MySt for rendering Jupyter notebook in documentation
 ]
+
+nb_kernel_rgx_aliases = {".*geoutils.*": "python3"}
 
 intersphinx_mapping = {
     "rasterio": ("https://rasterio.readthedocs.io/en/latest", None),

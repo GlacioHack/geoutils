@@ -16,6 +16,7 @@ dependencies:
   - jinja2<3.1
   - sphinx
   - myst-parser
+  - myst-nb
   - sphinx-autodoc-typehints
   - sphinxcontrib-programoutput
   - numpydoc

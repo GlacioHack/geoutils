@@ -12,6 +12,7 @@ sphinxcontrib_programoutput
 sphinx_autodoc_typehints
 matplotlib
 myst-parser
+myst-nb
 scipy
 pre-commit
 typing-extensions

@@ -590,16 +590,26 @@ class Raster:
         return mfh.open()
 
     def __repr__(self) -> str:
-        """Convert object to formal string representation."""
-        return self.__str__()
+        """Convert formal Raster string representation."""
+
+        # Align left spaces for multi-line object representation (arrays) after return to lines
+        s = "Raster(\n"+\
+            "  data=" + "\n       ".join(self.data.__str__().split("\n"))+\
+            "\ntransform="+ "\n          ".join(self.transform.__str__().split("\n"))+\
+            "\ncrs=" + self.crs.__str__()+\
+            "\nnodata=" + self.nodata.__str__()
+
+        return s
         # L = [getattr(self, item) for item in self._saved_attrs]
         # s: str = "{}.{}({})".format(type(self).__module__, type(self).__qualname__, ", ".join(map(str, L)))
 
         # return s
 
     def __str__(self) -> str:
-        """Provide string of information about Raster."""
-        return self.info()
+        """Provide simplified string for print() about Raster."""
+        s = self.data.__str__()
+
+        return s
 
     def __getitem__(self, value: Raster | Vector | list[float] | tuple[float, ...]) -> np.ndarray | Raster:
         """Subset the Raster object: calls the crop method with default parameters"""
@@ -2790,6 +2800,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
 # Subclass Mask for manipulating boolean Rasters
 class Mask(Raster):
+
     def __init__(
         self,
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
@@ -2821,6 +2832,17 @@ class Mask(Raster):
 
             # Define in dtypes
             self._dtypes = (bool,)
+
+    def __repr__(self) -> str:
+        """Convert formal Raster string representation."""
+
+        # Over-ride Raster's method to remove nodata value (always None)
+        s = "Mask(\n"+\
+            "  data=" + "\n       ".join(self.data.__str__().split("\n"))+\
+            "\ntransform="+ "\n          ".join(self.transform.__str__().split("\n"))+\
+            "\ncrs=" + self.crs.__str__()
+
+        return s
 
     def reproject(
         self: Mask,
@@ -2932,29 +2954,29 @@ class Mask(Raster):
         self._data = self.data.astype("uint8")
         return super().polygonize(in_value=in_value)
 
-    # Logical operations between mask objects: scale to the entire mask
+    # Logical bitwise operations
     def __and__(self: Mask, other: Mask) -> Mask:
 
         return self.from_array(
-            data=np.logical_and(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self.data & other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
     def __or__(self: Mask, other: Mask) -> Mask:
 
         return self.from_array(
-            data=np.logical_or(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self.data | other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
     def __xor__(self: Mask, other: Mask) -> Mask:
 
         return self.from_array(
-            data=np.logical_xor(self.data, other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self.data ^ other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
     def __invert__(self: Mask) -> Mask:
 
         return self.from_array(
-            data=np.logical_not(self.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=~self.data, transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
 
