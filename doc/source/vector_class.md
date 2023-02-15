@@ -78,6 +78,8 @@ TODO: Add rasterize text.
 
 ## Rasterize
 
+The {func}`~geoutils.Vector.rasterize` operation to convert from {class}`~geoutils.Vector` to {class}`~geoutils.Raster` inherently requires a 
+{attr}`~geoutils.Raster.res` or {attr}`~geoutils.Raster.shape` attribute to define the grid. While those can be passed on their own.
 
 ## Proximity
 

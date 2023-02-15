@@ -16,36 +16,37 @@ These link to either **on-disk** or **in-memory** datasets, opened by instantiat
 :language: python
 ```
 
-A {class}`~geoutils.Raster` is a composition class with four main attributes: 
-1. A {class}`~numpy.ma.MaskedArray` as `.data`, 
-2. A {class}`~pyproj.crs.CRS` as `.crs`,
-3. An {class}`~affine.Affine` as `.transform`,
-4. And a {class}`float` or {class}`int` as `.nodata`.
+A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`~numpy.ma.MaskedArray` as `.data`, a {class}`~pyproj.crs.CRS` as `.crs`, 
+an {class}`~affine.Affine` as `.transform`, and a {class}`float` or {class}`int` as `.nodata`. When a file exists on disk, {class}`~geoutils.Raster` is 
+linked to a {class}`rasterio.DatasetReader` object for loading the metadata, and the array at the appropriate time.
 
-When a file exists on disk, {class}`~geoutils.Raster` is linked to a {class}`rasterio.DatasetReader` object for loading the metadata, and the array at the 
-appropriate time.
+A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as `.ds`, for which most methods are 
+wrapped directly into {class}`~geoutils.Vector`. 
 
-A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as `.ds`. 
-
-Attributes of {class}`~geoutils.Raster` and {class}`~geoutils.Vector` update with georeferenced operations on themselves, or one of their subclasses. 
+All other attributes are derivatives of those main attributes, or of the filename on disk. Attributes of {class}`~geoutils.Raster` and 
+{class}`~geoutils.Vector` update with geospatial operations on themselves. 
 
 ## Geospatial handling and match-reference
 
-Geospatial operations are largely based on class methods, such  
-as {func}`geoutils.Raster.crop` or {func}`geoutils.Vector.proximity`. Most of these methods can be solely passed another {class}`~geoutils.Raster` or 
-{class}`~geoutils.Vector` as a **reference to match** during the operation.
+Geospatial operations are based on class methods, such as {func}`geoutils.Raster.crop` or {func}`geoutils.Vector.proximity`. Nearly all of these methods can be 
+passed solely another {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a **reference to match** during the operation. A **reference {class}`~geoutils.Vector`** 
+enforces a matching of `.bounds` and/or `.crs`, while a **reference {class}`~geoutils.Raster`** can also enforce a matching of `.res`, depending on the nature of the operation.
 
 ```{literalinclude} code/index_example.py
 :lines: 16-20
 :language: python
 ```
 
+All methods can be also be passed any number of georeferencing arguments such as `.shape` or `.res`, and will logically deduce others from the input, much 
+as in [GDAL](https://gdal.org/)'s command line.
+
+
 ```{note}
 Right now, the array `.data` of `rast` is still not loaded. Applying {func}`~geoutils.Raster.crop` does not yet require loading, 
 and `rast`'s metadata is sufficient to provide a georeferenced grid for {func}`~geoutils.Vector.proximity`. The array will only be loaded when necessary.
 ```
 
-Additionally, in GeoUtils, **geospatial handling methods that apply to the same georeferencing attributes have consistent naming**<sup>1</sup> across {class}`~geoutils.Raster` and {class}`~geoutils.Vector`. 
+Additionally, in GeoUtils, **methods that apply to the same georeferencing attributes have consistent naming**<sup>1</sup> across {class}`~geoutils.Raster` and {class}`~geoutils.Vector`. 
 
 ```{margin}
 <sup>1</sup>The names of geospatial handling methods is largely based on [GDAL and OGR](https://gdal.org/)'s, with the notable exception of {func}`~geoutils.Vector.reproject` that better applies to vectors than `warp`.
@@ -144,9 +145,9 @@ In a few lines, we:
  - **easily handled georeferencing** operations on rasters and vectors, 
  - performed numerical calculations **inherently respecting unvalid data**,
  - **naturally casted to a mask** from a logical operation on raster, and
- - **intuitively vectorized a mask** by harnessing overloaded subclass methods.
+ - **straightforwardly vectorized a mask** by harnessing overloaded subclass methods.
 
-Our result: a vector of high infrared absorption indexes at least 200 meters away from glaciers 
+**Our result:** a vector of high infrared absorption indexes at least 200 meters away from glaciers 
 near Everest, which likely corresponds to **perennial snowfields**.
 
 For a **bonus** example on parsing satellite metadata and DEMs, continue below.

@@ -1,2 +1,2 @@
 (core-inheritance)=
-# Inheritance for satellite images, DEMs
+# Inheritance to geo-images and beyond
