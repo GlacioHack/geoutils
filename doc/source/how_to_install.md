@@ -28,7 +28,7 @@ Setting up GDAL and PROJ may require some extra steps, depending on your operati
 
 ## Installing for contributors
 
-```shell
+```bash
 git clone https://github.com/GlacioHack/xdem.git
 cd ./xdem
 mamba env create -f dev-environment.yml

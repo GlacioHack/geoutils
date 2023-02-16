@@ -593,7 +593,8 @@ class Raster:
         """Convert formal Raster string representation."""
 
         # Align left spaces for multi-line object representation (arrays) after return to lines
-        s = "Raster(\n"+\
+        # And use class name for easier inheritance to subclasses (avoid overloading)
+        s = self.__class__.__name__+"(\n"+\
             "  data=" + "\n       ".join(self.data.__str__().split("\n"))+\
             "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
             "\n  crs=" + self.crs.__str__()+\
