@@ -13,8 +13,8 @@ Pythonic operators work on {class}`~geoutils.Raster` much as they would on {clas
 
 ## Arithmetic of {class}`~geoutils.Raster` classes
 
-Arithmetic operators (+, -, /, //, *, **, %) can be used on a {class}`~geoutils.Raster` in combination with any other {class}`~geoutils.Raster`, {class}`~numpy.
-ndarray` or number.
+Arithmetic operators (`+`, `-`, `/`, `//`, `*`, `**`, `%`) can be used on a {class}`~geoutils.Raster` in combination with any other {class}`~geoutils.Raster`, 
+{class}`~numpy.ndarray` or number.
 
 For an operation with another {class}`~geoutils.Raster`, the georeferencing ({attr}`~geoutils.Raster.crs` and {attr}`~geoutils.Raster.transform`) must match. 
 For another {class}`~numpy.ndarray`, the {attr}`~geoutils.Raster.shape` must match. The operation always returns a {class}`~geoutils.Raster`.
@@ -61,7 +61,7 @@ following [standard NumPy coercion rules](https://numpy.org/doc/stable/reference
 
 ## Logical comparisons cast to {class}`~geoutils.Mask`
 
-Logical comparison operators (==, !=, >=, >, <=, <) can be used on a {class}`~geoutils.Raster`, also in combination with any other {class}`~geoutils.Raster`, 
+Logical comparison operators (`==`, `!=`, `>=`, `>`, `<=`, `<`) can be used on a {class}`~geoutils.Raster`, also in combination with any other {class}`~geoutils.Raster`, 
 {class}`~numpy.ndarray` or number.
 
 Those operation always return a {class}`~geoutils.Mask`, a subclass of {class}`~geoutils.Raster` with a boolean {class}`~numpy.ma.MaskedArray` 
@@ -80,7 +80,7 @@ A {class}`~geoutils.Mask`'s {attr}`~geoutils.Raster.data` remains a {class}`~num
 
 ## Logical bitwise operations on {class}`~geoutils.Mask`
 
-Logical bitwise operators (~, &, |, ^) can be used to combine a {class}`~geoutils.Mask` with another {class}`~geoutils.Mask`, and always output a {class}`~geoutils.Mask`.
+Logical bitwise operators (`~`, `&`, `|`, `^`) can be used to combine a {class}`~geoutils.Mask` with another {class}`~geoutils.Mask`, and always output a {class}`~geoutils.Mask`.
 
 ```{code-cell} ipython3
 # Logical bitwise operation between masks
@@ -89,3 +89,17 @@ mask
 ```
 
 ## Indexing a {class}`~geoutils.Raster` with a {class}`~geoutils.Mask`
+
+Finally, indexing and index assignment operations (`[]`, `[] = `) are both supported by {class}`Rasters<geoutils.Raster>`. 
+
+For indexing, they can be passed either a {class}`~geoutils.Mask` with the same georeferencing, or a boolean {class}`~numpy.ndarray` of the same shape. 
+For assignment, either a {class}`~geoutils.Raster` with the same georeferencing, or any {class}`~numpy.ndarray` of the same shape is expected.
+
+When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the indexed values of the {class}`~geoutils.Mask` **excluding those masked in its 
+{class}`~geoutils.Raster.data`'s {class}`~numpy.ma.MaskedArray` (i.e. nodata values present during logical comparison)**. To bypass this behaviour, simply 
+index without the mask using {attr}`<Mask.data.data>`.
+
+```{code-cell} ipython3
+# Indexing the raster with the previous mask
+raster[mask]
+```

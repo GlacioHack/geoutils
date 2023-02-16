@@ -1,10 +1,15 @@
+---
+file_format: mystnb
+kernelspec:
+  name: geoutils
+---
 (core-composition)=
 
 # Composition from Rasterio and GeoPandas
 
 ## A composition framework
 
-GeoUtil's main classes {class}`~geoutils.Raster` and {class}`~geoutils.Vector` are linked to [Rasterio](https://rasterio.readthedocs.io/en/latest/) and
+GeoUtils' main classes {class}`~geoutils.Raster` and {class}`~geoutils.Vector` are linked to [Rasterio](https://rasterio.readthedocs.io/en/latest/) and
 [GeoPandas](https://geopandas.org/en/stable/docs.html), respectively, through class composition. 
 
 They directly rely on their robust geospatial handling functionalities, as well of that of [PyProj](https://pyproj4.github.io/pyproj/stable/index.html), and 
@@ -14,14 +19,31 @@ add a layer on top for interfacing between rasters and vectors with higher-level
 
 The {class}`~geoutils.Raster` is a composition class with **four main attributes**:
 
-1. a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, 
-2. a {class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, 
-3. an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`, and 
+1. a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`,
+2. an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`
+3. a {class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, and
 4. a {class}`float` or {class}`int` as {attr}`~geoutils.Raster.nodata`.
+
+```{code-cell} ipython3
+:tags: [hide-output]
+
+import geoutils as gu
+
+# Initiate a Raster from disk
+raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
+raster
+```
 
 From these **four main attributes**, many other derivatives attributes exist, such as {attr}`~geoutils.Raster.bounds` or {attr}`~geoutils.Raster.res` to 
 describe georeferencing. When a {class}`~geoutils.Raster` is based on an **on-disk** dataset, other attributes exist such as {attr}`~geoutils.Raster.
 name` or {attr}`~geoutils.Raster.driver`.
+
+```{code-cell} ipython3
+:tags: [hide-output]
+
+# Show summarized information
+print(raster.info())
+```
 
 ```{important}
 The {class}`~geoutils.Raster` is not a composition of either a {class}`rasterio.DatasetReader`, a {class}`rasterio.MemoryFile` or a {class}`rasterio.DatasetWriter`. 
@@ -48,3 +70,11 @@ A {class}`~geoutils.Vector` is a composition class with a single main attribute:
 Because lazy loading is a lesser priority with vector data, a {class}`~geoutils.Vector` directly loads its {attr}`~geoutils.Vector.ds`. Besides, many 
 higher-level geospatial methods are already available in {class}`~geopandas.GeoDataFrame`. We thus only wrap those directly into {class}`~geoutils.Vector`, 
 in order to easily call them from the vector object, and build additional methods on top.
+
+```{code-cell} ipython3
+:tags: [hide-output]
+
+# Initiate a Vector from disk
+vector = examples.get_path("exploradores_rgi_outlines")
+vector
+```

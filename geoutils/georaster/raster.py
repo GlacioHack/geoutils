@@ -104,7 +104,7 @@ _HANDLED_FUNCTIONS_2NIN = [
     "equal",
     "not_equal",
 ]
-
+handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
 
 # Function to set the default nodata values for any given dtype
 # Similar to GDAL for int types, but without absurdly long nodata values for floats.
@@ -595,9 +595,9 @@ class Raster:
         # Align left spaces for multi-line object representation (arrays) after return to lines
         s = "Raster(\n"+\
             "  data=" + "\n       ".join(self.data.__str__().split("\n"))+\
-            "\ntransform="+ "\n          ".join(self.transform.__str__().split("\n"))+\
-            "\ncrs=" + self.crs.__str__()+\
-            "\nnodata=" + self.nodata.__str__()
+            "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
+            "\n  crs=" + self.crs.__str__()+\
+            "\n  nodata=" + self.nodata.__str__()+")"
 
         return s
         # L = [getattr(self, item) for item in self._saved_attrs]
@@ -1423,7 +1423,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     ) -> Any:
         """
         Method to cast NumPy array function directly on a Raster object by applying it to the masked array.
-        A limited number of function is supported, listed in raster._HANDLED_FUNCTIONS.
+        A limited number of function is supported, listed in raster.handled_array_funcs.
         """
 
         # If function is not implemented
@@ -2839,8 +2839,8 @@ class Mask(Raster):
         # Over-ride Raster's method to remove nodata value (always None)
         s = "Mask(\n"+\
             "  data=" + "\n       ".join(self.data.__str__().split("\n"))+\
-            "\ntransform="+ "\n          ".join(self.transform.__str__().split("\n"))+\
-            "\ncrs=" + self.crs.__str__()
+            "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
+            "\n  crs=" + self.crs.__str__()+")"
 
         return s
 

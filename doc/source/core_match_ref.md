@@ -18,10 +18,10 @@ operation.
 
 ## Matching with a {class}`~geoutils.Raster` or a {class}`~geoutils.Vector` reference
 
-The rules of using match-reference with a {class}`~geoutils.Raster` or a {class}`~geoutils.Vector` are always the same.
+The rules of using match-reference with a {class}`~geoutils.Raster` or a {class}`~geoutils.Vector` are always the same:
 
  - If the **reference** passed is a {class}`~geoutils.Vector`, it can enforce a matching of its {attr}`~geoutils.Vector.bounds` and/or of its {attr}`~geoutils.Vector.crs` (its only two 
-   georeferencing characteristics),
+   georeferencing attributes),
  - If the **reference** is a {class}`~geoutils.Raster`, it can also enforce a matching of any aspect of its {attr}`~geoutils.Raster.transform` (i.e, its 
    {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds` or {attr}`~geoutils.Raster.shape`) and/or of its {attr}`~geoutils.Raster.crs`.
 

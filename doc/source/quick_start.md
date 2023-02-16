@@ -79,7 +79,7 @@ Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils
 
 ## Pythonic arithmetic and NumPy interface
 
-All {class}`~geoutils.Raster` objects support Python arithmetic (+, -, /, //, *, **, %) with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or 
+All {class}`~geoutils.Raster` objects support Python arithmetic (`+`, `-`, `/`, `//`, `*`, `**`, `%`) with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or 
 number. For other {class}`~geoutils.Raster`, the georeferencing must match, while only the shape for other {class}`~numpy.ndarray`.
 
 ```{literalinclude} code/index_example.py
@@ -97,7 +97,7 @@ most other NumPy array functions, while logically casting `dtypes` and respectin
 
 ## Casting to {class}`~geoutils.Mask`, indexing and overload
 
-All {class}`~geoutils.Raster` classes also support Python logical comparison operators (==, !=, >=, >, <=, <), or more complex NumPy logical functions. Those 
+All {class}`~geoutils.Raster` classes also support Python logical comparison operators (`==`, `!=`, `>=`, `>`, `<=`, `<`), or more complex NumPy logical functions. Those 
 operations automatically casts them into a {class}`~geoutils.Mask`, a subclass of {class}`~geoutils.Raster`.
 
 
