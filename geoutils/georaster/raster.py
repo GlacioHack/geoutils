@@ -265,7 +265,7 @@ class Raster:
         | rio.io.MemoryFile
         | dict[str, Any],
         indexes: None | int | list[int] = None,
-        load_data: bool = True,
+        load_data: bool = False,
         downsample: AnyNumber = 1,
         masked: bool = True,
         nodata: int | float | list[int] | list[float] | None = None,
@@ -278,7 +278,7 @@ class Raster:
 
         :param indexes: The band(s) to load into the object. Default is to load all bands.
 
-        :param load_data: Load the raster data into the object. Default is True.
+        :param load_data: Load the raster data into the object. Default is False.
 
         :param downsample: Reduce the size of the image loaded by this factor. Default is 1.
 
@@ -592,10 +592,16 @@ class Raster:
     def __repr__(self) -> str:
         """Convert formal Raster string representation."""
 
-        # Align left spaces for multi-line object representation (arrays) after return to lines
-        # And use class name for easier inheritance to subclasses (avoid overloading)
+        # If data not loaded, return and string and avoid calling .data
+        if not self.is_loaded:
+            str_data = "not_loaded"
+        else:
+            str_data = "\n       ".join(self.data.__str__().split("\n"))
+
+        # Above and below, we align left spaces for multi-line object representation (arrays) after return to lines
+        # And call the class name for easier inheritance to subclasses (avoid overloading to just rewrite subclass name)
         s = self.__class__.__name__+"(\n"+\
-            "  data=" + "\n       ".join(self.data.__str__().split("\n"))+\
+            "  data=" + str_data +\
             "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
             "\n  crs=" + self.crs.__str__()+\
             "\n  nodata=" + self.nodata.__str__()+")"
@@ -970,6 +976,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :returns: True if Raster has been modified.
 
         """
+        if not self.is_loaded:
+            return False
+
         if not self._is_modified:
             new_hash = hash(
                 (self._data.tobytes() if self._data is not None else 0, self.transform, self.crs, self.nodata)
@@ -1259,7 +1268,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             f"Driver:               {self.driver} \n",
             f"Opened from file:     {self.filename} \n",
             f"Filename:             {self.name} \n",
-            f"Raster modified since disk load?  {self._is_modified} \n",
+            f"Loaded?               {self.is_loaded} \n",
+            f"Modified since load?  {self.is_modified} \n",
             f"Size:                 {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtypes}\n",

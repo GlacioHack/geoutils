@@ -9,7 +9,7 @@ kernelspec:
 
 GeoUtils integrates most of Python's operators for shorter, more intuitive code to consistently perform arithmetic and logical operations.
  
-Pythonic operators work on {class}`~geoutils.Raster` much as they would on {class}`~numpy.ndarray`, with some more details.
+Pythonic operators work on {class}`Rasters<geoutils.Raster>` much as they would on {class}`ndarrays<numpy.ndarray>`, with some more details.
 
 ## Arithmetic of {class}`~geoutils.Raster` classes
 
@@ -96,8 +96,8 @@ For indexing, they can be passed either a {class}`~geoutils.Mask` with the same 
 For assignment, either a {class}`~geoutils.Raster` with the same georeferencing, or any {class}`~numpy.ndarray` of the same shape is expected.
 
 When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the indexed values of the {class}`~geoutils.Mask` **excluding those masked in its 
-{class}`~geoutils.Raster.data`'s {class}`~numpy.ma.MaskedArray` (i.e. nodata values present during logical comparison)**. To bypass this behaviour, simply 
-index without the mask using {attr}`<Mask.data.data>`.
+{class}`~geoutils.Raster.data`'s {class}`~numpy.ma.MaskedArray` (for instance, nodata values present during a previous logical comparison)**. To bypass this 
+behaviour, simply index without the mask using {attr}`Mask.data.data`.
 
 ```{code-cell} ipython3
 # Indexing the raster with the previous mask

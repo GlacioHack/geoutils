@@ -18,7 +18,7 @@ operation.
 
 ## Matching with a {class}`~geoutils.Raster` or a {class}`~geoutils.Vector` reference
 
-The rules of using match-reference with a {class}`~geoutils.Raster` or a {class}`~geoutils.Vector` are always the same:
+The rules of using match-reference with {class}`Rasters<geoutils.Raster>` or {class}`Vectors<geoutils.Vector>` are always the same:
 
  - If the **reference** passed is a {class}`~geoutils.Vector`, it can enforce a matching of its {attr}`~geoutils.Vector.bounds` and/or of its {attr}`~geoutils.Vector.crs` (its only two 
    georeferencing attributes),
@@ -29,7 +29,7 @@ Which of these attributes are eventually used to enforce the matching **depends 
 
 ## Geospatial handling rules for match-reference
 
-Core "handling" methods all support match-reference, and **always enforce the same georeferencing attributes** for either {class}`~geoutils.Raster` 
+Geospatial handling methods all support match-reference, and **always enforce the same georeferencing attributes** for either {class}`~geoutils.Raster` 
 or {class}`~geoutils.Vector`:
 
 ```{list-table} 
@@ -57,10 +57,10 @@ or {class}`~geoutils.Vector`:
 <sup>1</sup>Because a {class}`~geoutils.Vector` only possesses the {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Raster`'s {attr}`~geoutils.Raster.transform`.
 
 
-## Other operations supporting match-reference arguments
+## Other operations supporting match-reference
 
 There are **other geospatial operation that also support match-reference arguments**. Unlike the geospatial handling methods described above, these do not aim 
-at modifying the georeferencing of a {class}`~geoutils.Raster` or a {class}`~geoutils.Vector`. Instead, they simply require the georeferencing metadata.
+at modifying the georeferencing of {class}`Rasters<geoutils.Raster>` or {class}`Vectors<geoutils.Vector>`. Instead, they simply require the georeferencing metadata.
 
 ### From vector to raster
 

@@ -38,9 +38,12 @@ From these **four main attributes**, many other derivatives attributes exist, su
 describe georeferencing. When a {class}`~geoutils.Raster` is based on an **on-disk** dataset, other attributes exist such as {attr}`~geoutils.Raster.
 name` or {attr}`~geoutils.Raster.driver`.
 
+```{note}
+By default, {attr}`~geoutils.Raster.data` is not loaded during instantiation. See {ref}`core-lazy-load` for more details.
+```
+
 ```{code-cell} ipython3
 :tags: [hide-output]
-
 # Show summarized information
 print(raster.info())
 ```
