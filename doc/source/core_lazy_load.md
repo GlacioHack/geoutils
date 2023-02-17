@@ -7,6 +7,10 @@ kernelspec:
 
 # Implicit lazy loading
 
+Lazy loading, also known as "call-by-need", is the delay in loading or evaluating a dataset.
+
+In GeoUtils, we implicitly load and pass only metadata, until the data is actually needed, and are working to implement lazy analysis tools relying on other packages.
+
 ## Lazy instantiation of {class}`Rasters<geoutils.Raster>`
 
 By default, GeoUtils instantiate a {class}`~geoutils.Raster` from an **on-disk** file without loading its {attr}`geoutils.Raster.data` array. It only loads its 

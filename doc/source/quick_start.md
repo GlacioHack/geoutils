@@ -79,7 +79,8 @@ Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils
 
 ## Pythonic arithmetic and NumPy interface
 
-All {class}`~geoutils.Raster` objects support Python arithmetic (`+`, `-`, `/`, `//`, `*`, `**`, `%`) with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or 
+All {class}`~geoutils.Raster` objects support Python arithmetic ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`, 
+{func}`**<operator.pow>`, {func}`%<operator.mod>`) with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or 
 number. For other {class}`~geoutils.Raster`, the georeferencing must match, while only the shape for other {class}`~numpy.ndarray`.
 
 ```{literalinclude} code/index_example.py
@@ -97,8 +98,8 @@ most other NumPy array functions, while logically casting `dtypes` and respectin
 
 ## Casting to {class}`~geoutils.Mask`, indexing and overload
 
-All {class}`~geoutils.Raster` classes also support Python logical comparison operators (`==`, `!=`, `>=`, `>`, `<=`, `<`), or more complex NumPy logical functions. Those 
-operations automatically casts them into a {class}`~geoutils.Mask`, a subclass of {class}`~geoutils.Raster`.
+All {class}`~geoutils.Raster` classes also support Python logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, 
+{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.Mask`, a subclass of {class}`~geoutils.Raster`.
 
 
 ```{literalinclude} code/index_example.py
@@ -106,7 +107,7 @@ operations automatically casts them into a {class}`~geoutils.Mask`, a subclass o
 :language: python
 ```
 
-Masks can then be used for indexing a {class}`~geoutils.Raster`.
+Masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a {class}`~numpy.ma.MaskedArray` of indexed values.
 
 ```{literalinclude} code/index_example.py
 :lines: 32-33

@@ -43,6 +43,7 @@ extensions = [
 nb_kernel_rgx_aliases = {".*geoutils.*": "python3"}
 
 intersphinx_mapping = {
+    "python": ("https://docs.python.org/", None),
     "rasterio": ("https://rasterio.readthedocs.io/en/latest", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "matplotlib": ("https://matplotlib.org/stable", None),

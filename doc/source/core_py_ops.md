@@ -7,13 +7,14 @@ kernelspec:
 (core-py-ops)=
 # Support of pythonic operators
 
-GeoUtils integrates most of Python's operators for shorter, more intuitive code to consistently perform arithmetic and logical operations.
+GeoUtils integrates pythonic operators for shorter, more intuitive code, and to perform arithmetic and logical operations consistently.
  
-Pythonic operators work on {class}`Rasters<geoutils.Raster>` much as they would on {class}`ndarrays<numpy.ndarray>`, with some more details.
+These operators work on {class}`Rasters<geoutils.Raster>` much as they would on {class}`ndarrays<numpy.ndarray>`, with some more details.
 
 ## Arithmetic of {class}`~geoutils.Raster` classes
 
-Arithmetic operators (`+`, `-`, `/`, `//`, `*`, `**`, `%`) can be used on a {class}`~geoutils.Raster` in combination with any other {class}`~geoutils.Raster`, 
+Arithmetic operators ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`, 
+{func}`**<operator.pow>`, {func}`%<operator.mod>`) can be used on a {class}`~geoutils.Raster` in combination with any other {class}`~geoutils.Raster`, 
 {class}`~numpy.ndarray` or number.
 
 For an operation with another {class}`~geoutils.Raster`, the georeferencing ({attr}`~geoutils.Raster.crs` and {attr}`~geoutils.Raster.transform`) must match. 
@@ -22,6 +23,7 @@ For another {class}`~numpy.ndarray`, the {attr}`~geoutils.Raster.shape` must mat
 ```{code-cell} ipython3
 import geoutils as gu
 import rasterio as rio
+import pyproj
 import numpy as np
 
 # Create a random 3 x 3 masked array
@@ -30,11 +32,12 @@ arr = np.random.randint(0, 255, size=(3, 3), dtype="uint8")
 mask = np.random.randint(0, 2, size=(3, 3), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
-# Create an example Raster with only a transform
+# Create an example Raster
 raster = gu.Raster.from_array(
         data = ma,
         transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
-        crs = None
+        crs = pyproj.CRS.from_epsg(4326),
+        nodata = 255
     )
 
 raster
@@ -61,8 +64,9 @@ following [standard NumPy coercion rules](https://numpy.org/doc/stable/reference
 
 ## Logical comparisons cast to {class}`~geoutils.Mask`
 
-Logical comparison operators (`==`, `!=`, `>=`, `>`, `<=`, `<`) can be used on a {class}`~geoutils.Raster`, also in combination with any other {class}`~geoutils.Raster`, 
-{class}`~numpy.ndarray` or number.
+Logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, 
+{func}`<<operator.lt>`) can be used on a {class}`~geoutils.Raster`, also in combination with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or 
+number.
 
 Those operation always return a {class}`~geoutils.Mask`, a subclass of {class}`~geoutils.Raster` with a boolean {class}`~numpy.ma.MaskedArray` 
 as {class}`~geoutils.Raster.data`.
@@ -80,7 +84,8 @@ A {class}`~geoutils.Mask`'s {attr}`~geoutils.Raster.data` remains a {class}`~num
 
 ## Logical bitwise operations on {class}`~geoutils.Mask`
 
-Logical bitwise operators (`~`, `&`, `|`, `^`) can be used to combine a {class}`~geoutils.Mask` with another {class}`~geoutils.Mask`, and always output a {class}`~geoutils.Mask`.
+Logical bitwise operators ({func}`~ <operator.invert>`, {func}`& <operator.and_>`, {func}`| <operator.or_>`, {func}`^ <operator.xor>`) can be used to 
+combine a {class}`~geoutils.Mask` with another {class}`~geoutils.Mask`, and always output a {class}`~geoutils.Mask`.
 
 ```{code-cell} ipython3
 # Logical bitwise operation between masks
@@ -90,7 +95,8 @@ mask
 
 ## Indexing a {class}`~geoutils.Raster` with a {class}`~geoutils.Mask`
 
-Finally, indexing and index assignment operations (`[]`, `[] = `) are both supported by {class}`Rasters<geoutils.Raster>`. 
+Finally, indexing and index assignment operations ({func}`[] <operator.getitem>`, {func}`[]= <operator.setitem>`) are both supported by 
+{class}`Rasters<geoutils.Raster>`. 
 
 For indexing, they can be passed either a {class}`~geoutils.Mask` with the same georeferencing, or a boolean {class}`~numpy.ndarray` of the same shape. 
 For assignment, either a {class}`~geoutils.Raster` with the same georeferencing, or any {class}`~numpy.ndarray` of the same shape is expected.

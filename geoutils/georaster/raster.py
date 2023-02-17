@@ -1281,22 +1281,24 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ]
 
         if stats:
-            if self.is_loaded:
-                if self.count == 1:
-                    as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
-                    as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
-                    as_str.append(f"[MEDIAN]:           {np.ma.median(self.data):.2f}\n")
-                    as_str.append(f"[MEAN]:             {np.nanmean(self.data):.2f}\n")
-                    as_str.append(f"[STD DEV]:          {np.nanstd(self.data):.2f}\n")
-                else:
-                    for b in range(self.count):
-                        # try to keep with rasterio convention.
-                        as_str.append(f"Band {b + 1}:")
-                        as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data[b, :, :]):.2f}\n")
-                        as_str.append(f"[MINIMUM]:          {np.nanmin(self.data[b, :, :]):.2f}\n")
-                        as_str.append(f"[MEDIAN]:           {np.ma.median(self.data[b, :, :]):.2f}\n")
-                        as_str.append(f"[MEAN]:             {np.nanmean(self.data[b, :, :]):.2f}\n")
-                        as_str.append(f"[STD DEV]:          {np.nanstd(self.data[b, :, :]):.2f}\n")
+            if not self.is_loaded:
+                self.load()
+
+            if self.count == 1:
+                as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
+                as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
+                as_str.append(f"[MEDIAN]:           {np.ma.median(self.data):.2f}\n")
+                as_str.append(f"[MEAN]:             {np.nanmean(self.data):.2f}\n")
+                as_str.append(f"[STD DEV]:          {np.nanstd(self.data):.2f}\n")
+            else:
+                for b in range(self.count):
+                    # try to keep with rasterio convention.
+                    as_str.append(f"Band {b + 1}:")
+                    as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data[b, :, :]):.2f}\n")
+                    as_str.append(f"[MINIMUM]:          {np.nanmin(self.data[b, :, :]):.2f}\n")
+                    as_str.append(f"[MEDIAN]:           {np.ma.median(self.data[b, :, :]):.2f}\n")
+                    as_str.append(f"[MEAN]:             {np.nanmean(self.data[b, :, :]):.2f}\n")
+                    as_str.append(f"[STD DEV]:          {np.nanstd(self.data[b, :, :]):.2f}\n")
 
         return "".join(as_str)
 
@@ -1345,8 +1347,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :returns Array with masked data as NaNs, (Optional) Mask of valid data
         """
 
-        # Get the array with masked value fill with NaNs
-        nanarray = self.data.filled(fill_value=np.nan).squeeze()
+        # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
+        if "int" in str(self.data.dtype):
+            # Get the array with masked value fill with NaNs
+            nanarray = self.data.astype("float32").filled(fill_value=np.nan).squeeze()
+        else:
+            # Same here
+            nanarray = self.data.filled(fill_value=np.nan).squeeze()
 
         # The function np.ma.filled() only returns a copy if the array is masked, copy the array if it's not the case
         if not np.ma.is_masked(self.data):

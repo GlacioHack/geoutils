@@ -35,6 +35,8 @@ documentation.
     Raster.from_array
 ```
 
+(api-raster-attrs)=
+
 ### Unique attributes
 
 ```{eval-rst}

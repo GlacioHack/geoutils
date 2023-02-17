@@ -7,8 +7,6 @@ kernelspec:
 
 # Composition from Rasterio and GeoPandas
 
-## A composition framework
-
 GeoUtils' main classes {class}`~geoutils.Raster` and {class}`~geoutils.Vector` are linked to [Rasterio](https://rasterio.readthedocs.io/en/latest/) and
 [GeoPandas](https://geopandas.org/en/stable/docs.html), respectively, through class composition. 
 
@@ -36,7 +34,7 @@ raster
 
 From these **four main attributes**, many other derivatives attributes exist, such as {attr}`~geoutils.Raster.bounds` or {attr}`~geoutils.Raster.res` to 
 describe georeferencing. When a {class}`~geoutils.Raster` is based on an **on-disk** dataset, other attributes exist such as {attr}`~geoutils.Raster.
-name` or {attr}`~geoutils.Raster.driver`.
+name` or {attr}`~geoutils.Raster.driver`, see {ref}`raster-class` for a summary, or the {ref}`dedicated sections of the API` for a full listing.
 
 ```{note}
 By default, {attr}`~geoutils.Raster.data` is not loaded during instantiation. See {ref}`core-lazy-load` for more details.

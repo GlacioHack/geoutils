@@ -6,9 +6,10 @@ kernelspec:
 (core-inheritance)=
 # Inheritance to geo-images and beyond
 
-Inheritance is practical to naturally pass down parent methods and attributes to child classes. 
-In the case of {class}`Rasters<geoutils.Raster>`, many types of geospatial data exist with their own peculiarities, additional attributes, while 
-remaining {class}`Rasters<geoutils.Raster>` that benefit from methods implemented in GeoUtils.
+Inheritance is practical to naturally pass down parent methods and attributes to child classes.
+
+Many subtypes of {class}`Rasters<geoutils.Raster>` geospatial data exist that require additional attributes and methods, yet might benefit from methods 
+implemented in GeoUtils.
 
 ## Overview of {class}`~geoutils.Raster` inheritance
 
@@ -64,5 +65,5 @@ Many types of geospatial data can be viewed as a subclass of {class}`Rasters<geo
 **spectral images**, **velocity fields**, **phase difference maps**, etc...
 
 If you are interested to build your own subclass of {class}`~geoutils.Raster`, you can take example of the structure of {class}`geoutils.SatelliteImage` and 
-{class}`xdem.DEM`. Then, just add any of your own attributes and methods, and overload parent methods if necessary! Don't hesitate to reach out on GitHub if 
-you have a subclassing project.
+{class}`xdem.DEM`. Then, just add any of your own attributes and methods, and overload parent methods if necessary! Don't hesitate to reach out on our 
+GitHub if you have a subclassing project.

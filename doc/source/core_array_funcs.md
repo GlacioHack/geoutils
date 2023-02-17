@@ -10,7 +10,7 @@ kernelspec:
 NumPy possesses an [array interface](https://numpy.org/doc/stable/reference/arrays.interface.html) that allows to properly map their functions on objects 
 that depend on {class}`ndarrays<numpy.ndarray>`.
 
-GeoUtils integrates this interface to work with all {class}`Rasters<geoutils.Raster>` and their subclasses.
+GeoUtils utilizes this interface to work with all {class}`Rasters<geoutils.Raster>` and their subclasses.
 
 ## Universal functions
 
@@ -33,6 +33,7 @@ Below, we re-use the same example created in {ref}`core-py-ops`.
 
 import geoutils as gu
 import rasterio as rio
+import pyproj
 import numpy as np
 
 # Create a random 3 x 3 masked array
@@ -41,11 +42,12 @@ arr = np.random.randint(0, 255, size=(3, 3), dtype="uint8")
 mask = np.random.randint(0, 2, size=(3, 3), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
-# Create an example Raster with only a transform
+# Create an example Raster
 raster = gu.Raster.from_array(
         data = ma,
         transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
-        crs = None
+        crs = pyproj.CRS.from_epsg(4326),
+        nodata = 255
     )
 raster
 ```

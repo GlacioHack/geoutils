@@ -1,6 +1,8 @@
 (core-match-ref)=
 # Match-reference functionality
 
+Match-reference functionalities lie at the core of GeoUtils' focus to provide accessible and intuitive tools for end-user geospatial analysis.
+
 ## What is match-reference ?
 
 Match-reference means to **match** the georeferencing of a dataset to that of another **reference** dataset.
