@@ -157,7 +157,7 @@ A {class}`~geoutils.Raster` can be applied any pythonic arithmetic operation ({f
 ```
 
 A {class}`~geoutils.Raster` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, 
-{func}`<<operator.lt>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will cast to a {class}`geoutils.Mask`.
+{func}`<<operator.lt>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.Mask`.
 
 ```{code-cell} ipython3
 # What raster pixels are less than 100?
@@ -176,7 +176,7 @@ A {class}`~geoutils.Raster` can be applied any NumPy universal functions and mos
 np.sqrt(raster)
 ```
 
-Logical comparison functions will cast to a {class}`geoutils.Mask`.
+Logical comparison functions will cast to a {class}`~geoutils.Mask`.
 
 ```{code-cell} ipython3
 # Is the raster close to another within tolerance?
@@ -185,55 +185,52 @@ np.isclose(raster, raster+0.05, atol=0.1)
 
 See {ref}`core-array-funcs` for more details.
 
+## Reproject
+
+Reprojecting a {class}`~geoutils.Raster` means to enforce a new {attr}`~geoutils.Raster.transform` and/or {class}`~geoutils.Raster.crs`. This is done by the 
+{func}`~geoutils.Raster.reproject` function.
+
+```{important}
+As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.
+Vector` as argument. 
+
+A {class}`~geoutils.Raster` reference will enforce to match its {attr}`~geoutils.Raster.transform` and {class}`~geoutils.Raster.crs`.
+A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bounds` and {class}`~geoutils.Vector.crs`.
+
+See {ref}`core-match-ref` for more details.
+```
+
+The {func}`~geoutils.Raster.reproject` function can also be passed any individual arguments such as `dst_bounds`, to enforce specific georeferencing 
+attributes. For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
+
+```{code-cell} ipython3
+# Original bounds and resolution
+print(raster.res)
+print(raster.bounds)
+```
+
+```{code-cell} ipython3
+# Reproject to smaller bounds and higher resolution
+raster = raster.reproject(
+    dst_res=0.25, 
+    dst_bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75}, 
+    resampling="cubic")
+raster
+```
+
+```{code-cell} ipython3
+# New bounds and resolution
+print(raster.res)
+print(raster.bounds)
+```
+
+```{note}
+In GeoUtils, `"bilinear"` is the default resampling method. A simple {class}`str` matching the naming of a {class}`rasterio.enums.Resampling` method can be 
+passed.
+```
+
 
 ## Crop
-
-Comparing multiple rasters can often be a burden if multiple coordinate systems, bounding boxes, and resolutions are involved.
-The {class}`geoutils.Raster` class simplifies this using two methods: `Raster.crop()` and `Raster.reproject()`.
-
-{func}`geoutils.Raster.crop`
-
-If a large raster should be cropped to a smaller extent without changing the uncropped data, this is possible through the crop function.
-
-```{literalinclude} code/raster-basics_cropping_and_reprojecting.py
-:lines: 4-6
-```
-
-```python
-print(large_image.shape)
-
-print(smaller_image.shape)
-```
-
-prints:
-
-```{eval-rst}
-.. program-output:: $PYTHON -c "exec(open('code/raster-basics_cropping_and_reprojecting.py').read());print(large_image_orig.shape);print(smaller_image.shape)"
-        :shell:
-```
-
-If we want to crop the larger image to fit the smaller one:
-
-```{literalinclude} code/raster-basics_cropping_and_reprojecting.py
-:lines: 9
-```
-
-Now, they have the same shape, and can be compared directly:
-
-```python
-print(large_image.shape)
-
-print(smaller_image.shape)
-```
-
-prints:
-
-```{eval-rst}
-.. program-output:: $PYTHON -c "exec(open('code/raster-basics_cropping_and_reprojecting.py').read());print(large_image.shape);print(smaller_image.shape)"
-        :shell:
-```
-
-## Reproject
 
 {func}`geoutils.Raster.reproject`
 

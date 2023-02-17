@@ -71,6 +71,8 @@ documentation.
     Raster.driver
 ```
 
+(api-geo-handle)=
+
 ### Geospatial handling methods
 
 ```{eval-rst}
