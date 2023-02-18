@@ -1862,18 +1862,18 @@ class TestRaster:
             plt.close()
         assert True
 
-        # Test plotting single band B/W, add_cb
+        # Test plotting single band B/W, add_cbar
         ax = plt.subplot(111)
-        img_RGB.show(index=1, cmap="gray", ax=ax, add_cb=False, title="Plotting one band B/W")
+        img_RGB.show(index=1, cmap="gray", ax=ax, add_cbar=False, title="Plotting one band B/W")
         if DO_PLOT:
             plt.show()
         else:
             plt.close()
         assert True
 
-        # Test vmin, vmax and cb_title
+        # Test vmin, vmax and cbar_title
         ax = plt.subplot(111)
-        img.show(cmap="gray", vmin=40, vmax=220, cb_title="Custom cbar", ax=ax, title="Testing vmin, vmax and cb_title")
+        img.show(cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax, title="Testing vmin, vmax and cbar_title")
         if DO_PLOT:
             plt.show()
         else:
