@@ -1912,8 +1912,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         vmin: float | int | None = None,
         vmax: float | int | None = None,
         alpha: float | int | None = None,
-        cb_title: str | None = None,
-        add_cb: bool = True,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
         ax: matplotlib.axes.Axes | None = None,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
@@ -1926,12 +1926,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
         :param vmax: Colorbar maximum value. Default is data min.
-        :param cb_title: Colorbar label. Default is None.
-        :param add_cb: Set to True to display a colorbar. Default is True.
+        :param cbar_title: Colorbar label. Default is None.
+        :param add_cbar: Set to True to display a colorbar. Default is True.
         :param ax: A figure ax to be used for plotting. If None, will create default figure and axes,
             and plot figure directly.
 
-        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
+        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cbar is False)
 
 
         You can also pass in \*\*kwargs to be used by the underlying imshow or
@@ -1962,7 +1962,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # If multiple bands (RGB), cbar does not make sense
         if isinstance(index, abc.Sequence):
             if len(index) > 1:
-                add_cb = False
+                add_cbar = False
 
         # Create colorbar
         # Use rcParam default
@@ -2009,15 +2009,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         )
 
         # Add colorbar
-        if add_cb:
+        if add_cbar:
             divider = make_axes_locatable(ax0)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
             cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
             cbar.solids.set_alpha(alpha)
 
-            if cb_title is not None:
-                cbar.set_label(cb_title)
+            if cbar_title is not None:
+                cbar.set_label(cbar_title)
         else:
             cbar = None
 
