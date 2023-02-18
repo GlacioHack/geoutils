@@ -30,6 +30,7 @@ from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from scipy.ndimage import distance_transform_edt, map_coordinates
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
@@ -1910,6 +1911,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
+        alpha: float | int | None = None,
         cb_title: str | None = None,
         add_cb: bool = True,
         ax: matplotlib.axes.Axes | None = None,
@@ -2002,15 +2004,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
+            alpha=alpha,
             **kwargs,
         )
 
         # Add colorbar
         if add_cb:
-            cbar = fig.colorbar(
-                cm.ScalarMappable(norm=colors.Normalize(vmin=vmin, vmax=vmax), cmap=cmap),
-                ax=ax0,
-            )
+            divider = make_axes_locatable(ax0)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
+            cbar.solids.set_alpha(alpha)
 
             if cb_title is not None:
                 cbar.set_label(cb_title)
