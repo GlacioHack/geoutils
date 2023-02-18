@@ -1819,7 +1819,7 @@ class TestRaster:
         r0 = gr.Raster(example)
         fig,ax = plt.subplots(figsize=(figsize,figsize))
         r0.show(ax =ax,
-                add_cb=True,
+                add_cbar=True,
                )
         fig.axes[0].set_axis_off()
         fig.axes[1].set_axis_off()
