@@ -24,13 +24,12 @@ import rasterio.transform
 import rasterio.warp
 import rasterio.windows
 from affine import Affine
-from matplotlib import cm, colors
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from scipy.ndimage import distance_transform_edt, map_coordinates
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
@@ -1992,7 +1991,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             fig, ax0 = plt.subplots()
         elif isinstance(ax, matplotlib.axes.Axes):
             ax0 = ax
-            fig = ax.figure
         else:
             raise ValueError("ax must be a matplotlib.axes.Axes instance or None")
 
