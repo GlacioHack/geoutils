@@ -230,8 +230,8 @@ def main() -> None:
         interpolation="nearest",
         vmin=vmin,
         vmax=vmax,
-        add_cb=args.nocb,
-        cb_title=args.clabel,
+        add_cbar=args.nocb,
+        cbar_title=args.clabel,
         title=args.title,
     )
 

@@ -24,7 +24,7 @@ import rasterio.transform
 import rasterio.warp
 import rasterio.windows
 from affine import Affine
-from matplotlib import cm, colors
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.features import shapes
@@ -1910,8 +1910,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
-        cb_title: str | None = None,
-        add_cb: bool = True,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
         ax: matplotlib.axes.Axes | None = None,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
@@ -1924,12 +1925,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
         :param vmax: Colorbar maximum value. Default is data min.
-        :param cb_title: Colorbar label. Default is None.
-        :param add_cb: Set to True to display a colorbar. Default is True.
+        :param cbar_title: Colorbar label. Default is None.
+        :param add_cbar: Set to True to display a colorbar. Default is True.
         :param ax: A figure ax to be used for plotting. If None, will create default figure and axes,
             and plot figure directly.
 
-        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cb is False)
+        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cbar is False)
 
 
         You can also pass in \*\*kwargs to be used by the underlying imshow or
@@ -1960,7 +1961,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # If multiple bands (RGB), cbar does not make sense
         if isinstance(index, abc.Sequence):
             if len(index) > 1:
-                add_cb = False
+                add_cbar = False
 
         # Create colorbar
         # Use rcParam default
@@ -1990,7 +1991,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             fig, ax0 = plt.subplots()
         elif isinstance(ax, matplotlib.axes.Axes):
             ax0 = ax
-            fig = ax.figure
         else:
             raise ValueError("ax must be a matplotlib.axes.Axes instance or None")
 
@@ -2002,18 +2002,20 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
+            alpha=alpha,
             **kwargs,
         )
 
         # Add colorbar
-        if add_cb:
-            cbar = fig.colorbar(
-                cm.ScalarMappable(norm=colors.Normalize(vmin=vmin, vmax=vmax), cmap=cmap),
-                ax=ax0,
-            )
+        if add_cbar:
+            divider = make_axes_locatable(ax0)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
+            cbar.solids.set_alpha(alpha)
 
-            if cb_title is not None:
-                cbar.set_label(cb_title)
+            if cbar_title is not None:
+                cbar.set_label(cbar_title)
         else:
             cbar = None
 
