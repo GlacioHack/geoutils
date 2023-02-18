@@ -15,8 +15,8 @@ Below, a summary of the {class}`~geoutils.Raster` object and its methods.
 
 A {class}`~geoutils.Raster` contains **four main attributes**:
 
-1. a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`,
-2. an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`
+1. a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, of either {class}`~numpy.integer` or {class}`~numpy.floating` {class}`~numpy.dtype`,
+2. an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`,
 3. a {class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, and
 4. a {class}`float` or {class}`int` as {attr}`~geoutils.Raster.nodata`.
 
@@ -86,7 +86,7 @@ import os
 os.remove("myraster.tif")
 ```
 
-## Create from array
+## Create from {class}`~numpy.ndarray`
 
 A {class}`~geoutils.Raster` is created from an array by calling the class method {func}`~geoutils.Raster.from_array` and passing the 
 {ref}`four main attributes<raster-obj-def>`.
@@ -187,8 +187,8 @@ See {ref}`core-array-funcs` for more details.
 
 ## Reproject
 
-Reprojecting a {class}`~geoutils.Raster` means to enforce a new {attr}`~geoutils.Raster.transform` and/or {class}`~geoutils.Raster.crs`. This is done by the 
-{func}`~geoutils.Raster.reproject` function.
+Reprojecting a {class}`~geoutils.Raster` is done through the{func}`~geoutils.Raster.reproject`, which enforces new {attr}`~geoutils.Raster.transform` and/or 
+{class}`~geoutils.Raster.crs`.
 
 ```{important}
 As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.
@@ -211,11 +211,11 @@ print(raster.bounds)
 
 ```{code-cell} ipython3
 # Reproject to smaller bounds and higher resolution
-raster = raster.reproject(
-    dst_res=0.25, 
+raster_reproj = raster.reproject(
+    dst_res=0.1, 
     dst_bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75}, 
     resampling="cubic")
-raster
+raster_reproj
 ```
 
 ```{code-cell} ipython3
@@ -227,40 +227,113 @@ print(raster.bounds)
 ```{note}
 In GeoUtils, `"bilinear"` is the default resampling method. A simple {class}`str` matching the naming of a {class}`rasterio.enums.Resampling` method can be 
 passed.
-```
 
+Resampling methods are listed in **[the dedicated section of Rasterio's API](https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling)**.
+```
 
 ## Crop
 
-{func}`geoutils.Raster.reproject`
+Cropping a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`. 
 
-For rasters with different coordinate systems, resolutions or grids, reprojection is needed to fit one raster to another.
-`Raster.reproject()` is apt for these use-cases:
+```{important}
+As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.
+Vector` as argument. 
 
-```{literalinclude} code/raster-basics_cropping_and_reprojecting.py
-:lines: 11
+See {ref}`core-match-ref` for more details.
 ```
 
-This call will crop, project and resample the `larger_raster` to fit the `smaller_raster` exactly.
-By default, `Raster.resample()` uses nearest neighbour resampling, which is good for fast reprojections, but may induce unintended artefacts when precision is important.
-It is therefore recommended to choose the method that fits the purpose best, using the `resampling=` keyword argument:
+The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). 
+For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
-1. `resampling="nearest"`: Default. Performant but is not good for changes in resolution and grid.
-2. `resampling="bilinear"`: Good when changes in resolution and grid are involved.
-3. `resampling="cubic_spline"`: Often considered the best approach. Not as performant as simpler methods.
 
-All valid resampling methods can be seen in the [Rasterio documentation](https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling).
-
-```{eval-rst}
-.. minigallery:: geoutils.Raster
-        :add-heading:
-        :heading-level: -
+```{code-cell} ipython3
+# Crop to smaller bounds
+raster_crop = raster.crop(cropGeom=(0.3, 0.3, 1, 1), inplace=False)
+raster_crop
 ```
 
 ## Polygonize
 
+Polygonizing a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.polygonize` function, which converts target pixels into a multi-polygon 
+{class}`~geoutils.Vector`.
+
+By default, values equal to `1` are used.
+
+```{note}
+For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels.
+```
+
+```{code-cell} ipython3
+# Polygonize all values lower than 100
+
+vector_lt_100 = (raster < 100).polygonize()
+vector_lt_100
+```
+
 ## Proximity
+
+Computing proximity from a {class}`~geoutils.Raster` is done through by the {func}`~geoutils.Raster.proximity` function, which computes the distance to any 
+target pixels in the {class}`~geoutils.Raster`.
+
+```{note}
+For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels.
+```
+
+```{code-cell} ipython3
+# Compute proximity from mask for all values lower than 100
+proximity_lt_100 = (raster < 100).proximity()
+proximity_lt_100
+```
+
+Optionally, instead of target pixel values, a {class}`~geoutils.Vector` can be passed to compute the proximity from the geometry.
+
+```{code-cell} ipython3
+# Compute proximity from mask for all values lower than 100
+proximity_lt_100_from_vector = raster.proximity(vector=vector_lt_100)
+proximity_lt_100_from_vector
+```
 
 ## Interpolate or extract to point
 
+Interpolating or extracting {class}`~geoutils.Raster` values at specific points can be done through:
+- the {func}`~geoutils.Raster.value_at_coords` function, who extracts the single closest pixel or a surrounding window for each coordinate, on which
+  can be applied reducing any function ({func}`numpy.ma.mean` by default), or
+- the {func}`~geoutils.Raster.interp_points` function, who interpolates the {class}`~geoutils.Raster`'s regular grid to each coordinate using a 
+  resampling algorithm.
+
+```{code-cell} ipython3
+# Extract median value in a 3 x 3 pixel window
+raster_reproj.value_at_coords(x=0.5, y=0.5, reducer_function=np.ma.median)
+```
+
+```{code-cell} ipython3
+# Interpolate coordinate value with quintic algorithm
+raster_reproj.interp_points([(0.5, 0.5)], mode="quintic")
+```
+
+```{note}
+Both {func}`~geoutils.Raster.value_at_coords` and {func}`~geoutils.Raster.interp_points` can be passed a single coordinate as {class}`floats<float>`, or a 
+{class}`list` of coordinates.
+```
+
 ## Export
+
+A {class}`~geoutils.Raster` can be exported to different formats, to facilitate inter-compatibility with different packages and code versions.
+
+Those include exporting to:
+- a {class}`xarray.Dataset` with {class}`~geoutils.Raster.to_xarray`, 
+- a {class}`rasterio.DatasetReader` with {class}`~geoutils.Raster.to_rio_dataset`, 
+- a {class}`numpy.ndarray`, {class}`geopandas.GeoDataFrame` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_points`.
+
+```{code-cell} ipython3
+# Export to rasterio dataset-reader through a memoryfile
+raster_reproj.to_rio_dataset()
+```
+
+```{code-cell} ipython3
+# Export to geopandas dataframe
+raster_reproj.to_points(as_frame=True)
+```
+
+
+

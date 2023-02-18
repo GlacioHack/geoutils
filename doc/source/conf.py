@@ -49,6 +49,7 @@ intersphinx_mapping = {
     "matplotlib": ("https://matplotlib.org/stable", None),
     "pyproj": ("https://pyproj4.github.io/pyproj/stable", None),
     "geopandas": ("https://geopandas.org/en/stable", None),
+    "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "xdem": ("https://xdem.readthedocs.io/en/latest", None),
 }
 

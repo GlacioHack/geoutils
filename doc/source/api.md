@@ -122,16 +122,6 @@ documentation.
     Raster.to_xarray
 ```
 
-### Logical methods
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    Raster.raster_equal
-    Raster.equal_georeferenced_grid
-```
-
 ### Coordinate and extent methods
 
 ```{eval-rst}
@@ -145,6 +135,16 @@ documentation.
     Raster.get_bounds_projected
     Raster.intersection
     Raster.outside_image   
+```
+
+### Testing methods
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.raster_equal
+    Raster.equal_georeferenced_grid
 ```
 
 ### Arithmetic with other rasters, arrays or numbers

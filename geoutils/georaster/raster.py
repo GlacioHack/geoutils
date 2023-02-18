@@ -2854,9 +2854,15 @@ class Mask(Raster):
     def __repr__(self) -> str:
         """Convert formal Raster string representation."""
 
+        # If data not loaded, return and string and avoid calling .data
+        if not self.is_loaded:
+            str_data = "not_loaded"
+        else:
+            str_data = "\n       ".join(self.data.__str__().split("\n"))
+
         # Over-ride Raster's method to remove nodata value (always None)
         s = "Mask(\n"+\
-            "  data=" + "\n       ".join(self.data.__str__().split("\n"))+\
+            "  data=" + str_data +\
             "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
             "\n  crs=" + self.crs.__str__()+")"
 
@@ -2965,12 +2971,40 @@ class Mask(Raster):
         self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1
     ) -> Vector:
 
+        # If target values is passed but does not correspond to 0 or 1, raise a warning
         if not isinstance(in_value, (int, np.integer, float, np.floating)) or in_value not in [0, 1]:
             warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
             in_value = 1
 
+        # Convert to unsigned integer and pass to parent method
         self._data = self.data.astype("uint8")
         return super().polygonize(in_value=in_value)
+
+    def proximity(
+        self,
+        vector: Vector | None = None,
+        target_values: list[float] | None = None,
+        geometry_type: str = "boundary",
+        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
+        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+    ) -> Raster:
+
+        # By default, target True values of the mask
+        if vector is None and target_values is None:
+            target_values = [1]
+
+        # TODO: Adapt target_value into int | list in Raster.proximity
+        # If target values is passed but does not correspond to 0 or 1, raise a warning
+        # if target_values is not None and not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
+        #     warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
+        #     target_values = [1]
+
+        # Convert to unsigned integer and pass to parent method
+        self._data = self.data.astype("uint8")
+
+        # Need to cast output to Raster before computing proximity, as output will not be boolean (super() would instantiate Mask() again)
+        raster = Raster({"data": self.data, "transform": self.transform, "crs": self.crs, "nodata": self.nodata})
+        return raster.proximity(vector=vector, target_values=target_values, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit)
 
     # Logical bitwise operations
     def __and__(self: Mask, other: Mask) -> Mask:

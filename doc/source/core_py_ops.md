@@ -93,6 +93,8 @@ mask = (raster > 100) & ((raster % 2) == 0)
 mask
 ```
 
+(py-ops-indexing)=
+
 ## Indexing a {class}`~geoutils.Raster` with a {class}`~geoutils.Mask`
 
 Finally, indexing and index assignment operations ({func}`[] <operator.getitem>`, {func}`[]= <operator.setitem>`) are both supported by 
