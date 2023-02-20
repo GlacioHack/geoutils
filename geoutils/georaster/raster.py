@@ -642,6 +642,24 @@ class Raster:
 
         # return s
 
+    def _repr_html_(self) -> str:
+        """Convert to HTML representation for notebooks and docs"""
+
+        # If data not loaded, return and string and avoid calling .data
+        if not self.is_loaded:
+            str_data = "<i>not_loaded</i>"
+        else:
+            str_data = "\n       ".join(self.data.__str__().split("\n"))
+
+        # Over-ride Raster's method to remove nodata value (always None)
+        # Use <pre> to keep white spaces, <span> to keep line breaks
+        s = '<pre><span style="white-space: pre-wrap"><b><em>'+self.__class__.__name__+'</em></b>(\n' + \
+            "  <b>data=</b>" + str_data + \
+            "\n  <b>transform=</b>" + "\n            ".join(self.transform.__str__().split("\n")) + \
+            "\n  <b>crs=</b>" + self.crs.__str__() + ")</span></pre>"
+
+        return s
+
     def __str__(self) -> str:
         """Provide simplified string for print() about Raster."""
 
@@ -2900,6 +2918,24 @@ class Mask(Raster):
             "  data=" + str_data +\
             "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
             "\n  crs=" + self.crs.__str__()+")"
+
+        return s
+
+    def _repr_html_(self) -> str:
+        """Convert to HTML representation for notebooks and docs"""
+
+        # If data not loaded, return and string and avoid calling .data
+        if not self.is_loaded:
+            str_data = "<i>not_loaded</i>"
+        else:
+            str_data = "\n       ".join(self.data.__str__().split("\n"))
+
+        # Over-ride Raster's method to remove nodata value (always None)
+        # Use <pre> to keep white spaces, <span> to keep line breaks
+        s = '<pre><span style="white-space: pre-wrap"><b><em>Mask</em></b>(\n' + \
+            "  <b>data=</b>" + str_data + \
+            "\n  <b>transform=</b>" + "\n            ".join(self.transform.__str__().split("\n")) + \
+            "\n  <b>crs=</b>" + self.crs.__str__() + ")</span></pre>"
 
         return s
 

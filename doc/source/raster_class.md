@@ -69,7 +69,6 @@ Detailed information on the {class}`~geoutils.Raster` is printed using {class}`~
 print(raster.info(stats=True))
 ```
 
-
 ```{note}
 Calling {class}`~geoutils.Raster.info()` with `stats=True` automatically loads the array in-memory, like any other operation calling {attr}`~geoutils.Raster.data`.
 ```
