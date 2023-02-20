@@ -193,17 +193,21 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
-    if transform is not None and shape is not None:
-        if transform == dataset.transform:
-            row_off, col_off = 0, 0
-        else:
-            row_off, col_off = (round(val) for val in dataset.index(transform[2], abs(transform[4])))
-
-        window = rio.windows.Window(col_off, row_off, *shape[::-1])
-    elif sum(param is None for param in [shape, transform]) == 1:
-        raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
-    else:
+    # If out_shape is passed, no need to account for transform and shape
+    if kwargs['out_shape'] is not None:
         window = None
+    else:
+        if transform is not None and shape is not None:
+            if transform == dataset.transform:
+                row_off, col_off = 0, 0
+            else:
+                row_off, col_off = (round(val) for val in dataset.index(transform[2], abs(transform[4])))
+
+            window = rio.windows.Window(col_off, row_off, *shape[::-1])
+        elif sum(param is None for param in [shape, transform]) == 1:
+            raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
+        else:
+            window = None
 
     if indexes is None:
         data = dataset.read(masked=masked, window=window, **kwargs)
@@ -211,7 +215,7 @@ def _load_rio(
         data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
     if len(data.shape) == 2:
         data = data[np.newaxis, :, :]
-    return np.ma.masked_array(data)
+    return data
 
 
 class Raster:
@@ -303,6 +307,7 @@ class Raster:
         self._indexes = indexes
         self._indexes_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
+        self._out_shape: tuple[int, int, int] | None = None
         self._disk_hash: int | None = None
         self._is_modified = True
         self._disk_shape: tuple[int, int, int] | None = None
@@ -342,8 +347,11 @@ class Raster:
                 elif isinstance(filename_or_dataset, rio.io.DatasetReader):
                     ds = filename_or_dataset
                     self.filename = filename_or_dataset.files[0]
-                else:  # This is if it's a MemoryFile
+                # This is if it's a MemoryFile
+                else:
                     ds = filename_or_dataset.open()
+                    # In that case, data has to be loaded
+                    load_data = True
                     self.filename = None
 
                 self.transform = ds.transform
@@ -381,16 +389,23 @@ class Raster:
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
 
+            # This will record the downsampled out_shape is data is only loaded later on by .load()
+            self._out_shape = out_shape
+
             if load_data:
                 # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
-                self._data = _load_rio(ds, indexes=indexes, masked=masked, out_shape=out_shape)  # type: ignore
-                if isinstance(filename_or_dataset, str):
-                    self._is_modified = False
-                    self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
+                # Don't need to pass shape and transform, because out_shape overrides it
+                self.data = _load_rio(ds, indexes=indexes, masked=masked, out_shape=out_shape)  # type: ignore
 
-            # Set nodata
-            if nodata is not None:
-                self.set_nodata(nodata)
+            # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
+            # Set nodata only if data is loaded
+            # if nodata is not None and self._data is not None:
+            #     self.set_nodata(self._nodata)
+
+            # If data was loaded explicitly, initiate is_modified and save disk hash
+            if load_data and isinstance(filename_or_dataset, str):
+                self._is_modified = False
+                self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename_or_dataset, np.ndarray):
@@ -432,6 +447,10 @@ class Raster:
     @property
     def shape(self) -> tuple[int, int]:
         """Return a (height, width) tuple of the data shape in pixels."""
+        # If a downsampling argument was defined but data not loaded yet
+        if self._out_shape is not None and not self.is_loaded:
+            return self._out_shape[1], self._out_shape[2]
+        # If data is not loaded, pass the disk shape
         if not self.is_loaded:
             return self._disk_shape[1], self._disk_shape[2]  # type: ignore
         return int(self.data.shape[1]), int(self.data.shape[2])
@@ -503,6 +522,7 @@ class Raster:
         # Save which indexes are loaded
         self._indexes_loaded = valid_indexes
 
+        # If a downsampled out_shape was defined during instantiation
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
                 dataset,
@@ -510,8 +530,18 @@ class Raster:
                 masked=self._masked,
                 transform=self.transform,
                 shape=self.shape,
+                out_shape=self._out_shape,
                 **kwargs,
             )
+
+        # Probably don't want to use set_nodata() that updates the array
+        # Set nodata value with the loaded array
+        # if self._nodata is not None:
+        #     self.set_nodata(nodata=self._nodata)
+
+        # To have is_modified work correctly when data is loaded implicitly (not in init)
+        self._is_modified = False
+        self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
 
     @classmethod
     def from_array(
@@ -614,7 +644,11 @@ class Raster:
 
     def __str__(self) -> str:
         """Provide simplified string for print() about Raster."""
-        s = self.data.__str__()
+
+        if not self.is_loaded:
+            s = "not_loaded"
+        else:
+            s = self.data.__str__()
 
         return s
 
@@ -1133,8 +1167,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :returns: data array.
 
         """
-        if not self.is_loaded and self._data is None:
-            raise ValueError("Data are not loaded")
+        if not self.is_loaded:
+            self.load()
         return self._data
 
     @data.setter
@@ -2291,31 +2325,32 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             rio_window = rio.windows.Window(col, row, width, height)
 
             if self.is_loaded:
-                data = self.data[slice(None) if index is None else index, row : row + height, col : col + width]
+                data = self.data[slice(None) if index is None else index - 1, row : row + height, col : col + width]
                 if not masked:
                     data = data.filled()
                 value = format_value(data)
                 win: np.ndarray | dict[int, np.ndarray] = data
 
             else:
-                if self.count == 1:
-                    with rio.open(self.filename) as raster:
-                        data = raster.read(
-                            window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked
-                        )
-                    value = format_value(data)
-                    win = data
-                else:
-                    value = {}
-                    win = {}
-                    with rio.open(self.filename) as raster:
-                        for b in self.indexes:
-                            data = raster.read(
-                                window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b
-                            )
-                            val = format_value(data)
-                            value[b] = val
-                            win[b] = data  # type: ignore
+                # TODO: if we want to allow sampling multiple bands, need to do it also when data is loaded
+                # if self.count == 1:
+                with rio.open(self.filename) as raster:
+                    data = raster.read(
+                        window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=index,
+                    )
+                value = format_value(data)
+                win = data
+                # else:
+                #     value = {}
+                #     win = {}
+                #     with rio.open(self.filename) as raster:
+                #         for b in self.indexes:
+                #             data = raster.read(
+                #                 window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b
+                #             )
+                #             val = format_value(data)
+                #             value[b] = val
+                #             win[b] = data  # type: ignore
 
             list_values.append(value)
             if return_window:

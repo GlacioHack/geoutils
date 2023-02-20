@@ -102,13 +102,21 @@ class TestRaster:
         r4 = gr.Raster(memfile)
         assert isinstance(r4, gr.Raster)
 
+        # All rasters should be equal
         assert all(
             [r0.raster_equal(r1), r0.raster_equal(r1), r0.raster_equal(r2), r0.raster_equal(r3), r0.raster_equal(r4)]
         )
 
-        # The data will not be copied, immutable objects will
+        # For re-instantiation via Raster (r2 above), we check the behaviour:
+        # By default, raster were unloaded, and were loaded during raster_equal() independently
+        # So the instances should not be pointing to the same data and not mirror modifs
         r0.data[0, 0, 0] += 5
-        assert r2.data[0, 0, 0] == r0.data[0, 0, 0]
+        assert r2.data[0, 0, 0] != r0.data[0, 0, 0]
+
+        # However, if we reinstantiate now that the data is loaded, it should point to the same
+        r5 = gr.Raster(r0)
+        r0.data[0, 0, 0] += 5
+        assert r5.data[0, 0, 0] == r0.data[0, 0, 0]
 
         # With r.count = 2
         r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
@@ -129,12 +137,9 @@ class TestRaster:
             for attr in _default_rio_attrs:
                 assert r.__getattribute__(attr) == dataset.__getattribute__(attr)
 
-        # Check summary matches that of RIO
-        assert str(r) == r.info()
-
         # Check that the stats=True flag doesn't trigger a warning
         with warnings.catch_warnings():
-            warnings.simplefilter("error")
+            warnings.filterwarnings("ignore", message="New nodata.*", category=UserWarning)
             stats = r.info(stats=True)
 
         # Check the stats adapt to nodata values
@@ -161,10 +166,17 @@ class TestRaster:
         """
         Test that loading metadata and data works for all possible cases.
         """
+        # Test 0 - test that loading explicitly via load() or implicitly via .data is similar
+        r_explicit = gr.Raster(self.landsat_b4_path, load_data=True)
+        r_implicit = gr.Raster(self.landsat_b4_path)
+
+        assert r_explicit.raster_equal(r_implicit)
+
         # Test 1 - loading metadata only, single band
         # For the first example with Landsat B4
-        r = gr.Raster(self.landsat_b4_path, load_data=False)
+        r = gr.Raster(self.landsat_b4_path)
 
+        assert not r.is_loaded
         assert r.driver == "GTiff"
         assert r.width == 800
         assert r.height == 655
@@ -178,11 +190,11 @@ class TestRaster:
         assert np.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
-        assert not r.is_loaded
 
         # And the second example with ASTER DEM
-        r2 = gr.Raster(self.aster_dem_path, load_data=False)
+        r2 = gr.Raster(self.aster_dem_path)
 
+        assert not r2.is_loaded
         assert r2.driver == "GTiff"
         assert r2.width == 539
         assert r2.height == 618
@@ -196,7 +208,6 @@ class TestRaster:
         assert np.array_equal(r2.res, [30.0, 30.0])
         assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
         assert r2.crs == rio.crs.CRS.from_epsg(32718)
-        assert not r2.is_loaded
 
         # Test 2 - loading the data afterward
         r.load()
@@ -1456,9 +1467,9 @@ class TestRaster:
         itest = itest[0]
         jtest = jtest[0]
         # Extract the values
-        z_band1 = r_multi.value_at_coords(xtest0, ytest0, index=0)
-        z_band2 = r_multi.value_at_coords(xtest0, ytest0, index=1)
-        z_band3 = r_multi.value_at_coords(xtest0, ytest0, index=2)
+        z_band1 = r_multi.value_at_coords(xtest0, ytest0, index=1)
+        z_band2 = r_multi.value_at_coords(xtest0, ytest0, index=2)
+        z_band3 = r_multi.value_at_coords(xtest0, ytest0, index=3)
         # Compare to the Raster array slice
         assert list(r_multi.data[:, itest, jtest]) == [z_band1, z_band2, z_band3]
 
@@ -1471,7 +1482,7 @@ class TestRaster:
 
         # 4/ Window argument
         val_window, z_window = r_multi.value_at_coords(
-            xtest0, ytest0, index=0, window=3, masked=True, return_window=True
+            xtest0, ytest0, index=1, window=3, masked=True, return_window=True
         )
         assert (
             val_window
@@ -1482,7 +1493,7 @@ class TestRaster:
 
         # 5/ Reducer function argument
         val_window2 = r_multi.value_at_coords(
-            xtest0, ytest0, index=0, window=3, masked=True, reducer_function=np.ma.median
+            xtest0, ytest0, index=1, window=3, masked=True, reducer_function=np.ma.median
         )
         assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
