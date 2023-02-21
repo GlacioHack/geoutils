@@ -1,25 +1,24 @@
 """
-Loading and understanding Vectors
-=================================
+Opening a vector from file
+==========================
 
-This is (right now) a dummy example for showing the functionality of :class:`geoutils.Vector`.
+This example demonstrates the instantiation of a vector through :class:`geoutils.Vector`.
 """
-
-import matplotlib.pyplot as plt
 
 import geoutils as gu
 
 # %%
-# Example raster:
-glaciers = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+# We open an example vector.
+vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+vect
 
 # %%
-# Info:
-print(glaciers)
-
+# We can print more info on the vector.
+print(vect)
 
 # %%
-# A plot:
-for _, glacier in glaciers.ds.iterrows():
+# Let's plot:
+import matplotlib.pyplot as plt
+for _, glacier in vect.ds.iterrows():
     plt.plot(*glacier.geometry.exterior.xy)
 plt.show()

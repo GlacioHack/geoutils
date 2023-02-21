@@ -626,7 +626,7 @@ class Raster:
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
-            str_data = "not_loaded"
+            str_data = "not_loaded; shape on disk "+str(self._disk_shape)
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 
@@ -649,7 +649,7 @@ class Raster:
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
-            str_data = "<i>not_loaded</i>"
+            str_data = "<i>not_loaded; shape on disk "+str(self._disk_shape)+"</i>"
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 
