@@ -1822,7 +1822,39 @@ class TestRaster:
             assert np.dtype(rout.dtypes[0]) == dtype
             assert rout.data.dtype == dtype
 
-    def test_plot(self) -> None:
+    @pytest.mark.parametrize(
+        "example", [landsat_b4_path, landsat_b4_crop_path, landsat_rgb_path, aster_dem_path]
+    )  # type: ignore
+    @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))  # type: ignore
+    def test_show_cbar(self, example, figsize) -> None:
+        """
+        Test cbar matches plot height.
+        """
+        # Plot raster with cbar
+        r0 = gr.Raster(example)
+        fig, ax = plt.subplots(figsize=(figsize, figsize))
+        r0.show(
+            ax=ax,
+            add_cbar=True,
+        )
+        fig.axes[0].set_axis_off()
+        fig.axes[1].set_axis_off()
+
+        # Get size of main plot
+        ax0_bbox = fig.axes[0].get_tightbbox()
+        xmin, ymin, xmax, ymax = ax0_bbox.bounds
+        h = ymax - ymin
+
+        # Get size of cbar
+        ax_cbar_bbox = fig.axes[1].get_tightbbox()
+        xmin, ymin, xmax, ymax = ax_cbar_bbox.bounds
+        h_cbar = ymax - ymin
+        plt.close("all")
+
+        # Assert height is the same
+        assert h == pytest.approx(h_cbar)
+
+    def test_show(self) -> None:
 
         # Read single band raster and RGB raster
         img = gr.Raster(self.landsat_b4_path)
@@ -1846,18 +1878,20 @@ class TestRaster:
             plt.close()
         assert True
 
-        # Test plotting single band B/W, add_cb
+        # Test plotting single band B/W, add_cbar
         ax = plt.subplot(111)
-        img_RGB.show(index=1, cmap="gray", ax=ax, add_cb=False, title="Plotting one band B/W")
+        img_RGB.show(index=1, cmap="gray", ax=ax, add_cbar=False, title="Plotting one band B/W")
         if DO_PLOT:
             plt.show()
         else:
             plt.close()
         assert True
 
-        # Test vmin, vmax and cb_title
+        # Test vmin, vmax and cbar_title
         ax = plt.subplot(111)
-        img.show(cmap="gray", vmin=40, vmax=220, cb_title="Custom cbar", ax=ax, title="Testing vmin, vmax and cb_title")
+        img.show(
+            cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax, title="Testing vmin, vmax and cbar_title"
+        )
         if DO_PLOT:
             plt.show()
         else:
