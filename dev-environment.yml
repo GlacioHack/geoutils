@@ -33,3 +33,4 @@ dependencies:
 
   - pip:
     - sphinx-book-theme
+    - -e ./
