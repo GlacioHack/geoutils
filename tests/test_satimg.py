@@ -135,7 +135,7 @@ class TestSatelliteImage:
         satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
         # using list directly available in Class
         attrs = georaster_attrs + satimg_attrs
-        all_attrs = attrs + gr.satimg_attrs
+        all_attrs = attrs + gr.satimg.satimg_attrs
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 

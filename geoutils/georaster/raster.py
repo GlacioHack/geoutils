@@ -733,9 +733,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Case 1 - other is a Raster
         if isinstance(other, Raster):
-            # Check that both data are loaded
-            if not (self.is_loaded & other.is_loaded):
-                raise ValueError("Raster's data must be loaded with self.load().")
+            # Not necessary anymore with implicit loading
+            # # Check that both data are loaded
+            # if not (self.is_loaded & other.is_loaded):
+            #     raise ValueError("Raster's data must be loaded with self.load().")
 
             # Check that both rasters have the same shape and georeferences
             if (self.data.shape == other.data.shape) & (self.transform == other.transform) & (self.crs == other.crs):
