@@ -33,6 +33,7 @@ an {class}`~affine.Affine` as `.transform`, and a {class}`float` or {class}`int`
 linked to a {class}`rasterio.io.DatasetReader` object for loading the metadata, and the array at the appropriate time.
 
 ```{code-cell} ipython3
+:tags: [hide-output]
 # The opened raster
 rast
 ```
@@ -41,6 +42,7 @@ A {class}`~geoutils.Vector` is a composition class with a single main attribute:
 wrapped directly into {class}`~geoutils.Vector`. 
 
 ```{code-cell} ipython3
+:tags: [hide-output]
 # The opened vector
 vect
 ```
@@ -163,7 +165,7 @@ For saving, {func}`~geoutils.Raster.save` is used.
 import matplotlib.pyplot as plt
 fig = plt.figure()
 ax = plt.gca()
-rast.show(ax=ax, cmap='Reds', cb_title='Normalized infrared')
+rast.show(ax=ax, cmap='Reds', cbar_title='Normalized infrared')
 vect_aoi.ds.plot(ax=ax, fc='none', ec='k', lw=0.5)
 ```
 

@@ -5,7 +5,7 @@
 ## What is GeoUtils?
 
 GeoUtils<sup>1</sup> is a **[Python](https://www.python.org/) package for the handling and analysis of georeferenced data**, developed with the objective of 
-making geospatial analysis accessible, intuitive and robust. 
+making geospatial analysis accessible, efficient and robust. 
 
 GeoUtils is designed for all Earth and planetary observation science. It is generally **most useful for remote sensing and Earth's surface applications 
 relying on moderate- to high-resolution georeferenced data** (typically < 1 km). Applications that, for analysis, require reprojections, re-gridding, point 
@@ -26,7 +26,7 @@ We are working on making features fully consistent for the first long-term relea
 GeoUtils is built on top of [Rasterio](https://rasterio.readthedocs.io/en/latest/), [GeoPandas](https://geopandas.org/en/stable/docs.html) 
 and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenced operations, and relies on [NumPy](https://numpy.org/doc/stable/), 
 [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/) for scientific computing to provide:
-- A **common and consistent framework** for rasters and vectors handling and analysis,
+- A **common and consistent framework** for efficient rasters and vectors handling and analysis,
 - A structure following the **principal of least knowledge**<sup>2</sup> to foster accessibility,
 - A **pythonic arithmetic** and **NumPy interfacing** for robust numerical computing and intuitive use.
 
