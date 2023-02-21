@@ -147,9 +147,29 @@ raster[mask_outlines]
 
 See {ref}`py-ops-indexing` for more details.
 
+(mask-class-poly-overloaded)=
+
 ## Polygonize (overloaded from {class}`~geoutils.Raster`)
 
-Some methods
+{class}`Masks<geoutils.Mask>` have simplified class methods overloaded from {class}`Rasters<geoutils.Raster>` when one or several attributes of the methods 
+become implicit in the case of {class}`bool` data.
+
+The {func}`~geoutils.Mask.polygonize` function is one of those, implicitly applying to the `True` values of the mask as target pixels. It outputs a 
+{class}`~geoutils.Vector` of the input mask.
+
+```{code-cell} ipython3
+# Polygonize mask
+mask.polygonize()
+```
+
+(mask-class-prox-overloaded)=
 
 ## Proximity (overloaded from {class}`~geoutils.Raster`)
 
+The {func}`~geoutils.Mask.proximity` function is another overloaded method of {class}`~geoutils.Raster` implicitly applying to the `True` values of the mask as 
+target pixels. It outputs a {class}`~geoutils.Raster` of the distances to the input mask.
+
+```{code-cell} ipython3
+# Proximity to mask
+mask.proximity()
+```

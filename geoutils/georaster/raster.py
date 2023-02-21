@@ -487,10 +487,12 @@ class Raster:
     @property
     def indexes(self) -> tuple[int, ...]:
         """Return the indexes of bands loaded in memory if they are, otherwise on disk."""
-        if self._indexes_loaded is not None:
-            if isinstance(self._indexes_loaded, int):
-                return (self._indexes_loaded,)
-            return tuple(self._indexes_loaded)
+        if self._indexes is not None and not self.is_loaded:
+            return self._indexes
+        # if self._indexes_loaded is not None:
+        #     if isinstance(self._indexes_loaded, int):
+        #         return (self._indexes_loaded, )
+        #     return tuple(self._indexes_loaded)
         if self.is_loaded:
             return tuple(range(1, self.count + 1))
         return self.indexes_on_disk  # type: ignore

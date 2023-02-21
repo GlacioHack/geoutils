@@ -1,3 +1,8 @@
+---
+file_format: mystnb
+kernelspec:
+  name: geoutils
+---
 (quick-start)=
 
 # Quick start
@@ -11,17 +16,34 @@ For more details, refer to the {ref}`core-index`, {ref}`rasters-index` or {ref}`
 In GeoUtils, geospatial handling is object-based and revolves around {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.
 These link to either **on-disk** or **in-memory** datasets, opened by instantiating the class.
 
-```{literalinclude} code/index_example.py
-:lines: 1-9
-:language: python
+```{code-cell} ipython3
+import geoutils as gu
+
+# Examples files: infrared band of Landsat and glacier outlines
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+
+# Open files
+rast = gu.Raster(filename_rast)
+vect = gu.Vector(filename_vect)
 ```
 
 A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`~numpy.ma.MaskedArray` as `.data`, a {class}`~pyproj.crs.CRS` as `.crs`, 
 an {class}`~affine.Affine` as `.transform`, and a {class}`float` or {class}`int` as `.nodata`. When a file exists on disk, {class}`~geoutils.Raster` is 
-linked to a {class}`rasterio.DatasetReader` object for loading the metadata, and the array at the appropriate time.
+linked to a {class}`rasterio.io.DatasetReader` object for loading the metadata, and the array at the appropriate time.
+
+```{code-cell} ipython3
+# The opened raster
+rast
+```
 
 A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as `.ds`, for which most methods are 
 wrapped directly into {class}`~geoutils.Vector`. 
+
+```{code-cell} ipython3
+# The opened vector
+vect
+```
 
 All other attributes are derivatives of those main attributes, or of the filename on disk. Attributes of {class}`~geoutils.Raster` and 
 {class}`~geoutils.Vector` update with geospatial operations on themselves. 
@@ -32,9 +54,15 @@ Geospatial operations are based on class methods, such as {func}`geoutils.Raster
 passed solely another {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a **reference to match** during the operation. A **reference {class}`~geoutils.Vector`** 
 enforces a matching of `.bounds` and/or `.crs`, while a **reference {class}`~geoutils.Raster`** can also enforce a matching of `.res`, depending on the nature of the operation.
 
-```{literalinclude} code/index_example.py
-:lines: 16-20
-:language: python
+
+```{code-cell} ipython3
+# Crop raster to vector's extent
+rast.crop(vect)
+```
+
+```{code-cell} ipython3
+# Compute proximity to vector on raster's grid
+rast_proximity_to_vec = vect.proximity(rast)
 ```
 
 All methods can be also be passed any number of georeferencing arguments such as `.shape` or `.res`, and will logically deduce others from the input, much 
@@ -83,17 +111,18 @@ All {class}`~geoutils.Raster` objects support Python arithmetic ({func}`+<operat
 {func}`**<operator.pow>`, {func}`%<operator.mod>`) with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or 
 number. For other {class}`~geoutils.Raster`, the georeferencing must match, while only the shape for other {class}`~numpy.ndarray`.
 
-```{literalinclude} code/index_example.py
-:lines: 22-23
-:language: python
+```{code-cell} ipython3
+# Add 1 to the raster array
+rast += 1
 ```
 
 Additionally, the class {class}`~geoutils.Raster` possesses a NumPy masked-array interface that allows to apply to it any [NumPy universal function](https://numpy.org/doc/stable/reference/ufuncs.html) and 
 most other NumPy array functions, while logically casting `dtypes` and respecting `.nodata` values.
 
-```{literalinclude} code/index_example.py
-:lines: 25-27
-:language: python
+```{code-cell} ipython3
+# Apply a normalization to the raster
+import numpy as np
+rast = (rast - np.min(rast)) / (np.max(rast) - np.min(rast))
 ```
 
 ## Casting to {class}`~geoutils.Mask`, indexing and overload
@@ -101,25 +130,24 @@ most other NumPy array functions, while logically casting `dtypes` and respectin
 All {class}`~geoutils.Raster` classes also support Python logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, 
 {func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.Mask`, a subclass of {class}`~geoutils.Raster`.
 
-
-```{literalinclude} code/index_example.py
-:lines: 29-30
-:language: python
+```{code-cell} ipython3
+# Get mask of an AOI: infrared index above 0.7, at least 200 m from glaciers
+mask_aoi = np.logical_and(rast > 0.7, rast_proximity_to_vec > 200)
 ```
 
 Masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a {class}`~numpy.ma.MaskedArray` of indexed values.
 
-```{literalinclude} code/index_example.py
-:lines: 32-33
-:language: python
+```{code-cell} ipython3
+# Index raster with mask to extract a 1-D array
+values_aoi = rast[mask_aoi]
 ```
 
 Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean `dtypes`. Using {func}`~geoutils.Raster.polygonize` with a 
 {class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
-```{literalinclude} code/index_example.py
-:lines: 35-36
-:language: python
+```{code-cell} ipython3
+# Polygonize areas where mask is True
+vect_aoi = mask_aoi.polygonize()
 ```
 
 ## Plotting and saving geospatial data
@@ -130,15 +158,13 @@ The plotting function was renamed {func}`~geoutils.Raster.show` everywhere, for 
 
 For saving, {func}`~geoutils.Raster.save` is used.
 
-```{literalinclude} code/index_example.py
-:lines: 38-47
-:language: python
-```
-
-```{eval-rst}
-.. plot:: code/index_example.py
-    :caption: High infrared outside of glaciers at Mount Everest (perennial snowfields)
-    :width: 90%
+```{code-cell} ipython3
+# Plot result
+import matplotlib.pyplot as plt
+fig = plt.figure()
+ax = plt.gca()
+rast.show(ax=ax, cmap='Reds', cb_title='Normalized infrared')
+vect_aoi.ds.plot(ax=ax, fc='none', ec='k', lw=0.5)
 ```
 
 ```{admonition} Wrap-up
@@ -161,14 +187,15 @@ Otherwise, for more **hands-on** examples, explore GeoUtils' gallery of examples
 In our case, `rast` would be better opened using the {class}`~geoutils.Raster` subclass {class}`~geoutils.SatelliteImage` instead, which tentatively parses 
 metadata recognized from the filename or auxiliary files.
 
-```{literalinclude} code/index_example.py
-:lines: 11-14
-:language: python
+```{code-cell} ipython3
+# Name of the image we used
+import os
+print(os.path.basename(filename_rast))
 ```
 
-```{eval-rst}
-.. program-output:: $PYTHON code/index_example.py
-        :shell:
+```{code-cell} ipython3
+# Open while parsing metadata
+rast = gu.SatelliteImage(filename_rast, silent=False)
 ```
 
 There are many possible subclass to derive from a {class}`~geoutils.Raster`. Here's an **overview of current {class}`~geoutils.Raster` class inheritance**, which extends into 

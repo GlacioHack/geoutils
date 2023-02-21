@@ -22,7 +22,7 @@ A {class}`~geoutils.Raster` contains **four main attributes**:
 
 For more details on {class}`~geoutils.Raster` class composition, see {ref}`core-composition`.
 
-A {class}`~geoutils.Raster` also contains many derivative attributes, with naming generally consistent with that of a {class}`rasterio.DatasetReader`.
+A {class}`~geoutils.Raster` also contains many derivative attributes, with naming generally consistent with that of a {class}`rasterio.io.DatasetReader`.
 
 A first category includes georeferencing attributes directly derived from {attr}`~geoutils.Raster.transform`, namely: {attr}`~geoutils.Raster.shape`, 
 {attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds`.
@@ -31,7 +31,7 @@ A second category concerns the attributes derived from the raster array shape an
 {attr}`~geoutils.Raster.dtypes`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and their indexes.
 
 ```{important}
-The {attr}`~geoutils.Raster.indexes` of {class}`rasterio.DatasetReader` start from 1 and not 0, be careful when instantiating or loading from a 
+The {attr}`~geoutils.Raster.indexes` of {class}`rasterio.io.DatasetReader` start from 1 and not 0, be careful when instantiating or loading from a 
 multi-band raster!
 ```
 
@@ -51,7 +51,8 @@ The complete list of {class}`~geoutils.Raster` attributes with description is av
 
 ## Open and save
 
-A {class}`~geoutils.Raster` is opened by instantiating with either a {class}`str`, a {class}`pathlib.Path` or a {class}`rasterio.DatasetReader`.
+A {class}`~geoutils.Raster` is opened by instantiating with either a {class}`str`, a {class}`pathlib.Path`, a {class}`rasterio.io.DatasetReader` or a 
+{class}`rasterio.io.MemoryFile`.
 
 
 ```{code-cell} ipython3
@@ -235,8 +236,7 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 Cropping a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`. 
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.
-Vector` as argument. 
+As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as argument. 
 
 See {ref}`core-match-ref` for more details.
 ```
@@ -259,7 +259,8 @@ Polygonizing a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Ra
 By default, values equal to `1` are used.
 
 ```{note}
-For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels.
+For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels. See 
+{ref}`mask-class-poly-overloaded`.
 ```
 
 ```{code-cell} ipython3
@@ -275,7 +276,8 @@ Computing proximity from a {class}`~geoutils.Raster` is done through by the {fun
 target pixels in the {class}`~geoutils.Raster`.
 
 ```{note}
-For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels.
+For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels. See 
+{ref}`mask-class-prox-overloaded`.
 ```
 
 ```{code-cell} ipython3
@@ -321,7 +323,7 @@ A {class}`~geoutils.Raster` can be exported to different formats, to facilitate 
 
 Those include exporting to:
 - a {class}`xarray.Dataset` with {class}`~geoutils.Raster.to_xarray`, 
-- a {class}`rasterio.DatasetReader` with {class}`~geoutils.Raster.to_rio_dataset`, 
+- a {class}`rasterio.io.DatasetReader` with {class}`~geoutils.Raster.to_rio_dataset`, 
 - a {class}`numpy.ndarray`, {class}`geopandas.GeoDataFrame` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_points`.
 
 ```{code-cell} ipython3

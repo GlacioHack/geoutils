@@ -40,7 +40,9 @@ proj_tools
 :caption: Examples
 :maxdepth: 2
     
-auto_examples/index.rst 
+io_examples/index
+handling_examples/index
+analysis_examples/index
 ```
 
 ```{toctree}

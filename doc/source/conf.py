@@ -54,8 +54,12 @@ intersphinx_mapping = {
 }
 
 sphinx_gallery_conf = {
-    "examples_dirs": os.path.join(os.path.dirname(__file__), "../", "../", "examples"),  # path to your example scripts
-    "gallery_dirs": "auto_examples",  # path to where to save gallery generated output
+    "examples_dirs": [
+        os.path.join(os.path.dirname(__file__), "../", "../", "examples/io"),
+        os.path.join(os.path.dirname(__file__), "../", "../", "examples/handling"),
+        os.path.join(os.path.dirname(__file__), "../", "../", "examples/analysis"),
+    ],  # path to your example scripts
+    "gallery_dirs": ["io_examples", "handling_examples", "analysis_examples"],  # path to where to save gallery generated output
     "inspect_global_variables": True,  # Make links to the class/function definitions.
     "reference_url": {
         # The module you locally document uses None

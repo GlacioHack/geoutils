@@ -244,6 +244,7 @@ And reverse operations.
     Mask.crop
     Mask.reproject
     Mask.polygonize
+    Mask.proximity
 ```
 
 ## Vectors
