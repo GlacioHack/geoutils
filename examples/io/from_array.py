@@ -14,7 +14,7 @@ import numpy as np
 
 # A random 3 x 3 masked array
 np.random.seed(42)
-arr = np.random.randint(0, 255, size=(3, 3), dtype="float32")
+arr = np.random.normal(size=(5, 5))
 # A transform with 3 x 3 pixels in a [0-1, 0-1] bound square
 transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3)
 # A CRS, here geographic (latitude/longitude)
@@ -35,16 +35,18 @@ print(rast.info())
 
 # %%
 # The array has been automatically cast into a :class:`~numpy.ma.MaskedArray`, to respect :class:`~geoutils.Raster.nodata` values.
+rast.data
 
 # %%
 # We could also have created directly from a :class:`~numpy.ma.MaskedArray`.
 
 # A random mask, that will mask one out of two values on average
-mask = np.random.randint(0, 2, size=(3, 3), dtype="bool")
+mask = np.random.randint(0, 2, size=(5, 5), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
+# This time, we pass directly the masked array
 rast = gu.Raster.from_array(
-        data = arr,
+        data = ma,
         transform = transform,
         crs = crs,
         nodata = 255
@@ -52,5 +54,6 @@ rast = gu.Raster.from_array(
 rast
 
 # %%
-# The different functionalities of GeoUtils will respect :class:`~geoutils.Raster.nodata` values, starting with :func:`~geoutils.Raster.show`.
-rast.show(cmap="Greys_r")
+# The different functionalities of GeoUtils will respect :class:`~geoutils.Raster.nodata` values, starting with :func:`~geoutils.Raster.show`,
+# which will ignore them during plotting (transparent).
+rast.show(cmap="copper")
