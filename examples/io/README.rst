@@ -1,4 +1,4 @@
 Input/output
 ============
 
-Examples about opening, creating, loading or saving raster and vector data.
+Examples about **opening**, **creating**, **loading** or **saving** geospatial data.

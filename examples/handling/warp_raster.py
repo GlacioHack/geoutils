@@ -1,0 +1,60 @@
+"""
+Warp a raster
+=============
+
+This example demonstrates the warping of a raster using :class:`~geoutils.Raster.reproject`.
+"""
+# %%
+# We open two example rasters.
+import geoutils as gu
+rast1 = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
+rast2 = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
+
+# %%
+# The first raster has larger extent and higher resolution than the second one
+print(rast1.info())
+print(rast2.info())
+
+# %%
+# Let's plot the first raster, with the warped extent of the second one
+import matplotlib.pyplot as plt
+ax = plt.gca()
+rast1.show(ax=ax, cmap="Blues")
+vect_bounds_rast2 = gu.Vector.from_bounds_projected(rast2)
+vect_bounds_rast2.ds.plot(ax=ax, fc='none', ec='r', lw=2)
+
+# %%
+# **First option:** using the second raster as a reference to match, we reproject the first one. We simply have to pass the second :class:`~geoutils.Raster`
+# as single argument to :func:`~geoutils.Raster.reproject`. See :ref:`core-match-ref` for more details.
+#
+# By default, a "bilinear" resampling algorithm is used. Any string or :class:`~rasterio.enums.Resampling` can be passed.
+
+
+rast1_warped = rast1.reproject(rast2)
+rast1_warped
+
+# %%
+# .. note::
+#   Because no :attr:`geoutils.Raster.nodata` value is defined in the original image, the default value ``255`` for :class:`numpy.uint8` is used. This
+#   value is detected as already existing in the original raster, however, which raises a ``UserWarning``. If your :attr:`geoutils.Raster.nodata` is not defined,
+#   use :func:`geoutils.Raster.set_nodata`.
+#
+# Now the shape and georeferencing should be the same as that of the second raster, shown above.
+
+print(rast1_warped.info())
+
+# %%
+# We can plot the two rasters next to one another
+
+rast1_warped.show(cmap="Reds")
+rast2.show(cmap="Blues")
+
+# %%
+# **Second option:** we can pass any georeferencing argument to :func:`~geoutils.Raster.reproject`, such as ``dst_size`` and ``dst_crs``, and will only
+# deduce other parameters from the raster from which it is called (for ``dst_crs``, an EPSG code can be passed directly as :class:`int`).
+
+# Ensure the right nodata value is set
+rast2.set_nodata(0)
+# Pass the desired georeferencing parameters
+rast2_warped = rast2.reproject(dst_size=(100, 100), dst_crs=32645)
+print(rast2_warped.info())

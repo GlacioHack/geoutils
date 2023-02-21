@@ -1,23 +1,22 @@
 """
-SatelliteImage class basics
-===========================
+Parsing image metadata
+======================
 
-This is (right now) a dummy example for showing the functionality of :class:`geoutils.SatelliteImage`.
+This example demonstrates the instantiation of an image through :class:`~geoutils.SatelliteImage`.
 """
-import matplotlib.pyplot as plt
 
 import geoutils as gu
 
 # %%
-# Example raster:
-img = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
+# We print the filename of our raster that, as often with satellite data, holds metadata information.
+filename = gu.examples.get_path("everest_landsat_b4")
+import os
+print(os.path.basename(filename))
 
 # %%
-# Info:
-print(img)
-
+# We open it as a geo-image, unsilencing the attribute retrieval to see the parsed data.
+img = gu.SatelliteImage(gu.examples.get_path("everest_landsat_b4"), silent=False)
 
 # %%
-# A plot:
-img.show(cmap="Greys_r")
-plt.show()
+# We have now retrieved the metadata. For the rest, the :class:`~geoutils.SatelliteImage` is a subclass of :class:`~geoutils.Raster`, and behaves similarly.
+img

@@ -432,6 +432,25 @@ class Vector:
 
         return output
 
+    @classmethod
+    def from_bounds_projected(cls, raster_or_vector: gu.Raster | VectorType, out_crs: CRS | None = None, densify_pts: int = 5000) -> VectorType:
+        """Create a vector polygon from projected bounds of a raster or vector.
+
+        :param raster_or_vector: A raster or vector
+        :param out_crs: In which CRS to compute the bounds
+        :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
+        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        """
+
+        if out_crs is None:
+            out_crs = raster_or_vector.crs
+
+        poly = gu.projtools.bounds2poly(raster_or_vector, out_crs=out_crs)
+
+        df = gpd.GeoDataFrame(geometry=[poly], crs=out_crs)
+
+        return cls(df)
+
     def query(self: VectorType, expression: str, inplace: bool = False) -> VectorType:
         """
         Query the Vector dataset with a valid Pandas expression.

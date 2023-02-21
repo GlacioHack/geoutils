@@ -116,7 +116,7 @@ html_theme = "sphinx_book_theme"
 
 html_theme_options = {
     "use_sidenotes": True,
-    "repository_url": "https://github.com/GlacioHack/xdem",
+    "repository_url": "https://github.com/GlacioHack/geoutils",
     "use_repository_button": True,
 }
 
