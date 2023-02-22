@@ -1,13 +1,26 @@
-% GeoUtils documentation master file, created by
-% sphinx-quickstart on Fri Nov 13 17:43:16 2020.
-% You can adapt this file completely to your liking, but it should at least
-% contain the root 'toctree' directive.
+---
+title: GeoUtils
+---
 
-# Welcome to GeoUtils' documentation!
+::::{grid}
+:reverse:
+:gutter: 2 1 1 1
+:margin: 4 4 1 1
 
-```{epigraph}
-GeoUtils is an **accessible**, **efficient** and **robust** package to handle and analyze geospatial data.
+:::{grid-item}
+:columns: 4
+
+```{image} ./_static/logo_only_v3.svg
+:width: 150px
 ```
+:::
+
+:::{grid-item}
+:columns: 8
+:class: sd-fs-3
+
+GeoUtils is an **accessible**, **efficient** and **robust** package to handle and analyze geospatial data.
+:::
 
 ```{important}
 :class: margin
