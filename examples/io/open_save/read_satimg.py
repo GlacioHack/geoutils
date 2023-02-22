@@ -1,6 +1,6 @@
 """
-Parsing image metadata
-======================
+Parsing metadata
+================
 
 This example demonstrates the instantiation of an image through :class:`~geoutils.SatelliteImage`.
 """

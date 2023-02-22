@@ -2764,7 +2764,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return points
 
     def polygonize(
-        self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1
+        self, in_value: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = "all"
     ) -> Vector:
         """
         Return a GeoDataFrame polygonized from a raster.
@@ -2802,8 +2802,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # mask all valid values
         elif in_value == "all":
 
-            vals_for_msk = list(set(self.data.flatten()))
-            bool_msk = np.isin(self.data, vals_for_msk).astype("uint8")
+            bool_msk = (~self.data.mask).astype("uint8")
 
         else:
 

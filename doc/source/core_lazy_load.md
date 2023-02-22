@@ -65,7 +65,7 @@ package!
 ```
 
 Some georeferencing operations be done without loading the entire array Right now, relying directly on Rasterio, GeoUtils supports optimized subsetting 
-through the {func}`~geoutils.Raster.`crop` method.
+through the {func}`~geoutils.Raster.crop` method.
 
 ```{code-cell} ipython3
 # The previously cropped Raster was loaded without accessing the entire array

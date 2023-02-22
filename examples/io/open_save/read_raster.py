@@ -1,6 +1,6 @@
 """
-Opening a raster from file
-==========================
+Opening a raster
+================
 
 This example demonstrates the instantiation of a raster through :class:`~geoutils.Raster`.
 """

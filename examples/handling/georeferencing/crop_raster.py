@@ -2,23 +2,23 @@
 Crop a raster
 =============
 
-This example demonstrates the cropping of a raster using :class:`~geoutils.Raster.crop`.
+This example demonstrates the cropping of a raster using :func:`geoutils.Raster.crop`.
 """
 # sphinx_gallery_thumbnail_number = 2
 # %%
-# We open two example rasters.
+# We open a raster and vector, and subset the latter.
 import geoutils as gu
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 vect = gu.Vector(vect.ds[vect.ds["RGIId"] == "RGI60-15.10055"])
 
 # %%
-# The first raster has larger extent and higher resolution than the second one
+# The first raster has larger extent and higher resolution than the second one.
 print(rast.info())
 print(vect.bounds)
 
 # %%
-# Let's plot the raster and vector
+# Let's plot the raster and vector.
 import matplotlib.pyplot as plt
 ax = plt.gca()
 rast.show(ax=ax, cmap="Purples")

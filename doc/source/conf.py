@@ -32,6 +32,7 @@ extensions = [
     "sphinx.ext.autosummary",  # Create API doc summary texts from the docstrings.
     "sphinx.ext.inheritance_diagram",  # For class inheritance diagrams.
     "sphinx.ext.graphviz", # To render graphviz diagrams.
+    "sphinx_design", # To render nice blocks
     "sphinx_autodoc_typehints",  # Include type hints in the API documentation.
     "sphinxcontrib.programoutput",
     "sphinx_gallery.gen_gallery",  # Examples gallery
@@ -39,6 +40,9 @@ extensions = [
     # "myst_parser",  !! Not needed with myst_nb !! # Form of Markdown that works with sphinx, used a lot by the Sphinx Book Theme
     "myst_nb" # MySt for rendering Jupyter notebook in documentation
 ]
+
+# For sphinx design to work properly
+myst_enable_extensions = ["colon_fence"]
 
 nb_kernel_rgx_aliases = {".*geoutils.*": "python3"}
 
@@ -114,7 +118,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_templates"]
 #
 html_theme = "sphinx_book_theme"
 html_favicon = "_static/logo_only_v3.svg"
-html_logo = "_static/logo_v3_2.svg"
+html_logo = "_static/logo_v3.svg"
 html_title = "GeoUtils"
 
 html_theme_options = {

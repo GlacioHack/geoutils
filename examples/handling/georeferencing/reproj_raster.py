@@ -1,8 +1,8 @@
 """
-Warp a raster
-=============
+Reproject a raster
+=================)
 
-This example demonstrates the warping of a raster using :class:`~geoutils.Raster.reproject`.
+This example demonstrates the reprojection of a raster using :func:`geoutils.Raster.reproject`.
 """
 # %%
 # We open two example rasters.
@@ -11,12 +11,12 @@ rast1 = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 rast2 = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
 
 # %%
-# The first raster has larger extent and higher resolution than the second one
+# The first raster has larger extent and higher resolution than the second one.
 print(rast1.info())
 print(rast2.info())
 
 # %%
-# Let's plot the first raster, with the warped extent of the second one
+# Let's plot the first raster, with the warped extent of the second one.
 import matplotlib.pyplot as plt
 ax = plt.gca()
 rast1.show(ax=ax, cmap="Blues")

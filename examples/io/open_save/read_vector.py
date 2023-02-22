@@ -1,6 +1,6 @@
 """
-Opening a vector from file
-==========================
+Opening a vector
+================
 
 This example demonstrates the instantiation of a vector through :class:`geoutils.Vector`.
 """

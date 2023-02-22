@@ -109,6 +109,8 @@ class Vector:
     def crop(
         self: VectorType,
         cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        clip: bool,
+        *,
         inplace: Literal[True] = True,
     ) -> None:
         ...
@@ -117,6 +119,8 @@ class Vector:
     def crop(
         self: VectorType,
         cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        clip: bool,
+        *,
         inplace: Literal[False],
     ) -> VectorType:
         ...
@@ -124,10 +128,11 @@ class Vector:
     def crop(
         self: VectorType,
         cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        clip: bool = False,
         inplace: bool = True,
     ) -> VectorType | None:
         """
-        Crop the Vector to given extent, or bounds of a raster or vector.
+        Crop the Vector to given extent, or bounds of a raster or vector. Optionally, clip geometries to that extent (by default keeps all intersecting).
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
@@ -135,6 +140,7 @@ class Vector:
             coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
             Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
+        :param clip: Whether to clip the geometry to the given extent (by default keeps all intersecting).
         :param inplace: Update the vector inplace or return copy.
         """
         if isinstance(cropGeom, (gu.Raster, Vector)):
@@ -148,11 +154,14 @@ class Vector:
         # Need to separate the two options, inplace update
         if inplace:
             self.ds = self.ds.cx[xmin:xmax, ymin:ymax]
+            if clip:
+                self.ds = self.ds.clip(mask=(xmin, ymin, xmax, ymax))
             return None
         # Or create a copy otherwise
         else:
             new_vector = self.copy()
             new_vector.ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]
+            new_vector.ds = new_vector.ds.clip(mask=(xmin, ymin, xmax, ymax))
             return new_vector
 
     def reproject(
@@ -337,7 +346,7 @@ class Vector:
 
         :param rst: A raster to be used as reference for the output grid
         :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
-        :param xres: Output raster spatial resolution in x. Only is rst is None.
+        :param xres: Output raster spatial resolution in x. Only if rst is None.
             Must be in units of crs, if set.
         :param yres: Output raster spatial resolution in y. Only if rst is None.
         Must be in units of crs, if set. (Default to xres)

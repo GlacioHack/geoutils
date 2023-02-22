@@ -32,5 +32,6 @@ dependencies:
   - rioxarray
 
   - pip:
+    - sphinx-design
     - sphinx-book-theme
     - -e ./
