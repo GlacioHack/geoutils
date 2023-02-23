@@ -1,6 +1,6 @@
 """
 Reproject a raster
-=================)
+==================
 
 This example demonstrates the reprojection of a raster using :func:`geoutils.Raster.reproject`.
 """
@@ -28,7 +28,6 @@ vect_bounds_rast2.ds.plot(ax=ax, fc='none', ec='r', lw=2)
 # as single argument to :func:`~geoutils.Raster.reproject`. See :ref:`core-match-ref` for more details.
 #
 # By default, a "bilinear" resampling algorithm is used. Any string or :class:`~rasterio.enums.Resampling` can be passed.
-
 
 rast1_warped = rast1.reproject(rast2)
 rast1_warped

@@ -40,7 +40,7 @@ its testing suite and type checking ([Pytest](https://docs.pytest.org/en/7.2.x/)
 :gutter: 1 1 1 2
 
 :::{grid-item-card} {material-regular}`edit_note;2em` About GeoUtils
-:link: about_geoutils
+:link: about-geoutils
 :link-type: ref
 
 Learn more about why we developed GeoUtils.
@@ -50,17 +50,17 @@ Learn more about why we developed GeoUtils.
 :::
 
 :::{grid-item-card} {material-regular}`data_exploration;2em` Quick start
-:link: quick_start
+:link: quick-start
 :link-type: ref
  
-Run through a short example of the package functionalities.
+Run a short example of the package functionalities.
 
 +++
 [Learn more »](quick_start)
 :::
 
 :::{grid-item-card} {material-regular}`preview;2em` Features
-:link: core_index
+:link: core-index
 :link-type: ref
 
 Dive into the full documentation.
