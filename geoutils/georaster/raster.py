@@ -1522,7 +1522,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             first_arg = args[0].data.compressed()
 
         elif func.__name__ in ["gradient"]:
-            first_arg = args[0].data.squeeze()
+            first_arg = args[0].data[0, :, :]
 
         # Otherwise, we run the numpy function normally (most take masks into account)
         else:

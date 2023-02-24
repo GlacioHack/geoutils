@@ -9,8 +9,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 
-import geoutils
-import geoutils.georaster as gr
+import geoutils as gu
 from geoutils import examples
 
 DO_PLOT = False
@@ -28,18 +27,18 @@ class TestSatelliteImage:
         """
 
         # from filename, checking option
-        img = gr.SatelliteImage(example, read_from_fn=False)
-        img = gr.SatelliteImage(example)
-        assert isinstance(img, gr.SatelliteImage)
+        img = gu.SatelliteImage(example, read_from_fn=False)
+        img = gu.SatelliteImage(example)
+        assert isinstance(img, gu.SatelliteImage)
 
         # from SatelliteImage
-        img2 = gr.SatelliteImage(img)
-        assert isinstance(img2, gr.SatelliteImage)
+        img2 = gu.SatelliteImage(img)
+        assert isinstance(img2, gu.SatelliteImage)
 
         # from Raster
-        r = gr.Raster(example)
-        img3 = gr.SatelliteImage(r)
-        assert isinstance(img3, gr.SatelliteImage)
+        r = gu.Raster(example)
+        img3 = gu.SatelliteImage(r)
+        assert isinstance(img3, gu.SatelliteImage)
 
         assert img.raster_equal(img2)
         assert img.raster_equal(img3)
@@ -64,13 +63,13 @@ class TestSatelliteImage:
                 sys.stdout = self._stdout
 
         with Capturing() as output1:
-            gr.SatelliteImage(example, silent=False)
+            gu.SatelliteImage(example, silent=False)
 
         # check the metadata reading outputs to console
         assert len(output1) > 0
 
         with Capturing() as output2:
-            gr.SatelliteImage(example, silent=True)
+            gu.SatelliteImage(example, silent=True)
 
         # check nothing outputs to console
         assert len(output2) == 0
@@ -82,22 +81,22 @@ class TestSatelliteImage:
         # Create fake rasters with random values in 0-255 and dtype uint8
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-        satimg1 = gr.SatelliteImage.from_array(
+        satimg1 = gu.SatelliteImage.from_array(
             np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
-        satimg2 = gr.SatelliteImage.from_array(
+        satimg2 = gu.SatelliteImage.from_array(
             np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
 
         # Check that output type is same - other tests are in test_georaster.py
         sat_out = -satimg1
-        assert isinstance(sat_out, gr.SatelliteImage)
+        assert isinstance(sat_out, gu.SatelliteImage)
 
         sat_out = satimg1 + satimg2
-        assert isinstance(sat_out, gr.SatelliteImage)
+        assert isinstance(sat_out, gu.SatelliteImage)
 
         sat_out = satimg1 - satimg2  # type: ignore
-        assert isinstance(sat_out, gr.SatelliteImage)
+        assert isinstance(sat_out, gu.SatelliteImage)
 
     @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_copy(self, example: str) -> None:
@@ -108,7 +107,7 @@ class TestSatelliteImage:
         - if r is copied, r.data changed, r2.data should be unchanged
         """
         # Open dataset, update data and make a copy
-        r = gr.SatelliteImage(example)
+        r = gu.SatelliteImage(example)
         r.data += 5
         r2 = r.copy()
 
@@ -116,7 +115,7 @@ class TestSatelliteImage:
         assert r is not r2
 
         # Check the object is a SatelliteImage
-        assert isinstance(r2, gr.SatelliteImage)
+        assert isinstance(r2, gu.SatelliteImage)
 
         # check all immutable attributes are equal
         georaster_attrs = [
@@ -135,7 +134,7 @@ class TestSatelliteImage:
         satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
         # using list directly available in Class
         attrs = georaster_attrs + satimg_attrs
-        all_attrs = attrs + gr.satimg.satimg_attrs
+        all_attrs = attrs + gu.georaster.satimg.satimg_attrs
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
@@ -192,7 +191,7 @@ class TestSatelliteImage:
         ]
 
         for names in copied_names:
-            attrs = geoutils.georaster.satimg.parse_metadata_from_fn(names)
+            attrs = gu.georaster.satimg.parse_metadata_from_fn(names)
             i = copied_names.index(names)
             assert satellites[i] == attrs[0]
             assert sensors[i] == attrs[1]
@@ -207,17 +206,17 @@ class TestSatelliteImage:
         test_latlon = [(14, -65), (-14, 65), (14, -65), (14, -65), (14, -65), (0, 0)]
 
         for tile in test_tiles:
-            assert geoutils.georaster.satimg.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
-            assert geoutils.georaster.satimg.sw_naming_to_latlon(tile)[1] == test_latlon[test_tiles.index(tile)][1]
+            assert gu.georaster.satimg.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
+            assert gu.georaster.satimg.sw_naming_to_latlon(tile)[1] == test_latlon[test_tiles.index(tile)][1]
 
         for latlon in test_latlon:
-            assert geoutils.georaster.satimg.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
+            assert gu.georaster.satimg.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
 
         # check possible exceptions, rounded lat/lon belong to their southwest border
-        assert geoutils.georaster.satimg.latlon_to_sw_naming((0, 0)) == "N00E000"
+        assert gu.georaster.satimg.latlon_to_sw_naming((0, 0)) == "N00E000"
         # those are the same point, should give same naming
-        assert geoutils.georaster.satimg.latlon_to_sw_naming((-90, 0)) == "S90E000"
-        assert geoutils.georaster.satimg.latlon_to_sw_naming((90, 0)) == "S90E000"
+        assert gu.georaster.satimg.latlon_to_sw_naming((-90, 0)) == "S90E000"
+        assert gu.georaster.satimg.latlon_to_sw_naming((90, 0)) == "S90E000"
         # same here
-        assert geoutils.georaster.satimg.latlon_to_sw_naming((0, -180)) == "N00W180"
-        assert geoutils.georaster.satimg.latlon_to_sw_naming((0, 180)) == "N00W180"
+        assert gu.georaster.satimg.latlon_to_sw_naming((0, -180)) == "N00W180"
+        assert gu.georaster.satimg.latlon_to_sw_naming((0, 180)) == "N00W180"
