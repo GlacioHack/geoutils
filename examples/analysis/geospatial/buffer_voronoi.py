@@ -2,7 +2,7 @@
 Metric buffer and without overlap
 =================================
 
-This example demonstrates the metric buffering of a vector using :class:`~geoutils.Vector.buffer_metric`.
+This example demonstrates the metric buffering of a vector using :func:`~geoutils.Vector.buffer_metric` and  :func:`~geoutils.Vector.buffer_without_overlap`.
 """
 # sphinx_gallery_thumbnail_number = 3
 # %%

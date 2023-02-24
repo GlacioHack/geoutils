@@ -1,5 +1,5 @@
 """
-From/To Rasterio
+From/to Rasterio
 ================
 
 This example demonstrates importing and exporting a :class:`rasterio.io.DatasetReader` or :class:`rasterio.io.DatasetReader` from and to a
@@ -11,19 +11,19 @@ This example demonstrates importing and exporting a :class:`rasterio.io.DatasetR
 import geoutils as gu
 import rasterio as rio
 
-ds = rio.DatasetReader(gu.examples.get_path("everest_landsat_b4"))
+ds = rio.DatasetReader(gu.examples.get_path("exploradores_aster_dem"))
 rast = gu.Raster(ds)
 rast
 
 # %%
 # The data is unloaded, as when instantiated with a filename.
 # The data will be loaded explicitly by any function requiring its :attr:`~geoutils.Raster.data`, such as :func:`~geoutils.Raster.show`.
-rast.show(cmap="Greys_r")
+rast.show(cmap="terrain")
 
 # %%
 # We can also pass a :class:`rasterio.io.MemoryFile` during instantiation.
 
-mem = rio.MemoryFile(open(gu.examples.get_path("everest_landsat_b4"), "rb"))
+mem = rio.MemoryFile(open(gu.examples.get_path("exploradores_aster_dem"), "rb"))
 rast = gu.Raster(mem)
 rast
 

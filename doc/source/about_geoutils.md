@@ -7,16 +7,18 @@
 GeoUtils<sup>1</sup> is a **[Python](https://www.python.org/) package for the handling and analysis of georeferenced data**, developed with the objective of 
 making such analysis accessible, efficient and reliable. 
 
-In a few words, GeoUtils can be described as a **convenience** wrapper package for end-users focusing on geospatial analysis. It allows to write shorter 
-code through consistent higher-level operations, implicit object behaviour and numerical interfacing.
+```{margin}
+<sup>1</sup>With name standing for *Geospatial Utilities*.
+```
+
+In a few words, GeoUtils can be described as a **convenience wrapper package for end-users** focusing on geospatial analysis. It allows to write shorter 
+code through consistent higher-level operations, implicit object behaviour and numerical interfacing. In addition, GeoUtils adds **analysis-oriented 
+functions** that require many steps to perform with other packages, and which are robustly tested.
 
 GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for remote sensing and Earth's surface 
 applications** that rely on moderate- to high-resolution georeferenced data. All applications that, for analysis, require robust reprojections, re-gridding, 
 point interpolation, and other types of fine-grid analysis with millions of pixels.
 
-```{margin}
-<sup>1</sup>With name standing for *Geospatial Utilities*.
-```
 
 ```{important}
 GeoUtils is in early stages of development and its features might evolve rapidly. Note the version you are working on for

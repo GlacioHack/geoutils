@@ -1,5 +1,5 @@
 """
-From/To GeoPandas
+From/to GeoPandas
 =================
 
 This example demonstrates importing or exporting a :class:`geopandas.GeoDataFrame` from and to a :class:`~geoutils.Vector`.
@@ -11,9 +11,14 @@ This example demonstrates importing or exporting a :class:`geopandas.GeoDataFram
 import geoutils as gu
 import geopandas as gpd
 
-ds = gpd.read_file(gu.examples.get_path("everest_rgi_outlines"))
+ds = gpd.read_file(gu.examples.get_path("exploradores_rgi_outlines"))
 vect = gu.Vector(ds)
 vect
+
+# %%
+# We plot the vector.
+
+vect.ds.plot(column="RGIId")
 
 # %%
 # To export, the :class:`geopandas.GeoDataFrame` is always stored as an attribute as :class:`~geoutils.Vector` is composed from it. See :ref:`core-composition`.

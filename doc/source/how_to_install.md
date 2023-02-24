@@ -2,13 +2,13 @@
 
 # How to install
 
-## Installing with `mamba` (recommended)
+## Installing with ``mamba`` (recommended)
 
 ```bash
 mamba install -c conda-forge geoutils
 ```
 
-```{note}
+```{important}
 Solving dependencies can take a long time with `conda`, `mamba` significantly speeds up the process. Install it with:
 
     conda install mamba -n base -c conda-forge
@@ -16,7 +16,7 @@ Solving dependencies can take a long time with `conda`, `mamba` significantly sp
 Once installed, the same commands can be run by simply replacing `conda` by `mamba`. More details available in the [mamba documentation](https://mamba.readthedocs.io/en/latest/).
 ```
 
-## Installing with `pip`
+## Installing with ``pip``
 
 ```bash
 pip install geoutils
@@ -29,11 +29,8 @@ Setting up GDAL and PROJ may require some extra steps, depending on your operati
 ## Installing for contributors
 
 ```bash
-git clone https://github.com/GlacioHack/xdem.git
-cd ./xdem
-mamba env create -f dev-environment.yml
-mamba activate xdem
-pip install -e .
+git clone https://github.com/GlacioHack/geoutils.git
+mamba env create -f geoutils/dev-environment.yml
 ```
 
-After installing, check that everything is working by running the tests: `pytest -rA`.
+After installing, you can check that everything is working by running the tests: `pytest -rA`.

@@ -2,7 +2,7 @@
 Proximity to raster or vector
 =============================
 
-This example demonstrates the calculation of proximity distances to a raster or vector using :class:`~geoutils.Raster.proximity`.
+This example demonstrates the calculation of proximity distances to a raster or vector using :func:`~geoutils.Raster.proximity`.
 """
 # sphinx_gallery_thumbnail_number = 2
 # %%

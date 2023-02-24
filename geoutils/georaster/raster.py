@@ -87,6 +87,7 @@ _HANDLED_FUNCTIONS_1NIN = (
     ]
     + ["sort", "count_nonzero", "unique"]
     + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"]
+    + ["gradient"]
 )
 
 _HANDLED_FUNCTIONS_2NIN = [
@@ -1520,6 +1521,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         elif func.__name__ in ["quantile", "nanquantile"]:
             first_arg = args[0].data.compressed()
 
+        elif func.__name__ in ["gradient"]:
+            first_arg = args[0].data.squeeze()
+
         # Otherwise, we run the numpy function normally (most take masks into account)
         else:
             first_arg = args[0].data
@@ -2299,7 +2303,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 if window is not None:
                     value = reducer_function(value.flatten())
                 else:
-                    value = value[0, 0]
+                    value = value[0, 0, 0]
             else:
                 value = None
             return value
@@ -2385,7 +2389,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             if return_window:
                 output_win = list_windows[0]
         else:
-            output_val = list_values  # type: ignore
+            output_val = np.array(list_values)  # type: ignore
             if return_window:
                 output_win = list_windows
 
@@ -2419,7 +2423,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             xx += dx / 2  # shift by half a pixel
             yy += dy / 2
         if grid:
-            meshgrid: tuple[np.ndarray, np.ndarray] = np.meshgrid(xx[:-1], yy[:-1])  # drop the last element
+            meshgrid: tuple[np.ndarray, np.ndarray] = np.meshgrid(xx[:-1], np.flip(yy[:-1]))  # drop the last element
             return meshgrid
         else:
             return xx[:-1], yy[:-1]

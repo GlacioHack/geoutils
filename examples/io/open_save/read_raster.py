@@ -1,8 +1,8 @@
 """
-Opening a raster
-================
+Open/save a raster
+==================
 
-This example demonstrates the instantiation of a raster through :class:`~geoutils.Raster`.
+This example demonstrates the instantiation of a raster through :class:`~geoutils.Raster` and saving with :func:`~geoutils.Raster.save`.
 """
 
 # %%
@@ -12,6 +12,9 @@ rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 rast
 
 # %%
+#
+# .. note::
+#        A raster can also be instantiated with a :class:`rasterio.io.DatasetReader` or a :class:`rasterio.io.MemoryFile`, see :ref:`sphx_glr_io_examples_import_export_import_raster.py`.
 # We can print more info on the raster.
 print(rast.info())
 
@@ -30,3 +33,7 @@ rast
 # We can load it explicitly by calling :func:`~geoutils.Raster.load` (could have also passed ``load_data=True`` to :class:`~geoutils.Raster`).
 rast.load()
 rast
+
+# %%
+# Finally, a raster is saved using :func:`~geoutils.Raster.save`:
+rast.save("myraster.tif")
