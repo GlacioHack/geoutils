@@ -33,8 +33,8 @@ raster
 ```
 
 From these **four main attributes**, many other derivatives attributes exist, such as {attr}`~geoutils.Raster.bounds` or {attr}`~geoutils.Raster.res` to 
-describe georeferencing. When a {class}`~geoutils.Raster` is based on an **on-disk** dataset, other attributes exist such as {attr}`~geoutils.Raster.
-name` or {attr}`~geoutils.Raster.driver`, see {ref}`raster-class` for a summary, or the {ref}`dedicated sections of the API` for a full listing.
+describe georeferencing. When a {class}`~geoutils.Raster` is based on an **on-disk** dataset, other attributes exist such as {attr}`~geoutils.Raster.name` or 
+{attr}`~geoutils.Raster.driver`, see {ref}`raster-class` for a summary, or the {ref}`dedicated sections of the API<api-raster-attrs>` for a full listing.
 
 ```{note}
 By default, {attr}`~geoutils.Raster.data` is not loaded during instantiation. See {ref}`core-lazy-load` for more details.
@@ -74,8 +74,12 @@ in order to easily call them from the vector object, and build additional method
 
 ```{code-cell} ipython3
 :tags: [hide-output]
-
 # Initiate a Vector from disk
-vector = examples.get_path("exploradores_rgi_outlines")
+vector = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
 vector
+```
+```{code-cell} ipython3
+:tags: [hide-output]
+# Show summarized information
+print(vector.info())
 ```

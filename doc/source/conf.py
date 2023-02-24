@@ -55,6 +55,7 @@ intersphinx_mapping = {
     "geopandas": ("https://geopandas.org/en/stable", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "xdem": ("https://xdem.readthedocs.io/en/latest", None),
+    "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None)
 }
 
 sphinx_gallery_conf = {
@@ -110,6 +111,12 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_templates"]
 # autodoc_default_options = {
 #        "special-members": "__init__",
 # }
+
+# To ignore warnings due to having myst-nb reading the .ipynb created by sphinx-gallery
+# Should eventually be fixed, see: https://github.com/executablebooks/MyST-NB/issues/363
+def setup(app):
+    # Ignore .ipynb files
+    app.registry.source_suffix.pop(".ipynb", None)
 
 # -- Options for HTML output -------------------------------------------------
 

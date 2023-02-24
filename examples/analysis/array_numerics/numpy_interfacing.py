@@ -32,6 +32,7 @@ asp.show(cmap='twilight', cbar_title="Aspect (degrees)")
 #
 # .. important::
 #        For rigorous slope and aspect calculation (matching that of GDAL), **check-out our sister package** `xDEM <https://xdem.readthedocs.io/en/latest/index.html>`_.
+#
 # We can make numpy logical operations to isolate the terrain oriented South and above three thousand meters. The rasters will be cast to a :class:`Mask<geoutils.Mask>`.
 
 # Not supported yet, fix first

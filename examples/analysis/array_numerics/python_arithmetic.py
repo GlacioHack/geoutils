@@ -24,6 +24,7 @@ rast.show(cmap='Greys_r')
 # .. important::
 #        Arithmetic operations cast to new :class:`dtypes<numpy.dtype>` automatically following NumPy coercion rules. If we had written ``(rast + 1)``,
 #        this calculation would have conserved the original :class:`numpy.uint8` :class:`dtype<numpy.dtype>` of the raster.
+#
 # Logical comparison operations will naturally cast to a :class:`Mask<geoutils.Mask>`.
 
 mask = rast == 200

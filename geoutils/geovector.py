@@ -382,7 +382,7 @@ class Vector:
         :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
         :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
         :param buffer: Size of buffer to be added around the features, in the raster's projection units.
-        If a negative value is set, will erode the features.
+            If a negative value is set, will erode the features.
 
         :returns: A Mask object contain a boolean array
         """
@@ -489,13 +489,13 @@ class Vector:
         :param xres: Output raster spatial resolution in x. Only if rst is None.
             Must be in units of crs, if set.
         :param yres: Output raster spatial resolution in y. Only if rst is None.
-        Must be in units of crs, if set. (Default to xres)
+            Must be in units of crs, if set. (Default to xres)
         :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None
             Must be in same system as crs, if set. (Default to self bounds).
         :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1)
         :param out_value: Value to be burned outside the polygons (Default is 0)
 
-        :returns: array containing the burned geometries
+        :returns: Raster or mask containing the burned geometries
         """
         # If input rst is string, open as Raster
         if isinstance(rst, str):
@@ -718,7 +718,7 @@ class Vector:
 
         :param out_crs: Output CRS
         :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
-        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+            Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
         # Calculate new bounds
@@ -738,21 +738,21 @@ class Vector:
         The algorithm may also yield unexpected results on very simple geometries.
 
         Note: A similar functionality is provided by momepy (http://docs.momepy.org) and is probably more robust.
-        It could be implemented in GeoPandas in the future: https://github.com/geopandas/geopandas/issues/2015
-
-        :examples:
-        >>> outlines = gu.Vector(gu.examples.get_path('everest_rgi_outlines'))
-        >>> outlines = gu.Vector(outlines.ds.to_crs('EPSG:32645'))
-        >>> buffer = outlines.buffer_without_overlap(500)
-        >>> ax = buffer.ds.plot()  # doctest: +SKIP
-        >>> outlines.ds.plot(ax=ax, ec='k', fc='none')  # doctest: +SKIP
-        >>> plt.show()  # doctest: +SKIP
+        It could be implemented in GeoPandas in the future: https://github.com/geopandas/geopandas/issues/2015.
 
         :param buffer_size: Buffer size in self's coordinate system units.
         :param metric: Whether to perform the buffering in a local metric system (default: True).
         :param plot: Set to True to show intermediate plots, useful for understanding or debugging.
 
         :returns: A Vector containing the buffered geometries.
+
+        :examples: On glacier outlines.
+            >>> outlines = gu.Vector(gu.examples.get_path('everest_rgi_outlines'))
+            >>> outlines = gu.Vector(outlines.ds.to_crs('EPSG:32645'))
+            >>> buffer = outlines.buffer_without_overlap(500)
+            >>> ax = buffer.ds.plot()  # doctest: +SKIP
+            >>> outlines.ds.plot(ax=ax, ec='k', fc='none')  # doctest: +SKIP
+            >>> plt.show()  # doctest: +SKIP
         """
 
         from geoutils.projtools import latlon_to_utm, utm_to_epsg

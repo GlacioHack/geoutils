@@ -44,10 +44,10 @@ except ImportError:
 
 try:
     import rioxarray
-except ImportError:
-    _has_rioxarray = False
-else:
     _has_rioxarray = True
+except ImportError:
+    rioxarray = None
+    _has_rioxarray = False
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
@@ -1665,10 +1665,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             defaults to self.crs.
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
         :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the
-        source CRS.
+            source CRS.
         :param dst_res: Pixel size in units of target CRS. Either 1 value or (xres, yres). Do not use with dst_size.
         :param dst_nodata: nodata value of the destination. If set to None, will use the same as source,
-        and if source is None, will use GDAL's default.
+            and if source is None, will use GDAL's default.
         :param dst_dtype: Set data type of output.
         :param src_nodata: nodata value of the source. If set to None, will read from the metadata.
         :param resampling: A rasterio Resampling method
@@ -1676,7 +1676,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param n_threads: The number of worker threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: The warp operation memory limit in MB. Larger values may perform better.
 
-        :returns: Raster
+        :returns: Reprojected raster
 
         """
 
@@ -2032,7 +2032,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if not _has_rioxarray:
             raise ImportError("rioxarray is required for this functionality.")
 
-        xr = rioxarray.open_rasterio(self.ds)
+        xr = rioxarray.open_rasterio(self.to_rio_dataset())
         if name is not None:
             xr.name = name
 
@@ -2576,16 +2576,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
          to ensure that the interpolation of points is done at the right location. See parameter description
          of shift_area_or_point for more details.
 
-        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image,
-        value returned is nan. Shape should be (N,2)'.
+        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image, value
+            returned is nan. Shape should be (N,2).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
-        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is
-             used to interpolate the raster value at each point. For more information, see
-             scipy.interpolate.interp2d. Default is linear.
+        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is used to
+            interpolate the raster value at each point. For more information, see scipy.interpolate.interp2d. Default is linear.
         :param index: The band to use (from 1 to self.count).
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
-
 
         :returns rpts: Array of raster value(s) for the given points.
         """

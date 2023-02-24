@@ -32,9 +32,9 @@ GeoUtils is an **accessible**, **efficient** and **reliable** package to analyze
 **Reliable** owing to its consistent higher-level operations respecting geospatial intricacies such as nodata values and pixel interpretation, ensured by 
 its testing suite and type checking ([Pytest](https://docs.pytest.org/en/7.2.x/), [Mypy](https://mypy-lang.org/)).
 
-# Where to start?
-
 ----------------
+
+# Where to start?
 
 ::::{grid} 1 2 2 3
 :gutter: 1 1 1 2

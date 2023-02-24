@@ -16,6 +16,7 @@ vect
 #
 # .. note::
 #        A vector can also be instantiated with a :class:`geopandas.GeoDataFrame`, see :ref:`sphx_glr_io_examples_import_export_import_vector.py`.
+#
 # We can print more info on the vector.
 print(vect)
 
