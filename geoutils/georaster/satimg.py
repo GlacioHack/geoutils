@@ -304,12 +304,12 @@ class SatelliteImage(Raster):  # type: ignore
             super().__init__(filename_or_dataset, attrs=attrs, load_data=load_data, indexes=indexes)
 
         # priority to user input
-        self.datetime = datetime
-        self.tile_name = tile_name
-        self.satellite = satellite
-        self.sensor = sensor
-        self.product = product
-        self.version = version
+        self._datetime = datetime
+        self._tile_name = tile_name
+        self._satellite = satellite
+        self._sensor = sensor
+        self._product = product
+        self._version = version
 
         # trying to get metadata from separate metadata file
         if read_from_meta and self.filename is not None and fn_meta is not None:
@@ -347,24 +347,49 @@ class SatelliteImage(Raster):  # type: ignore
                 print("No metadata could be read from filename.")
             return
 
-        for n in name_attrs:
-            a = self.__getattribute__(n)
-            a_fn = attrs[name_attrs.index(n)]
-            if a is None and a_fn is not None:
+        for name in name_attrs:
+            attr = self.__getattribute__(name)
+            attr_fn = attrs[name_attrs.index(name)]
+            if attr is None and attr_fn is not None:
                 if not silent:
-                    print("From filename: setting " + n + " as " + str(a_fn))
-                setattr(self, n, a_fn)
-            elif a is not None and attrs[name_attrs.index(n)] is not None:
+                    print("From filename: setting " + name + " as " + str(attr_fn))
+                # Set hidden attribute first
+                setattr(self, "_"+name, attr_fn)
+            elif attr is not None and attrs[name_attrs.index(name)] is not None:
                 if not silent:
                     print(
                         "Leaving user input of "
-                        + str(a)
+                        + str(attr)
                         + " for attribute "
-                        + n
+                        + name
                         + " despite reading "
-                        + str(attrs[name_attrs.index(n)])
+                        + str(attrs[name_attrs.index(name)])
                         + "from filename"
                     )
+
+    @property
+    def datetime(self) -> dt.datetime | None:
+        return self._datetime
+
+    @property
+    def satellite(self) -> str | None:
+        return self._satellite
+
+    @property
+    def sensor(self) -> str | None:
+        return self._sensor
+
+    @property
+    def product(self) -> str | None:
+        return self._product
+
+    @property
+    def version(self) -> str | None:
+        return self._version
+
+    @property
+    def tile_name(self) -> str | None:
+        return self._tile_name
 
     def __parse_metadata_from_file(self, fn_meta: str | None) -> None:
         warnings.warn(f"Parse metadata from file not implemented. {fn_meta}")

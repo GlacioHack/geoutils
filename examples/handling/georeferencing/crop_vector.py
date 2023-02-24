@@ -13,10 +13,8 @@ vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 
 # %%
 # Let's plot the raster and vector. The raster has smaller extent than the vector.
-import matplotlib.pyplot as plt
-ax = plt.gca()
-rast.show(ax=ax, cmap="Greys_r", alpha=0.7)
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='tab:purple', lw=3)
+rast.show(cmap="Greys_r", alpha=0.7)
+vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
 
 # %%
 # **First option:** using the raster as a reference to match, we crop the vector. We simply have to pass the :class:`~geoutils.Raster` as single argument to
@@ -29,18 +27,16 @@ vect.crop(rast)
 #      By default, :func:`~geoutils.Vector.crop` is done in-place, replacing ``vect``. This behaviour can be modified by passing ``inplace=False``.
 #
 
-ax = plt.gca()
-rast.show(ax=ax, cmap="Greys_r", alpha=0.7)
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='tab:purple', lw=3)
+rast.show(ax="new", cmap="Greys_r", alpha=0.7)
+vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
 
 # %%
 # The :func:`~geoutils.Vector.crop` keeps all features with geometries intersecting the extent to crop to. We can also force a clipping of the geometries
 # within the bounds using ``clip=True``.
 
 vect.crop(rast, clip=True)
-ax = plt.gca()
-rast.show(ax=ax, cmap="Greys_r", alpha=0.7)
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='tab:purple', lw=3)
+rast.show(ax="new", cmap="Greys_r", alpha=0.7)
+vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
 
 # %%
 # **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Vector.crop`, including another :class:`~geoutils.Vector` or a
@@ -52,6 +48,5 @@ vect.crop(cropGeom=(bounds.left + 0.5*(bounds.right - bounds.left),
                     bounds.right,
                     bounds.top))
 
-ax = plt.gca()
-rast.show(ax=ax, cmap="Greys_r", alpha=0.7)
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='tab:purple', lw=3)
+rast.show(ax="new", cmap="Greys_r", alpha=0.7)
+vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)

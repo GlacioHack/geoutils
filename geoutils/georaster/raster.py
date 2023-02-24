@@ -2103,24 +2103,26 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         alpha: float | int | None = None,
         cbar_title: str | None = None,
         add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | None = None,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        return_axes: bool = False,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        r"""Show/display the image, with axes in projection of image.
+        r"""Show/display the raster, with axes in projection of image.
 
         This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
-        you give this method will be passed to rasterio.plot.show.
+        you give this method will be passed to it.
 
         :param index: Which band to plot, from 1 to self.count (default is all).
         :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
-        :param vmax: Colorbar maximum value. Default is data min.
+        :param vmax: Colorbar maximum value. Default is data max.
+        :param alpha: Transparency of raster and colorbar.
         :param cbar_title: Colorbar label. Default is None.
         :param add_cbar: Set to True to display a colorbar. Default is True.
-        :param ax: A figure ax to be used for plotting. If None, will create default figure and axes,
-            and plot figure directly.
+        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new", will create a new axis.
+        :param return_axes: Whether to return axes.
 
-        :returns: if ax is not None, returns (ax, cbar) where cbar is the colorbar (None if add_cbar is False)
+        :returns: None, or (ax, caxes) if return_axes is True
 
 
         You can also pass in \*\*kwargs to be used by the underlying imshow or
@@ -2178,11 +2180,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Create axes
         if ax is None:
-            fig, ax0 = plt.subplots()
+            # If no figure exists, get a new axis
+            if len(plt.get_fignums()) == 0:
+                ax0 = plt.gca()
+            # Otherwise, get first axis
+            else:
+                ax0 = plt.gcf().axes[0]
+        elif isinstance(ax, str) and ax.lower() == "new":
+            _, ax0 = plt.subplots()
         elif isinstance(ax, matplotlib.axes.Axes):
             ax0 = ax
         else:
-            raise ValueError("ax must be a matplotlib.axes.Axes instance or None")
+            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
         # Use data array directly, as rshow on self.ds will re-load data
         rshow(
@@ -2209,12 +2218,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             cbar = None
 
-        # If ax not set, figure should be plotted directly
-        if ax is None:
-            plt.show()
-            return None
-
-        return ax0, cbar
+        # If returning axes
+        if return_axes:
+            return ax, cax
 
     def value_at_coords(
         self,
@@ -2689,19 +2695,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     @overload
     def to_points(
-        self, subset: float | int, as_frame: Literal[True], pixel_offset: Literal["center", "corner"]
-    ) -> gpd.GeoDataFrame:
+        self, subset: float | int, as_array: Literal[True], pixel_offset: Literal["center", "corner"]
+    ) -> Vector:
         ...
 
     @overload
     def to_points(
-        self, subset: float | int, as_frame: Literal[False], pixel_offset: Literal["center", "corner"]
+        self, subset: float | int, as_array: Literal[False], pixel_offset: Literal["center", "corner"]
     ) -> np.ndarray:
         ...
 
     def to_points(
-        self, subset: float | int = 1, as_frame: bool = False, pixel_offset: Literal["center", "corner"] = "center"
-    ) -> np.ndarray:
+        self, subset: float | int = 1, as_array: bool = False, pixel_offset: Literal["center", "corner"] = "center"
+    ) -> np.ndarray | Vector:
         """
         Subset a point cloud of the raster.
 
@@ -2711,11 +2717,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If the raster is not loaded, sampling will be done from disk without loading the entire Raster.
 
         Formats:
-            * `as_frame` == None | False: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
-            * `as_frame` == True: A GeoPandas GeoDataFrame with the columns ["b1", "b2", ..., "geometry"]
+            * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
+            * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
 
         :param subset: The point count or fraction. If 'subset' > 1, it's parsed as a count.
-        :param as_frame: Return a GeoDataFrame with a geometry column and crs instead of an ndarray.
+        :param as_array: Return an array instead of a vector.
         :param pixel_offset: The point at which to associate the pixel coordinate with ('corner' == upper left).
 
         :raises ValueError: If the subset count or fraction is poorly formatted.
@@ -2757,13 +2763,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Merge the coordinates and pixel data into a point cloud.
         points = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
 
-        if as_frame:
-            points = gpd.GeoDataFrame(
+        if not as_array:
+            points = Vector(gpd.GeoDataFrame(
                 points[:, 2:],
                 columns=[f"b{i}" for i in range(1, pixel_data.shape[0] + 1)],
                 geometry=gpd.points_from_xy(points[:, 0], points[:, 1]),
                 crs=self.crs,
-            )
+            ))
 
         return points
 

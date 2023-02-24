@@ -20,11 +20,8 @@ vect
 print(vect)
 
 # %%
-# Let's plot:
-import matplotlib.pyplot as plt
-for _, glacier in vect.ds.iterrows():
-    plt.plot(*glacier.geometry.exterior.xy)
-plt.show()
+# Let's plot by vector area
+vect.show(column="Area", cbar_title="Area (km²)")
 
 # %%
 # Finally, a vector is saved using :func:`~geoutils.Vector.save`.

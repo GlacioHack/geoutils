@@ -8,11 +8,13 @@ import pathlib
 import warnings
 from collections import abc
 from numbers import Number
-from typing import Literal, TypeVar, overload
+from typing import Literal, TypeVar, overload, Any
 
 import fiona
 import geopandas as gpd
+import matplotlib
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 import rasterio as rio
 import rasterio.errors
@@ -48,22 +50,46 @@ class Vector:
                 # This warning shows up in numpy 1.21 (2021-07-09)
                 warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
                 ds = gpd.read_file(filename)
-            self.ds = ds
-            self.name: str | gpd.GeoDataFrame | None = filename
+            self._ds = ds
+            self._name: str | gpd.GeoDataFrame | None = filename
         elif isinstance(filename, gpd.GeoDataFrame):
-            self.ds = filename
-            self.name = None
+            self._ds = filename
+            self._name = None
         else:
             raise ValueError("filename argument not recognised.")
 
         self._crs = self.ds.crs
 
     def __repr__(self) -> str:
-        return str(self.ds.__repr__())
+        """Representation of vector"""
+
+        # Get the representation of ds
+        str_ds= "\n       ".join(self.__str__().split("\n"))
+
+        s = self.__class__.__name__ + "(\n" + \
+            "  ds=" + str_ds + \
+            "\n  crs=" + self.crs.__str__() + \
+            "\n  bounds=" + self.bounds.__str__() + ")"
+
+        return s
+
+    def _repr_html_(self) -> str:
+        """Representation of vector for html"""
+
+        str_ds = "\n       ".join(self.ds.__str__().split("\n"))
+
+        # Over-ride Raster's method to remove nodata value (always None)
+        # Use <pre> to keep white spaces, <span> to keep line breaks
+        s = '<pre><span style="white-space: pre-wrap"><b><em>' + self.__class__.__name__ + '</em></b>(\n' + \
+            "  <b>ds=</b>" + str_ds + \
+            "\n  <b>crs=</b>" + self.crs.__str__() + \
+            "\n  <b>bounds=</b>" + self.bounds.__repr__() + ")</span></pre>"
+
+        return s
 
     def __str__(self) -> str:
         """Provide string of information about Raster."""
-        return self.info()
+        return self.ds.__str__()
 
     def __getitem__(self, value: gu.Raster | Vector | list[float] | tuple[float, ...]) -> Vector:
         """Subset the Raster object: calls the crop method with default parameters"""
@@ -87,6 +113,99 @@ class Vector:
 
         return "".join(as_str)
 
+    def show(self,
+             ref_crs: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | CRS | int | None = None,
+             cmap: matplotlib.colors.Colormap | str | None = None,
+             vmin: float | int | None = None,
+             vmax: float | int | None = None,
+             alpha: float | int | None = None,
+             cbar_title: str | None = None,
+             add_cbar: bool = False,
+             ax: matplotlib.axes.Axes | None | Literal["new"] = None,
+             return_axes: bool = False,
+             **kwargs: Any,
+             ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
+        """Show/display the vector, with axes in projection of image.
+
+        This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs which
+        you give this method will be passed to it.
+
+        :param ref_crs: The CRS to match when plotting.
+        :param cmap: The colormap. Default is plt.rcParams['image.cmap'].
+        :param vmin: Colorbar minimum value. Default is data min.
+        :param vmax: Colorbar maximum value. Default is data max.
+        :param alpha: Transparency of raster and colorbar.
+        :param cbar_title: Colorbar label. Default is None.
+        :param add_cbar: Set to True to display a colorbar. Default is True.
+        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new", will create a new axis.
+        :param return_axes: Whether to return axes.
+
+        :returns: None, or (ax, caxes) if return_axes is True
+        """
+
+        # Ensure that the vector is in the same crs as a reference
+        if isinstance(ref_crs, (gu.Raster, rio.io.DatasetReader, Vector, gpd.GeoDataFrame, str)):
+            vect_reproj = self.reproject(dst_ref=ref_crs)
+        elif isinstance(ref_crs, (CRS, int)):
+            vect_reproj = self.reproject(dst_crs=ref_crs)
+        else:
+            vect_reproj = self
+
+        # Create axes, or get current ones by default (like in matplotlib)
+        if ax is None:
+            # If no figure exists, get a new axis
+            if len(plt.get_fignums()) == 0:
+                ax0 = plt.gca()
+            # Otherwise, get first axis
+            else:
+                ax0 = plt.gcf().axes[0]
+        elif isinstance(ax, str) and ax.lower() == "new":
+            _, ax0 = plt.subplots()
+        elif isinstance(ax, matplotlib.axes.Axes):
+            ax0 = ax
+        else:
+            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
+
+        # Update with this function's arguments
+        if add_cbar:
+            legend = True
+        else:
+            legend = False
+
+        if "legend" in list(kwargs.keys()):
+            legend = kwargs.pop("legend")
+        else:
+            legend = False
+
+        # Get colormap arguments that might have been passed in the keyword args
+        if "legend_kwds" in list(kwargs.keys()) and legend:
+            legend_kwds = kwargs.pop("legend_kwds")
+            if "label" in list(legend_kwds):
+                cbar_title = legend_kwds.pop("label")
+        else:
+            legend_kwds = None
+
+        # Add colorbar
+        if add_cbar or cbar_title:
+            divider = make_axes_locatable(ax0)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm) #, orientation="horizontal", ticklocation="top")
+            cbar.solids.set_alpha(alpha)
+
+            if cbar_title is not None:
+                cbar.set_label(cbar_title)
+        else:
+            cax = None
+            cbar = None
+
+        # Plot
+        vect_reproj.ds.plot(ax=ax0, cax=cax, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha, legend=legend, legend_kwds=legend_kwds, **kwargs)
+
+        # If returning axes
+        if return_axes:
+            return ax, cax
+
     @property
     def bounds(self) -> rio.coords.BoundingBox:
         """Get a bounding box of the total bounds of the Vector."""
@@ -97,6 +216,27 @@ class Vector:
         """Ensure CRS cannot be set"""
         self._crs = self.ds.crs
         return self._crs
+
+    @property
+    def ds(self) -> gpd.GeoDataFrame:
+        """Getter method for dataset"""
+        return self._ds
+
+    @ds.setter
+    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
+        """Setting a new GeoDataFrame"""
+
+        if isinstance(new_ds, gpd.GeoDataFrame):
+            self._ds = new_ds
+        elif isinstance(new_ds, gpd.GeoSeries):
+            self._ds = gpd.GeoDataFrame(geometry=new_ds)
+        else:
+            raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
+
+    @property
+    def name(self) -> str | None:
+        """Filename if exists"""
+        return self._name
 
     def copy(self: VectorType) -> VectorType:
         """Return a copy of the Vector."""

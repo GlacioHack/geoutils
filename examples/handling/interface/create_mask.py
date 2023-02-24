@@ -13,17 +13,15 @@ vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 
 # %%
 # Let's plot the raster and vector.
-import matplotlib.pyplot as plt
-ax = plt.gca()
-rast.show(ax=ax, cmap="Purples")
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='k', lw=2)
+rast.show(cmap="Purples")
+vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
 
 # %%
 # **First option:** using the raster as a reference to match, we create a mask for the vector in any projection and georeferenced grid. We simply have to pass
 # the :class:`~geoutils.Raster` as single argument to :func:`~geoutils.Vector.rasterize`. See :ref:`core-match-ref` for more details.
 
 vect_rasterized = vect.create_mask(rast)
-vect_rasterized.show()
+vect_rasterized.show(ax="new")
 
 # %%
 # .. note::

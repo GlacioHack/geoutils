@@ -20,9 +20,8 @@ print(vect.bounds)
 # %%
 # Let's plot the raster and vector.
 import matplotlib.pyplot as plt
-ax = plt.gca()
-rast.show(ax=ax, cmap="Purples")
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='k', lw=2)
+rast.show(cmap="Purples")
+vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
 
 # %%
 # **First option:** using the second raster as a reference to match, we reproject the first one. We simply have to pass the second :class:`~geoutils.Raster`
@@ -37,9 +36,8 @@ rast.crop(vect)
 #      By default, :func:`~geoutils.Raster.crop` is done in-place, replacing ``rast``. This behaviour can be modified by passing ``inplace=False``.
 #
 
-ax = plt.gca()
-rast.show(ax=ax, cmap="Purples")
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='k', lw=2)
+rast.show(ax="new", cmap="Purples")
+vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
 
 # %%
 # **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Raster.crop`, including another :class:`~geoutils.Raster` or a
@@ -47,6 +45,5 @@ vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='k', lw=2)
 
 rast.crop((rast.bounds.left + 1000, rast.bounds.bottom, rast.bounds.right, rast.bounds.top - 500))
 
-ax = plt.gca()
-rast.show(ax=ax, cmap="Purples")
-vect.reproject(rast).ds.plot(ax=ax, fc='none', ec='k', lw=2)
+rast.show(ax="new", cmap="Purples")
+vect.show(ref_crs=rast, fc='none', ec='k', lw=2)

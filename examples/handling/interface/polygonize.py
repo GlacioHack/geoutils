@@ -18,7 +18,7 @@ rast.show(cmap="terrain")
 # We polygonize the raster.
 
 rast_polygonized = rast.polygonize()
-rast_polygonized.ds.plot()
+rast_polygonized.show(ax="new")
 
 # %%
 # By default, :func:`~geoutils.Raster.polygonize` will try to polygonize target all valid values. Instead, one can specify discrete values to target by
@@ -26,13 +26,13 @@ rast_polygonized.ds.plot()
 
 # A range of values to polygonize
 rast_polygonized = rast.polygonize((2500, 3000))
-rast_polygonized.ds.plot()
+rast_polygonized.show(ax="new")
 
 # %%
 # An even simpler way to do this is to compute a :func:`~geoutils.Mask` to polygonize using logical comparisons on the :func:`~geoutils.Raster`.
 
 rast_polygonized = ((2500 < rast) & (rast < 3000)).polygonize()
-rast_polygonized.ds.plot()
+rast_polygonized.show(ax="new")
 
 # %%
 # .. note::
