@@ -22,14 +22,14 @@ title: GeoUtils
 GeoUtils is an **accessible**, **efficient** and **reliable** package to analyze geospatial data.
 ::::
 
-**Accessible** owing to its convenient object-based structure, intuitive match-reference operations and familiar geospatial dependencies 
-([Rasterio](https://rasterio.readthedocs.io/en/latest/), [Rioxarray](https://corteva.github.io/rioxarray/stable/), 
+**Accessible** owing to its convenient object-based structure, intuitive match-reference operations and familiar geospatial dependencies
+([Rasterio](https://rasterio.readthedocs.io/en/latest/), [Rioxarray](https://corteva.github.io/rioxarray/stable/),
 [GeoPandas](https://geopandas.org/en/stable/docs.html), [PyProj](https://pyproj4.github.io/pyproj/stable/index.html)).
 
-**Efficient** owing to its implicit lazy loading functionalities, logical integration with pythonic operators and array interfacing 
+**Efficient** owing to its implicit lazy loading functionalities, logical integration with pythonic operators and array interfacing
 ([NumPy](https://numpy.org/doc/stable/), [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/)).
 
-**Reliable** owing to its consistent higher-level operations respecting geospatial intricacies such as nodata values and pixel interpretation, ensured by 
+**Reliable** owing to its consistent higher-level operations respecting geospatial intricacies such as nodata values and pixel interpretation, ensured by
 its testing suite and type checking ([Pytest](https://docs.pytest.org/en/7.2.x/), [Mypy](https://mypy-lang.org/)).
 
 ----------------
@@ -52,7 +52,7 @@ Learn more about why we developed GeoUtils.
 :::{grid-item-card} {material-regular}`data_exploration;2em` Quick start
 :link: quick-start
 :link-type: ref
- 
+
 Run a short example of the package functionalities.
 
 +++
@@ -94,7 +94,7 @@ quick_start
 ```{toctree}
 :caption: Features
 :maxdepth: 2
-    
+
 core_index
 rasters_index
 vectors_index
@@ -104,7 +104,7 @@ proj_tools
 ```{toctree}
 :caption: Examples
 :maxdepth: 2
-    
+
 io_examples/index
 handling_examples/index
 analysis_examples/index
@@ -112,8 +112,8 @@ analysis_examples/index
 
 ```{toctree}
 :caption: Reference
-:maxdepth: 2 
-    
+:maxdepth: 2
+
 api
 background
 ```

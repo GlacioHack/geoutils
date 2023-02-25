@@ -20,20 +20,20 @@ A {class}`~geoutils.Mask` is a subclass of {class}`~geoutils.Raster` that contai
 A {class}`~geoutils.Mask` also inherits the same derivative attributes as a {class}`~geoutils.Raster`.
 
 ```{note}
-There is no {class}`~geoutils.Raster.nodata` value defined in a {class}`~geoutils.Mask`, as it only take binary values. However, the 
-{class}`numpy.ma.MaskedArray` still has a {class}`~geoutils.Raster.data.mask` for unvalid values.
+There is no {class}`~geoutils.Raster.nodata` value defined in a {class}`~geoutils.Mask`, as it only take binary values. However, the
+{class}`numpy.ma.MaskedArray` still has a {class}`~geoutils.Raster.data.mask` for invalid values.
 ```
 
 ## Open and save
 
-{class}`Masks<geoutils.Mask>` can be created from files through instantiation with {class}`~geoutils.Mask`, and inherit the {func}`~geoutils.Raster.save` 
+{class}`Masks<geoutils.Mask>` can be created from files through instantiation with {class}`~geoutils.Mask`, and inherit the {func}`~geoutils.Raster.save`
 method from {class}`~geoutils.Raster`.
 
 ```{important}
-Most raster file formats such a [GeoTIFFs](https://gdal.org/drivers/raster/gtiff.html) **do not support {class}`bool` array {class}`dtypes<numpy.dtype>` 
+Most raster file formats such a [GeoTIFFs](https://gdal.org/drivers/raster/gtiff.html) **do not support {class}`bool` array {class}`dtypes<numpy.dtype>`
 on-disk**, and **most of Rasterio functionalities also do not support {class}`bool` {class}`dtypes<numpy.dtype>`**.
 
-To address this, during opening, saving and geospatial handling operations, {class}`Masks<geoutils.Mask>` are automatically converted to and from {class}`numpy.uint8`. 
+To address this, during opening, saving and geospatial handling operations, {class}`Masks<geoutils.Mask>` are automatically converted to and from {class}`numpy.uint8`.
 The {class}`~geoutils.Raster.nodata` of a {class}`~geoutils.Mask` can now be defined to save to a file, and defaults to `255`.
 ```
 
@@ -49,7 +49,7 @@ mask
 
 ## Cast from {class}`~geoutils.Raster`
 
-{class}`Masks<geoutils.Mask>` are automatically cast by a logical comparison operation performed on a {class}`~geoutils.Raster` with either another 
+{class}`Masks<geoutils.Mask>` are automatically cast by a logical comparison operation performed on a {class}`~geoutils.Raster` with either another
 {class}`~geoutils.Raster`, a {class}`~numpy.ndarray` or a number.
 
 ```{code-cell} ipython3
@@ -65,7 +65,7 @@ See {ref}`core-py-ops` for more details.
 
 ## Create from {class}`~numpy.ndarray`
 
-The class method {func}`geoutils.Raster.from_array`, inherited by the {class}`~geoutils.Mask` subclass, automatically casts to a {class}`~geoutils.Mask` if 
+The class method {func}`geoutils.Raster.from_array`, inherited by the {class}`~geoutils.Mask` subclass, automatically casts to a {class}`~geoutils.Mask` if
 the input {class}`~numpy.ndarray` is of {class}`bool` {class}`~numpy.dtype`.
 
 ```{code-cell} ipython3
@@ -104,7 +104,7 @@ mask
 
 ## Create from {class}`~geoutils.Vector`
 
-{class}`Masks<geoutils.Mask>` can also be created from a {class}`~geoutils.Vector` using {class}`~geoutils.Vector.create_mask`, which rasterizes all input 
+{class}`Masks<geoutils.Mask>` can also be created from a {class}`~geoutils.Vector` using {class}`~geoutils.Vector.create_mask`, which rasterizes all input
 geometries to a boolean array through {class}`~geoutils.Vector.rasterize`.
 
 Georeferencing attributes to create the {class}`~geoutils.Mask` can also be passed individually, using `bounds`, `crs`, `xres` and `yres`.
@@ -122,7 +122,7 @@ See {ref}`core-match-ref` for more details on the match-reference functionality.
 
 ## Arithmetic
 
-{class}`Masks<geoutils.Mask>` support Python's logical bitwise operators ({func}`~ <operator.invert>`, {func}`& <operator.and_>`, {func}`|<operator.or_>`, 
+{class}`Masks<geoutils.Mask>` support Python's logical bitwise operators ({func}`~ <operator.invert>`, {func}`& <operator.and_>`, {func}`|<operator.or_>`,
 {func}`^ <operator.xor>`) with other {class}`Masks<geoutils.Mask>`, and always output a {class}`~geoutils.Mask`.
 
 ```{code-cell} ipython3
@@ -136,7 +136,7 @@ See {ref}`core-match-ref` for more details on the match-reference functionality.
 {class}`Rasters<geoutils.Raster>`.
 
 ```{important}
-When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the indexed values of the {class}`~geoutils.Mask` **excluding those masked in its 
+When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the indexed values of the {class}`~geoutils.Mask` **excluding those masked in its
 {class}`~geoutils.Raster.data`'s {class}`~numpy.ma.MaskedArray`**.
 ```
 
@@ -151,10 +151,10 @@ See {ref}`py-ops-indexing` for more details.
 
 ## Polygonize (overloaded from {class}`~geoutils.Raster`)
 
-{class}`Masks<geoutils.Mask>` have simplified class methods overloaded from {class}`Rasters<geoutils.Raster>` when one or several attributes of the methods 
+{class}`Masks<geoutils.Mask>` have simplified class methods overloaded from {class}`Rasters<geoutils.Raster>` when one or several attributes of the methods
 become implicit in the case of {class}`bool` data.
 
-The {func}`~geoutils.Mask.polygonize` function is one of those, implicitly applying to the `True` values of the mask as target pixels. It outputs a 
+The {func}`~geoutils.Mask.polygonize` function is one of those, implicitly applying to the `True` values of the mask as target pixels. It outputs a
 {class}`~geoutils.Vector` of the input mask.
 
 ```{code-cell} ipython3
@@ -166,7 +166,7 @@ mask.polygonize()
 
 ## Proximity (overloaded from {class}`~geoutils.Raster`)
 
-The {func}`~geoutils.Mask.proximity` function is another overloaded method of {class}`~geoutils.Raster` implicitly applying to the `True` values of the mask as 
+The {func}`~geoutils.Mask.proximity` function is another overloaded method of {class}`~geoutils.Raster` implicitly applying to the `True` values of the mask as
 target pixels. It outputs a {class}`~geoutils.Raster` of the distances to the input mask.
 
 ```{code-cell} ipython3

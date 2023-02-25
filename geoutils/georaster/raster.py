@@ -44,6 +44,7 @@ except ImportError:
 
 try:
     import rioxarray
+
     _has_rioxarray = True
 except ImportError:
     rioxarray = None
@@ -106,6 +107,7 @@ _HANDLED_FUNCTIONS_2NIN = [
     "not_equal",
 ]
 handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
+
 
 # Function to set the default nodata values for any given dtype
 # Similar to GDAL for int types, but without absurdly long nodata values for floats.
@@ -195,7 +197,7 @@ def _load_rio(
     * resampling : to set the resampling algorithm
     """
     # If out_shape is passed, no need to account for transform and shape
-    if kwargs['out_shape'] is not None:
+    if kwargs["out_shape"] is not None:
         window = None
     else:
         if transform is not None and shape is not None:
@@ -489,7 +491,9 @@ class Raster:
     def indexes(self) -> tuple[int, ...]:
         """Return the indexes of bands loaded in memory if they are, otherwise on disk."""
         if self._indexes is not None and not self.is_loaded:
-            return self._indexes
+            if isinstance(self._indexes, int):
+                return (self._indexes,)
+            return tuple(self._indexes)
         # if self._indexes_loaded is not None:
         #     if isinstance(self._indexes_loaded, int):
         #         return (self._indexes_loaded, )
@@ -627,19 +631,27 @@ class Raster:
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
-            str_data = "not_loaded; shape on disk "+str(self._disk_shape)
+            str_data = "not_loaded; shape on disk " + str(self._disk_shape)
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 
         # Above and below, we align left spaces for multi-line object representation (arrays) after return to lines
         # And call the class name for easier inheritance to subclasses (avoid overloading to just rewrite subclass name)
-        s = self.__class__.__name__+"(\n"+\
-            "  data=" + str_data +\
-            "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
-            "\n  crs=" + self.crs.__str__()+\
-            "\n  nodata=" + self.nodata.__str__()+")"
+        s = (
+            self.__class__.__name__
+            + "(\n"
+            + "  data="
+            + str_data
+            + "\n  transform="
+            + "\n            ".join(self.transform.__str__().split("\n"))
+            + "\n  crs="
+            + self.crs.__str__()
+            + "\n  nodata="
+            + self.nodata.__str__()
+            + ")"
+        )
 
-        return s
+        return str(s)
         # L = [getattr(self, item) for item in self._saved_attrs]
         # s: str = "{}.{}({})".format(type(self).__module__, type(self).__qualname__, ", ".join(map(str, L)))
 
@@ -650,18 +662,26 @@ class Raster:
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
-            str_data = "<i>not_loaded; shape on disk "+str(self._disk_shape)+"</i>"
+            str_data = "<i>not_loaded; shape on disk " + str(self._disk_shape) + "</i>"
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 
         # Over-ride Raster's method to remove nodata value (always None)
         # Use <pre> to keep white spaces, <span> to keep line breaks
-        s = '<pre><span style="white-space: pre-wrap"><b><em>'+self.__class__.__name__+'</em></b>(\n' + \
-            "  <b>data=</b>" + str_data + \
-            "\n  <b>transform=</b>" + "\n            ".join(self.transform.__str__().split("\n")) + \
-            "\n  <b>crs=</b>" + self.crs.__str__() + ")</span></pre>"
+        s = (
+            '<pre><span style="white-space: pre-wrap"><b><em>'
+            + self.__class__.__name__
+            + "</em></b>(\n"
+            + "  <b>data=</b>"
+            + str_data
+            + "\n  <b>transform=</b>"
+            + "\n            ".join(self.transform.__str__().split("\n"))
+            + "\n  <b>crs=</b>"
+            + self.crs.__str__()
+            + ")</span></pre>"
+        )
 
-        return s
+        return str(s)
 
     def __str__(self) -> str:
         """Provide simplified string for print() about Raster."""
@@ -671,7 +691,7 @@ class Raster:
         else:
             s = self.data.__str__()
 
-        return s
+        return str(s)
 
     def __getitem__(self, value: Raster | Vector | list[float] | tuple[float, ...]) -> np.ndarray | Raster:
         """Subset the Raster object: calls the crop method with default parameters"""
@@ -2119,7 +2139,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param alpha: Transparency of raster and colorbar.
         :param cbar_title: Colorbar label. Default is None.
         :param add_cbar: Set to True to display a colorbar. Default is True.
-        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new", will create a new axis.
+        :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
+            If "new", will create a new axis.
         :param return_axes: Whether to return axes.
 
         :returns: None, or (ax, caxes) if return_axes is True
@@ -2221,6 +2242,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # If returning axes
         if return_axes:
             return ax, cax
+        else:
+            return None
 
     def value_at_coords(
         self,
@@ -2369,7 +2392,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 # if self.count == 1:
                 with rio.open(self.filename) as raster:
                     data = raster.read(
-                        window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=index,
+                        window=rio_window,
+                        fill_value=self.nodata,
+                        boundless=boundless,
+                        masked=masked,
+                        indexes=index,
                     )
                 value = format_value(data)
                 win = data
@@ -2379,7 +2406,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 #     with rio.open(self.filename) as raster:
                 #         for b in self.indexes:
                 #             data = raster.read(
-                #                 window=rio_window, fill_value=self.nodata, boundless=boundless, masked=masked, indexes=b
+                #                 window=rio_window, fill_value=self.nodata, boundless=boundless,
+                #                 masked=masked, indexes=b
                 #             )
                 #             val = format_value(data)
                 #             value[b] = val
@@ -2580,7 +2608,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             returned is nan. Shape should be (N,2).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
         :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is used to
-            interpolate the raster value at each point. For more information, see scipy.interpolate.interp2d. Default is linear.
+            interpolate the raster value at each point. For more information, see scipy.interpolate.interp2d.
+            Default is linear.
         :param index: The band to use (from 1 to self.count).
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
@@ -2762,12 +2791,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         points = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
 
         if not as_array:
-            points = Vector(gpd.GeoDataFrame(
-                points[:, 2:],
-                columns=[f"b{i}" for i in range(1, pixel_data.shape[0] + 1)],
-                geometry=gpd.points_from_xy(points[:, 0], points[:, 1]),
-                crs=self.crs,
-            ))
+            points = Vector(
+                gpd.GeoDataFrame(
+                    points[:, 2:],
+                    columns=[f"b{i}" for i in range(1, pixel_data.shape[0] + 1)],
+                    geometry=gpd.points_from_xy(points[:, 0], points[:, 1]),
+                    crs=self.crs,
+                )
+            )
 
         return points
 
@@ -2883,7 +2914,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
 # Subclass Mask for manipulating boolean Rasters
 class Mask(Raster):
-
     def __init__(
         self,
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
@@ -2926,12 +2956,18 @@ class Mask(Raster):
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 
         # Over-ride Raster's method to remove nodata value (always None)
-        s = "Mask(\n"+\
-            "  data=" + str_data +\
-            "\n  transform="+ "\n            ".join(self.transform.__str__().split("\n"))+\
-            "\n  crs=" + self.crs.__str__()+")"
+        s = (
+            "Mask(\n"
+            + "  data="
+            + str_data
+            + "\n  transform="
+            + "\n            ".join(self.transform.__str__().split("\n"))
+            + "\n  crs="
+            + self.crs.__str__()
+            + ")"
+        )
 
-        return s
+        return str(s)
 
     def _repr_html_(self) -> str:
         """Convert to HTML representation for notebooks and docs"""
@@ -2944,12 +2980,18 @@ class Mask(Raster):
 
         # Over-ride Raster's method to remove nodata value (always None)
         # Use <pre> to keep white spaces, <span> to keep line breaks
-        s = '<pre><span style="white-space: pre-wrap"><b><em>Mask</em></b>(\n' + \
-            "  <b>data=</b>" + str_data + \
-            "\n  <b>transform=</b>" + "\n            ".join(self.transform.__str__().split("\n")) + \
-            "\n  <b>crs=</b>" + self.crs.__str__() + ")</span></pre>"
+        s = (
+            '<pre><span style="white-space: pre-wrap"><b><em>Mask</em></b>(\n'
+            + "  <b>data=</b>"
+            + str_data
+            + "\n  <b>transform=</b>"
+            + "\n            ".join(self.transform.__str__().split("\n"))
+            + "\n  <b>crs=</b>"
+            + self.crs.__str__()
+            + ")</span></pre>"
+        )
 
-        return s
+        return str(s)
 
     def reproject(
         self: Mask,
@@ -3078,16 +3120,24 @@ class Mask(Raster):
 
         # TODO: Adapt target_value into int | list in Raster.proximity
         # If target values is passed but does not correspond to 0 or 1, raise a warning
-        # if target_values is not None and not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
+        # if target_values is not None and not isinstance(target_values, (int, np.integer,
+        # float, np.floating)) or target_values not in [0, 1]:
         #     warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
         #     target_values = [1]
 
         # Convert to unsigned integer and pass to parent method
         self._data = self.data.astype("uint8")
 
-        # Need to cast output to Raster before computing proximity, as output will not be boolean (super() would instantiate Mask() again)
+        # Need to cast output to Raster before computing proximity, as output will not be boolean
+        # (super() would instantiate Mask() again)
         raster = Raster({"data": self.data, "transform": self.transform, "crs": self.crs, "nodata": self.nodata})
-        return raster.proximity(vector=vector, target_values=target_values, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit)
+        return raster.proximity(
+            vector=vector,
+            target_values=target_values,
+            geometry_type=geometry_type,
+            in_or_out=in_or_out,
+            distance_unit=distance_unit,
+        )
 
     # Logical bitwise operations
     def __and__(self: Mask, other: Mask) -> Mask:
@@ -3110,9 +3160,7 @@ class Mask(Raster):
 
     def __invert__(self: Mask) -> Mask:
 
-        return self.from_array(
-            data=~self.data, transform=self.transform, crs=self.crs, nodata=self.nodata
-        )
+        return self.from_array(data=~self.data, transform=self.transform, crs=self.crs, nodata=self.nodata)
 
 
 # -----------------------------------------

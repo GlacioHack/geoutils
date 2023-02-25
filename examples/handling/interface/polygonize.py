@@ -8,8 +8,9 @@ This example demonstrates the polygonizing of a raster using :func:`geoutils.Ras
 # %%
 # We open a raster.
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left+5000, rast.bounds.bottom+5000])
+rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 5000, rast.bounds.bottom + 5000])
 # %%
 # Let's plot the raster.
 rast.show(cmap="terrain")

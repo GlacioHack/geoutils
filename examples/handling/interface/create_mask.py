@@ -8,13 +8,14 @@ This example demonstrates the creation of a mask from a vector using :func:`geou
 # %%
 # We open a raster and vector.
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 
 # %%
 # Let's plot the raster and vector.
 rast.show(cmap="Purples")
-vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
+vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **First option:** using the raster as a reference to match, we create a mask for the vector in any projection and georeferenced grid. We simply have to pass

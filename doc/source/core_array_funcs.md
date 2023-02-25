@@ -7,23 +7,23 @@ kernelspec:
 
 # Masked-array NumPy interface
 
-NumPy possesses an [array interface](https://numpy.org/doc/stable/reference/arrays.interface.html) that allows to properly map their functions on objects 
+NumPy possesses an [array interface](https://numpy.org/doc/stable/reference/arrays.interface.html) that allows to properly map their functions on objects
 that depend on {class}`ndarrays<numpy.ndarray>`.
 
 GeoUtils utilizes this interface to work with all {class}`Rasters<geoutils.Raster>` and their subclasses.
 
 ## Universal functions
 
-A first category of NumPy functions supported by {class}`Rasters<geoutils.Raster>` through the array interface is that of  
-[universal functions](https://numpy.org/doc/stable/reference/ufuncs.html), which operate on {class}`ndarrays<numpy.ndarray>` in an element-by-element 
-fashion. Examples of such functions are {func}`~numpy.add`, {func}`~numpy.absolute`, {func}`~numpy.isnan` or {func}`~numpy.sin`, and they number at more 
+A first category of NumPy functions supported by {class}`Rasters<geoutils.Raster>` through the array interface is that of
+[universal functions](https://numpy.org/doc/stable/reference/ufuncs.html), which operate on {class}`ndarrays<numpy.ndarray>` in an element-by-element
+fashion. Examples of such functions are {func}`~numpy.add`, {func}`~numpy.absolute`, {func}`~numpy.isnan` or {func}`~numpy.sin`, and they number at more
 than 90.
 
-Universal functions can take one or two inputs, and return one or two outputs. Through GeoUtils, as long as one of the two inputs is a {class}`Rasters<geoutils.Raster>`, 
+Universal functions can take one or two inputs, and return one or two outputs. Through GeoUtils, as long as one of the two inputs is a {class}`Rasters<geoutils.Raster>`,
 the output will be a {class}`~geoutils.Raster`. If there is a second input, it can be a {class}`~geoutils.Raster` or {class}`~numpy.ndarray` with
 matching georeferencing or shape, respectively.
 
-These functions inherently support the casting of different {attr}`~geoutils.Raster.dtypes` and values masked by {attr}`~geoutils.Raster.nodata` in the 
+These functions inherently support the casting of different {attr}`~geoutils.Raster.dtypes` and values masked by {attr}`~geoutils.Raster.nodata` in the
 {class}`~numpy.ma.MaskedArray`.
 
 Below, we re-use the same example created in {ref}`core-py-ops`.
@@ -67,7 +67,7 @@ np.add(arr, raster)
 np.modf(raster)
 ```
 
-Similar to with Python operators, NumPy's [logical comparison functions](https://numpy.org/doc/stable/reference/ufuncs.html#comparison-functions) cast 
+Similar to with Python operators, NumPy's [logical comparison functions](https://numpy.org/doc/stable/reference/ufuncs.html#comparison-functions) cast
 {class}`Rasters<geoutils.Raster>` to a {class}`~geoutils.Mask`.
 
 ```{code-cell} ipython3
@@ -77,8 +77,8 @@ np.greater(raster, raster + np.random.normal(size=np.shape(arr)))
 
 ## Array functions
 
-The second and last category of NumPy array functions supported by {class}`Rasters<geoutils.Raster>` through the array interface is that of array functions, 
-which are all other non-universal functions that can be applied to an array. Those function always modify the dimensionality of the output, such as 
+The second and last category of NumPy array functions supported by {class}`Rasters<geoutils.Raster>` through the array interface is that of array functions,
+which are all other non-universal functions that can be applied to an array. Those function always modify the dimensionality of the output, such as
 {func}`~numpy.mean`, {func}`~numpy.count_nonzero` or {func}`~numpy.nanmax`. Consequently, the output is the same as it would be with {class}`ndarrays<numpy.ndarray>`.
 
 
@@ -99,7 +99,7 @@ np.count_nonzero(raster, axis=2)
 
 
 Not all array functions are supported, however. GeoUtils supports nearly all [mathematical functions](https://numpy.org/doc/stable/reference/routines.math.html),
-[masked-array functions](https://numpy.org/doc/stable/reference/routines.ma.html) and [logical functions](https://numpy.org/doc/stable/reference/routines.logic.html). 
+[masked-array functions](https://numpy.org/doc/stable/reference/routines.ma.html) and [logical functions](https://numpy.org/doc/stable/reference/routines.logic.html).
 A full list of supported array function is available in {attr}`geoutils.georaster.raster.handled_array_funcs`.
 
 ## Respecting masked values

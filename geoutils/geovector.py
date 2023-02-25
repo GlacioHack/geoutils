@@ -8,17 +8,17 @@ import pathlib
 import warnings
 from collections import abc
 from numbers import Number
-from typing import Literal, TypeVar, overload, Any
+from typing import Any, Literal, TypeVar, overload
 
 import fiona
 import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 import rasterio as rio
 import rasterio.errors
 import shapely
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from rasterio import features, warp
 from rasterio.crs import CRS
 from scipy.spatial import Voronoi
@@ -64,12 +64,19 @@ class Vector:
         """Representation of vector"""
 
         # Get the representation of ds
-        str_ds= "\n       ".join(self.__str__().split("\n"))
+        str_ds = "\n       ".join(self.__str__().split("\n"))
 
-        s = self.__class__.__name__ + "(\n" + \
-            "  ds=" + str_ds + \
-            "\n  crs=" + self.crs.__str__() + \
-            "\n  bounds=" + self.bounds.__str__() + ")"
+        s = str(
+            self.__class__.__name__
+            + "(\n"
+            + "  ds="
+            + str_ds
+            + "\n  crs="
+            + self.crs.__str__()
+            + "\n  bounds="
+            + self.bounds.__str__()
+            + ")"
+        )
 
         return s
 
@@ -80,20 +87,30 @@ class Vector:
 
         # Over-ride Raster's method to remove nodata value (always None)
         # Use <pre> to keep white spaces, <span> to keep line breaks
-        s = '<pre><span style="white-space: pre-wrap"><b><em>' + self.__class__.__name__ + '</em></b>(\n' + \
-            "  <b>ds=</b>" + str_ds + \
-            "\n  <b>crs=</b>" + self.crs.__str__() + \
-            "\n  <b>bounds=</b>" + self.bounds.__repr__() + ")</span></pre>"
+        s = str(
+            '<pre><span style="white-space: pre-wrap"><b><em>'
+            + self.__class__.__name__
+            + "</em></b>(\n"
+            + "  <b>ds=</b>"
+            + str_ds
+            + "\n  <b>crs=</b>"
+            + self.crs.__str__()
+            + "\n  <b>bounds=</b>"
+            + self.bounds.__repr__()
+            + ")</span></pre>"
+        )
 
         return s
 
     def __str__(self) -> str:
         """Provide string of information about Raster."""
-        return self.ds.__str__()
+
+        return str(self.ds.__str__())
 
     def __getitem__(self, value: gu.Raster | Vector | list[float] | tuple[float, ...]) -> Vector:
         """Subset the Raster object: calls the crop method with default parameters"""
-        return self.crop(cropGeom=value, inplace=False)
+
+        return self.crop(cropGeom=value, clip=False, inplace=False)
 
     def info(self) -> str:
         """
@@ -113,19 +130,20 @@ class Vector:
 
         return "".join(as_str)
 
-    def show(self,
-             ref_crs: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | CRS | int | None = None,
-             cmap: matplotlib.colors.Colormap | str | None = None,
-             vmin: float | int | None = None,
-             vmax: float | int | None = None,
-             alpha: float | int | None = None,
-             cbar_title: str | None = None,
-             add_cbar: bool = False,
-             ax: matplotlib.axes.Axes | None | Literal["new"] = None,
-             return_axes: bool = False,
-             **kwargs: Any,
-             ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        """Show/display the vector, with axes in projection of image.
+    def show(
+        self,
+        ref_crs: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | CRS | int | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = False,
+        ax: matplotlib.axes.Axes | None | Literal["new"] = None,
+        return_axes: bool = False,
+        **kwargs: Any,
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
+        r"""Show/display the vector, with axes in projection of image.
 
         This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs which
         you give this method will be passed to it.
@@ -137,7 +155,8 @@ class Vector:
         :param alpha: Transparency of raster and colorbar.
         :param cbar_title: Colorbar label. Default is None.
         :param add_cbar: Set to True to display a colorbar. Default is True.
-        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new", will create a new axis.
+        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
+            will create a new axis.
         :param return_axes: Whether to return axes.
 
         :returns: None, or (ax, caxes) if return_axes is True
@@ -190,7 +209,9 @@ class Vector:
             divider = make_axes_locatable(ax0)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm) #, orientation="horizontal", ticklocation="top")
+            cbar = matplotlib.colorbar.ColorbarBase(
+                cax, cmap=cmap, norm=norm
+            )  # , orientation="horizontal", ticklocation="top")
             cbar.solids.set_alpha(alpha)
 
             if cbar_title is not None:
@@ -200,11 +221,23 @@ class Vector:
             cbar = None
 
         # Plot
-        vect_reproj.ds.plot(ax=ax0, cax=cax, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha, legend=legend, legend_kwds=legend_kwds, **kwargs)
+        vect_reproj.ds.plot(
+            ax=ax0,
+            cax=cax,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            alpha=alpha,
+            legend=legend,
+            legend_kwds=legend_kwds,
+            **kwargs,
+        )
 
         # If returning axes
         if return_axes:
             return ax, cax
+        else:
+            return None
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:
@@ -251,7 +284,7 @@ class Vector:
         cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
-        inplace: Literal[True] = True,
+        inplace: Literal[True],
     ) -> None:
         ...
 
@@ -265,6 +298,16 @@ class Vector:
     ) -> VectorType:
         ...
 
+    @overload
+    def crop(
+        self: VectorType,
+        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        clip: bool,
+        *,
+        inplace: bool = True,
+    ) -> VectorType | None:
+        ...
+
     def crop(
         self: VectorType,
         cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
@@ -272,7 +315,8 @@ class Vector:
         inplace: bool = True,
     ) -> VectorType | None:
         """
-        Crop the Vector to given extent, or bounds of a raster or vector. Optionally, clip geometries to that extent (by default keeps all intersecting).
+        Crop the Vector to given extent, or bounds of a raster or vector. Optionally, clip geometries
+        to that extent (by default keeps all intersecting).
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
@@ -583,7 +627,9 @@ class Vector:
         return output
 
     @classmethod
-    def from_bounds_projected(cls, raster_or_vector: gu.Raster | VectorType, out_crs: CRS | None = None, densify_pts: int = 5000) -> VectorType:
+    def from_bounds_projected(
+        cls, raster_or_vector: gu.Raster | VectorType, out_crs: CRS | None = None, densify_pts: int = 5000
+    ) -> VectorType:
         """Create a vector polygon from projected bounds of a raster or vector.
 
         :param raster_or_vector: A raster or vector
@@ -599,9 +645,9 @@ class Vector:
 
         df = gpd.GeoDataFrame(geometry=[poly], crs=out_crs)
 
-        return cls(df)
+        return cls(df)  # type: ignore
 
-    def query(self: VectorType, expression: str, inplace: bool = False) -> VectorType:
+    def query(self: Vector, expression: str, inplace: bool = False) -> Vector | None:
         """
         Query the Vector dataset with a valid Pandas expression.
 
@@ -612,13 +658,12 @@ class Vector:
         """
         # Modify inplace if wanted and return the self instance.
         if inplace:
-            self.ds.query(expression, inplace=True)
-            return self
+            self._ds = self.ds.query(expression, inplace=True)
+            return None
 
         # Otherwise, create a new Vector from the queried dataset.
-        new_vector = self.__new__(type(self))
-        new_vector.__init__(self.ds.query(expression))  # type: ignore
-        return new_vector  # type: ignore
+        new_vector = Vector(self.ds.query(expression))
+        return new_vector
 
     def proximity(
         self,

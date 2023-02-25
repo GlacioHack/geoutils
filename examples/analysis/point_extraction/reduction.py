@@ -8,8 +8,9 @@ This example demonstrates raster reduction to point values using :func:`~geoutil
 # %%
 # We open an example raster, a digital elevation model in South America
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left+2000, rast.bounds.bottom+2000])
+rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000, rast.bounds.bottom + 2000])
 
 # Plot the raster
 rast.show(cmap="terrain")
@@ -17,8 +18,9 @@ rast.show(cmap="terrain")
 # %%
 # We generate a random subsample of 100 coordinates to extract
 
-import numpy as np
 import geopandas as gpd
+import numpy as np
+
 # Replace by Raster function once done
 np.random.seed(42)
 x_coords = np.random.uniform(rast.bounds.left + 50, rast.bounds.right - 50, 50)
@@ -49,7 +51,11 @@ coords = rast.coords(grid=True)
 x_closest = rast.copy(new_array=coords[0]).value_at_coords(x=x_coords, y=y_coords)
 y_closest = rast.copy(new_array=coords[1]).value_at_coords(x=x_coords, y=y_coords)
 from shapely import box
-geometry = [box(x - 2*rast.res[0], y - 2*rast.res[1], x + 2*rast.res[0], y + 2*rast.res[1]) for x, y in zip(x_closest, y_closest)]
+
+geometry = [
+    box(x - 2 * rast.res[0], y - 2 * rast.res[1], x + 2 * rast.res[0], y + 2 * rast.res[1])
+    for x, y in zip(x_closest, y_closest)
+]
 ds = gpd.GeoDataFrame(geometry=geometry, crs=rast.crs)
 ds["vals"] = vals_reduced
 ds.plot(column="vals", cmap="terrain", legend=True, vmin=np.nanmin(rast), vmax=np.nanmax(rast))

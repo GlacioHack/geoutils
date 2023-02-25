@@ -6,10 +6,11 @@ This example demonstrates importing and exporting a :class:`rasterio.io.DatasetR
 :class:`~geoutils.Raster`.
 """
 
+import rasterio as rio
+
 # %%
 # A raster can be imported from a :class:`rasterio.io.DatasetReader` or :class:`rasterio.io.MemoryFile` simply by instantiating :class:`~geoutils.Raster`.
 import geoutils as gu
-import rasterio as rio
 
 ds = rio.DatasetReader(gu.examples.get_path("exploradores_aster_dem"))
 rast = gu.Raster(ds)

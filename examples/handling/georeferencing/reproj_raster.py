@@ -7,6 +7,7 @@ This example demonstrates the reprojection of a raster using :func:`geoutils.Ras
 # %%
 # We open two example rasters.
 import geoutils as gu
+
 rast1 = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 rast2 = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
 
@@ -18,9 +19,10 @@ print(rast2.info())
 # %%
 # Let's plot the first raster, with the warped extent of the second one.
 import matplotlib.pyplot as plt
+
 rast1.show(cmap="Blues")
 vect_bounds_rast2 = gu.Vector.from_bounds_projected(rast2)
-vect_bounds_rast2.show(fc='none', ec='r', lw=2)
+vect_bounds_rast2.show(fc="none", ec="r", lw=2)
 
 # %%
 # **First option:** using the second raster as a reference to match, we reproject the first one. We simply have to pass the second :class:`~geoutils.Raster`

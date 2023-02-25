@@ -1,8 +1,8 @@
 (api)=
 # API reference
 
-This page provides an auto-generated summary of GeoUtils’ API. 
-For more details and examples, refer to the relevant chapters in the main part of the 
+This page provides an auto-generated summary of GeoUtils’ API.
+For more details and examples, refer to the relevant chapters in the main part of the
 documentation.
 
 ```{eval-rst}
@@ -106,9 +106,9 @@ documentation.
     Raster.astype
     Raster.set_mask
     Raster.set_nodata
-    Raster.get_nanarray    
+    Raster.get_nanarray
 ```
-    
+
 ### I/O methods
 
 ```{eval-rst}
@@ -134,7 +134,7 @@ documentation.
     Raster.shift
     Raster.get_bounds_projected
     Raster.intersection
-    Raster.outside_image   
+    Raster.outside_image
 ```
 
 ### Testing methods
@@ -160,7 +160,7 @@ documentation.
     Raster.__truediv__
     Raster.__floordiv__
     Raster.__mod__
-    Raster.__pow__    
+    Raster.__pow__
 ```
 
 And reverse operations.
@@ -176,7 +176,7 @@ And reverse operations.
     Raster.__lt__
     Raster.__le__
     Raster.__gt__
-    Raster.__ge__ 
+    Raster.__ge__
 ```
 
 ### Array interface with NumPy
@@ -186,7 +186,7 @@ And reverse operations.
     :toctree: gen_modules/
 
     Raster.__array_ufunc__
-    Raster.__array_function__  
+    Raster.__array_function__
 ```
 
 ## SatelliteImage
@@ -311,5 +311,5 @@ And reverse operations.
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
-    
-    Vector.get_bounds_projected 
+
+    Vector.get_bounds_projected

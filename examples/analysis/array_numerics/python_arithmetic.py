@@ -8,16 +8,17 @@ This example demonstrates arithmetic operations using raster arithmetic on :clas
 # %%
 # We open a raster
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 rast
 
 # %% We plot the original raster.
-rast.show(cmap='Greys_r')
+rast.show(cmap="Greys_r")
 
 # %%
 # Performing arithmetic operations implicitly loads the data.
-rast = (rast + 1.)**0.5 / 5
-rast.show(cmap='Greys_r')
+rast = (rast + 1.0) ** 0.5 / 5
+rast.show(cmap="Greys_r")
 
 # %%
 #

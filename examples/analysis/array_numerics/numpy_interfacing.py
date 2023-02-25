@@ -8,10 +8,11 @@ This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geou
 # %%
 # We open a raster
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
 # %% We plot the original raster.
-rast.show(cmap='terrain')
+rast.show(cmap="terrain")
 
 # %%
 # NumPy interfacing allows to use any NumPy function directly on the raster
@@ -26,7 +27,7 @@ aspect = (aspect * 180 / np.pi) + np.pi
 # We copy the new array into a raster
 asp = rast.copy(new_array=aspect)
 
-asp.show(cmap='twilight', cbar_title="Aspect (degrees)")
+asp.show(cmap="twilight", cbar_title="Aspect (degrees)")
 
 # %%
 #
@@ -43,5 +44,3 @@ asp.show(cmap='twilight', cbar_title="Aspect (degrees)")
 # We plot the mask.
 
 # mask.show()
-
-

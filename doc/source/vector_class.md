@@ -31,7 +31,7 @@ and to allow the addition of more complex vector functionalities.
 
 ## Rasterize
 
-The {func}`~geoutils.Vector.rasterize` operation to convert from {class}`~geoutils.Vector` to {class}`~geoutils.Raster` inherently requires a 
+The {func}`~geoutils.Vector.rasterize` operation to convert from {class}`~geoutils.Vector` to {class}`~geoutils.Raster` inherently requires a
 {attr}`~geoutils.Raster.res` or {attr}`~geoutils.Raster.shape` attribute to define the grid. While those can be passed on their own.
 
 ## Proximity
@@ -41,5 +41,3 @@ The {func}`~geoutils.Vector.rasterize` operation to convert from {class}`~geouti
 
 
 ## Buffering
-
-

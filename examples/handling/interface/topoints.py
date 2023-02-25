@@ -8,8 +8,9 @@ This example demonstrates the conversion of a raster to point vector using :func
 # %%
 # We open a raster.
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left+500, rast.bounds.bottom+500])
+rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 500, rast.bounds.bottom + 500])
 # %%
 # Let's plot the raster.
 rast.show(cmap="terrain")

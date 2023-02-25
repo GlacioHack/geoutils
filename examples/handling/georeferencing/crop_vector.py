@@ -8,13 +8,14 @@ This example demonstrates the cropping of a vector using :func:`geoutils.Vector.
 # %%
 # We open a raster and vector.
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
 vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 
 # %%
 # Let's plot the raster and vector. The raster has smaller extent than the vector.
 rast.show(cmap="Greys_r", alpha=0.7)
-vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
+vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 
 # %%
 # **First option:** using the raster as a reference to match, we crop the vector. We simply have to pass the :class:`~geoutils.Raster` as single argument to
@@ -28,7 +29,7 @@ vect.crop(rast)
 #
 
 rast.show(ax="new", cmap="Greys_r", alpha=0.7)
-vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
+vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 
 # %%
 # The :func:`~geoutils.Vector.crop` keeps all features with geometries intersecting the extent to crop to. We can also force a clipping of the geometries
@@ -36,17 +37,14 @@ vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
 
 vect.crop(rast, clip=True)
 rast.show(ax="new", cmap="Greys_r", alpha=0.7)
-vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
+vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 
 # %%
 # **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Vector.crop`, including another :class:`~geoutils.Vector` or a
 # simple :class:`tuple` of bounds.
 
 bounds = rast.get_bounds_projected(out_crs=vect.crs)
-vect.crop(cropGeom=(bounds.left + 0.5*(bounds.right - bounds.left),
-                    bounds.bottom,
-                    bounds.right,
-                    bounds.top))
+vect.crop(cropGeom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top))
 
 rast.show(ax="new", cmap="Greys_r", alpha=0.7)
-vect.show(ref_crs=rast, fc='none', ec='tab:purple', lw=3)
+vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)

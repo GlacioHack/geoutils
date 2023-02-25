@@ -3,7 +3,7 @@
 
 ```{toctree}
 :maxdepth: 2
-    
+
 core_composition
 core_match_ref
 core_py_ops

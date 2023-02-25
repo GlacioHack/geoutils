@@ -8,6 +8,7 @@ This example demonstrates the cropping of a raster using :func:`geoutils.Raster.
 # %%
 # We open a raster and vector, and subset the latter.
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 vect = gu.Vector(vect.ds[vect.ds["RGIId"] == "RGI60-15.10055"])
@@ -20,8 +21,9 @@ print(vect.bounds)
 # %%
 # Let's plot the raster and vector.
 import matplotlib.pyplot as plt
+
 rast.show(cmap="Purples")
-vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
+vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **First option:** using the second raster as a reference to match, we reproject the first one. We simply have to pass the second :class:`~geoutils.Raster`
@@ -37,7 +39,7 @@ rast.crop(vect)
 #
 
 rast.show(ax="new", cmap="Purples")
-vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
+vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Raster.crop`, including another :class:`~geoutils.Raster` or a
@@ -46,4 +48,4 @@ vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
 rast.crop((rast.bounds.left + 1000, rast.bounds.bottom, rast.bounds.right, rast.bounds.top - 500))
 
 rast.show(ax="new", cmap="Purples")
-vect.show(ref_crs=rast, fc='none', ec='k', lw=2)
+vect.show(ref_crs=rast, fc="none", ec="k", lw=2)

@@ -8,6 +8,7 @@ This example demonstrates the instantiation of a raster through :class:`~geoutil
 # %%
 # We open an example raster. The data is, by default, unloaded.
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
 rast
 

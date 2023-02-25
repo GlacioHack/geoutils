@@ -5,12 +5,13 @@ Creating a raster from array
 This example demonstrates the creation of a raster through :func:`~geoutils.Raster.from_array`.
 """
 
+import numpy as np
+import pyproj
+import rasterio as rio
+
 # %%
 # We create a data array as :class:`~numpy.ndarray`, a transform as :class:`affine.Affine` and a coordinate reference system (CRS) as :class:`pyproj.CRS`.
 import geoutils as gu
-import rasterio as rio
-import pyproj
-import numpy as np
 
 # A random 3 x 3 masked array
 np.random.seed(42)
@@ -21,12 +22,7 @@ transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3)
 crs = pyproj.CRS.from_epsg(4326)
 
 # Create a raster
-rast = gu.Raster.from_array(
-        data = arr,
-        transform = transform,
-        crs = crs,
-        nodata = 255
-    )
+rast = gu.Raster.from_array(data=arr, transform=transform, crs=crs, nodata=255)
 rast
 
 # %%
@@ -45,12 +41,7 @@ mask = np.random.randint(0, 2, size=(5, 5), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
 # This time, we pass directly the masked array
-rast = gu.Raster.from_array(
-        data = ma,
-        transform = transform,
-        crs = crs,
-        nodata = 255
-    )
+rast = gu.Raster.from_array(data=ma, transform=transform, crs=crs, nodata=255)
 rast
 
 # %%

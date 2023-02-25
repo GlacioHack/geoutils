@@ -11,6 +11,7 @@ import geoutils as gu
 # We print the filename of our raster that, as often with satellite data, holds metadata information.
 filename = gu.examples.get_path("everest_landsat_b4")
 import os
+
 print(os.path.basename(filename))
 
 # %%

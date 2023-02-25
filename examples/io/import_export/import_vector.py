@@ -8,8 +8,9 @@ This example demonstrates importing or exporting a :class:`geopandas.GeoDataFram
 # %%
 # A vector can be imported from a :class:`geopandas.GeoDataFrame` simply by instantiating :class:`~geoutils.Vector`.
 
-import geoutils as gu
 import geopandas as gpd
+
+import geoutils as gu
 
 ds = gpd.read_file(gu.examples.get_path("exploradores_rgi_outlines"))
 vect = gu.Vector(ds)

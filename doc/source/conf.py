@@ -31,14 +31,14 @@ extensions = [
     "matplotlib.sphinxext.plot_directive",  # Render matplotlib figures from code.
     "sphinx.ext.autosummary",  # Create API doc summary texts from the docstrings.
     "sphinx.ext.inheritance_diagram",  # For class inheritance diagrams.
-    "sphinx.ext.graphviz", # To render graphviz diagrams.
-    "sphinx_design", # To render nice blocks
+    "sphinx.ext.graphviz",  # To render graphviz diagrams.
+    "sphinx_design",  # To render nice blocks
     "sphinx_autodoc_typehints",  # Include type hints in the API documentation.
     "sphinxcontrib.programoutput",
     "sphinx_gallery.gen_gallery",  # Examples gallery
     "sphinx.ext.intersphinx",
     # "myst_parser",  !! Not needed with myst_nb !! # Form of Markdown that works with sphinx, used a lot by the Sphinx Book Theme
-    "myst_nb" # MySt for rendering Jupyter notebook in documentation
+    "myst_nb",  # MySt for rendering Jupyter notebook in documentation
 ]
 
 # For sphinx design to work properly
@@ -55,7 +55,7 @@ intersphinx_mapping = {
     "geopandas": ("https://geopandas.org/en/stable", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "xdem": ("https://xdem.readthedocs.io/en/latest", None),
-    "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None)
+    "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
 }
 
 sphinx_gallery_conf = {
@@ -64,7 +64,11 @@ sphinx_gallery_conf = {
         os.path.join(os.path.dirname(__file__), "../", "../", "examples/handling"),
         os.path.join(os.path.dirname(__file__), "../", "../", "examples/analysis"),
     ],  # path to your example scripts
-    "gallery_dirs": ["io_examples", "handling_examples", "analysis_examples"],  # path to where to save gallery generated output
+    "gallery_dirs": [
+        "io_examples",
+        "handling_examples",
+        "analysis_examples",
+    ],  # path to where to save gallery generated output
     "inspect_global_variables": True,  # Make links to the class/function definitions.
     "reference_url": {
         # The module you locally document uses None
@@ -82,15 +86,19 @@ extlinks = {
 }
 
 # For matplotlib figures generate with sphinx plot: (suffix, dpi)
-plot_formats = [('.png', 400)]
+plot_formats = [(".png", 400)]
 
 # To avoid long path names in inheritance diagrams
-inheritance_alias = {"geoutils.georaster.raster.Raster": "geoutils.Raster", "geoutils.georaster.raster.Mask": "geoutils.Mask",
-                     "geoutils.georaster.satimg.SatelliteImage": "geoutils.SatelliteImage", "geoutils.geovector.Vector": "geoutils.Vector",
-                     "xdem.dem.DEM": "xdem.DEM"}
+inheritance_alias = {
+    "geoutils.georaster.raster.Raster": "geoutils.Raster",
+    "geoutils.georaster.raster.Mask": "geoutils.Mask",
+    "geoutils.georaster.satimg.SatelliteImage": "geoutils.SatelliteImage",
+    "geoutils.geovector.Vector": "geoutils.Vector",
+    "xdem.dem.DEM": "xdem.DEM",
+}
 
 # To avoid fuzzy PNGs
-graphviz_output_format = 'svg'
+graphviz_output_format = "svg"
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = [os.path.join(os.path.dirname(__file__), "_templates")]
@@ -118,6 +126,7 @@ def setup(app):
     # Ignore .ipynb files
     app.registry.source_suffix.pop(".ipynb", None)
 
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
@@ -137,10 +146,10 @@ html_theme_options = {
 
 # html_logo = "path/to/myimage.png"
 
-html_static_path = ['_static']
+html_static_path = ["_static"]
 
 html_css_files = [
-    'css/custom.css',
+    "css/custom.css",
 ]
 
 # Add any paths that contain custom static files (such as style sheets) here,
