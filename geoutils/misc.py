@@ -135,7 +135,7 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
 
         # If there is no pip dependency in env, all the ones of dev-env need to be added during CI
         else:
-            diff_pip_dep = list(pip_dep_devenv["pip"])
+            diff_pip_dep = pip_dep_devenv
 
     # If there is no pip dependency, we ignore this step
     else:
