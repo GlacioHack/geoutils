@@ -94,7 +94,6 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
     """
     Compute the difference between environment.yml and dev-environment.yml for setup of continuous integration,
     while checking that all the dependencies listed in environment.yml are also in dev-environment.yml
-
     :param fn_env: Filename path to environment.yml
     :param fn_devenv: Filename path to dev-environment.yml
     :param print_dep: Whether to print conda differences "conda", pip differences "pip" or both.
@@ -114,6 +113,10 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
     # Check if there is any pip dependency, if yes pop it from the end of the list
     if isinstance(conda_dep_devenv[-1], dict):
         pip_dep_devenv = conda_dep_devenv.pop()["pip"]
+
+        # Remove the package's self install for devs via pip, if it exists
+        if "-e ./" in pip_dep_devenv:
+            pip_dep_devenv.pop("-e ./")
 
         # Check if there is a pip dependency in the normal env as well, if yes pop it also
         if isinstance(conda_dep_env[-1], dict):
