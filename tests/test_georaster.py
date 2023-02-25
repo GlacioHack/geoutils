@@ -3076,14 +3076,18 @@ class TestArrayInterface:
     np.random.seed(42)
     arr1 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
     arr2 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
+    # This third one is to try ufunc methods like reduce()
+    arr3 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
 
     # Create two random masks
     mask1 = np.random.randint(0, 2, size=(width, height), dtype=bool)
     mask2 = np.random.randint(0, 2, size=(width, height), dtype=bool)
+    mask3 = np.random.randint(0, 2, size=(width, height), dtype=bool)
 
     # Assert that there is at least one unmasked value
     assert np.count_nonzero(~mask1) > 0
     assert np.count_nonzero(~mask2) > 0
+    assert np.count_nonzero(~mask3) > 0
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
     @pytest.mark.parametrize(
@@ -3326,3 +3330,39 @@ class TestArrayInterface:
             output_ma = arrfunc(rst1.data, rst2.data)
 
             assert np.ma.allequal(output_rst, output_ma)
+
+    @pytest.mark.parametrize("method_str", ["reduce"]) # type: ignore
+    def test_ufunc_methods(self, method_str):
+        """
+        Test that universal function methods all behave properly, don't need to test all
+        nodatas and dtypes as this was done above.
+        """
+
+        ma1 = np.ma.masked_array(data=self.arr1.astype("float32"), mask=self.mask1)
+        ma2 = np.ma.masked_array(data=self.arr2.astype("float32"), mask=self.mask2)
+        ma3 = np.ma.masked_array(data=self.arr3.astype("float32"), mask=self.mask3)
+
+        rst1 = gu.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=_default_nodata("float32"))
+        rst2 = gu.Raster.from_array(ma2, transform=self.transform, crs=None, nodata=_default_nodata("float32"))
+        rst3 = gu.Raster.from_array(ma3, transform=self.transform, crs=None, nodata=_default_nodata("float32"))
+
+        # Methods reduce, accumulate, reduceat and at only supported for binary function (2nin)
+        # -- Test 1: -- Try a ufunc with 2nin, 1nout like np.add
+        ufunc_2nin_1nout = getattr(np.add, method_str)
+        output_rst = ufunc_2nin_1nout((rst1, rst2, rst3))
+        output_ma = ufunc_2nin_1nout((ma1, ma2, ma3))
+
+        print(np.shape(output_ma))
+        print(np.shape(output_rst.data))
+        assert np.ma.allequal(output_rst.data, output_ma)
+
+        # Methods reduce only supports function that ouput a single value
+        # -- Test 2: -- Try a ufunc with 2nin, 2nout: there's only divmod
+        # ufunc_2nin_2nout = getattr(np.divmod, method_str)
+        # outputs_rst = ufunc_2nin_2nout((rst1, rst2, rst3))
+        # outputs_ma = ufunc_2nin_2nout((ma1, ma2, ma3))
+        #
+        # assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
+        #             outputs_ma[1], outputs_rst[1].data)
+
+

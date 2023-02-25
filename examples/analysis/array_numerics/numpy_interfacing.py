@@ -6,16 +6,16 @@ This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geou
 """
 # sphinx_gallery_thumbnail_number = 2
 # %%
-# We open a raster
+# We open a raster.
 import geoutils as gu
-
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
-# %% We plot the original raster.
+# %% We plot it.
 rast.show(cmap="terrain")
 
 # %%
-# NumPy interfacing allows to use any NumPy function directly on the raster
+#
+# The NumPy interface allows to use almost any NumPy function directly on the raster.
 
 import numpy as np
 
@@ -34,13 +34,13 @@ asp.show(cmap="twilight", cbar_title="Aspect (degrees)")
 # .. important::
 #        For rigorous slope and aspect calculation (matching that of GDAL), **check-out our sister package** `xDEM <https://xdem.readthedocs.io/en/latest/index.html>`_.
 #
-# We can make numpy logical operations to isolate the terrain oriented South and above three thousand meters. The rasters will be cast to a :class:`Mask<geoutils.Mask>`.
+# We use NumPy logical operations to isolate the terrain oriented South and above three thousand meters. The rasters will be logically cast to a
+# :class:`Mask<geoutils.Mask>`.
 
-# Not supported yet, fix first
-# mask = np.logical_and.reduce((asp > -45, asp < 45, rast > 3000))
-# mask
+mask = np.logical_and.reduce((asp > -45, asp < 45, rast > 3000))
+mask
 
 # %%
 # We plot the mask.
 
-# mask.show()
+mask.show()

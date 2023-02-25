@@ -1441,10 +1441,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             return nanarray
 
-    def __array__(self) -> np.ndarray:
-        """Method to cast np.array() or np.asarray() function directly on Raster classes."""
-
-        return self._data
+    # This is interfering with __array_ufunc__ and __array_function__, so better to leave out and specify
+    # behaviour directly in those.
+    # def __array__(self) -> np.ndarray:
+    #     """Method to cast np.array() or np.asarray() function directly on Raster classes."""
+    #
+    #     return self._data
 
     def __array_ufunc__(
         self,

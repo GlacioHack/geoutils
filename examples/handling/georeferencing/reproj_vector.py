@@ -23,7 +23,7 @@ print(vect.info())
 import matplotlib.pyplot as plt
 
 rast.show(cmap="Greys_r")
-vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
+vect.show(ax="new", fc="none", ec="tab:purple", lw=3)
 
 # %%
 # **First option:** using the raster as a reference to match, we reproject the vector. We simply have to pass the :class:`~geoutils.Raster` as an argument
@@ -40,6 +40,6 @@ vect_reproj.show(ax="new", fc="none", ec="tab:purple", lw=3)
 # **Second option:** we can pass the georeferencing argument ``dst_crs`` to :func:`~geoutils.Vector.reproject` (an EPSG code can be passed directly as
 # :class:`int`).
 
-# Reproject in UTM zone 45N
+# Reproject in UTM zone 45N.
 vect_reproj = vect.reproject(dst_crs=32645)
 vect_reproj

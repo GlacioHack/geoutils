@@ -31,7 +31,7 @@ We are working on making features fully consistent for the first long-term relea
 GeoUtils is built on top of [Rasterio](https://rasterio.readthedocs.io/en/latest/), [GeoPandas](https://geopandas.org/en/stable/docs.html)
 and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenced operations, and relies on [NumPy](https://numpy.org/doc/stable/),
 [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/) for scientific computing to provide:
-- A **common and consistent framework** for efficient rasters and vectors handling,
+- A **common and consistent framework** for efficient raster and vector handling,
 - A structure following the **principal of least knowledge**<sup>2</sup> to foster accessibility,
 - A **pythonic arithmetic** and **NumPy interfacing** for robust numerical computing and intuitive analysis.
 
