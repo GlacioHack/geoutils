@@ -116,7 +116,7 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
 
         # Remove the package's self install for devs via pip, if it exists
         if "-e ./" in pip_dep_devenv:
-            pip_dep_devenv.pop("-e ./")
+            pip_dep_devenv.remove("-e ./")
 
         # Check if there is a pip dependency in the normal env as well, if yes pop it also
         if isinstance(conda_dep_env[-1], dict):
