@@ -677,7 +677,7 @@ class Raster:
         """Subset the Raster object: calls the crop method with default parameters"""
 
         # If input is Mask with the same shape and georeferencing, index in 1D
-        if isinstance(value, Mask) and self.equal_georeferenced_grid(value):
+        if isinstance(value, Mask) and self.georeferenced_grid_equal(value):
             return self.data[value.data]
 
         # Otherwise, subset with crop
@@ -1375,7 +1375,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return cp
 
-    def equal_georeferenced_grid(self: RasterType, raster: RasterType) -> bool:
+    def georeferenced_grid_equal(self: RasterType, raster: RasterType) -> bool:
         """
         Check that grid shape, geotransform and CRS are equal.
 
@@ -2309,7 +2309,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 if window is not None:
                     value = reducer_function(value.flatten())
                 else:
-                    value = value[0, 0, 0]
+                    value = value[0, 0]
             else:
                 value = None
             return value

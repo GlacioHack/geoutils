@@ -293,15 +293,16 @@ class Vector:
 
         # Need to separate the two options, inplace update
         if inplace:
-            self.ds = self.ds.cx[xmin:xmax, ymin:ymax]
+            self._ds = self.ds.cx[xmin:xmax, ymin:ymax]
             if clip:
-                self.ds = self.ds.clip(mask=(xmin, ymin, xmax, ymax))
+                self._ds = self.ds.clip(mask=(xmin, ymin, xmax, ymax))
             return None
         # Or create a copy otherwise
         else:
             new_vector = self.copy()
-            new_vector.ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]
-            new_vector.ds = new_vector.ds.clip(mask=(xmin, ymin, xmax, ymax))
+            new_vector._ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]
+            if clip:
+                new_vector._ds = new_vector.ds.clip(mask=(xmin, ymin, xmax, ymax))
             return new_vector
 
     def reproject(

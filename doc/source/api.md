@@ -144,7 +144,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.raster_equal
-    Raster.equal_georeferenced_grid
+    Raster.georeferenced_grid_equal
 ```
 
 ### Arithmetic with other rasters, arrays or numbers

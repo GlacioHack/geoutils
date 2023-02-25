@@ -192,7 +192,7 @@ class TestVector:
         prox1 = vector.proximity(raster=raster1)
 
         # The proximity should have the same extent, resolution and CRS
-        assert raster1.equal_georeferenced_grid(prox1)
+        assert raster1.georeferenced_grid_equal(prox1)
 
         # With the base geometry
         vector.proximity(raster=raster1, geometry_type="geometry")

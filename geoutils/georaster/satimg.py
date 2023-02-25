@@ -25,7 +25,7 @@ def parse_landsat(gname: str) -> list[Any]:
         attrs.append(lsat_sensor[gname[1]])
         attrs.append(None)
         attrs.append(None)
-        attrs.append((int(gname[3:6]), int(gname[6:9])))
+        attrs.append((gname[3:6] + gname[6:9]))
         year = int(gname[9:13])
         doy = int(gname[13:16])
         attrs.append(dt.datetime.fromordinal(dt.date(year - 1, 12, 31).toordinal() + doy))
@@ -35,7 +35,7 @@ def parse_landsat(gname: str) -> list[Any]:
         attrs.append(lsat_sensor[split_name[0][1]])
         attrs.append(None)
         attrs.append(None)
-        attrs.append((int(split_name[2][0:3]), int(split_name[2][3:6])))
+        attrs.append((split_name[2][0:3] + split_name[2][3:6]))
         attrs.append(dt.datetime.strptime(split_name[3], "%Y%m%d"))
         attrs.append(attrs[3].date())
     return attrs
@@ -354,7 +354,7 @@ class SatelliteImage(Raster):  # type: ignore
                 if not silent:
                     print("From filename: setting " + name + " as " + str(attr_fn))
                 # Set hidden attribute first
-                setattr(self, "_"+name, attr_fn)
+                setattr(self, name, attr_fn)
             elif attr is not None and attrs[name_attrs.index(name)] is not None:
                 if not silent:
                     print(
@@ -367,29 +367,73 @@ class SatelliteImage(Raster):  # type: ignore
                         + "from filename"
                     )
 
+
+
     @property
     def datetime(self) -> dt.datetime | None:
         return self._datetime
+
+    @datetime.setter
+    def datetime(self, value: dt.datetime | None) -> None:
+        if isinstance(value, (dt.datetime, np.datetime64)) or value is None:
+            self._datetime = value
+        else:
+            raise ValueError('Datetime must be set with a python or NumPy datetime.')
 
     @property
     def satellite(self) -> str | None:
         return self._satellite
 
+    @satellite.setter
+    def satellite(self, value: str | None) -> None:
+        if isinstance(value, str) or value is None:
+            self._satellite = value
+        else:
+            raise ValueError('Satellite must be set with a string.')
+
     @property
     def sensor(self) -> str | None:
         return self._sensor
+
+    @sensor.setter
+    def sensor(self, value: str | None) -> None:
+        if isinstance(value, str) or value is None:
+            self._sensor = value
+        else:
+            raise ValueError('Sensor must be set with a string.')
 
     @property
     def product(self) -> str | None:
         return self._product
 
+    @product.setter
+    def product(self, value: str | None) -> None:
+        if isinstance(value, str) or value is None:
+            self._product = value
+        else:
+            raise ValueError('Product must be set with a string.')
+
     @property
     def version(self) -> str | None:
         return self._version
 
+    @version.setter
+    def version(self, value: str | None) -> None:
+        if isinstance(value, str) or value is None:
+            self._version = value
+        else:
+            raise ValueError('Version must be set with a string.')
+
     @property
     def tile_name(self) -> str | None:
         return self._tile_name
+
+    @tile_name.setter
+    def tile_name(self, value: str | None) -> None:
+        if isinstance(value, str) or value is None:
+            self._tile_name = value
+        else:
+            raise ValueError('Tile name must be set with a string.')
 
     def __parse_metadata_from_file(self, fn_meta: str | None) -> None:
         warnings.warn(f"Parse metadata from file not implemented. {fn_meta}")
