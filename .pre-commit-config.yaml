@@ -58,8 +58,7 @@ repos:
 
                   ]
                   additional_dependencies: [tokenize-rt==3.2.0]
-
-
+                  files: ^(geoutils|tests)
 
         # Sort imports using isort
         - repo: https://github.com/PyCQA/isort
