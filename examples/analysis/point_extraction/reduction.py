@@ -48,8 +48,8 @@ np.nanmean(vals - vals_reduced)
 
 # Replace by Vector fonction once done
 coords = rast.coords(grid=True)
-x_closest = rast.copy(new_array=coords[0]).value_at_coords(x=x_coords, y=y_coords)
-y_closest = rast.copy(new_array=coords[1]).value_at_coords(x=x_coords, y=y_coords)
+x_closest = rast.copy(new_array=coords[0]).value_at_coords(x=x_coords, y=y_coords).squeeze()
+y_closest = rast.copy(new_array=coords[1]).value_at_coords(x=x_coords, y=y_coords).squeeze()
 from shapely import box
 
 geometry = [
