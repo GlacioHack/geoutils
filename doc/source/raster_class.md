@@ -188,7 +188,8 @@ See {ref}`core-array-funcs` for more details.
 
 ## Reproject
 
-Reprojecting a {class}`~geoutils.Raster` is done through the{func}`~geoutils.Raster.reproject`, which enforces new {attr}`~geoutils.Raster.transform` and/or
+Reprojecting a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.reproject` function, which enforces new {attr}`~geoutils.Raster.transform` 
+and/or
 {class}`~geoutils.Raster.crs`.
 
 ```{important}
