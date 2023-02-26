@@ -8,6 +8,7 @@ This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geou
 # %%
 # We open a raster.
 import geoutils as gu
+
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
 # %% We plot it.

@@ -1552,16 +1552,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Separate one and two input functions
         if func.__name__ in _HANDLED_FUNCTIONS_1NIN:
-            outputs = func(first_arg, *args[1:], **kwargs) # type: ignore
+            outputs = func(first_arg, *args[1:], **kwargs)  # type: ignore
         else:
             second_arg = args[1].data
-            outputs = func(first_arg, second_arg, *args[2:], **kwargs) # type: ignore
+            outputs = func(first_arg, second_arg, *args[2:], **kwargs)  # type: ignore
 
         # Below, we recast to Raster if the shape was preserved, otherwise return an array
         # First, if there are several outputs in a tuple which are arrays
         if isinstance(outputs, tuple) and isinstance(outputs[0], np.ndarray):
             if all(output.shape == args[0].data.shape for output in outputs):
-                return (self.from_array(data=output, transform=self.transform, crs=self.crs, nodata=self.nodata) for output in outputs)
+                return (
+                    self.from_array(data=output, transform=self.transform, crs=self.crs, nodata=self.nodata)
+                    for output in outputs
+                )
             else:
                 return outputs
         # Second, if there is a single output which is an array

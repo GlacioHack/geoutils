@@ -3344,7 +3344,7 @@ class TestArrayInterface:
             else:
                 assert np.ma.allequal(output_rst, output_ma)
 
-    @pytest.mark.parametrize("method_str", ["reduce"]) # type: ignore
+    @pytest.mark.parametrize("method_str", ["reduce"])  # type: ignore
     def test_ufunc_methods(self, method_str):
         """
         Test that universal function methods all behave properly, don't need to test all
@@ -3369,7 +3369,7 @@ class TestArrayInterface:
         print(np.shape(output_rst.data))
         assert np.ma.allequal(output_rst.data, output_ma)
 
-        # Methods reduce only supports function that ouput a single value
+        # Methods reduce only supports function that output a single value
         # -- Test 2: -- Try a ufunc with 2nin, 2nout: there's only divmod
         # ufunc_2nin_2nout = getattr(np.divmod, method_str)
         # outputs_rst = ufunc_2nin_2nout((rst1, rst2, rst3))
@@ -3377,5 +3377,3 @@ class TestArrayInterface:
         #
         # assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
         #             outputs_ma[1], outputs_rst[1].data)
-
-
