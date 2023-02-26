@@ -180,6 +180,7 @@ Logical comparison functions will cast to a {class}`~geoutils.Mask`.
 
 ```{code-cell} ipython3
 # Is the raster close to another within tolerance?
+
 np.isclose(raster, raster+0.05, atol=0.1)
 ```
 

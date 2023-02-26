@@ -3281,8 +3281,14 @@ class TestArrayInterface:
             if "gradient" in arrfunc_str:
                 assert np.ma.allequal(output_rst[0], output_ma[0]) and np.ma.allequal(output_rst[1], output_ma[1])
             # This test is for when the NumPy function reduces the dimension of the array but not completely
-            elif isinstance(output_rst, np.ndarray):
-                assert np.ma.allequal(output_rst, output_ma)
+            elif isinstance(output_ma, np.ndarray):
+                # When the NumPy function preserves the shape, it returns a Raster
+                if output_ma.shape == rst.data.shape:
+                    assert isinstance(output_rst, gu.Raster)
+                    assert np.ma.allequal(output_rst.data, output_ma)
+                # Otherwise, it returns an array
+                else:
+                    assert np.ma.allequal(output_rst, output_ma)
             # This test is for when the NumPy function reduces the dimension to a single number
             else:
                 assert output_rst == output_ma
@@ -3326,10 +3332,17 @@ class TestArrayInterface:
 
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
+            # Compute outputs
             output_rst = arrfunc(rst1, rst2)
             output_ma = arrfunc(rst1.data, rst2.data)
 
-            assert np.ma.allequal(output_rst, output_ma)
+            # When the NumPy function preserves the shape, it returns a Raster
+            if isinstance(output_ma, np.ndarray) and output_ma.shape == rst1.data.shape:
+                assert isinstance(output_rst, gu.Raster)
+                assert np.ma.allequal(output_rst.data, output_ma)
+            # Otherwise, it returns an array
+            else:
+                assert np.ma.allequal(output_rst, output_ma)
 
     @pytest.mark.parametrize("method_str", ["reduce"]) # type: ignore
     def test_ufunc_methods(self, method_str):
