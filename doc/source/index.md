@@ -11,7 +11,8 @@ title: GeoUtils
 :columns: 4
 
 ```{image} ./_static/logo_only_v3.svg
-:width: 300px
+    :width: 300px
+    :class: dark-light
 ```
 :::
 

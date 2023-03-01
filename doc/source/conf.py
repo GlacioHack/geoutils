@@ -140,9 +140,46 @@ html_title = "GeoUtils"
 html_theme_options = {
     "use_sidenotes": True,
     "repository_url": "https://github.com/GlacioHack/geoutils",
+    "repository_branch": "main",
     "use_repository_button": True,
-    "logo_only": True,
+    "use_edit_page_button": True,
+    "use_source_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+    #"logo_only": True,
+    # "icon_links": [
+    #         {
+    #             "name": "Conda",
+    #             "url": "https://anaconda.org/conda-forge/geoutils",
+    #             "icon": "https://img.shields.io/conda/vn/conda-forge/geoutils.svg",
+    #             "type": "url",
+    #         },
+    #         {
+    #             "name": "PyPI",
+    #             "url": "https://pypi.org/project/geoutils/0.0.10/",
+    #             "icon": "https://badge.fury.io/py/geoutils.svg",
+    #             "type": "url",
+    #         },
+    #         {
+    #             "name": "Testing",
+    #             "url": "https://coveralls.io/github/GlacioHack/geoutils?branch=main",
+    #             "icon": "https://coveralls.io/repos/github/GlacioHack/geoutils/badge.svg?branch=main",
+    #             "type": "url",
+    #         }],
 }
+
+html_context = {
+   # ...
+   "default_mode": "auto"
+}
+
+# Add the search bar to be always displayed (not only on top)
+html_sidebars = {
+    "**": ["navbar-logo.html",
+           "search-field.html",
+           "sbt-sidebar-nav.html"]
+}
+
 
 # html_logo = "path/to/myimage.png"
 
