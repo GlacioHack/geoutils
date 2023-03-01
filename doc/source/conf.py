@@ -138,6 +138,7 @@ html_logo = "_static/logo_v3.svg"
 html_title = "GeoUtils"
 
 html_theme_options = {
+    "path_to_docs": "doc/source",
     "use_sidenotes": True,
     "repository_url": "https://github.com/GlacioHack/geoutils",
     "repository_branch": "main",
