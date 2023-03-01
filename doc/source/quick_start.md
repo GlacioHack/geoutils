@@ -30,9 +30,9 @@ rast = gu.Raster(filename_rast)
 vect = gu.Vector(filename_vect)
 ```
 
-A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`~numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, a 
+A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`~numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, a
 {class}`~pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an {class}`~affine.Affine` as {attr}`~geoutils.Raster.transform`, and a {class}`float` or {class}
-`int` as {attr}`geoutils.Raster.nodata`. 
+`int` as {attr}`geoutils.Raster.nodata`.
 
 
 ```{code-cell} ipython3
@@ -41,13 +41,13 @@ rast
 ```
 
 ```{important}
-When a file exists on disk, {class}`~geoutils.Raster` is linked to a {class}`rasterio.io.DatasetReader` object for loading the metadata. The array will be 
+When a file exists on disk, {class}`~geoutils.Raster` is linked to a {class}`rasterio.io.DatasetReader` object for loading the metadata. The array will be
 **loaded in-memory implicitly** when {attr}`~geoutils.Raster.data` is required by an operation.
 
 See {ref}`core-lazy-load` for more details.
 ```
 
-A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`, for which 
+A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`, for which
 most methods are wrapped directly into {class}`~geoutils.Vector`.
 
 ```{code-cell} ipython3
@@ -62,10 +62,10 @@ All other attributes are derivatives of those main attributes, or of the filenam
 
 ## Handling and match-reference
 
-In GeoUtils, geospatial handling operations are based on class methods, such as {func}`~geoutils.Raster.crop` or {func}`~geoutils.Raster.reproject`. 
+In GeoUtils, geospatial handling operations are based on class methods, such as {func}`~geoutils.Raster.crop` or {func}`~geoutils.Raster.reproject`.
 
-For convenience and consistency, nearly all of these methods can be passed solely another {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a 
-**reference to match** during the operation. A **reference {class}`~geoutils.Vector`** enforces a matching of {attr}`~geoutils.Vector.bounds` and/or 
+For convenience and consistency, nearly all of these methods can be passed solely another {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a
+**reference to match** during the operation. A **reference {class}`~geoutils.Vector`** enforces a matching of {attr}`~geoutils.Vector.bounds` and/or
 {attr}`~geoutils.Vector.crs`, while a **reference {class}`~geoutils.Raster`** can also enforce a matching of {attr}`~geoutils.Raster.res`, depending on the nature of the operation.
 
 
@@ -83,8 +83,8 @@ print(rast.info())
 
 Additionally, in GeoUtils, **methods that apply to the same georeferencing attributes have consistent naming**<sup>1</sup> across {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.
 
-A {func}`~geoutils.Raster.reproject` involves a change in {attr}`~geoutils.Raster.crs` or {attr}`~geoutils.Raster.transform`, while a {func}`~geoutils.Raster.crop` only involves a change 
-in {attr}`~geoutils.Raster.bounds`. Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils.Vector` from a {class}`~geoutils.Raster`, 
+A {func}`~geoutils.Raster.reproject` involves a change in {attr}`~geoutils.Raster.crs` or {attr}`~geoutils.Raster.transform`, while a {func}`~geoutils.Raster.crop` only involves a change
+in {attr}`~geoutils.Raster.bounds`. Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils.Vector` from a {class}`~geoutils.Raster`,
 and the other way around for {func}`~geoutils.Vector.rasterize`.
 
 ```{list-table}
@@ -105,18 +105,18 @@ and the other way around for {func}`~geoutils.Vector.rasterize`.
      - {func}`~geoutils.Vector.rasterize`
 ```
 
-All methods can be also be passed any number of georeferencing arguments such as {attr}`~geoutils.Raster.shape` or {attr}`~geoutils.Raster.res`, and will 
+All methods can be also be passed any number of georeferencing arguments such as {attr}`~geoutils.Raster.shape` or {attr}`~geoutils.Raster.res`, and will
 naturally deduce others from the input {class}`~geoutils.Raster` or {class}`~geoutils.Vector`, much as in [GDAL](https://gdal.org/)'s command line.
 
 
-## Higher-level analysis tools 
+## Higher-level analysis tools
 
-GeoUtils also implements higher-level geospatial analysis tools for both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>`. For 
-example, one can compute the distance to a {class}`~geoutils.Vector` geometry, or to target pixels of a {class}`~geoutils.Raster`, using 
+GeoUtils also implements higher-level geospatial analysis tools for both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>`. For
+example, one can compute the distance to a {class}`~geoutils.Vector` geometry, or to target pixels of a {class}`~geoutils.Raster`, using
 {func}`~geoutils.Vector.proximity`.
 
-As with the geospatial handling functions previously listed, many analysis functions can take a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a 
-**reference to utilize** during the operation. In the case of {func}`~geoutils.Vector.proximity`, passing a {class}`~geoutils.Raster` serves as a reference 
+As with the geospatial handling functions previously listed, many analysis functions can take a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a
+**reference to utilize** during the operation. In the case of {func}`~geoutils.Vector.proximity`, passing a {class}`~geoutils.Raster` serves as a reference
 for the georeferenced grid on which to compute the distances.
 
 ```{code-cell} ipython3
@@ -131,17 +131,17 @@ and `rast`'s metadata is sufficient to provide a georeferenced grid for {func}`~
 
 ## Quick plotting
 
-To facilitate the analysis process, GeoUtils includes quick plotting tools that support multiple colorbars and implicitly add layers to the current axis. 
+To facilitate the analysis process, GeoUtils includes quick plotting tools that support multiple colorbars and implicitly add layers to the current axis.
 Those are wrapped from {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot`, and relay any argument passed.
 
 ```{seealso}
 GeoUtils' plotting tools only aim to get rid off the most common hassles when quickly plotting raster and vector data during analysis.
 
-For advanced plotting tools to create "publication-quality" figures, see [Cartopy](https://scitools.org.uk/cartopy/docs/latest/) or 
+For advanced plotting tools to create "publication-quality" figures, see [Cartopy](https://scitools.org.uk/cartopy/docs/latest/) or
 [GeoPlot](https://residentmario.github.io/geoplot/index.html).
 ```
 
-The plotting functionality is named {func}`~geoutils.Raster.show` everywhere, for consistency. Here again, a {class}`~geoutils.Raster` or 
+The plotting functionality is named {func}`~geoutils.Raster.show` everywhere, for consistency. Here again, a {class}`~geoutils.Raster` or
 {class}`~geoutils.Vector` can be passed as a **reference to match** to ensure all data is displayed on the same grid and projection.
 
 ```{code-cell} ipython3
