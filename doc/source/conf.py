@@ -146,7 +146,7 @@ html_theme_options = {
     "use_source_button": True,
     "use_issues_button": True,
     "use_download_button": True,
-    #"logo_only": True,
+    # "logo_only": True,
     # "icon_links": [
     #         {
     #             "name": "Conda",
@@ -169,16 +169,12 @@ html_theme_options = {
 }
 
 html_context = {
-   # ...
-   "default_mode": "auto"
+    # ...
+    "default_mode": "auto"
 }
 
 # Add the search bar to be always displayed (not only on top)
-html_sidebars = {
-    "**": ["navbar-logo.html",
-           "search-field.html",
-           "sbt-sidebar-nav.html"]
-}
+html_sidebars = {"**": ["navbar-logo.html", "search-field.html", "sbt-sidebar-nav.html"]}
 
 
 # html_logo = "path/to/myimage.png"
