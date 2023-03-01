@@ -7,9 +7,11 @@ kernelspec:
 
 # Quick start
 
-The following presents how to quickly get started with GeoUtils, show-casing examples on different core aspects of the package.
+The following presents a descriptive example show-casing all core aspects of GeoUtils.
 
 For more details, refer to the {ref}`core-index`, {ref}`rasters-index` or {ref}`vectors-index` pages.
+
+To find an example about a specific functionality, jump to {ref}`quick-gallery`.
 
 ## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes
 
@@ -28,18 +30,25 @@ rast = gu.Raster(filename_rast)
 vect = gu.Vector(filename_vect)
 ```
 
-A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`~numpy.ma.MaskedArray` as `.data`, a {class}`~pyproj.crs.CRS` as `.crs`,
-an {class}`~affine.Affine` as `.transform`, and a {class}`float` or {class}`int` as `.nodata`. When a file exists on disk, {class}`~geoutils.Raster` is
-linked to a {class}`rasterio.io.DatasetReader` object for loading the metadata, and the array at the appropriate time.
+A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`~numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, a 
+{class}`~pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an {class}`~affine.Affine` as {attr}`~geoutils.Raster.transform`, and a {class}`float` or {class}
+`int` as {attr}`geoutils.Raster.nodata`. 
+
 
 ```{code-cell} ipython3
-:tags: [hide-output]
 # The opened raster
 rast
 ```
 
-A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as `.ds`, for which most methods are
-wrapped directly into {class}`~geoutils.Vector`.
+```{important}
+When a file exists on disk, {class}`~geoutils.Raster` is linked to a {class}`rasterio.io.DatasetReader` object for loading the metadata. The array will be 
+**loaded in-memory implicitly** when {attr}`~geoutils.Raster.data` is required by an operation.
+
+See {ref}`core-lazy-load` for more details.
+```
+
+A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`, for which 
+most methods are wrapped directly into {class}`~geoutils.Vector`.
 
 ```{code-cell} ipython3
 :tags: [hide-output]
@@ -50,37 +59,33 @@ vect
 All other attributes are derivatives of those main attributes, or of the filename on disk. Attributes of {class}`~geoutils.Raster` and
 {class}`~geoutils.Vector` update with geospatial operations on themselves.
 
-## Geospatial handling and match-reference
 
-Geospatial operations are based on class methods, such as {func}`geoutils.Raster.crop` or {func}`geoutils.Vector.proximity`. Nearly all of these methods can be
-passed solely another {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a **reference to match** during the operation. A **reference {class}`~geoutils.Vector`**
-enforces a matching of `.bounds` and/or `.crs`, while a **reference {class}`~geoutils.Raster`** can also enforce a matching of `.res`, depending on the nature of the operation.
+## Handling and match-reference
+
+In GeoUtils, geospatial handling operations are based on class methods, such as {func}`~geoutils.Raster.crop` or {func}`~geoutils.Raster.reproject`. 
+
+For convenience and consistency, nearly all of these methods can be passed solely another {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a 
+**reference to match** during the operation. A **reference {class}`~geoutils.Vector`** enforces a matching of {attr}`~geoutils.Vector.bounds` and/or 
+{attr}`~geoutils.Vector.crs`, while a **reference {class}`~geoutils.Raster`** can also enforce a matching of {attr}`~geoutils.Raster.res`, depending on the nature of the operation.
 
 
 ```{code-cell} ipython3
+:tags: [hide-output]
 # Crop raster to vector's extent
 rast.crop(vect)
+# Print info of cropped raster
+print(rast.info())
 ```
-
-```{code-cell} ipython3
-# Compute proximity to vector on raster's grid
-rast_proximity_to_vec = vect.proximity(rast)
-```
-
-All methods can be also be passed any number of georeferencing arguments such as `.shape` or `.res`, and will logically deduce others from the input, much
-as in [GDAL](https://gdal.org/)'s command line.
-
-
-```{note}
-Right now, the array `.data` of `rast` is still not loaded. Applying {func}`~geoutils.Raster.crop` does not yet require loading,
-and `rast`'s metadata is sufficient to provide a georeferenced grid for {func}`~geoutils.Vector.proximity`. The array will only be loaded when necessary.
-```
-
-Additionally, in GeoUtils, **methods that apply to the same georeferencing attributes have consistent naming**<sup>1</sup> across {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.
 
 ```{margin}
 <sup>1</sup>The names of geospatial handling methods is largely based on [GDAL and OGR](https://gdal.org/)'s, with the notable exception of {func}`~geoutils.Vector.reproject` that better applies to vectors than `warp`.
 ```
+
+Additionally, in GeoUtils, **methods that apply to the same georeferencing attributes have consistent naming**<sup>1</sup> across {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.
+
+A {func}`~geoutils.Raster.reproject` involves a change in {attr}`~geoutils.Raster.crs` or {attr}`~geoutils.Raster.transform`, while a {func}`~geoutils.Raster.crop` only involves a change 
+in {attr}`~geoutils.Raster.bounds`. Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils.Vector` from a {class}`~geoutils.Raster`, 
+and the other way around for {func}`~geoutils.Vector.rasterize`.
 
 ```{list-table}
    :widths: 30 30 30
@@ -98,14 +103,53 @@ Additionally, in GeoUtils, **methods that apply to the same georeferencing attri
    * - Rasterize/Polygonize
      - {func}`~geoutils.Raster.polygonize`
      - {func}`~geoutils.Vector.rasterize`
-   * - Proximity
-     - {func}`~geoutils.Raster.proximity`
-     - {func}`~geoutils.Vector.proximity`
 ```
 
-A {func}`~geoutils.Raster.reproject` involves a change in `.crs` or `.transform`, while a {func}`~geoutils.Raster.crop` only involves a change in `.bounds`.
-Using {func}`~geoutils.Raster.polygonize` allows to generate a {class}`~geoutils.Vector` from a {class}`~geoutils.Raster`, and the other way around for {func}`~geoutils.Vector.rasterize`.
+All methods can be also be passed any number of georeferencing arguments such as {attr}`~geoutils.Raster.shape` or {attr}`~geoutils.Raster.res`, and will 
+naturally deduce others from the input {class}`~geoutils.Raster` or {class}`~geoutils.Vector`, much as in [GDAL](https://gdal.org/)'s command line.
 
+
+## Higher-level analysis tools 
+
+GeoUtils also implements higher-level geospatial analysis tools for both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>`. For 
+example, one can compute the distance to a {class}`~geoutils.Vector` geometry, or to target pixels of a {class}`~geoutils.Raster`, using 
+{func}`~geoutils.Vector.proximity`.
+
+As with the geospatial handling functions previously listed, many analysis functions can take a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a 
+**reference to utilize** during the operation. In the case of {func}`~geoutils.Vector.proximity`, passing a {class}`~geoutils.Raster` serves as a reference 
+for the georeferenced grid on which to compute the distances.
+
+```{code-cell} ipython3
+# Compute proximity to vector on raster's grid
+rast_proximity_to_vec = vect.proximity(rast)
+```
+
+```{note}
+Right now, the array {attr}`~geoutils.Raster.data` of `rast` is still not loaded. Applying {func}`~geoutils.Raster.crop` does not yet require loading,
+and `rast`'s metadata is sufficient to provide a georeferenced grid for {func}`~geoutils.Vector.proximity`. The array will only be loaded when necessary.
+```
+
+## Quick plotting
+
+To facilitate the analysis process, GeoUtils includes quick plotting tools that support multiple colorbars and implicitly add layers to the current axis. 
+Those are wrapped from {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot`, and relay any argument passed.
+
+```{seealso}
+GeoUtils' plotting tools only aim to get rid off the most common hassles when quickly plotting raster and vector data during analysis.
+
+For advanced plotting tools to create "publication-quality" figures, see [Cartopy](https://scitools.org.uk/cartopy/docs/latest/) or 
+[GeoPlot](https://residentmario.github.io/geoplot/index.html).
+```
+
+The plotting functionality is named {func}`~geoutils.Raster.show` everywhere, for consistency. Here again, a {class}`~geoutils.Raster` or 
+{class}`~geoutils.Vector` can be passed as a **reference to match** to ensure all data is displayed on the same grid and projection.
+
+```{code-cell} ipython3
+# Plot proximity to vector
+rast_proximity_to_vec = vect.proximity(rast)
+rast_proximity_to_vec.show(cbar_title="Distance to glacier outline")
+vect.show(rast_proximity_to_vec, fc="none")
+```
 
 ## Pythonic arithmetic and NumPy interface
 
@@ -119,7 +163,7 @@ rast += 1
 ```
 
 Additionally, the class {class}`~geoutils.Raster` possesses a NumPy masked-array interface that allows to apply to it any [NumPy universal function](https://numpy.org/doc/stable/reference/ufuncs.html) and
-most other NumPy array functions, while logically casting `dtypes` and respecting `.nodata` values.
+most other NumPy array functions, while logically casting {class}`dtypes<numpy.dtype>` and respecting {attr}`~geoutils.Raster.nodata` values.
 
 ```{code-cell} ipython3
 # Apply a normalization to the raster
@@ -144,7 +188,7 @@ Masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a
 values_aoi = rast[mask_aoi]
 ```
 
-Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean `dtypes`. Using {func}`~geoutils.Raster.polygonize` with a
+Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtypes<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
 {class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{code-cell} ipython3
@@ -152,21 +196,25 @@ Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to 
 vect_aoi = mask_aoi.polygonize()
 ```
 
-## Plotting and saving geospatial data
-
-
-Finally, GeoUtils includes basic plotting tools wrapping directly {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot` for {class}`~geoutils.Raster` and {class}`~geoutils.Vector`, respectively.
-The plotting function was renamed {func}`~geoutils.Raster.show` everywhere, for consistency.
-
-For saving, {func}`~geoutils.Raster.save` is used.
-
 ```{code-cell} ipython3
 # Plot result
-import matplotlib.pyplot as plt
-fig = plt.figure()
-ax = plt.gca()
-rast.show(ax=ax, cmap='Reds', cbar_title='Normalized infrared')
-vect_aoi.ds.plot(ax=ax, fc='none', ec='k', lw=0.5)
+rast.show(cmap='Reds', cbar_title='Normalized infrared')
+vect_aoi.show(fc='none', ec='k', lw=0.5)
+```
+
+## Saving to file
+
+Finally, for saving a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` to file, simply call the {func}`~geoutils.Raster.save` function.
+
+```{code-cell} ipython3
+# Save our AOI vector
+# vect_aoi.save()
+```
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+import os
+# os.remove()
 ```
 
 ```{admonition} Wrap-up
@@ -182,6 +230,21 @@ near Everest, which likely corresponds to **perennial snowfields**.
 For a **bonus** example on parsing satellite metadata and DEMs, continue below.
 
 Otherwise, for more **hands-on** examples, explore GeoUtils' gallery of examples!
+```
+
+(quick-gallery)=
+## More examples
+
+To dive into more illustrated code, explore our gallery of examples that is composed of:
+- An {ref}`examples-io` section on opening, saving, loading, importing and exporting,
+- An {ref}`examples-handling` section on geotransformations (crop, reproject) and raster-vector interfacing,
+- An {ref}`examples-analysis` section on analysis tools and raster numerics.
+
+See also the full concatenated list of examples below.
+
+```{eval-rst}
+.. minigallery:: geoutils.Raster
+    :add-heading: Examples using rasters and vectors
 ```
 
 ## **Bonus:** Parsing metadata with {class}`~geoutils.SatelliteImage`
@@ -207,7 +270,7 @@ There are many possible subclass to derive from a {class}`~geoutils.Raster`. Her
 .. inheritance-diagram:: geoutils.georaster.raster geoutils.georaster.satimg xdem.dem.DEM
     :top-classes: geoutils.georaster.raster.Raster
 ```
-```{note}
+```{seealso}
 The {class}`~xdem.DEM` class of [xDEM](https://xdem.readthedocs.io/en/latest/index.html) re-implements all methods of [gdalDEM](https://gdal.org/programs/gdaldem.html)
 (and more) to derive topographic attributes (hillshade, slope, aspect, etc), coded directly in Python for scalability and tested to yield the exact same
 results.

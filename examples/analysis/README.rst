@@ -1,3 +1,5 @@
+.. _examples-analysis:
+
 Analysis
 ========
 

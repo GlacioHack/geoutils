@@ -54,10 +54,11 @@ More on these core features of GeoUtils in the {ref}`quick-start`, or {ref}`core
 ## Why the need for GeoUtils?
 
 Recent community efforts have improved open-source geospatial analysis in Python, allowing to **move away from the low-level functions and
-complexity of [GDAL and OGR](https://gdal.org/)**'s Python bindings for raster and vector handling. Those efforts include in particular [Rasterio](https://rasterio.readthedocs.io/en/latest/) and [GeoPandas](https://geopandas.org/en/stable/docs.html).
+complexity of [GDAL and OGR](https://gdal.org/)'s Python bindings** for raster and vector handling. Those efforts include in particular 
+[Rasterio](https://rasterio.readthedocs.io/en/latest/) and [GeoPandas](https://geopandas.org/en/stable/docs.html).
 
 However, these new packages still maintain a relatively low-level API to serve all types of geospatial informatics users, **slowing down end-users focusing
-on data analysis**. As a result, interfacing between vector data and raster data is delicate and simple higher-level operation (such as
+on data analysis**. As a result, basic interfacing between vector data and raster data is not always straightforward and simple higher-level operation (such as
 reprojection to match a reference) are not always computed consistently in the community.
 
 Additionally, [Rasterio](https://rasterio.readthedocs.io/en/latest/) focuses mostly on reading, projecting and writing, and thus **requires array extraction

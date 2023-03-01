@@ -1,3 +1,5 @@
+.. _examples-io:
+
 Input/output
 ============
 
