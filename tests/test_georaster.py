@@ -1425,7 +1425,6 @@ class TestRaster:
         i, j = r.xy2ij(x, y)
         assert img[0, int(i), int(j)] == r.interp_points([(x, y)], order=1)[0]
 
-
     def test_value_at_coords(self) -> None:
         """
         Test that value at coords works as intended
@@ -1457,10 +1456,10 @@ class TestRaster:
         assert z == z_val
 
         # Check that the value is the same the other 4 corners of the pixel
-        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 - 0.49*r.res[1])
-        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 + 0.49*r.res[1])
-        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 - 0.49*r.res[1])
-        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 + 0.49*r.res[1])
+        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 - 0.49 * r.res[1])
+        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 + 0.49 * r.res[1])
+        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 - 0.49 * r.res[1])
+        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 + 0.49 * r.res[1])
 
         # -- Tests 2: check arguments work as intended --
 
@@ -1539,20 +1538,19 @@ class TestRaster:
         # -- Tests 5 -- Check image corners and latlon argument
 
         # Lower right pixel
-        x, y = [r.bounds.right - r.res[0]/2, r.bounds.bottom + r.res[1]/2]
+        x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = pt.reproject_to_latlon([x, y], r.crs)
         assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -1, -1]
 
         # One pixel above
-        x, y = [r.bounds.right - r.res[0]/2, r.bounds.bottom + 3*r.res[1]/2]
+        x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
         lat, lon = pt.reproject_to_latlon([x, y], r.crs)
         assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -2, -1]
 
         # One pixel left
-        x, y = [r.bounds.right - 3*r.res[0]/2, r.bounds.bottom + r.res[1]/2]
+        x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = pt.reproject_to_latlon([x, y], r.crs)
         assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -1, -2]
-
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:
