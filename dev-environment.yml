@@ -15,6 +15,7 @@ dependencies:
   - sphinx
   - myst-nb
   - graphviz
+  - python-graphviz
   - sphinx-autodoc-typehints
   - sphinxcontrib-programoutput
   - numpydoc
