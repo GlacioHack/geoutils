@@ -2372,7 +2372,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             x, y = projtools.reproject_from_latlon((y, x), self.crs)  # type: ignore
 
         # Convert coordinates to pixel space
-        rows, cols = rio.transform.rowcol(self.transform, x, y, op=round)
+        rows, cols = rio.transform.rowcol(self.transform, x, y, op=np.floor)
 
         # Loop over all coordinates passed
         for k in range(len(rows)):  # type: ignore
