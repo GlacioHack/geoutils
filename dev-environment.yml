@@ -30,8 +30,8 @@ dependencies:
   - scikit-image
   - pyyaml
   - rioxarray
+  - sphinx-design
+  - sphinx-book-theme
 
   - pip:
-    - sphinx-design
-    - sphinx-book-theme
     - -e ./
