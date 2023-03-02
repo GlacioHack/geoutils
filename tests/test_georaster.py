@@ -1425,6 +1425,7 @@ class TestRaster:
         i, j = r.xy2ij(x, y)
         assert img[0, int(i), int(j)] == r.interp_points([(x, y)], order=1)[0]
 
+
     def test_value_at_coords(self) -> None:
         """
         Test that value at coords works as intended
@@ -1435,14 +1436,18 @@ class TestRaster:
         # Open raster
         r = gu.Raster(self.landsat_b4_crop_path)
 
-        # Random test point that raised an error
-        itest0 = 118
-        jtest0 = 450
-        xtest0 = 496930
-        ytest0 = 3099170
+        # A pixel center where all neighbouring coordinates are different:
+        # array([[[237, 194, 239],
+        #          [250, 173, 164],
+        #          [255, 192, 128]]]
+        itest0 = 120
+        jtest0 = 451
+        # This is the center of the pixel
+        xtest0 = 496975
+        ytest0 = 3099095
 
         # Verify coordinates match indexes
-        x_out, y_out = r.ij2xy(itest0, jtest0, offset="ul")
+        x_out, y_out = r.ij2xy(itest0, jtest0, offset="center")
         assert x_out == xtest0
         assert y_out == ytest0
 
@@ -1450,6 +1455,12 @@ class TestRaster:
         z_val = r.value_at_coords(xtest0, ytest0)
         z = r.data.data[0, itest0, jtest0]
         assert z == z_val
+
+        # Check that the value is the same the other 4 corners of the pixel
+        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 - 0.49*r.res[1])
+        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 + 0.49*r.res[1])
+        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 - 0.49*r.res[1])
+        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 + 0.49*r.res[1])
 
         # -- Tests 2: check arguments work as intended --
 
@@ -1462,8 +1473,8 @@ class TestRaster:
         # Get the indexes for the multi-band Raster
         r_multi = gu.Raster(self.landsat_rgb_path)
         itest, jtest = r_multi.xy2ij(xtest0, ytest0)
-        itest = itest[0]
-        jtest = jtest[0]
+        itest = int(itest[0])
+        jtest = int(jtest[0])
         # Extract the values
         z_band1 = r_multi.value_at_coords(xtest0, ytest0, index=1)
         z_band2 = r_multi.value_at_coords(xtest0, ytest0, index=2)
@@ -1524,6 +1535,24 @@ class TestRaster:
         assert len(windows) == len(x_coords)
         assert np.array_equal(windows[0], win0, equal_nan=True)
         assert np.array_equal(windows[1], win1, equal_nan=True)
+
+        # -- Tests 5 -- Check image corners and latlon argument
+
+        # Lower right pixel
+        x, y = [r.bounds.right - r.res[0]/2, r.bounds.bottom + r.res[1]/2]
+        lat, lon = pt.reproject_to_latlon([x, y], r.crs)
+        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -1, -1]
+
+        # One pixel above
+        x, y = [r.bounds.right - r.res[0]/2, r.bounds.bottom + 3*r.res[1]/2]
+        lat, lon = pt.reproject_to_latlon([x, y], r.crs)
+        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -2, -1]
+
+        # One pixel left
+        x, y = [r.bounds.right - 3*r.res[0]/2, r.bounds.bottom + r.res[1]/2]
+        lat, lon = pt.reproject_to_latlon([x, y], r.crs)
+        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -1, -2]
+
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:
@@ -1978,27 +2007,6 @@ class TestRaster:
             # Currently not covered by test image
             assert yy.min() == pytest.approx(img.bounds.top + hy)
             assert yy.max() == pytest.approx(img.bounds.bottom - hy)
-
-    def test_value_at_coords2(self) -> None:
-        """
-        Check that values returned at selected pixels correspond to what is expected, both for original CRS and lat/lon.
-        """
-        img = gu.Raster(self.landsat_b4_path)
-
-        # Lower right pixel
-        x, y = [img.bounds.right - img.res[0], img.bounds.bottom + img.res[1]]
-        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
-        assert img.value_at_coords(x, y) == img.value_at_coords(lon, lat, latlon=True) == img.data[0, -1, -1]
-
-        # One pixel above
-        x, y = [img.bounds.right - img.res[0], img.bounds.bottom + 2 * img.res[1]]
-        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
-        assert img.value_at_coords(x, y) == img.value_at_coords(lon, lat, latlon=True) == img.data[0, -2, -1]
-
-        # One pixel left
-        x, y = [img.bounds.right - 2 * img.res[0], img.bounds.bottom + img.res[1]]
-        lat, lon = pt.reproject_to_latlon([x, y], img.crs)
-        assert img.value_at_coords(x, y) == img.value_at_coords(lon, lat, latlon=True) == img.data[0, -1, -2]
 
     def test_from_array(self) -> None:
 
