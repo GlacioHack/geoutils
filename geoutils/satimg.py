@@ -258,7 +258,7 @@ class SatelliteImage(Raster):  # type: ignore
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
         attrs: list[str] | None = None,
         load_data: bool = True,
-        bands: int | list[int] | None = None,
+        indexes: int | list[int] | None = None,
         read_from_fn: bool = True,
         datetime: dt.datetime | None = None,
         tile_name: str | None = None,
@@ -279,7 +279,7 @@ class SatelliteImage(Raster):  # type: ignore
            Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         :param load_data: Load the raster data into the object. Default is True.
-        :param bands: The band(s) to load into the object. Default is to load all bands.
+        :param indexes: The band(s) to load into the object. Default is to load all bands.
         :param read_from_fn: Try to read metadata from the filename
         :param datetime: Provide datetime attribute
         :param tile_name: Provide tile name
@@ -301,7 +301,7 @@ class SatelliteImage(Raster):  # type: ignore
             return
         # Else rely on parent Raster class options (including raised errors)
         else:
-            super().__init__(filename_or_dataset, attrs=attrs, load_data=load_data, bands=bands)
+            super().__init__(filename_or_dataset, attrs=attrs, load_data=load_data, indexes=indexes)
 
         # priority to user input
         self.datetime = datetime

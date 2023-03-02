@@ -74,18 +74,18 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
     return deprecator_func
 
 
-def resampling_method_from_str(method_str: str) -> rio.warp.Resampling:
+def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
     # Try to match the string version of the resampling method with a rio Resampling enum name
-    for method in rio.warp.Resampling:
-        if str(method).replace("Resampling.", "") == method_str:
+    for method in rio.enums.Resampling:
+        if method.name == method_str:
             resampling_method = method
             break
     # If no match was found, raise an error.
     else:
         raise ValueError(
-            f"'{method_str}' is not a valid rasterio.warp.Resampling method. "
-            f"Valid methods: {[str(method).replace('Resampling.', '') for method in rio.warp.Resampling]}"
+            f"'{method_str}' is not a valid rasterio.enums.Resampling method. "
+            f"Valid methods: {[method.name for method in rio.enums.Resampling]}"
         )
     return resampling_method
 

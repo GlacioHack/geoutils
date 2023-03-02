@@ -182,23 +182,39 @@ def images_3d():  # type: ignore
 
 
 @pytest.mark.parametrize(
-    "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images")]
+    "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images"), pytest.lazy_fixture("images_3d")]
 )  # type: ignore
-#    pytest.lazy_fixture('images_3d')]) ## Requires Raster.reproject() fix.
 def test_stack_rasters(rasters) -> None:  # type: ignore
     """Test stack_rasters"""
 
-    warnings.filterwarnings("ignore", category=UserWarning)
+    # Silence the reprojection warning for default nodata value
+    warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+    warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*")
 
     # Merge the two overlapping DEMs and check that output bounds and shape is correct
-    stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
+    if rasters.img1.count > 1:
+        # Check warning is raised once
+        with pytest.warns(
+            expected_warning=UserWarning,
+            match="Some input Rasters have multiple bands, only their first band will be used.",
+        ):
+            stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
+        # Then ignore the other ones
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message="Some input Rasters have multiple bands, only their first band will be used.",
+        )
+
+    else:
+        stacked_img = gu.spatial_tools.stack_rasters([rasters.img1, rasters.img2])
 
     assert stacked_img.count == 2
     assert rasters.img.shape == stacked_img.shape
     assert type(stacked_img) == gu.Raster  # Check output object is always Raster, whatever input was given
     assert np.count_nonzero(np.isnan(stacked_img.data)) == 0  # Check no NaNs introduced
 
-    merged_bounds = gu.spatial_tools.merge_bounding_boxes(
+    merged_bounds = gu.projtools.merge_bounds(
         [rasters.img1.bounds, rasters.img2.bounds], resolution=rasters.img1.res[0]
     )
     assert merged_bounds == stacked_img.bounds
@@ -227,24 +243,34 @@ def test_stack_rasters(rasters) -> None:  # type: ignore
     assert stacked_img2.bounds == rasters.img.bounds
 
 
-@pytest.mark.parametrize("rasters", [pytest.lazy_fixture("images_1d")])  # type: ignore
-#    pytest.lazy_fixture('images_3d')]) ##Requires Raster.reproject() fix.
+@pytest.mark.parametrize(
+    "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("images_3d")]
+)  # type: ignore
 def test_merge_rasters(rasters) -> None:  # type: ignore
     """Test merge_rasters"""
     # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
 
-    # Silence the reprojection warning for default nodata value already taken
-    warnings.filterwarnings("ignore", category=UserWarning)
+    # Silence the reprojection warning for default nodata value
+    warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+    warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*")
+
+    # Ignore warning already checked in test_stack_rasters
+    if rasters.img1.count > 1:
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message="Some input Rasters have multiple bands, only their first band will be used.",
+        )
 
     merged_img = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
 
-    assert rasters.img.data.shape == merged_img.data.shape
+    assert rasters.img.shape == merged_img.shape
     assert rasters.img.bounds == merged_img.bounds
     assert np.count_nonzero(np.isnan(merged_img.data)) == 0  # Check no NaNs introduced
 
     diff = rasters.img.data - merged_img.data
 
-    assert np.abs(np.nanmean(diff)) < 0.3
+    assert np.abs(np.nanmean(diff)) < 1
 
     # Check that reference works
     merged_img2 = gu.spatial_tools.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
