@@ -14,6 +14,7 @@ dependencies:
   - autovizwidget
   - sphinx
   - myst-nb
+  - graphviz
   - sphinx-autodoc-typehints
   - sphinxcontrib-programoutput
   - numpydoc
@@ -32,5 +33,4 @@ dependencies:
   - pip:
     - sphinx-design
     - sphinx-book-theme
-    - graphviz
     - -e ./
