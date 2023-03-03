@@ -1497,33 +1497,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         elif dst_ref is None and dst_crs is None:
             dst_crs = self.crs
 
-        # Case a raster is provided as reference
-        if dst_ref is not None:
-
-            # Check that dst_ref type is either str, Raster or rasterio data set
-            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
-            if isinstance(dst_ref, Raster):
-                ds_ref = dst_ref
-            elif isinstance(dst_ref, rio.io.MemoryFile) or isinstance(dst_ref, rasterio.io.DatasetReader):
-                ds_ref = dst_ref
-            elif isinstance(dst_ref, str):
-                if not os.path.exists(dst_ref):
-                    raise ValueError("Reference raster does not exist.")
-                ds_ref = Raster(dst_ref, load_data=False)
-            else:
-                raise TypeError(
-                    "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set."
-                )
-
-            # Read reprojecting params from ref raster
-            dst_crs = ds_ref.crs
-            dst_size = (ds_ref.width, ds_ref.height)
-            dst_res = None
-            dst_bounds = ds_ref.bounds
-        else:
-            # Determine target CRS
-            dst_crs = CRS.from_user_input(dst_crs)
-
         # Set output dtype
         if dst_dtype is None:
             # Warning: this will not work for multiple bands with different dtypes
@@ -1566,6 +1539,36 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             "dst_nodata": dst_nodata,
         }
 
+        dst_transform = None
+        # Case a raster is provided as reference
+        if dst_ref is not None:
+
+            # Check that dst_ref type is either str, Raster or rasterio data set
+            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
+            if isinstance(dst_ref, Raster):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, rio.io.MemoryFile) or isinstance(dst_ref, rasterio.io.DatasetReader):
+                ds_ref = dst_ref
+            elif isinstance(dst_ref, str):
+                if not os.path.exists(dst_ref):
+                    raise ValueError("Reference raster does not exist.")
+                ds_ref = Raster(dst_ref, load_data=False)
+            else:
+                raise TypeError(
+                    "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set."
+                )
+
+            # Read reprojecting params from ref raster
+            dst_crs = ds_ref.crs
+            dst_transform = ds_ref.transform
+            reproj_kwargs.update({"dst_transform": dst_transform})
+            dst_data = np.ones((self.count, ds_ref.shape[0], ds_ref.shape[1]), dtype=dst_dtype)
+            reproj_kwargs.update({"destination": dst_data})
+            reproj_kwargs.update({"dst_crs": ds_ref.crs})
+        else:
+            # Determine target CRS
+            dst_crs = CRS.from_user_input(dst_crs)
+
         # If dst_ref is None, check other input arguments
         if dst_size is not None and dst_res is not None:
             raise ValueError("dst_size and dst_res both specified. Specify only one.")
@@ -1581,7 +1584,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 )
 
         # Determine target raster size/resolution
-        dst_transform = None
         if dst_res is not None:
             if dst_bounds is None:
                 # Let rasterio determine the maximum bounds of the new raster.
@@ -1629,22 +1631,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # Calculate associated transform
             dst_transform = rio.transform.from_bounds(*dst_bounds, width=dst_size[0], height=dst_size[1])
-
-            # Ensure resolution is nicely rounded after 10 digits
-            # TODO: open issue on Rasterio?
-            rounded_a = round(dst_transform.a, 10)
-            rounded_e = round(dst_transform.e, 10)
-            dst_transform = rio.transform.Affine(
-                rounded_a,
-                dst_transform.b,
-                dst_transform.c,
-                dst_transform.d,
-                rounded_e,
-                dst_transform.f,
-                dst_transform.g,
-                dst_transform.h,
-                dst_transform.i,
-            )
 
             # Specify the output bounds and shape, let rasterio handle the rest
             reproj_kwargs.update({"dst_transform": dst_transform})
