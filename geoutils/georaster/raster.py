@@ -1634,9 +1634,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # TODO: open issue on Rasterio?
             rounded_a = round(dst_transform.a, 10)
             rounded_e = round(dst_transform.a, 10)
-            dst_transform = rio.transform.Affine(rounded_a, dst_transform.b, dst_transform.c,
-                                                 dst_transform.d, rounded_e, dst_transform.f,
-                                                 dst_transform.g, dst_transform.h, dst_transform.i)
+            dst_transform = rio.transform.Affine(
+                rounded_a,
+                dst_transform.b,
+                dst_transform.c,
+                dst_transform.d,
+                rounded_e,
+                dst_transform.f,
+                dst_transform.g,
+                dst_transform.h,
+                dst_transform.i,
+            )
 
             # Specify the output bounds and shape, let rasterio handle the rest
             reproj_kwargs.update({"dst_transform": dst_transform})
