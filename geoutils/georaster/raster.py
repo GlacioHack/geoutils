@@ -1633,7 +1633,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # Ensure resolution is nicely rounded after 10 digits
             # TODO: open issue on Rasterio?
             rounded_a = round(dst_transform.a, 10)
-            rounded_e = round(dst_transform.a, 10)
+            rounded_e = round(dst_transform.e, 10)
             dst_transform = rio.transform.Affine(
                 rounded_a,
                 dst_transform.b,
