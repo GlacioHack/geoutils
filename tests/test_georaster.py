@@ -1134,6 +1134,23 @@ class TestRaster:
             assert np.shape(out_img.data) == (n, 500, 500)
             assert (out_img.count, *out_img.shape) == (n, 500, 500)
 
+        # Test that the rounding of resolution is correct for large rasters (we take an example that used to fail, see issue #354)
+        data = np.zeros(shape=(5741, 2959), dtype="uint8")
+        transform = rio.transform.Affine(20.0, 0.0, 238286.29553975424, 0.0, -20.0, 6995453.456051373)
+        crs = rio.CRS.from_epsg(32633)
+        nodata = -9999.0
+        rst = gu.Raster.from_array(data=data, transform=transform, crs=crs, nodata=nodata)
+
+        data2 = np.zeros(shape=(4321, 8640), dtype="uint8")
+        transform2 = rio.transform.Affine(0.041666666666666664, 0.0, -180.02083333333334, 0.0, -0.041666666666666664, 90.02083333333333)
+        crs2 = rio.CRS.from_epsg(4979)
+        rst2 = gu.Raster.from_array(data=data2, transform=transform2, crs=crs2, nodata=None)
+
+        rst2_reproj = rst2.reproject(rst)
+        # This used to be 19.999999999999999 due to floating point precision
+        assert rst2_reproj.res == (20.0, 20.0)
+
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
         """Check the behaviour of the intersection function"""
