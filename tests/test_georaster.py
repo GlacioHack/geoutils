@@ -1142,6 +1142,7 @@ class TestRaster:
         nodata = -9999.0
         rst = gu.Raster.from_array(data=data, transform=transform, crs=crs, nodata=nodata)
 
+        # This large grid geotransform is taken from https://cdn.proj.org/us_nga_egm08_25.tif
         data2 = np.zeros(shape=(4321, 8640), dtype="uint8")
         transform2 = rio.transform.Affine(
             0.041666666666666664, 0.0, -180.02083333333334, 0.0, -0.041666666666666664, 90.02083333333333
