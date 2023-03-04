@@ -19,8 +19,9 @@ title: GeoUtils
 :::{grid-item}
 :columns: 8
 :class: sd-fs-3
+:child-align: center
 
-GeoUtils is an **accessible**, **efficient** and **reliable** package to analyze geospatial data.
+GeoUtils is a Python package for **accessible**, **efficient** and **reliable** geospatial analysis.
 ::::
 
 **Accessible** owing to its convenient object-based structure, intuitive match-reference operations and familiar geospatial dependencies

@@ -44,6 +44,7 @@ extensions = [
 # For sphinx design to work properly
 myst_enable_extensions = ["colon_fence"]
 
+# For myst-nb to find the Jupyter kernel (=environment) to run from
 nb_kernel_rgx_aliases = {".*geoutils.*": "python3"}
 
 intersphinx_mapping = {
@@ -169,13 +170,14 @@ html_theme_options = {
     #         }],
 }
 
+# For dark mode
 html_context = {
     # ...
     "default_mode": "auto"
 }
 
 # Add the search bar to be always displayed (not only on top)
-html_sidebars = {"**": ["navbar-logo.html", "search-field.html", "sbt-sidebar-nav.html"]}
+# html_sidebars = {"**": ["navbar-logo.html", "search-field.html", "sbt-sidebar-nav.html"]}
 
 
 # html_logo = "path/to/myimage.png"
