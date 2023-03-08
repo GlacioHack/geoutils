@@ -122,3 +122,11 @@ class TestMisc:
 
         captured = capsys.readouterr().out
         assert captured == "opencv\nNone\n"
+
+        env = {"dependencies": ["python==3.9", "numpy", "fiona"]}
+        devenv = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv", {"pip": ["geoutils"]}]}
+
+        geoutils.misc.diff_environment_yml(env, devenv, input_dict=True, print_dep="both")
+        captured = capsys.readouterr().out
+
+        assert captured == "opencv\ngeoutils\n"
