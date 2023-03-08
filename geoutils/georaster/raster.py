@@ -307,7 +307,7 @@ class Raster:
         self.tags: dict[str, Any] = {}
 
         self._data: np.ma.masked_array | None = None
-        self._nodata: int | float | list[int] | list[float] | None = nodata
+        self._nodata: int | float | tuple[int] | tuple[float] | None = nodata
         self._indexes = indexes
         self._indexes_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
@@ -1117,7 +1117,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self._is_modified
 
     @property
-    def nodata(self) -> int | float | list[int] | list[float] | None:
+    def nodata(self) -> int | float | tuple[int] | tuple[float] | None:
         """
         Get nodata value.
 
@@ -1126,7 +1126,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self._nodata
 
     @nodata.setter
-    def nodata(self, new_nodata: int | float | list[int] | list[float] | None) -> None:
+    def nodata(self, new_nodata: int | float | tuple[int] | tuple[float] | None) -> None:
         """
         Set .nodata and update .data by calling set_nodata() with default parameters.
 
@@ -1143,7 +1143,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self.set_nodata(nodata=new_nodata)
 
     def set_nodata(
-        self, nodata: int | float | list[int] | list[float] | None, update_array: bool = True, update_mask: bool = True
+        self, nodata: int | float | tuple[int] | tuple[float] | None, update_array: bool = True, update_mask: bool = True
     ) -> None:
         """
         Set a new nodata value for each band. This updates the old nodata into a new nodata value in the metadata,
@@ -1175,10 +1175,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             raise ValueError("Type of nodata not understood, must be list or float or int")
 
         elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
-            nodata = [nodata] * self.count
+            nodata = (nodata,) * self.count
 
         elif isinstance(nodata, list) and self.count == 1:
-            nodata = list(nodata)[0]
+            nodata = tuple(nodata)[0]
 
         elif nodata is None:
             nodata = None
@@ -1427,7 +1427,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
-                    as_str.append(f"Band {b + 1}:")
+                    as_str.append(f"Band {b + 1}:\n")
                     as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data[b, :, :]):.2f}\n")
                     as_str.append(f"[MINIMUM]:          {np.nanmin(self.data[b, :, :]):.2f}\n")
                     as_str.append(f"[MEDIAN]:           {np.ma.median(self.data[b, :, :]):.2f}\n")

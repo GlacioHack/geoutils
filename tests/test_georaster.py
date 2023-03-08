@@ -124,7 +124,7 @@ class TestRaster:
         assert np.ma.isMaskedArray(gu.Raster(example, masked=True).data)
         assert np.ma.isMaskedArray(gu.Raster(example, masked=False).data)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
 
