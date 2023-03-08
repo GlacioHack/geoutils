@@ -1656,7 +1656,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def crop(
         self: RasterType,
-        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False],
@@ -1666,7 +1666,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def crop(
         self: RasterType,
-        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         inplace: bool = True,
     ) -> RasterType | None:
@@ -1674,7 +1674,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def crop(
         self: RasterType,
-        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         inplace: bool = True,
     ) -> RasterType | None:
@@ -1683,7 +1683,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param cropGeom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
+        :param crop_geom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
             coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
             Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
@@ -1699,11 +1699,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             "match_pixel",
         ], "mode must be one of 'match_pixel', 'match_extent'"
 
-        if isinstance(cropGeom, (Raster, Vector)):
+        if isinstance(crop_geom, (Raster, Vector)):
             # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-            xmin, ymin, xmax, ymax = cropGeom.get_bounds_projected(out_crs=self.crs)
-        elif isinstance(cropGeom, (list, tuple)):
-            xmin, ymin, xmax, ymax = cropGeom
+            xmin, ymin, xmax, ymax = crop_geom.get_bounds_projected(out_crs=self.crs)
+        elif isinstance(crop_geom, (list, tuple)):
+            xmin, ymin, xmax, ymax = crop_geom
         else:
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
