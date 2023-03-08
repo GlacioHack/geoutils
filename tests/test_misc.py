@@ -104,7 +104,7 @@ class TestMisc:
             with pytest.raises(ValueError, match="^" + text + "$"):
                 useless_func()
 
-    def test_diff_environment_yml(self, capsys) -> None:
+    def test_diff_environment_yml(self, capsys) -> None:  # type: ignore
 
         # Test with synthetic environment
         env = {"dependencies": ["python==3.9", "numpy", "fiona"]}
@@ -123,10 +123,10 @@ class TestMisc:
         captured = capsys.readouterr().out
         assert captured == "opencv\nNone\n"
 
-        env = {"dependencies": ["python==3.9", "numpy", "fiona"]}
-        devenv = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv", {"pip": ["geoutils"]}]}
+        env2 = {"dependencies": ["python==3.9", "numpy", "fiona"]}
+        devenv2 = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv", {"pip": ["geoutils"]}]}
 
-        geoutils.misc.diff_environment_yml(env, devenv, input_dict=True, print_dep="both")
+        geoutils.misc.diff_environment_yml(env2, devenv2, input_dict=True, print_dep="both")
         captured = capsys.readouterr().out
 
         assert captured == "opencv\ngeoutils\n"

@@ -714,7 +714,9 @@ class TestRaster:
         mask2 = r2 == np.nanmin(r2)
         r2.set_mask(mask2)
         # Indexing at 0 for the mask in case the data has multiple bands
-        assert (np.count_nonzero(mask2) > 0) & np.array_equal(orig_mask | mask2.data.filled(False).squeeze(), r2.data.mask[0, :, :])
+        assert (np.count_nonzero(mask2) > 0) & np.array_equal(
+            orig_mask | mask2.data.filled(False).squeeze(), r2.data.mask[0, :, :]
+        )
         # The two last masking (array or Mask) should yield the same result when the data is only 2D
         if r.count == 1:
             assert np.array_equal(r.data.mask, r2.data.mask)
@@ -772,7 +774,7 @@ class TestRaster:
         rst2 = rst.copy()
 
         # It should work with a number, or a 1D array of the same length as the indexed one
-        rst[mask] = 1.
+        rst[mask] = 1.0
         rst2[arr] = np.ones(rst2.shape)[arr]
 
         # The rasters should be the same
@@ -789,15 +791,21 @@ class TestRaster:
             rst[arr.astype("uint8")] = 1
         # An error when the georeferencing of the Mask does not match
         mask.shift(1, 1)
-        with pytest.raises(ValueError, match="Indexing a raster with a mask requires the two being on the same georeferenced grid."):
+        with pytest.raises(
+            ValueError, match="Indexing a raster with a mask requires the two being on the same georeferenced grid."
+        ):
             rst[mask]
             rst[mask] = 1
         # For assignment, an error when the input index is neither a Mask or a boolean ndarray
         # (indexing attempts to call crop for differently shaped data)
-        with pytest.raises(ValueError, match="Indexing a raster requires a mask of same georeferenced grid, or a boolean array of same shape."):
+        with pytest.raises(
+            ValueError,
+            match="Indexing a raster requires a mask of same georeferenced grid, or a boolean array of same shape.",
+        ):
             rst["lol"] = 1
 
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
+
     @pytest.mark.parametrize("data", test_data)  # type: ignore
     def test_crop(self, data: list[str]) -> None:
         """Test for crop method, also called by square brackets through __getitem__"""
@@ -970,9 +978,9 @@ class TestRaster:
         r_cropped3 = r[outlines]
         assert list(r_cropped3.bounds) == list(new_bounds)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path]) # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_shift(self, example: str) -> None:
-        """ Tests shift works as intended"""
+        """Tests shift works as intended"""
 
         r = gu.Raster(example)
 

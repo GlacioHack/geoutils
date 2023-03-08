@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import warnings
+from typing import Any
 
 try:
     import yaml  # type: ignore
@@ -90,8 +91,9 @@ def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     return resampling_method
 
 
-def diff_environment_yml(fn_env: str | dict[str, Any], fn_devenv: str | dict[str, Any], print_dep: str = "both",
-                         input_dict: bool = False) -> None:
+def diff_environment_yml(
+    fn_env: str | dict[str, Any], fn_devenv: str | dict[str, Any], print_dep: str = "both", input_dict: bool = False
+) -> None:
     """
     Compute the difference between environment.yml and dev-environment.yml for setup of continuous integration,
     while checking that all the dependencies listed in environment.yml are also in dev-environment.yml
@@ -106,8 +108,8 @@ def diff_environment_yml(fn_env: str | dict[str, Any], fn_devenv: str | dict[str
 
     if not input_dict:
         # Load the yml as dictionaries
-        yaml_env = yaml.safe_load(open(fn_env))
-        yaml_devenv = yaml.safe_load(open(fn_devenv))
+        yaml_env = yaml.safe_load(open(fn_env))  # type: ignore
+        yaml_devenv = yaml.safe_load(open(fn_devenv))  # type: ignore
     else:
         yaml_env = fn_env
         yaml_devenv = fn_devenv

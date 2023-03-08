@@ -406,29 +406,29 @@ class Vector:
 
     @overload
     def create_mask(
-            self,
-            rst: str | gu.Raster | None = None,
-            crs: CRS | None = None,
-            xres: float | None = None,
-            yres: float | None = None,
-            bounds: tuple[float, float, float, float] | None = None,
-            buffer: int | float | np.number = 0,
-            *,
-            as_array: Literal[False] = False
+        self,
+        rst: str | gu.Raster | None = None,
+        crs: CRS | None = None,
+        xres: float | None = None,
+        yres: float | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        buffer: int | float | np.number = 0,
+        *,
+        as_array: Literal[False] = False,
     ) -> gu.Mask:
         ...
 
     @overload
     def create_mask(
-            self,
-            rst: str | gu.Raster | None = None,
-            crs: CRS | None = None,
-            xres: float | None = None,
-            yres: float | None = None,
-            bounds: tuple[float, float, float, float] | None = None,
-            buffer: int | float | np.number = 0,
-            *,
-            as_array: Literal[True]
+        self,
+        rst: str | gu.Raster | None = None,
+        crs: CRS | None = None,
+        xres: float | None = None,
+        yres: float | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        buffer: int | float | np.number = 0,
+        *,
+        as_array: Literal[True],
     ) -> np.ndarray:
         ...
 
@@ -440,7 +440,7 @@ class Vector:
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         buffer: int | float | np.number = 0,
-        as_array: bool = False
+        as_array: bool = False,
     ) -> gu.Mask | np.ndarray:
         """
         Rasterize the vector features into a boolean mask matching the georeferencing of a raster.

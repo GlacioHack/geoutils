@@ -276,7 +276,7 @@ class Raster:
         load_data: bool = False,
         downsample: AnyNumber = 1,
         masked: bool = True,
-        nodata: int | float | list[int] | list[float] | None = None,
+        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         attrs: list[str] | None = None,
     ) -> None:
         """
@@ -307,7 +307,7 @@ class Raster:
         self.tags: dict[str, Any] = {}
 
         self._data: np.ma.masked_array | None = None
-        self._nodata: int | float | tuple[int] | tuple[float] | None = nodata
+        self._nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = nodata
         self._indexes = indexes
         self._indexes_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
@@ -557,7 +557,7 @@ class Raster:
         data: np.ndarray | np.ma.masked_array,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
-        nodata: int | float | list[int] | list[float] | None = None,
+        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
     ) -> RasterType:
         """Create a Raster from a numpy array and some geo-referencing information.
 
@@ -721,8 +721,8 @@ class Raster:
 
     def __setitem__(self, index: Mask | np.ndarray, assign: np.ndarray | Number) -> None:
         """
-          Index assignment: if a mask of same georeferencing or array of same shape is passed,
-          assign values of the raster array.
+        Index assignment: if a mask of same georeferencing or array of same shape is passed,
+        assign values of the raster array.
         """
 
         # First, check index
@@ -744,7 +744,9 @@ class Raster:
                 ind = index
         # Otherwise, raise an error
         else:
-            raise ValueError("Indexing a raster requires a mask of same georeferenced grid, or a boolean array of same shape.")
+            raise ValueError(
+                "Indexing a raster requires a mask of same georeferenced grid, or a boolean array of same shape."
+            )
 
         # Second, assign, NumPy will raise appropriate errors itself
 
@@ -752,10 +754,9 @@ class Raster:
         if not self.is_loaded:
             self.load()
         # Assign the values to the index
-        self._data[:, ind] = assign
+        self._data[:, ind] = assign  # type: ignore
 
         return None
-
 
     def raster_equal(self, other: object) -> bool:
         """Check if a Raster masked array's data (including masked values), mask, fill_value and dtype are equal,
@@ -777,7 +778,9 @@ class Raster:
 
     def _overloading_check(
         self: RasterType, other: RasterType | np.ndarray | Number
-    ) -> tuple[np.ma.masked_array, np.ma.masked_array | Number, float | int | list[int] | list[float] | None]:
+    ) -> tuple[
+        np.ma.masked_array, np.ma.masked_array | Number, float | int | tuple[int, ...] | tuple[float, ...] | None
+    ]:
         """
         Before any operation overloading, check input data type and return both self and other data as either
         a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
@@ -1117,7 +1120,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self._is_modified
 
     @property
-    def nodata(self) -> int | float | tuple[int] | tuple[float] | None:
+    def nodata(self) -> int | float | tuple[int, ...] | tuple[float, ...] | None:
         """
         Get nodata value.
 
@@ -1126,7 +1129,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self._nodata
 
     @nodata.setter
-    def nodata(self, new_nodata: int | float | tuple[int] | tuple[float] | None) -> None:
+    def nodata(self, new_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None) -> None:
         """
         Set .nodata and update .data by calling set_nodata() with default parameters.
 
@@ -1143,7 +1146,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self.set_nodata(nodata=new_nodata)
 
     def set_nodata(
-        self, nodata: int | float | tuple[int] | tuple[float] | None, update_array: bool = True, update_mask: bool = True
+        self,
+        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None,
+        update_array: bool = True,
+        update_mask: bool = True,
     ) -> None:
         """
         Set a new nodata value for each band. This updates the old nodata into a new nodata value in the metadata,
@@ -1171,20 +1177,20 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param update_mask: Update the old mask by unmasking old nodata and masking new nodata (if array is updated,
             old nodata are changed to new nodata and thus stay masked)
         """
-        if nodata is not None and not isinstance(nodata, (list, int, float, np.integer, np.floating)):
-            raise ValueError("Type of nodata not understood, must be list or float or int")
+        if nodata is not None and not isinstance(nodata, (tuple, int, float, np.integer, np.floating)):
+            raise ValueError("Type of nodata not understood, must be tuple or float or int")
 
         elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
             nodata = (nodata,) * self.count
 
-        elif isinstance(nodata, list) and self.count == 1:
-            nodata = tuple(nodata)[0]
+        elif isinstance(nodata, tuple) and self.count == 1:
+            nodata = nodata[0]
 
         elif nodata is None:
             nodata = None
 
         # Check that nodata has same length as number of bands in self
-        if isinstance(nodata, list):
+        if isinstance(nodata, tuple):
             if len(nodata) != self.count:
                 raise ValueError(f"Length of nodata ({len(nodata)}) incompatible with number of bands ({self.count})")
             # Check that nodata value is compatible with dtype
@@ -1742,8 +1748,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | list[int] | list[float] | None = None,
-        src_nodata: int | float | list[int] | list[float] | None = None,
+        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         dst_dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
@@ -3084,8 +3090,8 @@ class Mask(Raster):
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | list[int] | list[float] | None = None,
-        src_nodata: int | float | list[int] | list[float] | None = None,
+        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         dst_dtype: np.dtype | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
