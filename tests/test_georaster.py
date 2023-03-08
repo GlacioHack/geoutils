@@ -2263,7 +2263,7 @@ class TestRaster:
         pixel_area = np.count_nonzero(img.data == value) * img.res[0] * img.res[1]
 
         # Polygonize the raster for this value, and compute the total area
-        polygonized = img.polygonize(in_value=value)
+        polygonized = img.polygonize(target_values=value)
         polygon_area = polygonized.ds.area.sum()
 
         # Check that these two areas are approximately equal
@@ -2282,11 +2282,11 @@ class TestRaster:
                 )
                 img_dtype = img_dtype.astype(dtype)
             value = np.unique(img_dtype)[0]
-            img_dtype.polygonize(in_value=value)
+            img_dtype.polygonize(target_values=value)
 
         # And for a boolean object, such as a mask
         mask = img > value
-        mask.polygonize(in_value=1)
+        mask.polygonize(target_values=1)
 
     # Test all options, with both an artificial Raster (that has all target values) and a real Raster
     @pytest.mark.parametrize("distunits", ["GEO", "PIXEL"])  # type: ignore
