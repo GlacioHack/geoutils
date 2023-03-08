@@ -90,21 +90,27 @@ def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     return resampling_method
 
 
-def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -> None:
+def diff_environment_yml(fn_env: str | dict[str, Any], fn_devenv: str | dict[str, Any], print_dep: str = "both",
+                         input_dict: bool = False) -> None:
     """
     Compute the difference between environment.yml and dev-environment.yml for setup of continuous integration,
     while checking that all the dependencies listed in environment.yml are also in dev-environment.yml
     :param fn_env: Filename path to environment.yml
     :param fn_devenv: Filename path to dev-environment.yml
     :param print_dep: Whether to print conda differences "conda", pip differences "pip" or both.
+    :param input_dict: Whether to consider the input as a dict (for testing purposes).
     """
 
     if not _has_yaml:
         raise ValueError("Test dependency needed. Install 'pyyaml'")
 
-    # Load the yml as dictionaries
-    yaml_env = yaml.safe_load(open(fn_env))
-    yaml_devenv = yaml.safe_load(open(fn_devenv))
+    if not input_dict:
+        # Load the yml as dictionaries
+        yaml_env = yaml.safe_load(open(fn_env))
+        yaml_devenv = yaml.safe_load(open(fn_devenv))
+    else:
+        yaml_env = fn_env
+        yaml_devenv = fn_devenv
 
     # Extract the dependencies values
     conda_dep_env = yaml_env["dependencies"]

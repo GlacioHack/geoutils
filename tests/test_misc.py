@@ -103,3 +103,22 @@ class TestMisc:
         else:
             with pytest.raises(ValueError, match="^" + text + "$"):
                 useless_func()
+
+    def test_diff_environment_yml(self, capsys) -> None:
+
+        # Test with synthetic environment
+        env = {"dependencies": ["python==3.9", "numpy", "fiona"]}
+        devenv = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv"]}
+
+        # This should print the difference between the two
+        geoutils.misc.diff_environment_yml(env, devenv, input_dict=True, print_dep="conda")
+
+        # Capture the stdout and check it is indeed the right diff
+        captured = capsys.readouterr().out
+        assert captured == "opencv\n"
+
+        # This should print the difference including pip
+        geoutils.misc.diff_environment_yml(env, devenv, input_dict=True, print_dep="both")
+
+        captured = capsys.readouterr().out
+        assert captured == "opencv\nNone\n"
