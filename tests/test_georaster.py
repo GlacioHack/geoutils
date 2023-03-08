@@ -703,9 +703,21 @@ class TestRaster:
         """
         # Test boolean mask
         r = gu.Raster(example)
-        mask = r.data.data == np.min(r.data.data)
+        # We need to know the existing nodata in case they exist, as set_mask only masks new values
+        orig_mask = r.data.mask.copy().squeeze()
+        mask = r.data.data == np.nanmin(r.data)
         r.set_mask(mask)
-        assert (np.count_nonzero(mask) > 0) & np.array_equal(mask > 0, r.data.mask)
+        assert (np.count_nonzero(mask) > 0) & np.array_equal(orig_mask | mask > 0, r.data.mask)
+
+        #  Test mask object
+        r2 = gu.Raster(example)
+        mask2 = r2 == np.nanmin(r2)
+        r2.set_mask(mask2)
+        # Indexing at 0 for the mask in case the data has multiple bands
+        assert (np.count_nonzero(mask2) > 0) & np.array_equal(orig_mask | mask2.data.filled(False).squeeze(), r2.data.mask[0, :, :])
+        # The two last masking (array or Mask) should yield the same result when the data is only 2D
+        if r.count == 1:
+            assert np.array_equal(r.data.mask, r2.data.mask)
 
         # Test non-boolean mask with values > 0
         r = gu.Raster(example)

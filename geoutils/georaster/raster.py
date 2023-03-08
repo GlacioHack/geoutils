@@ -1376,15 +1376,16 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # If the mask is a Mask instance, pass the boolean array
         if isinstance(mask, Mask):
             mask = mask.data.filled(False)
+        mask = mask.squeeze()
 
         if mask.shape != orig_shape:
-            # In case first dimension is empty and other dimensions match -> reshape mask
-            if (orig_shape[0] == 1) & (orig_shape[1:] == mask.shape):
-                mask = mask.reshape(orig_shape)
+            # In case first dimension is more than one (several bands) and other dimensions match
+            if orig_shape[1:] == mask.shape:
+                self.data[:, mask > 0] = np.ma.masked
             else:
                 raise ValueError(f"mask must be of the same shape as existing data: {orig_shape}.")
-
-        self.data[mask > 0] = np.ma.masked
+        else:
+            self.data[mask > 0] = np.ma.masked
 
     def info(self, stats: bool = False) -> str:
         """
