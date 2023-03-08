@@ -33,27 +33,36 @@ VectorType = TypeVar("VectorType", bound="Vector")
 
 class Vector:
     """
-    Create a Vector object from a fiona-supported vector dataset.
+    The georeferenced vector
+
+     Main attributes:
+        ds: :class:`geopandas.GeoDataFrame`
+            Geodataframe of the vector.
+        crs: :class:`pyproj.crs.CRS`
+            Coordinate reference system of the vector.
+        bounds: :class:`rio.coords.BoundingBox`
+            Coordinate bounds of the vector.
+
+    All other attributes are derivatives of those attributes, or read from the file on disk.
+    See the API for more details.
     """
 
-    def __init__(self, filename: str | pathlib.Path | gpd.GeoDataFrame):
+    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame):
         """
-        Load a fiona-supported dataset, given a filename.
+        Instantiate a vector from a filename or geopandas geodataframe.
 
-        :param filename: The filename or GeoDataFrame of the dataset.
-
-        :return: A Vector object
+        :param filename_or_dataset: The filename or geodataframe.
         """
 
-        if isinstance(filename, (str, pathlib.Path)):
+        if isinstance(filename_or_dataset, (str, pathlib.Path)):
             with warnings.catch_warnings():
                 # This warning shows up in numpy 1.21 (2021-07-09)
                 warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
-                ds = gpd.read_file(filename)
+                ds = gpd.read_file(filename_or_dataset)
             self._ds = ds
-            self._name: str | gpd.GeoDataFrame | None = filename
-        elif isinstance(filename, gpd.GeoDataFrame):
-            self._ds = filename
+            self._name: str | gpd.GeoDataFrame | None = filename_or_dataset
+        elif isinstance(filename_or_dataset, gpd.GeoDataFrame):
+            self._ds = filename_or_dataset
             self._name = None
         else:
             raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
@@ -61,7 +70,8 @@ class Vector:
         self._crs = self.ds.crs
 
     def __repr__(self) -> str:
-        """Representation of vector"""
+        """Convert vector to string representation."""
+
 
         # Get the representation of ds
         str_ds = "\n       ".join(self.__str__().split("\n"))
@@ -81,7 +91,7 @@ class Vector:
         return s
 
     def _repr_html_(self) -> str:
-        """Representation of vector for html"""
+        """Convert vector to HTML string representation for documentation."""
 
         str_ds = "\n       ".join(self.ds.__str__().split("\n"))
 
@@ -103,18 +113,20 @@ class Vector:
         return s
 
     def __str__(self) -> str:
-        """Provide string of information about Raster."""
+        """Provide simplified vector string representation for print()."""
 
         return str(self.ds.__str__())
 
     def __getitem__(self, value: gu.Raster | Vector | list[float] | tuple[float, ...]) -> Vector:
-        """Subset the Raster object: calls the crop method with default parameters"""
+        """
+        Index or subset the vector.
+        """
 
         return self.crop(crop_geom=value, clip=False, inplace=False)
 
     def info(self) -> str:
         """
-        Returns string of information about the vector (filename, coordinate system, number of layers, features, etc.).
+        Summarize information about the vector.
 
         :returns: text information about Vector attributes.
         :rtype: str
@@ -143,7 +155,8 @@ class Vector:
         return_axes: bool = False,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        r"""Show/display the vector, with axes in projection of image.
+        r"""
+        Plot the vector.
 
         This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs which
         you give this method will be passed to it.
@@ -241,23 +254,23 @@ class Vector:
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:
-        """Get a bounding box of the total bounds of the Vector."""
+        """Bounding box of the vector."""
         return rio.coords.BoundingBox(*self.ds.total_bounds)
 
     @property
     def crs(self) -> rio.crs.CRS:
-        """Ensure CRS cannot be set"""
+        """Coordinate reference system of the vector."""
         self._crs = self.ds.crs
         return self._crs
 
     @property
     def ds(self) -> gpd.GeoDataFrame:
-        """Getter method for dataset"""
+        """Geodataframe of the vector."""
         return self._ds
 
     @ds.setter
     def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
-        """Setting a new GeoDataFrame"""
+        """Set a new geodataframe."""
 
         if isinstance(new_ds, gpd.GeoDataFrame):
             self._ds = new_ds
@@ -268,11 +281,11 @@ class Vector:
 
     @property
     def name(self) -> str | None:
-        """Filename if exists"""
+        """Name on disk, if it exists."""
         return self._name
 
     def copy(self: VectorType) -> VectorType:
-        """Return a copy of the Vector."""
+        """Return a copy of the vector."""
         # Utilise the copy method of GeoPandas
         new_vector = self.__new__(type(self))
         new_vector.__init__(self.ds.copy())  # type: ignore
@@ -315,8 +328,11 @@ class Vector:
         inplace: bool = True,
     ) -> VectorType | None:
         """
-        Crop the Vector to given extent, or bounds of a raster or vector. Optionally, clip geometries
-        to that extent (by default keeps all intersecting).
+        Crop the vector to given extent.
+
+        Match-reference: a reference raster or vector can be passed to match bounds during cropping.
+
+        Optionally, clip geometries to that extent (by default keeps all intersecting).
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
@@ -355,10 +371,11 @@ class Vector:
         dst_crs: CRS | str | int | None = None,
     ) -> Vector:
         """
-        Reproject vector to a specified CRS.
+        Reproject vector to a specified coordinate reference system.
 
-        The output CRS can either be given by a reference Raster or Vector (using `dst_ref`) or by manually
-        providing the output CRS (`dst_crs`)
+        Match-reference: a reference raster or vector can be passed to match CRS during reprojection.
+
+        Alternatively, a CRS can be passed in many formats (string, EPSG integer, or CRS).
 
         To reproject a Vector with different source bounds, first run Vector.crop().
 
@@ -443,7 +460,9 @@ class Vector:
         as_array: bool = False,
     ) -> gu.Mask | np.ndarray:
         """
-        Rasterize the vector features into a boolean mask matching the georeferencing of a raster.
+        Create a mask from the vector features.
+
+        Match-reference: a raster can be passed to match its resolution, bounds and CRS when creating the mask.
 
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
         Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
@@ -551,9 +570,9 @@ class Vector:
         out_value: int | float = 0,
     ) -> gu.Raster | gu.Mask:
         """
-        Return an array with input geometries burned in.
+        Rasterize vector to a raster or mask, with input geometries burned in.
 
-        By default, output raster has the extent/dimensions of the provided raster file.
+        Match-reference: a raster can be passed to match its resolution, bounds and CRS when rasterizing the vector.
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
         Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
 
@@ -677,7 +696,7 @@ class Vector:
 
     def query(self: Vector, expression: str, inplace: bool = False) -> Vector | None:
         """
-        Query the Vector dataset with a valid Pandas expression.
+        Query the vector with a valid Pandas expression.
 
         :param expression: A python-like expression to evaluate. Example: "col1 > col2".
         :param inplace: Whether the query should modify the data in place or return a modified copy.
@@ -702,11 +721,11 @@ class Vector:
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
     ) -> gu.Raster:
         """
-        Proximity to this Vector's geometry computed for each cell of a Raster grid, or for a grid size with
-        this Vector's extent.
+        Compute proximity distances to this vector's geometry.
 
-        If passed, the Raster georeferenced grid will be used to burn the proximity. If not, a grid size can be
-        passed to create a georeferenced grid with the bounds and CRS of this Vector.
+        Match-reference: a raster can be passed to match its resolution, bounds and CRS for computing proximity distances.
+
+        Alternatively, a grid size can be passed to create a georeferenced grid with the bounds and CRS of this vector.
 
         By default, the boundary of the Vector's geometry will be used. The full geometry can be used by
         passing "geometry",
@@ -747,7 +766,7 @@ class Vector:
 
     def buffer_metric(self, buffer_size: float) -> Vector:
         """
-        Buffer the vector in a metric system (UTM only).
+        Buffer the vector features in a local metric system (UTM only).
 
         The outlines are projected to a local UTM, then reverted to the original projection after buffering.
 
@@ -788,7 +807,7 @@ class Vector:
 
     def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
         """
-        Return self's bounds in the given CRS.
+        Get vector bounds projected in a specified CRS.
 
         :param out_crs: Output CRS
         :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
@@ -802,7 +821,7 @@ class Vector:
 
     def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> Vector:
         """
-        Returns a Vector object containing self's geometries extended by a buffer, without overlapping each other.
+        Buffer the vector geometries without overlapping each other.
 
         The algorithm is based upon this tutorial: https://statnmap.com/2020-07-31-buffer-area-for-nearest-neighbour/.
         The buffered polygons are created using Voronoi polygons in order to delineate the "area of influence"

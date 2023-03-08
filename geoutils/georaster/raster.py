@@ -274,8 +274,6 @@ class Raster:
             Default list is set by geoutils.georaster.raster._default_rio_attrs, i.e.
             ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
-
-        :return: A Raster object
         """
         self.driver: str | None = None
         self.name: str | None = None
@@ -604,7 +602,7 @@ class Raster:
         return mfh.open()
 
     def __repr__(self) -> str:
-        """Convert to raster string representation."""
+        """Convert raster to string representation."""
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
@@ -635,7 +633,7 @@ class Raster:
         # return s
 
     def _repr_html_(self) -> str:
-        """Convert to raster HTML representation for documentation."""
+        """Convert raster to HTML representation for documentation."""
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
@@ -1753,12 +1751,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         Match-reference: a reference raster can be passed to match resolution, bounds and CRS during reprojection.
 
-        The output grid can either be given by a reference raster (using `dst_ref`),
-        or by manually providing the output CRS (`dst_crs`), dimensions (`dst_size`),
-        resolution (with `dst_size`) and/or bounds (`dst_bounds`).
-        Any resampling algorithm implemented in rasterio can be used.
+        Alternatively, the destination resolution, bounds and CRS can be passed individually.
 
-        To reproject a Raster with different source bounds, first run Raster.crop.
+        Any resampling algorithm implemented in Rasterio can be passed as a string.
+        See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
+        for the full list.
 
         :param dst_ref: A reference raster. If set will use the attributes of this
             raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
@@ -2939,7 +2936,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
     ) -> Raster:
         """
-        Compute the proximity distance to the raster target pixels, or to a vector geometry on the raster grid.
+        Compute proximity distances to the raster target pixels, or to a vector geometry on the raster grid.
 
         When passing a Vector, by default, the boundary of the geometry will be used. The full geometry can be used by
         passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
