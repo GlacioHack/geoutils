@@ -44,7 +44,7 @@ vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 # simple :class:`tuple` of bounds.
 
 bounds = rast.get_bounds_projected(out_crs=vect.crs)
-vect.crop(cropGeom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top))
+vect.crop(crop_geom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top))
 
 rast.show(ax="new", cmap="Greys_r", alpha=0.7)
 vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)

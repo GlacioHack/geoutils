@@ -717,7 +717,7 @@ class Raster:
 
         # Otherwise, subset with crop
         else:
-            return self.crop(cropGeom=index, inplace=False)
+            return self.crop(crop_geom=index, inplace=False)
 
     def __setitem__(self, index: Mask | np.ndarray, assign: np.ndarray | Number) -> None:
         """
@@ -1646,7 +1646,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def crop(
         self: RasterType,
-        cropGeom: RasterType | Vector | list[float] | tuple[float, ...],
+        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -3159,7 +3159,7 @@ class Mask(Raster):
 
     def crop(
         self: Mask,
-        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         inplace: bool = True,
     ) -> Mask | None:
@@ -3168,17 +3168,17 @@ class Mask(Raster):
         if mode == "match_extent":
             self.data = self.data.astype("float32")
             if inplace:
-                super().crop(cropGeom=cropGeom, mode=mode, inplace=inplace)
+                super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
                 self.data = self.data.astype(bool)
                 return None
             else:
-                output = super().crop(cropGeom=cropGeom, mode=mode, inplace=inplace)
+                output = super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
                 output.data = output.data.astype(bool)
                 return output
         # Otherwise, run a classic crop
         else:
             if not inplace:
-                return super().crop(cropGeom=cropGeom, mode=mode, inplace=inplace)
+                return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
             else:
                 return None
 

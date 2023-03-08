@@ -7,6 +7,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
+import matplotlib.pyplot as plt
 from scipy.ndimage import binary_erosion
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
@@ -45,6 +46,10 @@ class TestVector:
         # Third, with a geopandas dataframe
         v2 = gu.Vector(gpd.read_file(self.aster_outlines_path))
         assert isinstance(v2, gu.Vector)
+
+        # Check errors are raised when filename has wrong type
+        with pytest.raises(TypeError, match="Filename argument should be a string, Path or geopandas.GeoDataFrame."):
+            gu.Vector(1) # type: ignore
 
     def test_copy(self) -> None:
 
@@ -129,15 +134,37 @@ class TestVector:
 
     def test_rasterize_unproj(self) -> None:
         """Test rasterizing an EPSG:3426 dataset into a projection."""
-        v = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
-        # Use Web Mercator at 30 m.
 
+        vct = gu.Vector(self.everest_outlines_path)
+        rst = gu.Raster(self.landsat_b4_crop_path)
+
+        # Use Web Mercator at 30 m.
         # Capture the warning on resolution not matching exactly bounds
         with pytest.warns(UserWarning):
-            burned = v.rasterize(xres=30, crs=3857)
+            burned = vct.rasterize(xres=30, crs=3857)
 
         assert burned.shape[0] == 1251
         assert burned.shape[1] == 1522
+
+        # Typically, rasterize returns a raster
+        burned_in2_out1 = vct.rasterize(rst=rst, in_value=2, out_value=1)
+        assert isinstance(burned_in2_out1, gu.Raster)
+
+        # For an in_value of 1 and out_value of 0 (default), it returns a mask
+        burned_mask = vct.rasterize(rst=rst, in_value=1)
+        assert isinstance(burned_mask, gu.Mask)
+
+        # Check that rasterizing with in_value=1 is the same as creating a mask
+        assert burned_mask.raster_equal(vct.create_mask(rst=rst))
+
+        # The two rasterization should match
+        assert np.all(burned_in2_out1[burned_mask] == 2)
+        assert np.all(burned_in2_out1[~burned_mask] == 1)
+
+        # Check that errors are raised
+        with pytest.raises(ValueError, match="Only one of rst or crs can be provided."):
+            vct.rasterize(rst=rst, crs=3857)
+
 
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
@@ -155,7 +182,12 @@ class TestVector:
 
         # Crop
         outlines_new = outlines.copy()
-        outlines_new.crop(rst)
+        outlines_new.crop(crop_geom=rst)
+
+        # Crop by passing bounds
+        outlines_new_bounds = outlines.copy()
+        outlines_new_bounds.crop(crop_geom=list(rst.bounds))
+        assert_geodataframe_equal(outlines_new.ds, outlines_new_bounds.ds)
 
         # Check with bracket call
         outlines_new2 = outlines_new[rst]
@@ -178,6 +210,10 @@ class TestVector:
 
         # Check that some features were indeed removed
         assert np.sum(~np.array(intersects_old)) > 0
+
+        # Check that error is raised when cropGeom argument is unvalid
+        with pytest.raises(TypeError, match="Crop geometry must be a Raster, Vector, or list of coordinates."):
+            outlines.crop(1) # type: ignore
 
     def test_proximity(self) -> None:
         """
@@ -302,6 +338,18 @@ class TestSynthetic:
         # Check that by default, create_mask returns a Mask
         assert isinstance(mask, gu.Mask)
 
+        # Check that an error is raised if xres is not passed
+        with pytest.raises(ValueError, match="At least rst or xres must be set."):
+            vector.create_mask()
+
+        # Check that an error is raised if buffer is the wrong type
+        with pytest.raises(TypeError, match="Buffer must be a number, currently set to str."):
+            vector.create_mask(rst, buffer="lol") # type: ignore
+
+        # If the raster has the wrong type
+        with pytest.raises(TypeError, match="Raster must be a geoutils.Raster or None."):
+            vector.create_mask("lol") # type: ignore
+
         # Check that a warning is raised if the bounds were passed specifically by the user
         with pytest.warns(UserWarning):
             vector.create_mask(xres=1.01, bounds=(0, 0, 21, 21))
@@ -415,7 +463,7 @@ class TestSynthetic:
         # And this time, it is the reprojected GeoDataFrame that should almost match (within a tolerance of 10e-06)
         assert all(direct_gpd_buffer.ds.geom_almost_equals(two_squares_geographic_buffered_reproj.ds))
 
-    def test_buffer_without_overlap(self) -> None:
+    def test_buffer_without_overlap(self, monkeypatch) -> None:
         """
         Check that non-overlapping buffer feature works. Does not work on simple geometries, so test on MultiPolygon.
         Yet, very simple geometries yield unexpected results, as is the case for the second test case here.
@@ -478,3 +526,7 @@ class TestSynthetic:
         mask_buffer = two_squares.create_mask(xres=0.1, bounds=(0, 0, 21, 21), buffer=buffer_size)
         mask_nobuffer = two_squares.create_mask(xres=0.1, bounds=(0, 0, 21, 21))
         assert np.all(mask_nobuffer | mask_nonoverlap == mask_buffer)
+
+        # Check that plotting runs without errors and close it
+        monkeypatch.setattr(plt, 'show', lambda: None)
+        two_squares.buffer_without_overlap(buffer_size, plot=True)

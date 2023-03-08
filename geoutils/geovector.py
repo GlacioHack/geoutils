@@ -56,7 +56,7 @@ class Vector:
             self._ds = filename
             self._name = None
         else:
-            raise ValueError("filename argument not recognised.")
+            raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
 
         self._crs = self.ds.crs
 
@@ -110,7 +110,7 @@ class Vector:
     def __getitem__(self, value: gu.Raster | Vector | list[float] | tuple[float, ...]) -> Vector:
         """Subset the Raster object: calls the crop method with default parameters"""
 
-        return self.crop(cropGeom=value, clip=False, inplace=False)
+        return self.crop(crop_geom=value, clip=False, inplace=False)
 
     def info(self) -> str:
         """
@@ -310,7 +310,7 @@ class Vector:
 
     def crop(
         self: VectorType,
-        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool = False,
         inplace: bool = True,
     ) -> VectorType | None:
@@ -320,20 +320,20 @@ class Vector:
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param cropGeom: Geometry to crop vector to, as either a Raster object, a Vector object, or a list of
+        :param crop_geom: Geometry to crop vector to, as either a Raster object, a Vector object, or a list of
             coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
             Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param clip: Whether to clip the geometry to the given extent (by default keeps all intersecting).
         :param inplace: Update the vector inplace or return copy.
         """
-        if isinstance(cropGeom, (gu.Raster, Vector)):
+        if isinstance(crop_geom, (gu.Raster, Vector)):
             # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-            xmin, ymin, xmax, ymax = cropGeom.get_bounds_projected(out_crs=self.crs)
-        elif isinstance(cropGeom, (list, tuple)):
-            xmin, ymin, xmax, ymax = cropGeom
+            xmin, ymin, xmax, ymax = crop_geom.get_bounds_projected(out_crs=self.crs)
+        elif isinstance(crop_geom, (list, tuple)):
+            xmin, ymin, xmax, ymax = crop_geom
         else:
-            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+            raise TypeError("Crop geometry must be a Raster, Vector, or list of coordinates.")
 
         # Need to separate the two options, inplace update
         if inplace:
@@ -434,7 +434,7 @@ class Vector:
 
     def create_mask(
         self,
-        rst: str | gu.Raster | None = None,
+        rst: gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -450,7 +450,7 @@ class Vector:
 
         Vector features which fall outside the bounds of the raster file are not written to the new mask file.
 
-        :param rst: A Raster object or string to filename
+        :param rst: A raster
         :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
         :param xres: Output raster spatial resolution in x. Only is rst is None.
         :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
@@ -461,16 +461,13 @@ class Vector:
 
         :returns: A Mask object contain a boolean array
         """
-        # If input rst is string, open as Raster
-        if isinstance(rst, str):
-            rst = gu.Raster(rst)  # type: ignore
 
         # If no rst given, use provided dimensions
         if rst is None:
 
             # At minimum, xres must be set
             if xres is None:
-                raise ValueError("at least rst or xres must be set")
+                raise ValueError("At least rst or xres must be set.")
             if yres is None:
                 yres = xres
 
@@ -491,7 +488,7 @@ class Vector:
             if width % 1 != 0 or height % 1 != 0:
                 # Only warn if the bounds were provided, and not derived from the vector
                 if not bounds_shp:
-                    warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
+                    warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds.")
 
             width = int(np.round(width))
             height = int(np.round(height))
@@ -507,7 +504,7 @@ class Vector:
             crs = rst.crs
             bounds = rst.bounds
         else:
-            raise ValueError("`rst` must be either a str, geoutils.Raster or None")
+            raise TypeError("Raster must be a geoutils.Raster or None.")
 
         # Copying GeoPandas dataframe before applying changes
         gdf = self.ds.copy()
@@ -522,7 +519,7 @@ class Vector:
 
         # Create a buffer around the features
         if not isinstance(buffer, (int, float, np.number)):
-            raise ValueError(f"`buffer` must be a number, currently set to {type(buffer)}")
+            raise TypeError("Buffer must be a number, currently set to {}.".format(type(buffer).__name__))
         if buffer != 0:
             gdf.geometry = [geom.buffer(buffer) for geom in gdf.geometry]
         elif buffer == 0:
@@ -545,8 +542,8 @@ class Vector:
 
     def rasterize(
         self,
-        rst: str | gu.Raster | None = None,
-        crs: CRS | None = None,
+        rst: gu.Raster | None = None,
+        crs: CRS | int | None = None,
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
@@ -576,9 +573,6 @@ class Vector:
 
         :returns: Raster or mask containing the burned geometries
         """
-        # If input rst is string, open as Raster
-        if isinstance(rst, str):
-            rst = gu.Raster(rst)  # type: ignore
 
         if (rst is not None) and (crs is not None):
             raise ValueError("Only one of rst or crs can be provided.")
@@ -598,7 +592,7 @@ class Vector:
 
             # At minimum, xres must be set
             if xres is None:
-                raise ValueError("at least rst or xres must be set")
+                raise ValueError("At least rst or xres must be set.")
             if yres is None:
                 yres = xres
 
@@ -612,7 +606,7 @@ class Vector:
             height = abs((top - bottom) / yres)
 
             if width % 1 != 0 or height % 1 != 0:
-                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds")
+                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds.")
 
             width = int(np.round(width))
             height = int(np.round(height))
