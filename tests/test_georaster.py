@@ -970,6 +970,27 @@ class TestRaster:
         r_cropped3 = r[outlines]
         assert list(r_cropped3.bounds) == list(new_bounds)
 
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path]) # type: ignore
+    def test_shift(self, example: str) -> None:
+        """ Tests shift works as intended"""
+
+        r = gu.Raster(example)
+
+        orig_transform = r.transform
+        orig_bounds = r.bounds
+        r.shift(xoff=1, yoff=1)
+
+        # Only bounds should change
+        assert orig_transform.c + 1 == r.transform.c
+        assert orig_transform.f + 1 == r.transform.f
+        for attr in ["a", "b", "d", "e"]:
+            assert getattr(orig_transform, attr) == getattr(r.transform, attr)
+
+        assert orig_bounds.left + 1 == r.bounds.left
+        assert orig_bounds.right + 1 == r.bounds.right
+        assert orig_bounds.bottom + 1 == r.bounds.bottom
+        assert orig_bounds.top + 1 == r.bounds.top
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
         warnings.simplefilter("error")
