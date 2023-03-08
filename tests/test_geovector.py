@@ -250,7 +250,7 @@ class TestSynthetic:
         """
         # First with given res and bounds -> Should be a 21 x 21 array with 0 everywhere except center pixel
         vector = self.vector.copy()
-        out_mask = vector.create_mask(xres=1, bounds=(0, 0, 21, 21)).get_nanarray()
+        out_mask = vector.create_mask(xres=1, bounds=(0, 0, 21, 21), as_array=True)
         ref_mask = np.zeros((21, 21), dtype="bool")
         ref_mask[10, 10] = True
         assert out_mask.shape == (21, 21)
@@ -263,7 +263,7 @@ class TestSynthetic:
 
         # Then with a gu.Raster as reference, single band
         rst = gu.Raster.from_array(np.zeros((21, 21)), transform=(1.0, 0.0, 0.0, 0.0, -1.0, 21.0), crs="EPSG:4326")
-        out_mask = vector.create_mask(rst).get_nanarray()
+        out_mask = vector.create_mask(rst, as_array=True)
         assert out_mask.shape == (21, 21)
 
         # With gu.Raster, 2 bands -> fails...
@@ -271,14 +271,14 @@ class TestSynthetic:
         # out_mask = vector.create_mask(rst)
 
         # Test that buffer = 0 works
-        out_mask_buff = vector.create_mask(rst, buffer=0).get_nanarray()
+        out_mask_buff = vector.create_mask(rst, buffer=0, as_array=True)
         assert np.all(ref_mask == out_mask_buff)
 
         # Test that buffer > 0 works
         rst = gu.Raster.from_array(np.zeros((21, 21)), transform=(1.0, 0.0, 0.0, 0.0, -1.0, 21.0), crs="EPSG:4326")
-        out_mask = vector.create_mask(rst).get_nanarray()
+        out_mask = vector.create_mask(rst, as_array=True)
         for buffer in np.arange(1, 8):
-            out_mask_buff = vector.create_mask(rst, buffer=buffer).get_nanarray()
+            out_mask_buff = vector.create_mask(rst, buffer=buffer, as_array=True)
             diff = out_mask_buff & ~out_mask
             assert np.count_nonzero(diff) > 0
             # Difference between masks should always be thinner than buffer + 1
@@ -287,9 +287,9 @@ class TestSynthetic:
 
         # Test that buffer < 0 works
         vector_5 = self.vector_5
-        out_mask = vector_5.create_mask(rst).get_nanarray()
+        out_mask = vector_5.create_mask(rst, as_array=True)
         for buffer in np.arange(-1, -3, -1):
-            out_mask_buff = vector_5.create_mask(rst, buffer=buffer).get_nanarray()
+            out_mask_buff = vector_5.create_mask(rst, buffer=buffer, as_array=True)
             diff = ~out_mask_buff & out_mask
             assert np.count_nonzero(diff) > 0
             # Difference between masks should always be thinner than buffer + 1
@@ -297,7 +297,10 @@ class TestSynthetic:
             assert np.count_nonzero(eroded_diff) == 0
 
         # Check that no warning is raised when creating a mask with a xres not multiple of vector bounds
-        vector.create_mask(xres=1.01)
+        mask = vector.create_mask(xres=1.01)
+
+        # Check that by default, create_mask returns a Mask
+        assert isinstance(mask, gu.Mask)
 
         # Check that a warning is raised if the bounds were passed specifically by the user
         with pytest.warns(UserWarning):

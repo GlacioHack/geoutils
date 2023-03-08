@@ -404,6 +404,34 @@ class Vector:
 
         return Vector(self.ds.to_crs(crs=dst_crs))
 
+    @overload
+    def create_mask(
+            self,
+            rst: str | gu.Raster | None = None,
+            crs: CRS | None = None,
+            xres: float | None = None,
+            yres: float | None = None,
+            bounds: tuple[float, float, float, float] | None = None,
+            buffer: int | float | np.number = 0,
+            *,
+            as_array: Literal[False] = False
+    ) -> gu.Mask:
+        ...
+
+    @overload
+    def create_mask(
+            self,
+            rst: str | gu.Raster | None = None,
+            crs: CRS | None = None,
+            xres: float | None = None,
+            yres: float | None = None,
+            bounds: tuple[float, float, float, float] | None = None,
+            buffer: int | float | np.number = 0,
+            *,
+            as_array: Literal[True]
+    ) -> np.ndarray:
+        ...
+
     def create_mask(
         self,
         rst: str | gu.Raster | None = None,
@@ -412,7 +440,8 @@ class Vector:
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         buffer: int | float | np.number = 0,
-    ) -> gu.Mask:
+        as_array: bool = False
+    ) -> gu.Mask | np.ndarray:
         """
         Rasterize the vector features into a boolean mask matching the georeferencing of a raster.
 
@@ -428,6 +457,7 @@ class Vector:
         :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
         :param buffer: Size of buffer to be added around the features, in the raster's projection units.
             If a negative value is set, will erode the features.
+        :param as_array: Return mask as a boolean array
 
         :returns: A Mask object contain a boolean array
         """
@@ -507,7 +537,11 @@ class Vector:
         if rst is not None:
             mask = mask.reshape((rst.count, rst.height, rst.width))  # type: ignore
 
-        return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+        # Return output as mask or as array
+        if as_array:
+            return mask.squeeze()
+        else:
+            return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     def rasterize(
         self,

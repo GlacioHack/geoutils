@@ -738,10 +738,56 @@ class TestRaster:
         with pytest.raises(ValueError, match="mask must be a numpy array"):
             r.set_mask(1)
 
-    test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    def test_getitem_setitem(self, example: str) -> None:
+        """Test the __getitem__ method ([]) for indexing and __setitem__ for index assignment."""
 
+        # Open a Raster
+        rst = gu.Raster(example)
+
+        # Create a boolean array of the same shape, and a mask of the same transform/crs
+        arr = np.random.randint(low=0, high=2, size=rst.shape, dtype=bool)
+        mask = gu.Mask.from_array(data=arr, transform=rst.transform, crs=rst.crs)
+
+        # Check that indexing works with both of those
+        vals_arr = rst[arr]
+        vals_mask = rst[mask]
+
+        # Those indexing operations should yield the same 1D array of values
+        assert np.array_equal(vals_mask, vals_arr, equal_nan=True)
+
+        # Now, we test index assignment
+        rst2 = rst.copy()
+
+        # It should work with a number, or a 1D array of the same length as the indexed one
+        rst[mask] = 1.
+        rst2[arr] = np.ones(rst2.shape)[arr]
+
+        # The rasters should be the same
+        assert rst2.raster_equal(rst)
+
+        # Check that errors are raised for both indexing and index assignment
+        # An error when the shape is wrong
+        with pytest.raises(ValueError, match="Indexing a raster with an array requires the two having the same shape."):
+            rst[arr[:-1, :-1]]
+            rst[arr[:-1, :-1]] = 1
+        # A warning when the array type is not boolean
+        with pytest.warns(UserWarning, match="Input array was cast to boolean for indexing."):
+            rst[arr.astype("uint8")]
+            rst[arr.astype("uint8")] = 1
+        # An error when the georeferencing of the Mask does not match
+        mask.shift(1, 1)
+        with pytest.raises(ValueError, match="Indexing a raster with a mask requires the two being on the same georeferenced grid."):
+            rst[mask]
+            rst[mask] = 1
+        # For assignment, an error when the input index is neither a Mask or a boolean ndarray
+        # (indexing attempts to call crop for differently shaped data)
+        with pytest.raises(ValueError, match="Indexing a raster requires a mask of same georeferenced grid, or a boolean array of same shape."):
+            rst["lol"] = 1
+
+    test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
     @pytest.mark.parametrize("data", test_data)  # type: ignore
-    def test_crop_and_getitem(self, data: list[str]) -> None:
+    def test_crop(self, data: list[str]) -> None:
         """Test for crop method, also called by square brackets through __getitem__"""
 
         raster_path, outlines_path = data

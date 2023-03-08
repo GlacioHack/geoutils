@@ -694,16 +694,68 @@ class Raster:
 
         return str(s)
 
-    def __getitem__(self, value: Raster | Vector | list[float] | tuple[float, ...]) -> np.ndarray | Raster:
-        """Subset the Raster object: calls the crop method with default parameters"""
+    def __getitem__(self, index: Raster | Vector | np.ndarray | list[float] | tuple[float, ...]) -> np.ndarray | Raster:
+        """
+        Index or subset the raster:
+        - If a mask of same georeferencing or array of same shape is passed, return the indexed raster array.
+        - If a raster, vector, list or tuple of bounds is passed, return the cropped raster matching those objects.
+        """
 
-        # If input is Mask with the same shape and georeferencing, index in 1D
-        if isinstance(value, Mask) and self.georeferenced_grid_equal(value):
-            return self.data[value.data]
+        # If input is Mask with the same shape and georeferencing
+        if isinstance(index, Mask):
+            if not self.georeferenced_grid_equal(index):
+                raise ValueError("Indexing a raster with a mask requires the two being on the same georeferenced grid.")
+            return self.data[:, index.data.squeeze()]
+        # If input is array with the same shape
+        elif isinstance(index, np.ndarray):
+            if np.shape(index) != self.shape:
+                raise ValueError("Indexing a raster with an array requires the two having the same shape.")
+            if str(index.dtype) != "bool":
+                index = index.astype(bool)
+                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
+            return self.data[:, index]
 
         # Otherwise, subset with crop
         else:
-            return self.crop(cropGeom=value, inplace=False)
+            return self.crop(cropGeom=index, inplace=False)
+
+    def __setitem__(self, index: Mask | np.ndarray, assign: np.ndarray | Number) -> None:
+        """
+          Index assignment: if a mask of same georeferencing or array of same shape is passed,
+          assign values of the raster array.
+        """
+
+        # First, check index
+
+        # If input is Mask with the same shape and georeferencing
+        if isinstance(index, Mask):
+            if not self.georeferenced_grid_equal(index):
+                raise ValueError("Indexing a raster with a mask requires the two being on the same georeferenced grid.")
+
+            ind = index.data.squeeze()
+        # If input is array with the same shape
+        elif isinstance(index, np.ndarray):
+            if np.shape(index) != self.shape:
+                raise ValueError("Indexing a raster with an array requires the two having the same shape.")
+            if str(index.dtype) != "bool":
+                ind = index.astype(bool)
+                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
+            else:
+                ind = index
+        # Otherwise, raise an error
+        else:
+            raise ValueError("Indexing a raster requires a mask of same georeferenced grid, or a boolean array of same shape.")
+
+        # Second, assign, NumPy will raise appropriate errors itself
+
+        # We need to explicitly load here, as we cannot call the data getter/setter directly
+        if not self.is_loaded:
+            self.load()
+        # Assign the values to the index
+        self._data[:, ind] = assign
+
+        return None
+
 
     def raster_equal(self, other: object) -> bool:
         """Check if a Raster masked array's data (including masked values), mask, fill_value and dtype are equal,
@@ -727,8 +779,8 @@ class Raster:
         self: RasterType, other: RasterType | np.ndarray | Number
     ) -> tuple[np.ma.masked_array, np.ma.masked_array | Number, float | int | list[int] | list[float] | None]:
         """
-        Before any operation overloading, check input data type and return both self and other data as either \
-a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
+        Before any operation overloading, check input data type and return both self and other data as either
+        a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
         Also returns the best compatible nodata value.
 
         The nodata value is set in the following order:
@@ -1302,7 +1354,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
 
-    def set_mask(self, mask: np.ndarray) -> None:
+    def set_mask(self, mask: np.ndarray | Mask) -> None:
         """
         Mask all pixels of self.data where `mask` is set to True or > 0.
 
@@ -1312,14 +1364,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param mask: The data mask
         """
         # Check that mask is a Numpy array
-        if not isinstance(mask, np.ndarray):
-            raise ValueError("mask must be a numpy array.")
+        if not isinstance(mask, (np.ndarray, Mask)):
+            raise ValueError("mask must be a numpy array or a Mask.")
 
         # Check that new_data has correct shape
         if self.is_loaded:
             orig_shape = self.data.shape
         else:
             raise AttributeError("self.data must be loaded first, with e.g. self.load()")
+
+        # If the mask is a Mask instance, pass the boolean array
+        if isinstance(mask, Mask):
+            mask = mask.data.filled(False)
 
         if mask.shape != orig_shape:
             # In case first dimension is empty and other dimensions match -> reshape mask
