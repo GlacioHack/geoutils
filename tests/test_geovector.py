@@ -4,10 +4,10 @@ import pathlib
 import re
 
 import geopandas as gpd
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
-import matplotlib.pyplot as plt
 from scipy.ndimage import binary_erosion
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
@@ -49,7 +49,7 @@ class TestVector:
 
         # Check errors are raised when filename has wrong type
         with pytest.raises(TypeError, match="Filename argument should be a string, Path or geopandas.GeoDataFrame."):
-            gu.Vector(1) # type: ignore
+            gu.Vector(1)  # type: ignore
 
     def test_copy(self) -> None:
 
@@ -165,7 +165,6 @@ class TestVector:
         with pytest.raises(ValueError, match="Only one of rst or crs can be provided."):
             vct.rasterize(rst=rst, crs=3857)
 
-
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)  # type: ignore
@@ -211,9 +210,9 @@ class TestVector:
         # Check that some features were indeed removed
         assert np.sum(~np.array(intersects_old)) > 0
 
-        # Check that error is raised when cropGeom argument is unvalid
+        # Check that error is raised when cropGeom argument is invalid
         with pytest.raises(TypeError, match="Crop geometry must be a Raster, Vector, or list of coordinates."):
-            outlines.crop(1) # type: ignore
+            outlines.crop(1)  # type: ignore
 
     def test_proximity(self) -> None:
         """
@@ -344,11 +343,11 @@ class TestSynthetic:
 
         # Check that an error is raised if buffer is the wrong type
         with pytest.raises(TypeError, match="Buffer must be a number, currently set to str."):
-            vector.create_mask(rst, buffer="lol") # type: ignore
+            vector.create_mask(rst, buffer="lol")  # type: ignore
 
         # If the raster has the wrong type
         with pytest.raises(TypeError, match="Raster must be a geoutils.Raster or None."):
-            vector.create_mask("lol") # type: ignore
+            vector.create_mask("lol")  # type: ignore
 
         # Check that a warning is raised if the bounds were passed specifically by the user
         with pytest.warns(UserWarning):
@@ -463,7 +462,7 @@ class TestSynthetic:
         # And this time, it is the reprojected GeoDataFrame that should almost match (within a tolerance of 10e-06)
         assert all(direct_gpd_buffer.ds.geom_almost_equals(two_squares_geographic_buffered_reproj.ds))
 
-    def test_buffer_without_overlap(self, monkeypatch) -> None:
+    def test_buffer_without_overlap(self, monkeypatch) -> None:  # type: ignore
         """
         Check that non-overlapping buffer feature works. Does not work on simple geometries, so test on MultiPolygon.
         Yet, very simple geometries yield unexpected results, as is the case for the second test case here.
@@ -528,5 +527,5 @@ class TestSynthetic:
         assert np.all(mask_nobuffer | mask_nonoverlap == mask_buffer)
 
         # Check that plotting runs without errors and close it
-        monkeypatch.setattr(plt, 'show', lambda: None)
+        monkeypatch.setattr(plt, "show", lambda: None)
         two_squares.buffer_without_overlap(buffer_size, plot=True)

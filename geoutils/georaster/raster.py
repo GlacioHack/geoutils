@@ -2726,7 +2726,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return rpts
 
-
     def split_bands(self: RasterType, copy: bool = False, subset: list[int] | int | None = None) -> list[Raster]:
         """
         Split the bands into separate rasters.
@@ -2982,6 +2981,7 @@ class Mask(Raster):
     All other attributes are derivatives of those attributes, or read from the file on disk.
     See the API for more details.
     """
+
     def __init__(
         self,
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
@@ -3109,7 +3109,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -3119,7 +3119,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False],
@@ -3129,7 +3129,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        cropGeom: Mask | Vector | list[float] | tuple[float, ...],
+        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         inplace: bool = True,
     ) -> Mask | None:

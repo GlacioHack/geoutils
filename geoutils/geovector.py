@@ -72,7 +72,6 @@ class Vector:
     def __repr__(self) -> str:
         """Convert vector to string representation."""
 
-
         # Get the representation of ds
         str_ds = "\n       ".join(self.__str__().split("\n"))
 
@@ -294,7 +293,7 @@ class Vector:
     @overload
     def crop(
         self: VectorType,
-        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
         inplace: Literal[True],
@@ -304,7 +303,7 @@ class Vector:
     @overload
     def crop(
         self: VectorType,
-        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
         inplace: Literal[False],
@@ -314,7 +313,7 @@ class Vector:
     @overload
     def crop(
         self: VectorType,
-        cropGeom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
         inplace: bool = True,
@@ -538,7 +537,7 @@ class Vector:
 
         # Create a buffer around the features
         if not isinstance(buffer, (int, float, np.number)):
-            raise TypeError("Buffer must be a number, currently set to {}.".format(type(buffer).__name__))
+            raise TypeError(f"Buffer must be a number, currently set to {type(buffer).__name__}.")
         if buffer != 0:
             gdf.geometry = [geom.buffer(buffer) for geom in gdf.geometry]
         elif buffer == 0:
@@ -723,7 +722,8 @@ class Vector:
         """
         Compute proximity distances to this vector's geometry.
 
-        Match-reference: a raster can be passed to match its resolution, bounds and CRS for computing proximity distances.
+        Match-reference: a raster can be passed to match its resolution, bounds and CRS for computing
+        proximity distances.
 
         Alternatively, a grid size can be passed to create a georeferenced grid with the bounds and CRS of this vector.
 
