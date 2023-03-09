@@ -127,9 +127,9 @@ class TestRaster:
 
         # Check that an error is raised when instantiating with an array
         with pytest.raises(
-            TypeError, match="The filename is an array, did you mean to call Raster.from_array(...) instead?"
-        ):
-            gu.Raster(np.ones(size=(1, 1)))  # type: ignore
+            TypeError, match=re.escape("The filename is an array, did you mean to call Raster.from_array(...) instead?"
+        )):
+            gu.Raster(np.ones(shape=(1, 1)))  # type: ignore
         with pytest.raises(
             TypeError, match="The filename argument is not recognised, should be a path or a Rasterio dataset."
         ):
