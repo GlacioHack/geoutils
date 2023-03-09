@@ -1641,7 +1641,13 @@ class TestRaster:
         x = 493120.0
         y = 3101000.0
         i, j = r.xy2ij(x, y)
-        assert img[0, int(i), int(j)] == r.interp_points([(x, y)], order=1)[0]
+        val = r.interp_points([(x, y)], order=1)[0]
+        assert img[0, int(i), int(j)] == val
+
+        # Finally, check that interp convert to latlon
+        lat, lon = gu.projtools.reproject_to_latlon((x,y), in_crs=r.crs)
+        val_latlon = r.interp_points([(lat, lon)], order=1, input_latlon=True)[0]
+        assert val == pytest.approx(val_latlon, abs=0.0001)
 
     def test_value_at_coords(self) -> None:
         """
@@ -2194,6 +2200,12 @@ class TestRaster:
         if img.nodata is None:
             with pytest.warns(UserWarning):
                 img.save(TemporaryFile())
+
+        # Test with blank argument
+        img.save(temp_file.name, blank_value=0)
+        saved = gu.Raster(temp_file.name)
+
+        assert np.array_equal(saved.data.data, np.zeros(np.shape(saved.data)))
 
         # Clean up temporary folder - fails on Windows
         try:

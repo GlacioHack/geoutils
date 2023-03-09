@@ -430,3 +430,125 @@ class TestSubsample:
         assert len(indices) == np.ndim(array)
         assert np.ndim(array[indices]) == 1
         assert np.size(array[indices]) == int(np.size(array) * 0.3)
+
+class TestRasterTools:
+
+    def test_get_valid_extent(self) -> None:
+        """Check the function to get valid extent."""
+
+        # Create an artificial array and masked array
+        arr = np.ones(shape=(5, 5))
+        arr_mask = np.zeros(shape=(5, 5), dtype=bool)
+        mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
+
+        # For no unvalid values, the function should return the edges
+        # For the array
+        assert (0, 4, 0, 4) == gu.spatial_tools.get_valid_extent(arr)
+        # For the masked-array
+        assert (0, 4, 0, 4) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # 1/ First column:
+        # If we mask it in the masked array
+        mask_ma[0, :] = np.ma.masked
+        assert (1, 4, 0, 4) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # If we changed the array to NaNs
+        arr[0, :] = np.nan
+        assert (1, 4, 0, 4) == gu.spatial_tools.get_valid_extent(arr)
+        mask_ma.data[0, :] = np.nan
+        mask_ma.mask = False
+        assert (1, 4, 0, 4) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # 2/ First row:
+        arr = np.ones(shape=(5, 5))
+        arr_mask = np.zeros(shape=(5, 5), dtype=bool)
+        mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
+        # If we mask it in the masked array
+        mask_ma[:, 0] = np.ma.masked
+        assert (0, 4, 1, 4) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # If we changed the array to NaNs
+        arr[:, 0] = np.nan
+        assert (0, 4, 1, 4) == gu.spatial_tools.get_valid_extent(arr)
+        mask_ma.data[:, 0] = np.nan
+        mask_ma.mask = False
+        assert (0, 4, 1, 4) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # 3/ Last column:
+        arr = np.ones(shape=(5, 5))
+        arr_mask = np.zeros(shape=(5, 5), dtype=bool)
+        mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
+
+        # If we mask it in the masked array
+        mask_ma[-1, :] = np.ma.masked
+        assert (0, 3, 0, 4) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # If we changed the array to NaNs
+        arr[-1, :] = np.nan
+        assert (0, 3, 0, 4) == gu.spatial_tools.get_valid_extent(arr)
+        mask_ma.data[-1, :] = np.nan
+        mask_ma.mask = False
+        assert (0, 3, 0, 4) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # 4/ Last row:
+        arr = np.ones(shape=(5, 5))
+        arr_mask = np.zeros(shape=(5, 5), dtype=bool)
+        mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
+
+        # If we mask it in the masked array
+        mask_ma[:, -1] = np.ma.masked
+        assert (0, 4, 0, 3) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+        # If we changed the array to NaNs
+        arr[:, -1] = np.nan
+        assert (0, 4, 0, 3) == gu.spatial_tools.get_valid_extent(arr)
+        mask_ma.data[:, -1] = np.nan
+        mask_ma.mask = False
+        assert (0, 4, 0, 3) == gu.spatial_tools.get_valid_extent(mask_ma)
+
+
+    def test_get_xy_rotated(self):
+        """Check the function to rotate array."""
+
+        # Create an artificial raster
+        width = height = 5
+        transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
+        r1 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
+
+        # First, we get initial coords
+        xx, yy = r1.coords(grid=True)
+
+        # Rotating the coordinates 90 degrees should be the same as rotating the array
+        xx90, yy90 = gu.spatial_tools.get_xy_rotated(r1, along_track_angle=90)
+        assert np.allclose(np.rot90(xx90), xx)
+        assert np.allclose(np.rot90(yy90), yy)
+
+        # Same for 180 degrees
+        xx180, yy180 = gu.spatial_tools.get_xy_rotated(r1, along_track_angle=180)
+        assert np.allclose(np.rot90(xx180, k=2), xx)
+        assert np.allclose(np.rot90(yy180, k=2), yy)
+
+        # Same for 270 degrees
+        xx270, yy270 = gu.spatial_tools.get_xy_rotated(r1, along_track_angle=270)
+        assert np.allclose(np.rot90(xx270, k=3), xx)
+        assert np.allclose(np.rot90(yy270, k=3), yy)
+
+        # 360 degrees should get us back on our feet
+        xx360, yy360 = gu.spatial_tools.get_xy_rotated(r1, along_track_angle=360)
+        assert np.allclose(xx360, xx)
+        assert np.allclose(yy360, yy)
+
+        # Test that the values make sense for 45 degrees
+        xx45, yy45 = gu.spatial_tools.get_xy_rotated(r1, along_track_angle=45)
+        # Should have zero on the upper left corner for xx
+        assert xx45[0, 0] == pytest.approx(0)
+        # Then a multiple of sqrt2 along each dimension
+        assert xx45[1, 0] == pytest.approx(xx45[0, 1]) == pytest.approx(0.1 * np.sqrt(2))
+        # The lower right corner should have the highest coordinate (0.8) times sqrt(2)
+        assert xx45[-1, -1] == pytest.approx(np.max(xx) * np.sqrt(2))
+
+        # Finally, yy should be rotated by 90
+        assert np.allclose(np.rot90(xx45), yy45)
+
+
+        xx, yy = gu.spatial_tools.get_xy_rotated(r1, along_track_angle=90)

@@ -481,26 +481,27 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> np.ndarray:
 def get_xy_rotated(raster: Raster, along_track_angle: float) -> tuple[np.ndarray, np.ndarray]:
     """
     Rotate x, y axes of image to get along- and cross-track distances.
-    :param raster: raster to get x,y positions from.
-    :param along_track_angle: angle by which to rotate axes (degrees)
-    :returns xxr, yyr: arrays corresponding to along (x) and cross (y) track distances.
+    :param raster: Raster to get x,y positions from.
+    :param along_track_angle: Angle by which to rotate axes (degrees)
+
+    :returns xxr, yyr: Arrays corresponding to along (x) and cross (y) track distances.
     """
 
     myang = np.deg2rad(along_track_angle)
 
-    # get grid coordinates
+    # Get grid coordinates
     xx, yy = raster.coords(grid=True)
     xx -= np.min(xx)
     yy -= np.min(yy)
 
-    # get rotated coordinates
+    # Get rotated coordinates
 
-    # for along-track
-    xxr = np.multiply(xx, np.cos(myang)) + np.multiply(-1 * yy, np.sin(along_track_angle))
-    # for cross-track
-    yyr = np.multiply(xx, np.sin(myang)) + np.multiply(yy, np.cos(along_track_angle))
+    # For along-track
+    xxr = xx * np.cos(myang) - yy * np.sin(myang)
+    # For cross-track
+    yyr = xx * np.sin(myang) + yy * np.cos(myang)
 
-    # re-initialize coordinate at zero
+    # Re-initialize coordinate at zero
     xxr -= np.nanmin(xxr)
     yyr -= np.nanmin(yyr)
 

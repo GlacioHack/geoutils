@@ -1742,7 +1742,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def reproject(
         self: RasterType,
-        dst_ref: RasterType | rio.io.Dataset | str | None = None,
+        dst_ref: RasterType | str | None = None,
         dst_crs: CRS | str | int | None = None,
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
@@ -1767,7 +1767,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         for the full list.
 
         :param dst_ref: A reference raster. If set will use the attributes of this
-            raster for the output grid. Can be provided as Raster/rasterio data set or as path to the file.
+            raster for the output grid.
         :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
             defaults to self.crs.
         :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
@@ -1845,15 +1845,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
             if isinstance(dst_ref, Raster):
                 ds_ref = dst_ref
-            elif isinstance(dst_ref, rio.io.MemoryFile) or isinstance(dst_ref, rasterio.io.DatasetReader):
-                ds_ref = dst_ref
             elif isinstance(dst_ref, str):
                 if not os.path.exists(dst_ref):
                     raise ValueError("Reference raster does not exist.")
                 ds_ref = Raster(dst_ref, load_data=False)
             else:
                 raise TypeError(
-                    "Type of dst_ref not understood, must be path to file (str), Raster or rasterio data set."
+                    "Type of dst_ref not understood, must be path to file (str), Raster."
                 )
 
             # Read reprojecting params from ref raster
@@ -3303,7 +3301,7 @@ def proximity_from_vector_or_raster(
         # We create a geodataframe with the geometry type
         boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
         # We mask the pixels that make up the geometry type
-        mask_boundary = Vector(boundary_shp).create_mask(raster).get_nanarray()
+        mask_boundary = Vector(boundary_shp).create_mask(raster, as_array=True)
 
     else:
         # We mask target pixels
@@ -3334,7 +3332,7 @@ def proximity_from_vector_or_raster(
         if in_or_out == "both":
             pass
         elif in_or_out in ["in", "out"]:
-            mask_polygon = Vector(vector.ds).create_mask(raster).get_nanarray()
+            mask_polygon = Vector(vector.ds).create_mask(raster, as_array=True)
             if in_or_out == "in":
                 proximity[~mask_polygon] = 0
             else:
