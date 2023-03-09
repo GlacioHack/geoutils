@@ -2617,17 +2617,7 @@ class TestMask:
         # Check nodata is removed
         assert "nodata=" not in r_repr
 
-        assert r_str == "not_loaded"
-        assert r_repr.split("data=")[1][:10] == "not_loaded"
-
-        # With data loaded
-        r.load()
-
-        r_repr = r.__repr__()
-        r_str = r.__str__()
-
         assert r_str == r.data.__str__()
-        assert r_repr.split("data=")[1][:10] != "not_loaded"
 
     def test_from_array(self) -> None:
         """Test that Raster.__init__ casts to Mask with dict input of from_array() and a boolean data array."""
