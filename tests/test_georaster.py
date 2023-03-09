@@ -136,6 +136,28 @@ class TestRaster:
             gu.Raster(1)  # type: ignore
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    def test_repr_str(self, example: str) -> None:
+        """Test the representation of a raster works"""
+
+        # For data not loaded by default
+        r = gu.Raster(example)
+
+        r_repr = r.__repr__()
+        r_str = r.__str__()
+
+        assert r_str == "not_loaded"
+        assert r_repr.split("data=")[1][:10] == "not_loaded"
+
+        # With data loaded
+        r.load()
+
+        r_repr = r.__repr__()
+        r_str = r.__str__()
+
+        assert r_str == r.data.__str__()
+        assert r_repr.split("data=")[1][:10] != "not_loaded"
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
 

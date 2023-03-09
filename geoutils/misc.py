@@ -4,6 +4,7 @@ from __future__ import annotations
 import functools
 import warnings
 from typing import Any
+import copy
 
 try:
     import yaml  # type: ignore
@@ -111,8 +112,10 @@ def diff_environment_yml(
         yaml_env = yaml.safe_load(open(fn_env))  # type: ignore
         yaml_devenv = yaml.safe_load(open(fn_devenv))  # type: ignore
     else:
-        yaml_env = fn_env
-        yaml_devenv = fn_devenv
+        # We need a copy as we'll pop things out and don't want to affect input
+        # dict.copy() is shallow and does not work with embedded list in dicts (as is the case here)
+        yaml_env = copy.deepcopy(fn_env)
+        yaml_devenv = copy.deepcopy(fn_devenv)
 
     # Extract the dependencies values
     conda_dep_env = yaml_env["dependencies"]
