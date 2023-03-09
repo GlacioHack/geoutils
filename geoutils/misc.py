@@ -1,10 +1,10 @@
 """Miscellaneous functions, mainly for testing."""
 from __future__ import annotations
 
+import copy
 import functools
 import warnings
 from typing import Any
-import copy
 
 try:
     import yaml  # type: ignore

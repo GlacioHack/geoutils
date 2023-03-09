@@ -150,7 +150,7 @@ class TestRaster:
 
         # Check that all main attribute names are printed
         attrs_shown = ["data", "transform", "crs", "nodata"]
-        assert all([attr+"=" in r_repr for attr in attrs_shown])
+        assert all(attr + "=" in r_repr for attr in attrs_shown)
 
         assert r_str == "not_loaded"
         assert r_repr.split("data=")[1][:10] == "not_loaded"
@@ -2612,7 +2612,7 @@ class TestMask:
 
         # Check that all main attribute names are printed
         attrs_shown = ["data", "transform", "crs"]
-        assert all([attr + "=" in r_repr for attr in attrs_shown])
+        assert all(attr + "=" in r_repr for attr in attrs_shown)
 
         # Check nodata is removed
         assert "nodata=" not in r_repr
@@ -2710,7 +2710,6 @@ class TestMask:
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
-
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
     def test_reproject(self, mask: gu.Mask) -> None:
 
@@ -2731,13 +2730,15 @@ class TestMask:
 
         # Test 2: should raise a warning when the resampling differs from nearest
 
-        with pytest.warns(UserWarning, match="Reprojecting a mask with a resampling method other than 'nearest', "
-                                             "the boolean array will be converted to float during interpolation."):
+        with pytest.warns(
+            UserWarning,
+            match="Reprojecting a mask with a resampling method other than 'nearest', "
+            "the boolean array will be converted to float during interpolation.",
+        ):
             mask.reproject(resampling="bilinear")
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
     def test_crop(self, mask: gu.Mask) -> None:
-
 
         # Test with same bounds -> should be the same #
         crop_geom = mask.bounds
@@ -2811,7 +2812,6 @@ class TestMask:
         with pytest.warns(UserWarning, match="In-value converted to 1 for polygonizing boolean mask."):
             mask.polygonize(target_values=2)
 
-
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
     def test_proximity(self, mask: gu.Mask) -> None:
 
@@ -2822,8 +2822,6 @@ class TestMask:
         assert isinstance(rast, gu.Raster)
         # A mask is a raster, so also need to check this
         assert not isinstance(rast, gu.Mask)
-
-
 
 
 class TestArithmetic:

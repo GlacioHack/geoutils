@@ -150,13 +150,7 @@ class TestMisc:
             geoutils.misc.diff_environment_yml(env3, devenv3, input_dict=True, print_dep="pip")
 
         # For pip dependencies
-        env4 = {"dependencies": ["python==3.9", "numpy", "fiona", {"pip":  ["lol"]}]}
+        env4 = {"dependencies": ["python==3.9", "numpy", "fiona", {"pip": ["lol"]}]}
         devenv4 = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv", {"pip": ["geoutils"]}]}
         with pytest.raises(ValueError, match="The following pip dependencies are listed in env but not dev-env: lol"):
             geoutils.misc.diff_environment_yml(env4, devenv4, input_dict=True, print_dep="pip")
-
-
-
-
-
-

@@ -3090,8 +3090,10 @@ class Mask(Raster):
         if resampling in [Resampling.nearest, "nearest"]:
             self.data = self.data.astype("uint8")
         else:
-            warnings.warn("Reprojecting a mask with a resampling method other than 'nearest', "
-                          "the boolean array will be converted to float during interpolation.")
+            warnings.warn(
+                "Reprojecting a mask with a resampling method other than 'nearest', "
+                "the boolean array will be converted to float during interpolation."
+            )
             self.data = self.data.astype("float32")
 
         # Call Raster.reproject()
@@ -3217,7 +3219,6 @@ class Mask(Raster):
             in_or_out=in_or_out,
             distance_unit=distance_unit,
         )
-
 
     def __and__(self: Mask, other: Mask | np.ndarray) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
