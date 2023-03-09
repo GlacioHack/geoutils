@@ -145,6 +145,13 @@ class TestRaster:
         r_repr = r.__repr__()
         r_str = r.__str__()
 
+        # Check that the class is printed correctly
+        assert r_repr[0:6] == "Raster"
+
+        # Check that all main attribute names are printed
+        attrs_shown = ["data", "transform", "crs", "nodata"]
+        assert all([attr+"=" in r_repr for attr in attrs_shown])
+
         assert r_str == "not_loaded"
         assert r_repr.split("data=")[1][:10] == "not_loaded"
 
@@ -2541,7 +2548,7 @@ class TestRaster:
 
 
 class TestMask:
-    # Real data
+    # Paths to example data
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
@@ -2556,6 +2563,11 @@ class TestMask:
     arr = np.random.randint(low=0, high=2, size=(1, width, height), dtype=bool)
     arr_mask = np.random.randint(0, 2, size=(1, width, height), dtype=bool)
     mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
+
+    # Mask without nodata
+    mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125
+    # Mask with nodata
+    mask_aster_dem = gu.Raster(aster_dem_path) > 2000
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
@@ -2584,6 +2596,38 @@ class TestMask:
         # Check that a mask object is sent back from its own init
         mask2 = gu.Mask(mask)
         assert mask.raster_equal(mask2)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    def test_repr_str(self, example: str) -> None:
+        """Test the representation of a raster works"""
+
+        # For data not loaded by default
+        r = gu.Mask(example)
+
+        r_repr = r.__repr__()
+        r_str = r.__str__()
+
+        # Check that the class is printed correctly
+        assert r_repr[0:6] == "Mask"
+
+        # Check that all main attribute names are printed
+        attrs_shown = ["data", "transform", "crs"]
+        assert all([attr + "=" in r_repr for attr in attrs_shown])
+
+        # Check nodata is removed
+        assert "nodata=" not in r_repr
+
+        assert r_str == "not_loaded"
+        assert r_repr.split("data=")[1][:10] == "not_loaded"
+
+        # With data loaded
+        r.load()
+
+        r_repr = r.__repr__()
+        r_str = r.__str__()
+
+        assert r_str == r.data.__str__()
+        assert r_repr.split("data=")[1][:10] != "not_loaded"
 
     def test_from_array(self) -> None:
         """Test that Raster.__init__ casts to Mask with dict input of from_array() and a boolean data array."""
@@ -2665,6 +2709,121 @@ class TestMask:
         assert isinstance(mask, gu.Mask)
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
+
+
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    def test_reproject(self, mask: gu.Mask) -> None:
+
+        # Test 1: with a classic resampling (bilinear)
+
+        # Reproject mask
+        mask_reproj = mask.reproject()
+
+        # Check instance is respected
+        assert isinstance(mask_reproj, gu.Mask)
+
+        # This should be equivalent to converting the array to uint8, reprojecting, converting back
+        mask_uint8 = mask.astype("uint8")
+        mask_uint8_reproj = mask_uint8.reproject()
+        mask_uint8_reproj.data = mask_uint8_reproj.data.astype("bool")
+
+        assert mask_reproj.raster_equal(mask_uint8_reproj)
+
+        # Test 2: should raise a warning when the resampling differs from nearest
+
+        with pytest.warns(UserWarning, match="Reprojecting a mask with a resampling method other than 'nearest', "
+                                             "the boolean array will be converted to float during interpolation."):
+            mask.reproject(resampling="bilinear")
+
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    def test_crop(self, mask: gu.Mask) -> None:
+
+
+        # Test with same bounds -> should be the same #
+        crop_geom = mask.bounds
+        mask_cropped = mask.crop(crop_geom, inplace=False)
+        assert mask_cropped.raster_equal(mask)
+
+        # Check if instance is respected
+        assert isinstance(mask_cropped, gu.Mask)
+
+        # Test with bracket call
+        mask_cropped_getitem = mask[crop_geom]
+        assert mask_cropped_getitem.raster_equal(mask_cropped)
+
+        # - Test cropping each side by a random integer of pixels - #
+        rand_int = np.random.randint(1, min(mask.shape) - 1)
+
+        # Left
+        crop_geom2 = [crop_geom[0] + rand_int * mask.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
+        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        assert list(mask_cropped.bounds) == crop_geom2
+        assert np.array_equal(mask.data[:, :, rand_int:].data, mask_cropped.data.data, equal_nan=True)
+        assert np.array_equal(mask.data[:, :, rand_int:].mask, mask_cropped.data.mask)
+
+        # Right
+        crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_int * mask.res[0], crop_geom[3]]
+        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        assert list(mask_cropped.bounds) == crop_geom2
+        assert np.array_equal(mask.data[:, :, :-rand_int].data, mask_cropped.data.data, equal_nan=True)
+        assert np.array_equal(mask.data[:, :, :-rand_int].mask, mask_cropped.data.mask)
+
+        # Bottom
+        crop_geom2 = [crop_geom[0], crop_geom[1] + rand_int * abs(mask.res[1]), crop_geom[2], crop_geom[3]]
+        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        assert list(mask_cropped.bounds) == crop_geom2
+        assert np.array_equal(mask.data[:, :-rand_int, :].data, mask_cropped.data.data, equal_nan=True)
+        assert np.array_equal(mask.data[:, :-rand_int, :].mask, mask_cropped.data.mask)
+
+        # Top
+        crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_int * abs(mask.res[1])]
+        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        assert list(mask_cropped.bounds) == crop_geom2
+        assert np.array_equal(mask.data[:, rand_int:, :].data, mask_cropped.data, equal_nan=True)
+        assert np.array_equal(mask.data[:, rand_int:, :].mask, mask_cropped.data.mask)
+
+        # Test inplace
+        mask_orig = mask.copy()
+        mask.crop(crop_geom2)
+        assert list(mask.bounds) == crop_geom2
+        assert np.array_equal(mask.data[:, rand_int:, :].data, mask_orig.data, equal_nan=True)
+        assert np.array_equal(mask.data[:, rand_int:, :].mask, mask_orig.data.mask)
+
+        # Run with match_extent, check that inplace or not yields the same result
+        mask_cropped = mask.crop(crop_geom2, inplace=False, mode="match_extent")
+        mask_orig.crop(crop_geom2, mode="match_extent")
+        assert mask_cropped.raster_equal(mask_orig)
+
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    def test_polygonize(self, mask: gu.Mask) -> None:
+
+        # Run default
+        vect = mask.polygonize()
+
+        # Check the output is cast into a vector
+        assert isinstance(vect, gu.Vector)
+
+        # Run with zero as target
+        vect = mask.polygonize(target_values=0)
+        assert isinstance(vect, gu.Vector)
+
+        # Check a warning is raised when using a non-boolean value
+        with pytest.warns(UserWarning, match="In-value converted to 1 for polygonizing boolean mask."):
+            mask.polygonize(target_values=2)
+
+
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    def test_proximity(self, mask: gu.Mask) -> None:
+
+        # Run default
+        rast = mask.proximity()
+
+        # Check that output is cast back into a raster
+        assert isinstance(rast, gu.Raster)
+        # A mask is a raster, so also need to check this
+        assert not isinstance(rast, gu.Mask)
+
+
 
 
 class TestArithmetic:
@@ -3154,6 +3313,32 @@ class TestArithmetic:
         assert (array_2d >= r2).raster_equal(self.from_array(array_2d[np.newaxis, :, :] >= r2.data, rst_ref=r1))
         assert (r2 >= array_2d).raster_equal(self.from_array(r2.data >= array_2d[np.newaxis, :, :], rst_ref=r1))
         assert (r1 >= floatval).raster_equal(self.from_array(r1.data >= floatval, rst_ref=r1))
+
+    def test_ops_logical_bitwise_implicit(self) -> None:
+
+        # Create two masks
+        r1 = self.r1
+        m1 = self.r1 > 128
+        m2 = self.r2 > 128
+        array_2d = np.random.randint(1, 255, (self.height, self.width)).astype("uint8") > 128
+
+        # Bitwise or
+        assert (m1 | m2).raster_equal(self.from_array(m1.data | m2.data, rst_ref=r1))
+        assert (m1 | array_2d).raster_equal(self.from_array(m1.data | array_2d, rst_ref=r1))
+        assert (array_2d | m1).raster_equal(self.from_array(array_2d | m1.data, rst_ref=r1))
+
+        # Bitwise and
+        assert (m1 & m2).raster_equal(self.from_array(m1.data & m2.data, rst_ref=r1))
+        assert (m1 & array_2d).raster_equal(self.from_array(m1.data & array_2d, rst_ref=r1))
+        assert (array_2d & m1).raster_equal(self.from_array(array_2d & m1.data, rst_ref=r1))
+
+        # Bitwise xor
+        assert (m1 ^ m2).raster_equal(self.from_array(m1.data ^ m2.data, rst_ref=r1))
+        assert (m1 ^ array_2d).raster_equal(self.from_array(m1.data ^ array_2d, rst_ref=r1))
+        assert (array_2d ^ m1).raster_equal(self.from_array(array_2d ^ m1.data, rst_ref=r1))
+
+        # Bitwise invert
+        assert (~m1).raster_equal(self.from_array(~m1.data, rst_ref=r1))
 
     @pytest.mark.parametrize("op", ops_2args)  # type: ignore
     def test_raise_errors(self, op: str) -> None:

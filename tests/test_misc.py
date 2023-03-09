@@ -124,8 +124,9 @@ class TestMisc:
         assert captured == "opencv\nNone\n"
 
         env2 = {"dependencies": ["python==3.9", "numpy", "fiona"]}
-        devenv2 = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv", {"pip": ["geoutils"]}]}
+        devenv2 = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv", {"pip": ["geoutils", "-e ./"]}]}
 
+        # The diff function should not account for -e ./ that is the local install for developers
         geoutils.misc.diff_environment_yml(env2, devenv2, input_dict=True, print_dep="both")
         captured = capsys.readouterr().out
 

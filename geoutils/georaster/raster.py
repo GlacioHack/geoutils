@@ -3080,7 +3080,7 @@ class Mask(Raster):
         dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         dst_dtype: np.dtype | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
+        resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -3090,6 +3090,8 @@ class Mask(Raster):
         if resampling in [Resampling.nearest, "nearest"]:
             self.data = self.data.astype("uint8")
         else:
+            warnings.warn("Reprojecting a mask with a resampling method other than 'nearest', "
+                          "the boolean array will be converted to float during interpolation.")
             self.data = self.data.astype("float32")
 
         # Call Raster.reproject()
@@ -3216,26 +3218,50 @@ class Mask(Raster):
             distance_unit=distance_unit,
         )
 
-    # Logical bitwise operations
-    def __and__(self: Mask, other: Mask) -> Mask:
+
+    def __and__(self: Mask, other: Mask | np.ndarray) -> Mask:
+        """Bitwise and between masks, or a mask and an array."""
+        self_data, other_data = self._overloading_check(other)[0:2]
 
         return self.from_array(
-            data=(self.data & other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self_data & other_data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
-    def __or__(self: Mask, other: Mask) -> Mask:
+    def __rand__(self: Mask, other: Mask | np.ndarray) -> Mask:
+        """Bitwise and between masks, or a mask and an array."""
+
+        return self.__and__(other)
+
+    def __or__(self: Mask, other: Mask | np.ndarray) -> Mask:
+        """Bitwise or between masks, or a mask and an array."""
+
+        self_data, other_data = self._overloading_check(other)[0:2]
 
         return self.from_array(
-            data=(self.data | other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self_data | other_data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
 
-    def __xor__(self: Mask, other: Mask) -> Mask:
+    def __ror__(self: Mask, other: Mask | np.ndarray) -> Mask:
+        """Bitwise or between masks, or a mask and an array."""
+
+        return self.__or__(other)
+
+    def __xor__(self: Mask, other: Mask | np.ndarray) -> Mask:
+        """Bitwise xor between masks, or a mask and an array."""
+
+        self_data, other_data = self._overloading_check(other)[0:2]
 
         return self.from_array(
-            data=(self.data ^ other.data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self_data ^ other_data), transform=self.transform, crs=self.crs, nodata=self.nodata
         )
+
+    def __rxor__(self: Mask, other: Mask | np.ndarray) -> Mask:
+        """Bitwise xor between masks, or a mask and an array."""
+
+        return self.__xor__(other)
 
     def __invert__(self: Mask) -> Mask:
+        """Bitwise inversion of a mask."""
 
         return self.from_array(data=~self.data, transform=self.transform, crs=self.crs, nodata=self.nodata)
 
