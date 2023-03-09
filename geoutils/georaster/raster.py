@@ -3088,13 +3088,13 @@ class Mask(Raster):
 
         # Depending on resampling, adjust to rasterio supported types
         if resampling in [Resampling.nearest, "nearest"]:
-            self.data = self.data.astype("uint8")
+            self._data = self.data.astype("uint8")
         else:
             warnings.warn(
                 "Reprojecting a mask with a resampling method other than 'nearest', "
                 "the boolean array will be converted to float during interpolation."
             )
-            self.data = self.data.astype("float32")
+            self._data = self.data.astype("float32")
 
         # Call Raster.reproject()
         output = super().reproject(
@@ -3113,7 +3113,7 @@ class Mask(Raster):
         )
 
         # Transform back to a boolean array
-        output.data = output.data.astype(bool)
+        output._data = output.data.astype(bool)
 
         return output
 
@@ -3157,20 +3157,22 @@ class Mask(Raster):
 
         # If there is resampling involved during cropping, encapsulate type as in reproject()
         if mode == "match_extent":
-            self.data = self.data.astype("float32")
-            if inplace:
-                super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
-                self.data = self.data.astype(bool)
-                return None
-            else:
-                output = super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
-                output.data = output.data.astype(bool)
-                return output
+            raise ValueError(NotImplementedError)
+            # self._data = self.data.astype("float32")
+            # if inplace:
+            #     super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     self._data = self.data.astype(bool)
+            #     return None
+            # else:
+            #     output = super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     output._data = output.data.astype(bool)
+            #     return output
         # Otherwise, run a classic crop
         else:
             if not inplace:
                 return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
             else:
+                super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
                 return None
 
     def polygonize(
