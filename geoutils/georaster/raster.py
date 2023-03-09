@@ -44,6 +44,7 @@ except ImportError:
     from typing_extensions import Literal  # type: ignore
 
 try:
+    import xarray as xr
     import rioxarray
 
     _has_rioxarray = True
@@ -133,7 +134,7 @@ def _default_nodata(dtype: str | np.dtype | type) -> int:
     }
     # Check argument dtype is as expected
     if not isinstance(dtype, (str, np.dtype, type)):
-        raise ValueError(f"dtype {dtype} not understood")
+        raise TypeError(f"dtype {dtype} not understood.")
 
     # Convert numpy types to string
     if isinstance(dtype, type):
@@ -146,7 +147,7 @@ def _default_nodata(dtype: str | np.dtype | type) -> int:
     if dtype in default_nodata_lookup.keys():
         return default_nodata_lookup[dtype]
     else:
-        raise NotImplementedError(f"No default nodata value set for dtype {dtype}")
+        raise NotImplementedError(f"No default nodata value set for dtype {dtype}.")
 
 
 # Set default attributes to be kept from rasterio's DatasetReader
@@ -357,7 +358,7 @@ class Raster:
 
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
-                raise ValueError("downsample must be of type int or float")
+                raise TypeError("downsample must be of type int or float.")
             if downsample == 1:
                 out_shape = (count, self.height, self.width)
             else:
@@ -387,11 +388,11 @@ class Raster:
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename_or_dataset, np.ndarray):
-            raise ValueError("np.array provided as filename. Did you mean to call Raster.from_array(...) instead? ")
+            raise TypeError("The filename is an array, did you mean to call Raster.from_array(...) instead?")
 
         # Don't recognise the input, so stop here.
         else:
-            raise ValueError("filename argument not recognised.")
+            raise TypeError("The filename argument is not recognised, should be a path or a Rasterio dataset.")
 
     @property
     def count_on_disk(self) -> None | int:
@@ -488,18 +489,24 @@ class Raster:
         :raises AttributeError: If no 'filename' attribute exists.
         """
         if self.is_loaded:
-            raise ValueError("Data are already loaded")
+            raise ValueError("Data are already loaded.")
 
         if self.filename is None:
-            raise AttributeError("'filename' is not set")
+            raise AttributeError("Cannot load as filename is not set anymore. Did you manually update the filename attribute?")
 
         # If no index is passed, use all of them
         if indexes is None:
             valid_indexes = self.indexes
-        elif isinstance(indexes, int):
-            valid_indexes = (indexes,)
-        else:
-            valid_indexes = tuple(indexes)
+        # If a new index was pass, redefine out_shape
+        elif isinstance(indexes, (int, list)):
+            # Rewrite properly as a tuple
+            if isinstance(indexes, int):
+                valid_indexes = (indexes,)
+            else:
+                valid_indexes = tuple(indexes)
+            # Update out_shape
+            self._out_shape = (len(valid_indexes), self._out_shape[1], self._out_shape[2])
+
 
         # Save which indexes are loaded
         self._indexes_loaded = valid_indexes
@@ -563,7 +570,7 @@ class Raster:
             if isinstance(transform, tuple):
                 transform = Affine(*transform)
             else:
-                raise ValueError("transform argument needs to be Affine or tuple.")
+                raise TypeError("The transform argument needs to be Affine or tuple.")
 
         # Enable shortcut to create CRS from an EPSG ID.
         if isinstance(crs, int):
@@ -2118,7 +2125,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
                 dst.gcps = (rio_gcps, gcps_crs)
 
-    def to_xarray(self, name: str | None = None) -> rioxarray.DataArray:
+    def to_xarray(self, name: str | None = None) -> xr.DataArray:
         """
         Convert raster to a xarray.DataArray.
 
@@ -2135,11 +2142,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if not _has_rioxarray:
             raise ImportError("rioxarray is required for this functionality.")
 
-        xr = rioxarray.open_rasterio(self.to_rio_dataset())
+        ds = rioxarray.open_rasterio(self.to_rio_dataset())
         if name is not None:
-            xr.name = name
+            ds.name = name
 
-        return xr
+        return ds
 
     def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
         """

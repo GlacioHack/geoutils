@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
+import xarray as xr
+import rioxarray as rioxr
 from pylint import epylint
 
 import geoutils as gu
@@ -124,6 +126,12 @@ class TestRaster:
         assert np.ma.isMaskedArray(gu.Raster(example, masked=True).data)
         assert np.ma.isMaskedArray(gu.Raster(example, masked=False).data)
 
+        # Check that an error is raised when instantiating with an array
+        with pytest.raises(TypeError, match="The filename is an array, did you mean to call Raster.from_array(...) instead?"):
+            gu.Raster(np.ones(size=(1,1))) # type: ignore
+        with pytest.raises(TypeError, match="The filename argument is not recognised, should be a path or a Rasterio dataset."):
+            gu.Raster(1) # type: ignore
+
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
@@ -160,7 +168,7 @@ class TestRaster:
                 continue
             assert line == new_stats.splitlines()[i]
 
-    def test_loading(self) -> None:
+    def test_load(self) -> None:
         """
         Test that loading metadata and data works for all possible cases.
         """
@@ -169,6 +177,12 @@ class TestRaster:
         r_implicit = gu.Raster(self.landsat_b4_path)
 
         assert r_explicit.raster_equal(r_implicit)
+
+        # Same for a multi-band raster
+        r_explicit_rgb = gu.Raster(self.landsat_rgb_path, load_data=True)
+        r_implicit_rgb = gu.Raster(self.landsat_rgb_path)
+
+        assert r_explicit_rgb.raster_equal(r_implicit_rgb)
 
         # Test 1 - loading metadata only, single band
         # For the first example with Landsat B4
@@ -257,6 +271,33 @@ class TestRaster:
         assert r.indexes_on_disk == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
+        # Test 7 - load a single band a posteriori calling load()
+        r = gu.Raster(self.landsat_rgb_path)
+        r.load(indexes=1)
+        assert r.count == 1
+        assert r.count_on_disk == 3
+        assert r.indexes == (1,)
+        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.data.shape == (r.count, r.height, r.width)
+
+        # Test 8 - load a list of band a posteriori calling load()
+        r = gu.Raster(self.landsat_rgb_path)
+        r.load(indexes=[2, 3])
+        assert r.count == 2
+        assert r.count_on_disk == 3
+        assert r.indexes == (1, 2)
+        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.data.shape == (r.count, r.height, r.width)
+
+        # Check that errors are raised when appropriate
+        with pytest.raises(ValueError, match="Data are already loaded."):
+            r.load()
+        with pytest.raises(AttributeError, match="Cannot load as filename is not set anymore. "
+                                             "Did you manually update the filename attribute?"):
+            r = gu.Raster(self.landsat_b4_path)
+            r.filename = None
+            r.load()
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_to_rio_dataset(self, example: str):
         """Test the export to a rasterio dataset"""
@@ -276,6 +317,39 @@ class TestRaster:
         # Check that the masked arrays are equal
         assert np.array_equal(rst.data.data, rio_ds.read().data)
         assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_to_xarray(self, example: str):
+        """Test the export to a xarray dataset"""
+
+        # Open raster and export to rio dataset
+        rst = gu.Raster(example)
+        ds = rst.to_xarray()
+
+        # Check that the output is indeed a xarray Dataset
+        assert isinstance(ds, xr.DataArray)
+
+        # Check that all attributes are equal
+        assert ds.band.size == rst.count
+        assert ds.x.size == rst.width
+        assert ds.y.size == rst.height
+
+        # Check that coordinates are shifted by a half pixel
+        assert ds.x.values[0] == rst.bounds.left + rst.res[0] / 2
+        assert ds.y.values[0] == rst.bounds.top - rst.res[1] / 2
+        assert ds.x.values[-1] == rst.bounds.right - rst.res[0] / 2
+        assert ds.y.values[-1] == rst.bounds.bottom + rst.res[1] / 2
+
+        # Check that georeferencing attribute are equal
+        new_trans_order = ["c", "a", "b", "f", "d", "e"]
+        assert ds.spatial_ref.GeoTransform == " ".join([str(getattr(rst.transform, attr)) for attr in new_trans_order])
+
+        # Check that CRS are equal
+        assert ds.spatial_ref.crs_wkt == rst.crs.to_wkt()
+
+        # Check that the arrays are equal in NaN type
+        assert np.array_equal(rst.data.data, ds.data)
+
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
@@ -515,6 +589,10 @@ class TestRaster:
         assert r.xy2ij(r.bounds.right + r.res[0], r.bounds.bottom) == (r.height, r.width + 1)
         # One pixel right and down
         assert r.xy2ij(r.bounds.left + r.res[0], r.bounds.top - r.res[1]) == (1, 1)
+
+        # Check that error is raised when downsampling value is not valid
+        with pytest.raises(TypeError, match="downsample must be of type int or float."):
+            gu.Raster(self.landsat_b4_path, downsample=[1, 1]) # type: ignore
 
     def test_add_sub(self) -> None:
         """
@@ -1901,9 +1979,13 @@ class TestRaster:
             assert _default_nodata(dtype) == -99999
 
         # Check that an error is raised for other types
-        expected_message = "No default nodata value set for dtype"
+        expected_message = "No default nodata value set for dtype."
         with pytest.raises(NotImplementedError, match=expected_message):
             _default_nodata("bla")
+
+        # Check that an error is raised for a wrong type
+        with pytest.raises(TypeError, match="dtype 1 not understood."):
+            _default_nodata(1) # type: ignore
 
     def test_astype(self) -> None:
         warnings.simplefilter("error")
@@ -2135,6 +2217,10 @@ class TestRaster:
         img.data.mask[0, 0, 0] = True
         out_img = gu.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
         assert out_img.data.mask[0, 0, 0]
+
+        # Check that error is raised if the transform is not affine
+        with pytest.raises(TypeError, match="The transform argument needs to be Affine or tuple."):
+            gu.Raster.from_array(data=img.data, transform="lol", crs=None, nodata=None) # type: ignore
 
     def test_type_hints(self) -> None:
         """Test that pylint doesn't raise errors on valid code."""
