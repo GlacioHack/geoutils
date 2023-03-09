@@ -15,7 +15,6 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
-import rioxarray as rioxr
 from pylint import epylint
 
 import geoutils as gu
@@ -127,10 +126,14 @@ class TestRaster:
         assert np.ma.isMaskedArray(gu.Raster(example, masked=False).data)
 
         # Check that an error is raised when instantiating with an array
-        with pytest.raises(TypeError, match="The filename is an array, did you mean to call Raster.from_array(...) instead?"):
-            gu.Raster(np.ones(size=(1,1))) # type: ignore
-        with pytest.raises(TypeError, match="The filename argument is not recognised, should be a path or a Rasterio dataset."):
-            gu.Raster(1) # type: ignore
+        with pytest.raises(
+            TypeError, match="The filename is an array, did you mean to call Raster.from_array(...) instead?"
+        ):
+            gu.Raster(np.ones(size=(1, 1)))  # type: ignore
+        with pytest.raises(
+            TypeError, match="The filename argument is not recognised, should be a path or a Rasterio dataset."
+        ):
+            gu.Raster(1)  # type: ignore
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_info(self, example: str) -> None:
@@ -292,8 +295,10 @@ class TestRaster:
         # Check that errors are raised when appropriate
         with pytest.raises(ValueError, match="Data are already loaded."):
             r.load()
-        with pytest.raises(AttributeError, match="Cannot load as filename is not set anymore. "
-                                             "Did you manually update the filename attribute?"):
+        with pytest.raises(
+            AttributeError,
+            match="Cannot load as filename is not set anymore. " "Did you manually update the filename attribute?",
+        ):
             r = gu.Raster(self.landsat_b4_path)
             r.filename = None
             r.load()
@@ -349,7 +354,6 @@ class TestRaster:
 
         # Check that the arrays are equal in NaN type
         assert np.array_equal(rst.data.data, ds.data)
-
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
@@ -592,7 +596,7 @@ class TestRaster:
 
         # Check that error is raised when downsampling value is not valid
         with pytest.raises(TypeError, match="downsample must be of type int or float."):
-            gu.Raster(self.landsat_b4_path, downsample=[1, 1]) # type: ignore
+            gu.Raster(self.landsat_b4_path, downsample=[1, 1])  # type: ignore
 
     def test_add_sub(self) -> None:
         """
@@ -1985,7 +1989,7 @@ class TestRaster:
 
         # Check that an error is raised for a wrong type
         with pytest.raises(TypeError, match="dtype 1 not understood."):
-            _default_nodata(1) # type: ignore
+            _default_nodata(1)  # type: ignore
 
     def test_astype(self) -> None:
         warnings.simplefilter("error")
@@ -2220,7 +2224,7 @@ class TestRaster:
 
         # Check that error is raised if the transform is not affine
         with pytest.raises(TypeError, match="The transform argument needs to be Affine or tuple."):
-            gu.Raster.from_array(data=img.data, transform="lol", crs=None, nodata=None) # type: ignore
+            gu.Raster.from_array(data=img.data, transform="lol", crs=None, nodata=None)  # type: ignore
 
     def test_type_hints(self) -> None:
         """Test that pylint doesn't raise errors on valid code."""

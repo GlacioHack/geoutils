@@ -44,8 +44,8 @@ except ImportError:
     from typing_extensions import Literal  # type: ignore
 
 try:
-    import xarray as xr
     import rioxarray
+    import xarray as xr
 
     _has_rioxarray = True
 except ImportError:
@@ -492,7 +492,9 @@ class Raster:
             raise ValueError("Data are already loaded.")
 
         if self.filename is None:
-            raise AttributeError("Cannot load as filename is not set anymore. Did you manually update the filename attribute?")
+            raise AttributeError(
+                "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
+            )
 
         # If no index is passed, use all of them
         if indexes is None:
@@ -505,8 +507,8 @@ class Raster:
             else:
                 valid_indexes = tuple(indexes)
             # Update out_shape
-            self._out_shape = (len(valid_indexes), self._out_shape[1], self._out_shape[2])
-
+            if self._out_shape is not None:
+                self._out_shape = (len(valid_indexes), self._out_shape[1], self._out_shape[2])
 
         # Save which indexes are loaded
         self._indexes_loaded = valid_indexes
