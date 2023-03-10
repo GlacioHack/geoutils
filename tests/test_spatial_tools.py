@@ -440,8 +440,6 @@ class TestSubsample:
         assert np.array_equal(sub42, sub42_gen)
 
 
-
-
 class TestRasterTools:
     def test_get_valid_extent(self) -> None:
         """Check the function to get valid extent."""

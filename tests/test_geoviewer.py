@@ -50,6 +50,7 @@ def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
         if os.path.exists("test.png"):
             os.remove("test.png")
 
+
 @pytest.mark.parametrize(
     "filename", [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")]
 )  # type: ignore
@@ -72,4 +73,3 @@ def test_geoviewer_invalid(capsys, monkeypatch, filename, option):  # type: igno
     # To not get exception when testing generic functions such as --help
     with pytest.raises(ValueError):
         gv.main([filename, *option])
-

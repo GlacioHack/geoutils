@@ -9,7 +9,6 @@ TO DO:
 from __future__ import annotations
 
 import argparse
-import sys
 from typing import Sequence
 
 import matplotlib.pyplot as plt
