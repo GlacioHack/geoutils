@@ -266,17 +266,10 @@ class TestSatelliteImage:
         assert attrs1[1] == "MSS"
         assert attrs1[-1] == datetime.datetime(1976, 1, 31)
 
-         # Landsat 7 example
+        # Landsat 7 example
         landsat7 = "LE71400412000304SGS00_B4.tif"
         attrs7 = gu.georaster.satimg.parse_landsat(landsat7)
 
         assert attrs7[0] == "Landsat 7"
         assert attrs7[1] == "ETM+"
         assert attrs7[-1] == datetime.datetime(2000, 10, 30)
-
-
-
-
-
-
-
