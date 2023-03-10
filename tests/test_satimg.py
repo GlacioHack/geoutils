@@ -1,6 +1,7 @@
 """
 Test functions for SatelliteImage class
 """
+import datetime
 import datetime as dt
 import sys
 from io import StringIO
@@ -220,3 +221,62 @@ class TestSatelliteImage:
         # same here
         assert gu.georaster.satimg.latlon_to_sw_naming((0, -180)) == "N00W180"
         assert gu.georaster.satimg.latlon_to_sw_naming((0, 180)) == "N00W180"
+
+    def test_parse_tile_attr_from_name(self) -> None:
+        """Test the parsing of tile attribute from tile name."""
+
+        # For ASTER, SRTM, NASADEM: 1x1 tiling globally
+        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N01W179", product="SRTMGL1")
+
+        assert y == 1
+        assert x == -179
+        assert size == (1, 1)
+        assert epsg == 4326
+
+        # For TanDEM-X: depends on latitude
+        # Mid-latitude is 2 x 1
+        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N62E04", product="TDM1")
+        assert y == 62
+        assert x == 4
+        assert size == (1, 2)
+        assert epsg == 4326
+
+        # Low-latitude is 1 x 1
+        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N52E04", product="TDM1")
+        assert y == 52
+        assert x == 4
+        assert size == (1, 1)
+        assert epsg == 4326
+
+        # High-latitude is 5 x 1
+        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N82E04", product="TDM1")
+        assert y == 82
+        assert x == 4
+        assert size == (1, 4)
+        assert epsg == 4326
+
+    def test_parse_landsat(self) -> None:
+        """Test the parsing of landsat metadata from name."""
+
+        # Landsat 1
+        landsat1 = "LM10170391976031AAA01.tif"
+        attrs1 = gu.georaster.satimg.parse_landsat(landsat1)
+
+        assert attrs1[0] == "Landsat 1"
+        assert attrs1[1] == "MSS"
+        assert attrs1[-1] == datetime.datetime(1976, 1, 31)
+
+         # Landsat 7 example
+        landsat7 = "LE71400412000304SGS00_B4.tif"
+        attrs7 = gu.georaster.satimg.parse_landsat(landsat7)
+
+        assert attrs7[0] == "Landsat 7"
+        assert attrs7[1] == "ETM+"
+        assert attrs7[-1] == datetime.datetime(2000, 10, 30)
+
+
+
+
+
+
+
