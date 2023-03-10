@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -117,34 +117,31 @@ def getparser() -> argparse.Namespace:
         help="True or False, if False then allow dynamic image downscaling, if True, prevent it.",
     )
 
-    args = parser.parse_args()
-
-    return args
+    return parser
 
 
-def main() -> None:
+def main(args=None) -> None:
 
     # Parse arguments
-    args = getparser()
+    parser = getparser()
+    args = parser.parse_args(args)
 
     # Load image metadata #
     img = Raster(args.filename, load_data=False)
-    xmin, xmax, ymin, ymax = img.bounds
 
     # Resample if image is too large #
     if ((img.width > args.max_size) or (img.height > args.max_size)) & (not args.noresampl):
         dfact = max(int(img.width / args.max_size), int(img.height / args.max_size))
         print(f"Image will be downsampled by a factor {dfact}.")
-        new_shape: tuple[Any, ...] | None = (img.count, int(img.height / dfact), int(img.width / dfact))
     else:
-        new_shape = None
+        dfact = 1
 
     # Read image #
-    img.load(out_shape=new_shape)
+    img = Raster(args.filename, downsample=dfact)
 
     # Set no data value
     if args.nodata == "default":
-        nodata = img.nodata
+        pass
     else:
         try:
             nodata = float(args.nodata)
@@ -201,8 +198,7 @@ def main() -> None:
         figsize = plt.rcParams["figure.figsize"]
     else:
         try:
-            figsize = tuple(int(arg) for arg in args.figsize)
-            xfigsize, yfigsize = figsize
+            figsize = tuple(int(arg) for arg in args.figsize.split(","))
         except Exception as exception:
             print("ERROR: figsize must be a tuple of size 2, currently set to %s" % args.figsize)
             sys.stderr.write(str(exception))
@@ -225,7 +221,7 @@ def main() -> None:
     # plot
     img.show(
         ax=ax,
-        band=args.band,
+        index=args.band,
         cmap=cmap,
         interpolation="nearest",
         vmin=vmin,

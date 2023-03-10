@@ -2256,7 +2256,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if index is None:
             index = np.arange(1, self.count + 1)
         elif isinstance(index, int):
-            if index >= self.count:
+            if index > self.count:
                 raise ValueError(f"Index must be in range 1-{self.count:d}")
             pass
         else:
