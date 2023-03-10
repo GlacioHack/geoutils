@@ -2214,32 +2214,42 @@ class TestRaster:
         except (NotADirectoryError, PermissionError):
             pass
 
-    def test_coords(self) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
+    def test_coords(self, example: str) -> None:
 
         img = gu.Raster(self.landsat_b4_path)
-        xx, yy = img.coords(offset="corner")
-        assert xx.min() == pytest.approx(img.bounds.left)
-        assert xx.max() == pytest.approx(img.bounds.right - img.res[0])
+
+        # With corner argument
+        xx0, yy0 = img.coords(offset="corner", grid=False)
+
+        assert xx0[0] == pytest.approx(img.bounds.left)
+        assert xx0[-1] == pytest.approx(img.bounds.right - img.res[0])
         if img.res[1] > 0:
-            assert yy.min() == pytest.approx(img.bounds.bottom)
-            assert yy.max() == pytest.approx(img.bounds.top - img.res[1])
+            assert yy0[0] == pytest.approx(img.bounds.bottom)
+            assert yy0[-1] == pytest.approx(img.bounds.top - img.res[1])
         else:
             # Currently not covered by test image
-            assert yy.min() == pytest.approx(img.bounds.top)
-            assert yy.max() == pytest.approx(img.bounds.bottom + img.res[1])
+            assert yy0[0] == pytest.approx(img.bounds.top)
+            assert yy0[-1] == pytest.approx(img.bounds.bottom + img.res[1])
 
-        xx, yy = img.coords(offset="center")
+        # With center argument
+        xx, yy = img.coords(offset="center", grid=False)
         hx = img.res[0] / 2
         hy = img.res[1] / 2
-        assert xx.min() == pytest.approx(img.bounds.left + hx)
-        assert xx.max() == pytest.approx(img.bounds.right - hx)
+        assert xx[0] == pytest.approx(img.bounds.left + hx)
+        assert xx[-1] == pytest.approx(img.bounds.right - hx)
         if img.res[1] > 0:
-            assert yy.min() == pytest.approx(img.bounds.bottom + hy)
-            assert yy.max() == pytest.approx(img.bounds.top - hy)
+            assert yy[0] == pytest.approx(img.bounds.bottom + hy)
+            assert yy[-1] == pytest.approx(img.bounds.top - hy)
         else:
             # Currently not covered by test image
-            assert yy.min() == pytest.approx(img.bounds.top + hy)
-            assert yy.max() == pytest.approx(img.bounds.bottom - hy)
+            assert yy[-1] == pytest.approx(img.bounds.top + hy)
+            assert yy[0] == pytest.approx(img.bounds.bottom - hy)
+
+        # With grid argument (default argument, repeated here for clarity)
+        xxgrid, yygrid = img.coords(offset="corner", grid=True)
+        assert np.array_equal(xxgrid, np.repeat(xx0[np.newaxis, :], img.height, axis=0))
+        assert np.array_equal(yygrid, np.flipud(np.repeat(yy0[:, np.newaxis], img.width, axis=1)))
 
     def test_from_array(self) -> None:
 
