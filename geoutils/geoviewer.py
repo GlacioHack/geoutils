@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-import os
+from typing import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,7 +18,7 @@ import numpy as np
 from geoutils.georaster import Raster
 
 
-def getparser() -> argparse.Namespace:
+def getparser() -> argparse.ArgumentParser:
 
     # Set up description
     parser = argparse.ArgumentParser(description="Visualisation tool for any image supported by GDAL.")
@@ -120,23 +120,23 @@ def getparser() -> argparse.Namespace:
     return parser
 
 
-def main(args=None) -> None:
+def main(test_args: Sequence[str] | None = None) -> None:
 
     # Parse arguments
     parser = getparser()
-    args = parser.parse_args(args)
+    args = parser.parse_args(test_args)  # type: ignore
 
-    # Load image metadata #
+    # Load image metadata
     img = Raster(args.filename, load_data=False)
 
-    # Resample if image is too large #
+    # Resample if image is too large
     if ((img.width > args.max_size) or (img.height > args.max_size)) & (not args.noresampl):
         dfact = max(int(img.width / args.max_size), int(img.height / args.max_size))
         print(f"Image will be downsampled by a factor {dfact}.")
     else:
         dfact = 1
 
-    # Read image #
+    # Read image
     img = Raster(args.filename, downsample=dfact)
 
     # Set no data value
@@ -150,7 +150,7 @@ def main(args=None) -> None:
 
         img.set_nodata(nodata)
 
-    # Set default parameters #
+    # Set default parameters
 
     # vmin
     if args.vmin is not None:
@@ -213,7 +213,7 @@ def main(args=None) -> None:
         except ValueError:
             raise ValueError("ERROR: dpi must be an integer, currently set to %s" % args.dpi)
 
-    # Plot data #
+    # Plot data
 
     fig = plt.figure(figsize=figsize)
     ax = fig.add_subplot(111)

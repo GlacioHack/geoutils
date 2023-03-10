@@ -1850,9 +1850,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     raise ValueError("Reference raster does not exist.")
                 ds_ref = Raster(dst_ref, load_data=False)
             else:
-                raise TypeError(
-                    "Type of dst_ref not understood, must be path to file (str), Raster."
-                )
+                raise TypeError("Type of dst_ref not understood, must be path to file (str), Raster.")
 
             # Read reprojecting params from ref raster
             dst_crs = ds_ref.crs
@@ -3070,7 +3068,7 @@ class Mask(Raster):
 
     def reproject(
         self: Mask,
-        dst_ref: RasterType | rio.io.Dataset | str | None = None,
+        dst_ref: RasterType | str | None = None,
         dst_crs: CRS | str | int | None = None,
         dst_size: tuple[int, int] | None = None,
         dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
@@ -3096,7 +3094,7 @@ class Mask(Raster):
 
         # Call Raster.reproject()
         output = super().reproject(
-            dst_ref=dst_ref,
+            dst_ref=dst_ref,  # type: ignore
             dst_crs=dst_crs,
             dst_size=dst_size,
             dst_bounds=dst_bounds,

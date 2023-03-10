@@ -1645,7 +1645,7 @@ class TestRaster:
         assert img[0, int(i), int(j)] == val
 
         # Finally, check that interp convert to latlon
-        lat, lon = gu.projtools.reproject_to_latlon((x,y), in_crs=r.crs)
+        lat, lon = gu.projtools.reproject_to_latlon((x, y), in_crs=r.crs)
         val_latlon = r.interp_points([(lat, lon)], order=1, input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 

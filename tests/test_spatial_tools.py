@@ -431,8 +431,8 @@ class TestSubsample:
         assert np.ndim(array[indices]) == 1
         assert np.size(array[indices]) == int(np.size(array) * 0.3)
 
-class TestRasterTools:
 
+class TestRasterTools:
     def test_get_valid_extent(self) -> None:
         """Check the function to get valid extent."""
 
@@ -441,7 +441,7 @@ class TestRasterTools:
         arr_mask = np.zeros(shape=(5, 5), dtype=bool)
         mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
 
-        # For no unvalid values, the function should return the edges
+        # For no invalid values, the function should return the edges
         # For the array
         assert (0, 4, 0, 4) == gu.spatial_tools.get_valid_extent(arr)
         # For the masked-array
@@ -506,14 +506,15 @@ class TestRasterTools:
         mask_ma.mask = False
         assert (0, 4, 0, 3) == gu.spatial_tools.get_valid_extent(mask_ma)
 
-
-    def test_get_xy_rotated(self):
+    def test_get_xy_rotated(self) -> None:
         """Check the function to rotate array."""
 
         # Create an artificial raster
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-        r1 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
+        r1 = gu.Raster.from_array(
+            np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None
+        )
 
         # First, we get initial coords
         xx, yy = r1.coords(grid=True)
@@ -549,6 +550,5 @@ class TestRasterTools:
 
         # Finally, yy should be rotated by 90
         assert np.allclose(np.rot90(xx45), yy45)
-
 
         xx, yy = gu.spatial_tools.get_xy_rotated(r1, along_track_angle=90)
