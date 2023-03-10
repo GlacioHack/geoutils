@@ -2202,6 +2202,7 @@ class TestRaster:
                 img.save(TemporaryFile())
 
         # Test with blank argument
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
         img.save(temp_file.name, blank_value=0)
         saved = gu.Raster(temp_file.name)
 
