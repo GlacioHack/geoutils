@@ -431,6 +431,16 @@ class TestSubsample:
         assert np.ndim(array[indices]) == 1
         assert np.size(array[indices]) == int(np.size(array) * 0.3)
 
+        # Check that we can pass an integer to fix the random state
+        sub42 = gu.spatial_tools.subsample_raster(array, subsample=10, random_state=42)
+        # Check by passing a generator directly
+        random_gen = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(42)))
+        sub42_gen = gu.spatial_tools.subsample_raster(array, subsample=10, random_state=random_gen)
+        # Both should be equal
+        assert np.array_equal(sub42, sub42_gen)
+
+
+
 
 class TestRasterTools:
     def test_get_valid_extent(self) -> None:
