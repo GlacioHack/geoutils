@@ -28,7 +28,7 @@ import geoutils.geoviewer as gv
         ("-noresampl",),
     ),
 )  # type: ignore
-def test_geoviewer(capsys, monkeypatch, filename, option):  # type: ignore
+def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
 
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
@@ -49,3 +49,27 @@ def test_geoviewer(capsys, monkeypatch, filename, option):  # type: ignore
     if option[0] == "-save":
         if os.path.exists("test.png"):
             os.remove("test.png")
+
+@pytest.mark.parametrize(
+    "filename", [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")]
+)  # type: ignore
+@pytest.mark.parametrize(
+    "option",
+    (
+        ("-cmap", "Lols"),
+        ("-vmin", "lol"),
+        ("-vmin", "lol2"),
+        ("-figsize", "blabla"),
+        ("-dpi", "300.5"),
+        ("-nodata", "lol"),
+    ),
+)  # type: ignore
+def test_geoviewer_invalid(capsys, monkeypatch, filename, option):  # type: ignore
+
+    # To avoid having the plots popping up during execution
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    # To not get exception when testing generic functions such as --help
+    with pytest.raises(ValueError):
+        gv.main([filename, *option])
+

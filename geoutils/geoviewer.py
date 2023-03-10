@@ -146,7 +146,7 @@ def main(test_args: Sequence[str] | None = None) -> None:
         try:
             nodata = float(args.nodata)
         except ValueError:
-            raise ValueError("ERROR: nodata must be a float, currently set to %s" % args.nodata)
+            raise ValueError("Nodata must be a float, currently set to %s" % args.nodata)
 
         img.set_nodata(nodata)
 
@@ -188,10 +188,7 @@ def main(test_args: Sequence[str] | None = None) -> None:
     elif args.cmap in plt.cm.datad.keys():
         cmap = args.cmap
     else:
-        print("ERROR: cmap set to %s, must be in:" % args.cmap)
-        for i, elem in enumerate(plt.cm.datad.keys(), 1):
-            print(str(elem), end="\n" if i % 10 == 0 else ", ")
-        sys.exit(1)
+        raise ValueError("Wrong cmap, must be in: {}".format(",".join(str(elem) for elem in plt.cm.datad.keys())))
 
     # Figsize
     if args.figsize == "default":
@@ -199,10 +196,8 @@ def main(test_args: Sequence[str] | None = None) -> None:
     else:
         try:
             figsize = tuple(int(arg) for arg in args.figsize.split(","))
-        except Exception as exception:
-            print("ERROR: figsize must be a tuple of size 2, currently set to %s" % args.figsize)
-            sys.stderr.write(str(exception))
-            sys.exit(1)
+        except Exception:
+            raise ValueError("Figsize must be a tuple of size 2, currently set to %s" % args.figsize)
 
     # dpi
     if args.dpi == "default":
@@ -211,7 +206,7 @@ def main(test_args: Sequence[str] | None = None) -> None:
         try:
             dpi = int(args.dpi)
         except ValueError:
-            raise ValueError("ERROR: dpi must be an integer, currently set to %s" % args.dpi)
+            raise ValueError("dpi must be an integer, currently set to %s" % args.dpi)
 
     # Plot data
 
