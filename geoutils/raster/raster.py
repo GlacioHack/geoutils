@@ -335,8 +335,8 @@ class Raster:
                 self.transform = ds.transform
                 self.crs = ds.crs
                 self._nodata = ds.nodata
-                self.name = ds.name
-                self.driver = ds.driver
+                self._name = ds.name
+                self._driver = ds.driver
                 self.tags.update(ds.tags())
 
                 self._disk_shape = (ds.count, ds.height, ds.width)
@@ -1733,7 +1733,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param crop_geom: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
             coordinates. If ``crop_geom`` is a raster or vector, will crop to the bounds. If ``crop_geom`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
-        :param mode: Either ``"match_pixel"`` (default) or ``"match_extent"``. ``'match_pixel'`` will preserve the original pixel
+        :param mode: Whether to match within pixels or exact extent. ``'match_pixel'`` will preserve the original pixel
             resolution, cropping to the extent that most closely aligns with the current coordinates. ``'match_extent'``
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
         :param inplace: Whether to update the raster in-place.
