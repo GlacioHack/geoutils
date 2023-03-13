@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import rasterio as rio
 
-from geoutils.georaster import Raster, RasterType
+from geoutils.raster import Raster, RasterType
 
 lsat_sensor = {"C": "OLI/TIRS", "E": "ETM+", "T": "TM", "M": "MSS", "O": "OLI", "TI": "TIRS"}
 

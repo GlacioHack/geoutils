@@ -1,5 +1,5 @@
 """
-Test functions for georaster
+Test functions for raster
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from pylint import epylint
 import geoutils as gu
 import geoutils.projtools as pt
 from geoutils import examples
-from geoutils.georaster.raster import _default_nodata, _default_rio_attrs
+from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 from geoutils.misc import resampling_method_from_str
 from geoutils.projtools import reproject_to_latlon
 
@@ -767,7 +767,7 @@ class TestRaster:
 
         # When passing the new array as a NaN ndarray, only the valid data is equal, because masked data is NaN in one
         # case, and -9999 in the other
-        r_arr = gu.georaster.get_array_and_mask(r)[0]
+        r_arr = gu.raster.get_array_and_mask(r)[0]
         r2 = r.copy(new_array=r_arr)
         assert np.ma.allequal(r.data, r2.data)
         # If a nodata value exists, and we update the NaN pixels to be that nodata value, then the two Rasters should
@@ -1122,13 +1122,13 @@ class TestRaster:
         r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.georaster.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtypes[0])
-        rand_indices = gu.georaster.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
@@ -1229,7 +1229,7 @@ class TestRaster:
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
-        rand_indices = gu.georaster.subsample_array(r_gaps.data, nsamples, return_indices=True)
+        rand_indices = gu.raster.subsample_array(r_gaps.data, nsamples, return_indices=True)
         r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
@@ -3475,8 +3475,8 @@ class TestArrayInterface:
     # Most other math functions are already universal functions
 
     # Separate between two lists (single input and double input) for testing
-    handled_functions_2in = gu.georaster.raster._HANDLED_FUNCTIONS_2NIN
-    handled_functions_1in = gu.georaster.raster._HANDLED_FUNCTIONS_1NIN
+    handled_functions_2in = gu.raster.raster._HANDLED_FUNCTIONS_2NIN
+    handled_functions_1in = gu.raster.raster._HANDLED_FUNCTIONS_1NIN
 
     # Details below:
     # NaN functions: [f for f in np.lib.nanfunctions.__all__]

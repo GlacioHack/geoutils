@@ -39,8 +39,8 @@ See the full documentation at https://geoutils.readthedocs.io.
 ## Structure
 
 GeoUtils is composed of three libraries:
-- `georaster.py` to handle raster data set. In particular, a Raster class to load a raster file along with metadata.
-- `geovector.py` to handle vector data set. In particular, a Vector class to load a raster file along with metadata.
+- `raster.py` to handle raster data set. In particular, a Raster class to load a raster file along with metadata.
+- `vector.py` to handle vector data set. In particular, a Vector class to load a raster file along with metadata.
 - `projtools.py` with various tools around projections.
 
 

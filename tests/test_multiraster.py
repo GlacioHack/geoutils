@@ -12,7 +12,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.georaster import RasterType
+from geoutils.raster import RasterType
 
 
 class stack_merge_images:
@@ -90,7 +90,7 @@ class TestMultiRaster:
                 expected_warning=UserWarning,
                 match="Some input Rasters have multiple bands, only their first band will be used.",
             ):
-                stacked_img = gu.georaster.stack_rasters([rasters.img1, rasters.img2])
+                stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2])
             # Then ignore the other ones
             warnings.filterwarnings(
                 "ignore",
@@ -99,7 +99,7 @@ class TestMultiRaster:
             )
 
         else:
-            stacked_img = gu.georaster.stack_rasters([rasters.img1, rasters.img2])
+            stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2])
 
         assert stacked_img.count == 2
         assert rasters.img.shape == stacked_img.shape
@@ -112,12 +112,12 @@ class TestMultiRaster:
         assert merged_bounds == stacked_img.bounds
 
         # Check that reference works with input Raster
-        stacked_img = gu.georaster.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img)
+        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img)
         assert rasters.img.bounds == stacked_img.bounds
 
         # Others than int or gu.Raster should raise a ValueError
         try:
-            stacked_img = gu.georaster.stack_rasters([rasters.img1, rasters.img2], reference="a string")
+            stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference="a string")
         except ValueError as exception:
             if "reference should be" not in str(exception):
                 raise exception
@@ -125,11 +125,11 @@ class TestMultiRaster:
         # Check that use_ref_bounds works - use a img that do not cover the whole extent
 
         # This case should not preserve original extent
-        stacked_img = gu.georaster.stack_rasters([rasters.img1, rasters.img3])
+        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img3])
         assert stacked_img.bounds != rasters.img.bounds
 
         # This case should preserve original extent
-        stacked_img2 = gu.georaster.stack_rasters(
+        stacked_img2 = gu.raster.stack_rasters(
             [rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True
         )
         assert stacked_img2.bounds == rasters.img.bounds
@@ -153,7 +153,7 @@ class TestMultiRaster:
                 message="Some input Rasters have multiple bands, only their first band will be used.",
             )
 
-        merged_img = gu.georaster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
+        merged_img = gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
 
         assert rasters.img.shape == merged_img.shape
         assert rasters.img.bounds == merged_img.bounds
@@ -164,7 +164,7 @@ class TestMultiRaster:
         assert np.abs(np.nanmean(diff)) < 1
 
         # Check that reference works
-        merged_img2 = gu.georaster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
+        merged_img2 = gu.raster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
         assert merged_img2 == merged_img
 
     # Group rasters for for testing `load_multiple_rasters`
@@ -188,14 +188,14 @@ class TestMultiRaster:
         Test load_multiple_rasters functionalities, when rasters overlap -> no warning is raised
         """
         # - Test that with crop=False and ref_grid=None, rasters are simply loaded - #
-        output_rst: list[gu.Raster] = gu.georaster.load_multiple_rasters(raster_paths, crop=False, ref_grid=None)
+        output_rst: list[gu.Raster] = gu.raster.load_multiple_rasters(raster_paths, crop=False, ref_grid=None)
         for k, rst in enumerate(output_rst):
             assert rst.is_loaded
             rst2 = gu.Raster(raster_paths[k])
             assert rst == rst2
 
         # - Test that with crop=True and ref_grid=None, rasters are cropped only in area of overlap - #
-        output_rst = gu.georaster.load_multiple_rasters(raster_paths, crop=True, ref_grid=None)
+        output_rst = gu.raster.load_multiple_rasters(raster_paths, crop=True, ref_grid=None)
         ref_crs = gu.Raster(raster_paths[0], load_data=False).crs
 
         # Save original and new bounds (as polygons) in the reference CRS
@@ -217,7 +217,7 @@ class TestMultiRaster:
         # For the landsat test case, a warning will be raised because nodata is None
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=UserWarning)
-            output_rst = gu.georaster.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
+            output_rst = gu.raster.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
 
         ref_rst = gu.Raster(raster_paths[0], load_data=False)
         for k, rst in enumerate(output_rst):
@@ -242,7 +242,7 @@ class TestMultiRaster:
         Test load_multiple_rasters functionalities with rasters that do not overlap -> raises warning in certain cases
         """
         # - With crop=False and ref_grid=None, rasters are simply loaded - #
-        output_rst: list[gu.Raster] = gu.georaster.load_multiple_rasters(raster_paths, crop=False, ref_grid=None)
+        output_rst: list[gu.Raster] = gu.raster.load_multiple_rasters(raster_paths, crop=False, ref_grid=None)
         for k, rst in enumerate(output_rst):
             assert rst.is_loaded
             rst2 = gu.Raster(raster_paths[k])
@@ -250,13 +250,13 @@ class TestMultiRaster:
 
         # - With crop=True -> should raise a warning - #
         with pytest.warns(UserWarning, match="Intersection is void, returning unloaded rasters."):
-            output_rst = gu.georaster.load_multiple_rasters(raster_paths, crop=True, ref_grid=None)
+            output_rst = gu.raster.load_multiple_rasters(raster_paths, crop=True, ref_grid=None)
 
         # - Should work with crop=False and ref_grid=0 - #
         # For the landsat test case, a warning will be raised because nodata is None
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=UserWarning)
-            output_rst = gu.georaster.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
+            output_rst = gu.raster.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
 
         ref_rst = gu.Raster(raster_paths[0], load_data=False)
         for k, rst in enumerate(output_rst):

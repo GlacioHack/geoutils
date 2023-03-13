@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
+import sys
 
 import matplotlib.pyplot as plt
 import pytest
 
 import geoutils as gu
-import geoutils.geoviewer as gv
 
+# Import executable just for the test
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin/geoviewer.py")))
+import geoviewer
 
 @pytest.mark.parametrize(
     "filename", [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")]
@@ -35,7 +38,7 @@ def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
 
     # To not get exception when testing generic functions such as --help
     try:
-        gv.main([filename, *option])
+        geoviewer.main([filename, *option])
     except SystemExit:
         pass
 
@@ -72,4 +75,4 @@ def test_geoviewer_invalid(capsys, monkeypatch, filename, option):  # type: igno
 
     # To not get exception when testing generic functions such as --help
     with pytest.raises(ValueError):
-        gv.main([filename, *option])
+        geoviewer.main([filename, *option])

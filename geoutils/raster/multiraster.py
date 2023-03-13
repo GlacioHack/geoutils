@@ -10,8 +10,8 @@ import rasterio.warp
 from tqdm import tqdm
 
 import geoutils as gu
-from geoutils.georaster import Raster, RasterType, get_array_and_mask
-from geoutils.georaster.raster import _default_nodata
+from geoutils.raster import Raster, RasterType, get_array_and_mask
+from geoutils.raster.raster import _default_nodata
 from geoutils.misc import resampling_method_from_str
 
 
@@ -175,7 +175,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
             raster.load()
             raster.is_loaded = False
 
-        nodata = reference_raster.nodata or gu.georaster.raster._default_nodata(reference_raster.data.dtype)
+        nodata = reference_raster.nodata or gu.raster.raster._default_nodata(reference_raster.data.dtype)
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
             dst_bounds=dst_bounds,

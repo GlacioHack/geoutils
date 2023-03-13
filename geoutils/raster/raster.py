@@ -1,5 +1,5 @@
 """
-geoutils.georaster provides a toolset for working with raster data.
+geoutils.raster provides a toolset for working with raster data.
 """
 from __future__ import annotations
 
@@ -30,10 +30,10 @@ from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from scipy.ndimage import distance_transform_edt, map_coordinates
 
-import geoutils.geovector as gv
+import geoutils.vector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
-from geoutils.georaster.sampling import subsample_array
-from geoutils.geovector import Vector
+from geoutils.raster.sampling import subsample_array
+from geoutils.vector import Vector
 from geoutils.projtools import _get_bounds_projected
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -271,7 +271,7 @@ class Raster:
         :param nodata: The nodata value to be used (overwrites the metadata). Default reads from metadata.
 
         :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
-            Default list is set by geoutils.georaster.raster._default_rio_attrs, i.e.
+            Default list is set by geoutils.raster.raster._default_rio_attrs, i.e.
             ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         """

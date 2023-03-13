@@ -217,7 +217,7 @@ class TestVector:
     def test_proximity(self) -> None:
         """
         The core functionality is already tested against GDAL in test_raster: just verify the vector-specific behaviour.
-        #TODO: add an artificial test as well (mirroring TODO in test_georaster)
+        #TODO: add an artificial test as well (mirroring TODO in test_raster)
         """
 
         vector = gu.Vector(self.everest_outlines_path)
@@ -358,37 +358,37 @@ class TestSynthetic:
         Test that extract_vertices works with simple geometries.
         """
         # Polygons
-        vertices = gu.geovector.extract_vertices(self.vector.ds)
+        vertices = gu.vector.extract_vertices(self.vector.ds)
         assert len(vertices) == 1
         assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]]
 
         # MultiPolygons
-        vertices = gu.geovector.extract_vertices(self.vector_multipoly.ds)
+        vertices = gu.vector.extract_vertices(self.vector_multipoly.ds)
         assert len(vertices) == 2
         assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]
         assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0), (5.0, 5.0)]
 
         # LineString
-        vertices = gu.geovector.extract_vertices(self.vector_lines.ds)
+        vertices = gu.vector.extract_vertices(self.vector_lines.ds)
         assert len(vertices) == 1
         assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]]
 
         # MultiLineString
-        vertices = gu.geovector.extract_vertices(self.vector_multilines.ds)
+        vertices = gu.vector.extract_vertices(self.vector_multilines.ds)
         assert len(vertices) == 2
         assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]
         assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0)]
 
     def test_generate_voronoi(self) -> None:
         """
-        Check that geovector.generate_voronoi_polygons works on a simple Polygon.
+        Check that vector.generate_voronoi_polygons works on a simple Polygon.
         Does not work with simple shapes as squares or triangles as the diagram is infinite.
         For now, test on a set of two squares.
         """
         # Check with a multipolygon
-        voronoi = gu.geovector.generate_voronoi_polygons(self.vector_multipoly.ds)
+        voronoi = gu.vector.generate_voronoi_polygons(self.vector_multipoly.ds)
         assert len(voronoi) == 2
-        vertices = gu.geovector.extract_vertices(voronoi)
+        vertices = gu.vector.extract_vertices(voronoi)
         assert vertices == [
             [(5.5, 10.5), (10.5, 10.5), (10.5, 5.5), (5.5, 10.5)],
             [(5.5, 10.5), (10.5, 5.5), (5.5, 5.5), (5.5, 10.5)],
@@ -397,7 +397,7 @@ class TestSynthetic:
         # Check that it fails with proper error for too simple geometries
         expected_message = "Invalid geometry, cannot generate finite Voronoi polygons"
         with pytest.raises(ValueError, match=expected_message):
-            voronoi = gu.geovector.generate_voronoi_polygons(self.vector.ds)
+            voronoi = gu.vector.generate_voronoi_polygons(self.vector.ds)
 
     def test_buffer_metric(self) -> None:
         """Check that metric buffering works"""

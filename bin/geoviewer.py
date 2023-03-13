@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-geoutils.geoviewer provides a toolset for plotting raster and vector data
+Geoviewer provides a command line tool for plotting raster and vector data.
 
 TO DO:
 - change so that only needed band is loaded
@@ -14,7 +14,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from geoutils.georaster import Raster
+from geoutils.raster import Raster
 
 
 def getparser() -> argparse.ArgumentParser:

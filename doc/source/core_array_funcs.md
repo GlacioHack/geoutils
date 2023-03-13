@@ -100,7 +100,7 @@ np.count_nonzero(raster, axis=2)
 
 Not all array functions are supported, however. GeoUtils supports nearly all [mathematical functions](https://numpy.org/doc/stable/reference/routines.math.html),
 [masked-array functions](https://numpy.org/doc/stable/reference/routines.ma.html) and [logical functions](https://numpy.org/doc/stable/reference/routines.logic.html).
-A full list of supported array function is available in {attr}`geoutils.georaster.raster.handled_array_funcs`.
+A full list of supported array function is available in {attr}`geoutils.raster.raster.handled_array_funcs`.
 
 ## Respecting masked values
 

@@ -34,7 +34,7 @@ Right now are supported:
 
 The {class}`~geoutils.SatelliteImage.datetime` is always parsed or deduced.
 
-For tiled products such as SRTM, the tile naming is also retrieved, which can be converted to geographic extent with {func}`geoutils.georaster.satimg.parse_tile_attr_from_name`.
+For tiled products such as SRTM, the tile naming is also retrieved, which can be converted to geographic extent with {func}`geoutils.raster.satimg.parse_tile_attr_from_name`.
 
 ```{code-cell} ipython3
 import geoutils as gu

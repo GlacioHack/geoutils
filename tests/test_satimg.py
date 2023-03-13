@@ -89,7 +89,7 @@ class TestSatelliteImage:
             np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
 
-        # Check that output type is same - other tests are in test_georaster.py
+        # Check that output type is same - other tests are in test_raster.py
         sat_out = -satimg1
         assert isinstance(sat_out, gu.SatelliteImage)
 
@@ -119,7 +119,7 @@ class TestSatelliteImage:
         assert isinstance(r2, gu.SatelliteImage)
 
         # check all immutable attributes are equal
-        georaster_attrs = [
+        raster_attrs = [
             "bounds",
             "count",
             "crs",
@@ -134,8 +134,8 @@ class TestSatelliteImage:
         ]
         satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
         # using list directly available in Class
-        attrs = georaster_attrs + satimg_attrs
-        all_attrs = attrs + gu.georaster.satimg.satimg_attrs
+        attrs = raster_attrs + satimg_attrs
+        all_attrs = attrs + gu.raster.satimg.satimg_attrs
         for attr in all_attrs:
             assert r.__getattribute__(attr) == r2.__getattribute__(attr)
 
@@ -192,7 +192,7 @@ class TestSatelliteImage:
         ]
 
         for names in copied_names:
-            attrs = gu.georaster.satimg.parse_metadata_from_fn(names)
+            attrs = gu.raster.satimg.parse_metadata_from_fn(names)
             i = copied_names.index(names)
             assert satellites[i] == attrs[0]
             assert sensors[i] == attrs[1]
@@ -207,26 +207,26 @@ class TestSatelliteImage:
         test_latlon = [(14, -65), (-14, 65), (14, -65), (14, -65), (14, -65), (0, 0)]
 
         for tile in test_tiles:
-            assert gu.georaster.satimg.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
-            assert gu.georaster.satimg.sw_naming_to_latlon(tile)[1] == test_latlon[test_tiles.index(tile)][1]
+            assert gu.raster.satimg.sw_naming_to_latlon(tile)[0] == test_latlon[test_tiles.index(tile)][0]
+            assert gu.raster.satimg.sw_naming_to_latlon(tile)[1] == test_latlon[test_tiles.index(tile)][1]
 
         for latlon in test_latlon:
-            assert gu.georaster.satimg.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
+            assert gu.raster.satimg.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
 
         # check possible exceptions, rounded lat/lon belong to their southwest border
-        assert gu.georaster.satimg.latlon_to_sw_naming((0, 0)) == "N00E000"
+        assert gu.raster.satimg.latlon_to_sw_naming((0, 0)) == "N00E000"
         # those are the same point, should give same naming
-        assert gu.georaster.satimg.latlon_to_sw_naming((-90, 0)) == "S90E000"
-        assert gu.georaster.satimg.latlon_to_sw_naming((90, 0)) == "S90E000"
+        assert gu.raster.satimg.latlon_to_sw_naming((-90, 0)) == "S90E000"
+        assert gu.raster.satimg.latlon_to_sw_naming((90, 0)) == "S90E000"
         # same here
-        assert gu.georaster.satimg.latlon_to_sw_naming((0, -180)) == "N00W180"
-        assert gu.georaster.satimg.latlon_to_sw_naming((0, 180)) == "N00W180"
+        assert gu.raster.satimg.latlon_to_sw_naming((0, -180)) == "N00W180"
+        assert gu.raster.satimg.latlon_to_sw_naming((0, 180)) == "N00W180"
 
     def test_parse_tile_attr_from_name(self) -> None:
         """Test the parsing of tile attribute from tile name."""
 
         # For ASTER, SRTM, NASADEM: 1x1 tiling globally
-        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N01W179", product="SRTMGL1")
+        y, x, size, epsg = gu.raster.satimg.parse_tile_attr_from_name(tile_name="N01W179", product="SRTMGL1")
 
         assert y == 1
         assert x == -179
@@ -235,21 +235,21 @@ class TestSatelliteImage:
 
         # For TanDEM-X: depends on latitude
         # Mid-latitude is 2 x 1
-        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N62E04", product="TDM1")
+        y, x, size, epsg = gu.raster.satimg.parse_tile_attr_from_name(tile_name="N62E04", product="TDM1")
         assert y == 62
         assert x == 4
         assert size == (1, 2)
         assert epsg == 4326
 
         # Low-latitude is 1 x 1
-        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N52E04", product="TDM1")
+        y, x, size, epsg = gu.raster.satimg.parse_tile_attr_from_name(tile_name="N52E04", product="TDM1")
         assert y == 52
         assert x == 4
         assert size == (1, 1)
         assert epsg == 4326
 
         # High-latitude is 5 x 1
-        y, x, size, epsg = gu.georaster.satimg.parse_tile_attr_from_name(tile_name="N82E04", product="TDM1")
+        y, x, size, epsg = gu.raster.satimg.parse_tile_attr_from_name(tile_name="N82E04", product="TDM1")
         assert y == 82
         assert x == 4
         assert size == (1, 4)
@@ -260,7 +260,7 @@ class TestSatelliteImage:
 
         # Landsat 1
         landsat1 = "LM10170391976031AAA01.tif"
-        attrs1 = gu.georaster.satimg.parse_landsat(landsat1)
+        attrs1 = gu.raster.satimg.parse_landsat(landsat1)
 
         assert attrs1[0] == "Landsat 1"
         assert attrs1[1] == "MSS"
@@ -268,7 +268,7 @@ class TestSatelliteImage:
 
         # Landsat 7 example
         landsat7 = "LE71400412000304SGS00_B4.tif"
-        attrs7 = gu.georaster.satimg.parse_landsat(landsat7)
+        attrs7 = gu.raster.satimg.parse_landsat(landsat7)
 
         assert attrs7[0] == "Landsat 7"
         assert attrs7[1] == "ETM+"
