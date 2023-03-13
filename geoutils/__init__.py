@@ -2,7 +2,7 @@
 GeoUtils is a python package of raster and vector tools.
 """
 
-from geoutils import examples, raster, vector, projtools  # noqa
+from geoutils import examples, projtools, raster, vector  # noqa
 from geoutils.raster import Mask, Raster, SatelliteImage  # noqa
 from geoutils.vector import Vector  # noqa
 

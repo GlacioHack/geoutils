@@ -129,9 +129,7 @@ class TestMultiRaster:
         assert stacked_img.bounds != rasters.img.bounds
 
         # This case should preserve original extent
-        stacked_img2 = gu.raster.stack_rasters(
-            [rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True
-        )
+        stacked_img2 = gu.raster.stack_rasters([rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True)
         assert stacked_img2.bounds == rasters.img.bounds
 
     @pytest.mark.parametrize(

@@ -32,9 +32,9 @@ from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.vector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
+from geoutils.projtools import _get_bounds_projected
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
-from geoutils.projtools import _get_bounds_projected
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:

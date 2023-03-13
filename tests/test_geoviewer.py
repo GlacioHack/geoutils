@@ -1,3 +1,5 @@
+"""Test for geoviewer executable."""
+
 from __future__ import annotations
 
 import os
@@ -8,9 +10,10 @@ import pytest
 
 import geoutils as gu
 
-# Import executable just for the test
+# Add geoviewer path temporarily
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin/geoviewer.py")))
-import geoviewer
+import geoviewer  # noqa
+
 
 @pytest.mark.parametrize(
     "filename", [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")]

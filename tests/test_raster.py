@@ -20,9 +20,9 @@ from pylint import epylint
 import geoutils as gu
 import geoutils.projtools as pt
 from geoutils import examples
-from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 from geoutils.misc import resampling_method_from_str
 from geoutils.projtools import reproject_to_latlon
+from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 
 DO_PLOT = False
 
