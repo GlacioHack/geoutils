@@ -176,19 +176,19 @@ def _load_rio(
     **kwargs: Any,
 ) -> np.ma.masked_array:
     r"""
-    Load specific bands of the dataset, using rasterio.read().
+    Load specific bands of the dataset, using :func:`rasterio.read`.
 
-    Ensure that self.data.ndim = 3 for ease of use (needed e.g. in show)
+    Ensure that ``self.data.ndim=3`` for ease of use (needed e.g. in show).
 
-    :param dataset: The dataset to read (opened with "rio.open(filename)")
-    :param indexes: The band(s) to load. Note that rasterio begins counting at 1, not 0.
-    :param masked: Should the mask be read (if any exists), and/or should the nodata be used to mask values
+    :param dataset: Dataset to read (opened with :func:`rasterio.open`).
+    :param indexes: Band(s) to load. Note that rasterio begins counting at 1, not 0.
+    :param masked: Whether the mask should be read (if any exists) to use the nodata to mask values.
     :param transform: Create a window from the given transform (to read only parts of the raster)
-    :param shape: The expected shape of the read ndarray. Must be given together with the 'transform' argument.
+    :param shape: Expected shape of the read ndarray. Must be given together with the `transform` argument.
 
-    :raises ValueError: If only one of 'transform' and 'shape' are given.
+    :raises ValueError: If only one of ``transform`` and ``shape`` are given.
 
-    :returns: A numpy array if masked == False or a masked_array
+    :returns: An unmasked array if ``masked`` is ``False``, or a masked array otherwise.
 
     \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
     Useful ones are:
@@ -258,9 +258,9 @@ class Raster:
         """
         Instantiate a raster from a filename or rasterio dataset.
 
-        :param filename_or_dataset: The filename or dataset.
+        :param filename_or_dataset: Path to file or Rasterio dataset.
 
-        :param indexes: The band(s) to load into the object. Default loads all bands.
+        :param indexes: Band(s) to load into the object. Default loads all bands.
 
         :param load_data: Whether to load the array during instantiation. Default is False.
 
@@ -268,15 +268,15 @@ class Raster:
 
         :param masked: Whether to load the array as a NumPy masked-array, with nodata values masked. Default is True.
 
-        :param nodata: The nodata value to be used (overwrites the metadata). Default reads from metadata.
+        :param nodata: Nodata value to be used (overwrites the metadata). Default reads from metadata.
 
-        :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
+        :param attrs: Additional attributes from Rasterio's DataReader class to add to the Raster object.
             Default list is set by geoutils.raster.raster._default_rio_attrs, i.e.
             ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         """
-        self.driver: str | None = None
-        self.name: str | None = None
+        self._driver: str | None = None
+        self._name: str | None = None
         self.filename: str | None = None
         self.tags: dict[str, Any] = {}
 
@@ -395,14 +395,14 @@ class Raster:
 
     @property
     def count_on_disk(self) -> None | int:
-        """The count of bands on disk if it exists."""
+        """Count of bands on disk if it exists."""
         if self._disk_shape is not None:
             return self._disk_shape[0]
         return None
 
     @property
     def count(self) -> int:
-        """The count of bands loaded in memory if they are, otherwise the one on disk."""
+        """Count of bands loaded in memory if they are, otherwise the one on disk."""
         if self.is_loaded:
             return int(self.data.shape[0])
         #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
@@ -410,21 +410,21 @@ class Raster:
 
     @property
     def height(self) -> int:
-        """The height of the raster in pixels."""
+        """Height of the raster in pixels."""
         if not self.is_loaded:
             return self._disk_shape[1]  # type: ignore
         return int(self.data.shape[1])
 
     @property
     def width(self) -> int:
-        """The width of the raster in pixels."""
+        """Width of the raster in pixels."""
         if not self.is_loaded:
             return self._disk_shape[2]  # type: ignore
         return int(self.data.shape[2])
 
     @property
     def shape(self) -> tuple[int, int]:
-        """The shape (i.e., height, width) of the raster in pixels."""
+        """Shape (i.e., height, width) of the raster in pixels."""
         # If a downsampling argument was defined but data not loaded yet
         if self._out_shape is not None and not self.is_loaded:
             return self._out_shape[1], self._out_shape[2]
@@ -435,12 +435,12 @@ class Raster:
 
     @property
     def res(self) -> tuple[float | int, float | int]:
-        """The resolution (X, Y) of the raster in georeferenced units."""
+        """Resolution (X, Y) of the raster in georeferenced units."""
         return self.transform[0], abs(self.transform[4])
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:
-        """The bounding coordinates of the raster."""
+        """Bounding coordinates of the raster."""
         return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
 
     @property
@@ -450,21 +450,21 @@ class Raster:
 
     @property
     def dtypes(self) -> tuple[str, ...]:
-        """The data type for each raster band (string representation)."""
+        """Data type for each raster band (string representation)."""
         if not self.is_loaded and self._disk_dtypes is not None:
             return self._disk_dtypes
         return (str(self.data.dtype),) * self.count
 
     @property
     def indexes_on_disk(self) -> None | tuple[int, ...]:
-        """The indexes of bands on disk if it exists."""
+        """Indexes of bands on disk if it exists."""
         if self._disk_indexes is not None:
             return self._disk_indexes
         return None
 
     @property
     def indexes(self) -> tuple[int, ...]:
-        """The indexes of bands loaded in memory if they are, otherwise on disk."""
+        """Indexes of bands loaded in memory if they are, otherwise on disk."""
         if self._indexes is not None and not self.is_loaded:
             if isinstance(self._indexes, int):
                 return (self._indexes,)
@@ -477,12 +477,22 @@ class Raster:
             return tuple(range(1, self.count + 1))
         return self.indexes_on_disk  # type: ignore
 
+    @property
+    def name(self) -> str | None:
+        """Name of the file on disk, if it exists."""
+        return self._name
+
+    @property
+    def driver(self) -> str | None:
+        """Driver used to read a file on disk."""
+        return self._driver
+
     def load(self, indexes: None | int | list[int] = None, **kwargs: Any) -> None:
         """
         Load the raster array from disk.
 
         :param kwargs: Optional keyword arguments sent to '_load_rio()'.
-        :param indexes: The band(s) to load. Note that rasterio begins counting at 1, not 0.
+        :param indexes: Band(s) to load. Note that rasterio begins counting at 1, not 0.
 
         :raises ValueError: If the data are already loaded.
         :raises AttributeError: If no 'filename' attribute exists.
@@ -543,20 +553,15 @@ class Raster:
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
-        :param data: data array
+        :param data: Input array.
+        :param transform: Affine 2D transform. Either a tuple(x_res, 0.0, top_left_x,
+            0.0, y_res, top_left_y) or an affine.Affine object.
+        :param crs: Coordinate reference system. Either a rasterio CRS,
+            or an EPSG integer.
 
-        :param transform: the 2-D affine transform for the image mapping.
-            Either a tuple(x_res, 0.0, top_left_x, 0.0, y_res, top_left_y) or
-            an affine.Affine object.
+        :param nodata: Nodata value.
 
-        :param crs: Coordinate Reference System for image. Either a rasterio CRS,
-            or the EPSG integer.
-
-        :param nodata: nodata value
-
-
-        :returns: A Raster object containing the provided data.
-
+        :returns: Raster created from the provided array and georeferencing.
 
         Example:
 
@@ -859,7 +864,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Sum two rasters, or a raster and a numpy array, or a raster and single number.
 
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -876,17 +881,27 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __radd__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
-        Addition overloading when other is first item in the operation (e.g. 1 + rst).
+        Sum two rasters, or a raster and a numpy array, or a raster and single number.
+
+        For when other is first item in the operation (e.g. 1 + rst).
         """
         return self.__add__(other)
 
     def __neg__(self: RasterType) -> RasterType:
-        """Return self with self.data set to -self.data"""
+        """
+        Take the raster negation.
+
+        Returns a raster with -self.data.
+        """
         return self.from_array(-self.data, self.transform, self.crs, nodata=self.nodata)
 
     def __sub__(self, other: Raster | np.ndarray | Number) -> Raster:
         """
-        Subtract two rasters. Both rasters must have the same data.shape, transform and crs.
+        Subtract two rasters, or a raster and a numpy array, or a raster and single number.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
+        If other is a np.ndarray, it must have the same shape.
+        Otherwise, other must be a single number.
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = self_data - other_data
@@ -894,7 +909,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __rsub__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
-        Subtraction overloading when other is first item in the operation (e.g. 1 - rst).
+        Subtract two rasters, or a raster and a numpy array, or a raster and single number.
+
+        For when other is first item in the operation (e.g. 1 - rst).
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data - self_data
@@ -902,8 +919,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __mul__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        Multiply the data of two rasters or a raster and a numpy array, or a raster and single number.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Multiply two rasters, or a raster and a numpy array, or a raster and single number.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -914,14 +932,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __rmul__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
-        Multiplication overloading when other is first item in the operation (e.g. 2 * rst).
+        Multiply two rasters, or a raster and a numpy array, or a raster and single number.
+
+        For when other is first item in the operation (e.g. 2 * rst).
         """
         return self.__mul__(other)
 
     def __truediv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        True division of the data of two rasters or a raster and a numpy array, or a raster and single number.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        True division of two rasters, or a raster and a numpy array, or a raster and single number.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -932,7 +953,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __rtruediv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
-        True division overloading when other is first item in the operation (e.g. 1/rst).
+        True division of two rasters, or a raster and a numpy array, or a raster and single number.
+
+        For when other is first item in the operation (e.g. 1/rst).
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data / self_data
@@ -941,8 +964,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __floordiv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        Floor division of the data of two rasters or a raster and a numpy array, or a raster and single number.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Floor division of two rasters, or a raster and a numpy array, or a raster and single number.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -953,7 +977,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __rfloordiv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
         """
-        Floor division overloading when other is first item in the operation (e.g. 1/rst).
+        Floor division of two rasters, or a raster and a numpy array, or a raster and single number.
+
+        For when other is first item in the operation (e.g. 1/rst).
         """
         self_data, other_data, nodata = self._overloading_check(other)
         out_data = other_data // self_data
@@ -962,8 +988,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __mod__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        Modulo of the data of two rasters or a raster and a numpy array, or a raster and single number.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Modulo of two rasters, or a raster and a numpy array, or a raster and single number.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -974,7 +1001,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __pow__(self: RasterType, power: int | float) -> RasterType:
         """
-        Calculate the power of self.data and returns a Raster.
+        Power of a raster to a number.
         """
         # Check that input is a number
         if not isinstance(power, Number):
@@ -988,8 +1015,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __eq__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:  # type: ignore
         """
-        Element-wise equality cast into a Mask subclass.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Element-wise equality of two rasters, or a raster and a numpy array, or a raster and single number.
+
+        This operation casts the result into a Mask.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -1000,8 +1030,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __ne__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:  # type: ignore
         """
-        Element-wise equality cast into a Mask subclass.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Element-wise negation of two rasters, or a raster and a numpy array, or a raster and single number.
+
+        This operation casts the result into a Mask.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -1012,8 +1045,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __lt__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        Element-wise equality cast into a Mask subclass.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Element-wise lower than comparison of two rasters, or a raster and a numpy array,
+        or a raster and single number.
+
+        This operation casts the result into a Mask.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -1024,8 +1061,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __le__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        Element-wise equality cast into a Mask subclass.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Element-wise lower or equal comparison of two rasters, or a raster and a numpy array,
+        or a raster and single number.
+
+        This operation casts the result into a Mask.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -1036,8 +1077,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __gt__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        Element-wise equality cast into a Mask subclass.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Element-wise greater than comparison of two rasters, or a raster and a numpy array,
+        or a raster and single number.
+
+        This operation casts the result into a Mask.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -1048,8 +1093,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __ge__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
         """
-        Element-wise equality cast into a Mask subclass.
-        If other is a Raster, it must have the same data.shape, transform and crs as self.
+        Element-wise greater or equal comparison of two rasters, or a raster and a numpy array,
+        or a raster and single number.
+
+        This operation casts the result into a Mask.
+
+        If other is a Raster, it must have the same shape, transform and crs as self.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
@@ -1068,12 +1117,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def astype(self, dtype: DTypeLike, inplace: bool = False) -> Raster | None:
         """
-        Convert the data type of a raster.
+        Convert data type of the raster.
 
-        :param dtype: Any numpy dtype or string accepted by numpy.astype
-        :param inplace: Set to True to modify the raster in place.
+        :param dtype: Any numpy dtype or string accepted by numpy.astype.
+        :param inplace: Whether to modify the raster in-place.
 
-        :returns: the output Raster with dtype changed.
+        :returns: Raster with updated dtype.
         """
         # Check that dtype is supported by rasterio
         if not rio.dtypes.check_dtype(dtype):
@@ -1132,7 +1181,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         To set nodata for more complex cases (e.g., redefining a wrong nodata that has a valid value in the array),
         call the function set_nodata() directly to set the arguments update_array and update_mask adequately.
 
-        :param new_nodata: New nodata to assign to this instance of Raster
+        :param new_nodata: New nodata to assign to this instance of Raster.
         """
 
         self.set_nodata(nodata=new_nodata)
@@ -1164,10 +1213,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         If None is passed as nodata, only the metadata is updated and the mask of oldnodata unset.
 
-        :param nodata: Nodata values
-        :param update_array: Update the old nodata values into new nodata values in the data array
+        :param nodata: Nodata values.
+        :param update_array: Update the old nodata values into new nodata values in the data array.
         :param update_mask: Update the old mask by unmasking old nodata and masking new nodata (if array is updated,
-            old nodata are changed to new nodata and thus stay masked)
+            old nodata are changed to new nodata and thus stay masked).
         """
         if nodata is not None and not isinstance(nodata, (tuple, int, float, np.integer, np.floating)):
             raise ValueError("Type of nodata not understood, must be tuple or float or int")
@@ -1257,7 +1306,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Array of the raster.
 
-        :returns: data array.
+        :returns: Raster array.
 
         """
         if not self.is_loaded:
@@ -1279,7 +1328,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         5. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array. Note that
             these values are not overwritten and can still be accessed in .data.data.
 
-        :param new_data: New data to assign to this instance of Raster
+        :param new_data: New data to assign to this instance of Raster.
 
         """
         # Check that new_data is a Numpy array
@@ -1361,7 +1410,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Masking is performed in place. The mask must have the same shape as loaded data,
         unless the first dimension is 1, then it is ignored.
 
-        :param mask: The data mask
+        :param mask: The raster array mask.
         """
         # Check that mask is a Numpy array
         if not isinstance(mask, (np.ndarray, Mask)):
@@ -1440,9 +1489,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Copy the raster in-memory.
 
-        :param new_array: New array to use for the copied raster
+        :param new_array: New array to use in the copied raster.
 
-        :return:
+        :return: Copy of the raster.
         """
         if new_array is not None:
             data = new_array
@@ -1457,9 +1506,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Check that raster shape, geotransform and CRS are equal.
 
-        :param raster: Another raster object
+        :param raster: Another raster.
 
-        :return: Whether the two objects have the same georeferenced grid
+        :return: Whether the two objects have the same georeferenced grid.
         """
 
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
@@ -1677,20 +1726,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Crop the raster to a given extent.
 
-        Match-reference: a reference raster or vector can be passed to match bounds during cropping.
+        **Match-reference:** a reference raster or vector can be passed to match bounds during cropping.
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param crop_geom: Geometry to crop raster to, as either a Raster object, a Vector object, or a list of
-            coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
-            Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
+        :param crop_geom: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
+            coordinates. If ``crop_geom`` is a raster or vector, will crop to the bounds. If ``crop_geom`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
-        :param mode: one of 'match_pixel' (default) or 'match_extent'. 'match_pixel' will preserve the original pixel
-            resolution, cropping to the extent that most closely aligns with the current coordinates. 'match_extent'
+        :param mode: Either ``"match_pixel"`` (default) or ``"match_extent"``. ``'match_pixel'`` will preserve the original pixel
+            resolution, cropping to the extent that most closely aligns with the current coordinates. ``'match_extent'``
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
-        :param inplace: Update the raster inplace or return copy.
+        :param inplace: Whether to update the raster in-place.
 
-        :returns: None if inplace=True and a new Raster if inplace=False
+        :returns: None for in-place cropping (defaults) or a new raster otherwise.
         """
         assert mode in [
             "match_extent",
@@ -1757,33 +1805,33 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
 
-        Match-reference: a reference raster can be passed to match resolution, bounds and CRS during reprojection.
+        **Match-reference**: a reference raster can be passed to match resolution, bounds and CRS during reprojection.
 
         Alternatively, the destination resolution, bounds and CRS can be passed individually.
 
         Any resampling algorithm implemented in Rasterio can be passed as a string.
-        See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
-        for the full list.
 
-        :param dst_ref: A reference raster. If set will use the attributes of this
-            raster for the output grid.
-        :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
-            defaults to self.crs.
-        :param dst_size: Raster size to write to (x, y). Do not use with dst_res.
-        :param dst_bounds: a BoundingBox object or a dictionary containing left, bottom, right, top bounds in the
-            destination CRS.
-        :param dst_res: Pixel size in units of destination CRS. Either 1 value or (xres, yres). Do not use with
-            dst_size.
-        :param dst_nodata: nodata value of the destination. If set to None, will use the same as source,
-            and if source is None, will use GDAL's default.
-        :param dst_dtype: Set data type of output.
-        :param src_nodata: nodata value of the source. If set to None, will read from the metadata.
-        :param resampling: A rasterio Resampling method
-        :param silent: If True, will not print warning statements
-        :param n_threads: The number of worker threads. Defaults to (os.cpu_count() - 1).
-        :param memory_limit: The warp operation memory limit in MB. Larger values may perform better.
 
-        :returns: Reprojected raster
+        :param dst_ref: Reference raster to match resolution, bounds and CRS.
+        :param dst_crs: Destination coordinate reference system as a string or EPSG. If ``dst_ref`` not set,
+            defaults to this raster's CRS.
+        :param dst_size: Destination size as (x, y). Do not use with ``dst_res``.
+        :param dst_bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
+            right, top bounds in the destination CRS.
+        :param dst_res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
+            Do not use with ``dst_size``.
+        :param dst_nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
+            not exist, will use GDAL's default.
+        :param dst_dtype: Destination data type of array.
+        :param src_nodata: Force a source nodata value (read from the metadata by default).
+        :param resampling: A Rasterio resampling method, can be passed as a string.
+            See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
+            for the full list.
+        :param silent: Whether to print warning statements.
+        :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
+        :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
+
+        :returns: Reprojected raster.
 
         """
 
@@ -2001,10 +2049,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def shift(self, xoff: float, yoff: float) -> None:
         """
-        Shift the raster by a X/Y offset.
+        Shift the raster by a (x,y) offset.
 
-        :param xoff: Translation X offset.
-        :param yoff: Translation Y offset.
+        :param xoff: Translation x offset.
+        :param yoff: Translation y offset.
 
 
         """
@@ -2037,20 +2085,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         pixel instead.
 
         :param filename: Filename to write the file to.
-        :param driver: the 'GDAL' driver to use to write the file as.
-        :param dtype: Data Type to write the image as (defaults to dtype of image data)
-        :param nodata: nodata value to be used.
-        :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE)
+        :param driver: Driver to write file with.
+        :param dtype: Data type to write the image as (defaults to dtype of image data).
+        :param nodata: Force a nodata value to be used (default to that of raster).
+        :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE).
         :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
-                      but increases file size.
-        :param blank_value: Use to write an image out with every pixel's value
+            but increases file size.
+        :param blank_value: Use to write an image out with every pixel's value.
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary,
-            e.g. {'TILED':'YES', 'COMPRESS':'LZW'}
-        :param metadata: pairs of metadata key, value
-        :param gcps: list of gcps, each gcp being [row, col, x, y, (z)]
-        :param gcps_crs: the CRS of the GCPS (Default is None)
-
+            e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
+        :param metadata: Pairs of metadata key, value.
+        :param gcps: List of gcps, each gcp being [row, col, x, y, (z)].
+        :param gcps_crs: CRS of the GCPS.
 
         :returns: None.
         """
@@ -2132,7 +2179,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         See the documentation of rioxarray and xarray for more information on
         the methods and attributes of the resulting DataArray.
 
-        :param name: Set the name of the DataArray.
+        :param name: Name attribute for the DataArray.
 
         :returns: xarray DataArray
         """
@@ -2149,7 +2196,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Get raster bounds projected in a specified CRS.
 
-        :param out_crs: Output CRS
+        :param out_crs: Output CRS.
         :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
 
@@ -2220,7 +2267,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
         you give this method will be passed to it.
 
-        :param index: Which band to plot, from 1 to self.count (default is all).
+        :param index: Band to plot, from 1 to self.count (default is all).
         :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
         :param vmax: Colorbar maximum value. Default is data max.
@@ -2231,7 +2278,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             If "new", will create a new axis.
         :param return_axes: Whether to return axes.
 
-        :returns: None, or (ax, caxes) if return_axes is True
+        :returns: None, or (ax, caxes) if return_axes is True.
 
 
         You can also pass in \*\*kwargs to be used by the underlying imshow or
@@ -2341,9 +2388,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         index: int | None = None,
         masked: bool = False,
         window: int | None = None,
+        reducer_function: Callable[[np.ndarray], float] = np.ma.mean,
         return_window: bool = False,
         boundless: bool = True,
-        reducer_function: Callable[[np.ndarray], float] = np.ma.mean,
     ) -> Any:
         """
         Extract raster values at the nearest pixels from the specified coordinates,
@@ -2351,24 +2398,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         By default, samples pixel value of each band. Can be passed a band index to sample from.
 
-        :param x: x (or longitude) coordinate(s).
-        :param y: y (or latitude) coordinate(s).
-        :param latlon: Set to True if coordinates provided as longitude/latitude.
-        :param index: The band number to extract from (from 1 to self.count).
-        :param masked: If `masked` is `True` the return value will be a masked
-            array. Otherwise (the default) the return value will be a
-            regular array.
-        :param window: expand area around coordinate to dimensions
-            window * window. window must be odd.
-        :param return_window: If True when window=int, returns (mean,array)
-            where array is the dataset extracted via the specified window size.
-        :param boundless: If `True`, windows that extend beyond the dataset's extent
-            are permitted and partially or completely filled arrays (with self.nodata) will
-            be returned as appropriate.
-        :param reducer_function: a function to apply to the values in window.
+        :param x: X (or longitude) coordinate(s).
+        :param y: Y (or latitude) coordinate(s).
+        :param latlon: Whether coordinates are provided as longitude-latitude.
+        :param index: Band number to extract from (from 1 to self.count).
+        :param masked: Whether to return a masked array, or classic array.
+        :param window: Window size to read around coordinates. Must be odd.
+        :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
+        :param return_window: Whether to return the windows (in addition to the reduced value).
+        :param boundless: Whether to allow windows that extend beyond the extent.
 
-        :returns: When called on a Raster or with a specific band set, return value of pixel.
-        :returns: If multiple band Raster and the band is not specified, a
+        :returns: When called on a raster or with a specific band set, return value of pixel.
+        :returns: If multiple band raster and the band is not specified, a
             dictionary containing the value of the pixel in each band.
         :returns: In addition, if return_window=True, return tuple of (values, arrays)
 
@@ -2566,11 +2607,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param x: X coordinates.
         :param y: Y coordinates.
         :param op: Operator to compute index.
-        :param precision: Precision passed to rio.Dataset.index.
+        :param precision: Precision passed to :func:`rasterio.transform.rowcol`.
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
 
-        :returns i, j: indices of (x,y) in the image.
+        :returns i, j: Indices of (x,y) in the image.
         """
         # Input checks
         if op not in [np.float32, np.float64, float]:
@@ -2659,9 +2700,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :param xi: Indices (or coordinates) of x direction to check.
         :param yj: Indices (or coordinates) of y direction to check.
-        :param index: Interpret ij as raster indices (default is True). If False, assumes ij is coordinates.
+        :param index: Interpret ij as raster indices (default is ``True``). If False, assumes ij is coordinates.
 
-        :returns is_outside: True if ij is outside the image.
+        :returns is_outside: ``True`` if ij is outside the image.
         """
         if not index:
             xi, xj = self.xy2ij(xi, yj)
@@ -2866,7 +2907,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Polygonize the raster into a vector.
 
         :param target_values: Value or range of values of the raster from which to
-          create geometries (Default is 1). If 'all', all unique pixel values of the raster are used.
+          create geometries (defaults to 'all', for which all unique pixel values of the raster are used).
 
         :returns: Vector containing the polygonized geometries.
         """
@@ -2941,19 +2982,22 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Compute proximity distances to the raster target pixels, or to a vector geometry on the raster grid.
 
-        When passing a Vector, by default, the boundary of the geometry will be used. The full geometry can be used by
+        **Match-reference**: a raster can be passed to match its resolution, bounds and CRS for computing
+        proximity distances.
+
+        When passing a vector, by default, the boundary of the geometry will be used. The full geometry can be used by
         passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
         See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
 
         :param vector: Vector for which to compute the proximity to geometry,
-            if not provided computed on this Raster target pixels.
-        :param target_values: (Only with Raster) List of target values to use for the proximity,
+            if not provided computed on this raster target pixels.
+        :param target_values: (Only with raster) List of target values to use for the proximity,
             defaults to all non-zero values.
-        :param geometry_type: (Only with a Vector) Type of geometry to use for the proximity, defaults to 'boundary'.
-        :param in_or_out: (Only with a Vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
+        :param geometry_type: (Only with a vector) Type of geometry to use for the proximity, defaults to 'boundary'.
+        :param in_or_out: (Only with a vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
         :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
 
-        :return: Proximity raster.
+        :return: Proximity distances raster.
         """
 
         proximity = proximity_from_vector_or_raster(

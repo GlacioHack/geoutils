@@ -49,9 +49,9 @@ class Vector:
 
     def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame):
         """
-        Instantiate a vector from a filename or geopandas geodataframe.
+        Instantiate a vector from a filename or GeoPandas geodataframe.
 
-        :param filename_or_dataset: The filename or geodataframe.
+        :param filename_or_dataset: Path to file or GeoPandas geodataframe.
         """
 
         if isinstance(filename_or_dataset, (str, pathlib.Path)):
@@ -127,8 +127,7 @@ class Vector:
         """
         Summarize information about the vector.
 
-        :returns: text information about Vector attributes.
-        :rtype: str
+        :returns: Unformation about vector attributes.
         """
         as_str = [  # 'Driver:             {} \n'.format(self.driver),
             f"Filename:           {self.name} \n",
@@ -160,8 +159,8 @@ class Vector:
         This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs which
         you give this method will be passed to it.
 
-        :param ref_crs: The CRS to match when plotting.
-        :param cmap: The colormap. Default is plt.rcParams['image.cmap'].
+        :param ref_crs: Coordinate reference system to match when plotting.
+        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
         :param vmax: Colorbar maximum value. Default is data max.
         :param alpha: Transparency of raster and colorbar.
@@ -329,18 +328,17 @@ class Vector:
         """
         Crop the vector to given extent.
 
-        Match-reference: a reference raster or vector can be passed to match bounds during cropping.
+        **Match-reference:** a reference raster or vector can be passed to match bounds during cropping.
 
         Optionally, clip geometries to that extent (by default keeps all intersecting).
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
         :param crop_geom: Geometry to crop vector to, as either a Raster object, a Vector object, or a list of
-            coordinates. If cropGeom is a Raster, crop() will crop to the boundary of the raster as returned by
-            Raster.ds.bounds. If cropGeom is a Vector, crop() will crop to the bounding geometry. If cropGeom is a
+            coordinates. If ``crop_geom`` is a raster or a vector, will crop to the bounds. If ``crop_geom`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param clip: Whether to clip the geometry to the given extent (by default keeps all intersecting).
-        :param inplace: Update the vector inplace or return copy.
+        :param inplace: Update the vector in-place or return copy.
         """
         if isinstance(crop_geom, (gu.Raster, Vector)):
             # For another Vector or Raster, we reproject the bounding box in the same CRS as self
@@ -372,18 +370,18 @@ class Vector:
         """
         Reproject vector to a specified coordinate reference system.
 
-        Match-reference: a reference raster or vector can be passed to match CRS during reprojection.
+        **Match-reference:** a reference raster or vector can be passed to match CRS during reprojection.
 
         Alternatively, a CRS can be passed in many formats (string, EPSG integer, or CRS).
 
         To reproject a Vector with different source bounds, first run Vector.crop().
 
         :param dst_ref: A reference raster or vector whose CRS to use as a reference for reprojection.
-            Can be provided as Raster, Vector, rasterio dataset, geopandas dataframe, or path to the file.
+            Can be provided as a raster, vector, Rasterio dataset, GeoPandas dataframe, or path to the file.
         :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
             defaults to self.crs.
 
-        :returns: Reprojected vector
+        :returns: Reprojected vector.
         """
 
         # Check that either dst_ref or dst_crs is provided
@@ -461,14 +459,14 @@ class Vector:
         """
         Create a mask from the vector features.
 
-        Match-reference: a raster can be passed to match its resolution, bounds and CRS when creating the mask.
+        **Match-reference:** a raster can be passed to match its resolution, bounds and CRS when creating the mask.
 
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
         Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
 
         Vector features which fall outside the bounds of the raster file are not written to the new mask file.
 
-        :param rst: A raster
+        :param rst: Reference raster to match during rasterization.
         :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
         :param xres: Output raster spatial resolution in x. Only is rst is None.
         :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
@@ -571,25 +569,26 @@ class Vector:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
 
-        Match-reference: a raster can be passed to match its resolution, bounds and CRS when rasterizing the vector.
+        **Match-reference:** a raster can be passed to match its resolution, bounds and CRS when rasterizing the vector.
+
         Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
         Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
 
         Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
         Default is an index from 1 to len(self.ds).
 
-        :param rst: A raster to be used as reference for the output grid
-        :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
+        :param rst: Reference raster to match during rasterization.
+        :param crs: Coordinate reference system as string or EPSG code (Default to rst.crs if not None then self.crs).
         :param xres: Output raster spatial resolution in x. Only if rst is None.
             Must be in units of crs, if set.
         :param yres: Output raster spatial resolution in y. Only if rst is None.
-            Must be in units of crs, if set. (Default to xres)
-        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None
+            Must be in units of crs, if set. (Default to xres).
+        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None.
             Must be in same system as crs, if set. (Default to self bounds).
-        :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1)
-        :param out_value: Value to be burned outside the polygons (Default is 0)
+        :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1).
+        :param out_value: Value to be burned outside the polygons (Default is 0).
 
-        :returns: Raster or mask containing the burned geometries
+        :returns: Raster or mask containing the burned geometries.
         """
 
         if (rst is not None) and (crs is not None):
@@ -722,7 +721,7 @@ class Vector:
         """
         Compute proximity distances to this vector's geometry.
 
-        Match-reference: a raster can be passed to match its resolution, bounds and CRS for computing
+        **Match-reference**: a raster can be passed to match its resolution, bounds and CRS for computing
         proximity distances.
 
         Alternatively, a grid size can be passed to create a georeferenced grid with the bounds and CRS of this vector.
@@ -770,9 +769,9 @@ class Vector:
 
         The outlines are projected to a local UTM, then reverted to the original projection after buffering.
 
-        :param buffer_size: Buffering distance in meters
+        :param buffer_size: Buffering distance in meters.
 
-        :return: Buffered shapefile
+        :return: Buffered shapefile.
         """
 
         from geoutils.projtools import latlon_to_utm, utm_to_epsg
@@ -809,7 +808,7 @@ class Vector:
         """
         Get vector bounds projected in a specified CRS.
 
-        :param out_crs: Output CRS
+        :param out_crs: Output CRS.
         :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
             Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
@@ -834,8 +833,8 @@ class Vector:
         It could be implemented in GeoPandas in the future: https://github.com/geopandas/geopandas/issues/2015.
 
         :param buffer_size: Buffer size in self's coordinate system units.
-        :param metric: Whether to perform the buffering in a local metric system (default: True).
-        :param plot: Set to True to show intermediate plots, useful for understanding or debugging.
+        :param metric: Whether to perform the buffering in a local metric system (defaults to ``True``).
+        :param plot: Whether to show intermediate plots.
 
         :returns: A Vector containing the buffered geometries.
 
@@ -942,8 +941,8 @@ def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
 
     :param gdf: The GeoDataFrame from which the vertices need to be extracted.
 
-    :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal \
-    to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
+    :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal
+        to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
     """
     vertices = []
     # Loop on all geometries within gdf
