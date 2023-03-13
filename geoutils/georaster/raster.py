@@ -20,8 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyproj
 import rasterio as rio
-import rasterio.mask
-import rasterio.transform
 import rasterio.warp
 import rasterio.windows
 from affine import Affine
@@ -36,6 +34,7 @@ import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
 from geoutils.geovector import Vector
 from geoutils.projtools import _get_bounds_projected
+from geoutils.georaster.sampling import subsample_array
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -2968,6 +2967,23 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return self.copy(new_array=proximity)
 
+    def subsample(
+        self,
+        subsample: int | float,
+        return_indices: bool = False,
+        random_state: None | np.random.RandomState | np.random.Generator | int = None
+        ) -> np.ndarray:
+        """
+        Randomly subsample the raster. Only valid values are considered.
+
+        :param subsample: If <= 1, a fraction of the total pixels to extract. If > 1, the number of pixels.
+        :param return_indices: Whether to return the extracted indices only.
+        :param random_state: Random state or seed number.
+
+        :return: Array of subsampled valid values, or array of subsampled indices.
+        """
+
+        return subsample_array(array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state)
 
 class Mask(Raster):
     """

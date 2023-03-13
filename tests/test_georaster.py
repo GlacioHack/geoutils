@@ -767,7 +767,7 @@ class TestRaster:
 
         # When passing the new array as a NaN ndarray, only the valid data is equal, because masked data is NaN in one
         # case, and -9999 in the other
-        r_arr = gu.spatial_tools.get_array_and_mask(r)[0]
+        r_arr = gu.georaster.get_array_and_mask(r)[0]
         r2 = r.copy(new_array=r_arr)
         assert np.ma.allequal(r.data, r2.data)
         # If a nodata value exists, and we update the NaN pixels to be that nodata value, then the two Rasters should
@@ -1122,13 +1122,13 @@ class TestRaster:
         r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.spatial_tools.subsample_raster(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.georaster.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtypes[0])
-        rand_indices = gu.spatial_tools.subsample_raster(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.georaster.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
@@ -1229,7 +1229,7 @@ class TestRaster:
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
-        rand_indices = gu.spatial_tools.subsample_raster(r_gaps.data, nsamples, return_indices=True)
+        rand_indices = gu.georaster.subsample_array(r_gaps.data, nsamples, return_indices=True)
         r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
