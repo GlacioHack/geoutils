@@ -5,7 +5,9 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+
 import geoutils as gu
+
 
 def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
     """
@@ -104,5 +106,3 @@ def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[np.ndar
     yyr -= np.nanmin(yyr)
 
     return xxr, yyr
-
-

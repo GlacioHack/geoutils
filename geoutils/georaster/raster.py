@@ -32,9 +32,9 @@ from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.geovector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
+from geoutils.georaster.sampling import subsample_array
 from geoutils.geovector import Vector
 from geoutils.projtools import _get_bounds_projected
-from geoutils.georaster.sampling import subsample_array
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -2971,8 +2971,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         subsample: int | float,
         return_indices: bool = False,
-        random_state: None | np.random.RandomState | np.random.Generator | int = None
-        ) -> np.ndarray:
+        random_state: None | np.random.RandomState | np.random.Generator | int = None,
+    ) -> np.ndarray:
         """
         Randomly subsample the raster. Only valid values are considered.
 
@@ -2983,7 +2983,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :return: Array of subsampled valid values, or array of subsampled indices.
         """
 
-        return subsample_array(array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state)
+        return subsample_array(
+            array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
+        )
+
 
 class Mask(Raster):
     """

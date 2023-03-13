@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
+
 from geoutils.georaster.array import get_mask
+
 
 def subsample_array(
     array: np.ndarray | np.ma.masked_array,

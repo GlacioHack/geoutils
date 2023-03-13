@@ -9,8 +9,8 @@ import rasterio as rio
 
 import geoutils as gu
 
-class TestArray:
 
+class TestArray:
     @pytest.mark.parametrize("dtype", ["uint8", "uint16", "int32", "float32", "float16"])  # type: ignore
     @pytest.mark.parametrize(
         "mask_and_viewable",
@@ -30,10 +30,11 @@ class TestArray:
             ((4,), True),  # A 1D array is okay.
         ],
     )  # type: ignore
-    def test_get_array_and_mask(self,
-            dtype: str,
-            mask_and_viewable: tuple[None | bool | list[bool], bool],
-            shape_and_check_passes: tuple[tuple[int, ...], bool],
+    def test_get_array_and_mask(
+        self,
+        dtype: str,
+        mask_and_viewable: tuple[None | bool | list[bool], bool],
+        shape_and_check_passes: tuple[tuple[int, ...], bool],
     ) -> None:
         """Validate that the function returns views when expected, and copies otherwise."""
         warnings.simplefilter("error")
@@ -90,7 +91,6 @@ class TestArray:
             assert np.shares_memory(array, arr_view)
         else:
             assert not np.shares_memory(array, arr_view)
-
 
     def test_get_valid_extent(self) -> None:
         """Check the function to get valid extent."""

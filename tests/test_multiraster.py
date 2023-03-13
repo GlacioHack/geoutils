@@ -72,9 +72,9 @@ def images_3d():  # type: ignore
 
 
 class TestMultiRaster:
-
     @pytest.mark.parametrize(
-        "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images"), pytest.lazy_fixture("images_3d")]
+        "rasters",
+        [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images"), pytest.lazy_fixture("images_3d")],
     )  # type: ignore
     def test_stack_rasters(self, rasters) -> None:  # type: ignore
         """Test stack_rasters"""
@@ -87,8 +87,8 @@ class TestMultiRaster:
         if rasters.img1.count > 1:
             # Check warning is raised once
             with pytest.warns(
-                    expected_warning=UserWarning,
-                    match="Some input Rasters have multiple bands, only their first band will be used.",
+                expected_warning=UserWarning,
+                match="Some input Rasters have multiple bands, only their first band will be used.",
             ):
                 stacked_img = gu.georaster.stack_rasters([rasters.img1, rasters.img2])
             # Then ignore the other ones
@@ -166,8 +166,6 @@ class TestMultiRaster:
         # Check that reference works
         merged_img2 = gu.georaster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
         assert merged_img2 == merged_img
-
-
 
     # Group rasters for for testing `load_multiple_rasters`
     # two overlapping, single band rasters
@@ -275,4 +273,3 @@ class TestMultiRaster:
             # Logically, the non overlapping raster should have only masked values
             if k != 0:
                 assert np.count_nonzero(~rst.data.mask) == 0
-

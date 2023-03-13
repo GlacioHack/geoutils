@@ -7,6 +7,7 @@ import pytest
 
 import geoutils as gu
 
+
 class TestSubsampling:
     """
     Different examples of 1D to 3D arrays with masked values for testing.
