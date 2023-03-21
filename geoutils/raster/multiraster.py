@@ -16,7 +16,7 @@ from geoutils.raster.raster import _default_nodata
 
 
 def load_multiple_rasters(
-    raster_paths: list[str], crop: bool = True, ref_grid: int = None, **kwargs: Any
+    raster_paths: list[str], crop: bool = True, ref_grid: int | None = None, **kwargs: Any
 ) -> list[RasterType]:
     """
     Function to load multiple rasters at once in a memory efficient way.
@@ -80,7 +80,6 @@ def load_multiple_rasters(
 
     # Optionally, reproject all rasters to the reference grid
     if reproject:
-
         ref_rst = output_rst[ref_grid]
 
         # Set output bounds - intersection if crop is True, otherwise use that of ref_grid
@@ -169,7 +168,6 @@ height2 and width2 are set based on reference's resolution and the maximum exten
     data: list[np.ndarray] = []
 
     for raster in tqdm(rasters, disable=not progress):
-
         # Check that data is loaded, otherwise temporarily load it
         if not raster.is_loaded:
             raster.load()

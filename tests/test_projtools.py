@@ -11,14 +11,12 @@ from geoutils import examples
 
 
 class TestProjTools:
-
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
 
     def test_latlon_to_utm(self) -> None:
-
         # First: Check errors are raised when format is invalid
 
         # If format is invalid

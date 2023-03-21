@@ -65,8 +65,8 @@ def utm_to_epsg(utm: str) -> int:
 
 def bounds2poly(
     boundsGeom: list[float] | rio.io.DatasetReader,
-    in_crs: CRS = None,
-    out_crs: CRS = None,
+    in_crs: CRS | None = None,
+    out_crs: CRS | None = None,
 ) -> Polygon:
     """
     Converts self's bounds into a shapely Polygon. Optionally, returns it into a different CRS.
@@ -108,7 +108,7 @@ def merge_bounds(
     bounds_list: abc.Iterable[
         list[float] | tuple[float] | rio.coords.BoundingBox | rio.io.DatasetReader | gpd.GeoDataFrame
     ],
-    resolution: float = None,
+    resolution: float | None = None,
     merging_algorithm: str = "union",
     return_rio_bbox: bool = False,
 ) -> tuple[float, ...] | rio.coords.BoundingBox:
@@ -287,7 +287,6 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 def _get_bounds_projected(
     bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
 ) -> rio.coords.BoundingBox:
-
     # Calculate new bounds
     left, bottom, right, top = bounds
     new_bounds = rio.warp.transform_bounds(in_crs, out_crs, left, bottom, right, top, densify_pts)

@@ -65,7 +65,6 @@ def run_gdal_proximity(
 
 
 class TestRaster:
-
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
@@ -2108,7 +2107,6 @@ class TestRaster:
         assert h == pytest.approx(h_cbar)
 
     def test_show(self) -> None:
-
         # Read single band raster and RGB raster
         img = gu.Raster(self.landsat_b4_path)
         img_RGB = gu.Raster(self.landsat_rgb_path)
@@ -2153,7 +2151,6 @@ class TestRaster:
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_save(self, example: str) -> None:
-
         # Read single band raster
         img = gu.Raster(example)
 
@@ -2216,7 +2213,6 @@ class TestRaster:
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_coords(self, example: str) -> None:
-
         img = gu.Raster(self.landsat_b4_path)
 
         # With corner argument
@@ -2252,7 +2248,6 @@ class TestRaster:
         assert np.array_equal(yygrid, np.flipud(np.repeat(yy0[:, np.newaxis], img.width, axis=1)))
 
     def test_from_array(self) -> None:
-
         # Test that from_array works if nothing is changed
         # -> most tests already performed in test_copy, no need for more
         img = gu.Raster(self.landsat_b4_path)
@@ -2318,7 +2313,6 @@ class TestRaster:
             assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"
 
     def test_split_bands(self) -> None:
-
         img = gu.Raster(self.landsat_rgb_path)
 
         red, green, blue = img.split_bands(copy=False)
@@ -2466,7 +2460,6 @@ class TestRaster:
             # It looks like GDAL might not have the right value,
             # so this particular case is treated differently in tests
             if target_values is not None and target_values[0] == 112 and raster.filename is not None:
-
                 # Get index and number of not almost equal point (tolerance of 10-4)
                 ind_not_almost_equal = np.abs(gdal_proximity - geoutils_proximity) > 1e-04
                 nb_not_almost_equal = np.count_nonzero(ind_not_almost_equal)
@@ -2485,7 +2478,6 @@ class TestRaster:
 
         # For debugging
         except Exception as exception:
-
             import matplotlib.pyplot as plt
 
             # Plotting the xdem and GDAL attributes for comparison (plotting "diff" can also help debug)
@@ -2725,7 +2717,6 @@ class TestMask:
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
     def test_reproject(self, mask: gu.Mask) -> None:
-
         # Test 1: with a classic resampling (bilinear)
 
         # Reproject mask
@@ -2752,7 +2743,6 @@ class TestMask:
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
     def test_crop(self, mask: gu.Mask) -> None:
-
         # Test with same bounds -> should be the same #
         crop_geom = mask.bounds
         mask_cropped = mask.crop(crop_geom, inplace=False)
@@ -2814,7 +2804,6 @@ class TestMask:
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
     def test_polygonize(self, mask: gu.Mask) -> None:
-
         # Run default
         vect = mask.polygonize()
 
@@ -2831,7 +2820,6 @@ class TestMask:
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
     def test_proximity(self, mask: gu.Mask) -> None:
-
         # Run default
         rast = mask.proximity()
 
@@ -3169,7 +3157,7 @@ class TestArithmetic:
         cls: type[TestArithmetic],
         data: np.ndarray | np.ma.masked_array,
         rst_ref: gu.RasterType,
-        nodata: int | float | list[int] | list[float] = None,
+        nodata: int | float | list[int] | list[float] | None = None,
     ) -> gu.Raster:
         """
         Generate a Raster from numpy array, with set georeferencing. Used for testing only.
@@ -3330,7 +3318,6 @@ class TestArithmetic:
         assert (r1 >= floatval).raster_equal(self.from_array(r1.data >= floatval, rst_ref=r1))
 
     def test_ops_logical_bitwise_implicit(self) -> None:
-
         # Create two masks
         r1 = self.r1
         m1 = self.r1 > 128
@@ -3380,7 +3367,6 @@ class TestArithmetic:
 
     @pytest.mark.parametrize("power", [2, 3.14, -1])  # type: ignore
     def test_power(self, power: float | int) -> None:
-
         if power > 0:  # Integers to negative integer powers are not allowed.
             assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
         assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
@@ -3540,12 +3526,10 @@ class TestArrayInterface:
 
         # Catch warnings
         with warnings.catch_warnings():
-
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
             if com_dtype in (str(np.dtype(t[0])) for t in ufunc.types):
-
                 # For a single output
                 if ufunc.nout == 1:
                     assert np.ma.allequal(ufunc(rst.data), ufunc(rst).data)
@@ -3612,16 +3596,13 @@ class TestArrayInterface:
 
         # Catch warnings
         with warnings.catch_warnings():
-
             warnings.filterwarnings("ignore", category=RuntimeWarning)
             warnings.filterwarnings("ignore", category=UserWarning)
 
             # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
             if com_dtype_tuple in ((str(np.dtype(t[0])), str(np.dtype(t[1]))) for t in ufunc.types):
-
                 # For a single output
                 if ufunc.nout == 1:
-
                     # There exists a single exception due to negative integers as exponent of integers in "power"
                     if ufunc_str == "power" and "int" in dtype1 and "int" in dtype2 and np.min(rst2.data) < 0:
                         with pytest.raises(ValueError, match="Integers to negative integer powers are not allowed."):
@@ -3676,7 +3657,6 @@ class TestArrayInterface:
 
         # Catch warnings
         with warnings.catch_warnings():
-
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             # Pass an argument for functions that require it (nanpercentile, percentile, quantile and nanquantile) and
@@ -3754,7 +3734,6 @@ class TestArrayInterface:
 
         # Catch warnings
         with warnings.catch_warnings():
-
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             # Compute outputs

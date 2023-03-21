@@ -105,7 +105,6 @@ class TestMisc:
                 useless_func()
 
     def test_diff_environment_yml(self, capsys) -> None:  # type: ignore
-
         # Test with synthetic environment
         env = {"dependencies": ["python==3.9", "numpy", "fiona"]}
         devenv = {"dependencies": ["python==3.9", "numpy", "fiona", "opencv"]}

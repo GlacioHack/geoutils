@@ -18,7 +18,6 @@ from geoutils.raster import Raster
 
 
 def getparser() -> argparse.ArgumentParser:
-
     # Set up description
     parser = argparse.ArgumentParser(description="Visualisation tool for any image supported by GDAL.")
 
@@ -120,7 +119,6 @@ def getparser() -> argparse.ArgumentParser:
 
 
 def main(test_args: Sequence[str] = None) -> None:
-
     # Parse arguments
     parser = getparser()
     args = parser.parse_args(test_args)  # type: ignore

@@ -381,7 +381,7 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
 
 #### Non-geometric per-feature attributes and methods
 
-This second category of attributes and methods return a non-geometric output with same length as the number of features. They are thus appended in the 
+This second category of attributes and methods return a non-geometric output with same length as the number of features. They are thus appended in the
 dataframe of the current {class}`~geoutils.Vector` by default, using as column name the name of the operation (e.g., "area", "contains" or "intersects").
 
 Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they return a {class}`pandas.Series` as in GeoPandas.
@@ -438,6 +438,6 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
 ```
 
 ```{seealso}
-The methods above are described in [GeoPandas GeoSeries's API](https://geopandas.org/en/stable/docs/reference/geoseries.html) and [Shapely object's 
+The methods above are described in [GeoPandas GeoSeries's API](https://geopandas.org/en/stable/docs/reference/geoseries.html) and [Shapely object's
 documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 ```

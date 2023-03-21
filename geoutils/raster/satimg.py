@@ -42,12 +42,10 @@ def parse_landsat(gname: str) -> list[Any]:
 
 
 def parse_metadata_from_fn(fname: str) -> list[Any]:
-
     bname = os.path.splitext(os.path.basename(fname))[0]
 
     # assumes that the filename has a form XX_YY.ext
     if "_" in bname:
-
         spl = bname.split("_")
 
         # attrs corresponds to: satellite, sensor, product, version, tile_name, datetime
@@ -119,7 +117,7 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
     return list(attrs)
 
 
-def parse_tile_attr_from_name(tile_name: str, product: str = None) -> tuple[float, float, tuple[int, int], int]:
+def parse_tile_attr_from_name(tile_name: str, product: str | None = None) -> tuple[float, float, tuple[int, int], int]:
     """
     Convert tile naming to metadata coordinates based on sensor and product
     by default the SRTMGL1 1x1° tile naming convention to lat, lon (originally SRTMGL1)
@@ -150,7 +148,6 @@ def parse_tile_attr_from_name(tile_name: str, product: str = None) -> tuple[floa
 
 
 def sw_naming_to_latlon(tile_name: str) -> tuple[float, float]:
-
     """
     Get latitude and longitude corresponding to southwestern corner of tile naming (originally SRTMGL1 convention)
 
@@ -250,27 +247,25 @@ satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datet
 
 
 class SatelliteImage(Raster):  # type: ignore
-
     date: None | dt.datetime
 
     def __init__(
         self,
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
-        attrs: list[str] = None,
+        attrs: list[str] | None = None,
         load_data: bool = True,
-        indexes: int | list[int] = None,
+        indexes: int | list[int] | None = None,
         read_from_fn: bool = True,
-        datetime: dt.datetime = None,
-        tile_name: str = None,
-        satellite: str = None,
-        sensor: str = None,
-        product: str = None,
-        version: str = None,
+        datetime: dt.datetime | None = None,
+        tile_name: str | None = None,
+        satellite: str | None = None,
+        sensor: str | None = None,
+        product: str | None = None,
+        version: str | None = None,
         read_from_meta: bool = True,
-        fn_meta: str = None,
+        fn_meta: str | None = None,
         silent: bool = True,
     ) -> None:
-
         """
         Load satellite data through the Raster class and parse additional attributes from filename or metadata.
 
@@ -322,7 +317,6 @@ class SatelliteImage(Raster):  # type: ignore
         self.__get_date()
 
     def __get_date(self) -> dt.datetime | None:  # type: ignore
-
         """
         Get date from datetime
         :return:
@@ -333,7 +327,6 @@ class SatelliteImage(Raster):  # type: ignore
             self.date = None
 
     def __parse_metadata_from_fn(self, silent: bool = False) -> None:
-
         """
         Attempts to pull metadata (e.g., sensor, date information) from fname, setting sensor, satellite,
         tile, datetime, and date attributes.
@@ -438,7 +431,7 @@ class SatelliteImage(Raster):  # type: ignore
 
         return None
 
-    def copy(self, new_array: np.ndarray = None) -> SatelliteImage:
+    def copy(self, new_array: np.ndarray | None = None) -> SatelliteImage:
         new_satimg = super().copy(new_array=new_array)  # type: ignore
         # all objects here are immutable so no need for a copy method (string and datetime)
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class

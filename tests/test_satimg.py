@@ -17,7 +17,6 @@ DO_PLOT = False
 
 
 class TestSatelliteImage:
-
     landsat_b4 = examples.get_path("everest_landsat_b4")
     aster_dem = examples.get_path("exploradores_aster_dem")
 
@@ -201,7 +200,6 @@ class TestSatelliteImage:
             assert datetimes[i] == attrs[5]
 
     def test_sw_tile_naming_parsing(self) -> None:
-
         # normal examples
         test_tiles = ["N14W065", "S14E065", "N014W065", "W065N014", "W065N14", "N00E000"]
         test_latlon = [(14, -65), (-14, 65), (14, -65), (14, -65), (14, -65), (0, 0)]

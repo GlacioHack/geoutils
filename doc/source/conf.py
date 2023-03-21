@@ -123,6 +123,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_templates"]
 #        "special-members": "__init__",
 # }
 
+
 # To ignore warnings due to having myst-nb reading the .ipynb created by sphinx-gallery
 # Should eventually be fixed, see: https://github.com/executablebooks/MyST-NB/issues/363
 def setup(app):

@@ -35,7 +35,6 @@ import geoviewer  # noqa
     ),
 )  # type: ignore
 def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
-
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 
@@ -72,7 +71,6 @@ def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
     ),
 )  # type: ignore
 def test_geoviewer_invalid(capsys, monkeypatch, filename, option):  # type: ignore
-
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 

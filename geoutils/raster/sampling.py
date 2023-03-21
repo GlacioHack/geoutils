@@ -11,7 +11,7 @@ def subsample_array(
     array: np.ndarray | np.ma.masked_array,
     subsample: float | int,
     return_indices: bool = False,
-    random_state: np.random.RandomState | np.random.Generator | int = None,
+    random_state: np.random.RandomState | np.random.Generator | int | None = None,
 ) -> np.ndarray:
     """
     Randomly subsample a 1D or 2D array by a subsampling factor, taking only non NaN/masked values.
