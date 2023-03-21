@@ -11,7 +11,9 @@ from numbers import Number
 from typing import Any, Literal, TypeVar, overload
 
 import fiona
+import pandas as pd
 import geopandas as gpd
+from geopandas.testing import assert_geodataframe_equal
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,6 +27,7 @@ from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
+from geoutils.misc import copy_doc
 from geoutils.projtools import _get_bounds_projected, bounds2poly
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
@@ -66,8 +69,6 @@ class Vector:
             self._name = None
         else:
             raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
-
-        self._crs = self.ds.crs
 
     def __repr__(self) -> str:
         """Convert vector to string representation."""
@@ -116,12 +117,13 @@ class Vector:
 
         return str(self.ds.__str__())
 
-    def __getitem__(self, value: gu.Raster | Vector | list[float] | tuple[float, ...]) -> Vector:
-        """
-        Index or subset the vector.
-        """
 
-        return self.crop(crop_geom=value, clip=False, inplace=False)
+    def __setattr__(self, attr, val):
+        # have to special case geometry b/c pandas tries to use as column...
+        if attr == "geometry":
+            object.__setattr__(self, attr, val)
+        else:
+            super().__setattr__(attr, val)
 
     def info(self) -> str:
         """
@@ -142,14 +144,14 @@ class Vector:
 
     def show(
         self,
-        ref_crs: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | CRS | int | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        cbar_title: str | None = None,
+        ref_crs: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | CRS | int = None,
+        cmap: matplotlib.colors.Colormap | str = None,
+        vmin: float | int = None,
+        vmax: float | int = None,
+        alpha: float | int = None,
+        cbar_title: str = None,
         add_cbar: bool = False,
-        ax: matplotlib.axes.Axes | None | Literal["new"] = None,
+        ax: matplotlib.axes.Axes | Literal["new"] = None,
         return_axes: bool = False,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
@@ -250,16 +252,407 @@ class Vector:
         else:
             return None
 
+    def save(
+        self,
+        filename: str | pathlib.Path ,
+        driver: str = None,
+        schema: dict = None,
+        index: bool = None,
+        **kwargs: Any
+    ) -> None:
+        """
+        Write the vector to file.
+
+        This function is a simple wrapper of :func:`geopandas.GeoDataFrame.to_file`. See there for details.
+
+        :param filename: Filename to write the file to.
+        :param driver: Driver to write file with.
+        :param schema: Dictionary passed to Fiona to better control how the file is written.
+        :param index: Whether to write the index or not.
+
+        :returns: None.
+        """
+
+        self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+
+    ########################################################################################################################
+    # Overriden and wrapped methods from GeoPandas and Pandas API to logically cast the output for minimalistic manipulation
+    ########################################################################################################################
+    def _override_gdf_output(self,
+                             other: gpd.GeoDataFrame | gpd.GeoSeries | shapely.Geometry | pd.Series | Any) -> Vector | pd.Series:
+        """Parse outputs of GeoPandas functions to facilitate object manipulation."""
+
+        # Raise error if output is not treated separately, should appear in tests
+        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoDataFrame, pd.Series, shapely.Geometry)):
+            raise ValueError("Not implemented. This error should only be raised in tests.")
+
+        # If a GeoDataFrame is the output, return it
+        if isinstance(other, gpd.GeoDataFrame):
+            return Vector(other)
+        # If a GeoSeries is the output, re-encapsulate in a GeoDataFrame and return it
+        elif isinstance(other, gpd.GeoSeries):
+            return Vector(gpd.GeoDataFrame(geometry=other))
+        # If a Shapely Geometry is the output, re-encapsulate in a GeoDataFrame and return it
+        elif isinstance(other, shapely.Geometry):
+            return Vector(gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs))
+        # If a DataFrame is the output, append it to that of the GeoDataFrame
+        elif isinstance(other, pd.Series):
+            return other
+
+    # -----------------------------------------------
+    # GeoPandasBase - Attributes that return a Series
+    # -----------------------------------------------
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def area(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.area)
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def length(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.length)
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def interiors(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.interiors)
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def geom_type(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.geom_type)
+
+    # Exception ! bounds is renamed geom_bounds to make Raster and Vector "bounds" the same "total_bounds"
+    @property
+    def geom_bounds(self):
+        """Returns or appends to ``Vector`` a ``Series`` with the bounds of each geometry feature."""
+        return self.ds.bounds
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def is_empty(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.is_empty)
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def is_ring(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.is_ring)
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def is_simple(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.is_simple)
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    @property
+    def has_z(self) -> bool:
+        return self.ds.has_z
+
+    # --------------------------------------------------
+    # GeoPandasBase - Attributes that return a GeoSeries
+    # --------------------------------------------------
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def boundary(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.boundary)
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def unary_union(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.unary_union)
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def centroid(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.centroid)
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def convex_hull(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.centroid)
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def envelope(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.envelope)
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def exterior(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.exterior)
+
+    # ---------------------------------------------------------------------------------
+    # GeoPandasBase - Attributes that return a specific value (not Series or GeoSeries)
+    # ---------------------------------------------------------------------------------
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def has_sindex(self) -> bool:
+        return self.ds.has_sindex
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    @property
+    def sindex(self) -> bool:
+        return self.ds.sindex
+
+    @property
+    def total_bounds(self) -> rio.coords.BoundingBox:
+        """Total bounds of the vector."""
+        return self.ds.total_bounds
+
+    # Exception ! Vector.bounds corresponds to the total_bounds
     @property
     def bounds(self) -> rio.coords.BoundingBox:
-        """Bounding box of the vector."""
+        """Total bounding box of the vector."""
         return rio.coords.BoundingBox(*self.ds.total_bounds)
+
+    # --------------------------------------------
+    # GeoPandasBase - Methods that return a Series
+    # --------------------------------------------
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def contains(self, other: gu.Vector, align: bool = True) -> Vector:
+
+        return self._override_gdf_output(self.ds.contains(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def geom_equals(self, other: gu.Vector, align: bool = True) -> Vector:
+
+        return self._override_gdf_output(self.ds.geom_equals(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def geom_almost_equals(self, other: gu.Vector, decimal: int = 6, align: bool = True) -> Vector:
+
+        return self._override_gdf_output(self.ds.geom_almost_equals(other=other.ds, decimal=decimal, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def geom_equals_exact(self, other: gu.Vector, tolerance: float, align: bool=True,) -> Vector:
+
+        return self._override_gdf_output(self.ds.geom_equals_exact(other=other.ds, tolerance=tolerance, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def crosses(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.crosses(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def disjoint(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.disjoint(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def intersects(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.intersects(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def overlaps(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.overlaps(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def touches(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.touches(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def within(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.within(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def covers(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.covers(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def covered_by(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.covered_by(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def distance(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.distance(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def relate(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.relate(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    def project(self, other: gu.Vector, normalized: bool = False, align: bool = True) -> Vector:
+
+        return self._override_gdf_output(self.ds.project(other=other.ds, normalized=normalized, align=align))
+
+    # -----------------------------------------------
+    # GeoPandasBase - Methods that return a GeoSeries
+    # -----------------------------------------------
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def representative_point(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.representative_point())
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def normalize(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.normalize())
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def make_valid(self) -> Vector:
+
+        return self._override_gdf_output(self.ds.make_valid())
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def difference(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.difference(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def symmetric_difference(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.symmetric_difference(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def union(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.union(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def intersection(self, other: gu.Vector, align: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.intersection(other=other.ds, align=align))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def clip_by_rect(self, xmin: float, ymin: float, xmax: float, ymax: float) -> Vector:
+
+        return self._override_gdf_output(self.ds.clip_by_rect(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def buffer(self, distance: float, resolution: int=16, **kwargs) -> Vector:
+
+        return self._override_gdf_output(self.ds.buffer(distance=distance, resolution=resolution, **kwargs))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def simplify(self, *args: Any, **kwargs: Any) -> Vector:
+
+        return self._override_gdf_output(self.ds.simplify(*args, **kwargs))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def affine_transform(self, matrix: tuple[float, ...]) -> Vector:
+
+        return self._override_gdf_output(self.ds.affine_transform(matrix=matrix))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def translate(self, xoff: float = 0.0, yoff: float = 0.0, zoff: float = 0.0) -> Vector:
+
+        return self._override_gdf_output(self.ds.translate(xoff=xoff, yoff=yoff, zoff=zoff))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def rotate(self, angle: float, origin: str = "center", use_radians: bool = False) -> Vector:
+
+        return self._override_gdf_output(self.ds.rotate(angle=angle, origin=origin, use_radians=use_radians))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def scale(self, xfact: float = 1.0, yfact: float = 1.0, zfact: float = 1.0, origin: str = "center") -> Vector:
+
+        return self._override_gdf_output(self.ds.scale(xfact=xfact, yfact=yfact, zfact=zfact, origin=origin))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def skew(self, xs: float=0.0, ys: float=0.0, origin: str = "center", use_radians: bool =False) -> Vector:
+
+        return self._override_gdf_output(self.ds.skew(xs=xs, ys=ys, origin=origin, use_radians=use_radians))
+
+    @copy_doc(gpd.GeoSeries, "Vector")
+    def interpolate(self, distance: float, normalized: bool=False) -> Vector:
+
+        return self._override_gdf_output(self.ds.interpolate(distance=distance, normalized=normalized))
+
+
+    # ----------------------------------------------
+    # GeoDataFrame - Methods that return a GeoSeries
+    # ----------------------------------------------
+
+    def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Vector:
+        """
+        Index the geodataframe or crop the vector.
+
+        If a raster, vector or tuple is passed, crops to its bounds.
+        Otherwise, indexes the geodataframe.
+        """
+
+        if isinstance(key, (gu.Raster, Vector)):
+            return self.crop(crop_geom=key, clip=False, inplace=False)
+        else:
+            return self._override_gdf_output(self.ds.__getitem__(key))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def __setitem__(self, key: Any, value: Any) -> None:
+
+        self.ds.__setitem__(key, value)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def dissolve(self, by: Any=None, aggfunc: Any = "first", as_index: bool=True, level: Any=None, sort: bool=True, observed: bool=False, dropna: bool=True) -> Vector:
+
+        return self._override_gdf_output(self.ds.dissolve(by=by, aggfunc=aggfunc, as_index=as_index, level=level, sort=sort, observed=observed, dropna=dropna))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def explode(self, column: str = None, ignore_index: bool = False, index_parts: bool = None, **kwargs: Any) -> Vector:
+
+        return self._override_gdf_output(self.ds.explode(column=column, ignore_index=ignore_index, index_parts=index_parts, **kwargs))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def sjoin(self, df: Vector | gpd.GeoDataFrame, *args: Any, **kwargs: Any) -> Vector:
+
+        # Ensure input is a geodataframe
+        if isinstance(df, gu.Vector):
+            gdf = df.ds
+        else:
+            gdf = df
+
+        return self._override_gdf_output(self.ds.sjoin(df=gdf, *args, **kwargs))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def sjoin_nearest(self, right: Vector | gpd.GeoDataFrame, how: str = "inner", max_distance: float = None, lsuffix: str = "left", rsuffix: str = "right",
+                      distance_col: str = None) -> Vector:
+
+        # Ensure input is a geodataframe
+        if isinstance(right, gu.Vector):
+            gdf = right.ds
+        else:
+            gdf = right
+
+        return self._override_gdf_output(self.ds.sjoin_nearest(right=gdf, how=how, max_distance=max_distance, lsuffix=lsuffix, rsuffix=rsuffix,
+                                                               distance_col=distance_col))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def overlay(self, right: Vector | gpd.GeoDataFrame, how: str = "intersection", keep_geom_type: bool = None, make_valid: bool = True) -> Vector:
+
+        # Ensure input is a geodataframe
+        if isinstance(right, gu.Vector):
+            gdf = right.ds
+        else:
+            gdf = right
+
+        return self._override_gdf_output(self.ds.overlay(right=gdf, how=how, keep_geom_type=keep_geom_type, make_valid=make_valid))
+
+    # --------------------------------
+    # End of GeoPandas functionalities
+    # --------------------------------
 
     @property
     def crs(self) -> rio.crs.CRS:
         """Coordinate reference system of the vector."""
-        self._crs = self.ds.crs
-        return self._crs
+        return self.ds.crs
 
     @property
     def ds(self) -> gpd.GeoDataFrame:
@@ -277,10 +670,25 @@ class Vector:
         else:
             raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
 
+    def vector_equal(self, other: gu.Vector) -> bool:
+        """Check if two vectors are equal."""
+
+        return assert_geodataframe_equal(self.ds, other.ds)
+
     @property
     def name(self) -> str | None:
         """Name on disk, if it exists."""
         return self._name
+
+    @property
+    def geometry(self) -> gpd.GeoSeries:
+
+        return self.ds.geometry
+
+    @property
+    def index(self):
+
+        return self.ds.index
 
     def copy(self: VectorType) -> VectorType:
         """Return a copy of the vector."""
@@ -364,8 +772,8 @@ class Vector:
 
     def reproject(
         self: Vector,
-        dst_ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
-        dst_crs: CRS | str | int | None = None,
+        dst_ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str = None,
+        dst_crs: CRS | str | int = None,
     ) -> Vector:
         """
         Reproject vector to a specified coordinate reference system.
@@ -421,11 +829,11 @@ class Vector:
     @overload
     def create_mask(
         self,
-        rst: str | gu.Raster | None = None,
-        crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
+        rst: str | gu.Raster = None,
+        crs: CRS = None,
+        xres: float = None,
+        yres: float = None,
+        bounds: tuple[float, float, float, float] = None,
         buffer: int | float | np.number = 0,
         *,
         as_array: Literal[False] = False,
@@ -435,11 +843,11 @@ class Vector:
     @overload
     def create_mask(
         self,
-        rst: str | gu.Raster | None = None,
-        crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
+        rst: str | gu.Raster = None,
+        crs: CRS = None,
+        xres: float = None,
+        yres: float = None,
+        bounds: tuple[float, float, float, float] = None,
         buffer: int | float | np.number = 0,
         *,
         as_array: Literal[True],
@@ -448,11 +856,11 @@ class Vector:
 
     def create_mask(
         self,
-        rst: gu.Raster | None = None,
-        crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
+        rst: gu.Raster = None,
+        crs: CRS = None,
+        xres: float = None,
+        yres: float = None,
+        bounds: tuple[float, float, float, float] = None,
         buffer: int | float | np.number = 0,
         as_array: bool = False,
     ) -> gu.Mask | np.ndarray:
@@ -558,12 +966,12 @@ class Vector:
 
     def rasterize(
         self,
-        rst: gu.Raster | None = None,
-        crs: CRS | int | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
-        in_value: int | float | abc.Iterable[int | float] | None = None,
+        rst: gu.Raster = None,
+        crs: CRS | int = None,
+        xres: float = None,
+        yres: float = None,
+        bounds: tuple[float, float, float, float] = None,
+        in_value: int | float | abc.Iterable[int | float] = None,
         out_value: int | float = 0,
     ) -> gu.Raster | gu.Mask:
         """
@@ -673,7 +1081,7 @@ class Vector:
 
     @classmethod
     def from_bounds_projected(
-        cls, raster_or_vector: gu.Raster | VectorType, out_crs: CRS | None = None, densify_pts: int = 5000
+        cls, raster_or_vector: gu.Raster | VectorType, out_crs: CRS = None, densify_pts: int = 5000
     ) -> VectorType:
         """Create a vector polygon from projected bounds of a raster or vector.
 
@@ -712,7 +1120,7 @@ class Vector:
 
     def proximity(
         self,
-        raster: gu.Raster | None = None,
+        raster: gu.Raster = None,
         grid_size: tuple[int, int] = (1000, 1000),
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",

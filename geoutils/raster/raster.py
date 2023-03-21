@@ -169,10 +169,10 @@ _default_rio_attrs = [
 
 def _load_rio(
     dataset: rio.io.DatasetReader,
-    indexes: int | tuple[int, ...] | None = None,
+    indexes: int | tuple[int, ...] = None,
     masked: bool = False,
-    transform: Affine | None = None,
-    shape: tuple[int, int] | None = None,
+    transform: Affine = None,
+    shape: tuple[int, int] = None,
     **kwargs: Any,
 ) -> np.ma.masked_array:
     r"""
@@ -248,12 +248,12 @@ class Raster:
         | rio.io.DatasetReader
         | rio.io.MemoryFile
         | dict[str, Any],
-        indexes: None | int | list[int] = None,
+        indexes: int | list[int] = None,
         load_data: bool = False,
         downsample: AnyNumber = 1,
         masked: bool = True,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        attrs: list[str] | None = None,
+        nodata: int | float | tuple[int, ...] | tuple[float, ...] = None,
+        attrs: list[str] = None,
     ) -> None:
         """
         Instantiate a raster from a filename or rasterio dataset.
@@ -275,22 +275,22 @@ class Raster:
             ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
             'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         """
-        self._driver: str | None = None
-        self._name: str | None = None
-        self.filename: str | None = None
+        self._driver: str = None
+        self._name: str = None
+        self.filename: str = None
         self.tags: dict[str, Any] = {}
 
-        self._data: np.ma.masked_array | None = None
+        self._data: np.ma.masked_array = None
         self._nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = nodata
         self._indexes = indexes
-        self._indexes_loaded: int | tuple[int, ...] | None = None
+        self._indexes_loaded: int | tuple[int, ...] = None
         self._masked = masked
-        self._out_shape: tuple[int, int, int] | None = None
-        self._disk_hash: int | None = None
+        self._out_shape: tuple[int, int, int] = None
+        self._disk_hash: int = None
         self._is_modified = True
-        self._disk_shape: tuple[int, int, int] | None = None
-        self._disk_indexes: tuple[int] | None = None
-        self._disk_dtypes: tuple[str] | None = None
+        self._disk_shape: tuple[int, int, int] = None
+        self._disk_indexes: tuple[int] = None
+        self._disk_dtypes: tuple[str] = None
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
@@ -487,7 +487,7 @@ class Raster:
         """Driver used to read a file on disk."""
         return self._driver
 
-    def load(self, indexes: None | int | list[int] = None, **kwargs: Any) -> None:
+    def load(self, indexes: int | list[int] = None, **kwargs: Any) -> None:
         """
         Load the raster array from disk.
 
@@ -549,7 +549,7 @@ class Raster:
         data: np.ndarray | np.ma.masked_array,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        nodata: int | float | tuple[int, ...] | tuple[float, ...] = None,
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
@@ -1485,7 +1485,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return "".join(as_str)
 
-    def copy(self: RasterType, new_array: np.ndarray | None = None) -> RasterType:
+    def copy(self: RasterType, new_array: np.ndarray = None) -> RasterType:
         """
         Copy the raster in-memory.
 
@@ -1789,14 +1789,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def reproject(
         self: RasterType,
-        dst_ref: RasterType | str | None = None,
-        dst_crs: CRS | str | int | None = None,
-        dst_size: tuple[int, int] | None = None,
-        dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        dst_dtype: np.dtype | None = None,
+        dst_ref: RasterType | str = None,
+        dst_crs: CRS | str | int = None,
+        dst_size: tuple[int, int] = None,
+        dst_bounds: dict[str, float] | rio.coords.BoundingBox = None,
+        dst_res: float | abc.Iterable[float] = None,
+        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] = None,
+        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] = None,
+        dst_dtype: np.dtype = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
         n_threads: int = 0,
@@ -2064,21 +2064,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         filename: str | pathlib.Path | IO[bytes],
         driver: str = "GTiff",
-        dtype: DTypeLike | None = None,
-        nodata: AnyNumber | None = None,
+        dtype: DTypeLike = None,
+        nodata: AnyNumber = None,
         compress: str = "deflate",
         tiled: bool = False,
-        blank_value: None | int | float = None,
-        co_opts: dict[str, str] | None = None,
-        metadata: dict[str, Any] | None = None,
-        gcps: list[tuple[float, ...]] | None = None,
-        gcps_crs: CRS | None = None,
+        blank_value: int | float = None,
+        co_opts: dict[str, str] = None,
+        metadata: dict[str, Any] = None,
+        gcps: list[tuple[float, ...]] = None,
+        gcps_crs: CRS = None,
     ) -> None:
         """
         Write the raster to file.
-
-        Given a filename to save the Raster to, create a geo-referenced file
-        on disk which contains the contents of self.data.
 
         If blank_value is set to an integer or float, then instead of writing
         the contents of self.data to disk, write this provided value to every
@@ -2169,7 +2166,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
                 dst.gcps = (rio_gcps, gcps_crs)
 
-    def to_xarray(self, name: str | None = None) -> xr.DataArray:
+    def to_xarray(self, name: str = None) -> xr.DataArray:
         """
         Convert raster to a xarray.DataArray.
 
@@ -2250,14 +2247,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def show(
         self,
-        index: int | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        cbar_title: str | None = None,
+        index: int = None,
+        cmap: matplotlib.colors.Colormap | str = None,
+        vmin: float | int = None,
+        vmax: float | int = None,
+        alpha: float | int = None,
+        cbar_title: str = None,
         add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        ax: matplotlib.axes.Axes | Literal["new"] = None,
         return_axes: bool = False,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
@@ -2385,9 +2382,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         x: float | ArrayLike,
         y: float | ArrayLike,
         latlon: bool = False,
-        index: int | None = None,
+        index: int = None,
         masked: bool = False,
-        window: int | None = None,
+        window: int = None,
         reducer_function: Callable[[np.ndarray], float] = np.ma.mean,
         return_window: bool = False,
         boundless: bool = True,
@@ -2594,7 +2591,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         x: ArrayLike,
         y: ArrayLike,
         op: type = np.float32,
-        precision: float | None = None,
+        precision: float = None,
         shift_area_or_point: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -2771,7 +2768,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return rpts
 
-    def split_bands(self: RasterType, copy: bool = False, subset: list[int] | int | None = None) -> list[Raster]:
+    def split_bands(self: RasterType, copy: bool = False, subset: list[int] | int = None) -> list[Raster]:
         """
         Split the bands into separate rasters.
 
@@ -2973,8 +2970,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def proximity(
         self,
-        vector: Vector | None = None,
-        target_values: list[float] | None = None,
+        vector: Vector = None,
+        target_values: list[float] = None,
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
@@ -3015,7 +3012,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         subsample: int | float,
         return_indices: bool = False,
-        random_state: None | np.random.RandomState | np.random.Generator | int = None,
+        random_state: np.random.RandomState | np.random.Generator | int = None,
     ) -> np.ndarray:
         """
         Randomly subsample the raster. Only valid values are considered.
@@ -3131,14 +3128,14 @@ class Mask(Raster):
 
     def reproject(
         self: Mask,
-        dst_ref: RasterType | str | None = None,
-        dst_crs: CRS | str | int | None = None,
-        dst_size: tuple[int, int] | None = None,
-        dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        dst_dtype: np.dtype | None = None,
+        dst_ref: RasterType | str = None,
+        dst_crs: CRS | str | int = None,
+        dst_size: tuple[int, int] = None,
+        dst_bounds: dict[str, float] | rio.coords.BoundingBox = None,
+        dst_res: float | abc.Iterable[float] = None,
+        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] = None,
+        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] = None,
+        dst_dtype: np.dtype = None,
         resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
         n_threads: int = 0,
@@ -3249,8 +3246,8 @@ class Mask(Raster):
 
     def proximity(
         self,
-        vector: Vector | None = None,
-        target_values: list[float] | None = None,
+        vector: Vector = None,
+        target_values: list[float] = None,
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
@@ -3335,8 +3332,8 @@ class Mask(Raster):
 
 def proximity_from_vector_or_raster(
     raster: Raster,
-    vector: Vector | None = None,
-    target_values: list[float] | None = None,
+    vector: Vector = None,
+    target_values: list[float] = None,
     geometry_type: str = "boundary",
     in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
     distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",

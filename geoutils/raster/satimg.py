@@ -119,7 +119,7 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
     return list(attrs)
 
 
-def parse_tile_attr_from_name(tile_name: str, product: str | None = None) -> tuple[float, float, tuple[int, int], int]:
+def parse_tile_attr_from_name(tile_name: str, product: str = None) -> tuple[float, float, tuple[int, int], int]:
     """
     Convert tile naming to metadata coordinates based on sensor and product
     by default the SRTMGL1 1x1° tile naming convention to lat, lon (originally SRTMGL1)
@@ -256,18 +256,18 @@ class SatelliteImage(Raster):  # type: ignore
     def __init__(
         self,
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
-        attrs: list[str] | None = None,
+        attrs: list[str] = None,
         load_data: bool = True,
-        indexes: int | list[int] | None = None,
+        indexes: int | list[int] = None,
         read_from_fn: bool = True,
-        datetime: dt.datetime | None = None,
-        tile_name: str | None = None,
-        satellite: str | None = None,
-        sensor: str | None = None,
-        product: str | None = None,
-        version: str | None = None,
+        datetime: dt.datetime = None,
+        tile_name: str = None,
+        satellite: str = None,
+        sensor: str = None,
+        product: str = None,
+        version: str = None,
         read_from_meta: bool = True,
-        fn_meta: str | None = None,
+        fn_meta: str = None,
         silent: bool = True,
     ) -> None:
 
@@ -438,7 +438,7 @@ class SatelliteImage(Raster):  # type: ignore
 
         return None
 
-    def copy(self, new_array: np.ndarray | None = None) -> SatelliteImage:
+    def copy(self, new_array: np.ndarray = None) -> SatelliteImage:
         new_satimg = super().copy(new_array=new_array)  # type: ignore
         # all objects here are immutable so no need for a copy method (string and datetime)
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class

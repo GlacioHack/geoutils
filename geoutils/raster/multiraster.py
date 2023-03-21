@@ -16,7 +16,7 @@ from geoutils.raster.raster import _default_nodata
 
 
 def load_multiple_rasters(
-    raster_paths: list[str], crop: bool = True, ref_grid: int | None = None, **kwargs: Any
+    raster_paths: list[str], crop: bool = True, ref_grid: int = None, **kwargs: Any
 ) -> list[RasterType]:
     """
     Function to load multiple rasters at once in a memory efficient way.

@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import os.path
 import pathlib
 import re
+import inspect
+import tempfile
+from tempfile import NamedTemporaryFile
 
 import geopandas as gpd
+import geopandas.base
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from geopandas.testing import assert_geodataframe_equal
+import shapely
+from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 from scipy.ndimage import binary_erosion
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
 from shapely.geometry.multipolygon import MultiPolygon
 from shapely.geometry.polygon import Polygon
+from pandas.testing import assert_series_equal
 
 import geoutils as gu
 
@@ -68,6 +75,25 @@ class TestVector:
         assert vector2 is not self.glacier_outlines
 
         assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]
+
+    def test_save(self) -> None:
+        """Test the save wrapper for GeoDataFrame.to_file()."""
+
+        vector = gu.Vector(self.aster_outlines_path)
+
+        # Create a temporary file in a temporary directory
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name, suffix=".gpkg")
+        os.remove(temp_file.name)
+
+        # Save and check the file exists
+        vector.save(temp_file.name, overwrite=True)
+        assert os.path.exists(temp_file.name)
+
+        # Open and check the object is the same
+        vector_save = gu.Vector(temp_file.name)
+        assert_geodataframe_equal(vector_save, vector)
+
 
     def test_bounds(self) -> None:
 
@@ -529,3 +555,181 @@ class TestSynthetic:
         # Check that plotting runs without errors and close it
         monkeypatch.setattr(plt, "show", lambda: None)
         two_squares.buffer_without_overlap(buffer_size, plot=True)
+
+
+class TestGeoPandasMethods:
+
+    # Use two synthetic vectors
+    poly = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
+    gdf1 = gpd.GeoDataFrame({"geometry": [poly]}, crs="EPSG:4326")
+    synthvec1 = gu.Vector(gdf1)
+
+    # Create a synthetic LineString geometry
+    lines = LineString([(10, 10), (10.5, 10.5), (11, 11)])
+    gdf2 = gpd.GeoDataFrame({"geometry": [lines]}, crs="EPSG:4326")
+    synthvec2 = gu.Vector(gdf2)
+
+    # Use two real-life vectors
+    realvec1 = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
+    realvec2 = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+
+    # Properties and methods derived from Shapely or GeoPandas
+    # List of properties and methods with non-geometric output that are implemented in GeoUtils
+    nongeo_properties = ["area", "length", "interiors", "geom_type", "is_empty", "is_ring", "is_simple"]
+    nongeo_methods = ["contains", "geom_equals", "geom_almost_equals", "crosses", "disjoint", "intersects",
+                            "overlaps", "touches", "within", "covers", "covered_by", "distance", "relate", "project"]
+
+    # List of properties and methods with geometric output that are implemented in GeoUtils
+    geo_properties = ["boundary", "unary_union", "centroid", "convex_hull", "envelope", "exterior"]
+    geo_methods = ["representative_point", "normalize", "make_valid", "difference", "symmetric_difference", "union",
+                             "intersection", "clip_by_rect", "buffer", "simplify", "affine_transform", "translate", "rotate",
+                             "scale", "skew", "interpolate", "dissolve", "explode", "sjoin", "sjoin_nearest", "overlay"]
+
+    # List of other properties and methods
+    other = ["has_sindex", "sindex"]
+    all_declared = nongeo_methods + nongeo_properties + geo_methods + geo_properties + other
+
+    # Get all GeoPandasBase public methods with some exceptions
+    geobase_methods = gpd.base.GeoPandasBase.__dict__.copy()
+    # exceptions_geobase = ["plot", "explore", "equals"]
+    # geobase_methods = {key: geobase_methods[key] for key in geobase_methods if key[0] != "_" and key not in exceptions_geobase}
+
+    # Get all GeoDataFrame public methods with some exceptions
+    gdf_methods = gpd.GeoDataFrame.__dict__.copy()
+    # exceptions_gdf = ["total_bounds"]
+    # gdf_methods = {key: gdf_methods[key] for key in gdf_methods if key[0] != "_" and key not in exceptions_gdf}
+
+    def test_overriden_funcs_exist(self) -> None:
+        """Check that all methods listed above exist in Vector."""
+
+        # Check that all methods declared in the class above exist in Vector
+        vector_methods = gu.Vector.__dict__
+
+        assert all(method in vector_methods.keys() for method in self.all_declared)
+
+    def test_geopandas_coverage(self) -> None:
+        """Check that all existing methods of GeoPandas are overriden, with a couple exceptions."""
+
+        # Merge the two
+        all_methods = self.geobase_methods.copy()
+        all_methods.update(self.gdf_methods)
+
+        # Check that all methods declared in the class above are covered in Vector
+        list_missing = [method for method in all_methods.keys() if method not in self.all_declared]
+        try:
+            assert len(list_missing) == 0
+        except AssertionError:
+            print('Missing methods from GeoPandas:')
+            print(list_missing)
+
+    @pytest.mark.parametrize("method", nongeo_methods + geo_methods)  # type: ignore
+    def test_overriden_funcs_args(self, method: str) -> None:
+        """Check that all methods overriden have the same arguments as in GeoPandas."""
+
+        # Get GeoPandas class where the methods live
+        if method in self.geobase_methods.keys():
+            upstream_class = gpd.base.GeoPandasBase
+        elif method in self.gdf_methods.keys():
+            upstream_class = gpd.GeoDataFrame
+        else:
+            raise ValueError("Method did not belong to GeoDataFrame or GeoPandasBase class.")
+
+        # Get a full argument inspection object for each class
+        argspec_upstream = inspect.getfullargspec(getattr(upstream_class, method))
+        argspec_geoutils = inspect.getfullargspec(getattr(gu.Vector, method))
+
+        # Check that all positional arguments are the same
+        assert argspec_upstream.args == argspec_geoutils.args
+        # Check that the *args and **kwargs argument are declared consistently
+        assert argspec_upstream.varargs == argspec_geoutils.varargs
+        assert argspec_upstream.varkw == argspec_geoutils.varkw
+        # Check that default argument values are the same
+        assert argspec_upstream.defaults == argspec_geoutils.defaults
+
+    @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2]) # type: ignore
+    @pytest.mark.parametrize("method", nongeo_properties) # type: ignore
+    def test_nongeo_properties(self, vector: gu.Vector, method: str) -> None:
+        """Check non-geometric properties are consistent with GeoPandas."""
+
+        # Get method for each class
+        output_geoutils = getattr(vector, method)
+        output_geopandas = getattr(vector.ds, method)
+
+        # Assert equality
+        assert_series_equal(output_geoutils, output_geopandas)
+
+    @pytest.mark.parametrize("vector1", [synthvec1, realvec1]) # type: ignore
+    @pytest.mark.parametrize("vector2", [synthvec2, realvec2]) # type: ignore
+    @pytest.mark.parametrize("method", nongeo_methods) # type: ignore
+    def test_nongeo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
+        """
+        Check non-geometric methods are consistent with GeoPandas.
+        All these methods require two inputs ("other", "df", or "right" argument).
+        """
+
+        # Get method for each class
+        output_geoutils = getattr(vector1, method)(vector2)
+        output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+
+        # Assert equality
+        assert_series_equal(output_geoutils, output_geopandas)
+
+    @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])  # type: ignore
+    @pytest.mark.parametrize("method", geo_properties)  # type: ignore
+    def test_geo_properties(self, vector: gu.Vector, method: str) -> None:
+        """Check geometric properties are consistent with GeoPandas."""
+
+        # Get method for each class
+        output_geoutils = getattr(vector, method)
+        output_geopandas = getattr(vector.ds, method)
+
+        # Assert output types
+        assert isinstance(output_geoutils, gu.Vector)
+        assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame, shapely.Geometry))
+
+        # Separate cases depending on GeoPandas' output
+        if isinstance(output_geopandas, gpd.GeoSeries):
+            # Assert geoseries equality
+            assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
+        elif isinstance(output_geopandas, shapely.Geometry):
+            assert_geodataframe_equal(output_geoutils.ds, gpd.GeoDataFrame({"geometry": [output_geopandas]}, crs=vector.crs))
+        else:
+            assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
+
+
+    specific_method_args = {"buffer": {"distance": 1}, "clip_by_rect": {"xmin": 10.5, "ymin": 10.5, "xmax": 11, "ymax": 11},
+                     "affine_transform": {"matrix": [0, 0, 0, 0, 1, 1]}, "translate": {"xoff": 1, "yoff": 1, "zoff": 0},
+                     "rotate": {"angle": 90}, "scale": {"xfact": 1.1, "yfact": 1.1, "zfact": 1.1, "origin": "center"},
+                     "skew": {"xs": 1.1, "ys": 1.1}, "interpolate": {"distance": 1}, "simplify": {"tolerance": 1}}
+
+    @pytest.mark.parametrize("vector1", [synthvec1, realvec1]) # type: ignore
+    @pytest.mark.parametrize("vector2", [synthvec2, realvec2]) # type: ignore
+    @pytest.mark.parametrize("method", geo_methods) # type: ignore
+    def test_geo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
+        """Check geometric properties are consistent with GeoPandas."""
+
+        # Methods that require two inputs
+        if method in ["difference", "symmetric_difference", "union", "intersection", "sjoin", "sjoin_nearest", "overlay"]:
+            output_geoutils = getattr(vector1, method)(vector2)
+            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+        # Methods that require zero input
+        elif method in ["representative_point", "normalize", "make_valid", "dissolve", "explode"]:
+            output_geoutils = getattr(vector1, method)()
+            output_geopandas = getattr(vector1.ds, method)()
+        elif method in self.specific_method_args.keys():
+            output_geoutils = getattr(vector1, method)(**self.specific_method_args[method])
+            output_geopandas = getattr(vector1.ds, method)(**self.specific_method_args[method])
+        else:
+            raise ValueError("The method '{}' is not covered by this test.".format(method))
+
+        # Assert output types
+        assert isinstance(output_geoutils, gu.Vector)
+        assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame))
+
+        # Separate cases depending on GeoPandas' output
+        if isinstance(output_geopandas, gpd.GeoSeries):
+            # Assert geoseries equality
+            assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
+        else:
+            # Or assert geodataframe equality
+            assert_geodataframe_equal(output_geoutils.ds, output_geopandas)

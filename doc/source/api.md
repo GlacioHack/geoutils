@@ -1,7 +1,7 @@
 (api)=
 # API reference
 
-This page provides an auto-generated summary of GeoUtils’ API.
+This page provides a summary of GeoUtils’ API.
 For more details and examples, refer to the relevant chapters in the main part of the
 documentation.
 
@@ -247,12 +247,13 @@ And reverse operations.
     Mask.proximity
 ```
 
-## Vectors
+## Vector
 
 ```{eval-rst}
 .. minigallery:: geoutils.Vector
       :add-heading:
 ```
+
 ### Opening a file
 
 ```{eval-rst}
@@ -313,3 +314,130 @@ And reverse operations.
     :toctree: gen_modules/
 
     Vector.get_bounds_projected
+```
+
+### Indexing and assignment
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.__getitem__
+    Vector.__setitem__
+```
+
+### From Shapely and GeoPandas
+
+#### Geometric attributes and methods
+
+This first category of attributes and methods return a geometric output, converted to a {class}`~geoutils.Vector` by default.
+
+Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they return a {class}`geopandas.GeoSeries` or {class}`geopandas.GeoDataFrame` as in GeoPandas.
+
+**Attributes:**
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.boundary
+    Vector.unary_union
+    Vector.centroid
+    Vector.convex_hull
+    Vector.envelope
+    Vector.exterior
+```
+
+
+**Methods:**
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.representative_point
+    Vector.normalize
+    Vector.make_valid
+    Vector.difference
+    Vector.symmetric_difference
+    Vector.union
+    Vector.intersection
+    Vector.clip_by_rect
+    Vector.buffer
+    Vector.simplify
+    Vector.affine_transform
+    Vector.translate
+    Vector.rotate
+    Vector.scale
+    Vector.skew
+    Vector.interpolate
+    Vector.merge
+    Vector.dissolve
+    Vector.explode
+    Vector.sjoin
+    Vector.sjoin_nearest
+    Vector.overlay
+```
+
+#### Non-geometric per-feature attributes and methods
+
+This second category of attributes and methods return a non-geometric output with same length as the number of features. They are thus appended in the 
+dataframe of the current {class}`~geoutils.Vector` by default, using as column name the name of the operation (e.g., "area", "contains" or "intersects").
+
+Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they return a {class}`pandas.Series` as in GeoPandas.
+
+**Attributes:**
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.area
+    Vector.length
+    Vector.interiors
+    Vector.geom_type
+    Vector.geom_bounds
+    Vector.is_empty
+    Vector.is_ring
+    Vector.is_simple
+    Vector.has_z
+```
+
+**Methods:**
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.contains
+    Vector.equals
+    Vector.geom_equals
+    Vector.geom_almost_equals
+    Vector.crosses
+    Vector.disjoint
+    Vector.intersects
+    Vector.overlaps
+    Vector.touches
+    Vector.within
+    Vector.covers
+    Vector.covered_by
+    Vector.distance
+    Vector.relate
+    Vector.project
+```
+
+#### Other attributes and methods
+
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.has_sindex
+    Vector.sindex
+```
+
+```{seealso}
+The methods above are described in [GeoPandas GeoSeries's API](https://geopandas.org/en/stable/docs/reference/geoseries.html) and [Shapely object's 
+documentation](https://shapely.readthedocs.io/en/stable/properties.html).
+```

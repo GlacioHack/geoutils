@@ -53,10 +53,12 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable", None),
     "matplotlib": ("https://matplotlib.org/stable", None),
     "pyproj": ("https://pyproj4.github.io/pyproj/stable", None),
-    "geopandas": ("https://geopandas.org/en/stable", None),
+    "geopandas": ("https://geopandas.org/en/stable/", None),
+    "shapely": ("https://shapely.readthedocs.io/en/stable/", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "xdem": ("https://xdem.readthedocs.io/en/latest", None),
     "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
 }
 
 sphinx_gallery_conf = {

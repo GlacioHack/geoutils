@@ -3169,7 +3169,7 @@ class TestArithmetic:
         cls: type[TestArithmetic],
         data: np.ndarray | np.ma.masked_array,
         rst_ref: gu.RasterType,
-        nodata: int | float | list[int] | list[float] | None = None,
+        nodata: int | float | list[int] | list[float] = None,
     ) -> gu.Raster:
         """
         Generate a Raster from numpy array, with set georeferencing. Used for testing only.

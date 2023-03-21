@@ -4,7 +4,8 @@ from __future__ import annotations
 import copy
 import functools
 import warnings
-from typing import Any
+from typing import Any, Union, Callable
+from textwrap import dedent
 
 try:
     import yaml  # type: ignore
@@ -19,7 +20,7 @@ from packaging.version import Version
 import geoutils
 
 
-def deprecate(removal_version: str | None = None, details: str | None = None):  # type: ignore
+def deprecate(removal_version: str = None, details: str = None):  # type: ignore
     """
     Trigger a DeprecationWarning for the decorated function.
 
@@ -74,6 +75,57 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
         return new_func
 
     return deprecator_func
+
+def copy_doc(old_class: object, new_class_name: str, origin_class: object = None, replace_return_series_statement: bool = False) -> Callable:
+    """
+    A decorator to copy docstring from a class to another class while replacing the docstring.
+    ----------
+    **params
+        The classes used to reformat docstring template.
+    """
+
+    def decorator(decorated: Callable) -> Callable:
+
+        # Get name of decorated object
+        # If object is a property, get name through fget
+        try:
+            decorated_name = decorated.fget.__name__
+        # Otherwise, directly with the name attribute
+        except AttributeError:
+            decorated_name = decorated.__name__
+
+        # Get parent doc
+        old_class_doc = getattr(old_class, decorated_name).__doc__
+        # Remove examples if there are any
+        doc_descript = old_class_doc.split("\n\n")[0]
+
+        # Remove duplicate white spaces while keeping lines
+        doc_descript = "\n".join([" ".join(spl.split()) for spl in doc_descript.splitlines()])
+        # Replace old class output name by the new class output name
+        replaced_descript = doc_descript.replace(old_class.__name__, new_class_name)
+
+        # Replace "Return a Series" statement by "Append a Series to Vector" if it exists
+        if replace_return_series_statement:
+            if replaced_descript[0:20] == "Returns a ``Series``":
+                replaced_descript = replaced_descript.replace("Returns a ``Series``", "Returns or appends to ``Vector`` a ``Series``")
+            else:
+                replaced_descript += " Can be appended to ``Vector``."
+
+        # Add an intersphinx link to the doc of the previous class
+        if origin_class is None:
+            orig_class = old_class
+        else:
+            orig_class = origin_class
+        # Get module and old class names
+        orig_module_name = orig_class.__module__.split(".")[0]
+        old_class_name = orig_class.__name__
+        add_link_to_old_class = "\n\nSee more details at :func:`" + orig_module_name + "." + old_class_name + "." + decorated_name + "`."
+
+        decorated.__doc__ = replaced_descript + add_link_to_old_class
+
+        return decorated
+
+    return decorator
 
 
 def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:

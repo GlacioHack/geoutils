@@ -119,7 +119,7 @@ def getparser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(test_args: Sequence[str] | None = None) -> None:
+def main(test_args: Sequence[str] = None) -> None:
 
     # Parse arguments
     parser = getparser()
