@@ -375,7 +375,7 @@ class Vector:
     @property
     def convex_hull(self) -> Vector:
 
-        return self._override_gdf_output(self.ds.centroid)
+        return self._override_gdf_output(self.ds.convex_hull)
 
     @copy_doc(gpd.GeoSeries, "Vector")
     @property
@@ -483,15 +483,17 @@ class Vector:
 
         return self._override_gdf_output(self.ds.distance(other=other.ds, align=align))
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
-    def relate(self, other: gu.Vector, align: bool=True) -> Vector:
-
-        return self._override_gdf_output(self.ds.relate(other=other.ds, align=align))
-
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
-    def project(self, other: gu.Vector, normalized: bool = False, align: bool = True) -> Vector:
-
-        return self._override_gdf_output(self.ds.project(other=other.ds, normalized=normalized, align=align))
+    # Method that exists in GeoPandasBase but not exposed in GeoSeries yet
+    # @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    # def relate(self, other: gu.Vector, align: bool=True) -> Vector:
+    #
+    #     return self._override_gdf_output(self.ds.relate(other=other.ds, align=align))
+    #
+    # Method that exists in GeoPandasBase but not exposed in GeoSeries yet
+    # @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
+    # def project(self, other: gu.Vector, normalized: bool = False, align: bool = True) -> Vector:
+    #
+    #     return self._override_gdf_output(self.ds.project(other=other.ds.geometry, normalized=normalized, align=align))
 
     # -----------------------------------------------
     # GeoPandasBase - Methods that return a GeoSeries
@@ -572,10 +574,11 @@ class Vector:
 
         return self._override_gdf_output(self.ds.skew(xs=xs, ys=ys, origin=origin, use_radians=use_radians))
 
-    @copy_doc(gpd.GeoSeries, "Vector")
-    def interpolate(self, distance: float, normalized: bool=False) -> Vector:
-
-        return self._override_gdf_output(self.ds.interpolate(distance=distance, normalized=normalized))
+    # Method that exists in GeoPandasBase but not exposed in GeoSeries yet
+    # @copy_doc(gpd.GeoSeries, "Vector")
+    # def interpolate(self, distance: float, normalized: bool=False) -> Vector:
+    #
+    #     return self._override_gdf_output(self.ds.interpolate(distance=distance, normalized=normalized))
 
 
     # ----------------------------------------------

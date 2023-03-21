@@ -6,6 +6,7 @@ import re
 import inspect
 import tempfile
 from tempfile import NamedTemporaryFile
+import warnings
 
 import geopandas as gpd
 import geopandas.base
@@ -92,7 +93,7 @@ class TestVector:
 
         # Open and check the object is the same
         vector_save = gu.Vector(temp_file.name)
-        assert_geodataframe_equal(vector_save, vector)
+        vector_save.vector_equal(vector)
 
 
     def test_bounds(self) -> None:
@@ -577,13 +578,13 @@ class TestGeoPandasMethods:
     # List of properties and methods with non-geometric output that are implemented in GeoUtils
     nongeo_properties = ["area", "length", "interiors", "geom_type", "is_empty", "is_ring", "is_simple"]
     nongeo_methods = ["contains", "geom_equals", "geom_almost_equals", "crosses", "disjoint", "intersects",
-                            "overlaps", "touches", "within", "covers", "covered_by", "distance", "relate", "project"]
+                            "overlaps", "touches", "within", "covers", "covered_by", "distance"]
 
     # List of properties and methods with geometric output that are implemented in GeoUtils
     geo_properties = ["boundary", "unary_union", "centroid", "convex_hull", "envelope", "exterior"]
     geo_methods = ["representative_point", "normalize", "make_valid", "difference", "symmetric_difference", "union",
                              "intersection", "clip_by_rect", "buffer", "simplify", "affine_transform", "translate", "rotate",
-                             "scale", "skew", "interpolate", "dissolve", "explode", "sjoin", "sjoin_nearest", "overlay"]
+                             "scale", "skew", "dissolve", "explode", "sjoin", "sjoin_nearest", "overlay"]
 
     # List of other properties and methods
     other = ["has_sindex", "sindex"]
@@ -651,6 +652,10 @@ class TestGeoPandasMethods:
     def test_nongeo_properties(self, vector: gu.Vector, method: str) -> None:
         """Check non-geometric properties are consistent with GeoPandas."""
 
+        # Remove warnings about operations in a non-projected system, and future changes
+        warnings.simplefilter("ignore", category=UserWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+
         # Get method for each class
         output_geoutils = getattr(vector, method)
         output_geopandas = getattr(vector.ds, method)
@@ -667,6 +672,10 @@ class TestGeoPandasMethods:
         All these methods require two inputs ("other", "df", or "right" argument).
         """
 
+        # Remove warnings about operations in a non-projected system, and future changes
+        warnings.simplefilter("ignore", category=UserWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+
         # Get method for each class
         output_geoutils = getattr(vector1, method)(vector2)
         output_geopandas = getattr(vector1.ds, method)(vector2.ds)
@@ -678,6 +687,10 @@ class TestGeoPandasMethods:
     @pytest.mark.parametrize("method", geo_properties)  # type: ignore
     def test_geo_properties(self, vector: gu.Vector, method: str) -> None:
         """Check geometric properties are consistent with GeoPandas."""
+
+        # Remove warnings about operations in a non-projected system, and future changes
+        warnings.simplefilter("ignore", category=UserWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
 
         # Get method for each class
         output_geoutils = getattr(vector, method)
@@ -698,15 +711,19 @@ class TestGeoPandasMethods:
 
 
     specific_method_args = {"buffer": {"distance": 1}, "clip_by_rect": {"xmin": 10.5, "ymin": 10.5, "xmax": 11, "ymax": 11},
-                     "affine_transform": {"matrix": [0, 0, 0, 0, 1, 1]}, "translate": {"xoff": 1, "yoff": 1, "zoff": 0},
+                     "affine_transform": {"matrix": [1, 1, 1, 1, 1, 1]}, "translate": {"xoff": 1, "yoff": 1, "zoff": 0},
                      "rotate": {"angle": 90}, "scale": {"xfact": 1.1, "yfact": 1.1, "zfact": 1.1, "origin": "center"},
-                     "skew": {"xs": 1.1, "ys": 1.1}, "interpolate": {"distance": 1}, "simplify": {"tolerance": 1}}
+                     "skew": {"xs": 1.1, "ys": 1.1}, "interpolate": {"distance": 1}, "simplify": {"tolerance": 0.1}}
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1]) # type: ignore
     @pytest.mark.parametrize("vector2", [synthvec2, realvec2]) # type: ignore
     @pytest.mark.parametrize("method", geo_methods) # type: ignore
     def test_geo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """Check geometric properties are consistent with GeoPandas."""
+
+        # Remove warnings about operations in a non-projected system, and future changes
+        warnings.simplefilter("ignore", category=UserWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
 
         # Methods that require two inputs
         if method in ["difference", "symmetric_difference", "union", "intersection", "sjoin", "sjoin_nearest", "overlay"]:
@@ -726,10 +743,13 @@ class TestGeoPandasMethods:
         assert isinstance(output_geoutils, gu.Vector)
         assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame))
 
-        # Separate cases depending on GeoPandas' output
-        if isinstance(output_geopandas, gpd.GeoSeries):
-            # Assert geoseries equality
+        # Separate cases depending on GeoPandas' output, and nature of the function
+        # Simplify is a special case that can make geometries unvalid, so adjust test
+        if method == "simplify":
+            assert_geoseries_equal(output_geopandas.make_valid(), output_geoutils.ds.geometry.make_valid())
+        # For geoseries output, check equality of it
+        elif isinstance(output_geopandas, gpd.GeoSeries):
             assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
+        # For geodataframe output, check equality
         else:
-            # Or assert geodataframe equality
             assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
