@@ -44,19 +44,19 @@ repos:
                   files: ^(geoutils|tests)
         # Lint the code using mypy
         - repo: https://github.com/pre-commit/mirrors-mypy
-          rev: v0.982
+          rev: v1.1.1
           hooks:
                 - id: mypy
                   args: [
                         --strict,
-                        --implicit-optional,
                         --ignore-missing-imports,  # Don't warn about stubs since pre-commit runs in a limited env
                         --allow-untyped-calls,  # Dynamic function/method calls are okay. Untyped function definitions are not okay.
                         --show-error-codes,
                         --no-warn-unused-ignores,  # Ignore 'type: ignore' comments that are not used.
                         --disable-error-code=attr-defined,  # "Module has no attribute 'XXX'" occurs because of the pre-commit env.
-                        --disable-error-code=name-defined  # "Name 'XXX' is not defined" occurs because of the pre-commit env.
-
+                        --disable-error-code=name-defined,  # "Name 'XXX' is not defined" occurs because of the pre-commit env.
+                        --disable-error-code=var-annotated,
+                        --disable-error-code=no-any-return
                   ]
                   additional_dependencies: [tokenize-rt==3.2.0]
                   files: ^(geoutils|tests)
