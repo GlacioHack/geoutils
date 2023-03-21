@@ -422,8 +422,6 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     Vector.covers
     Vector.covered_by
     Vector.distance
-    Vector.relate
-    Vector.project
 ```
 
 #### Other attributes and methods
