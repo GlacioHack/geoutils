@@ -84,9 +84,7 @@ def copy_doc(
 ) -> Callable:  # type: ignore
     """
     A decorator to copy docstring from a class to another class while replacing the docstring.
-    ----------
-    **params
-        The classes used to reformat docstring template.
+    Use for parsing GeoPandas' documentation to geoutils.Vector.
     """
 
     def decorator(decorated: Callable) -> Callable:  # type: ignore
