@@ -14,6 +14,7 @@ from math import floor
 from numbers import Number
 from typing import IO, Any, Callable, TypeVar, overload
 
+import affine
 import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
@@ -253,7 +254,6 @@ class Raster:
         downsample: AnyNumber = 1,
         masked: bool = True,
         nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        attrs: list[str] | None = None,
     ) -> None:
         """
         Instantiate a raster from a filename or rasterio dataset.
@@ -269,11 +269,6 @@ class Raster:
         :param masked: Whether to load the array as a NumPy masked-array, with nodata values masked. Default is True.
 
         :param nodata: Nodata value to be used (overwrites the metadata). Default reads from metadata.
-
-        :param attrs: Additional attributes from Rasterio's DataReader class to add to the Raster object.
-            Default list is set by geoutils.raster.raster._default_rio_attrs, i.e.
-            ['bounds', 'count', 'crs', 'driver', 'dtypes', 'height', 'indexes',
-            'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         """
         self._driver: str | None = None
         self._name: str | None = None
@@ -281,6 +276,8 @@ class Raster:
         self.tags: dict[str, Any] = {}
 
         self._data: np.ma.masked_array | None = None
+        self._transform: affine.Affine | None = None
+        self._crs: CRS | None = None
         self._nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = nodata
         self._indexes = indexes
         self._indexes_loaded: int | tuple[int, ...] | None = None
@@ -331,8 +328,8 @@ class Raster:
                     load_data = True
                     self.filename = None
 
-                self.transform = ds.transform
-                self.crs = ds.crs
+                self._transform = ds.transform
+                self._crs = ds.crs
                 self._nodata = ds.nodata
                 self._name = ds.name
                 self._driver = ds.driver
@@ -341,10 +338,6 @@ class Raster:
                 self._disk_shape = (ds.count, ds.height, ds.width)
                 self._disk_indexes = ds.indexes
                 self._disk_dtypes = ds.dtypes
-
-                if attrs is not None:
-                    for attr in attrs:
-                        self.__setattr__(attr, ds.__getattr__(attr))
 
             # Check number of bands to be loaded
             if indexes is None:
@@ -1397,6 +1390,57 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # 4/ If the new data is classic ndarray
         else:
             self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
+
+    @property
+    def transform(self) -> affine.Affine:
+        """
+        Geotransform of the raster.
+
+        :returns: Affine matrix geotransform.
+
+        """
+        return self._transform
+
+    @transform.setter
+    def transform(self, transform= tuple[float, ...] | Affine | None) -> None:
+        """
+        Set the geotransform of the raster.
+        """
+
+        if transform is None:
+            self._transform = None
+            return
+
+        if not isinstance(transform, Affine):
+            if isinstance(transform, tuple):
+                transform = Affine(*transform)
+            else:
+                raise TypeError("The transform argument needs to be Affine or tuple.")
+
+        self._transform = transform
+
+    @property
+    def crs(self) -> CRS:
+        """
+        Coordinate reference system (CRS) of the raster.
+
+        :returns: Pyproj coordinate reference system.
+
+        """
+        return self._crs
+
+    @crs.setter
+    def crs(self, crs = CRS | int | str | None) -> None:
+        """
+        Set the coordinate reference system (CRS) of the raster.
+        """
+
+        if crs is None:
+            self._crs = None
+            return
+
+        crs = CRS.from_user_input(value=crs)
+        self._crs = crs
 
     def set_mask(self, mask: np.ndarray | Mask) -> None:
         """

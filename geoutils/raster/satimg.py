@@ -252,7 +252,6 @@ class SatelliteImage(Raster):  # type: ignore
     def __init__(
         self,
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
-        attrs: list[str] | None = None,
         load_data: bool = True,
         indexes: int | list[int] | None = None,
         read_from_fn: bool = True,
@@ -270,9 +269,6 @@ class SatelliteImage(Raster):  # type: ignore
         Load satellite data through the Raster class and parse additional attributes from filename or metadata.
 
         :param filename_or_dataset: The filename of the dataset.
-        :param attrs: Additional attributes from rasterio's DataReader class to add to the Raster object.
-           Default list is ['bounds', 'count', 'crs', 'dataset_mask', 'driver', 'dtypes', 'height', 'indexes',
-           'name', 'nodata', 'res', 'shape', 'transform', 'width'] - if no attrs are specified, these will be added.
         :param load_data: Load the raster data into the object. Default is True.
         :param indexes: The band(s) to load into the object. Default is to load all bands.
         :param read_from_fn: Try to read metadata from the filename
@@ -296,7 +292,7 @@ class SatelliteImage(Raster):  # type: ignore
             return
         # Else rely on parent Raster class options (including raised errors)
         else:
-            super().__init__(filename_or_dataset, attrs=attrs, load_data=load_data, indexes=indexes)
+            super().__init__(filename_or_dataset, load_data=load_data, indexes=indexes)
 
         # priority to user input
         self._datetime = datetime

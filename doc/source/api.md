@@ -370,8 +370,6 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     Vector.rotate
     Vector.scale
     Vector.skew
-    Vector.interpolate
-    Vector.merge
     Vector.dissolve
     Vector.explode
     Vector.sjoin
