@@ -569,7 +569,17 @@ class TestGeoPandasMethods:
     # Properties and methods derived from Shapely or GeoPandas
     # List of properties and methods with non-geometric output that are implemented in GeoUtils
     main_properties = ["crs", "geometry", "total_bounds"]
-    nongeo_properties = ["area", "length", "interiors", "geom_type", "is_empty", "is_ring", "is_simple", "is_valid", "has_z"]
+    nongeo_properties = [
+        "area",
+        "length",
+        "interiors",
+        "geom_type",
+        "is_empty",
+        "is_ring",
+        "is_simple",
+        "is_valid",
+        "has_z",
+    ]
     nongeo_methods = [
         "contains",
         "geom_equals",
@@ -613,19 +623,46 @@ class TestGeoPandasMethods:
         "set_crs",
         "rename_geometry",
         "set_geometry",
-        "clip"
+        "clip",
     ]
     # List of class methods
-    io_methods = ["from_file", "from_postgis", "from_dict", "from_features", "to_feather",
-                 "to_parquet", "to_file", "to_postgis", "to_json", "to_wkb", "to_wkt", "to_csv"]
+    io_methods = [
+        "from_file",
+        "from_postgis",
+        "from_dict",
+        "from_features",
+        "to_feather",
+        "to_parquet",
+        "to_file",
+        "to_postgis",
+        "to_json",
+        "to_wkb",
+        "to_wkt",
+        "to_csv",
+    ]
 
     # List of other properties and methods
     other = ["has_sindex", "sindex", "estimate_utm_crs", "cx", "iterfeatures"]
-    all_declared = main_properties + nongeo_methods + nongeo_properties + geo_methods + geo_properties + other + io_methods
+    all_declared = (
+        main_properties + nongeo_methods + nongeo_properties + geo_methods + geo_properties + other + io_methods
+    )
 
     # Exceptions for GeoPandasBase functions not implemented (or deprecrated) in GeoSeries/GeoDataFrame
-    exceptions_unimplemented = ["plot", "explore", "cascaded_union", "bounds", "relate", "project", "interpolate", "equals", "type", "convert_dtypes",
-                                "merge", "apply", "astype"]
+    exceptions_unimplemented = [
+        "plot",
+        "explore",
+        "cascaded_union",
+        "bounds",
+        "relate",
+        "project",
+        "interpolate",
+        "equals",
+        "type",
+        "convert_dtypes",
+        "merge",
+        "apply",
+        "astype",
+    ]
     # Exceptions for IO/conversion that can be done directly from .ds
     all_exceptions = exceptions_unimplemented
 
@@ -643,7 +680,7 @@ class TestGeoPandasMethods:
 
         list_missing = [method for method in self.all_declared if method not in vector_methods.keys()]
 
-        assert len(list_missing) == 0, print("Test method listed that is not in GeoUtils: {}".format(list_missing))
+        assert len(list_missing) == 0, print(f"Test method listed that is not in GeoUtils: {list_missing}")
 
     def test_geopandas_coverage(self) -> None:
         """Check that all existing methods of GeoPandas are overridden, with a couple exceptions."""
@@ -661,7 +698,7 @@ class TestGeoPandasMethods:
         # Check that all methods declared in the class above are covered in Vector
         list_missing = [method for method in covered_methods if method not in self.all_declared]
 
-        assert len(list_missing) == 0, print("Missing methods from GeoPandas: {}".format(list_missing))
+        assert len(list_missing) == 0, print(f"Missing methods from GeoPandas: {list_missing}")
 
     @pytest.mark.parametrize("method", nongeo_methods + geo_methods)  # type: ignore
     def test_overridden_funcs_args(self, method: str) -> None:
@@ -769,7 +806,7 @@ class TestGeoPandasMethods:
         "set_crs": {"crs": pyproj.CRS.from_epsg(32610), "allow_override": True},
         "rename_geometry": {"col": "lol"},
         "set_geometry": {"col": synthvec1.geometry},
-        "clip": {"mask": poly}
+        "clip": {"mask": poly},
     }
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1])  # type: ignore

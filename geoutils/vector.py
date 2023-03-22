@@ -8,8 +8,17 @@ import pathlib
 import warnings
 from collections import abc
 from numbers import Number
-from typing import Any, Literal, TypeVar, overload, Generator, Iterable, Sequence, Hashable
 from os import PathLike
+from typing import (
+    Any,
+    Generator,
+    Hashable,
+    Iterable,
+    Literal,
+    Sequence,
+    TypeVar,
+    overload,
+)
 
 import fiona
 import geopandas as gpd
@@ -17,12 +26,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from pandas._typing import WriteBuffer, ReadBuffer
 import rasterio as rio
 import rasterio.errors
 import shapely
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from pandas._typing import WriteBuffer
 from rasterio import features, warp
 from rasterio.crs import CRS
 from scipy.spatial import Voronoi
@@ -645,14 +654,18 @@ class Vector:
 
         if inplace:
             self.ds = self.ds.to_crs(crs=crs, epsg=epsg)
+            return None
         else:
             return self._override_gdf_output(self.ds.to_crs(crs=crs, epsg=epsg))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def set_crs(self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False, allow_override: bool = False) -> Vector | None:
+    def set_crs(
+        self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False, allow_override: bool = False
+    ) -> Vector | None:
 
         if inplace:
             self.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
+            return None
         else:
             return self._override_gdf_output(self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override))
 
@@ -661,6 +674,7 @@ class Vector:
 
         if inplace:
             self.ds = self.ds.set_geometry(col=col, drop=drop, crs=crs)
+            return None
         else:
             return self._override_gdf_output(self.ds.set_geometry(col=col, drop=drop, crs=crs))
 
@@ -669,6 +683,7 @@ class Vector:
 
         if inplace:
             self.ds = self.ds.set_geometry(col=col)
+            return None
         else:
             return self._override_gdf_output(self.ds.rename_geometry(col=col))
 
@@ -703,7 +718,9 @@ class Vector:
         return self.ds.estimate_utm_crs(datum_name=datum_name)
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def iterfeatures(self, na: str | None = "null", show_bbox: bool = False, drop_id: bool = False) -> Generator[dict[str, str | dict | None | dict], Any, Any]:
+    def iterfeatures(
+        self, na: str | None = "null", show_bbox: bool = False, drop_id: bool = False
+    ) -> Generator[dict[str, str | dict[str, Any] | None | dict[str, Any]], Any, Any]:
 
         return self.ds.iterfeatures(na=na, show_bbox=show_bbox, drop_id=drop_id)
 
@@ -721,11 +738,32 @@ class Vector:
 
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def from_postgis(cls, sql: str, con: Any, geom_col: str = "geom", crs: CRS | None = None, index_col: str | None = None,
-                     coerce_float: bool = True, parse_dates: Any = None, params: Any = None, chunksize: Any = None) -> Vector:
+    def from_postgis(
+        cls,
+        sql: str,
+        con: Any,
+        geom_col: str = "geom",
+        crs: CRS | None = None,
+        index_col: str | None = None,
+        coerce_float: bool = True,
+        parse_dates: Any = None,
+        params: Any = None,
+        chunksize: Any = None,
+    ) -> Vector:
 
-        return cls(gpd.GeoDataFrame.from_postgis(sql=sql, con=con, geom_col=geom_col, crs=crs, index_col=index_col, coerce_float=coerce_float,
-                                                 parse_dates=parse_dates, params=params, chunksize=chunksize))
+        return cls(
+            gpd.GeoDataFrame.from_postgis(
+                sql=sql,
+                con=con,
+                geom_col=geom_col,
+                crs=crs,
+                index_col=index_col,
+                coerce_float=coerce_float,
+                parse_dates=parse_dates,
+                params=params,
+                chunksize=chunksize,
+            )
+        )
 
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
@@ -734,23 +772,27 @@ class Vector:
         return cls(gpd.GeoDataFrame.from_dict(data=data, geometry=geometry, crs=crs, **kwargs))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_file(self, filename: str,
-            driver: Any = None,
-            schema: Any = None,
-            index: Any = None,
-            **kwargs: Any) -> None:
+    def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
 
         return self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_feather(self, path: Any, index: Any = None, compression: Any = None, schema_version: Any = None, **kwargs: Any) -> None:
+    def to_feather(
+        self, path: Any, index: Any = None, compression: Any = None, schema_version: Any = None, **kwargs: Any
+    ) -> None:
 
-        return self.ds.to_feather(path=path, index=index, compression=compression, schema_version=schema_version, **kwargs)
+        return self.ds.to_feather(
+            path=path, index=index, compression=compression, schema_version=schema_version, **kwargs
+        )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_parquet(self, path: Any, index: Any = None, compression: Any = "snappy", schema_version: Any = None, **kwargs: Any) -> None:
+    def to_parquet(
+        self, path: Any, index: Any = None, compression: Any = "snappy", schema_version: Any = None, **kwargs: Any
+    ) -> None:
 
-        return self.ds.to_parquet(path=path, index=index, compression=compression, schema_version=schema_version, **kwargs)
+        return self.ds.to_parquet(
+            path=path, index=index, compression=compression, schema_version=schema_version, **kwargs
+        )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def to_wkt(self, **kwargs: Any) -> pd.DataFrame:
@@ -763,25 +805,37 @@ class Vector:
         return self.ds.to_wkb(hex=hex, **kwargs)
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_json(self, na: Any = "null", show_bbox: bool =False, drop_id: bool = False, **kwargs: Any) -> str | None:
+    def to_json(self, na: Any = "null", show_bbox: bool = False, drop_id: bool = False, **kwargs: Any) -> str | None:
 
         return self.ds.to_json(na=na, show_bbox=show_bbox, drop_id=drop_id, **kwargs)
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_postgis(self, name: str,
-               con: Any,
-               schema: Any = None,
-               if_exists: Any = "fail",
-               index: Any = False,
-               index_label: Any = None,
-               chunksize: Any = None,
-               dtype: Any = None) -> None:
+    def to_postgis(
+        self,
+        name: str,
+        con: Any,
+        schema: Any = None,
+        if_exists: Any = "fail",
+        index: Any = False,
+        index_label: Any = None,
+        chunksize: Any = None,
+        dtype: Any = None,
+    ) -> None:
 
-        return self.ds.to_postgis(name=name, con=con, schema=schema, if_exists=if_exists, index=index,
-                                  index_label=index_label, chunksize=chunksize, dtype=dtype)
+        return self.ds.to_postgis(
+            name=name,
+            con=con,
+            schema=schema,
+            if_exists=if_exists,
+            index=index,
+            index_label=index_label,
+            chunksize=chunksize,
+            dtype=dtype,
+        )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_csv(self,
+    def to_csv(
+        self,
         path_or_buf: str | PathLike[str] | WriteBuffer[bytes] | WriteBuffer[str] | None = None,
         sep: str = ",",
         na_rep: str = "",
@@ -794,7 +848,7 @@ class Vector:
         encoding: str | None = None,
         compression: Literal["infer", "gzip", "bz2", "zip", "xz", "zstd", "tar"] | dict[str, Any] | None = "infer",
         quoting: int | None = None,
-        quotechar: str = '\"',
+        quotechar: str = '"',
         lineterminator: str | None = None,
         chunksize: int | None = None,
         date_format: str | None = None,
@@ -802,13 +856,32 @@ class Vector:
         escapechar: str | None = None,
         decimal: str = ".",
         errors: str = "strict",
-        storage_options: dict[str, Any] | None = None
-               ) -> str | None:
+        storage_options: dict[str, Any] | None = None,
+    ) -> str | None:
 
-        return self.ds.to_csv(path_or_buf=path_or_buf, sep=sep, na_rep=na_rep, float_format=float_format, columns=columns, header=header,
-                              index=index, index_label=index_label, mode=mode, encoding=encoding, compression=compression, quoting=quoting,
-                              quotechar=quotechar, lineterminator=lineterminator, chunksize=chunksize, date_format=date_format,
-                              doublequote=doublequote, escapechar=escapechar, decimal=decimal, errors=errors, storage_options=storage_options)
+        return self.ds.to_csv(
+            path_or_buf=path_or_buf,
+            sep=sep,
+            na_rep=na_rep,
+            float_format=float_format,
+            columns=columns,
+            header=header,
+            index=index,
+            index_label=index_label,
+            mode=mode,
+            encoding=encoding,
+            compression=compression,
+            quoting=quoting,
+            quotechar=quotechar,
+            lineterminator=lineterminator,
+            chunksize=chunksize,
+            date_format=date_format,
+            doublequote=doublequote,
+            escapechar=escapechar,
+            decimal=decimal,
+            errors=errors,
+            storage_options=storage_options,
+        )
 
     # --------------------------------
     # End of GeoPandas functionalities

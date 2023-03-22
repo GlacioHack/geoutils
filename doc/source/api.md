@@ -435,7 +435,7 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
 #### I/O, conversions and others
 
 ```{important}
-The behaviour of methods below is not modified in {class}`~geoutils.Vector`, as they deal with outputs of different types. 
+The behaviour of methods below is not modified in {class}`~geoutils.Vector`, as they deal with outputs of different types.
 To ensure those are up-to-date with GeoPandas, alternatively call those from {attr}`Vector.ds<geoutils.Vector.ds>`.
 ```
 
