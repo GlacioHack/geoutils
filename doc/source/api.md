@@ -377,6 +377,12 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     Vector.sjoin
     Vector.sjoin_nearest
     Vector.overlay
+    Vector.clip
+    Vector.to_crs
+    Vector.set_crs
+    Vector.set_geometry
+    Vector.rename_geometry
+    Vector.cx
 ```
 
 #### Non-geometric per-feature attributes and methods
@@ -397,6 +403,7 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     Vector.interiors
     Vector.geom_type
     Vector.geom_bounds
+    Vector.is_valid
     Vector.is_empty
     Vector.is_ring
     Vector.is_simple
@@ -423,6 +430,33 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     Vector.covered_by
     Vector.distance
 ```
+
+
+#### I/O, conversions and others
+
+```{important}
+The behaviour of methods below is not modified in {class}`~geoutils.Vector`, as they deal with outputs of different types. 
+To ensure those are up-to-date with GeoPandas, alternatively call those from {attr}`Vector.ds<geoutils.Vector.ds>`.
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.from_file
+    Vector.from_features
+    Vector.from_postgis
+    Vector.from_dict
+    Vector.to_file
+    Vector.to_feather
+    Vector.to_parquet
+    Vector.to_wkt
+    Vector.to_wkb
+    Vector.to_json
+    Vector.to_postgis
+    Vector.to_csv
+```
+
 
 #### Other attributes and methods
 

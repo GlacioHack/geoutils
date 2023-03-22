@@ -12,6 +12,7 @@ import geopandas as gpd
 import geopandas.base
 import matplotlib.pyplot as plt
 import numpy as np
+import pyproj
 import pytest
 import shapely
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
@@ -567,11 +568,13 @@ class TestGeoPandasMethods:
 
     # Properties and methods derived from Shapely or GeoPandas
     # List of properties and methods with non-geometric output that are implemented in GeoUtils
-    nongeo_properties = ["area", "length", "interiors", "geom_type", "is_empty", "is_ring", "is_simple"]
+    main_properties = ["crs", "geometry", "total_bounds"]
+    nongeo_properties = ["area", "length", "interiors", "geom_type", "is_empty", "is_ring", "is_simple", "is_valid", "has_z"]
     nongeo_methods = [
         "contains",
         "geom_equals",
         "geom_almost_equals",
+        "geom_equals_exact",
         "crosses",
         "disjoint",
         "intersects",
@@ -606,22 +609,31 @@ class TestGeoPandasMethods:
         "sjoin",
         "sjoin_nearest",
         "overlay",
+        "to_crs",
+        "set_crs",
+        "rename_geometry",
+        "set_geometry",
+        "clip"
     ]
+    # List of class methods
+    io_methods = ["from_file", "from_postgis", "from_dict", "from_features", "to_feather",
+                 "to_parquet", "to_file", "to_postgis", "to_json", "to_wkb", "to_wkt", "to_csv"]
 
     # List of other properties and methods
-    other = ["has_sindex", "sindex"]
-    all_declared = nongeo_methods + nongeo_properties + geo_methods + geo_properties + other
+    other = ["has_sindex", "sindex", "estimate_utm_crs", "cx", "iterfeatures"]
+    all_declared = main_properties + nongeo_methods + nongeo_properties + geo_methods + geo_properties + other + io_methods
+
+    # Exceptions for GeoPandasBase functions not implemented (or deprecrated) in GeoSeries/GeoDataFrame
+    exceptions_unimplemented = ["plot", "explore", "cascaded_union", "bounds", "relate", "project", "interpolate", "equals", "type", "convert_dtypes",
+                                "merge", "apply", "astype"]
+    # Exceptions for IO/conversion that can be done directly from .ds
+    all_exceptions = exceptions_unimplemented
 
     # Get all GeoPandasBase public methods with some exceptions
     geobase_methods = gpd.base.GeoPandasBase.__dict__.copy()
-    # exceptions_geobase = ["plot", "explore", "equals"]
-    # geobase_methods = {key: geobase_methods[key] for key in geobase_methods if key[0] != "_"
-    # and key not in exceptions_geobase}
 
     # Get all GeoDataFrame public methods with some exceptions
     gdf_methods = gpd.GeoDataFrame.__dict__.copy()
-    # exceptions_gdf = ["total_bounds"]
-    # gdf_methods = {key: gdf_methods[key] for key in gdf_methods if key[0] != "_" and key not in exceptions_gdf}
 
     def test_overridden_funcs_exist(self) -> None:
         """Check that all methods listed above exist in Vector."""
@@ -629,7 +641,9 @@ class TestGeoPandasMethods:
         # Check that all methods declared in the class above exist in Vector
         vector_methods = gu.Vector.__dict__
 
-        assert all(method in vector_methods.keys() for method in self.all_declared)
+        list_missing = [method for method in self.all_declared if method not in vector_methods.keys()]
+
+        assert len(list_missing) == 0, print("Test method listed that is not in GeoUtils: {}".format(list_missing))
 
     def test_geopandas_coverage(self) -> None:
         """Check that all existing methods of GeoPandas are overridden, with a couple exceptions."""
@@ -638,13 +652,16 @@ class TestGeoPandasMethods:
         all_methods = self.geobase_methods.copy()
         all_methods.update(self.gdf_methods)
 
+        # Remove exceptions we don't want to reuse from GeoPandas (mirrored in Vector)
+        name_all_methods = list(all_methods.keys())
+        public_methods = [method for method in name_all_methods if method[0] != "_"]
+
+        covered_methods = [method for method in public_methods if method not in self.all_exceptions]
+
         # Check that all methods declared in the class above are covered in Vector
-        list_missing = [method for method in all_methods.keys() if method not in self.all_declared]
-        try:
-            assert len(list_missing) == 0
-        except AssertionError:
-            print("Missing methods from GeoPandas:")
-            print(list_missing)
+        list_missing = [method for method in covered_methods if method not in self.all_declared]
+
+        assert len(list_missing) == 0, print("Missing methods from GeoPandas: {}".format(list_missing))
 
     @pytest.mark.parametrize("method", nongeo_methods + geo_methods)  # type: ignore
     def test_overridden_funcs_args(self, method: str) -> None:
@@ -692,7 +709,7 @@ class TestGeoPandasMethods:
     def test_nongeo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """
         Check non-geometric methods are consistent with GeoPandas.
-        All these methods require two inputs ("other", "df", or "right" argument).
+        All these methods require two inputs ("other", "df", or "right" argument), except one.
         """
 
         # Remove warnings about operations in a non-projected system, and future changes
@@ -700,8 +717,12 @@ class TestGeoPandasMethods:
         warnings.simplefilter("ignore", category=FutureWarning)
 
         # Get method for each class
-        output_geoutils = getattr(vector1, method)(vector2)
-        output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+        if method != "geom_equals_exact":
+            output_geoutils = getattr(vector1, method)(vector2)
+            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+        else:
+            output_geoutils = getattr(vector1, method)(vector2, tolerance=0.1)
+            output_geopandas = getattr(vector1.ds, method)(vector2.ds, tolerance=0.1)
 
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
@@ -744,6 +765,11 @@ class TestGeoPandasMethods:
         "skew": {"xs": 1.1, "ys": 1.1},
         "interpolate": {"distance": 1},
         "simplify": {"tolerance": 0.1},
+        "to_crs": {"crs": pyproj.CRS.from_epsg(32610)},
+        "set_crs": {"crs": pyproj.CRS.from_epsg(32610), "allow_override": True},
+        "rename_geometry": {"col": "lol"},
+        "set_geometry": {"col": synthvec1.geometry},
+        "clip": {"mask": poly}
     }
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1])  # type: ignore

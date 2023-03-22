@@ -8,7 +8,8 @@ import pathlib
 import warnings
 from collections import abc
 from numbers import Number
-from typing import Any, Literal, TypeVar, overload
+from typing import Any, Literal, TypeVar, overload, Generator, Iterable, Sequence, Hashable
+from os import PathLike
 
 import fiona
 import geopandas as gpd
@@ -16,6 +17,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from pandas._typing import WriteBuffer, ReadBuffer
 import rasterio as rio
 import rasterio.errors
 import shapely
@@ -340,6 +342,11 @@ class Vector:
 
     @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
     @property
+    def is_valid(self) -> pd.Series:
+        return self._override_gdf_output(self.ds.is_valid)
+
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @property
     def has_z(self) -> pd.Series:
         return self.ds.has_z
 
@@ -549,23 +556,6 @@ class Vector:
     # GeoDataFrame - Methods that return a GeoSeries
     # ----------------------------------------------
 
-    def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Vector:
-        """
-        Index the geodataframe or crop the vector.
-
-        If a raster, vector or tuple is passed, crops to its bounds.
-        Otherwise, indexes the geodataframe.
-        """
-
-        if isinstance(key, (gu.Raster, Vector)):
-            return self.crop(crop_geom=key, clip=False, inplace=False)
-        else:
-            return self._override_gdf_output(self.ds.__getitem__(key))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def __setitem__(self, key: Any, value: Any) -> None:
-        self.ds.__setitem__(key, value)
-
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def dissolve(
         self,
@@ -590,6 +580,10 @@ class Vector:
         return self._override_gdf_output(
             self.ds.explode(column=column, ignore_index=ignore_index, index_parts=index_parts, **kwargs)
         )
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def clip(self, mask: Any, keep_geom_type: bool = False) -> Vector:
+        return self._override_gdf_output(self.ds.clip(mask=mask, keep_geom_type=keep_geom_type))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def sjoin(self, df: Vector | gpd.GeoDataFrame, *args: Any, **kwargs: Any) -> Vector:
@@ -645,6 +639,176 @@ class Vector:
         return self._override_gdf_output(
             self.ds.overlay(right=gdf, how=how, keep_geom_type=keep_geom_type, make_valid=make_valid)
         )
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_crs(self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False) -> Vector | None:
+
+        if inplace:
+            self.ds = self.ds.to_crs(crs=crs, epsg=epsg)
+        else:
+            return self._override_gdf_output(self.ds.to_crs(crs=crs, epsg=epsg))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def set_crs(self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False, allow_override: bool = False) -> Vector | None:
+
+        if inplace:
+            self.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
+        else:
+            return self._override_gdf_output(self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def set_geometry(self, col: str, drop: bool = False, inplace: bool = False, crs: CRS = None) -> Vector | None:
+
+        if inplace:
+            self.ds = self.ds.set_geometry(col=col, drop=drop, crs=crs)
+        else:
+            return self._override_gdf_output(self.ds.set_geometry(col=col, drop=drop, crs=crs))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def rename_geometry(self, col: str, inplace: bool = False) -> Vector | None:
+
+        if inplace:
+            self.ds = self.ds.set_geometry(col=col)
+        else:
+            return self._override_gdf_output(self.ds.rename_geometry(col=col))
+
+    # -----------------------------------
+    # GeoDataFrame: other functionalities
+    # -----------------------------------
+
+    def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Vector:
+        """
+        Index the geodataframe or crop the vector.
+
+        If a raster, vector or tuple is passed, crops to its bounds.
+        Otherwise, indexes the geodataframe.
+        """
+
+        if isinstance(key, (gu.Raster, Vector)):
+            return self.crop(crop_geom=key, clip=False, inplace=False)
+        else:
+            return self._override_gdf_output(self.ds.__getitem__(key))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def __setitem__(self, key: Any, value: Any) -> None:
+        self.ds.__setitem__(key, value)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def cx(self) -> Vector:
+        return self._override_gdf_output(self.ds.cx)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def estimate_utm_crs(self, datum_name: str = "WGS 84") -> CRS:
+
+        return self.ds.estimate_utm_crs(datum_name=datum_name)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def iterfeatures(self, na: str | None = "null", show_bbox: bool = False, drop_id: bool = False) -> Generator[dict[str, str | dict | None | dict], Any, Any]:
+
+        return self.ds.iterfeatures(na=na, show_bbox=show_bbox, drop_id=drop_id)
+
+    @classmethod
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def from_file(cls, filename: str, **kwargs: Any) -> Vector:
+
+        return cls(gpd.GeoDataFrame.from_file(filename=filename, **kwargs))
+
+    @classmethod
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def from_features(cls, features: Iterable[dict[str, Any]], crs: CRS, columns: list[str]) -> Vector:
+
+        return cls(gpd.GeoDataFrame.from_features(features=features, crs=crs, columns=columns))
+
+    @classmethod
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def from_postgis(cls, sql: str, con: Any, geom_col: str = "geom", crs: CRS | None = None, index_col: str | None = None,
+                     coerce_float: bool = True, parse_dates: Any = None, params: Any = None, chunksize: Any = None) -> Vector:
+
+        return cls(gpd.GeoDataFrame.from_postgis(sql=sql, con=con, geom_col=geom_col, crs=crs, index_col=index_col, coerce_float=coerce_float,
+                                                 parse_dates=parse_dates, params=params, chunksize=chunksize))
+
+    @classmethod
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def from_dict(cls, data: dict[str, Any], geometry: Any = None, crs: CRS | None = None, **kwargs: Any) -> Vector:
+
+        return cls(gpd.GeoDataFrame.from_dict(data=data, geometry=geometry, crs=crs, **kwargs))
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_file(self, filename: str,
+            driver: Any = None,
+            schema: Any = None,
+            index: Any = None,
+            **kwargs: Any) -> None:
+
+        return self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_feather(self, path: Any, index: Any = None, compression: Any = None, schema_version: Any = None, **kwargs: Any) -> None:
+
+        return self.ds.to_feather(path=path, index=index, compression=compression, schema_version=schema_version, **kwargs)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_parquet(self, path: Any, index: Any = None, compression: Any = "snappy", schema_version: Any = None, **kwargs: Any) -> None:
+
+        return self.ds.to_parquet(path=path, index=index, compression=compression, schema_version=schema_version, **kwargs)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_wkt(self, **kwargs: Any) -> pd.DataFrame:
+
+        return self.ds.to_wkt(**kwargs)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_wkb(self, hex: bool = False, **kwargs: Any) -> pd.DataFrame:
+
+        return self.ds.to_wkb(hex=hex, **kwargs)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_json(self, na: Any = "null", show_bbox: bool =False, drop_id: bool = False, **kwargs: Any) -> str | None:
+
+        return self.ds.to_json(na=na, show_bbox=show_bbox, drop_id=drop_id, **kwargs)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_postgis(self, name: str,
+               con: Any,
+               schema: Any = None,
+               if_exists: Any = "fail",
+               index: Any = False,
+               index_label: Any = None,
+               chunksize: Any = None,
+               dtype: Any = None) -> None:
+
+        return self.ds.to_postgis(name=name, con=con, schema=schema, if_exists=if_exists, index=index,
+                                  index_label=index_label, chunksize=chunksize, dtype=dtype)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_csv(self,
+        path_or_buf: str | PathLike[str] | WriteBuffer[bytes] | WriteBuffer[str] | None = None,
+        sep: str = ",",
+        na_rep: str = "",
+        float_format: Any = None,
+        columns: Sequence[Hashable] | None = None,
+        header: bool | list[str] = True,
+        index: bool = True,
+        index_label: Hashable | Sequence[Hashable] | None = None,
+        mode: str = "w",
+        encoding: str | None = None,
+        compression: Literal["infer", "gzip", "bz2", "zip", "xz", "zstd", "tar"] | dict[str, Any] | None = "infer",
+        quoting: int | None = None,
+        quotechar: str = '\"',
+        lineterminator: str | None = None,
+        chunksize: int | None = None,
+        date_format: str | None = None,
+        doublequote: bool = True,
+        escapechar: str | None = None,
+        decimal: str = ".",
+        errors: str = "strict",
+        storage_options: dict[str, Any] | None = None
+               ) -> str | None:
+
+        return self.ds.to_csv(path_or_buf=path_or_buf, sep=sep, na_rep=na_rep, float_format=float_format, columns=columns, header=header,
+                              index=index, index_label=index_label, mode=mode, encoding=encoding, compression=compression, quoting=quoting,
+                              quotechar=quotechar, lineterminator=lineterminator, chunksize=chunksize, date_format=date_format,
+                              doublequote=doublequote, escapechar=escapechar, decimal=decimal, errors=errors, storage_options=storage_options)
 
     # --------------------------------
     # End of GeoPandas functionalities
