@@ -1397,50 +1397,48 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Geotransform of the raster.
 
         :returns: Affine matrix geotransform.
-
         """
         return self._transform
 
     @transform.setter
-    def transform(self, transform= tuple[float, ...] | Affine | None) -> None:
+    def transform(self, new_transform: tuple[float, ...] | Affine | None) -> None:
         """
         Set the geotransform of the raster.
         """
 
-        if transform is None:
+        if new_transform is None:
             self._transform = None
             return
 
-        if not isinstance(transform, Affine):
-            if isinstance(transform, tuple):
-                transform = Affine(*transform)
+        if not isinstance(new_transform, Affine):
+            if isinstance(new_transform, tuple):
+                new_transform = Affine(*new_transform)
             else:
                 raise TypeError("The transform argument needs to be Affine or tuple.")
 
-        self._transform = transform
+        self._transform = new_transform
 
     @property
     def crs(self) -> CRS:
         """
-        Coordinate reference system (CRS) of the raster.
+        Coordinate reference system of the raster.
 
         :returns: Pyproj coordinate reference system.
-
         """
         return self._crs
 
     @crs.setter
-    def crs(self, crs = CRS | int | str | None) -> None:
+    def crs(self, new_crs: CRS | int | str | None) -> None:
         """
-        Set the coordinate reference system (CRS) of the raster.
+        Set the coordinate reference system of the raster.
         """
 
-        if crs is None:
+        if new_crs is None:
             self._crs = None
             return
 
-        crs = CRS.from_user_input(value=crs)
-        self._crs = crs
+        new_crs = CRS.from_user_input(value=new_crs)
+        self._crs = new_crs
 
     def set_mask(self, mask: np.ndarray | Mask) -> None:
         """
