@@ -3461,8 +3461,8 @@ class TestArrayInterface:
     # Most other math functions are already universal functions
 
     # Separate between two lists (single input and double input) for testing
-    handled_functions_2in = gu.raster.raster._HANDLED_FUNCTIONS_2NIN
-    handled_functions_1in = gu.raster.raster._HANDLED_FUNCTIONS_1NIN
+    handled_functions_2in = gu.raster.core._HANDLED_FUNCTIONS_2NIN
+    handled_functions_1in = gu.raster.core._HANDLED_FUNCTIONS_1NIN
 
     # Details below:
     # NaN functions: [f for f in np.lib.nanfunctions.__all__]

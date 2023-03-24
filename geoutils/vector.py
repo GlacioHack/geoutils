@@ -1397,7 +1397,7 @@ class Vector:
 
             raster = gu.Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 
-        proximity = gu.raster.raster.proximity_from_vector_or_raster(
+        proximity = gu.raster.core.proximity_from_vector_or_raster(
             raster=raster, vector=self, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit
         )
 
