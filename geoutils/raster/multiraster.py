@@ -12,7 +12,7 @@ from tqdm import tqdm
 import geoutils as gu
 from geoutils.misc import resampling_method_from_str
 from geoutils.raster import Raster, RasterType, get_array_and_mask
-from geoutils.raster.raster import _default_nodata
+from geoutils.raster.core import _default_nodata
 
 
 def load_multiple_rasters(
