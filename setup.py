@@ -1,7 +1,7 @@
 from os import path
 from typing import Optional
 
-from setuptools import setup, find_packages
+from setuptools import setup
 
 FULLVERSION = "0.0.10"
 VERSION = FULLVERSION
@@ -40,7 +40,7 @@ setup(
     url="https://www.github.com/GlacioHack/geoutils/",
     author="The GlacioHack Team",
     license="BSD-3",
-    packages=find_packages(),
+    packages=["geoutils", "geoutils.raster"],
     python_requires=">=3.8",
     install_requires=[
         "rasterio",
