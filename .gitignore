@@ -151,3 +151,8 @@ examples/data/
 
 # Directory where myst_nb executes jupyter code
 doc/jupyter_execute/
+
+# Files that should have been deleted by Sphinx at end of build (but can exist if build fails)
+examples/io/open_save/myraster.tif
+examples/io/open_save/myvector.gpkg
+

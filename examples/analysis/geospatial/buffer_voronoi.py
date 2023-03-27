@@ -4,9 +4,10 @@ Metric buffer and without overlap
 
 This example demonstrates the metric buffering of a vector using :func:`~geoutils.Vector.buffer_metric` and  :func:`~geoutils.Vector.buffer_without_overlap`.
 """
-# sphinx_gallery_thumbnail_number = 3
 # %%
 # We open an example vector
+
+# sphinx_gallery_thumbnail_number = 3
 import geoutils as gu
 
 vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))

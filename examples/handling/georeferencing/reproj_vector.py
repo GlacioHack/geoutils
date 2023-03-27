@@ -4,10 +4,10 @@ Reproject a vector
 
 This example demonstrates the reprojection of a vector using :func:`geoutils.Vector.reproject`.
 """
-# sphinx_gallery_thumbnail_number = 3
-
 # %%
 # We open a raster and vector.
+
+# sphinx_gallery_thumbnail_number = 3
 import geoutils as gu
 
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))

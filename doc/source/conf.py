@@ -1,6 +1,7 @@
 #
 # Configuration file for the Sphinx documentation builder.
 #
+import glob
 import os
 import sys
 
@@ -80,7 +81,8 @@ sphinx_gallery_conf = {
     "filename_pattern": r".*\.py",  # Run all python files in the gallery (by default, only files starting with "plot_" are run)
     # directory where function/class granular galleries are stored
     "backreferences_dir": "gen_modules/backreferences",
-    "doc_module": ("geoutils"),  # which function/class levels are used to create galleries
+    "doc_module": ("geoutils"),  # Which function/class levels are used to create galleries
+    'remove_config_comments': True, # To remove comments such as sphinx-gallery-thumbnail-number (only works in code, not in text)
 }
 
 extlinks = {
@@ -123,12 +125,20 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_templates"]
 #        "special-members": "__init__",
 # }
 
+def clean_gallery_files(app, exception):
+    fn_myraster = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../examples/io/open_save/myraster.tif"))
+    fn_myvector = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../examples/io/open_save/myvector.gpkg"))
+    if os.path.exists(fn_myraster):
+        os.remove(fn_myraster)
+    if os.path.exists(fn_myvector):
+        os.remove(fn_myvector)
 
 # To ignore warnings due to having myst-nb reading the .ipynb created by sphinx-gallery
 # Should eventually be fixed, see: https://github.com/executablebooks/MyST-NB/issues/363
 def setup(app):
     # Ignore .ipynb files
     app.registry.source_suffix.pop(".ipynb", None)
+    app.connect("build-finished", clean_gallery_files)
 
 
 # -- Options for HTML output -------------------------------------------------

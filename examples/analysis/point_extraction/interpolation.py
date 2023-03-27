@@ -4,9 +4,10 @@ Regular-grid interpolation
 
 This example demonstrates raster interpolation to point values using :func:`~geoutils.Raster.interp_points`.
 """
-# sphinx_gallery_thumbnail_number = 2
 # %%
 # We open an example raster, a digital elevation model in South America
+
+# sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))

@@ -4,9 +4,10 @@ Rasterize a vector
 
 This example demonstrates the rasterizing of a vector using :func:`geoutils.Vector.rasterize`.
 """
-# sphinx_gallery_thumbnail_number = 2
 # %%
 # We open a raster and vector.
+
+# sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
 rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))

@@ -4,9 +4,10 @@ Window point reduction
 
 This example demonstrates raster reduction to point values using :func:`~geoutils.Raster.value_at_coords`.
 """
-# sphinx_gallery_thumbnail_number = 3
 # %%
 # We open an example raster, a digital elevation model in South America
+
+# sphinx_gallery_thumbnail_number = 3
 import geoutils as gu
 
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))

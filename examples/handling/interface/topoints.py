@@ -4,9 +4,10 @@ Raster to points
 
 This example demonstrates the conversion of a raster to point vector using :func:`geoutils.Raster.to_points`.
 """
-# sphinx_gallery_thumbnail_number = 2
 # %%
 # We open a raster.
+
+# sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))

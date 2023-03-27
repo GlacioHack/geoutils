@@ -27,4 +27,4 @@ vect.show(column="Area", cbar_title="Area (km²)")
 # %%
 # Finally, a vector is saved using :func:`~geoutils.Vector.save`.
 
-# vect.save("myvector.shp")
+vect.save("myvector.gpkg")

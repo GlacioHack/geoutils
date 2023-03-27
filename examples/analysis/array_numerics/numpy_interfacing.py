@@ -4,9 +4,10 @@ NumPy interfacing
 
 This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geoutils.Raster>`. See :ref:`core-array-funcs` for more details.
 """
-# sphinx_gallery_thumbnail_number = 2
 # %%
 # We open a raster.
+
+# sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))

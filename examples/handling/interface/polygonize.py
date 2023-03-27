@@ -4,9 +4,10 @@ Polygonize a raster
 
 This example demonstrates the polygonizing of a raster using :func:`geoutils.Raster.polygonize` and :func:`geoutils.Mask.polygonize`.
 """
-# sphinx_gallery_thumbnail_number = 3
 # %%
 # We open a raster.
+
+# sphinx_gallery_thumbnail_number = 3
 import geoutils as gu
 
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
