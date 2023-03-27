@@ -1,7 +1,7 @@
 """Functions to test the documentation."""
 import os
-import shutil
 import platform
+import shutil
 
 import sphinx.cmd.build
 
