@@ -267,8 +267,8 @@ There are many possible subclass to derive from a {class}`~geoutils.Raster`. Her
 [xDEM](https://xdem.readthedocs.io/en/latest/index.html) through the {class}`~xdem.DEM` class for analyzing digital elevation models:
 
 ```{eval-rst}
-.. inheritance-diagram:: geoutils.raster.core geoutils.raster.satimg xdem.dem.DEM
-    :top-classes: geoutils.raster.core.Raster
+.. inheritance-diagram:: geoutils.raster.raster geoutils.raster.satimg xdem.dem.DEM
+    :top-classes: geoutils.raster.raster.Raster
 ```
 ```{seealso}
 The {class}`~xdem.DEM` class of [xDEM](https://xdem.readthedocs.io/en/latest/index.html) re-implements all methods of [gdalDEM](https://gdal.org/programs/gdaldem.html)

@@ -249,7 +249,7 @@ For more details, see the {ref}`specific section and function descriptions in th
 
 ```{code-cell} ipython3
 # Crop to smaller bounds
-raster_crop = raster.crop(cropGeom=(0.3, 0.3, 1, 1), inplace=False)
+raster_crop = raster.crop(crop_geom=(0.3, 0.3, 1, 1), inplace=False)
 raster_crop
 ```
 

@@ -415,7 +415,6 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     :toctree: gen_modules/
 
     Vector.contains
-    Vector.equals
     Vector.geom_equals
     Vector.geom_almost_equals
     Vector.crosses

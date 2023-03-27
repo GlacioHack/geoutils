@@ -22,7 +22,7 @@ import geoutils.projtools as pt
 from geoutils import examples
 from geoutils.misc import resampling_method_from_str
 from geoutils.projtools import reproject_to_latlon
-from geoutils.raster.core import _default_nodata, _default_rio_attrs
+from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 
 DO_PLOT = False
 
@@ -2158,29 +2158,26 @@ class TestRaster:
         temp_dir = tempfile.TemporaryDirectory()
 
         # Save file to temporary file, with defaults opts
-        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-        img.save(temp_file.name)
-        saved = gu.Raster(temp_file.name)
+        temp_file = os.path.join(temp_dir.name, "test.tif")
+        img.save(temp_file)
+        saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
 
         # Try to save with a pathlib path (create a new temp file for Windows)
-        temp_file_1 = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-        path = pathlib.Path(temp_file_1.name)
+        path = pathlib.Path(temp_file)
         img.save(path)
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
-        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-        img.save(temp_file.name, co_opts=co_opts, metadata=metadata)
-        saved = gu.Raster(temp_file.name)
+        img.save(temp_file, co_opts=co_opts, metadata=metadata)
+        saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
         assert saved.tags["Type"] == "test"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
-        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-        img.save(temp_file.name, nodata=0)
-        saved = gu.Raster(temp_file.name)
+        img.save(temp_file, nodata=0)
+        saved = gu.Raster(temp_file)
         assert np.ma.allequal(img.data, saved.data)
         assert saved.nodata == 0
 
@@ -2188,9 +2185,8 @@ class TestRaster:
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
         if img.nodata is not None:
-            temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-            img.save(temp_file.name)
-            saved = gu.Raster(temp_file.name)
+            img.save(temp_file)
+            saved = gu.Raster(temp_file)
             assert np.array_equal(img.data.mask, saved.data.mask)
 
         # Test that a warning is raised if nodata is not set and a mask exists (defined above)
@@ -2199,9 +2195,8 @@ class TestRaster:
                 img.save(TemporaryFile())
 
         # Test with blank argument
-        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name)
-        img.save(temp_file.name, blank_value=0)
-        saved = gu.Raster(temp_file.name)
+        img.save(temp_file, blank_value=0)
+        saved = gu.Raster(temp_file)
 
         assert np.array_equal(saved.data.data, np.zeros(np.shape(saved.data)))
 
@@ -3461,8 +3456,8 @@ class TestArrayInterface:
     # Most other math functions are already universal functions
 
     # Separate between two lists (single input and double input) for testing
-    handled_functions_2in = gu.raster.core._HANDLED_FUNCTIONS_2NIN
-    handled_functions_1in = gu.raster.core._HANDLED_FUNCTIONS_1NIN
+    handled_functions_2in = gu.raster.raster._HANDLED_FUNCTIONS_2NIN
+    handled_functions_1in = gu.raster.raster._HANDLED_FUNCTIONS_1NIN
 
     # Details below:
     # NaN functions: [f for f in np.lib.nanfunctions.__all__]

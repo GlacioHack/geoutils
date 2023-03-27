@@ -82,16 +82,16 @@ class TestVector:
 
         # Create a temporary file in a temporary directory
         temp_dir = tempfile.TemporaryDirectory()
-        temp_file = NamedTemporaryFile(mode="w", delete=False, dir=temp_dir.name, suffix=".gpkg")
-        os.remove(temp_file.name)
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
 
         # Save and check the file exists
-        vector.save(temp_file.name, overwrite=True)
-        assert os.path.exists(temp_file.name)
+        vector.save(temp_file)
+        assert os.path.exists(temp_file)
 
         # Open and check the object is the same
-        vector_save = gu.Vector(temp_file.name)
+        vector_save = gu.Vector(temp_file)
         vector_save.vector_equal(vector)
+
 
     def test_bounds(self) -> None:
         bounds = self.glacier_outlines.bounds
