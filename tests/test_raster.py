@@ -8,7 +8,7 @@ import pathlib
 import re
 import tempfile
 import warnings
-from tempfile import NamedTemporaryFile, TemporaryFile
+from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np

@@ -6,7 +6,6 @@ import pathlib
 import re
 import tempfile
 import warnings
-from tempfile import NamedTemporaryFile
 
 import geopandas as gpd
 import geopandas.base
@@ -91,7 +90,6 @@ class TestVector:
         # Open and check the object is the same
         vector_save = gu.Vector(temp_file)
         vector_save.vector_equal(vector)
-
 
     def test_bounds(self) -> None:
         bounds = self.glacier_outlines.bounds
