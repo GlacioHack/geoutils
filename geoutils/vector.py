@@ -61,11 +61,11 @@ class Vector:
     See the API for more details.
     """
 
-    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame):
+    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | shapely.Geometry):
         """
-        Instantiate a vector from a filename or GeoPandas geodataframe.
+        Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
-        :param filename_or_dataset: Path to file or GeoPandas geodataframe.
+        :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
         """
 
         if isinstance(filename_or_dataset, (str, pathlib.Path)):
@@ -75,9 +75,14 @@ class Vector:
                 ds = gpd.read_file(filename_or_dataset)
             self._ds = ds
             self._name: str | gpd.GeoDataFrame | None = filename_or_dataset
-        elif isinstance(filename_or_dataset, gpd.GeoDataFrame):
-            self._ds = filename_or_dataset
+        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, shapely.Geometry)):
             self._name = None
+            if isinstance(filename_or_dataset, gpd.GeoDataFrame):
+                self._ds = filename_or_dataset
+            elif isinstance(filename_or_dataset, gpd.GeoSeries):
+                self._ds = gpd.GeoDataFrame(geometry=filename_or_dataset)
+            else:
+                self._ds = gpd.GeoDataFrame({"geometry": [filename_or_dataset]}, crs=None)
         else:
             raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
 
@@ -132,15 +137,14 @@ class Vector:
         """
         Summarize information about the vector.
 
-        :returns: Unformation about vector attributes.
+        :returns: Information about vector attributes.
         """
         as_str = [  # 'Driver:             {} \n'.format(self.driver),
             f"Filename:           {self.name} \n",
             f"Coordinate System:  EPSG:{self.ds.crs.to_epsg()}\n",
-            f"Number of features: {len(self.ds)} \n",
             f"Extent:             {self.ds.total_bounds.tolist()} \n",
-            f"Attributes:         {self.ds.columns.tolist()} \n",
-            self.ds.__repr__(),
+            f"Number of features: {len(self.ds)} \n",
+            f"Attributes:         {self.ds.columns.tolist()}",
         ]
 
         return "".join(as_str)
@@ -415,7 +419,13 @@ class Vector:
     # Exception ! Vector.bounds corresponds to the total_bounds
     @property
     def bounds(self) -> rio.coords.BoundingBox:
-        """Total bounding box of the vector."""
+        """
+        Total bounding box of the vector.
+
+        Caution: this is equivalent to ``GeoDataFrame.total_bounds``,
+        but not ``GeoDataFrame.bounds`` (per-feature bounds) which is instead defined as
+        ``Vector.geom_bounds``.
+        """
         return rio.coords.BoundingBox(*self.ds.total_bounds)
 
     # --------------------------------------------

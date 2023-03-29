@@ -63,7 +63,7 @@ raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 raster
 ```
 
-Detailed information on the {class}`~geoutils.Raster` is printed using {class}`~geoutils.Raster.info()`, along with basic statistics using `stats=True`:
+Detailed information on the {class}`~geoutils.Raster` is printed using {func}`~geoutils.Raster.info`, along with basic statistics using `stats=True`:
 
 ```{code-cell} ipython3
 # Print details of raster
@@ -238,17 +238,18 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 Cropping a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`.
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as argument.
+As with all geospatial handling methods, the {func}`~geoutils.Raster.crop` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` 
+as argument.
 
 See {ref}`core-match-ref` for more details.
 ```
 
-The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`).
+The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default, 
+{func}`~geoutils.Raster.crop` is done in-place.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
-
 ```{code-cell} ipython3
-# Crop to smaller bounds
+# Crop raster to smaller bounds
 raster_crop = raster.crop(crop_geom=(0.3, 0.3, 1, 1), inplace=False)
 raster_crop
 ```
@@ -258,8 +259,6 @@ raster_crop
 Polygonizing a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.polygonize` function, which converts target pixels into a multi-polygon
 {class}`~geoutils.Vector`.
 
-By default, values equal to `1` are used.
-
 ```{note}
 For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels. See
 {ref}`mask-class-poly-overloaded`.
@@ -267,15 +266,14 @@ For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly ta
 
 ```{code-cell} ipython3
 # Polygonize all values lower than 100
-
 vector_lt_100 = (raster < 100).polygonize()
 vector_lt_100
 ```
 
 ## Proximity
 
-Computing proximity from a {class}`~geoutils.Raster` is done through by the {func}`~geoutils.Raster.proximity` function, which computes the distance to any
-target pixels in the {class}`~geoutils.Raster`.
+Computing proximity from a {class}`~geoutils.Raster` is done through by the {func}`~geoutils.Raster.proximity` function, which computes the closest distance 
+to any target pixels in the {class}`~geoutils.Raster`.
 
 ```{note}
 For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels. See

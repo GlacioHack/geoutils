@@ -276,6 +276,13 @@ And reverse operations.
     Vector.name
 ```
 
+```{caution}
+The {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a 
+{class}`~geopandas.GeoDataFrame`, for consistency between rasters and vectors (and can also be accessed through {attr}`~geoutils.Vector.total_bounds`).
+
+The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
+```
+
 ### Geospatial handling methods
 
 ```{eval-rst}
@@ -316,23 +323,22 @@ And reverse operations.
     Vector.get_bounds_projected
 ```
 
-### Indexing and assignment
+### Indexing
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
     Vector.__getitem__
-    Vector.__setitem__
 ```
+
+(vector-from-geopandas)=
 
 ### From Shapely and GeoPandas
 
 #### Geometric attributes and methods
 
-This first category of attributes and methods return a geometric output, converted to a {class}`~geoutils.Vector` by default.
-
-Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they return a {class}`geopandas.GeoSeries` or {class}`geopandas.GeoDataFrame` as in GeoPandas.
+This first category of attributes and methods return a geometric output converted to a {class}`~geoutils.Vector` by default.
 
 **Attributes:**
 
@@ -464,6 +470,7 @@ To ensure those are up-to-date with GeoPandas, alternatively call those from {at
 
     Vector.has_sindex
     Vector.sindex
+    Vector.total_bounds
 ```
 
 ```{seealso}

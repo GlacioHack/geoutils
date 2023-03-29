@@ -64,13 +64,14 @@ To check if a {class}`~geoutils.Raster` was loaded from the **on-disk** data, us
 To check if the {class}`~geoutils.Raster` was modified since loading from the **on-disk** data, use the {attr}`~geoutils.Raster.is_modified` attribute.
 ```
 
+See {ref}`(raster-class)` for more details.
+
+
 ## The {class}`~geoutils.Vector` class composition
 
 A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`.
 
-Because lazy loading is a lesser priority with vector data, a {class}`~geoutils.Vector` directly loads its {attr}`~geoutils.Vector.ds`. Besides, many
-higher-level geospatial methods are already available in {class}`~geopandas.GeoDataFrame`. We thus only wrap those directly into {class}`~geoutils.Vector`,
-in order to easily call them from the vector object, and build additional methods on top.
+Because lazy loading is a lesser priority with vector data, a {class}`~geoutils.Vector` directly loads its {attr}`~geoutils.Vector.ds`.
 
 ```{code-cell} ipython3
 :tags: [hide-output]
@@ -83,3 +84,15 @@ vector
 # Show summarized information
 print(vector.info())
 ```
+
+All geospatial methods of {class}`~geopandas.GeoDataFrame` are directly available into {class}`~geoutils.Vector`, and cast the output logically depending on 
+its type: to a {class}`~geoutils.Vector` for a geometric output (e.g., {class}`~geoutils.Vector.boundary`), or to {class}`pandas.Series` that can be immediatelly appended to the {class}
+`~geoutils.Vector` for a per-feature non-geometric output (e.g., {class}`~geoutils.Vector.area`).
+
+```{code-cell} ipython3
+:tags: [hide-output]
+# Compute the vector's boundary
+vector.boundary
+```
+
+See {ref}`(vector-class)` for more details.

@@ -11,9 +11,9 @@ making such analysis accessible, efficient and reliable.
 <sup>1</sup>With name standing for *Geospatial Utilities*.
 ```
 
-In a few words, GeoUtils can be described as a **convenience wrapper package for end-users** focusing on geospatial analysis. It allows to write shorter
-code through consistent higher-level operations, implicit object behaviour and numerical interfacing. In addition, GeoUtils adds **analysis-oriented
-functions** that require many steps to perform with other packages, and which are robustly tested.
+In a few words, GeoUtils can be described as a **convenience package for end-users focusing on geospatial analysis**. It allows to write shorter
+code through consistent higher-level operations, implicit object behaviour and numerical interfacing. In addition, GeoUtils adds analysis-oriented
+functions that require many steps to perform with other packages, and which are robustly tested.
 
 GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for remote sensing and Earth's surface
 applications** that rely on moderate- to high-resolution georeferenced data. All applications that, for analysis, require robust reprojections, re-gridding,
