@@ -175,8 +175,8 @@ If an `out_value` of `0` (default) and `in_value` value of `1` are passed (i.e.,
 the output to a {class}`~geoutils.Mask`.
 ```
 
-To define the grid on which to rasterize, a reference {class}`~geoutils.Raster` to match can be passed. Alternatively, a {attr}`~geoutils.Raster.res` or {attr}
-`~geoutils.Raster.shape` can be passed to define the grid.
+To define the grid on which to rasterize, a reference {class}`~geoutils.Raster` to match can be passed. Alternatively, a {attr}`~geoutils.Raster.res` or 
+{attr}`~geoutils.Raster.shape` can be passed to define the grid.
 
 ```{code-cell} ipython3
 # Rasterize all geometries by index
@@ -184,7 +184,7 @@ rasterized_vect = vect.rasterize(rast)
 rasterized_vect
 ```
 
-## Create a `Mask`
+## Create a {class}`~geoutils.Mask`
 
 Creating a {class}`~geoutils.Mask` from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask` function, which converts vector
 geometries into boolean gridded values for all features.

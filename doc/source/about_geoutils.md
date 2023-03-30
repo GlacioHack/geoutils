@@ -12,19 +12,11 @@ making such analysis accessible, efficient and reliable.
 ```
 
 In a few words, GeoUtils can be described as a **convenience package for end-users focusing on geospatial analysis**. It allows to write shorter
-code through consistent higher-level operations, implicit object behaviour and numerical interfacing. In addition, GeoUtils adds analysis-oriented
+code through consistent higher-level operations, implicit object behaviour and interfacing. In addition, GeoUtils adds several analysis-oriented
 functions that require many steps to perform with other packages, and which are robustly tested.
 
-GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for remote sensing and Earth's surface
-applications** that rely on moderate- to high-resolution georeferenced data. All applications that, for analysis, require robust reprojections, re-gridding,
-point interpolation, and other types of fine-grid analysis with millions of pixels.
-
-
-```{important}
-GeoUtils is in early stages of development and its features might evolve rapidly. Note the version you are working on for
-**reproducibility**!
-We are working on making features fully consistent for the first long-term release ``v0.1`` (likely sometime in 2023).
-```
+GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for surface applications that rely on 
+moderate- to high-resolution data** (requiring reprojection, re-gridding, point interpolation, and other types of fine-grid analysis).
 
 ## Why use GeoUtils?
 
@@ -33,7 +25,7 @@ and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenc
 [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/) for scientific computing to provide:
 - A **common and consistent framework** for efficient raster and vector handling,
 - A structure following the **principal of least knowledge**<sup>2</sup> to foster accessibility,
-- A **pythonic arithmetic** and **NumPy interfacing** for robust numerical computing and intuitive analysis.
+- A **pythonic arithmetic** and **NumPy interfacing** for robust numerical computing.
 
 ```{margin}
 <sup>2</sup>Or the [Law of Demeter](https://en.wikipedia.org/wiki/Law_of_Demeter) for software development.
@@ -41,9 +33,9 @@ and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenc
 
 In particular, GeoUtils:
 - Rarely requires more than **single-line operations** thanks to its object-based structure,
-- Strives to rely on **lazy-operations** under-the-hood to avoid unnecessary data loading,
+- Strives to rely on **lazy operations** under-the-hood to avoid unnecessary data loading,
 - Allows for **match-reference operations** to facilitate geospatial handling,
-- Re-implements **several of [GDAL](https://gdal.org/)'s missing features** (Proximity, DEM, Calc, etc),
+- Re-implements **several of [GDAL](https://gdal.org/)'s missing features** (Proximity, DEM through xDEM, etc),
 - Naturally handles **different `dtypes` and `nodata`** values through its NumPy masked-array interface.
 
 
@@ -58,11 +50,15 @@ complexity of [GDAL and OGR](https://gdal.org/)'s Python bindings** for raster a
 [Rasterio](https://rasterio.readthedocs.io/en/latest/) and [GeoPandas](https://geopandas.org/en/stable/docs.html).
 
 However, these new packages still maintain a relatively low-level API to serve all types of geospatial informatics users, **slowing down end-users focusing
-on data analysis**. As a result, basic interfacing between vector data and raster data is not always straightforward and simple higher-level operation (such as
-reprojection to match a reference) are not always computed consistently in the community.
+on data analysis**. As a result, basic interfacing between vectors and rasters is not always straightforward and simple higher-level operations (such as
+reprojection to match a vector or raster reference, or point interpolation) are not always computed consistently in the community. 
 
-Additionally, [Rasterio](https://rasterio.readthedocs.io/en/latest/) focuses mostly on reading, projecting and writing, and thus **requires array extraction
-and re-encapsulation** either before, during or after any numerical computation to interface with other georeferencing packages.
+On one hand, [Rasterio](https://rasterio.readthedocs.io/en/latest/) focuses largely on reading, projecting and writing, and thus **requires 
+array extraction, re-encapsulation, and the volatile passing of metadata** either before, during or after any numerical calculations. On the other hand, 
+[GeoPandas](https://geopandas.org/en/stable/docs.html) focuses on integrating [Shapely](https://shapely.readthedocs.io/en/stable/) geometries in the 
+[Pandas](https://pandas.pydata.org/) framework, which is practical for tabular analysis but **yields a multitude of outputs (dataframes, series, geoseries, 
+geometries), often requiring object re-construction and specific reprojection routines** to analyze with other data, or derive metric attributes (area, 
+length).
 
 Finally, **many common geospatial analysis tools are generally unavailable** in existing packages (e.g., boolean-masking from vectors,
 [proximity](https://gdal.org/programs/gdal_proximity.html) estimation, metric buffering) as they rely on a combination of lower-level operations.

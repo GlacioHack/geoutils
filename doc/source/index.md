@@ -38,6 +38,13 @@ its testing suite and type checking ([Pytest](https://docs.pytest.org/en/7.2.x/)
 
 # Where to start?
 
+```{important}
+:class: margin
+GeoUtils is in early stages of development and its features might evolve rapidly. Note the version you are working on for
+**reproducibility**!
+We are working on making features fully consistent for the first long-term release ``v0.1`` (likely sometime in 2023).
+```
+
 ::::{grid} 1 2 2 3
 :gutter: 1 1 1 2
 
@@ -73,14 +80,10 @@ Dive into the full documentation.
 
 ::::
 
-----------------
-
-```{important}
-:class: margin
-GeoUtils is in early stages of development and its features might evolve rapidly. Note the version you are working on for
-**reproducibility**!
-We are working on making features fully consistent for the first long-term release ``v0.1`` (likely sometime in 2023).
+```{seealso}
+If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/en/latest/index.html) for digital elevation models.**
 ```
+----------------
 
 # Table of contents
 

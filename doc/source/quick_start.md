@@ -30,9 +30,9 @@ rast = gu.Raster(filename_rast)
 vect = gu.Vector(filename_vect)
 ```
 
-A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`~numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, a
-{class}`~pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an {class}`~affine.Affine` as {attr}`~geoutils.Raster.transform`, and a {class}`float` or {class}
-`int` as {attr}`geoutils.Raster.nodata`.
+A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, a
+{class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`, and a {class}`float` or 
+{class}`int` as {attr}`~geoutils.Raster.nodata`.
 
 
 ```{code-cell} ipython3
@@ -135,7 +135,7 @@ To facilitate the analysis process, GeoUtils includes quick plotting tools that 
 Those are wrapped from {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot`, and relay any argument passed.
 
 ```{seealso}
-GeoUtils' plotting tools only aim to get rid off the most common hassles when quickly plotting raster and vector data during analysis.
+GeoUtils' plotting tools only aim to smooth out the most common hassles when quickly plotting raster and vectors.
 
 For advanced plotting tools to create "publication-quality" figures, see [Cartopy](https://scitools.org.uk/cartopy/docs/latest/) or
 [GeoPlot](https://residentmario.github.io/geoplot/index.html).
@@ -155,7 +155,7 @@ vect.show(rast_proximity_to_vec, fc="none")
 
 All {class}`~geoutils.Raster` objects support Python arithmetic ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
 {func}`**<operator.pow>`, {func}`%<operator.mod>`) with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or
-number. For other {class}`~geoutils.Raster`, the georeferencing must match, while only the shape for other {class}`~numpy.ndarray`.
+number. With another {class}`~geoutils.Raster`, the georeferencing must match, while only the shape with a {class}`~numpy.ndarray`.
 
 ```{code-cell} ipython3
 # Add 1 to the raster array
@@ -208,13 +208,29 @@ Finally, for saving a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` to 
 
 ```{code-cell} ipython3
 # Save our AOI vector
-# vect_aoi.save()
+vect_aoi.save("myaoi.gpkg")
 ```
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
 import os
-# os.remove()
+os.remove("myaoi.gpkg")
+```
+
+## Parsing metadata with {class}`~geoutils.SatelliteImage`
+
+In our case, `rast` would be better opened using the {class}`~geoutils.Raster` subclass {class}`~geoutils.SatelliteImage` instead, which tentatively parses
+metadata recognized from the filename or auxiliary files.
+
+```{code-cell} ipython3
+# Name of the image we used
+import os
+print(os.path.basename(filename_rast))
+```
+
+```{code-cell} ipython3
+# Open while parsing metadata
+rast = gu.SatelliteImage(filename_rast, silent=False)
 ```
 
 ```{admonition} Wrap-up
@@ -226,8 +242,6 @@ In a few lines, we:
 
 **Our result:** a vector of high infrared absorption indexes at least 200 meters away from glaciers
 near Everest, which likely corresponds to **perennial snowfields**.
-
-For a **bonus** example on parsing satellite metadata and DEMs, continue below.
 
 Otherwise, for more **hands-on** examples, explore GeoUtils' gallery of examples!
 ```
@@ -247,31 +261,3 @@ See also the full concatenated list of examples below.
     :add-heading: Examples using rasters and vectors
 ```
 
-## **Bonus:** Parsing metadata with {class}`~geoutils.SatelliteImage`
-
-In our case, `rast` would be better opened using the {class}`~geoutils.Raster` subclass {class}`~geoutils.SatelliteImage` instead, which tentatively parses
-metadata recognized from the filename or auxiliary files.
-
-```{code-cell} ipython3
-# Name of the image we used
-import os
-print(os.path.basename(filename_rast))
-```
-
-```{code-cell} ipython3
-# Open while parsing metadata
-rast = gu.SatelliteImage(filename_rast, silent=False)
-```
-
-There are many possible subclass to derive from a {class}`~geoutils.Raster`. Here's an **overview of current {class}`~geoutils.Raster` class inheritance**, which extends into
-[xDEM](https://xdem.readthedocs.io/en/latest/index.html) through the {class}`~xdem.DEM` class for analyzing digital elevation models:
-
-```{eval-rst}
-.. inheritance-diagram:: geoutils.raster.raster geoutils.raster.satimg xdem.dem.DEM
-    :top-classes: geoutils.raster.raster.Raster
-```
-```{seealso}
-The {class}`~xdem.DEM` class of [xDEM](https://xdem.readthedocs.io/en/latest/index.html) re-implements all methods of [gdalDEM](https://gdal.org/programs/gdaldem.html)
-(and more) to derive topographic attributes (hillshade, slope, aspect, etc), coded directly in Python for scalability and tested to yield the exact same
-results.
-```

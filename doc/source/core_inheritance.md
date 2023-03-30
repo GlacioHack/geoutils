@@ -27,8 +27,7 @@ The {class}`~xdem.DEM` class re-implements all methods of [gdalDEM](https://gdal
 (hillshade, slope, aspect, etc), coded directly in Python for scalability and tested to yield the exact same results.
 Among others, it also adds a {attr}`~xdem.DEM.vref` property to consistently manage vertical referencing (ellipsoid, geoids).
 
-If you are DEM-enthuisiastic, **[check-out our sister-package xDEM](https://xdem.readthedocs.io/en/latest/index.html)** for the analysis of digital
-elevation models.
+If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/en/latest/index.html) for digital elevation models.**
 ```
 
 ## The internal {class}`~geoutils.SatelliteImage` subclass
