@@ -175,7 +175,7 @@ If an `out_value` of `0` (default) and `in_value` value of `1` are passed (i.e.,
 the output to a {class}`~geoutils.Mask`.
 ```
 
-To define the grid on which to rasterize, a reference {class}`~geoutils.Raster` to match can be passed. Alternatively, a {attr}`~geoutils.Raster.res` or 
+To define the grid on which to rasterize, a reference {class}`~geoutils.Raster` to match can be passed. Alternatively, a {attr}`~geoutils.Raster.res` or
 {attr}`~geoutils.Raster.shape` can be passed to define the grid.
 
 ```{code-cell} ipython3

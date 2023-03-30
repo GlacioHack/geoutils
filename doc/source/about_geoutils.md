@@ -15,7 +15,7 @@ In a few words, GeoUtils can be described as a **convenience package for end-use
 code through consistent higher-level operations, implicit object behaviour and interfacing. In addition, GeoUtils adds several analysis-oriented
 functions that require many steps to perform with other packages, and which are robustly tested.
 
-GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for surface applications that rely on 
+GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for surface applications that rely on
 moderate- to high-resolution data** (requiring reprojection, re-gridding, point interpolation, and other types of fine-grid analysis).
 
 ## Why use GeoUtils?
@@ -51,13 +51,13 @@ complexity of [GDAL and OGR](https://gdal.org/)'s Python bindings** for raster a
 
 However, these new packages still maintain a relatively low-level API to serve all types of geospatial informatics users, **slowing down end-users focusing
 on data analysis**. As a result, basic interfacing between vectors and rasters is not always straightforward and simple higher-level operations (such as
-reprojection to match a vector or raster reference, or point interpolation) are not always computed consistently in the community. 
+reprojection to match a vector or raster reference, or point interpolation) are not always computed consistently in the community.
 
-On one hand, [Rasterio](https://rasterio.readthedocs.io/en/latest/) focuses largely on reading, projecting and writing, and thus **requires 
-array extraction, re-encapsulation, and the volatile passing of metadata** either before, during or after any numerical calculations. On the other hand, 
-[GeoPandas](https://geopandas.org/en/stable/docs.html) focuses on integrating [Shapely](https://shapely.readthedocs.io/en/stable/) geometries in the 
-[Pandas](https://pandas.pydata.org/) framework, which is practical for tabular analysis but **yields a multitude of outputs (dataframes, series, geoseries, 
-geometries), often requiring object re-construction and specific reprojection routines** to analyze with other data, or derive metric attributes (area, 
+On one hand, [Rasterio](https://rasterio.readthedocs.io/en/latest/) focuses largely on reading, projecting and writing, and thus **requires
+array extraction, re-encapsulation, and the volatile passing of metadata** either before, during or after any numerical calculations. On the other hand,
+[GeoPandas](https://geopandas.org/en/stable/docs.html) focuses on integrating [Shapely](https://shapely.readthedocs.io/en/stable/) geometries in the
+[Pandas](https://pandas.pydata.org/) framework, which is practical for tabular analysis but **yields a multitude of outputs (dataframes, series, geoseries,
+geometries), often requiring object re-construction and specific reprojection routines** to analyze with other data, or derive metric attributes (area,
 length).
 
 Finally, **many common geospatial analysis tools are generally unavailable** in existing packages (e.g., boolean-masking from vectors,

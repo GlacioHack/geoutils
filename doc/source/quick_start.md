@@ -31,7 +31,7 @@ vect = gu.Vector(filename_vect)
 ```
 
 A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, a
-{class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`, and a {class}`float` or 
+{class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`, and a {class}`float` or
 {class}`int` as {attr}`~geoutils.Raster.nodata`.
 
 
@@ -260,4 +260,3 @@ See also the full concatenated list of examples below.
 .. minigallery:: geoutils.Raster
     :add-heading: Examples using rasters and vectors
 ```
-
