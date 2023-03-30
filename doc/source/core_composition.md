@@ -85,8 +85,8 @@ vector
 print(vector.info())
 ```
 
-All geospatial methods of {class}`~geopandas.GeoDataFrame` are directly available into {class}`~geoutils.Vector`, and cast the output logically depending on 
-its type: to a {class}`~geoutils.Vector` for a geometric output (e.g., {class}`~geoutils.Vector.boundary`), or to {class}`pandas.Series` that can be immediatelly appended to the {class}
+All geospatial methods of {class}`~geopandas.GeoDataFrame` are directly available into {class}`~geoutils.Vector`, and cast the output logically depending on
+its type: to a {class}`~geoutils.Vector` for a geometric output (e.g., {class}`~geoutils.Vector.boundary`), or to {class}`pandas.Series` that can be immediately appended to the {class}
 `~geoutils.Vector` for a per-feature non-geometric output (e.g., {class}`~geoutils.Vector.area`).
 
 ```{code-cell} ipython3

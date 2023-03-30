@@ -277,7 +277,7 @@ And reverse operations.
 ```
 
 ```{caution}
-The {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a 
+The {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
 {class}`~geopandas.GeoDataFrame`, for consistency between rasters and vectors (and can also be accessed through {attr}`~geoutils.Vector.total_bounds`).
 
 The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.

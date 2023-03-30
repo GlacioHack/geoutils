@@ -238,13 +238,13 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 Cropping a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`.
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Raster.crop` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` 
+As with all geospatial handling methods, the {func}`~geoutils.Raster.crop` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector`
 as argument.
 
 See {ref}`core-match-ref` for more details.
 ```
 
-The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default, 
+The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default,
 {func}`~geoutils.Raster.crop` is done in-place.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
@@ -272,7 +272,7 @@ vector_lt_100
 
 ## Proximity
 
-Computing proximity from a {class}`~geoutils.Raster` is done through by the {func}`~geoutils.Raster.proximity` function, which computes the closest distance 
+Computing proximity from a {class}`~geoutils.Raster` is done through by the {func}`~geoutils.Raster.proximity` function, which computes the closest distance
 to any target pixels in the {class}`~geoutils.Raster`.
 
 ```{note}

@@ -13,17 +13,17 @@ Amaury Dehecq<sup>2</sup>.
 <sup>2</sup>More on our GlacioHack founder at [adehecq.github.io](https://adehecq.github.io/)!
 ```
 
-GeoUtils is inspired by previous efforts that were built directly on top of GDAL and OGR, namely: 
+GeoUtils is inspired by previous efforts that were built directly on top of GDAL and OGR, namely:
 
-- the older, homonymous package [GeoUtils](https://github.com/adehecq/geoutils_old), 
-- the class [pybob.GeoImg](https://github.com/iamdonovan/pybob/blob/master/pybob/GeoImg.py), 
+- the older, homonymous package [GeoUtils](https://github.com/adehecq/geoutils_old),
+- the class [pybob.GeoImg](https://github.com/iamdonovan/pybob/blob/master/pybob/GeoImg.py),
 - the package [pygeotools](https://github.com/dshean/pygeotools), and
 - the package [salem](https://github.com/fmaussion/salem).
 
 ## The people behind GeoUtils
 
 The initial core development of GeoUtils was mainly performed by members of the Glaciology group of the _Laboratory of Hydraulics, Hydrology and
-Glaciology (VAW)_ at ETH Zürich<sup>3</sup> and of the _University of Fribourg_, both in Switzerland. The package also received contributions by members of 
+Glaciology (VAW)_ at ETH Zürich<sup>3</sup> and of the _University of Fribourg_, both in Switzerland. The package also received contributions by members of
 the _University of Oslo_, Norway, the _University of Washington_, US and _Université Grenobles Alpes_, France.
 
 ```{margin}
@@ -65,4 +65,3 @@ And, additionally:
 - **Scalability**: all methods should support both lazy processing and distributed parallelized processing, to work with high-resolution data on local machines as well as on HPCs;
 
 - **State-of-the-art**: all methods should be at the cutting edge of remote sensing science, to provide users with the most reliable and up-to-date tools.
-
