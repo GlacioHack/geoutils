@@ -40,7 +40,7 @@ For this, the original rectangular footprint polygon lines are densified to resp
 
 ```{code-cell} ipython3
 # Get raster footprint in geographic CRS
-rast_footprint = rast.get_footprint_projected(3412)
+rast_footprint = rast.get_footprint_projected(4326)
 
 rast_footprint.show()
 ```
@@ -55,10 +55,6 @@ vect = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
 any(vect.intersects(rast_footprint))
 ```
 
-## Find a local metric projection
+## Estimate a local metric projection
 
-## Merge or align multiple bounds
 
-## Create a tiling
-
-## Shape-preserving vector reprojection

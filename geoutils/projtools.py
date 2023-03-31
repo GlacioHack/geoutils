@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from collections import abc
 from math import ceil, floor
+import warnings
+from typing import Literal
 
 import geopandas
 import geopandas as gpd
@@ -62,6 +64,39 @@ def utm_to_epsg(utm: str) -> int:
     epsg = pyproj.CRS(f"WGS 84 / UTM Zone {utm}").to_epsg()
 
     return int(epsg)
+
+def _get_utm_ups_crs(df: gpd.GeoDataFrame, method: Literal["centroid"] | Literal["geopandas"] = "centroid") -> CRS:
+
+    # Check input
+    if method.lower() not in ["centroid", "geopandas"]:
+        raise ValueError("Method to get local CRS should be one of 'centroid' and 'geopandas'.")
+
+    # Use geopandas if that is the desired method
+    if method == "geopandas":
+        crs = df.estimate_utm_crs()
+
+    # Else, compute the centroid of dissolved geometries and get UTM or UPS
+    else:
+        # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=UserWarning)
+            shp_wgs84 = df.to_crs(epsg=4326).dissolve()
+            lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+            del shp_wgs84
+
+        # If absolute latitude is below 80, get the EPSG code of the local UTM
+        if -80 <= lat <= 80:
+            utm = latlon_to_utm(lat, lon)
+            epsg = utm_to_epsg(utm)
+            crs = pyproj.CRS.from_epsg(epsg)
+        # If latitude is below 80, get UPS South
+        elif lat < -80:
+            crs = pyproj.CRS.from_epsg(32761)
+        # Else, get UPS North
+        else:
+            crs = pyproj.CRS.from_epsg(32661)
+
+    return crs
 
 
 def bounds2poly(

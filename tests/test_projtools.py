@@ -91,6 +91,33 @@ class TestProjTools:
         assert pt.utm_to_epsg("08s") == pt.utm_to_epsg("8S") == pt.utm_to_epsg("08S")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_get_metric_crs_utm(self, example: str) -> None:
+        """Check that the function works consistently with GeoPandas for UTM."""
+
+        # Open raster
+        rast = gu.Raster(example)
+
+        # Get utm zone from GeoPandas and GeoUtils
+        crs_gu = rast.get_metric_crs()
+        crs_geopandas = rast.get_metric_crs(method="geopandas")
+
+        # Verify they are the same
+        assert crs_gu == crs_geopandas
+
+    def test_get_metric_crs_ups(self):
+        """Check that the function works for UPS with points at high latitude."""
+
+        # Create a vector of a single point in geographic coordinates
+        point_north = shapely.Point([0, 84])
+        point_south = shapely.Point([0, -84])
+        vect_north = gu.Vector(gpd.GeoDataFrame({"geometry": [point_north]}, crs=pyproj.CRS.from_epsg(4326)))
+        vect_south = gu.Vector(gpd.GeoDataFrame({"geometry": [point_south]}, crs=pyproj.CRS.from_epsg(4326)))
+
+        # Check that UPS North and South are indeed returned
+        assert vect_north.get_metric_crs() == pyproj.CRS.from_epsg(32661)
+        assert vect_south.get_metric_crs() == pyproj.CRS.from_epsg(32761)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_latlon_reproject(self, example: str) -> None:
         """
         Check that to and from latlon projections are self consistent within tolerated rounding errors

@@ -132,9 +132,18 @@ documentation.
     Raster.ij2xy
     Raster.coords
     Raster.shift
-    Raster.get_bounds_projected
-    Raster.intersection
     Raster.outside_image
+```
+
+### Projection methods
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.get_bounds_projected
+    Raster.get_footprint_projected
+    Raster.intersection
 ```
 
 ### Testing methods

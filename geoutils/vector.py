@@ -39,7 +39,7 @@ from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 from geoutils.misc import copy_doc
-from geoutils.projtools import _get_bounds_projected, _get_footprint_projected, bounds2poly
+from geoutils.projtools import _get_bounds_projected, _get_footprint_projected, _get_utm_ups_crs, bounds2poly
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -1413,30 +1413,19 @@ class Vector:
 
     def buffer_metric(self, buffer_size: float) -> Vector:
         """
-        Buffer the vector features in a local metric system (UTM only).
+        Buffer the vector features in a local metric system (UTM or UPS).
 
-        The outlines are projected to a local UTM, then reverted to the original projection after buffering.
+        The outlines are projected to the local UTM or UPS, then reverted to the original projection after buffering.
 
         :param buffer_size: Buffering distance in meters.
 
         :return: Buffered shapefile.
         """
 
-        from geoutils.projtools import latlon_to_utm, utm_to_epsg
-
-        # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
-        with warnings.catch_warnings():
-            warnings.simplefilter(action="ignore", category=UserWarning)
-            shp_wgs84 = self.ds.to_crs(epsg=4326)
-            lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
-            del shp_wgs84
-
-        # Get the EPSG code of the local UTM
-        utm = latlon_to_utm(lat, lon)
-        epsg = utm_to_epsg(utm)
+        crs_utm_ups = _get_utm_ups_crs(df=self.ds)
 
         # Reproject the shapefile in the local UTM
-        ds_utm = self.ds.to_crs(epsg=epsg)
+        ds_utm = self.ds.to_crs(crs=crs_utm_ups)
 
         # Buffer the shapefile
         ds_buffered = ds_utm.buffer(distance=buffer_size)
@@ -1478,7 +1467,26 @@ class Vector:
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
-        return Vector.from_bounds_projected(self, out_crs=out_crs, densify_pts=densify_pts)
+        return Vector(_get_footprint_projected(bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts))
+
+    def get_metric_crs(self, local_crs_type: Literal["universal"] | Literal["custom"] = "universal",
+                       method: Literal["centroid"] | Literal["geopandas"] = "centroid") -> CRS:
+        """
+        Get local metric coordinate reference system for the vector (UTM, UPS, or custom Mercator or Polar).
+
+        :param local_crs_type: Whether to get a "universal" local CRS (UTM or UPS) or a "custom" local CRS
+            (Mercator or Polar centered on centroid).
+        :param method: Method to choose the zone of the CRS, either based on the centroid of the footprint
+            or the extent as implemented in :func:`geopandas.GeoDataFrame.estimate_utm_crs`.
+            Forced to centroid if `local_crs="custom"`.
+        """
+
+        # For universal CRS (UTM or UPS)
+        if local_crs_type == "universal":
+            return _get_utm_ups_crs(self.ds, method=method)
+        # For a custom CRS
+        else:
+            raise NotImplementedError("This is not implemented yet.")
 
     def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> Vector:
         """
@@ -1513,18 +1521,8 @@ class Vector:
 
         # Project in local UTM if metric is True
         if metric:
-            # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
-            with warnings.catch_warnings():
-                warnings.simplefilter(action="ignore", category=UserWarning)
-                shp_wgs84 = self.ds.to_crs(epsg=4326)
-                lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
-                del shp_wgs84
-
-            # Get the EPSG code of the local UTM
-            utm = latlon_to_utm(lat, lon)
-            epsg = utm_to_epsg(utm)
-
-            gdf = self.ds.to_crs(epsg=epsg)
+            crs_utm_ups = _get_utm_ups_crs(df=self.ds)
+            gdf = self.ds.to_crs(crs=crs_utm_ups)
         else:
             gdf = self.ds
 

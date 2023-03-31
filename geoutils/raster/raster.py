@@ -33,7 +33,7 @@ from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.vector as gv
 from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
-from geoutils.projtools import _get_bounds_projected
+from geoutils.projtools import _get_bounds_projected, _get_footprint_projected, _get_utm_ups_crs
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
 
@@ -2253,7 +2253,26 @@ np.ndarray or number and correct dtype, the compatible nodata value.
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
-        return Vector.from_bounds_projected(self, out_crs=out_crs, densify_pts=densify_pts)
+        return Vector(_get_footprint_projected(bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts))
+
+    def get_metric_crs(self, local_crs_type: Literal["universal"] | Literal["custom"] = "universal",
+                       method: Literal["centroid"] | Literal["geopandas"] = "centroid") -> CRS:
+        """
+        Get local metric coordinate reference system for the raster (UTM, UPS, or custom Mercator or Polar).
+
+        :param local_crs_type: Whether to get a "universal" local CRS (UTM or UPS) or a "custom" local CRS
+            (Mercator or Polar centered on centroid).
+        :param method: Method to choose the zone of the CRS, either based on the centroid of the footprint
+            or the extent as implemented in :func:`geopandas.GeoDataFrame.estimate_utm_crs`.
+            Forced to centroid if `local_crs="custom"`.
+        """
+
+        # For universal CRS (UTM or UPS)
+        if local_crs_type == "universal":
+            return _get_utm_ups_crs(self.get_footprint_projected(out_crs=self.crs).ds, method=method)
+        # For a custom CRS
+        else:
+            raise NotImplementedError("This is not implemented yet.")
 
     def intersection(self, rst: str | Raster, match_ref: bool = True) -> tuple[float, float, float, float]:
         """
