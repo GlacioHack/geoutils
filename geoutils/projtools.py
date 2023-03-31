@@ -3,9 +3,9 @@ projtools provides a set of tools for dealing with different coordinate referenc
 """
 from __future__ import annotations
 
+import warnings
 from collections import abc
 from math import ceil, floor
-import warnings
 from typing import Literal
 
 import geopandas
@@ -64,6 +64,7 @@ def utm_to_epsg(utm: str) -> int:
     epsg = pyproj.CRS(f"WGS 84 / UTM Zone {utm}").to_epsg()
 
     return int(epsg)
+
 
 def _get_utm_ups_crs(df: gpd.GeoDataFrame, method: Literal["centroid"] | Literal["geopandas"] = "centroid") -> CRS:
     """
@@ -395,16 +396,16 @@ def _get_footprint_projected(
     bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
 ) -> gpd.GeoDataFrame:
     """
-   Get bounding box footprint projected in a specified CRS.
+    Get bounding box footprint projected in a specified CRS.
 
-   The polygon points of the vector are densified during reprojection to warp
-   the rectangular square footprint of the original projection into the new one.
+    The polygon points of the vector are densified during reprojection to warp
+    the rectangular square footprint of the original projection into the new one.
 
-   :param in_crs: Input CRS.
-   :param out_crs: Output CRS.
-   :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
-    Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
-   """
+    :param in_crs: Input CRS.
+    :param out_crs: Output CRS.
+    :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+     Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+    """
 
     # Get bounds
     left, bottom, right, top = bounds

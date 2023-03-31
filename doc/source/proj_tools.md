@@ -7,7 +7,7 @@ kernelspec:
 
 # Projection tools
 
-This section describes projection tools that are common to {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>`, and facilitate 
+This section describes projection tools that are common to {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>`, and facilitate
 geospatial analysis.
 
 ## Get projected bounds
@@ -36,7 +36,7 @@ get_footprint_projected` described below.
 A projected footprint can be derived from both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>` through the
 {func}`~geoutils.Raster.get_footprint_projected` function.
 
-For this, the original rectangular footprint polygon lines are densified to respect the deformation during reprojection. 
+For this, the original rectangular footprint polygon lines are densified to respect the deformation during reprojection.
 
 ```{code-cell} ipython3
 # Get raster footprint in geographic CRS
@@ -56,5 +56,3 @@ any(vect.intersects(rast_footprint))
 ```
 
 ## Estimate a local metric projection
-
-

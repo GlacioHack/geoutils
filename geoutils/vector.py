@@ -39,7 +39,12 @@ from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 from geoutils.misc import copy_doc
-from geoutils.projtools import _get_bounds_projected, _get_footprint_projected, _get_utm_ups_crs, bounds2poly
+from geoutils.projtools import (
+    _get_bounds_projected,
+    _get_footprint_projected,
+    _get_utm_ups_crs,
+    bounds2poly,
+)
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -1337,7 +1342,9 @@ class Vector:
         if out_crs is None:
             out_crs = raster_or_vector.crs
 
-        df = _get_footprint_projected(raster_or_vector.bounds, in_crs=raster_or_vector.crs, out_crs=out_crs, densify_pts=densify_pts)
+        df = _get_footprint_projected(
+            raster_or_vector.bounds, in_crs=raster_or_vector.crs, out_crs=out_crs, densify_pts=densify_pts
+        )
 
         return cls(df)  # type: ignore
 
@@ -1467,10 +1474,15 @@ class Vector:
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
-        return Vector(_get_footprint_projected(bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts))
+        return Vector(
+            _get_footprint_projected(bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
+        )
 
-    def get_metric_crs(self, local_crs_type: Literal["universal"] | Literal["custom"] = "universal",
-                       method: Literal["centroid"] | Literal["geopandas"] = "centroid") -> CRS:
+    def get_metric_crs(
+        self,
+        local_crs_type: Literal["universal"] | Literal["custom"] = "universal",
+        method: Literal["centroid"] | Literal["geopandas"] = "centroid",
+    ) -> CRS:
         """
         Get local metric coordinate reference system for the vector (UTM, UPS, or custom Mercator or Polar).
 
@@ -1516,8 +1528,6 @@ class Vector:
             >>> outlines.ds.plot(ax=ax, ec='k', fc='none')  # doctest: +SKIP
             >>> plt.show()  # doctest: +SKIP
         """
-
-        from geoutils.projtools import latlon_to_utm, utm_to_epsg
 
         # Project in local UTM if metric is True
         if metric:

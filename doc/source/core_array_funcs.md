@@ -118,12 +118,11 @@ np.nanmedian(raster)
 np.ma.median(raster.data)
 ```
 
-If a NumPy core function raises an error (e.g., `np.percentile`), {class}`~geoutils.Raster.nodata` values might not be respected. In this case, use the NaN 
+If a NumPy core function raises an error (e.g., `np.percentile`), {class}`~geoutils.Raster.nodata` values might not be respected. In this case, use the NaN
 function on the {class}`~geoutils.Raster`.
 
 
 ```{note}
-Unfortunately, masked-array functions `np.ma.func` cannot be recognized yet if applied directly to a {class}`~geoutils.Raster`, but **this should come 
+Unfortunately, masked-array functions `np.ma.func` cannot be recognized yet if applied directly to a {class}`~geoutils.Raster`, but **this should come
 soon** as related interfacing is in the works in NumPy!
 ```
-

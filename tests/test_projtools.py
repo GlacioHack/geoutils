@@ -3,11 +3,11 @@ Test projtools
 """
 import os.path
 
+import geopandas as gpd
 import numpy as np
 import pyproj.exceptions
 import pytest
 import shapely
-import geopandas as gpd
 
 import geoutils as gu
 import geoutils.projtools as pt
@@ -104,7 +104,7 @@ class TestProjTools:
         # Verify they are the same
         assert crs_gu == crs_geopandas
 
-    def test_get_metric_crs_ups(self):
+    def test_get_metric_crs_ups(self) -> None:
         """Check that the function works for UPS with points at high latitude."""
 
         # Create a vector of a single point in geographic coordinates
@@ -175,13 +175,21 @@ class TestProjTools:
         assert out_bounds[2] == max(img1.bounds.right, outlines.ds.total_bounds[2])
         assert out_bounds[3] == max(img1.bounds.top, outlines.ds.total_bounds[3])
 
-
     # Try all vectors and rasters
-    @pytest.mark.parametrize("fn_raster_or_vector",
-                            [landsat_b4_path, landsat_rgb_path, landsat_b4_crop_path, everest_outlines_path, aster_dem_path, aster_outlines_path]) # type: ignore
+    @pytest.mark.parametrize(
+        "fn_raster_or_vector",
+        [
+            landsat_b4_path,
+            landsat_rgb_path,
+            landsat_b4_crop_path,
+            everest_outlines_path,
+            aster_dem_path,
+            aster_outlines_path,
+        ],
+    )  # type: ignore
     # Try with geographic, a UTM zone and a Robinson
-    @pytest.mark.parametrize("out_crs", [pyproj.CRS.from_epsg(4326), pyproj.CRS.from_epsg(32610)]) # type: ignore
-    @pytest.mark.parametrize("densify_pts", [2, 10, 5000])
+    @pytest.mark.parametrize("out_crs", [pyproj.CRS.from_epsg(4326), pyproj.CRS.from_epsg(32610)])  # type: ignore
+    @pytest.mark.parametrize("densify_pts", [2, 10, 5000])  # type: ignore
     def test_get_footprint_projected(self, fn_raster_or_vector: str, out_crs: pyproj.CRS, densify_pts: int) -> None:
         """Test the get footprint projected function."""
 
@@ -200,7 +208,7 @@ class TestProjTools:
 
         # Check that the original corner points were conserved
         left, bottom, right, top = rast_or_vect.bounds
-        corners = [shapely.Point([x, y]) for (x,y) in [(left, bottom), (left, top), (right, top), (right, bottom)]]
+        corners = [shapely.Point([x, y]) for (x, y) in [(left, bottom), (left, top), (right, top), (right, bottom)]]
         df = gpd.GeoDataFrame({"geometry": corners}, crs=rast_or_vect.crs)
         df_reproj = df.to_crs(crs=out_crs)
 
@@ -209,6 +217,3 @@ class TestProjTools:
         # Check that densification yields a logical amount of points
         # (4 initial corner points times the densification factor + the last point)
         assert len(footprint.geometry[0].exterior.coords[:]) == densify_pts * 4 + 1
-
-
-
