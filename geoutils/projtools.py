@@ -66,7 +66,14 @@ def utm_to_epsg(utm: str) -> int:
     return int(epsg)
 
 def _get_utm_ups_crs(df: gpd.GeoDataFrame, method: Literal["centroid"] | Literal["geopandas"] = "centroid") -> CRS:
+    """
+    Get universal metric coordinate reference system for the vector passed (UTM or UPS).
 
+    :param df: Input geodataframe.
+    :param method: Method to choose the zone of the CRS, either based on the centroid of the footprint
+       or the extent as implemented in :func:`geopandas.GeoDataFrame.estimate_utm_crs`.
+       Forced to centroid if `local_crs="custom"`.
+    """
     # Check input
     if method.lower() not in ["centroid", "geopandas"]:
         raise ValueError("Method to get local CRS should be one of 'centroid' and 'geopandas'.")
@@ -323,6 +330,15 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 def _get_bounds_projected(
     bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
 ) -> rio.coords.BoundingBox:
+    """
+    Get bounds projected in a specified CRS.
+
+    :param in_crs: Input CRS.
+    :param out_crs: Output CRS.
+    :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
+    Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+    """
+
     # Calculate new bounds
     left, bottom, right, top = bounds
     new_bounds = rio.warp.transform_bounds(in_crs, out_crs, left, bottom, right, top, densify_pts)
@@ -378,6 +394,17 @@ def _densify_geometry(line_geometry: shapely.LineString, densify_pts: int = 5000
 def _get_footprint_projected(
     bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
 ) -> gpd.GeoDataFrame:
+    """
+   Get bounding box footprint projected in a specified CRS.
+
+   The polygon points of the vector are densified during reprojection to warp
+   the rectangular square footprint of the original projection into the new one.
+
+   :param in_crs: Input CRS.
+   :param out_crs: Output CRS.
+   :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+    Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+   """
 
     # Get bounds
     left, bottom, right, top = bounds
