@@ -2241,6 +2241,20 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return new_bounds
 
+    def get_footprint_projected(self, out_crs: CRS, densify_pts: int = 5000) -> Vector:
+        """
+        Get raster footprint projected in a specified CRS.
+
+        The polygon points of the vector are densified during reprojection to warp
+        the rectangular square footprint of the original projection into the new one.
+
+        :param out_crs: Output CRS.
+        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+         Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        """
+
+        return Vector.from_bounds_projected(self, out_crs=out_crs, densify_pts=densify_pts)
+
     def intersection(self, rst: str | Raster, match_ref: bool = True) -> tuple[float, float, float, float]:
         """
         Returns the bounding box of intersection between this image and another.

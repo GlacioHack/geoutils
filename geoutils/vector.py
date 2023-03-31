@@ -39,7 +39,7 @@ from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 from geoutils.misc import copy_doc
-from geoutils.projtools import _get_bounds_projected, bounds2poly
+from geoutils.projtools import _get_bounds_projected, _get_footprint_projected, bounds2poly
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -1337,9 +1337,7 @@ class Vector:
         if out_crs is None:
             out_crs = raster_or_vector.crs
 
-        poly = gu.projtools.bounds2poly(raster_or_vector, out_crs=out_crs)
-
-        df = gpd.GeoDataFrame(geometry=[poly], crs=out_crs)
+        df = _get_footprint_projected(raster_or_vector.bounds, in_crs=raster_or_vector.crs, out_crs=out_crs, densify_pts=densify_pts)
 
         return cls(df)  # type: ignore
 
@@ -1467,6 +1465,20 @@ class Vector:
         new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
 
         return new_bounds
+
+    def get_footprint_projected(self, out_crs: CRS, densify_pts: int = 5000) -> Vector:
+        """
+        Get vector footprint projected in a specified CRS.
+
+        The polygon points of the vector are densified during reprojection to warp
+        the rectangular square footprint of the original projection into the new one.
+
+        :param out_crs: Output CRS.
+        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+         Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        """
+
+        return Vector.from_bounds_projected(self, out_crs=out_crs, densify_pts=densify_pts)
 
     def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> Vector:
         """

@@ -314,13 +314,15 @@ The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bou
     Vector.buffer_without_overlap
 ```
 
-### Coordinate and extent methods
+### Projection tools
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
+    Vector.from_bounds_projected
     Vector.get_bounds_projected
+    Vector.get_footprint_projected
 ```
 
 ### Indexing

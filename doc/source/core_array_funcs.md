@@ -88,15 +88,9 @@ np.max(raster)
 ```
 
 ```{code-cell} ipython3
-# Masked-array function
-np.ma.median(raster)
-```
-
-```{code-cell} ipython3
 # Expliciting an axis for reduction
 np.count_nonzero(raster, axis=2)
 ```
-
 
 Not all array functions are supported, however. GeoUtils supports nearly all [mathematical functions](https://numpy.org/doc/stable/reference/routines.math.html),
 [masked-array functions](https://numpy.org/doc/stable/reference/routines.ma.html) and [logical functions](https://numpy.org/doc/stable/reference/routines.logic.html).
@@ -104,4 +98,32 @@ A full list of supported array function is available in {attr}`geoutils.raster.r
 
 ## Respecting masked values
 
-TODO: finalize once masked-array recursion bug is fixed
+There are two ways to compute statistics on {class}`Rasters<geoutils.Raster>` while respecting masked values:
+
+1. Use any NumPy core function (`np.func`) directly on the {class}`~geoutils.Raster` (this includes NaN functions `np.nanfunc`),
+2. Use any NumPy masked-array function (`np.ma.func`) on {attr}`Raster.data<geoutils.Raster.data>`.
+
+```{code-cell} ipython3
+# Numpy core function applied to the raster
+np.median(raster)
+```
+
+```{code-cell} ipython3
+# Numpy NaN function applied to the raster
+np.nanmedian(raster)
+```
+
+```{code-cell} ipython3
+# Masked-array function on the data
+np.ma.median(raster.data)
+```
+
+If a NumPy core function raises an error (e.g., `np.percentile`), {class}`~geoutils.Raster.nodata` values might not be respected. In this case, use the NaN 
+function on the {class}`~geoutils.Raster`.
+
+
+```{note}
+Unfortunately, masked-array functions `np.ma.func` cannot be recognized yet if applied directly to a {class}`~geoutils.Raster`, but **this should come 
+soon** as related interfacing is in the works in NumPy!
+```
+
