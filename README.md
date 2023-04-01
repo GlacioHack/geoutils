@@ -16,10 +16,10 @@
 **GeoUtils** is an open source project to develop a core Python package for geospatial analysis and foster inter-operability between other Python GIS packages.
 
 It aims at **facilitating end-user geospatial analysis by revolving around consistent `Raster` and `Vector` objects** that effortlessly interface between
-themselves. GeoUtils is founded on **implicit loading behaviour**, **robust numerical interfacing** and **convenient object-based methods** to easily perform 
+themselves. GeoUtils is founded on **implicit loading behaviour**, **robust numerical interfacing** and **convenient object-based methods** to easily perform
 the most common higher-level tasks needed by geospatial users.
 
-If you are looking for an accessible Python package to write the Python equivalent of your [GDAL](https://gdal.org/) command lines, or of your 
+If you are looking for an accessible Python package to write the Python equivalent of your [GDAL](https://gdal.org/) command lines, or of your
 [QGIS](https://www.qgis.org/en/site/) analysis pipeline **without a steep learning curve** on Python GIS syntax, GeoUtils is perfect for you! For more advanced
 users, GeoUtils also aims at being efficient and scalable by supporting lazy loading and parallel computing (ongoing).
 
@@ -29,7 +29,7 @@ the functionalities of these packages through interfacing or composition, and qu
 
 ## Documentation
 
-For installation, quick start, gallery examples, a full feature description or a search through the API, see GeoUtils' documentation at: 
+For installation, quick start, gallery examples, a full feature description or a search through the API, see GeoUtils' documentation at:
 https://geoutils.readthedocs.io.
 
 ## Installation
