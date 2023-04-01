@@ -1,4 +1,4 @@
-# GeoUtils: handling and analysis of georeferenced rasters and vectors in Python.
+# GeoUtils: consistent geospatial analysis in Python.
 
 ![](https://readthedocs.org/projects/geoutils/badge/?version=latest)
 [![build](https://github.com/GlacioHack/geoutils/actions/workflows/python-app.yml/badge.svg)](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml)
