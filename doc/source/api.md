@@ -141,6 +141,7 @@ documentation.
 .. autosummary::
     :toctree: gen_modules/
 
+    Raster.get_metric_crs
     Raster.get_bounds_projected
     Raster.get_footprint_projected
     Raster.intersection
@@ -329,6 +330,7 @@ The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bou
 .. autosummary::
     :toctree: gen_modules/
 
+    Vector.get_metric_crs
     Vector.from_bounds_projected
     Vector.get_bounds_projected
     Vector.get_footprint_projected

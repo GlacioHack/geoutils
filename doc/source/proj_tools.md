@@ -10,10 +10,13 @@ kernelspec:
 This section describes projection tools that are common to {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>`, and facilitate
 geospatial analysis.
 
-## Get projected bounds
+## Get a metric coordinate system
 
-Projected bounds can be directly derived from both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>` through the
-{func}`~geoutils.Raster.get_bounds_projected` function.
+A local metric coordinate system can be estimated for both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>` through the
+{func}`~geoutils.Raster.get_metric_crs` function.
+
+The metric system returned can be either "universal" (zone of the Universal Transverse Mercator or Universal Polar Stereographic system), or "custom" 
+(Mercator or Polar projection centered on the {class}`Raster<geoutils.Raster>` or {class}`Vector<geoutils.Vector>`).
 
 ```{code-cell} ipython3
 import geoutils as gu
@@ -22,13 +25,22 @@ import geoutils as gu
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 print(rast.info())
 
+# Estimate a universal metric CRS for the raster
+rast.get_metric_crs()
+```
+
+## Get projected bounds
+
+Projected bounds can be directly derived from both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>` through the
+{func}`~geoutils.Raster.get_bounds_projected` function.
+
+```{code-cell} ipython3
 # Get raster bounds in geographic CRS by passing its EPSG code
 rast.get_bounds_projected(4326)
 ```
 
 ```{important}
-When projecting to a new CRS, the footprint shape of the data is generally deformed. To account for this, use {func}`~geoutils.Raster.
-get_footprint_projected` described below.
+When projecting to a new CRS, the footprint shape of the data is generally deformed. To account for this, use {func}`~geoutils.Raster.get_footprint_projected` described below.
 ```
 
 ## Get projected footprint
@@ -46,13 +58,3 @@ rast_footprint.show()
 ```
 
 This is for instance useful to check for intersection with other data.
-
-```{code-cell} ipython3
-# Open a vector
-vect = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
-
-# Do these raster and vector intersect?
-any(vect.intersects(rast_footprint))
-```
-
-## Estimate a local metric projection
