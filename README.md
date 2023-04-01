@@ -29,14 +29,16 @@ the functionalities of these packages through interfacing or composition, and qu
 
 ## Documentation
 
-For installation, quick start, gallery examples, a full feature description or a search through the API, see GeoUtils' documentation at: https://geoutils.
-readthedocs.io.
+For installation, quick start, gallery examples, a full feature description or a search through the API, see GeoUtils' documentation at: 
+https://geoutils.readthedocs.io.
 
 ## Installation
 
 ```bash
 mamba install -c conda-forge geoutils
 ```
+
+See [mamba's documentation](https://mamba.readthedocs.io/en/latest/) to install `mamba`, which will solve your environment much faster than `conda`.
 
 ## Start contributing
 
