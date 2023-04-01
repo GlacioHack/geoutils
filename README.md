@@ -15,13 +15,13 @@ Handling and analysis of georeferenced rasters and vectors in Python.
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 [![isort Status]](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
-GeoUtils is community effort to develop a core Python package for geospatial analysis and to foster inter-operability between Python GIS packages. 
-It aims at facilitating end-user geospatial tasks by revolving around consistent `Raster` and `Vector` objects that interface easily, have implicit 
-loading behaviour, robust numerical interfacing and convenient single-line methods for all the most common higher-level methods used in the geospatial 
-community. 
+GeoUtils is community effort to develop a core Python package for geospatial analysis and to foster inter-operability between Python GIS packages.
+It aims at facilitating end-user geospatial tasks by revolving around consistent `Raster` and `Vector` objects that interface easily, have implicit
+loading behaviour, robust numerical interfacing and convenient single-line methods for all the most common higher-level methods used in the geospatial
+community.
 
-GeoUtils relies on [Rasterio](https://github.com/rasterio/rasterio), [GeoPandas](https://github.com/geopandas/geopandas) and [Pyproj](https://github.com/pyproj4/pyproj) for georeferenced 
-calculations, and on [NumPy](https://github.com/numpy/numpy) and [Xarray](https://github.com/pydata/xarray) for numerical analysis. 
+GeoUtils relies on [Rasterio](https://github.com/rasterio/rasterio), [GeoPandas](https://github.com/geopandas/geopandas) and [Pyproj](https://github.com/pyproj4/pyproj) for georeferenced
+calculations, and on [NumPy](https://github.com/numpy/numpy) and [Xarray](https://github.com/pydata/xarray) for numerical analysis.
 
 ## Documentation
 

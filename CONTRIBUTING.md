@@ -38,7 +38,7 @@ pytest
 
 ### Formatting and linting
 
-Install and run `pre-commit` (see [pre-commit documentation](https://pre-commit.com/)), which will use `.pre-commit-config.yaml` to verify spelling errors, 
+Install and run `pre-commit` (see [pre-commit documentation](https://pre-commit.com/)), which will use `.pre-commit-config.yaml` to verify spelling errors,
 import sorting, type checking, formatting and linting.
 
 You can then run pre-commit manually:
