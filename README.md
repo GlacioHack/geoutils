@@ -15,7 +15,7 @@
 
 **GeoUtils** is an open source project to develop a core Python package for geospatial analysis and foster inter-operability between other Python GIS packages.
 
-It aims at **facilitating end-user geospatial analysis by revolving around consistent `Raster` and `Vector` objects** that easily interface between
+It aims at **facilitating end-user geospatial analysis by revolving around consistent `Raster` and `Vector` objects** that effortlessly interface between
 themselves. GeoUtils is founded on **implicit loading behaviour**, **robust numerical interfacing** and **convenient object-based methods** to easily perform 
 the most common higher-level tasks needed by geospatial users.
 
