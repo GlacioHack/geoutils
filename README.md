@@ -13,15 +13,21 @@ Handling and analysis of georeferenced rasters and vectors in Python.
 [![Pre-Commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![Formatted with black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/python/black)
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
-[![isort Status]](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
+[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
-GeoUtils is community effort to develop a core Python package for geospatial analysis and to foster inter-operability between Python GIS packages.
-It aims at facilitating end-user geospatial tasks by revolving around consistent `Raster` and `Vector` objects that interface easily, have implicit
-loading behaviour, robust numerical interfacing and convenient single-line methods for all the most common higher-level methods used in the geospatial
-community.
+GeoUtils is a community effort to develop a core Python package for geospatial analysis and foster inter-operability between Python GIS packages.
+It aims at facilitating end-user geospatial methods by revolving around accessible and consistent `Raster` and `Vector` objects that easily interface between
+themselves. GeoUtils is founded on implicit loading behaviour, robust numerical interfacing and convenient object methods to easily perform the most
+common analyses needed by geospatial users.
+
+If you are looking for an accessible Python package to write the equivalent of your [GDAL](https://gdal.org/) command lines or of your [QGIS](https://www.qgis.org/en/site/) analysis
+pipeline in Python without a steep learning curve on GIS syntax, GeoUtils is perfect for you!
+
+For more advanced users, GeoUtils also aims at being efficient, scalable and robust by supporting lazy loading and parallel computing.
 
 GeoUtils relies on [Rasterio](https://github.com/rasterio/rasterio), [GeoPandas](https://github.com/geopandas/geopandas) and [Pyproj](https://github.com/pyproj4/pyproj) for georeferenced
-calculations, and on [NumPy](https://github.com/numpy/numpy) and [Xarray](https://github.com/pydata/xarray) for numerical analysis.
+calculations, and on [NumPy](https://github.com/numpy/numpy) and [Xarray](https://github.com/pydata/xarray) for numerical analysis. It allows easy access to
+the functionalities of these packages through composition, and good inter-operability with rapid conversions.
 
 ## Documentation
 
