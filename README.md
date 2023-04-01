@@ -21,12 +21,12 @@ themselves. GeoUtils is founded on **implicit loading behaviour**, **robust nume
 the most common higher-level tasks needed by geospatial users.
 
 If you are looking for an accessible Python package to write the Python equivalent of your [GDAL](https://gdal.org/) command lines, or of your 
-[QGIS](https://www.qgis.org/en/site/) analysis pipeline **without a steep learning curve** on GIS syntax, GeoUtils is perfect for you! For more advanced 
-users, GeoUtils also aims at being efficient and scalable by supporting lazy loading and parallel computing.
+[QGIS](https://www.qgis.org/en/site/) analysis pipeline **without a steep learning curve** on Python GIS syntax, GeoUtils is perfect for you! For more advanced 
+users, GeoUtils also aims at being efficient and scalable by supporting lazy loading and parallel computing (ongoing).
 
 GeoUtils relies on [Rasterio](https://github.com/rasterio/rasterio), [GeoPandas](https://github.com/geopandas/geopandas) and [Pyproj](https://github.com/pyproj4/pyproj) for georeferenced
 calculations, and on [NumPy](https://github.com/numpy/numpy) and [Xarray](https://github.com/pydata/xarray) for numerical analysis. It allows easy access to
-the functionalities of these packages through composition, and good inter-operability with rapid conversions.
+the functionalities of these packages through interfacing or composition, and quick inter-operability through object conversion.
 
 ## Documentation
 
