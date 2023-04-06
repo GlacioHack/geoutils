@@ -828,9 +828,7 @@ class TestRaster:
         mask2 = r2.data == np.nanmin(r2)
         r2.set_mask(mask2)
         # Indexing at 0 for the mask in case the data has multiple bands
-        assert (np.count_nonzero(mask2) > 0) & np.array_equal(
-            orig_mask | mask2.filled(False), r2.data.mask
-        )
+        assert (np.count_nonzero(mask2) > 0) & np.array_equal(orig_mask | mask2.filled(False), r2.data.mask)
         # The two last masking (array or Mask) should yield the same result when the data is only 2D
         if r.count == 1:
             assert np.array_equal(r.data.mask, r2.data.mask)
@@ -947,7 +945,7 @@ class TestRaster:
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert list(r_cropped.bounds) == crop_geom2
         assert np.array_equal(r.data[:, rand_int:].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[ :, rand_int:].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:, rand_int:].mask, r_cropped.data.mask)
 
         # Right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_int * r.res[0], crop_geom[3]]

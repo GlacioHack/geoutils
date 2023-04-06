@@ -8,7 +8,6 @@ import os
 import pathlib
 import warnings
 from collections import abc
-from collections.abc import Iterable
 from contextlib import ExitStack
 from math import floor
 from numbers import Number
@@ -174,10 +173,11 @@ _default_rio_attrs = [
 
 def _load_rio(
     dataset: rio.io.DatasetReader,
-    indexes: int | tuple[int, ...] | None = None,
+    indexes: int | list[int] | None = None,
     masked: bool = False,
     transform: Affine | None = None,
     shape: tuple[int, int] | None = None,
+    out_count: int | None = None,
     **kwargs: Any,
 ) -> np.ma.masked_array:
     r"""
@@ -190,6 +190,7 @@ def _load_rio(
     :param masked: Whether the mask should be read (if any exists) to use the nodata to mask values.
     :param transform: Create a window from the given transform (to read only parts of the raster)
     :param shape: Expected shape of the read ndarray. Must be given together with the `transform` argument.
+    :param out_count: Specify the count for a subsampled version (to be used with kwargs out_shape).
 
     :raises ValueError: If only one of ``transform`` and ``shape`` are given.
 
@@ -198,13 +199,16 @@ def _load_rio(
     \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
     Useful ones are:
     .. hlist::
-    * out_shape : to load a subsampled version
+    * out_shape : to load a subsampled version, always use with out_count
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
     # If out_shape is passed, no need to account for transform and shape
     if kwargs["out_shape"] is not None:
         window = None
+        # If multi-band raster, the out_shape needs to contain the count
+        if out_count is not None and out_count > 1:
+            kwargs["out_shape"] = (out_count, *kwargs["out_shape"])
     else:
         if transform is not None and shape is not None:
             if transform == dataset.transform:
@@ -255,7 +259,7 @@ class Raster:
         load_data: bool = False,
         downsample: AnyNumber = 1,
         masked: bool = True,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        nodata: int | float | None = None,
     ) -> None:
         """
         Instantiate a raster from a filename or rasterio dataset.
@@ -280,11 +284,12 @@ class Raster:
         self._data: np.ma.masked_array | None = None
         self._transform: affine.Affine | None = None
         self._crs: CRS | None = None
-        self._nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = nodata
+        self._nodata: int | float | None = nodata
         self._indexes = indexes
         self._indexes_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
-        self._out_shape: tuple[int, int, int] | None = None
+        self._out_count: int | None = None
+        self._out_shape: tuple[int, int] | None = None
         self._disk_hash: int | None = None
         self._is_modified = True
         self._disk_shape: tuple[int, int, int] | None = None
@@ -346,32 +351,35 @@ class Raster:
                 count = self.count
             elif isinstance(indexes, int):
                 count = 1
-            elif isinstance(indexes, abc.Iterable):
+            else:
                 count = len(indexes)
 
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
             if downsample == 1:
-                out_shape = (count, self.height, self.width)
+                out_shape = (self.height, self.width)
             else:
                 down_width = int(np.ceil(self.width / downsample))
                 down_height = int(np.ceil(self.height / downsample))
-                out_shape = (count, down_height, down_width)
+                out_shape = (down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
 
-            # Rebuild out_shape for squeezing 2D arrays
-            if count == 1:
-                out_shape = out_shape[1:]
-
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
+            self._out_count = count
 
             if load_data:
                 # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
                 # Don't need to pass shape and transform, because out_shape overrides it
-                self.data = _load_rio(ds, indexes=indexes, masked=masked, out_shape=out_shape)  # type: ignore
+                self.data = _load_rio(
+                    ds,
+                    indexes=indexes,
+                    masked=masked,
+                    out_shape=out_shape,
+                    out_count=count,
+                )  # type: ignore
 
             # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
             # Set nodata only if data is loaded
@@ -440,10 +448,7 @@ class Raster:
         """Shape (i.e., height, width) of the raster in pixels."""
         # If a downsampling argument was defined but data not loaded yet
         if self._out_shape is not None and not self.is_loaded:
-            if len(self._out_shape) == 2:
-                return self._out_shape
-            else:
-                return self._out_shape[1:]
+            return self._out_shape
         # If data loaded or not, pass the disk/data shape through height and width
         return self.height, self.width
 
@@ -529,14 +534,9 @@ class Raster:
                 valid_indexes = (indexes,)
             else:
                 valid_indexes = tuple(indexes)
-            # Update out_shape
+            # Update out_count if out_shape exists (when a downsampling has been passed)
             if self._out_shape is not None:
-                # The shape attribute will automatically pass out_shape width and height,
-                # just need to add the first axis
-                if len(valid_indexes) > 1:
-                    self._out_shape = (len(valid_indexes), *self.shape)
-                else:
-                    self._out_shape = self.shape
+                self._out_count = len(valid_indexes)
 
         # Save which indexes are loaded
         self._indexes_loaded = valid_indexes
@@ -545,11 +545,12 @@ class Raster:
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
                 dataset,
-                indexes=valid_indexes,
+                indexes=list(valid_indexes),
                 masked=self._masked,
                 transform=self.transform,
                 shape=self.shape,
                 out_shape=self._out_shape,
+                out_count=self._out_count,
                 **kwargs,
             )
 
@@ -1192,7 +1193,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self._is_modified
 
     @property
-    def nodata(self) -> int | float | tuple[int, ...] | tuple[float, ...] | None:
+    def nodata(self) -> int | float | None:
         """
         Nodata value of the raster.
 
@@ -1201,7 +1202,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self._nodata
 
     @nodata.setter
-    def nodata(self, new_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None) -> None:
+    def nodata(self, new_nodata: int | float | None) -> None:
         """
         Set .nodata and update .data by calling set_nodata() with default parameters.
 
@@ -1224,7 +1225,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         update_mask: bool = True,
     ) -> None:
         """
-        Set a new nodata value for each band. This updates the old nodata into a new nodata value in the metadata,
+        Set a new nodata value for all bands. This updates the old nodata into a new nodata value in the metadata,
         replaces the nodata values in the data of the masked array, and updates the mask of the masked array.
 
         Careful! If the new nodata value already exists in the array, the related grid cells will be masked by default.
@@ -1306,7 +1307,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 # Masking like this works from the masked array directly, whether a mask exists or not
                 imgdata[index_new_nodatas] = np.ma.masked
 
-
             # Update the data
             self._data = imgdata
 
@@ -1355,12 +1355,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             new_data = new_data.squeeze(axis=0)
 
         # Check that new_data has correct shape
-        if self.is_loaded:
+
+        # If data is loaded
+        if self._data is not None:
             dtype = str(self._data.dtype)
             orig_shape = self._data.shape
-        elif self.filename is not None:
+        # If filename exists
+        elif self._disk_dtypes is not None:
             dtype = self._disk_dtypes[0]
-            orig_shape = self._out_shape
+            if self._out_count == 1:
+                orig_shape = self._out_shape
+            else:
+                orig_shape = (self._out_count, *self._out_shape)  # type: ignore
         else:
             dtype = str(new_data.dtype)
             orig_shape = new_data.shape
