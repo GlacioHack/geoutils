@@ -1336,7 +1336,7 @@ class Vector:
         :param raster_or_vector: A raster or vector
         :param out_crs: In which CRS to compute the bounds
         :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
-        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+            Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
         if out_crs is None:

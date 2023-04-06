@@ -89,7 +89,7 @@ np.max(raster)
 
 ```{code-cell} ipython3
 # Expliciting an axis for reduction
-np.count_nonzero(raster, axis=2)
+np.count_nonzero(raster, axis=1)
 ```
 
 Not all array functions are supported, however. GeoUtils supports nearly all [mathematical functions](https://numpy.org/doc/stable/reference/routines.math.html),

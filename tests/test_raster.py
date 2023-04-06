@@ -928,6 +928,12 @@ class TestRaster:
         # -- Test with crop_geom being a list/tuple -- ##
         crop_geom: list[float] = list(r.bounds)
 
+        # Test inplace unloaded cropping conserves the shape
+        r.crop(crop_geom=[crop_geom[0] + r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]])
+        assert len(r.data.shape) == 2
+
+        r = gu.Raster(raster_path)
+
         # Test with same bounds -> should be the same #
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3]]
         r_cropped = r.crop(crop_geom2, inplace=False)
@@ -2527,22 +2533,38 @@ class TestRaster:
 
     def test_to_points(self) -> None:
         """Test the outputs of the to_points method and that it doesn't load if not needed."""
+
         # Create a small raster to test point sampling on
-        img1 = gu.Raster.from_array(
+        img0 = gu.Raster.from_array(
             np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
         )
 
         # Sample the whole raster (fraction==1)
-        points = img1.to_points(1, as_array=True)
+        points = img0.to_points(1, as_array=True)
 
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
         assert isinstance(points, np.ndarray)
         assert points.shape == (25, 3)
         assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
 
-        assert img1.to_points(0.2, as_array=True).shape == (5, 3)
+        assert img0.to_points(0.2, as_array=True).shape == (5, 3)
 
-        img2 = gu.Raster(self.landsat_rgb_path, load_data=False)
+        # Try with a single-band raster
+        img1 = gu.Raster(self.aster_dem_path)
+
+        points = img1.to_points(10, as_array=True)
+
+        assert points.shape == (10, 3)
+        assert not img1.is_loaded
+
+        points_frame = img1.to_points(10)
+
+        assert isinstance(points_frame, gu.Vector)
+        assert np.array_equal(points_frame.ds.columns, ["b1", "geometry"])
+        assert points_frame.crs == img1.crs
+
+        # Try with a multi-band raster
+        img2 = gu.Raster(self.landsat_rgb_path)
 
         points = img2.to_points(10, as_array=True)
 

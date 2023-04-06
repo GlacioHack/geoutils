@@ -1848,6 +1848,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                         masked=self._masked,
                         window=final_window,
                     )
+                # Squeeze first axis for single-band
+                if len(crop_img.shape) == 3 and crop_img.shape[0] == 1:
+                    crop_img = crop_img.squeeze(axis=0)
 
         else:
             bbox = rio.coords.BoundingBox(left=xmin, bottom=ymin, right=xmax, top=ymax)
@@ -2884,7 +2887,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
         if self.count == 1:
-            rpts = map_coordinates(self.data[:, :].astype(np.float32), [i, j], **kwargs)
+            rpts = map_coordinates(self.data.astype(np.float32), [i, j], **kwargs)
         else:
             rpts = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
 
@@ -3017,7 +3020,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             points = Vector(
                 gpd.GeoDataFrame(
                     points[:, 2:],
-                    columns=[f"b{i}" for i in range(1, pixel_data.shape[0] + 1)],
+                    columns=[f"b{i}" for i in range(1, self.count + 1)],
                     geometry=gpd.points_from_xy(points[:, 0], points[:, 1]),
                     crs=self.crs,
                 )

@@ -64,7 +64,7 @@ To check if a {class}`~geoutils.Raster` was loaded from the **on-disk** data, us
 To check if the {class}`~geoutils.Raster` was modified since loading from the **on-disk** data, use the {attr}`~geoutils.Raster.is_modified` attribute.
 ```
 
-See {ref}`(raster-class)` for more details.
+See {ref}`raster-class` for more details.
 
 
 ## The {class}`~geoutils.Vector` class composition
@@ -95,4 +95,4 @@ its type: to a {class}`~geoutils.Vector` for a geometric output (e.g., {class}`~
 vector.boundary
 ```
 
-See {ref}`(vector-class)` for more details.
+See {ref}`vector-class` for more details.
