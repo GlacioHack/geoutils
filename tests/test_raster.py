@@ -108,13 +108,13 @@ class TestRaster:
         # For re-instantiation via Raster (r2 above), we check the behaviour:
         # By default, raster were unloaded, and were loaded during raster_equal() independently
         # So the instances should not be pointing to the same data and not mirror modifs
-        r0.data[0, 0, 0] += 5
-        assert r2.data[0, 0, 0] != r0.data[0, 0, 0]
+        r0.data[0, 0] += 5
+        assert r2.data[0, 0] != r0.data[0, 0]
 
         # However, if we reinstantiate now that the data is loaded, it should point to the same
         r5 = gu.Raster(r0)
-        r0.data[0, 0, 0] += 5
-        assert r5.data[0, 0, 0] == r0.data[0, 0, 0]
+        r0.data[0, 0] += 5
+        assert r5.data[0, 0] == r0.data[0, 0]
 
         # With r.count = 2
         r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
@@ -259,7 +259,7 @@ class TestRaster:
         assert r.count_on_disk == 1
         assert r.indexes == (1,)
         assert r.indexes_on_disk == (1,)
-        assert r.data.shape == (r.count, r.height, r.width)
+        assert r.data.shape == (r.height, r.width)
 
         # Test 3 - single band, loading data
         r = gu.Raster(self.landsat_b4_path, load_data=True)
@@ -268,7 +268,7 @@ class TestRaster:
         assert r.count_on_disk == 1
         assert r.indexes == (1,)
         assert r.indexes_on_disk == (1,)
-        assert r.data.shape == (r.count, r.height, r.width)
+        assert r.data.shape == (r.height, r.width)
 
         # Test 4 - multiple bands, load all bands
         r = gu.Raster(self.landsat_rgb_path, load_data=True)
@@ -292,7 +292,7 @@ class TestRaster:
         assert r.count_on_disk == 3
         assert r.indexes == (1,)
         assert r.indexes_on_disk == (1, 2, 3)
-        assert r.data.shape == (r.count, r.height, r.width)
+        assert r.data.shape == (r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
         r = gu.Raster(self.landsat_rgb_path, load_data=True, indexes=[2, 3])
@@ -309,7 +309,7 @@ class TestRaster:
         assert r.count_on_disk == 3
         assert r.indexes == (1,)
         assert r.indexes_on_disk == (1, 2, 3)
-        assert r.data.shape == (r.count, r.height, r.width)
+        assert r.data.shape == (r.height, r.width)
 
         # Test 8 - load a list of band a posteriori calling load()
         r = gu.Raster(self.landsat_rgb_path)
@@ -348,8 +348,8 @@ class TestRaster:
             assert rst.__getattribute__(attr) == rio_ds.__getattribute__(attr)
 
         # Check that the masked arrays are equal
-        assert np.array_equal(rst.data.data, rio_ds.read().data)
-        assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask)
+        assert np.array_equal(rst.data.data, rio_ds.read().squeeze())
+        assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask.squeeze())
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_to_xarray(self, example: str):
@@ -363,7 +363,8 @@ class TestRaster:
         assert isinstance(ds, xr.DataArray)
 
         # Check that all attributes are equal
-        assert ds.band.size == rst.count
+        if rst.count > 1:
+            assert ds.band.size == rst.count
         assert ds.x.size == rst.width
         assert ds.y.size == rst.height
 
@@ -381,7 +382,10 @@ class TestRaster:
         assert ds.spatial_ref.crs_wkt == rst.crs.to_wkt()
 
         # Check that the arrays are equal in NaN type
-        assert np.array_equal(rst.data.data, ds.data)
+        if rst.count > 1:
+            assert np.array_equal(rst.data.data, ds.data)
+        else:
+            assert np.array_equal(rst.data.data, ds.data.squeeze())
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
@@ -418,15 +422,15 @@ class TestRaster:
 
         # Fix the random seed
         np.random.seed(42)
-        arr = np.random.randint(low=val_min, high=val_max, size=(1, width, height), dtype=randint_dtype).astype(dtype)
-        mask = np.random.randint(0, 2, size=(1, width, height), dtype=bool)
+        arr = np.random.randint(low=val_min, high=val_max, size=(width, height), dtype=randint_dtype).astype(dtype)
+        mask = np.random.randint(0, 2, size=(width, height), dtype=bool)
 
         # Check that we are actually masking stuff
         assert np.count_nonzero(mask) > 0
 
         # Add a random floating point value if the data type is float
         if "float" in dtype:
-            arr += np.random.normal(size=(1, width, height))
+            arr += np.random.normal(size=(width, height))
 
         # Use either the default nodata or None
         if nodata_init == "type_default":
@@ -483,7 +487,7 @@ class TestRaster:
             indices = np.indices(np.shape(arr))
             ind_nm = indices[:, ~mask]
             rand_ind = np.random.randint(low=0, high=ind_nm.shape[1], size=1)[0]
-            arr_with_unmasked_nodata[ind_nm[0, rand_ind], ind_nm[1, rand_ind], ind_nm[2, rand_ind]] = np.nan
+            arr_with_unmasked_nodata[ind_nm[0, rand_ind], ind_nm[1, rand_ind]] = np.nan
 
             if nodata is None:
                 with pytest.warns(
@@ -604,7 +608,7 @@ class TestRaster:
         """
         # Test single band
         r = gu.Raster(self.landsat_b4_path, downsample=4)
-        assert r.data.shape == (1, 164, 200)
+        assert r.data.shape == (164, 200)
         assert r.height == 164
         assert r.width == 200
 
@@ -814,18 +818,18 @@ class TestRaster:
         # Test boolean mask
         r = gu.Raster(example)
         # We need to know the existing nodata in case they exist, as set_mask only masks new values
-        orig_mask = r.data.mask.copy().squeeze()
+        orig_mask = r.data.mask.copy()
         mask = r.data.data == np.nanmin(r.data)
         r.set_mask(mask)
         assert (np.count_nonzero(mask) > 0) & np.array_equal(orig_mask | mask > 0, r.data.mask)
 
         #  Test mask object
         r2 = gu.Raster(example)
-        mask2 = r2 == np.nanmin(r2)
+        mask2 = r2.data == np.nanmin(r2)
         r2.set_mask(mask2)
         # Indexing at 0 for the mask in case the data has multiple bands
         assert (np.count_nonzero(mask2) > 0) & np.array_equal(
-            orig_mask | mask2.data.filled(False).squeeze(), r2.data.mask[0, :, :]
+            orig_mask | mask2.filled(False), r2.data.mask
         )
         # The two last masking (array or Mask) should yield the same result when the data is only 2D
         if r.count == 1:
@@ -885,7 +889,7 @@ class TestRaster:
 
         # It should work with a number, or a 1D array of the same length as the indexed one
         rst[mask] = 1.0
-        rst2[arr] = np.ones(rst2.shape)[arr]
+        rst2[mask] = np.ones(rst2.shape)[arr]
 
         # The rasters should be the same
         assert rst2.raster_equal(rst)
@@ -942,29 +946,29 @@ class TestRaster:
         crop_geom2 = [crop_geom[0] + rand_int * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert list(r_cropped.bounds) == crop_geom2
-        assert np.array_equal(r.data[:, :, rand_int:].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, :, rand_int:].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:, rand_int:].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[ :, rand_int:].mask, r_cropped.data.mask)
 
         # Right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_int * r.res[0], crop_geom[3]]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert list(r_cropped.bounds) == crop_geom2
-        assert np.array_equal(r.data[:, :, :-rand_int].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, :, :-rand_int].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:, :-rand_int].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, :-rand_int].mask, r_cropped.data.mask)
 
         # Bottom
         crop_geom2 = [crop_geom[0], crop_geom[1] + rand_int * abs(r.res[1]), crop_geom[2], crop_geom[3]]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert list(r_cropped.bounds) == crop_geom2
-        assert np.array_equal(r.data[:, :-rand_int, :].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, :-rand_int, :].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:-rand_int, :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:-rand_int, :].mask, r_cropped.data.mask)
 
         # Top
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_int * abs(r.res[1])]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert list(r_cropped.bounds) == crop_geom2
-        assert np.array_equal(r.data[:, rand_int:, :].data, r_cropped.data, equal_nan=True)
-        assert np.array_equal(r.data[:, rand_int:, :].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[rand_int:, :].data, r_cropped.data, equal_nan=True)
+        assert np.array_equal(r.data[rand_int:, :].mask, r_cropped.data.mask)
 
         # Same but tuple
         crop_geom3: tuple[float, float, float, float] = (
@@ -975,8 +979,8 @@ class TestRaster:
         )
         r_cropped = r.crop(crop_geom3, inplace=False)
         assert list(r_cropped.bounds) == list(crop_geom3)
-        assert np.array_equal(r.data[:, rand_int:, :].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, rand_int:, :].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[rand_int:, :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[rand_int:, :].mask, r_cropped.data.mask)
 
         # -- Test with crop_geom being a Raster -- #
         r_cropped2 = r.crop(r_cropped, inplace=False)
@@ -1010,29 +1014,29 @@ class TestRaster:
         crop_geom2 = [crop_geom[0] + rand_float * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
-        assert np.array_equal(r.data[:, :, int(rand_float) :].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, :, int(rand_float) :].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:, int(rand_float) :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, int(rand_float) :].mask, r_cropped.data.mask)
 
         # right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_float * r.res[0], crop_geom[3]]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
-        assert np.array_equal(r.data[:, :, : -int(rand_float)].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, :, : -int(rand_float)].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:, : -int(rand_float)].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, : -int(rand_float)].mask, r_cropped.data.mask)
 
         # bottom
         crop_geom2 = [crop_geom[0], crop_geom[1] + rand_float * abs(r.res[1]), crop_geom[2], crop_geom[3]]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
-        assert np.array_equal(r.data[:, : -int(rand_float), :].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, : -int(rand_float), :].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[: -int(rand_float), :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[: -int(rand_float), :].mask, r_cropped.data.mask)
 
         # top
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_float * abs(r.res[1])]
         r_cropped = r.crop(crop_geom2, inplace=False)
         assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
-        assert np.array_equal(r.data[:, int(rand_float) :, :].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, int(rand_float) :, :].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[int(rand_float) :, :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[int(rand_float) :, :].mask, r_cropped.data.mask)
 
         # -- Test with mode='match_extent' -- #
         # Test all sides at once, with rand_float less than half the smallest extent
@@ -1166,7 +1170,7 @@ class TestRaster:
         )
 
         # data is cropped to the same extent
-        new_data = r.data[:, rand_int::, rand_int::]
+        new_data = r.data[rand_int::, rand_int::]
         r2b = gu.Raster.from_array(data=new_data, transform=new_transform, crs=r.crs, nodata=r.nodata)
 
         # Create a raster with different resolution
@@ -1592,7 +1596,6 @@ class TestRaster:
             # 2x2 slices
             z_ind = np.mean(
                 img[
-                    0,
                     slice(int(np.floor(i[k])), int(np.ceil(i[k])) + 1),
                     slice(int(np.floor(j[k])), int(np.ceil(j[k])) + 1),
                 ]
@@ -1629,7 +1632,7 @@ class TestRaster:
         img = r.data
         for k in range(len(xrand)):
             # We directly sample the values
-            z_ind = img[0, int(i[k]), int(j[k])]
+            z_ind = img[int(i[k]), int(j[k])]
             list_z_ind.append(z_ind)
 
         rpts = r.interp_points(pts, order=1)
@@ -1641,7 +1644,7 @@ class TestRaster:
         y = 3101000.0
         i, j = r.xy2ij(x, y)
         val = r.interp_points([(x, y)], order=1)[0]
-        assert img[0, int(i), int(j)] == val
+        assert img[int(i), int(j)] == val
 
         # Finally, check that interp convert to latlon
         lat, lon = gu.projtools.reproject_to_latlon((x, y), in_crs=r.crs)
@@ -1675,7 +1678,7 @@ class TestRaster:
 
         # Check that the value at this coordinate is the same as when indexing
         z_val = r.value_at_coords(xtest0, ytest0)
-        z = r.data.data[0, itest0, jtest0]
+        z = r.data.data[itest0, jtest0]
         assert z == z_val
 
         # Check that the value is the same the other 4 corners of the pixel
@@ -1763,17 +1766,17 @@ class TestRaster:
         # Lower right pixel
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = pt.reproject_to_latlon([x, y], r.crs)
-        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -1, -1]
+        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[-1, -1]
 
         # One pixel above
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
         lat, lon = pt.reproject_to_latlon([x, y], r.crs)
-        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -2, -1]
+        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[-2, -1]
 
         # One pixel left
         x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = pt.reproject_to_latlon([x, y], r.crs)
-        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[0, -1, -2]
+        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[-1, -2]
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:
@@ -1794,7 +1797,7 @@ class TestRaster:
 
         # Check that the new_nodata does not exist in the raster yet, and set it
         assert np.count_nonzero(r_copy.data.data == new_nodata) == 0
-        r.set_nodata(nodata=new_nodata)
+        r.set_nodata(new_nodata=new_nodata)
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
@@ -1814,7 +1817,7 @@ class TestRaster:
         # Then, we repeat for a nodata that already existed, we artificially modify the value on an unmasked pixel
         r = r_copy.copy()
         mask_pixel_artificially_set = np.zeros(np.shape(r.data), dtype=bool)
-        mask_pixel_artificially_set[0, 0, 0] = True
+        mask_pixel_artificially_set[0, 0] = True
         r.data.data[mask_pixel_artificially_set] = new_nodata
         # We set the value as masked before unmasking to create the mask if it does not exist yet
         r.data[mask_pixel_artificially_set] = np.ma.masked
@@ -1831,7 +1834,7 @@ class TestRaster:
                 "and/or update_mask=False to change this behaviour."
             ),
         ):
-            r.set_nodata(nodata=new_nodata)
+            r.set_nodata(new_nodata=new_nodata)
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
@@ -1873,7 +1876,7 @@ class TestRaster:
                 "with update_mask=False to change this behaviour."
             ),
         ):
-            r.set_nodata(nodata=new_nodata, update_array=False)
+            r.set_nodata(new_nodata=new_nodata, update_array=False)
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
@@ -1901,7 +1904,7 @@ class TestRaster:
                 "value. Use set_nodata() with update_array=False to change this behaviour."
             ),
         ):
-            r.set_nodata(nodata=new_nodata, update_mask=False)
+            r.set_nodata(new_nodata=new_nodata, update_mask=False)
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
@@ -1923,7 +1926,7 @@ class TestRaster:
         # -- Fourth, test set_nodata() with both update_array=False and update_mask=False --
         r = r_copy.copy()
 
-        r.set_nodata(nodata=new_nodata, update_array=False, update_mask=False)
+        r.set_nodata(new_nodata=new_nodata, update_array=False, update_mask=False)
         r.data.data[mask_pixel_artificially_set] = new_nodata
         # We set the value as masked before unmasking to create the mask if it does not exist yet
         r.data[mask_pixel_artificially_set] = np.ma.masked
@@ -1940,8 +1943,8 @@ class TestRaster:
         # -- Fifth, let's check that errors are raised when they should --
 
         # A ValueError if input nodata is neither a list, tuple, integer, floating
-        with pytest.raises(ValueError, match="Type of nodata not understood, must be tuple or float or int"):
-            r.set_nodata(nodata="this_should_not_work")  # type: ignore
+        with pytest.raises(ValueError, match="Type of nodata not understood, must be float or int."):
+            r.set_nodata(new_nodata="this_should_not_work")  # type: ignore
 
         # A ValueError if nodata value is incompatible with dtype
         expected_message = r"nodata value .* incompatible with self.dtype .*"
@@ -2260,9 +2263,9 @@ class TestRaster:
 
         # Test that data mask is taken into account
         img.data.mask = np.zeros((img.shape), dtype="bool")
-        img.data.mask[0, 0, 0] = True
+        img.data.mask[0, 0] = True
         out_img = gu.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
-        assert out_img.data.mask[0, 0, 0]
+        assert out_img.data.mask[0, 0]
 
         # Check that error is raised if the transform is not affine
         with pytest.raises(TypeError, match="The transform argument needs to be Affine or tuple."):
@@ -2314,9 +2317,7 @@ class TestRaster:
 
         # Check that the shapes are correct.
         assert red.count == 1
-        assert red.data.shape[0] == 1
         assert img.count == 3
-        assert img.data.shape[0] == 3
 
         # Extract only one band (then it will not return a list)
         red2 = img.split_bands(copy=False, subset=1)[0]
@@ -2757,36 +2758,36 @@ class TestMask:
         crop_geom2 = [crop_geom[0] + rand_int * mask.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
         mask_cropped = mask.crop(crop_geom2, inplace=False)
         assert list(mask_cropped.bounds) == crop_geom2
-        assert np.array_equal(mask.data[:, :, rand_int:].data, mask_cropped.data.data, equal_nan=True)
-        assert np.array_equal(mask.data[:, :, rand_int:].mask, mask_cropped.data.mask)
+        assert np.array_equal(mask.data[:, rand_int:].data, mask_cropped.data.data, equal_nan=True)
+        assert np.array_equal(mask.data[:, rand_int:].mask, mask_cropped.data.mask)
 
         # Right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_int * mask.res[0], crop_geom[3]]
         mask_cropped = mask.crop(crop_geom2, inplace=False)
         assert list(mask_cropped.bounds) == crop_geom2
-        assert np.array_equal(mask.data[:, :, :-rand_int].data, mask_cropped.data.data, equal_nan=True)
-        assert np.array_equal(mask.data[:, :, :-rand_int].mask, mask_cropped.data.mask)
+        assert np.array_equal(mask.data[:, :-rand_int].data, mask_cropped.data.data, equal_nan=True)
+        assert np.array_equal(mask.data[:, :-rand_int].mask, mask_cropped.data.mask)
 
         # Bottom
         crop_geom2 = [crop_geom[0], crop_geom[1] + rand_int * abs(mask.res[1]), crop_geom[2], crop_geom[3]]
         mask_cropped = mask.crop(crop_geom2, inplace=False)
         assert list(mask_cropped.bounds) == crop_geom2
-        assert np.array_equal(mask.data[:, :-rand_int, :].data, mask_cropped.data.data, equal_nan=True)
-        assert np.array_equal(mask.data[:, :-rand_int, :].mask, mask_cropped.data.mask)
+        assert np.array_equal(mask.data[:-rand_int, :].data, mask_cropped.data.data, equal_nan=True)
+        assert np.array_equal(mask.data[:-rand_int, :].mask, mask_cropped.data.mask)
 
         # Top
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_int * abs(mask.res[1])]
         mask_cropped = mask.crop(crop_geom2, inplace=False)
         assert list(mask_cropped.bounds) == crop_geom2
-        assert np.array_equal(mask.data[:, rand_int:, :].data, mask_cropped.data, equal_nan=True)
-        assert np.array_equal(mask.data[:, rand_int:, :].mask, mask_cropped.data.mask)
+        assert np.array_equal(mask.data[rand_int:, :].data, mask_cropped.data, equal_nan=True)
+        assert np.array_equal(mask.data[rand_int:, :].mask, mask_cropped.data.mask)
 
         # Test inplace
         mask_orig = mask.copy()
         mask.crop(crop_geom2)
         assert list(mask.bounds) == crop_geom2
-        assert np.array_equal(mask_orig.data[:, rand_int:, :].data, mask.data, equal_nan=True)
-        assert np.array_equal(mask_orig.data[:, rand_int:, :].mask, mask.data.mask)
+        assert np.array_equal(mask_orig.data[rand_int:, :].data, mask.data, equal_nan=True)
+        assert np.array_equal(mask_orig.data[rand_int:, :].mask, mask.data.mask)
 
         # Run with match_extent, check that inplace or not yields the same result
 
@@ -2856,7 +2857,7 @@ class TestArithmetic:
         crs=None,
         nodata=_default_nodata("float32"),
     )
-    r2_zero.data[0, 0, 0] = 0
+    r2_zero.data[0, 0] = 0
 
     # Create rasters with different shape, crs or transforms for testing errors
     r1_wrong_shape = gu.Raster.from_array(
@@ -3004,7 +3005,7 @@ class TestArithmetic:
         r2 = self.r2
         r2_zero = self.r2_zero
         satimg = self.satimg
-        array = np.random.randint(1, 255, (1, self.height, self.width)).astype("float64")
+        array = np.random.randint(1, 255, (self.height, self.width)).astype("float64")
         floatval = 3.14
         intval = 1
 
@@ -3105,7 +3106,7 @@ class TestArithmetic:
         warnings.filterwarnings("ignore", message="invalid value encountered")
 
         # Test various inputs: Raster with different dtypes, np.ndarray, single number
-        array = np.random.randint(1, 255, (1, self.height, self.width)).astype("float64")
+        array = np.random.randint(1, 255, (self.height, self.width)).astype("float64")
         floatval = 3.14
         intval = 1
 
@@ -3672,7 +3673,7 @@ class TestArrayInterface:
             elif "gradient" in arrfunc_str:
                 # For the gradient, we need to take a single band
                 output_rst = arrfunc(rst)
-                output_ma = np.gradient(rst.data[0, :, :])
+                output_ma = np.gradient(rst.data)
             else:
                 output_rst = arrfunc(rst)
                 output_ma = arrfunc(rst.data)

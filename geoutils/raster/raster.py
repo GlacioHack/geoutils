@@ -222,8 +222,6 @@ def _load_rio(
         data = dataset.read(masked=masked, window=window, **kwargs)
     else:
         data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
-    if len(data.shape) == 2:
-        data = data[np.newaxis, :, :]
     return data
 
 
@@ -363,6 +361,10 @@ class Raster:
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
 
+            # Rebuild out_shape for squeezing 2D arrays
+            if count == 1:
+                out_shape = out_shape[1:]
+
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
 
@@ -400,7 +402,10 @@ class Raster:
     def count(self) -> int:
         """Count of bands loaded in memory if they are, otherwise the one on disk."""
         if self.is_loaded:
-            return int(self.data.shape[0])
+            if len(self.data.shape) == 2:
+                return 1
+            else:
+                return int(self.data.shape[0])
         #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
         return self.count_on_disk  # type: ignore
 
@@ -409,25 +414,38 @@ class Raster:
         """Height of the raster in pixels."""
         if not self.is_loaded:
             return self._disk_shape[1]  # type: ignore
-        return int(self.data.shape[1])
+        else:
+            # If the raster is single-band
+            if len(self.data.shape) == 2:
+                return int(self.data.shape[0])
+            # Or multi-band
+            else:
+                return int(self.data.shape[1])
 
     @property
     def width(self) -> int:
         """Width of the raster in pixels."""
         if not self.is_loaded:
             return self._disk_shape[2]  # type: ignore
-        return int(self.data.shape[2])
+        else:
+            # If the raster is single-band
+            if len(self.data.shape) == 2:
+                return int(self.data.shape[1])
+            # Or multi-band
+            else:
+                return int(self.data.shape[2])
 
     @property
     def shape(self) -> tuple[int, int]:
         """Shape (i.e., height, width) of the raster in pixels."""
         # If a downsampling argument was defined but data not loaded yet
         if self._out_shape is not None and not self.is_loaded:
-            return self._out_shape[1], self._out_shape[2]
-        # If data is not loaded, pass the disk shape
-        if not self.is_loaded:
-            return self._disk_shape[1], self._disk_shape[2]  # type: ignore
-        return int(self.data.shape[1]), int(self.data.shape[2])
+            if len(self._out_shape) == 2:
+                return self._out_shape
+            else:
+                return self._out_shape[1:]
+        # If data loaded or not, pass the disk/data shape through height and width
+        return self.height, self.width
 
     @property
     def res(self) -> tuple[float | int, float | int]:
@@ -513,7 +531,12 @@ class Raster:
                 valid_indexes = tuple(indexes)
             # Update out_shape
             if self._out_shape is not None:
-                self._out_shape = (len(valid_indexes), self._out_shape[1], self._out_shape[2])
+                # The shape attribute will automatically pass out_shape width and height,
+                # just need to add the first axis
+                if len(valid_indexes) > 1:
+                    self._out_shape = (len(valid_indexes), *self.shape)
+                else:
+                    self._out_shape = self.shape
 
         # Save which indexes are loaded
         self._indexes_loaded = valid_indexes
@@ -605,7 +628,10 @@ class Raster:
             nodata=self.nodata,
             driver="GTiff",
         ) as ds:
-            ds.write(self.data)
+            if self.count == 1:
+                ds.write(self.data[np.newaxis, :, :])
+            else:
+                ds.write(self.data)
 
         # Then open as a DatasetReader
         return mfh.open()
@@ -690,7 +716,10 @@ class Raster:
         if isinstance(index, Mask):
             if not self.georeferenced_grid_equal(index):
                 raise ValueError("Indexing a raster with a mask requires the two being on the same georeferenced grid.")
-            return self.data[:, index.data.squeeze()]
+            if self.count == 1:
+                return self.data[index.data.squeeze()]
+            else:
+                return self.data[:, index.data.squeeze()]
         # If input is array with the same shape
         elif isinstance(index, np.ndarray):
             if np.shape(index) != self.shape:
@@ -698,7 +727,10 @@ class Raster:
             if str(index.dtype) != "bool":
                 index = index.astype(bool)
                 warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
-            return self.data[:, index]
+            if self.count == 1:
+                return self.data[index]
+            else:
+                return self.data[:, index]
 
         # Otherwise, subset with crop
         else:
@@ -719,7 +751,7 @@ class Raster:
             if not self.georeferenced_grid_equal(index):
                 raise ValueError("Indexing a raster with a mask requires the two being on the same georeferenced grid.")
 
-            ind = index.data.squeeze()
+            ind = index.data
         # If input is array with the same shape
         elif isinstance(index, np.ndarray):
             if np.shape(index) != self.shape:
@@ -741,8 +773,10 @@ class Raster:
         if not self.is_loaded:
             self.load()
         # Assign the values to the index
-        self._data[:, ind] = assign  # type: ignore
-
+        if self.count == 1:
+            self._data[ind] = assign  # type: ignore
+        else:
+            self._data[:, ind] = assign  # type: ignore
         return None
 
     def raster_equal(self, other: object) -> bool:
@@ -823,18 +857,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         elif isinstance(other, np.ndarray):
             # Check that both array have the same shape
 
-            if len(other.shape) == 2:
-                other_data = other[np.newaxis, :, :]
-            else:
-                other_data = other
+            other_data = other
+
+            # Squeeze first axis of other data if possible
+            if len(other_data.shape) == 3 and other_data.shape[0] == 1:
+                other_data = other_data.squeeze(axis=0)
 
             if self.data.shape == other_data.shape:
                 pass
             else:
-                raise ValueError("Both rasters must have the same shape.")
+                raise ValueError("The raster and array must have the same shape.")
 
             nodata2 = None
-            dtype2 = other_data.dtype
+            dtype2 = other.dtype
 
         # Case 3 - other is a single number
         else:
@@ -1180,11 +1215,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param new_nodata: New nodata to assign to this instance of Raster.
         """
 
-        self.set_nodata(nodata=new_nodata)
+        self.set_nodata(new_nodata=new_nodata)
 
     def set_nodata(
         self,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None,
+        new_nodata: int | float | None,
         update_array: bool = True,
         update_mask: bool = True,
     ) -> None:
@@ -1207,93 +1242,76 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If you wish to set nodata value without updating the mask, run this function with the update_mask argument as
         False.
 
-        If None is passed as nodata, only the metadata is updated and the mask of oldnodata unset.
+        If None is passed as nodata, only the metadata is updated and the mask of old nodata unset.
 
-        :param nodata: Nodata values.
+        :param new_nodata: New nodata value.
         :param update_array: Update the old nodata values into new nodata values in the data array.
         :param update_mask: Update the old mask by unmasking old nodata and masking new nodata (if array is updated,
             old nodata are changed to new nodata and thus stay masked).
         """
-        if nodata is not None and not isinstance(nodata, (tuple, int, float, np.integer, np.floating)):
-            raise ValueError("Type of nodata not understood, must be tuple or float or int")
+        if new_nodata is not None and not isinstance(new_nodata, (int, float, np.integer, np.floating)):
+            raise ValueError("Type of nodata not understood, must be float or int.")
 
-        elif (isinstance(nodata, (int, float, np.integer, np.floating))) and self.count > 1:
-            nodata = (nodata,) * self.count
-
-        elif isinstance(nodata, tuple) and self.count == 1:
-            nodata = nodata[0]
-
-        elif nodata is None:
-            nodata = None
-
-        # Check that nodata has same length as number of bands in self
-        if isinstance(nodata, tuple):
-            if len(nodata) != self.count:
-                raise ValueError(f"Length of nodata ({len(nodata)}) incompatible with number of bands ({self.count})")
-            # Check that nodata value is compatible with dtype
-            for k in range(len(nodata)):
-                if not rio.dtypes.can_cast_dtype(nodata[k], self.dtypes[k]):
-                    raise ValueError(f"nodata value {nodata[k]} incompatible with self.dtype {self.dtypes[k]}")
-        elif isinstance(nodata, (int, float, np.integer, np.floating)):
-            if not rio.dtypes.can_cast_dtype(nodata, self.dtypes[0]):
-                raise ValueError(f"nodata value {nodata} incompatible with self.dtype {self.dtypes[0]}")
+        if new_nodata is not None:
+            if not rio.dtypes.can_cast_dtype(new_nodata, self.dtypes[0]):
+                raise ValueError(f"nodata value {new_nodata} incompatible with self.dtype {self.dtypes[0]}")
 
         # If we update mask or array, get the masked array
         if update_array or update_mask:
+
             # Extract the data variable, so the self.data property doesn't have to be called a bunch of times
             imgdata = self.data
 
-            # Loop through the bands
-            for i, new_nodata in enumerate(nodata if isinstance(nodata, Iterable) else [nodata]):
-                # Get the index of old nodatas
-                index_old_nodatas = imgdata.data[i, :, :] == self.nodata
+            # Get the index of old nodatas
+            index_old_nodatas = imgdata.data == self.nodata
 
-                # Get the index of new nodatas, if it is defined
-                index_new_nodatas = imgdata.data[i, :, :] == new_nodata
+            # Get the index of new nodatas, if it is defined
+            index_new_nodatas = imgdata.data == new_nodata
 
-                if np.count_nonzero(index_new_nodatas) > 0:
-                    if update_array and update_mask:
-                        warnings.warn(
-                            message="New nodata value found in the data array. Those will be masked, and the old "
-                            "nodata cells will now take the same value. Use set_nodata() with update_array=False "
-                            "and/or update_mask=False to change this behaviour.",
-                            category=UserWarning,
-                        )
-                    elif update_array:
-                        warnings.warn(
-                            "New nodata value found in the data array. The old nodata cells will now take the same "
-                            "value. Use set_nodata() with update_array=False to change this behaviour.",
-                            category=UserWarning,
-                        )
-                    elif update_mask:
-                        warnings.warn(
-                            "New nodata value found in the data array. Those will be masked. Use set_nodata() "
-                            "with update_mask=False to change this behaviour.",
-                            category=UserWarning,
-                        )
+            if np.count_nonzero(index_new_nodatas) > 0:
+                if update_array and update_mask:
+                    warnings.warn(
+                        message="New nodata value found in the data array. Those will be masked, and the old "
+                        "nodata cells will now take the same value. Use set_nodata() with update_array=False "
+                        "and/or update_mask=False to change this behaviour.",
+                        category=UserWarning,
+                    )
+                elif update_array:
+                    warnings.warn(
+                        "New nodata value found in the data array. The old nodata cells will now take the same "
+                        "value. Use set_nodata() with update_array=False to change this behaviour.",
+                        category=UserWarning,
+                    )
+                elif update_mask:
+                    warnings.warn(
+                        "New nodata value found in the data array. Those will be masked. Use set_nodata() "
+                        "with update_mask=False to change this behaviour.",
+                        category=UserWarning,
+                    )
 
-                if update_array:
-                    # Only update array with new nodata if it is defined
-                    if nodata is not None:
-                        # Replace the nodata value in the Raster
-                        imgdata.data[i, index_old_nodatas] = new_nodata
+            if update_array:
+                # Only update array with new nodata if it is defined
+                if new_nodata is not None:
+                    # Replace the nodata value in the Raster
+                    imgdata.data[index_old_nodatas] = new_nodata
 
-                if update_mask:
-                    # If a mask already exists, unmask the old nodata values before masking the new ones
-                    # Can be skipped if array is updated (nodata is transferred from old to new, this part of the mask
-                    # stays the same)
-                    if np.ma.is_masked(imgdata) and (not update_array or nodata is None):
-                        # No way to unmask a value from the masked array, so we modify the mask directly
-                        imgdata.mask[i, index_old_nodatas] = False
+            if update_mask:
+                # If a mask already exists, unmask the old nodata values before masking the new ones
+                # Can be skipped if array is updated (nodata is transferred from old to new, this part of the mask
+                # stays the same)
+                if np.ma.is_masked(imgdata) and (not update_array or new_nodata is None):
+                    # No way to unmask a value from the masked array, so we modify the mask directly
+                    imgdata.mask[index_old_nodatas] = False
 
-                    # Masking like this works from the masked array directly, whether a mask exists or not
-                    imgdata[i, index_new_nodatas] = np.ma.masked
+                # Masking like this works from the masked array directly, whether a mask exists or not
+                imgdata[index_new_nodatas] = np.ma.masked
+
 
             # Update the data
             self._data = imgdata
 
         # Update the nodata value
-        self._nodata = nodata
+        self._nodata = new_nodata
 
     @property
     def data(self) -> np.ma.masked_array:
@@ -1315,7 +1333,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         The data setter behaviour is the following:
 
         1. Writes the data in a masked array, whether the input is a classic array or a masked_array,
-        2. Reshapes the data in a 3D array if it is 2D that can be broadcasted, raises an error otherwise,
+        2. Reshapes the data to a 2D array if it is single band,
         3. Raises an error if the dtype is different from that of the Raster, and points towards .copy() or .astype(),
         4. Sets a new nodata value to the Raster if none is set and if the provided array contains non-finite values
             that are unmasked (including if there is no mask at all, e.g. NaNs in a classic array),
@@ -1325,23 +1343,27 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param new_data: New data to assign to this instance of Raster.
 
         """
-        # Check that new_data is a Numpy array
+        # Check that new_data is a NumPy array
         if not isinstance(new_data, np.ndarray):
             raise ValueError("New data must be a numpy array.")
 
-        if len(new_data.shape) == 2:
-            new_data = new_data[np.newaxis, :, :]
+        if len(new_data.shape) not in [2, 3]:
+            raise ValueError("Data array must have 2 or 3 dimensions.")
+
+        # Squeeze 3D data if the band axis is of length 1
+        if len(new_data.shape) == 3 and new_data.shape[0] == 1:
+            new_data = new_data.squeeze(axis=0)
 
         # Check that new_data has correct shape
-        if self._data is not None:
+        if self.is_loaded:
             dtype = str(self._data.dtype)
-            orig_shape = self._data.shape[1:]
+            orig_shape = self._data.shape
         elif self.filename is not None:
-            dtype = self.dtypes[0]
-            orig_shape = self.shape
+            dtype = self._disk_dtypes[0]
+            orig_shape = self._out_shape
         else:
             dtype = str(new_data.dtype)
-            orig_shape = new_data.shape[1:]
+            orig_shape = new_data.shape
 
         # Check that new_data has the right type
         if str(new_data.dtype) != dtype:
@@ -1350,9 +1372,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 "different dtype, or astype() to change type.".format(dtype)
             )
 
-        if new_data.shape[1:] != orig_shape:
+        if new_data.shape != orig_shape:
             raise ValueError(
-                f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape[1:]}."
+                f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape}."
             )
 
         # If the new data is not masked and has non-finite values, we define a default nodata value
@@ -1696,7 +1718,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             first_arg = args[0].data.compressed()
 
         elif func.__name__ in ["gradient"]:
-            first_arg = args[0].data[0, :, :]
+            if self.count == 1:
+                first_arg = args[0].data
+            else:
+                warnings.warn("Applying np.gradient to first raster band only.")
+                first_arg = args[0].data[0, :, :]
 
         # Otherwise, we run the numpy function normally (most take masks into account)
         else:
@@ -1805,7 +1831,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             if self.is_loaded:
                 (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
-                crop_img = self.data[:, rowmin:rowmax, colmin:colmax]
+                if self.count == 1:
+                    crop_img = self.data[rowmin:rowmax, colmin:colmax]
+                else:
+                    crop_img = self.data[:, rowmin:rowmax, colmin:colmax]
             else:
                 with rio.open(self.filename) as raster:
                     crop_img = raster.read(
@@ -2154,7 +2183,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
                 save_data = np.zeros(self.data.shape)
-                save_data[:, :, :] = blank_value
+                save_data[:] = blank_value
             else:
                 raise ValueError("blank_values must be one of int, float (or None).")
         else:
@@ -2167,6 +2196,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     nodata = _default_nodata(save_data.dtype)
                     warnings.warn(f"No nodata set, will use default value of {nodata}")
                 save_data = save_data.filled(nodata)
+
+        # Cast to 3D before saving if single band
+        if self.count == 1:
+            save_data = save_data[np.newaxis, :, :]
 
         with rio.open(
             filename,
@@ -2378,6 +2411,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             raise ValueError("Index must be int or None")
 
+        # Get data
+        if self.count == 1:
+            data = self.data
+        else:
+            data = self.data[index - 1, :, :]
+
         # If multiple bands (RGB), cbar does not make sense
         if isinstance(index, abc.Sequence):
             if len(index) > 1:
@@ -2394,10 +2433,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Set colorbar min/max values (needed for ScalarMappable)
         if vmin is None:
-            vmin = np.nanmin(self.data[index - 1, :, :])
+            vmin = np.nanmin(data)
 
         if vmax is None:
-            vmax = np.nanmax(self.data[index - 1, :, :])
+            vmax = np.nanmax(data)
 
         # Make sure they are numbers, to avoid mpl error
         try:
@@ -2423,7 +2462,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Use data array directly, as rshow on self.ds will re-load data
         rshow(
-            self.data[index - 1, :, :],
+            data,
             transform=self.transform,
             ax=ax0,
             cmap=cmap,
@@ -2579,7 +2618,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             rio_window = rio.windows.Window(col, row, width, height)
 
             if self.is_loaded:
-                data = self.data[slice(None) if index is None else index - 1, row : row + height, col : col + width]
+                if self.count == 1:
+                    data = self.data[row : row + height, col : col + width]
+                else:
+                    data = self.data[slice(None) if index is None else index - 1, row : row + height, col : col + width]
                 if not masked:
                     data = data.filled()
                 value = format_value(data)
@@ -2835,7 +2877,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
-        rpts = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
+        if self.count == 1:
+            rpts = map_coordinates(self.data[:, :].astype(np.float32), [i, j], **kwargs)
+        else:
+            rpts = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
+
         rpts = np.array(rpts, dtype=np.float32)
         rpts[np.array(ind_invalid)] = np.nan
 
@@ -2877,7 +2923,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 # Set the data to a slice of the original array
                 bands.append(
                     self.from_array(
-                        self.data[band_n - 1, :, :].reshape((1,) + self.data.shape[1:]),
+                        self.data[band_n - 1, :, :],
                         transform=self.transform,
                         crs=self.crs,
                         nodata=self.nodata,
@@ -2947,7 +2993,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If the Raster is loaded, pick from the data, otherwise use the disk-sample method from rasterio.
         if self.is_loaded:
-            pixel_data = self.data[:, rows, cols]
+            if self.count == 1:
+                pixel_data = self.data[rows, cols]
+            else:
+                pixel_data = self.data[:, rows, cols]
         else:
             with rio.open(self.filename) as raster:
                 pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords)))).T
@@ -3135,7 +3184,7 @@ class Mask(Raster):
                     category=UserWarning,
                     message="Multi-band raster provided to create a Mask, only the first band will be used.",
                 )
-                self._data = np.reshape(self.data[0, :], (1, self.shape[0], self.shape[1]))
+                self._data = self.data[0, :, :]
 
             # Convert masked array to boolean
             self._data = self.data.astype(bool)

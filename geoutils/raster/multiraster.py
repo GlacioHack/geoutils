@@ -193,7 +193,10 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         else:
             # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
             # Use only first band
-            data.append(reprojected_raster.data[0, :])
+            if reprojected_raster.count == 1:
+                data.append(reprojected_raster.data[:])
+            else:
+                data.append(reprojected_raster.data[0, :])
 
         # Remove unloaded rasters
         if not raster.is_loaded:
