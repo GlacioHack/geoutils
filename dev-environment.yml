@@ -9,6 +9,8 @@ dependencies:
   - rasterio>=1.3
   - scipy
   - tqdm
+  - xarray
+  - rioxarray
 
   # Development-specific
   - autovizwidget
@@ -27,7 +29,6 @@ dependencies:
   - sphinx-gallery
   - scikit-image
   - pyyaml
-  - rioxarray
   - sphinx-design
   - sphinx-book-theme
 
