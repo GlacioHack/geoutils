@@ -5,19 +5,20 @@ Window point reduction
 This example demonstrates raster reduction to point values using :func:`~geoutils.Raster.value_at_coords`.
 """
 # %%
-# We open an example raster, a digital elevation model in South America
+# We open an example raster, a digital elevation model in South America.
 
 # sphinx_gallery_thumbnail_number = 3
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+rast = gu.Raster(filename_rast)
 rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000, rast.bounds.bottom + 2000])
 
 # Plot the raster
 rast.show(cmap="terrain")
 
 # %%
-# We generate a random subsample of 100 coordinates to extract
+# We generate a random subsample of 100 coordinates to extract.
 
 import geopandas as gpd
 import numpy as np
@@ -45,7 +46,7 @@ np.nanmean(vals - vals_reduced)
 
 # %%
 # The mean difference in extracted values is quite significant at 0.3 meters!
-# We can visualize how the sampling took place in window
+# We can visualize how the sampling took place in window.
 
 # Replace by Vector fonction once done
 coords = rast.coords(grid=True)

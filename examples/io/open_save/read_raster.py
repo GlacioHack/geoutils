@@ -9,8 +9,14 @@ This example demonstrates the instantiation of a raster through :class:`~geoutil
 # We open an example raster. The data is, by default, unloaded.
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+rast = gu.Raster(filename_rast)
 rast
+
+# %%
+# A raster is composed of four main attributes: a :class:`~geoutils.Raster.data` array, an affine :class:`~geoutils.Raster.transform`,
+# a coordinate reference system :class:`~geoutils.Raster.crs` and a :class:`~geoutils.Raster.nodata` value.
+# All other attributes are derivatives of those or the file on disk, and can be found in the :ref:`dedicated section of the API<api-raster-attrs>`. See also :ref:`raster-class`.
 
 # %%
 #

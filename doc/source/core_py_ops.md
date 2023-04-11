@@ -32,30 +32,30 @@ arr = np.random.randint(0, 255, size=(3, 3), dtype="uint8")
 mask = np.random.randint(0, 2, size=(3, 3), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
-# Create an example Raster
-raster = gu.Raster.from_array(
-        data = ma,
-        transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
-        crs = pyproj.CRS.from_epsg(4326),
-        nodata = 255
+# Create an example raster
+rast = gu.Raster.from_array(
+       data = ma,
+       transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
+       crs = pyproj.CRS.from_epsg(4326),
+       nodata = 255
     )
 
-raster
+rast
 ```
 
 ```{code-cell} ipython3
 # Arithmetic with a number
-raster + 1
+rast + 1
 ```
 
 ```{code-cell} ipython3
 # Arithmetic with an array
-raster / arr
+rast / arr
 
 ```
 ```{code-cell} ipython3
 # Arithmetic with a raster
-raster - (raster**0.5)
+rast - (rast**0.5)
 ```
 
 If an unmasked {class}`~numpy.ndarray` is passed, it will internally be cast into a {class}`~numpy.ma.MaskedArray` to respect the propagation of
@@ -73,7 +73,7 @@ as {class}`~geoutils.Raster.data`.
 
 ```{code-cell} ipython3
 # Logical comparison with a number
-mask = raster > 100
+mask = rast > 100
 mask
 ```
 
@@ -89,7 +89,7 @@ combine a {class}`~geoutils.Mask` with another {class}`~geoutils.Mask`, and alwa
 
 ```{code-cell} ipython3
 # Logical bitwise operation between masks
-mask = (raster > 100) & ((raster % 2) == 0)
+mask = (rast > 100) & ((rast % 2) == 0)
 mask
 ```
 
@@ -109,5 +109,5 @@ behaviour, simply index without the mask using {attr}`Mask.data.data`.
 
 ```{code-cell} ipython3
 # Indexing the raster with the previous mask
-raster[mask]
+rast[mask]
 ```

@@ -10,8 +10,10 @@ This example demonstrates the creation of a mask from a vector using :func:`geou
 # sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
-vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+rast = gu.Raster(filename_rast)
+vect = gu.Vector(filename_vect)
 
 # %%
 # Let's plot the raster and vector.

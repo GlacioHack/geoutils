@@ -10,7 +10,8 @@ This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geou
 # sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+rast = gu.Raster(filename_rast)
 
 # %% We plot it.
 rast.show(cmap="terrain")

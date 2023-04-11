@@ -10,8 +10,10 @@ This example demonstrates the reprojection of a vector using :func:`geoutils.Vec
 # sphinx_gallery_thumbnail_number = 3
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
-vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+filename_rast = gu.examples.get_path("everest_landsat_b4_cropped")
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+rast = gu.Raster(filename_rast)
+vect = gu.Vector(filename_vect)
 
 # %%
 # The two objects are in different projections.
@@ -20,8 +22,6 @@ print(vect.info())
 
 # %%
 # Let's plot the two in their original projection.
-import matplotlib.pyplot as plt
-
 rast.show(cmap="Greys_r")
 vect.show(ax="new", fc="none", ec="tab:purple", lw=3)
 

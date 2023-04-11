@@ -5,19 +5,20 @@ Regular-grid interpolation
 This example demonstrates raster interpolation to point values using :func:`~geoutils.Raster.interp_points`.
 """
 # %%
-# We open an example raster, a digital elevation model in South America
+# We open an example raster, a digital elevation model in South America.
 
 # sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+rast = gu.Raster(filename_rast)
 rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000, rast.bounds.bottom + 2000])
 
 # Plot the raster
 rast.show(cmap="terrain")
 
 # %%
-# We generate a random subsample of 100 points to interpolate, and extract the coordinates
+# We generate a random subsample of 100 points to interpolate, and extract the coordinates.
 
 import geopandas as gpd
 import numpy as np

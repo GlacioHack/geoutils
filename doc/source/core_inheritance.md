@@ -41,13 +41,15 @@ and other information.
 ```{code-cell} ipython3
 import geoutils as gu
 
-# Initiate a geo-image from an ASTER image
-geoimg = gu.SatelliteImage(gu.examples.get_path("exploradores_aster_dem"), silent=False)
+# Instantiate a geo-image from an ASTER image
+filename_geoimg = gu.examples.get_path("exploradores_aster_dem")
+geoimg = gu.SatelliteImage(filename_geoimg, silent=False)
 ```
 
 ```{code-cell} ipython3
-# Initiate a geo-image from a Landsat 7 image
-geoimg2 = gu.SatelliteImage(gu.examples.get_path("everest_landsat_b4"), silent=False)
+# Instantiate a geo-image from a Landsat 7 image
+filename_geoimg2 = gu.examples.get_path("everest_landsat_b4")
+geoimg2 = gu.SatelliteImage(filename_geoimg2, silent=False)
 ```
 
 Along these additional attributes, the {class}`~geoutils.SatelliteImage` possesses the same main attributes as a {class}`~geoutils.Raster`.

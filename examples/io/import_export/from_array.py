@@ -16,6 +16,8 @@ import geoutils as gu
 # A random 3 x 3 masked array
 np.random.seed(42)
 arr = np.random.normal(size=(5, 5))
+# Introduce a NaN value
+arr[2, 2] = np.nan
 # A transform with 3 x 3 pixels in a [0-1, 0-1] bound square
 transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3)
 # A CRS, here geographic (latitude/longitude)

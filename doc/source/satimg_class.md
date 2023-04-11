@@ -13,7 +13,7 @@ Below, a summary of the {class}`~geoutils.SatelliteImage` object and its methods
 
 A {class}`~geoutils.SatelliteImage` is a subclass of {class}`~geoutils.Raster` that contains all its main attributes, and retains additional ones:
 - a {class}`numpy.datetime64` as {class}`~geoutils.SatelliteImage.datetime`, and
-- several {class}`strings<str>` for`~geoutils.SatelliteImage.satellite`,  {class}`~geoutils.SatelliteImage.sensor`, {class}`~geoutils.SatelliteImage. version`, {class}`~geoutils.SatelliteImage.tile_name` and {class}`~geoutils.SatelliteImage.product`.
+- several {class}`strings<str>` for {class}`~geoutils.SatelliteImage.satellite`,  {class}`~geoutils.SatelliteImage.sensor`, {class}`~geoutils.SatelliteImage.version`, {class}`~geoutils.SatelliteImage.tile_name` and {class}`~geoutils.SatelliteImage.product`.
 
 A {class}`~geoutils.SatelliteImage` also inherits the same derivative attributes as a {class}`~geoutils.Raster`.
 
@@ -39,13 +39,15 @@ For tiled products such as SRTM, the tile naming is also retrieved, which can be
 ```{code-cell} ipython3
 import geoutils as gu
 
-# Initiate a geo-image from an ASTER image
-geoimg = gu.SatelliteImage(gu.examples.get_path("exploradores_aster_dem"), silent=False)
+# Instantiate a geo-image from an ASTER image
+filename_geoimg = gu.examples.get_path("exploradores_aster_dem")
+geoimg = gu.SatelliteImage(filename_geoimg, silent=False)
 ```
 
 ```{code-cell} ipython3
-# Initiate a geo-image from a Landsat 7 image
-geoimg2 = gu.SatelliteImage(gu.examples.get_path("everest_landsat_b4"), silent=False)
+# Instantiate a geo-image from a Landsat 7 image
+filename_geoimg2 = gu.examples.get_path("everest_landsat_b4")
+geoimg2 = gu.SatelliteImage(filename_geoimg2, silent=False)
 ```
 
 ```{important}

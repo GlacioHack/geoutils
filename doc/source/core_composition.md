@@ -8,7 +8,7 @@ kernelspec:
 # Composition from Rasterio and GeoPandas
 
 GeoUtils' main classes {class}`~geoutils.Raster` and {class}`~geoutils.Vector` are linked to [Rasterio](https://rasterio.readthedocs.io/en/latest/) and
-[GeoPandas](https://geopandas.org/en/stable/docs.html), respectively, through class composition.
+[GeoPandas](https://geopandas.org/en/stable/docs.html), respectively, through [class composition](https://realpython.com/inheritance-composition-python/#whats-composition).
 
 They directly rely on their robust geospatial handling functionalities, as well of that of [PyProj](https://pyproj4.github.io/pyproj/stable/index.html), and
 add a layer on top for interfacing between rasters and vectors with higher-level operations, performing easier numerical analysis, and adding more advanced geospatial functionalities.
@@ -18,7 +18,7 @@ add a layer on top for interfacing between rasters and vectors with higher-level
 The {class}`~geoutils.Raster` is a composition class with **four main attributes**:
 
 1. a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`,
-2. an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`
+2. an [{class}`affine.Affine`](https://rasterio.readthedocs.io/en/stable/topics/migrating-to-v1.html#affine-affine-vs-gdal-style-geotransforms) as {attr}`~geoutils.Raster.transform`,
 3. a {class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, and
 4. a {class}`float` or {class}`int` as {attr}`~geoutils.Raster.nodata`.
 
@@ -27,9 +27,10 @@ The {class}`~geoutils.Raster` is a composition class with **four main attributes
 
 import geoutils as gu
 
-# Initiate a Raster from disk
-raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-raster
+# Instantiate a raster from a filename on disk
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+rast = gu.Raster(filename_rast)
+rast
 ```
 
 From these **four main attributes**, many other derivatives attributes exist, such as {attr}`~geoutils.Raster.bounds` or {attr}`~geoutils.Raster.res` to
@@ -43,7 +44,7 @@ By default, {attr}`~geoutils.Raster.data` is not loaded during instantiation. Se
 ```{code-cell} ipython3
 :tags: [hide-output]
 # Show summarized information
-print(raster.info())
+print(rast.info())
 ```
 
 ```{important}
@@ -71,18 +72,21 @@ See {ref}`raster-class` for more details.
 
 A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`.
 
-Because lazy loading is a lesser priority with vector data, a {class}`~geoutils.Vector` directly loads its {attr}`~geoutils.Vector.ds`.
+A {class}`~geoutils.Vector`'s dataframe {attr}`~geoutils.Vector.ds` is directly loaded in-memory 
+(might evolve towards lazy behaviour soon through [Dask-GeoPandas](https://dask-geopandas.readthedocs.io/en/stable/)).
 
 ```{code-cell} ipython3
 :tags: [hide-output]
-# Initiate a Vector from disk
-vector = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
-vector
+# Instantiate a vector from a filename on disk
+filename_vect = gu.examples.get_path("exploradores_rgi_outlines")
+vect = gu.Vector(filename_vect)
+vect
 ```
+
 ```{code-cell} ipython3
 :tags: [hide-output]
 # Show summarized information
-print(vector.info())
+print(vect.info())
 ```
 
 All geospatial methods of {class}`~geopandas.GeoDataFrame` are directly available into {class}`~geoutils.Vector`, and cast the output logically depending on
@@ -92,7 +96,7 @@ its type: to a {class}`~geoutils.Vector` for a geometric output (e.g., {class}`~
 ```{code-cell} ipython3
 :tags: [hide-output]
 # Compute the vector's boundary
-vector.boundary
+vect.boundary
 ```
 
 See {ref}`vector-class` for more details.

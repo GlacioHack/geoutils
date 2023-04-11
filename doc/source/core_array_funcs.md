@@ -42,29 +42,29 @@ arr = np.random.randint(0, 255, size=(3, 3), dtype="uint8")
 mask = np.random.randint(0, 2, size=(3, 3), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
-# Create an example Raster
-raster = gu.Raster.from_array(
-        data = ma,
-        transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
-        crs = pyproj.CRS.from_epsg(4326),
-        nodata = 255
+# Create an example raster
+rast = gu.Raster.from_array(
+       data = ma,
+       transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
+       crs = pyproj.CRS.from_epsg(4326),
+       nodata = 255
     )
-raster
+rast
 ```
 
 ```{code-cell} ipython3
 # Universal function with a single input and output
-np.sin(raster)
+np.sin(rast)
 ```
 
 ```{code-cell} ipython3
 # Universal function with a two inputs and single output
-np.add(arr, raster)
+np.add(arr, rast)
 ```
 
 ```{code-cell} ipython3
 # Universal function with a single input and two outputs
-np.modf(raster)
+np.modf(rast)
 ```
 
 Similar to with Python operators, NumPy's [logical comparison functions](https://numpy.org/doc/stable/reference/ufuncs.html#comparison-functions) cast
@@ -72,7 +72,7 @@ Similar to with Python operators, NumPy's [logical comparison functions](https:/
 
 ```{code-cell} ipython3
 # Universal function with a single input and two outputs
-np.greater(raster, raster + np.random.normal(size=np.shape(arr)))
+np.greater(rast, rast + np.random.normal(size=np.shape(arr)))
 ```
 
 ## Array functions
@@ -84,17 +84,17 @@ which are all other non-universal functions that can be applied to an array. Tho
 
 ```{code-cell} ipython3
 # Traditional mathematical function
-np.max(raster)
+np.max(rast)
 ```
 
 ```{code-cell} ipython3
 # Expliciting an axis for reduction
-np.count_nonzero(raster, axis=1)
+np.count_nonzero(rast, axis=1)
 ```
 
 Not all array functions are supported, however. GeoUtils supports nearly all [mathematical functions](https://numpy.org/doc/stable/reference/routines.math.html),
 [masked-array functions](https://numpy.org/doc/stable/reference/routines.ma.html) and [logical functions](https://numpy.org/doc/stable/reference/routines.logic.html).
-A full list of supported array function is available in {attr}`geoutils.raster.raster.handled_array_funcs`.
+A full list of supported array function is available in {attr}`geoutils.raster.handled_array_funcs`.
 
 ## Respecting masked values
 
@@ -105,17 +105,17 @@ There are two ways to compute statistics on {class}`Rasters<geoutils.Raster>` wh
 
 ```{code-cell} ipython3
 # Numpy core function applied to the raster
-np.median(raster)
+np.median(rast)
 ```
 
 ```{code-cell} ipython3
 # Numpy NaN function applied to the raster
-np.nanmedian(raster)
+np.nanmedian(rast)
 ```
 
 ```{code-cell} ipython3
 # Masked-array function on the data
-np.ma.median(raster.data)
+np.ma.median(rast.data)
 ```
 
 If a NumPy core function raises an error (e.g., `np.percentile`), {class}`~geoutils.Raster.nodata` values might not be respected. In this case, use the NaN

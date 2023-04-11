@@ -14,7 +14,7 @@ Below, a summary of the {class}`~geoutils.Mask` object and its methods.
 A {class}`~geoutils.Mask` is a subclass of {class}`~geoutils.Raster` that contains **three main attributes**:
 
 1. a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data` of {class}`~numpy.boolean` {class}`~numpy.dtype`,
-2. an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`, and
+2. an [{class}`affine.Affine`](https://rasterio.readthedocs.io/en/stable/topics/migrating-to-v1.html#affine-affine-vs-gdal-style-geotransforms) as {attr}`~geoutils.Raster.transform`, and
 3. a {class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`.
 
 A {class}`~geoutils.Mask` also inherits the same derivative attributes as a {class}`~geoutils.Raster`.
@@ -42,8 +42,9 @@ On opening, all data will be forced to a {class}`bool` {class}`numpy.dtype`.
 ```{code-cell} ipython3
 import geoutils as gu
 
-# Initiate a raster from disk
-mask = gu.Mask(gu.examples.get_path("exploradores_aster_dem"), load_data=True)
+# Instantiate a mask from a filename on disk
+filename_mask = gu.examples.get_path("exploradores_aster_dem")
+mask = gu.Mask(filename_mask, load_data=True)
 mask
 ```
 
@@ -53,11 +54,12 @@ mask
 {class}`~geoutils.Raster`, a {class}`~numpy.ndarray` or a number.
 
 ```{code-cell} ipython3
-# Initiate a raster from disk
-raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"), load_data=True)
+# Instantiate a raster from disk
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+rast = gu.Raster(filename_rast, load_data=True)
 
 # Which pixels are below 1500 m?
-raster < 1500
+rast < 1500
 ```
 
 See {ref}`core-py-ops` for more details.
@@ -111,10 +113,11 @@ Georeferencing attributes to create the {class}`~geoutils.Mask` can also be pass
 
 ```{code-cell} ipython3
 # Open a vector of glacier outlines
-vector = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
+filename_vect = gu.examples.get_path("exploradores_rgi_outlines")
+vect = gu.Vector(filename_vect)
 
 # Create mask using the raster as reference to match for bounds, resolution and projection
-mask_outlines = vector.create_mask(raster)
+mask_outlines = vect.create_mask(rast)
 mask_outlines
 ```
 
@@ -142,7 +145,7 @@ When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the i
 
 ```{code-cell} ipython3
 # Index raster values on mask
-raster[mask_outlines]
+rast[mask_outlines]
 ```
 
 See {ref}`py-ops-indexing` for more details.

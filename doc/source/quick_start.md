@@ -25,7 +25,7 @@ import geoutils as gu
 filename_rast = gu.examples.get_path("everest_landsat_b4")
 filename_vect = gu.examples.get_path("everest_rgi_outlines")
 
-# Open files
+# Open files by instantiating Raster and Vector
 rast = gu.Raster(filename_rast)
 vect = gu.Vector(filename_vect)
 ```
@@ -51,7 +51,6 @@ A {class}`~geoutils.Vector` is a composition class with a single main attribute:
 most methods are wrapped directly into {class}`~geoutils.Vector`.
 
 ```{code-cell} ipython3
-:tags: [hide-output]
 # The opened vector
 vect
 ```
@@ -70,11 +69,12 @@ For convenience and consistency, nearly all of these methods can be passed solel
 
 
 ```{code-cell} ipython3
-:tags: [hide-output]
+# Print initial bounds of the raster
+print(rast.bounds)
 # Crop raster to vector's extent
 rast.crop(vect)
-# Print info of cropped raster
-print(rast.info())
+# Print bounds of cropped raster
+print(rast.bounds)
 ```
 
 ```{margin}
@@ -105,7 +105,7 @@ and the other way around for {func}`~geoutils.Vector.rasterize`.
      - {func}`~geoutils.Vector.rasterize`
 ```
 
-All methods can be also be passed any number of georeferencing arguments such as {attr}`~geoutils.Raster.shape` or {attr}`~geoutils.Raster.res`, and will
+All methods can also be passed any number of georeferencing arguments such as {attr}`~geoutils.Raster.shape` or {attr}`~geoutils.Raster.res`, and will
 naturally deduce others from the input {class}`~geoutils.Raster` or {class}`~geoutils.Vector`, much as in [GDAL](https://gdal.org/)'s command line.
 
 

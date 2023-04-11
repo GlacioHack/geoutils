@@ -10,24 +10,24 @@ This example demonstrates the cropping of a raster using :func:`geoutils.Raster.
 # sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
-vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
-vect = gu.Vector(vect.ds[vect.ds["RGIId"] == "RGI60-15.10055"])
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+rast = gu.Raster(filename_rast)
+vect = gu.Vector(filename_vect)
+vect = vect[vect["RGIId"] == "RGI60-15.10055"]
 
 # %%
-# The first raster has larger extent and higher resolution than the second one.
+# The first raster has larger extent and higher resolution than the vector.
 print(rast.info())
 print(vect.bounds)
 
 # %%
 # Let's plot the raster and vector.
-import matplotlib.pyplot as plt
-
 rast.show(cmap="Purples")
 vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
-# **First option:** using the second raster as a reference to match, we reproject the first one. We simply have to pass the second :class:`~geoutils.Raster`
+# **First option:** using the vector as a reference to match, we reproject the raster. We simply have to pass the :class:`~geoutils.Vector`
 # as single argument to :func:`~geoutils.Raster.crop`. See :ref:`core-match-ref` for more details.
 
 rast.crop(vect)
@@ -44,7 +44,7 @@ vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Raster.crop`, including another :class:`~geoutils.Raster` or a
-# simple :class:`tuple` of bounds.
+# simple :class:`tuple` of bounds. For instance, we can re-crop the raster to be smaller than the vector.
 
 rast.crop((rast.bounds.left + 1000, rast.bounds.bottom, rast.bounds.right, rast.bounds.top - 500))
 

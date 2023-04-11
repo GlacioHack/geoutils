@@ -21,23 +21,24 @@ metadata ({attr}`~geoutils.Raster.transform`, {attr}`~geoutils.Raster.crs`, {att
 
 import geoutils as gu
 
-# Initiate a Raster from disk
-raster = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
+# Instantiate a raster from a filename on disk
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+rast = gu.Raster(filename_rast)
 
-# This Raster is not loaded
-raster
+# This raster is not loaded
+rast
 ```
 
 To load the data explicitly during instantiation opening, `load_data=True` can be passed to {class}`~geoutils.Raster`. Or the {func}`~geoutils.Raster.load`
 method can be called after. The two are equivalent.
 
 ```{code-cell} ipython3
-# Initiate another Raster just for the purpose of loading
-raster_toload = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
-raster_toload.load()
+# Initiate another raster just for the purpose of loading
+rast_to_load = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
+rast_to_load.load()
 
-# This Raster is loaded
-raster_toload
+# This raster is loaded
+rast_to_load
 ```
 
 ## Lazy passing of georeferencing metadata
@@ -50,11 +51,11 @@ always conserve the lazy loading of that match-reference object.
 
 ```{code-cell} ipython3
 # Use a smaller Raster as reference to crop the initial one
-smaller_raster = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
-raster.crop(smaller_raster)
+smaller_rast = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
+rast.crop(smaller_rast)
 
-# The reference Raster is not loaded
-smaller_raster
+# The reference raster is not loaded
+smaller_rast
 ```
 
 ## Optimized geospatial subsetting
@@ -64,10 +65,10 @@ These features are a work in progress, we aim to make GeoUtils more lazy-friendl
 package!
 ```
 
-Some georeferencing operations be done without loading the entire array Right now, relying directly on Rasterio, GeoUtils supports optimized subsetting
+Some georeferencing operations can be done without loading the entire array. Right now, relying directly on Rasterio, GeoUtils supports optimized subsetting
 through the {func}`~geoutils.Raster.crop` method.
 
 ```{code-cell} ipython3
 # The previously cropped Raster was loaded without accessing the entire array
-raster
+rast
 ```

@@ -12,7 +12,8 @@ import geopandas as gpd
 
 import geoutils as gu
 
-ds = gpd.read_file(gu.examples.get_path("exploradores_rgi_outlines"))
+filename_vect = gu.examples.get_path("exploradores_rgi_outlines")
+ds = gpd.read_file(filename_vect)
 vect = gu.Vector(ds)
 vect
 

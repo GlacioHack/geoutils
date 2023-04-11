@@ -16,7 +16,7 @@ Below, a summary of the {class}`~geoutils.Raster` object and its methods.
 A {class}`~geoutils.Raster` contains **four main attributes**:
 
 1. a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, of either {class}`~numpy.integer` or {class}`~numpy.floating` {class}`~numpy.dtype`,
-2. an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`,
+2. an [{class}`affine.Affine`](https://rasterio.readthedocs.io/en/stable/topics/migrating-to-v1.html#affine-affine-vs-gdal-style-geotransforms) as {attr}`~geoutils.Raster.transform`,
 3. a {class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, and
 4. a {class}`float` or {class}`int` as {attr}`~geoutils.Raster.nodata`.
 
@@ -58,16 +58,17 @@ A {class}`~geoutils.Raster` is opened by instantiating with either a {class}`str
 ```{code-cell} ipython3
 import geoutils as gu
 
-# Initiate a raster from disk
-raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-raster
+# Instantiate a raster from a filename on disk
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+rast = gu.Raster(filename_rast)
+rast
 ```
 
 Detailed information on the {class}`~geoutils.Raster` is printed using {func}`~geoutils.Raster.info`, along with basic statistics using `stats=True`:
 
 ```{code-cell} ipython3
 # Print details of raster
-print(raster.info(stats=True))
+print(rast.info(stats=True))
 ```
 
 ```{note}
@@ -78,7 +79,7 @@ A {class}`~geoutils.Raster` is saved to file by calling {func}`~geoutils.Raster.
 
 ```{code-cell} ipython3
 # Save raster to disk
-raster.save("myraster.tif")
+rast.save("myraster.tif")
 ```
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -102,14 +103,14 @@ arr = np.random.randint(0, 255, size=(3, 3), dtype="uint8")
 mask = np.random.randint(0, 2, size=(3, 3), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
-# Create a Raster from array
-raster = gu.Raster.from_array(
-        data = ma,
-        transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
-        crs = pyproj.CRS.from_epsg(4326),
-        nodata = 255
+# Create a raster from array
+rast = gu.Raster.from_array(
+       data = ma,
+       transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
+       crs = pyproj.CRS.from_epsg(4326),
+       nodata = 255
     )
-raster
+rast
 ```
 
 ```{important}
@@ -124,7 +125,7 @@ The array of a {class}`~geoutils.Raster` is available in {class}`~geoutils.Raste
 
 ```{code-cell} ipython3
 # Get raster's masked-array
-raster.data
+rast.data
 ```
 
 For those less familiar with {class}`MaskedArrays<numpy.ma.MaskedArray>` and the associated functions in NumPy, an unmasked {class}`~numpy.ndarray` filled with
@@ -132,7 +133,7 @@ For those less familiar with {class}`MaskedArrays<numpy.ma.MaskedArray>` and the
 
 ```{code-cell} ipython3
 # Get raster's nan-array
-raster.get_nanarray()
+rast.get_nanarray()
 ```
 
 ```{important}
@@ -153,7 +154,7 @@ A {class}`~geoutils.Raster` can be applied any pythonic arithmetic operation ({f
 
 ```{code-cell} ipython3
 # Add 1 and divide raster by 2
-(raster + 1)/2
+(rast + 1)/2
 ```
 
 A {class}`~geoutils.Raster` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
@@ -161,7 +162,7 @@ A {class}`~geoutils.Raster` can also be applied any pythonic logical comparison 
 
 ```{code-cell} ipython3
 # What raster pixels are less than 100?
-raster < 100
+rast < 100
 ```
 
 See {ref}`core-py-ops` for more details.
@@ -172,8 +173,8 @@ A {class}`~geoutils.Raster` can be applied any NumPy universal functions and mos
 {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number.
 
 ```{code-cell} ipython3
-# Compute the element-wise sqrt
-np.sqrt(raster)
+# Compute the element-wise square-root
+np.sqrt(rast)
 ```
 
 Logical comparison functions will cast to a {class}`~geoutils.Mask`.
@@ -181,7 +182,7 @@ Logical comparison functions will cast to a {class}`~geoutils.Mask`.
 ```{code-cell} ipython3
 # Is the raster close to another within tolerance?
 
-np.isclose(raster, raster+0.05, atol=0.1)
+np.isclose(rast, rast+0.05, atol=0.1)
 ```
 
 See {ref}`core-array-funcs` for more details.
@@ -193,8 +194,8 @@ and/or
 {class}`~geoutils.Raster.crs`.
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.
-Vector` as argument.
+As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed a {class}`~geoutils.Raster` or {class}`~geoutils.
+Vector` as a reference to match. In that case, no other argument is necessary.
 
 A {class}`~geoutils.Raster` reference will enforce to match its {attr}`~geoutils.Raster.transform` and {class}`~geoutils.Raster.crs`.
 A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bounds` and {class}`~geoutils.Vector.crs`.
@@ -207,23 +208,23 @@ attributes. For more details, see the {ref}`specific section and function descri
 
 ```{code-cell} ipython3
 # Original bounds and resolution
-print(raster.res)
-print(raster.bounds)
+print(rast.res)
+print(rast.bounds)
 ```
 
 ```{code-cell} ipython3
 # Reproject to smaller bounds and higher resolution
-raster_reproj = raster.reproject(
+rast_reproj = rast.reproject(
     dst_res=0.1,
     dst_bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
     resampling="cubic")
-raster_reproj
+rast_reproj
 ```
 
 ```{code-cell} ipython3
 # New bounds and resolution
-print(raster.res)
-print(raster.bounds)
+print(rast.res)
+print(rast.bounds)
 ```
 
 ```{note}
@@ -239,7 +240,7 @@ Cropping a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster
 
 ```{important}
 As with all geospatial handling methods, the {func}`~geoutils.Raster.crop` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector`
-as argument.
+as a reference to match. In that case, no other argument is necessary.
 
 See {ref}`core-match-ref` for more details.
 ```
@@ -250,8 +251,8 @@ For more details, see the {ref}`specific section and function descriptions in th
 
 ```{code-cell} ipython3
 # Crop raster to smaller bounds
-raster_crop = raster.crop(crop_geom=(0.3, 0.3, 1, 1), inplace=False)
-raster_crop
+rast_crop = rast.crop(crop_geom=(0.3, 0.3, 1, 1), inplace=False)
+print(rast_crop.bounds)
 ```
 
 ## Polygonize
@@ -266,8 +267,8 @@ For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly ta
 
 ```{code-cell} ipython3
 # Polygonize all values lower than 100
-vector_lt_100 = (raster < 100).polygonize()
-vector_lt_100
+vect_lt_100 = (rast < 100).polygonize()
+vect_lt_100
 ```
 
 ## Proximity
@@ -282,34 +283,34 @@ For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.proximity` implicitly tar
 
 ```{code-cell} ipython3
 # Compute proximity from mask for all values lower than 100
-proximity_lt_100 = (raster < 100).proximity()
-proximity_lt_100
+prox_lt_100 = (rast < 100).proximity()
+prox_lt_100
 ```
 
 Optionally, instead of target pixel values, a {class}`~geoutils.Vector` can be passed to compute the proximity from the geometry.
 
 ```{code-cell} ipython3
 # Compute proximity from mask for all values lower than 100
-proximity_lt_100_from_vector = raster.proximity(vector=vector_lt_100)
-proximity_lt_100_from_vector
+prox_lt_100_from_vect = rast.proximity(vector=vect_lt_100)
+prox_lt_100_from_vect
 ```
 
 ## Interpolate or extract to point
 
 Interpolating or extracting {class}`~geoutils.Raster` values at specific points can be done through:
-- the {func}`~geoutils.Raster.value_at_coords` function, who extracts the single closest pixel or a surrounding window for each coordinate, on which
+- the {func}`~geoutils.Raster.value_at_coords` function, that extracts the single closest pixel or a surrounding window for each coordinate, on which
   can be applied reducing any function ({func}`numpy.ma.mean` by default), or
-- the {func}`~geoutils.Raster.interp_points` function, who interpolates the {class}`~geoutils.Raster`'s regular grid to each coordinate using a
+- the {func}`~geoutils.Raster.interp_points` function, that interpolates the {class}`~geoutils.Raster`'s regular grid to each coordinate using a
   resampling algorithm.
 
 ```{code-cell} ipython3
 # Extract median value in a 3 x 3 pixel window
-raster_reproj.value_at_coords(x=0.5, y=0.5, reducer_function=np.ma.median)
+rast_reproj.value_at_coords(x=0.5, y=0.5, window=3, reducer_function=np.ma.median)
 ```
 
 ```{code-cell} ipython3
 # Interpolate coordinate value with quintic algorithm
-raster_reproj.interp_points([(0.5, 0.5)], mode="quintic")
+rast_reproj.interp_points([(0.5, 0.5)], mode="quintic")
 ```
 
 ```{note}
@@ -328,10 +329,15 @@ Those include exporting to:
 
 ```{code-cell} ipython3
 # Export to rasterio dataset-reader through a memoryfile
-raster_reproj.to_rio_dataset()
+rast_reproj.to_rio_dataset()
 ```
 
 ```{code-cell} ipython3
 # Export to geopandas dataframe
-raster_reproj.to_points()
+rast_reproj.to_points()
+```
+
+```{code-cell} ipython3
+# Export to xarray data array
+rast_reproj.to_xarray()
 ```

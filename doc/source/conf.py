@@ -10,6 +10,7 @@ sys.path.append(os.path.abspath("../.."))
 sys.path.append(os.path.abspath("../../geoutils/"))
 sys.path.append(os.path.abspath(".."))
 
+from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
 project = "GeoUtils"
 copyright = "2021, GeoUtils Developers"
@@ -62,17 +63,28 @@ intersphinx_mapping = {
     "pandas": ("https://pandas.pydata.org/docs/", None),
 }
 
+example_path = os.path.join("../", "../", "examples")
+
 sphinx_gallery_conf = {
     "examples_dirs": [
-        os.path.join(os.path.dirname(__file__), "../", "../", "examples/io"),
-        os.path.join(os.path.dirname(__file__), "../", "../", "examples/handling"),
-        os.path.join(os.path.dirname(__file__), "../", "../", "examples/analysis"),
+        os.path.join(example_path, "io"),
+        os.path.join(example_path, "handling"),
+        os.path.join(example_path, "analysis"),
     ],  # path to your example scripts
     "gallery_dirs": [
         "io_examples",
         "handling_examples",
         "analysis_examples",
     ],  # path to where to save gallery generated output
+    'subsection_order': ExplicitOrder([os.path.join(example_path, "io", "open_save"),
+                                       os.path.join(example_path, "io", "import_export"),
+                                       os.path.join(example_path, "handling", "georeferencing"),
+                                       os.path.join(example_path, "handling", "interface"),
+                                       os.path.join(example_path, "analysis", "array_numerics"),
+                                       os.path.join(example_path, "analysis", "geospatial"),
+                                       os.path.join(example_path, "analysis", "point_extraction"),
+                                       ]),
+    'within_subsection_order': ExampleTitleSortKey,
     "inspect_global_variables": True,  # Make links to the class/function definitions.
     "reference_url": {
         # The module you locally document uses None

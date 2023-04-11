@@ -10,7 +10,8 @@ This example demonstrates arithmetic operations using raster arithmetic on :clas
 # sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+rast = gu.Raster(filename_rast)
 rast
 
 # %% We plot the original raster.

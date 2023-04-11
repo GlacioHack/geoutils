@@ -640,9 +640,15 @@ class Raster:
     def __repr__(self) -> str:
         """Convert raster to string representation."""
 
+        # Shape to load
+        if self.count == 1:
+            shape_to_load = self._out_shape
+        else:
+            shape_to_load = (self._out_count, *self._out_shape)
+
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
-            str_data = "not_loaded; shape on disk " + str(self._disk_shape)
+            str_data = "not_loaded; shape on disk " + str(self._disk_shape) + "; will load " + str(shape_to_load)
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 
@@ -671,9 +677,16 @@ class Raster:
     def _repr_html_(self) -> str:
         """Convert raster to HTML representation for documentation."""
 
+        # Shape to load
+        if self.count == 1:
+            shape_to_load = self._out_shape
+        else:
+            shape_to_load = (self._out_count, *self._out_shape)
+
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
-            str_data = "<i>not_loaded; shape on disk " + str(self._disk_shape) + "</i>"
+            str_data = "<i>not_loaded; shape on disk " + str(self._disk_shape) + "; will load " \
+                       + str(shape_to_load) + "</i>"
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 

@@ -12,7 +12,8 @@ import rasterio as rio
 # A raster can be imported from a :class:`rasterio.io.DatasetReader` or :class:`rasterio.io.MemoryFile` simply by instantiating :class:`~geoutils.Raster`.
 import geoutils as gu
 
-ds = rio.DatasetReader(gu.examples.get_path("exploradores_aster_dem"))
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+ds = rio.DatasetReader(filename_rast)
 rast = gu.Raster(ds)
 rast
 
@@ -24,7 +25,7 @@ rast.show(cmap="terrain")
 # %%
 # We can also pass a :class:`rasterio.io.MemoryFile` during instantiation.
 
-mem = rio.MemoryFile(open(gu.examples.get_path("exploradores_aster_dem"), "rb"))
+mem = rio.MemoryFile(open(filename_rast, "rb"))
 rast = gu.Raster(mem)
 rast
 

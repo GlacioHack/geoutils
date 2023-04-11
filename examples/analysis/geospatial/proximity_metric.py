@@ -10,17 +10,16 @@ This example demonstrates the calculation of proximity distances to a raster or 
 # sphinx_gallery_thumbnail_number = 2
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
-vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
-vect = gu.Vector(vect.ds[vect.ds["RGIId"] == "RGI60-15.10055"])
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+rast = gu.Raster(filename_rast)
+vect = gu.Vector(filename_vect)
+vect = vect[vect["RGIId"] == "RGI60-15.10055"]
 rast.crop(vect)
 
 # Plot the raster and vector
-import matplotlib.pyplot as plt
-
-ax = plt.gca()
-rast.show(ax=ax, cmap="Blues")
-vect.reproject(rast).ds.plot(ax=ax, fc="none", ec="k", lw=2)
+rast.show(cmap="Blues")
+vect.reproject(rast).show(fc="none", ec="k", lw=2)
 
 # %%
 # We use the raster as a reference to match for rasterizing the proximity distances with :func:`~geoutils.Vector.proximity`. See :ref:`core-match-ref` for more details.

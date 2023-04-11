@@ -9,8 +9,13 @@ import geoutils as gu
 
 # %%
 # We open an example vector.
-vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+vect = gu.Vector(filename_vect)
 vect
+
+# %%
+# A vector is composed of a single main attribute: a :class:`~geoutils.Vector.ds` geodataframe.
+# All other attributes are :ref:`inherited from Shapely and GeoPandas<vector-from-geopandas>`. See also :ref:`vector-class`.
 
 # %%
 #
@@ -18,7 +23,7 @@ vect
 #        A vector can also be instantiated with a :class:`geopandas.GeoDataFrame`, see :ref:`sphx_glr_io_examples_import_export_import_vector.py`.
 #
 # We can print more info on the vector.
-print(vect)
+print(vect.info())
 
 # %%
 # Let's plot by vector area

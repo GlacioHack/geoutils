@@ -25,7 +25,7 @@ class TestDocs:
                     "-j",
                     "1",
                     os.path.join(self.docs_dir, "source/"),
-                    os.path.join(self.docs_dir, "build/html"),
+                    os.path.join(self.docs_dir, "build/"),
                 ]
             )
 

@@ -9,8 +9,10 @@ This example demonstrates the reprojection of a raster using :func:`geoutils.Ras
 
 import geoutils as gu
 
-rast1 = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
-rast2 = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
+filename_rast1 = gu.examples.get_path("everest_landsat_b4")
+filename_rast2 = gu.examples.get_path("everest_landsat_b4_cropped")
+rast1 = gu.Raster(filename_rast1)
+rast2 = gu.Raster(filename_rast2)
 
 # %%
 # The first raster has larger extent and higher resolution than the second one.

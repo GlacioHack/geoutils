@@ -10,8 +10,10 @@ This example demonstrates the cropping of a vector using :func:`geoutils.Vector.
 # sphinx_gallery_thumbnail_number = 3
 import geoutils as gu
 
-rast = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
-vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+filename_rast = gu.examples.get_path("everest_landsat_b4_cropped")
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+rast = gu.Raster(filename_rast)
+vect = gu.Vector(filename_vect)
 
 # %%
 # Let's plot the raster and vector. The raster has smaller extent than the vector.

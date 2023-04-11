@@ -39,8 +39,9 @@ a {class}`geopandas.GeoSeries` or a {class}`shapely.Geometry`.
 
 import geoutils as gu
 
-# Initiate a vector from disk
-vect = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
+# Instantiate a vector from disk
+filename_vect = gu.examples.get_path("exploradores_rgi_outlines")
+vect = gu.Vector(filename_vect)
 vect
 ```
 
@@ -115,7 +116,9 @@ vect.to_json()
 Reprojecting a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.reproject` function, which enforces a new {attr}`~geoutils.Vector.crs`.
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Vector.reproject` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as argument to match its {class}`~geoutils.Raster.crs`.
+As with all geospatial handling methods, the {func}`~geoutils.Vector.reproject` function can be passed a 
+{class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a reference to match its {class}`~geoutils.Raster.crs`.
+In that case, no other argument is necessary.
 
 See {ref}`core-match-ref` for more details.
 ```
@@ -129,7 +132,8 @@ print(vect.crs)
 
 ```{code-cell} ipython3
 # Open a raster for which we want to match the CRS
-rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+rast = gu.Raster(filename_rast)
 # Reproject the vector to the raster's CRS
 vect_reproj = vect.reproject(rast)
 # New CRS
@@ -146,8 +150,8 @@ Cropping a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector
 
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Vector.crop` function can be passed only a {class}`~geoutils.Raster` or
-{class}`~geoutils.Vector` as argument.
+As with all geospatial handling methods, the {func}`~geoutils.Vector.crop` function can be passed a {class}`~geoutils.Raster` or
+{class}`~geoutils.Vector` as a reference to match. In that case, no other argument is necessary.
 
 See {ref}`core-match-ref` for more details.
 ```
