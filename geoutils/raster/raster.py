@@ -644,7 +644,7 @@ class Raster:
         if self.count == 1:
             shape_to_load = self._out_shape
         else:
-            shape_to_load = (self._out_count, *self._out_shape)
+            shape_to_load = (self._out_count, *self._out_shape)  # type: ignore
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
@@ -678,15 +678,16 @@ class Raster:
         """Convert raster to HTML representation for documentation."""
 
         # Shape to load
-        if self.count == 1:
+        if self._out_count == 1:
             shape_to_load = self._out_shape
         else:
-            shape_to_load = (self._out_count, *self._out_shape)
+            shape_to_load = (self._out_count, *self._out_shape)  # type: ignore
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
-            str_data = "<i>not_loaded; shape on disk " + str(self._disk_shape) + "; will load " \
-                       + str(shape_to_load) + "</i>"
+            str_data = (
+                "<i>not_loaded; shape on disk " + str(self._disk_shape) + "; will load " + str(shape_to_load) + "</i>"
+            )
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 

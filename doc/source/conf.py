@@ -76,15 +76,18 @@ sphinx_gallery_conf = {
         "handling_examples",
         "analysis_examples",
     ],  # path to where to save gallery generated output
-    'subsection_order': ExplicitOrder([os.path.join(example_path, "io", "open_save"),
-                                       os.path.join(example_path, "io", "import_export"),
-                                       os.path.join(example_path, "handling", "georeferencing"),
-                                       os.path.join(example_path, "handling", "interface"),
-                                       os.path.join(example_path, "analysis", "array_numerics"),
-                                       os.path.join(example_path, "analysis", "geospatial"),
-                                       os.path.join(example_path, "analysis", "point_extraction"),
-                                       ]),
-    'within_subsection_order': ExampleTitleSortKey,
+    "subsection_order": ExplicitOrder(
+        [
+            os.path.join(example_path, "io", "open_save"),
+            os.path.join(example_path, "io", "import_export"),
+            os.path.join(example_path, "handling", "georeferencing"),
+            os.path.join(example_path, "handling", "interface"),
+            os.path.join(example_path, "analysis", "array_numerics"),
+            os.path.join(example_path, "analysis", "geospatial"),
+            os.path.join(example_path, "analysis", "point_extraction"),
+        ]
+    ),
+    "within_subsection_order": ExampleTitleSortKey,
     "inspect_global_variables": True,  # Make links to the class/function definitions.
     "reference_url": {
         # The module you locally document uses None

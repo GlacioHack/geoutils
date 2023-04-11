@@ -116,7 +116,7 @@ vect.to_json()
 Reprojecting a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.reproject` function, which enforces a new {attr}`~geoutils.Vector.crs`.
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Vector.reproject` function can be passed a 
+As with all geospatial handling methods, the {func}`~geoutils.Vector.reproject` function can be passed a
 {class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a reference to match its {class}`~geoutils.Raster.crs`.
 In that case, no other argument is necessary.
 

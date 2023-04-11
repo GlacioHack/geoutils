@@ -72,7 +72,7 @@ See {ref}`raster-class` for more details.
 
 A {class}`~geoutils.Vector` is a composition class with a single main attribute: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`.
 
-A {class}`~geoutils.Vector`'s dataframe {attr}`~geoutils.Vector.ds` is directly loaded in-memory 
+A {class}`~geoutils.Vector`'s dataframe {attr}`~geoutils.Vector.ds` is directly loaded in-memory
 (might evolve towards lazy behaviour soon through [Dask-GeoPandas](https://dask-geopandas.readthedocs.io/en/stable/)).
 
 ```{code-cell} ipython3
