@@ -178,6 +178,9 @@ html_theme_options = {
     "use_source_button": True,
     "use_issues_button": True,
     "use_download_button": True,
+    "launch_buttons": {
+        "binderhub_url": "https://{your-binderhub-url}"
+    },
     # "logo_only": True,
     # "icon_links": [
     #         {

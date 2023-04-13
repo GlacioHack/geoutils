@@ -42,8 +42,8 @@ See [mamba's documentation](https://mamba.readthedocs.io/en/latest/) to install 
 
 ## Start contributing
 
-1. Fork the repository, make a feature branches and push changes.
-2. When ready, submit a pull request from the feature branch of your fork to `GlacioHack/geoutils:master`.
+1. Fork the repository, make a feature branch and push changes.
+2. When ready, submit a pull request from the feature branch of your fork to `GlacioHack/geoutils:main`.
 3. The PR will be reviewed by at least one maintainer, discussed, then merged.
 
 More info on [our contributing page](CONTRIBUTING.md).
