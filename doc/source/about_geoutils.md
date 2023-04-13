@@ -69,12 +69,12 @@ Having higher-level geospatial tools implemented in a **consistent** manner and 
 
 ## Side-by-side examples with Rasterio and GeoPandas
 
-This first side-by-side example demonstrates the difference with Rasterio for opening a raster, reprojecting on 
+This first side-by-side example demonstrates the difference with Rasterio for opening a raster, reprojecting on
 another "reference" raster, performing array operations respectful of nodata values, and saving to file.
 
 
 ```{note}
-**GeoUtils does not just wrap the Rasterio or GeoPandas operations showed below**. Instead, it defines **raster- and 
+**GeoUtils does not just wrap the Rasterio or GeoPandas operations showed below**. Instead, it defines **raster- and
 vector-centered objects to ensure consistent geospatial object behaviour that facilitates those operations** (e.g., by implicitly passing metadata, loading, or interfacing).
 ```
 
@@ -86,56 +86,56 @@ header-rows: 1
   - Rasterio
 * - ```python
     import geoutils as gu
-    
+
     # Opening of two rasters
     rast1 = gu.Raster("myraster1.tif")
     rast2 = gu.Raster("myraster2.tif")
-    
+
     # Reproject 1 to match 2
     # (raster 2 not loaded, only metadata)
     rast1_reproj = rast1.reproject(
         dst_ref = rast2
         )
-    
+
     # Array interfacing and implicit loading
     # (raster 2 loads implicitly)
     rast_result = (1 + rast2) / rast1_reproj
-    
+
     # Saving
     rast_result.save("myresult.tif")
     ```
-    
+
   - ```python
     import rasterio as rio
     import numpy as np
-    
+
     # Opening of two rasters
     rast1 = rio.io.DatasetReader("myraster1.tif")
     rast2 = rio.io.DatasetReader("myraster2.tif")
-    
+
     # Equivalent of a match-reference reprojection
     # (returns an array, not a raster-type object)
     arr1_reproj, _ = rio.warp.reproject(
-        source = rast1.read(), 
-        destination = np.ones(rast2.shape), 
-        src_transform = rast1.transform, 
-        src_crs = rast1.crs, 
-        src_nodata = rast1.nodata, 
-        dst_transform = rast2.transform, 
-        dst_crs = rast2.crs, 
+        source = rast1.read(),
+        destination = np.ones(rast2.shape),
+        src_transform = rast1.transform,
+        src_crs = rast1.crs,
+        src_nodata = rast1.nodata,
+        dst_transform = rast2.transform,
+        dst_crs = rast2.crs,
         dst_nodata = rast2.nodata,
         )
-    
+
     # Equivalent of array interfacing
-    # (ensuring nodata and dtypes are rightly 
+    # (ensuring nodata and dtypes are rightly
     # propagated through masked arrays)
     ma1_reproj = np.ma.MaskedArray(
-        data = arr1_reproj, 
+        data = arr1_reproj,
         mask = (arr1_reproj == rast2.nodata)
         )
     ma2 = rast2.read(masked = True)
     ma_result = (1 + ma2) / (ma1_reproj)
-    
+
     # Equivalent of saving
     # (requires to define a logical
     # nodata for the data type)
@@ -159,7 +159,7 @@ header-rows: 1
     ```
 `````
 
-This second side-by-side example demonstrates the difference with GeoPandas (and Rasterio) for opening a vector, 
+This second side-by-side example demonstrates the difference with GeoPandas (and Rasterio) for opening a vector,
 applying a metric geometric operation (buffering), rasterizing into a boolean mask, and indexing a raster with that mask.
 
 `````{list-table}
@@ -170,34 +170,34 @@ header-rows: 1
   - GeoPandas (and Rasterio)
 * - ```python
     import geoutils as gu
-    
+
     # Opening a vector and a raster
     vect = gu.Vector("myvector.shp")
     rast = gu.Raster("myraster.tif")
-    
+
     # Metric buffering
     vect_buff = vect.buffer(distance = 100)
-    
+
     # Create a mask on the raster grid
     # (raster not loaded, only metadata)
     mask = vect_buff.create_mask(
         dst_ref = rast
         )
-    
+
     # Index raster values on mask
     # (raster loads implicitly)
     values = rast[mask]
     ```
-    
+
   - ```python
     import geopandas as gpd
     import rasterio as rio
-    
+
     # Opening a vector and a raster
     df = gpd.read_file("myvector.tif")
     rast2 = rio.io.DatasetReader("myraster.tif")
-    
-    # Equivalent of a metric buffering 
+
+    # Equivalent of a metric buffering
     # (while keeping a frame object)
     gs_m_crs = df.to_crs(df.estimate_utm_crs())
     gs_m_crs_buff = gs_m_crs.buffer(distance = 100)
@@ -205,20 +205,20 @@ header-rows: 1
     df_buff = gpd.GeoDataFrame(
         geometry = gs_buff
         )
-        
+
     # Equivalent of creating a rasterized mask
     # (ensuring CRS are similar)
     df_buff = df_buff.to_crs(rast2.crs)
     mask = features.rasterize(
-        shapes = gdf.geometry, 
-        fill = 0, 
-        out_shape = rast2.shape, 
-        transform = rast2.transform, 
-        default_value = 1, 
+        shapes = gdf.geometry,
+        fill = 0,
+        out_shape = rast2.shape,
+        transform = rast2.transform,
+        default_value = 1,
         dtype = "uint8"
         )
     mask = mask.astype("bool")
-    
+
     # Equivalent of indexing with mask
     values = rast2.read(1, masked = True)[mask]
 `````
