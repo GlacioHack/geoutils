@@ -203,7 +203,7 @@ html_theme_options = {
 # For dark mode
 html_context = {
     # ...
-    "default_mode": "auto"
+    "default_mode": "dark"
 }
 
 # Add the search bar to be always displayed (not only on top)
