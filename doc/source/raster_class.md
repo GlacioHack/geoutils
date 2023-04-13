@@ -223,8 +223,8 @@ rast_reproj
 
 ```{code-cell} ipython3
 # New bounds and resolution
-print(rast.res)
-print(rast.bounds)
+print(rast_reproj.res)
+print(rast_reproj.bounds)
 ```
 
 ```{note}
