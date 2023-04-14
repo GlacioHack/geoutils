@@ -171,15 +171,15 @@ html_title = "GeoUtils"
 html_theme_options = {
     "path_to_docs": "doc/source",
     "use_sidenotes": True,
-    "repository_url": "https://github.com/GlacioHack/geoutils",
-    "repository_branch": "main",
+    "repository_url": "https://github.com/rhugonnet/geoutils",
+    "repository_branch": "docs",
     "use_repository_button": True,
     "use_edit_page_button": True,
     "use_source_button": True,
     "use_issues_button": True,
     "use_download_button": True,
     "launch_buttons": {
-        "binderhub_url": "https://{your-binderhub-url}"
+        "binderhub_url": "https://mybinder.org/"
     },
     # "logo_only": True,
     # "icon_links": [
