@@ -171,8 +171,8 @@ html_title = "GeoUtils"
 html_theme_options = {
     "path_to_docs": "doc/source",
     "use_sidenotes": True,
-    "repository_url": "https://github.com/rhugonnet/geoutils",
-    "repository_branch": "docs",
+    "repository_url": "https://github.com/GlacioHack/geoutils",
+    "repository_branch": "main",
     "use_repository_button": True,
     "use_edit_page_button": True,
     "use_source_button": True,
