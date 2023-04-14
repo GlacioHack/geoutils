@@ -20,6 +20,12 @@ For more details, refer to the {ref}`core-index`, {ref}`rasters-index` or {ref}`
 
 To find an example about a specific functionality, jump to {ref}`quick-gallery`.
 
+```{tip}
+All pages of this documentation containing code cells can be **run interactively online without the need of setting up your own environment**. Simply click the top launch button!
+
+Alternatively, start your own notebook to test GeoUtils at [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/GlacioHack/geoutils/main).
+```
+
 ## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes
 
 In GeoUtils, geospatial handling is object-based and revolves around {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.

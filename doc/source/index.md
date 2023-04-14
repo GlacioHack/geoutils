@@ -24,6 +24,13 @@ title: GeoUtils
 GeoUtils is a Python package for **accessible**, **efficient** and **reliable** geospatial analysis.
 ::::
 
+```{tip}
+:class: margin
+**Run any page of this documentation interactively** by clicking the top launch button!
+
+Or **start your own test notebook**: [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/GlacioHack/geoutils/main).
+```
+
 **Accessible** owing to its convenient object-based structure, intuitive match-reference operations and familiar geospatial dependencies
 ([Rasterio](https://rasterio.readthedocs.io/en/latest/), [Rioxarray](https://corteva.github.io/rioxarray/stable/),
 [GeoPandas](https://geopandas.org/en/stable/docs.html), [PyProj](https://pyproj4.github.io/pyproj/stable/index.html)).
@@ -79,6 +86,8 @@ Dive into the full documentation.
 :::
 
 ::::
+
+Looking to **learn a specific feature by running an example**? Jump straight into our **example galleries on {ref}`examples-io`, {ref}`examples-handling` and {ref}`examples-analysis`**.
 
 ```{seealso}
 If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/en/latest/index.html) for digital elevation models.**

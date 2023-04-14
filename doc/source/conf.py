@@ -179,7 +179,8 @@ html_theme_options = {
     "use_issues_button": True,
     "use_download_button": True,
     "launch_buttons": {
-        "binderhub_url": "https://mybinder.org/"
+        "binderhub_url": "https://mybinder.org/",
+        "notebook_interface": "jupyterlab",
     },
     # "logo_only": True,
     # "icon_links": [
