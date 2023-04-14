@@ -1,6 +1,7 @@
 ---
 file_format: mystnb
 kernelspec:
+  display_name: geoutils-env
   name: geoutils
 ---
 (quick-start)=
