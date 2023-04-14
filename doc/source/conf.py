@@ -180,7 +180,7 @@ html_theme_options = {
     "use_download_button": True,
     "launch_buttons": {
         "binderhub_url": "https://mybinder.org/",
-        "notebook_interface": "jupyterlab",
+        "notebook_interface": "jupyterlab",  # For launching Binder in Jupyterlab to open MD files as notebook (downloads them otherwise)
     },
     # "logo_only": True,
     # "icon_links": [
