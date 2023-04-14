@@ -2,4 +2,4 @@ channels:
   - conda-forge
 dependencies:
   - jupytext
-  - myst-parser
+  - myst-nb
