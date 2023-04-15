@@ -1,8 +1,10 @@
 """Miscellaneous functions, mainly for testing."""
 from __future__ import annotations
 
+import copy
 import functools
 import warnings
+from typing import Any, Callable
 
 try:
     import yaml  # type: ignore
@@ -74,6 +76,64 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
     return deprecator_func
 
 
+def copy_doc(
+    old_class: object,
+    new_class_name: str,
+    origin_class: object | None = None,
+    replace_return_series_statement: bool = False,
+) -> Callable:  # type: ignore
+    """
+    A decorator to copy docstring from a class to another class while replacing the docstring.
+    Use for parsing GeoPandas' documentation to geoutils.Vector.
+    """
+
+    def decorator(decorated: Callable) -> Callable:  # type: ignore
+        # Get name of decorated object
+        # If object is a property, get name through fget
+        try:
+            decorated_name = decorated.fget.__name__
+        # Otherwise, directly with the name attribute
+        except AttributeError:
+            decorated_name = decorated.__name__
+
+        # Get parent doc
+        old_class_doc = getattr(old_class, decorated_name).__doc__
+        # Remove examples if there are any
+        doc_descript = old_class_doc.split("\n\n")[0]
+
+        # Remove duplicate white spaces while keeping lines
+        doc_descript = "\n".join([" ".join(spl.split()) for spl in doc_descript.splitlines()])
+        # Replace old class output name by the new class output name
+        replaced_descript = doc_descript.replace(old_class.__name__, new_class_name)
+
+        # Replace "Return a Series" statement by "Append a Series to Vector" if it exists
+        if replace_return_series_statement:
+            if replaced_descript[0:20] == "Returns a ``Series``":
+                replaced_descript = replaced_descript.replace(
+                    "Returns a ``Series``", "Returns or appends to ``Vector`` a ``Series``"
+                )
+            else:
+                replaced_descript += " Can be appended to ``Vector``."
+
+        # Add an intersphinx link to the doc of the previous class
+        if origin_class is None:
+            orig_class = old_class
+        else:
+            orig_class = origin_class
+        # Get module and old class names
+        orig_module_name = orig_class.__module__.split(".")[0]
+        old_class_name = orig_class.__name__
+        add_link_to_old_class = (
+            "\n\nSee more details at :func:`" + orig_module_name + "." + old_class_name + "." + decorated_name + "`."
+        )
+
+        decorated.__doc__ = replaced_descript + add_link_to_old_class
+
+        return decorated
+
+    return decorator
+
+
 def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
     # Try to match the string version of the resampling method with a rio Resampling enum name
@@ -90,22 +150,30 @@ def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     return resampling_method
 
 
-def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -> None:
+def diff_environment_yml(
+    fn_env: str | dict[str, Any], fn_devenv: str | dict[str, Any], print_dep: str = "both", input_dict: bool = False
+) -> None:
     """
     Compute the difference between environment.yml and dev-environment.yml for setup of continuous integration,
     while checking that all the dependencies listed in environment.yml are also in dev-environment.yml
-
     :param fn_env: Filename path to environment.yml
     :param fn_devenv: Filename path to dev-environment.yml
     :param print_dep: Whether to print conda differences "conda", pip differences "pip" or both.
+    :param input_dict: Whether to consider the input as a dict (for testing purposes).
     """
 
     if not _has_yaml:
         raise ValueError("Test dependency needed. Install 'pyyaml'")
 
-    # Load the yml as dictionaries
-    yaml_env = yaml.safe_load(open(fn_env))
-    yaml_devenv = yaml.safe_load(open(fn_devenv))
+    if not input_dict:
+        # Load the yml as dictionaries
+        yaml_env = yaml.safe_load(open(fn_env))  # type: ignore
+        yaml_devenv = yaml.safe_load(open(fn_devenv))  # type: ignore
+    else:
+        # We need a copy as we'll pop things out and don't want to affect input
+        # dict.copy() is shallow and does not work with embedded list in dicts (as is the case here)
+        yaml_env = copy.deepcopy(fn_env)
+        yaml_devenv = copy.deepcopy(fn_devenv)
 
     # Extract the dependencies values
     conda_dep_env = yaml_env["dependencies"]
@@ -114,6 +182,10 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
     # Check if there is any pip dependency, if yes pop it from the end of the list
     if isinstance(conda_dep_devenv[-1], dict):
         pip_dep_devenv = conda_dep_devenv.pop()["pip"]
+
+        # Remove the package's self install for devs via pip, if it exists
+        if "-e ./" in pip_dep_devenv:
+            pip_dep_devenv.remove("-e ./")
 
         # Check if there is a pip dependency in the normal env as well, if yes pop it also
         if isinstance(conda_dep_env[-1], dict):
@@ -132,7 +204,7 @@ def diff_environment_yml(fn_env: str, fn_devenv: str, print_dep: str = "both") -
 
         # If there is no pip dependency in env, all the ones of dev-env need to be added during CI
         else:
-            diff_pip_dep = list(pip_dep_devenv["pip"])
+            diff_pip_dep = pip_dep_devenv
 
     # If there is no pip dependency, we ignore this step
     else:

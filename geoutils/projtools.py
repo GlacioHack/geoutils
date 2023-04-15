@@ -3,9 +3,12 @@ projtools provides a set of tools for dealing with different coordinate referenc
 """
 from __future__ import annotations
 
+import warnings
 from collections import abc
 from math import ceil, floor
+from typing import Literal
 
+import geopandas
 import geopandas as gpd
 import numpy as np
 import pyproj
@@ -61,6 +64,47 @@ def utm_to_epsg(utm: str) -> int:
     epsg = pyproj.CRS(f"WGS 84 / UTM Zone {utm}").to_epsg()
 
     return int(epsg)
+
+
+def _get_utm_ups_crs(df: gpd.GeoDataFrame, method: Literal["centroid"] | Literal["geopandas"] = "centroid") -> CRS:
+    """
+    Get universal metric coordinate reference system for the vector passed (UTM or UPS).
+
+    :param df: Input geodataframe.
+    :param method: Method to choose the zone of the CRS, either based on the centroid of the footprint
+       or the extent as implemented in :func:`geopandas.GeoDataFrame.estimate_utm_crs`.
+       Forced to centroid if `local_crs="custom"`.
+    """
+    # Check input
+    if method.lower() not in ["centroid", "geopandas"]:
+        raise ValueError("Method to get local CRS should be one of 'centroid' and 'geopandas'.")
+
+    # Use geopandas if that is the desired method
+    if method == "geopandas":
+        crs = df.estimate_utm_crs()
+
+    # Else, compute the centroid of dissolved geometries and get UTM or UPS
+    else:
+        # Get a rough centroid in geographic coordinates (ignore the warning that it is not the most precise):
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=UserWarning)
+            shp_wgs84 = df.to_crs(epsg=4326).dissolve()
+            lat, lon = shp_wgs84.centroid.y.values[0], shp_wgs84.centroid.x.values[0]
+            del shp_wgs84
+
+        # If absolute latitude is below 80, get the EPSG code of the local UTM
+        if -80 <= lat <= 80:
+            utm = latlon_to_utm(lat, lon)
+            epsg = utm_to_epsg(utm)
+            crs = pyproj.CRS.from_epsg(epsg)
+        # If latitude is below 80, get UPS South
+        elif lat < -80:
+            crs = pyproj.CRS.from_epsg(32761)
+        # Else, get UPS North
+        else:
+            crs = pyproj.CRS.from_epsg(32661)
+
+    return crs
 
 
 def bounds2poly(
@@ -287,6 +331,14 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 def _get_bounds_projected(
     bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
 ) -> rio.coords.BoundingBox:
+    """
+    Get bounds projected in a specified CRS.
+
+    :param in_crs: Input CRS.
+    :param out_crs: Output CRS.
+    :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
+    Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+    """
 
     # Calculate new bounds
     left, bottom, right, top = bounds
@@ -294,3 +346,81 @@ def _get_bounds_projected(
     new_bounds = rio.coords.BoundingBox(*new_bounds)
 
     return new_bounds
+
+
+def _densify_geometry(line_geometry: shapely.LineString, densify_pts: int = 5000) -> shapely.LineString:
+    """
+    Densify a linestring geometry.
+
+    Inspired by: https://gis.stackexchange.com/questions/372912/how-to-densify-linestring-vertices-in-shapely-geopandas.
+
+    :param line_geometry: Linestring.
+    :param densify_pts: Number of points to densify each line.
+
+    :return: Densified linestring.
+    """
+
+    # Get the segments (list of linestrings)
+    segments = list(map(shapely.LineString, zip(line_geometry.coords[:-1], line_geometry.coords[1:])))
+
+    # To store new coordinate tuples
+    xy = []
+
+    # For each segment, densify the points
+    for i, seg in enumerate(segments):
+
+        # Get the segment length
+        length_m = seg.length
+
+        # Loop over a distance on the segment length
+        densified_seg = np.linspace(0, length_m, 1 + densify_pts)
+        # (removing the last point, as it will be the first point of the next segment,
+        # except for the last segment)
+        if i < len(segments) - 1:
+            densified_seg = densified_seg[:-1]
+
+        for distance_along_old_line in densified_seg:
+            # Interpolate a point every step along the old line
+            point = seg.interpolate(distance_along_old_line)
+            # Extract the coordinates and store them in xy list
+            xp, yp = point.x, point.y
+            xy.append((xp, yp))
+
+    # Recreate a new line with densified points
+    densified_line_geometry = shapely.LineString(xy)
+
+    return densified_line_geometry
+
+
+def _get_footprint_projected(
+    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
+) -> gpd.GeoDataFrame:
+    """
+    Get bounding box footprint projected in a specified CRS.
+
+    The polygon points of the vector are densified during reprojection to warp
+    the rectangular square footprint of the original projection into the new one.
+
+    :param in_crs: Input CRS.
+    :param out_crs: Output CRS.
+    :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+     Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+    """
+
+    # Get bounds
+    left, bottom, right, top = bounds
+
+    # Create linestring
+    linestring = shapely.LineString([[left, bottom], [left, top], [right, top], [right, bottom], [left, bottom]])
+
+    # Densify linestring
+    densified_line_geometry = _densify_geometry(linestring, densify_pts=densify_pts)
+
+    # Get polygon from new linestring
+    densified_poly = shapely.Polygon(densified_line_geometry)
+
+    # Reproject the polygon
+    df = gpd.GeoDataFrame({"geometry": [densified_poly]}, crs=in_crs)
+    reproj_df = df.to_crs(crs=out_crs)
+
+    return reproj_df

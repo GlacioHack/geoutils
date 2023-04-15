@@ -1,9 +1,13 @@
 """
 Test projtools
 """
+import os.path
+
+import geopandas as gpd
 import numpy as np
 import pyproj.exceptions
 import pytest
+import shapely
 
 import geoutils as gu
 import geoutils.projtools as pt
@@ -11,14 +15,14 @@ from geoutils import examples
 
 
 class TestProjTools:
-
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path("everest_rgi_outlines")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
 
     def test_latlon_to_utm(self) -> None:
-
         # First: Check errors are raised when format is invalid
 
         # If format is invalid
@@ -87,6 +91,33 @@ class TestProjTools:
         assert pt.utm_to_epsg("08s") == pt.utm_to_epsg("8S") == pt.utm_to_epsg("08S")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_get_metric_crs_utm(self, example: str) -> None:
+        """Check that the function works consistently with GeoPandas for UTM."""
+
+        # Open raster
+        rast = gu.Raster(example)
+
+        # Get utm zone from GeoPandas and GeoUtils
+        crs_gu = rast.get_metric_crs()
+        crs_geopandas = rast.get_metric_crs(method="geopandas")
+
+        # Verify they are the same
+        assert crs_gu == crs_geopandas
+
+    def test_get_metric_crs_ups(self) -> None:
+        """Check that the function works for UPS with points at high latitude."""
+
+        # Create a vector of a single point in geographic coordinates
+        point_north = shapely.Point([0, 84])
+        point_south = shapely.Point([0, -84])
+        vect_north = gu.Vector(gpd.GeoDataFrame({"geometry": [point_north]}, crs=pyproj.CRS.from_epsg(4326)))
+        vect_south = gu.Vector(gpd.GeoDataFrame({"geometry": [point_south]}, crs=pyproj.CRS.from_epsg(4326)))
+
+        # Check that UPS North and South are indeed returned
+        assert vect_north.get_metric_crs() == pyproj.CRS.from_epsg(32661)
+        assert vect_south.get_metric_crs() == pyproj.CRS.from_epsg(32761)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_latlon_reproject(self, example: str) -> None:
         """
         Check that to and from latlon projections are self consistent within tolerated rounding errors
@@ -143,3 +174,46 @@ class TestProjTools:
         assert out_bounds[1] == min(img1.bounds.bottom, outlines.ds.total_bounds[1])
         assert out_bounds[2] == max(img1.bounds.right, outlines.ds.total_bounds[2])
         assert out_bounds[3] == max(img1.bounds.top, outlines.ds.total_bounds[3])
+
+    # Try all vectors and rasters
+    @pytest.mark.parametrize(
+        "fn_raster_or_vector",
+        [
+            landsat_b4_path,
+            landsat_rgb_path,
+            landsat_b4_crop_path,
+            everest_outlines_path,
+            aster_dem_path,
+            aster_outlines_path,
+        ],
+    )  # type: ignore
+    # Try with geographic, a UTM zone and a Robinson
+    @pytest.mark.parametrize("out_crs", [pyproj.CRS.from_epsg(4326), pyproj.CRS.from_epsg(32610)])  # type: ignore
+    @pytest.mark.parametrize("densify_pts", [2, 10, 5000])  # type: ignore
+    def test_get_footprint_projected(self, fn_raster_or_vector: str, out_crs: pyproj.CRS, densify_pts: int) -> None:
+        """Test the get footprint projected function."""
+
+        # Open raster or vector
+        if os.path.splitext(os.path.basename(fn_raster_or_vector))[-1] == ".tif":
+            rast_or_vect = gu.Raster(fn_raster_or_vector)
+        else:
+            rast_or_vect = gu.Vector(fn_raster_or_vector)
+
+        # Get footprint
+        footprint = rast_or_vect.get_footprint_projected(out_crs=out_crs, densify_pts=densify_pts)
+
+        # Assert it is a vector containing a polygon geometry
+        assert isinstance(footprint, gu.Vector)
+        assert isinstance(footprint.geometry[0], shapely.Polygon)
+
+        # Check that the original corner points were conserved
+        left, bottom, right, top = rast_or_vect.bounds
+        corners = [shapely.Point([x, y]) for (x, y) in [(left, bottom), (left, top), (right, top), (right, bottom)]]
+        df = gpd.GeoDataFrame({"geometry": corners}, crs=rast_or_vect.crs)
+        df_reproj = df.to_crs(crs=out_crs)
+
+        assert all(point.coords[0] in footprint.geometry[0].exterior.coords[:] for point in df_reproj.geometry)
+
+        # Check that densification yields a logical amount of points
+        # (4 initial corner points times the densification factor + the last point)
+        assert len(footprint.geometry[0].exterior.coords[:]) == densify_pts * 4 + 1

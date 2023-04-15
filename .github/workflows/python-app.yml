@@ -48,7 +48,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ steps.get-date.outputs.month }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 5 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 102 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and only
@@ -79,7 +79,7 @@ jobs:
         pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
         mamba install $pkgs_conda_dev --freeze-installed
         if [[ "$pkgs_pip_dev" != "None" ]]; then
-          pip install $pkgs_pip_dev
+          pip install --user $pkgs_pip_dev
         fi
 
     # Stop the build if there are Python syntax errors or undefined names

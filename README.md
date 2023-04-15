@@ -1,5 +1,4 @@
-# geoutils
-Set of tools to handle raster and vector data sets in Python.
+# GeoUtils: consistent geospatial analysis in Python.
 
 ![](https://readthedocs.org/projects/geoutils/badge/?version=latest)
 [![build](https://github.com/GlacioHack/geoutils/actions/workflows/python-app.yml/badge.svg)](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml)
@@ -9,51 +8,43 @@ Set of tools to handle raster and vector data sets in Python.
 [![PyPI version](https://badge.fury.io/py/geoutils.svg)](https://badge.fury.io/py/geoutils)
 [![Coverage Status](https://coveralls.io/repos/github/GlacioHack/geoutils/badge.svg?branch=main)](https://coveralls.io/github/GlacioHack/geoutils?branch=main)
 
-This package offers Python classes and functions as well as command line tools to work with both geospatial raster and vector datasets. It is built upon rasterio and GeoPandas. In a single command it can import any geo-referenced dataset that is understood by these libraries, complete with all geo-referencing information, various helper functions and interface between vector/raster data.
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/GlacioHack/geoutils/main)
+[![Pre-Commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
+[![Formatted with black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/python/black)
+[![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
+[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
+**GeoUtils** is an open source project to develop a core Python package for geospatial analysis and foster inter-operability between other Python GIS packages.
+
+It aims at **facilitating end-user geospatial analysis by revolving around consistent `Raster` and `Vector` objects** that effortlessly interface between
+themselves. GeoUtils is founded on **implicit loading behaviour**, **robust numerical interfacing** and **convenient object-based methods** to easily perform
+the most common higher-level tasks needed by geospatial users.
+
+If you are looking for an accessible Python package to write the Python equivalent of your [GDAL](https://gdal.org/) command lines, or of your
+[QGIS](https://www.qgis.org/en/site/) analysis pipeline **without a steep learning curve** on Python GIS syntax, GeoUtils is perfect for you! For more advanced
+users, GeoUtils also aims at being efficient and scalable by supporting lazy loading and parallel computing (ongoing).
+
+GeoUtils relies on [Rasterio](https://github.com/rasterio/rasterio), [GeoPandas](https://github.com/geopandas/geopandas) and [Pyproj](https://github.com/pyproj4/pyproj) for georeferenced
+calculations, and on [NumPy](https://github.com/numpy/numpy) and [Xarray](https://github.com/pydata/xarray) for numerical analysis. It allows easy access to
+the functionalities of these packages through interfacing or composition, and quick inter-operability through object conversion.
+
+## Documentation
+
+For installation, quick start, gallery examples, a full feature description or a search through the API, see GeoUtils' documentation at:
+https://geoutils.readthedocs.io.
 
 ## Installation
 
-#### With conda (recommended)
 ```bash
-conda install --channel conda-forge --strict-channel-priority geoutils
-```
-The `--strict-channel-priority` flag seems essential for Windows installs to function correctly, and is recommended for UNIX-based systems as well.
-
-#### With pip
-
-From PyPI:
-```bash
-pip install geoutils
+mamba install -c conda-forge geoutils
 ```
 
-Or from the repository tarball: make sure GDAL and PROJ are properly installed, then:
-```bash
-pip install https://github.com/GlacioHack/geoutils/tarball/main
-```
+See [mamba's documentation](https://mamba.readthedocs.io/en/latest/) to install `mamba`, which will solve your environment much faster than `conda`.
 
-## Documentation
-See the full documentation at https://geoutils.readthedocs.io.
+## Start contributing
 
+1. Fork the repository, make a feature branch and push changes.
+2. When ready, submit a pull request from the feature branch of your fork to `GlacioHack/geoutils:main`.
+3. The PR will be reviewed by at least one maintainer, discussed, then merged.
 
-## Structure
-
-GeoUtils is composed of three libraries:
-- `georaster.py` to handle raster data set. In particular, a Raster class to load a raster file along with metadata.
-- `geovector.py` to handle vector data set. In particular, a Vector class to load a raster file along with metadata.
-- `projtools.py` with various tools around projections.
-
-
-## How to contribute
-
-You can find ways to improve the libraries in the [issues](https://github.com/GlacioHack/geoutils/issues) section. All contributions are welcome.
-
-1. Fork the repository to your personal GitHub account, clone to your computer.
-2. (Optional but preferred:) Make a feature branch.
-3. Push to your feature branch.
-4. When ready, submit a Pull Request from your feature branch to `GlacioHack/geoutils:master`.
-5. The PR will be reviewed by at least one other person. Usually your PR will be merged via 'squash and merge'.
-
-Direct pushing to the GlacioHack repository is not permitted.
-
-A more detailed contribution instruction [can be found here](CONTRIBUTING.md).
+More info on [our contributing page](CONTRIBUTING.md).
