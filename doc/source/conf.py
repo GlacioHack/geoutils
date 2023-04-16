@@ -164,8 +164,8 @@ def setup(app):
 # a list of builtin themes.
 #
 html_theme = "sphinx_book_theme"
-html_favicon = "_static/logo_only.svg"
-html_logo = "_static/logo.svg"
+html_favicon = "_static/logo_only.png"
+html_logo = "_static/logo.png"
 html_title = "GeoUtils"
 
 html_theme_options = {
