@@ -2,6 +2,8 @@
 
 # About GeoUtils
 
+Prefer to **grasp GeoUtils' core concepts by comparing with other Python packages**? Further below is a **{ref}`side-by-side code comparison with Rasterio and GeoPandas<comparison-rasterio-geopandas>`**.
+
 ## What is GeoUtils?
 
 GeoUtils<sup>1</sup> is a **[Python](https://www.python.org/) package for the handling and analysis of georeferenced data**, developed with the objective of
@@ -67,6 +69,7 @@ Finally, **many common geospatial analysis tools are generally unavailable** in 
 Having higher-level geospatial tools implemented in a **consistent** manner and tested for **robustness** is essential for the wider geospatial community.
 ```
 
+(comparison-rasterio-geopandas)=
 ## Side-by-side examples with Rasterio and GeoPandas
 
 This first side-by-side example demonstrates the difference with Rasterio for opening a raster, reprojecting on

@@ -44,8 +44,8 @@ vect = gu.Vector(filename_vect)
 ```
 
 A {class}`~geoutils.Raster` is a composition class with four main attributes: a {class}`numpy.ma.MaskedArray` as {attr}`~geoutils.Raster.data`, a
-{class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an {class}`affine.Affine` as {attr}`~geoutils.Raster.transform`, and a {class}`float` or
-{class}`int` as {attr}`~geoutils.Raster.nodata`.
+{class}`pyproj.crs.CRS` as {attr}`~geoutils.Raster.crs`, an [{class}`affine.Affine`](https://rasterio.readthedocs.io/en/stable/topics/migrating-to-v1.html#affine-affine-vs-gdal-style-geotransforms)
+as {attr}`~geoutils.Raster.transform`, and a {class}`float` or {class}`int` as {attr}`~geoutils.Raster.nodata`.
 
 
 ```{code-cell} ipython3
@@ -145,7 +145,7 @@ and `rast`'s metadata is sufficient to provide a georeferenced grid for {func}`~
 ## Quick plotting
 
 To facilitate the analysis process, GeoUtils includes quick plotting tools that support multiple colorbars and implicitly add layers to the current axis.
-Those are wrapped from {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot`, and relay any argument passed.
+Those are build on top of {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot`, and relay any argument passed.
 
 ```{seealso}
 GeoUtils' plotting tools only aim to smooth out the most common hassles when quickly plotting raster and vectors.

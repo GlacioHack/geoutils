@@ -125,7 +125,7 @@ np.nanmedian(rast)
 np.ma.median(rast.data)
 ```
 
-If a NumPy core function raises an error (e.g., `np.percentile`), {class}`~geoutils.Raster.nodata` values might not be respected. In this case, use the NaN
+If a NumPy core function raises an error (e.g., {func}`numpy.percentile`), {class}`~geoutils.Raster.nodata` values might not be respected. In this case, use the NaN
 function on the {class}`~geoutils.Raster`.
 
 
