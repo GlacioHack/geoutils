@@ -25,7 +25,7 @@ Below is a diagram showing current {class}`~geoutils.Raster` inheritance, which 
 for analyzing digital elevation models.
 
 ```{eval-rst}
-.. inheritance-diagram:: geoutils.raster.raster geoutils.raster.satimg xdem.dem.DEM
+.. inheritance-diagram:: geoutils.raster.raster geoutils.raster.satimg
     :top-classes: geoutils.raster.raster.Raster
 ```
 
