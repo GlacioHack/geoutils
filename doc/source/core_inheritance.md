@@ -42,7 +42,7 @@ If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.
 GeoUtils subclasses {class}`Rasters<geoutils.Raster>` to {class}`SatelliteImages<geoutils.SatelliteImage>` for remote sensing users interested in parsing
 metadata from space- or airborne imagery.
 
-Based on the filename, or auxiliary files, the {class}`~geoutils.SatelliteImage` class attempts to automatically parse a 
+Based on the filename, or auxiliary files, the {class}`~geoutils.SatelliteImage` class attempts to automatically parse a
 {attr}`~geoutils.SatelliteImage.datetime`, {attr}`~geoutils.SatelliteImage.sensor`, {attr}`~geoutils.SatelliteImage.tile_name`,
 and other information.
 
