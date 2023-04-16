@@ -10,7 +10,7 @@ title: GeoUtils
 :::{grid-item}
 :columns: 4
 
-```{image} ./_static/logo_only.svg
+```{image} ./_static/logo_only.png
     :width: 300px
     :class: dark-light
 ```
