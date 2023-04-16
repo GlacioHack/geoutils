@@ -201,8 +201,8 @@ and/or
 {class}`~geoutils.Raster.crs`.
 
 ```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed a {class}`~geoutils.Raster` or {class}`~geoutils.
-Vector` as a reference to match. In that case, no other argument is necessary.
+As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed a {class}`~geoutils.Raster` or 
+{class}`~geoutils.Vector` as a reference to match. In that case, no other argument is necessary.
 
 A {class}`~geoutils.Raster` reference will enforce to match its {attr}`~geoutils.Raster.transform` and {class}`~geoutils.Raster.crs`.
 A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bounds` and {class}`~geoutils.Vector.crs`.

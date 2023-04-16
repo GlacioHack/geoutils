@@ -145,7 +145,7 @@ and `rast`'s metadata is sufficient to provide a georeferenced grid for {func}`~
 ## Quick plotting
 
 To facilitate the analysis process, GeoUtils includes quick plotting tools that support multiple colorbars and implicitly add layers to the current axis.
-Those are wrapped from {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot`, and relay any argument passed.
+Those are build on top of {func}`rasterio.plot.show` and {func}`geopandas.GeoDataFrame.plot`, and relay any argument passed.
 
 ```{seealso}
 GeoUtils' plotting tools only aim to smooth out the most common hassles when quickly plotting raster and vectors.

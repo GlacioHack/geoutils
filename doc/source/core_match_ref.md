@@ -41,12 +41,9 @@ or {class}`~geoutils.Vector`:
    * - **Operation**
      - Enforced on {class}`~geoutils.Raster`
      - Enforced on {class}`~geoutils.Vector`
-   * - {func}`~geoutils.Raster.warp`
+   * - {func}`~geoutils.Raster.reproject`
      - {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
      - {attr}`~geoutils.Vector.bounds`<sup>1</sup> and {attr}`~geoutils.Vector.crs`
-   * - {func}`~geoutils.Raster.reproject`
-     - {attr}`~geoutils.Raster.crs`
-     - {attr}`~geoutils.Vector.crs`
    * - {func}`~geoutils.Raster.crop`
      - {attr}`~geoutils.Vector.bounds`
      - {attr}`~geoutils.Raster.bounds`
@@ -68,7 +65,7 @@ at modifying the georeferencing of {class}`Rasters<geoutils.Raster>` or {class}`
 
 The {func}`~geoutils.Vector.rasterize` operation to convert from {class}`~geoutils.Vector` to {class}`~geoutils.Raster` accepts a {class}`~geoutils.Raster` to define the
 grid and georeferencing. The behaviour is similar for {func}`~geoutils.Vector.create_mask`, that directly relies on {func}`~geoutils.Vector.rasterize` to
-rasterize directly into a boolean {class}`~geoutils.Raster.Mask`.
+rasterize directly into a boolean {class}`~geoutils.Mask`.
 
 In addition, the {func}`~geoutils.Vector.proximity` operation to compute proximity distances from the vector also relies on a
 {func}`~geoutils.Vector.rasterize`, and therefore also accepts a {class}`~geoutils.Raster` as reference.

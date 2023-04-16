@@ -87,7 +87,10 @@ Dive into the full documentation.
 
 ::::
 
+Prefer to **grasp GeoUtils' core concepts by comparing with other Python packages**? Read through a short **{ref}`side-by-side code comparison with Rasterio and GeoPandas<comparison-rasterio-geopandas>`**.
+
 Looking to **learn a specific feature by running an example**? Jump straight into our **example galleries on {ref}`examples-io`, {ref}`examples-handling` and {ref}`examples-analysis`**.
+
 
 ```{seealso}
 If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/en/latest/index.html) for digital elevation models.**

@@ -32,7 +32,7 @@ for analyzing digital elevation models.
 ```{note}
 The {class}`~xdem.DEM` class re-implements all methods of [gdalDEM](https://gdal.org/programs/gdaldem.html) (and more) to derive topographic attributes
 (hillshade, slope, aspect, etc), coded directly in Python for scalability and tested to yield the exact same results.
-Among others, it also adds a {attr}`~xdem.DEM.vref` property to consistently manage vertical referencing (ellipsoid, geoids).
+Among others, it also adds a {attr}`~xdem.DEM.vcrs` property to consistently manage vertical referencing (ellipsoid, geoids).
 
 If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/en/latest/index.html) for digital elevation models.**
 ```
@@ -42,7 +42,8 @@ If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.
 GeoUtils subclasses {class}`Rasters<geoutils.Raster>` to {class}`SatelliteImages<geoutils.SatelliteImage>` for remote sensing users interested in parsing
 metadata from space- or airborne imagery.
 
-Based on the filename, or auxiliary files, the {class}`~geoutils.SatelliteImage` class attempts to automatically parse a `.datetime`, `.sensor`, `tile_name`,
+Based on the filename, or auxiliary files, the {class}`~geoutils.SatelliteImage` class attempts to automatically parse a 
+{attr}`~geoutils.SatelliteImage.datetime`, {attr}`~geoutils.SatelliteImage.sensor`, {attr}`~geoutils.SatelliteImage.tile_name`,
 and other information.
 
 ```{code-cell} ipython3
