@@ -14,6 +14,7 @@ dependencies:
 
   # Development-specific
   - autovizwidget
+  - graphviz
   - sphinx
   - myst-nb
   - sphinx-autodoc-typehints
