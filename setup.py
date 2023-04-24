@@ -3,7 +3,7 @@ from typing import Optional
 
 from setuptools import setup
 
-FULLVERSION = "0.0.10"
+FULLVERSION = "0.0.11"
 VERSION = FULLVERSION
 
 write_version = True
