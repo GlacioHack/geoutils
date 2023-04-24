@@ -1,6 +1,5 @@
 ---
 file_format: mystnb
-file_format: mystnb
 jupytext:
   formats: md:myst
   text_representation:
