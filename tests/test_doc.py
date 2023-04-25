@@ -11,7 +11,7 @@ class TestDocs:
     n_threads = os.getenv("N_CPUS")
 
     def test_build(self) -> None:
-        """Try building the doc and see if it works."""
+        """Try building the documentation and see if it works."""
         # Remove the build directory if it exists.
 
         # Test only on Linux
