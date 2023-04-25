@@ -30,8 +30,7 @@ the functionalities of these packages through interfacing or composition, and qu
 
 ## Documentation
 
-For installation, quick start, gallery examples, a full feature description or a search through the API, see GeoUtils' documentation at:
-https://geoutils.readthedocs.io.
+For a quick start, full feature description or search through the API, see GeoUtils' documentation at: https://geoutils.readthedocs.io.
 
 ## Installation
 

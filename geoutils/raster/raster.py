@@ -578,7 +578,6 @@ class Raster:
             0.0, y_res, top_left_y) or an affine.Affine object.
         :param crs: Coordinate reference system. Either a rasterio CRS,
             or an EPSG integer.
-
         :param nodata: Nodata value.
 
         :returns: Raster created from the provided array and georeferencing.
@@ -3243,7 +3242,7 @@ class Mask(Raster):
         return str(s)
 
     def _repr_html_(self) -> str:
-        """Convert mask to HTML representation for notebooks and docs"""
+        """Convert mask to HTML representation for notebooks and doc"""
 
         # If data not loaded, return and string and avoid calling .data
         if not self.is_loaded:
