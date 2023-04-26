@@ -141,8 +141,17 @@ geoutils/version.py
 # End of https://www.gitignore.io/api/python
 .vim/
 doc/source/file.txt
-doc/source/auto_examples/
+doc/source/io_examples/
+doc/source/handling_examples/
+doc/source/analysis_examples/
 doc/source/gen_modules/
 
 # Directories where example data is downloaded
 examples/data/
+
+# Directory where myst_nb executes jupyter code
+doc/jupyter_execute/
+
+# Files that should have been deleted by Sphinx at end of build (but can exist if build fails)
+examples/io/open_save/myraster.tif
+examples/io/open_save/myvector.gpkg

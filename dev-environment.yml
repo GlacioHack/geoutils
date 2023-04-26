@@ -9,10 +9,14 @@ dependencies:
   - rasterio>=1.3
   - scipy
   - tqdm
+  - xarray
+  - rioxarray
 
   # Development-specific
+  - autovizwidget
+  - graphviz
   - sphinx
-  - sphinx_rtd_theme
+  - myst-nb
   - sphinx-autodoc-typehints
   - sphinxcontrib-programoutput
   - numpydoc
@@ -26,4 +30,8 @@ dependencies:
   - sphinx-gallery
   - scikit-image
   - pyyaml
-  - rioxarray
+  - sphinx-design
+  - sphinx-book-theme
+
+  - pip:
+    - -e ./

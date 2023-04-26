@@ -1,10 +1,9 @@
-from glob import glob
 from os import path
 from typing import Optional
 
 from setuptools import setup
 
-FULLVERSION = "0.0.10"
+FULLVERSION = "0.0.11"
 VERSION = FULLVERSION
 
 write_version = True
@@ -35,13 +34,13 @@ with open("README.md", encoding="utf-8") as fh:
 setup(
     name="geoutils",
     version=FULLVERSION,
-    description="Tools for working with geospatial data",
+    description="Analysis and handling of georeferenced rasters and vectors",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://www.github.com/GlacioHack/geoutils/",
     author="The GlacioHack Team",
     license="BSD-3",
-    packages=["geoutils", "geoutils.georaster"],
+    packages=["geoutils", "geoutils.raster"],
     python_requires=">=3.8",
     install_requires=[
         "rasterio",
@@ -53,7 +52,7 @@ setup(
         "tqdm",
     ],
     extras_require={"rioxarray": ["rioxarray"]},
-    scripts=["geoutils/geoviewer.py"],
+    scripts=["bin/geoviewer.py"],
     zip_safe=False,
     classifiers=[
         "Programming Language :: Python :: 3",
