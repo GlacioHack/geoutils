@@ -10,7 +10,7 @@ build:
   tools:
     python: "mambaforge-4.10"
 
-# Build documentation in the docs/ directory with Sphinx
+# Build documentation in the doc/ directory with Sphinx
 sphinx:
   configuration: doc/source/conf.py
   fail_on_warning: false
@@ -18,7 +18,7 @@ sphinx:
 # Build the doc in offline formats
 formats:
   - pdf
-  - hmtlzip
+  - htmlzip
 
 conda:
   environment: dev-environment.yml
