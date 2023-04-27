@@ -21,7 +21,7 @@ implemented in GeoUtils.
 ## Overview of {class}`~geoutils.Raster` inheritance
 
 
-Below is a diagram showing current {class}`~geoutils.Raster` inheritance, which extends into other packages such as [xDEM](https://xdem.readthedocs.io/en/latest/index.html)
+Below is a diagram showing current {class}`~geoutils.Raster` inheritance, which extends into other packages such as [xDEM](https://xdem.readthedocs.io/)
 for analyzing digital elevation models.
 
 ```{eval-rst}
@@ -34,7 +34,7 @@ The {class}`~xdem.DEM` class re-implements all methods of [gdalDEM](https://gdal
 (hillshade, slope, aspect, etc), coded directly in Python for scalability and tested to yield the exact same results.
 Among others, it also adds a {attr}`~xdem.DEM.vcrs` property to consistently manage vertical referencing (ellipsoid, geoids).
 
-If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/en/latest/index.html) for digital elevation models.**
+If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/) for digital elevation models.**
 ```
 
 ## The internal {class}`~geoutils.SatelliteImage` subclass

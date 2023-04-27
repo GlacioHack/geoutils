@@ -58,7 +58,7 @@ intersphinx_mapping = {
     "geopandas": ("https://geopandas.org/en/stable/", None),
     "shapely": ("https://shapely.readthedocs.io/en/stable/", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
-    "xdem": ("https://xdem.readthedocs.io/en/latest", None),
+    "xdem": ("https://xdem.readthedocs.io/en/stable", None),
     "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
 }
