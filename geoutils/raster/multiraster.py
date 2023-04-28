@@ -161,7 +161,7 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         dst_bounds = reference_raster.bounds
     else:
         dst_bounds = gu.projtools.merge_bounds(
-            [raster.bounds for raster in rasters], resolution=reference_raster.res[0], return_rio_bbox=True
+            [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters], resolution=reference_raster.res[0], return_rio_bbox=True
         )
 
     # Make a data list and add all of the reprojected rasters into it.
@@ -171,7 +171,6 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         # Check that data is loaded, otherwise temporarily load it
         if not raster.is_loaded:
             raster.load()
-            raster.is_loaded = False
 
         nodata = reference_raster.nodata or gu.raster.raster._default_nodata(reference_raster.data.dtype)
         # Reproject to reference grid
