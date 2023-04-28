@@ -93,7 +93,7 @@ Looking to **learn a specific feature by running an example**? Jump straight int
 
 
 ```{seealso}
-If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/en/latest/index.html) for digital elevation models.**
+If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/) for digital elevation models.**
 ```
 ----------------
 
