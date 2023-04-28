@@ -119,8 +119,10 @@ def stack_rasters(
     """
     Stack a list of rasters on their maximum extent into a multi-band raster.
 
-    The input rasters can have any transform or CRS, and will be reprojected to the reference raster's CRS and resolution.
-    The output multi-band raster has an extent that is the union of all raster extents, except if `use_ref_bounds` is used,
+    The input rasters can have any transform or CRS, and will be reprojected to the
+    reference raster's CRS and resolution.
+    The output multi-band raster has an extent that is the union of all raster extents,
+    except if `use_ref_bounds` is used,
     and the number of band equal to the number of input rasters.
 
     Use diff=True to return directly the difference to the reference raster.
@@ -129,7 +131,8 @@ def stack_rasters(
     reprojection then deleted to optimize memory usage.
 
     :param rasters: List of rasters to be stacked.
-    :param reference: Index of reference raster in the list or separate reference raster. Defaults to the first raster in the list.
+    :param reference: Index of reference raster in the list or separate reference raster.
+        Defaults to the first raster in the list.
     :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
     :param diff: If True, will return the difference to the reference raster.
@@ -230,14 +233,17 @@ def merge_rasters(
     """
     Spatially merge a list of rasters into one larger raster of their maximum extent.
 
-    The input rasters can have any transform or CRS, and will be reprojected to the reference raster's CRS and resolution.
-    The output merged raster has an extent that is the union of all raster extents, except if `use_ref_bounds` is used.
+    The input rasters can have any transform or CRS, and will be reprojected to the
+    reference raster's CRS and resolution.
+    The output merged raster has an extent that is the union of all raster extents,
+    except if `use_ref_bounds` is used.
 
     Note that all rasters will be loaded once in memory. The data is only loaded for
     reprojection then deleted to optimize memory usage.
 
     :param rasters: List of rasters to be merged.
-    :param reference: Index of reference raster in the list or separate reference raster. Defaults to the first raster in the list.
+    :param reference: Index of reference raster in the list or separate reference raster.
+        Defaults to the first raster in the list.
     :param merge_algorithm: Reductor function (or list of functions) to merge the rasters with. Defaults to the mean.
         If several algorithms are provided, each result is returned as a separate band.
     :param resampling_method: Resampling method for reprojection.
