@@ -161,7 +161,9 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         dst_bounds = reference_raster.bounds
     else:
         dst_bounds = gu.projtools.merge_bounds(
-            [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters], resolution=reference_raster.res[0], return_rio_bbox=True
+            [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters],
+            resolution=reference_raster.res[0],
+            return_rio_bbox=True,
         )
 
     # Make a data list and add all of the reprojected rasters into it.

@@ -7,8 +7,8 @@ import warnings
 from typing import Callable
 
 import numpy as np
-import pytest
 import pyproj
+import pytest
 import rasterio as rio
 
 import geoutils as gu
@@ -23,7 +23,9 @@ class stack_merge_images:
     Param `cls` is used to set the type of the output, e.g. gu.Raster (default).
     """
 
-    def __init__(self, image: str, cls: Callable[[str], RasterType] = gu.Raster, different_crs: pyproj.CRS | None = None) -> None:
+    def __init__(
+        self, image: str, cls: Callable[[str], RasterType] = gu.Raster, different_crs: pyproj.CRS | None = None
+    ) -> None:
         img = cls(examples.get_path(image))
         self.img = img
 
@@ -63,6 +65,7 @@ class stack_merge_images:
 def images_1d():  # type: ignore
     return stack_merge_images("everest_landsat_b4")
 
+
 @pytest.fixture
 def images_different_crs():  # type: ignore
     return stack_merge_images("everest_landsat_b4", different_crs=4326)
@@ -81,7 +84,12 @@ def images_3d():  # type: ignore
 class TestMultiRaster:
     @pytest.mark.parametrize(
         "rasters",
-        [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images"), pytest.lazy_fixture("images_different_crs"), pytest.lazy_fixture("images_3d")],
+        [
+            pytest.lazy_fixture("images_1d"),
+            pytest.lazy_fixture("sat_images"),
+            pytest.lazy_fixture("images_different_crs"),
+            pytest.lazy_fixture("images_3d"),
+        ],
     )  # type: ignore
     def test_stack_rasters(self, rasters) -> None:  # type: ignore
         """Test stack_rasters"""
@@ -145,7 +153,12 @@ class TestMultiRaster:
         assert stacked_img2.bounds == rasters.img.bounds
 
     @pytest.mark.parametrize(
-        "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("images_3d"), pytest.lazy_fixture("images_different_crs")]
+        "rasters",
+        [
+            pytest.lazy_fixture("images_1d"),
+            pytest.lazy_fixture("images_3d"),
+            pytest.lazy_fixture("images_different_crs"),
+        ],
     )  # type: ignore
     def test_merge_rasters(self, rasters) -> None:  # type: ignore
         """Test merge_rasters"""
