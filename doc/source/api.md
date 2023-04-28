@@ -257,6 +257,16 @@ And reverse operations.
     Mask.proximity
 ```
 
+## Multiple rasters
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    raster.stack_rasters
+    raster.merge_rasters
+```
+
 ## Vector
 
 ```{eval-rst}
