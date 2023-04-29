@@ -117,28 +117,28 @@ def stack_rasters(
     progress: bool = True,
 ) -> gu.Raster:
     """
-    Stack a list of rasters into a common grid as a 3D np array with nodata set to Nan.
+    Stack a list of rasters on their maximum extent into a multi-band raster.
 
-    If use_ref_bounds is True, output will have the shape (N, height, width) where N is len(rasters) and \
-height and width is equal to reference's shape.
-    If use_ref_bounds is False, output will have the shape (N, height2, width2) where N is len(rasters) and \
-height2 and width2 are set based on reference's resolution and the maximum extent of all rasters.
+    The input rasters can have any transform or CRS, and will be reprojected to the
+    reference raster's CRS and resolution.
+    The output multi-band raster has an extent that is the union of all raster extents,
+    except if `use_ref_bounds` is used,
+    and the number of band equal to the number of input rasters.
 
     Use diff=True to return directly the difference to the reference raster.
 
-    Note that currently all rasters will be loaded once in memory. However, if rasters data is not loaded prior to \
-    merge_rasters it will be loaded for reprojection and deleted, therefore avoiding duplication and \
-    optimizing memory usage.
+    Note that all rasters will be loaded once in memory. The data is only loaded for
+    reprojection then deleted to optimize memory usage.
 
-    :param rasters: A list of geoutils Raster objects to be stacked.
-    :param reference: The reference index, in case the reference is to be stacked, or a separate Raster object \
- in case the reference should not be stacked. Defaults to the first raster in the list.
-    :param resampling_method: The resampling method for the raster reprojections.
+    :param rasters: List of rasters to be stacked.
+    :param reference: Index of reference raster in the list or separate reference raster.
+        Defaults to the first raster in the list.
+    :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
     :param diff: If True, will return the difference to the reference raster.
     :param progress: If True, will display a progress bar. Default is True.
 
-    :returns: The stacked raster with the same parameters (optionally bounds) as the reference.
+    :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
     # Check resampling method
     if isinstance(resampling_method, str):
@@ -161,7 +161,9 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         dst_bounds = reference_raster.bounds
     else:
         dst_bounds = gu.projtools.merge_bounds(
-            [raster.bounds for raster in rasters], resolution=reference_raster.res[0], return_rio_bbox=True
+            [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters],
+            resolution=reference_raster.res[0],
+            return_rio_bbox=True,
         )
 
     # Make a data list and add all of the reprojected rasters into it.
@@ -171,7 +173,6 @@ height2 and width2 are set based on reference's resolution and the maximum exten
         # Check that data is loaded, otherwise temporarily load it
         if not raster.is_loaded:
             raster.load()
-            raster.is_loaded = False
 
         nodata = reference_raster.nodata or gu.raster.raster._default_nodata(reference_raster.data.dtype)
         # Reproject to reference grid
@@ -230,23 +231,26 @@ def merge_rasters(
     progress: bool = True,
 ) -> RasterType:
     """
-    Merge a list of rasters into one larger raster.
+    Spatially merge a list of rasters into one larger raster of their maximum extent.
 
-    Reprojects the rasters to the reference raster CRS and resolution.
-    Note that currently all rasters will be loaded once in memory. However, if rasters data is not loaded prior to \
-    merge_rasters it will be loaded for reprojection and deleted, therefore avoiding duplication and \
-    optimizing memory usage.
+    The input rasters can have any transform or CRS, and will be reprojected to the
+    reference raster's CRS and resolution.
+    The output merged raster has an extent that is the union of all raster extents,
+    except if `use_ref_bounds` is used.
 
-    :param rasters: A list of geoutils Raster objects to be merged.
-    :param reference: The reference index, in case the reference is to be merged, or a separate Raster object \
- in case the reference should not be merged. Defaults to the first raster in the list.
-    :param merge_algorithm: The algorithm, or list of algorithms, to merge the rasters with. Defaults to the mean.\
-If several algorithms are provided, each result is returned as a separate band.
-    :param resampling_method: The resampling method for the raster reprojections.
+    Note that all rasters will be loaded once in memory. The data is only loaded for
+    reprojection then deleted to optimize memory usage.
+
+    :param rasters: List of rasters to be merged.
+    :param reference: Index of reference raster in the list or separate reference raster.
+        Defaults to the first raster in the list.
+    :param merge_algorithm: Reductor function (or list of functions) to merge the rasters with. Defaults to the mean.
+        If several algorithms are provided, each result is returned as a separate band.
+    :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
     :param progress: If True, will display a progress bar. Default is True.
 
-    :returns: The merged raster with the same parameters (excl. bounds) as the reference.
+    :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
     # Make sure merge_algorithm is a list
     if not isinstance(merge_algorithm, (list, tuple)):

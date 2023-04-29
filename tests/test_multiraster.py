@@ -7,6 +7,7 @@ import warnings
 from typing import Callable
 
 import numpy as np
+import pyproj
 import pytest
 import rasterio as rio
 
@@ -22,7 +23,9 @@ class stack_merge_images:
     Param `cls` is used to set the type of the output, e.g. gu.Raster (default).
     """
 
-    def __init__(self, image: str, cls: Callable[[str], RasterType] = gu.Raster) -> None:
+    def __init__(
+        self, image: str, cls: Callable[[str], RasterType] = gu.Raster, different_crs: pyproj.CRS | None = None
+    ) -> None:
         img = cls(examples.get_path(image))
         self.img = img
 
@@ -43,6 +46,8 @@ class stack_merge_images:
                 left=x_midpoint - img.res[0] * 3, right=img.bounds.right, top=img.bounds.top, bottom=img.bounds.bottom
             )
         )
+        if different_crs:
+            self.img2 = self.img2.reproject(dst_crs=different_crs)
 
         # To check that use_ref_bounds work - create a img that do not cover the whole extent
         self.img3 = img.copy()
@@ -62,6 +67,11 @@ def images_1d():  # type: ignore
 
 
 @pytest.fixture
+def images_different_crs():  # type: ignore
+    return stack_merge_images("everest_landsat_b4", different_crs=4326)
+
+
+@pytest.fixture
 def sat_images():  # type: ignore
     return stack_merge_images("everest_landsat_b4", cls=gu.SatelliteImage)
 
@@ -74,7 +84,12 @@ def images_3d():  # type: ignore
 class TestMultiRaster:
     @pytest.mark.parametrize(
         "rasters",
-        [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("sat_images"), pytest.lazy_fixture("images_3d")],
+        [
+            pytest.lazy_fixture("images_1d"),
+            pytest.lazy_fixture("sat_images"),
+            pytest.lazy_fixture("images_different_crs"),
+            pytest.lazy_fixture("images_3d"),
+        ],
     )  # type: ignore
     def test_stack_rasters(self, rasters) -> None:  # type: ignore
         """Test stack_rasters"""
@@ -102,17 +117,22 @@ class TestMultiRaster:
             stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2])
 
         assert stacked_img.count == 2
-        assert rasters.img.shape == stacked_img.shape
+        # If the rasters were in a different projection, the final shape can vary by 1 pixel
+        if not all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
+            assert rasters.img.height == pytest.approx(stacked_img.height, abs=1)
+            assert rasters.img.width == pytest.approx(stacked_img.width, abs=1)
+        else:
+            assert rasters.img.shape == stacked_img.shape
         assert type(stacked_img) == gu.Raster  # Check output object is always Raster, whatever input was given
         assert np.count_nonzero(np.isnan(stacked_img.data)) == 0  # Check no NaNs introduced
 
         merged_bounds = gu.projtools.merge_bounds(
-            [rasters.img1.bounds, rasters.img2.bounds], resolution=rasters.img1.res[0]
+            [rasters.img1.bounds, rasters.img2.get_bounds_projected(rasters.img1.crs)], resolution=rasters.img1.res[0]
         )
         assert merged_bounds == stacked_img.bounds
 
         # Check that reference works with input Raster
-        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img)
+        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
         assert rasters.img.bounds == stacked_img.bounds
 
         # Others than int or gu.Raster should raise a ValueError
@@ -133,7 +153,12 @@ class TestMultiRaster:
         assert stacked_img2.bounds == rasters.img.bounds
 
     @pytest.mark.parametrize(
-        "rasters", [pytest.lazy_fixture("images_1d"), pytest.lazy_fixture("images_3d")]
+        "rasters",
+        [
+            pytest.lazy_fixture("images_1d"),
+            pytest.lazy_fixture("images_3d"),
+            pytest.lazy_fixture("images_different_crs"),
+        ],
     )  # type: ignore
     def test_merge_rasters(self, rasters) -> None:  # type: ignore
         """Test merge_rasters"""
@@ -153,17 +178,29 @@ class TestMultiRaster:
 
         merged_img = gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.nanmean)
 
-        assert rasters.img.shape == merged_img.shape
-        assert rasters.img.bounds == merged_img.bounds
+        if not all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
+            assert rasters.img.height == pytest.approx(merged_img.height, abs=1)
+            assert rasters.img.width == pytest.approx(merged_img.width, abs=1)
+        else:
+            assert rasters.img.shape == merged_img.shape
+
+        merged_bounds = gu.projtools.merge_bounds(
+            [rasters.img1.bounds, rasters.img2.get_bounds_projected(rasters.img1.crs)], resolution=rasters.img1.res[0]
+        )
+        assert merged_bounds == merged_img.bounds
+
         assert np.count_nonzero(np.isnan(merged_img.data)) == 0  # Check no NaNs introduced
 
-        diff = rasters.img.data - merged_img.data
-
-        assert np.abs(np.nanmean(diff)) < 1
+        # Check that only works if CRS were the same
+        if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
+            diff = rasters.img.data - merged_img.data
+            assert np.abs(np.nanmean(diff)) < 1
 
         # Check that reference works
-        merged_img2 = gu.raster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img)
-        assert merged_img2 == merged_img
+        merged_img2 = gu.raster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
+        # Check that only works if CRS were the same
+        if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
+            assert merged_img2 == merged_img
 
     # Group rasters for for testing `load_multiple_rasters`
     # two overlapping, single band rasters
