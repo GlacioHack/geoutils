@@ -660,6 +660,12 @@ class TestGeoPandasMethods:
         "merge",
         "apply",
         "astype",
+        "minimum_bounding_circle",
+        "minimum_bounding_radius",
+        "get_coordinates",
+        "hilbert_distance",
+        "sample_points",
+        "copy",
     ]
     # Exceptions for IO/conversion that can be done directly from .ds
     all_exceptions = exceptions_unimplemented
