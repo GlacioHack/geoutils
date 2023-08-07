@@ -2857,6 +2857,12 @@ class TestMask:
         saved = gu.Raster(temp_file)
         assert mask.astype("uint8").raster_equal(saved)
 
+        # Clean up temporary folder - fails on Windows
+        try:
+            temp_dir.cleanup()
+        except (NotADirectoryError, PermissionError):
+            pass
+
 
 class TestArithmetic:
     """
