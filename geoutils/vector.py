@@ -594,8 +594,14 @@ class Vector:
     ) -> Vector:
         return self._override_gdf_output(
             self.ds.dissolve(
-                by=by, aggfunc=aggfunc, as_index=as_index, level=level, sort=sort, observed=observed, dropna=dropna,
-                **kwargs
+                by=by,
+                aggfunc=aggfunc,
+                as_index=as_index,
+                level=level,
+                sort=sort,
+                observed=observed,
+                dropna=dropna,
+                **kwargs,
             )
         )
 
