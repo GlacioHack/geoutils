@@ -2844,6 +2844,18 @@ class TestMask:
         # A mask is a raster, so also need to check this
         assert not isinstance(rast, gu.Mask)
 
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    def test_save(self, mask: gu.Mask) -> None:
+        """Test saving for masks"""
+
+        # Temporary folder
+        temp_dir = tempfile.TemporaryDirectory()
+
+        # Save file to temporary file, with defaults opts
+        temp_file = os.path.join(temp_dir.name, "test.tif")
+        mask.save(temp_file)
+        saved = gu.Raster(temp_file)
+        assert mask.astype("uint8").raster_equal(saved)
 
 class TestArithmetic:
     """
