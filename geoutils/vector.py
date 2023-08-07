@@ -590,10 +590,12 @@ class Vector:
         sort: bool = True,
         observed: bool = False,
         dropna: bool = True,
+        **kwargs: Any,
     ) -> Vector:
         return self._override_gdf_output(
             self.ds.dissolve(
-                by=by, aggfunc=aggfunc, as_index=as_index, level=level, sort=sort, observed=observed, dropna=dropna
+                by=by, aggfunc=aggfunc, as_index=as_index, level=level, sort=sort, observed=observed, dropna=dropna,
+                **kwargs
             )
         )
 
