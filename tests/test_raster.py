@@ -2857,6 +2857,7 @@ class TestMask:
         saved = gu.Raster(temp_file)
         assert mask.astype("uint8").raster_equal(saved)
 
+
 class TestArithmetic:
     """
     Test that all arithmetic overloading functions work as expected.
