@@ -1102,8 +1102,11 @@ class TestRaster:
 
         r = gu.Raster(example)
 
+        # Get original transform
         orig_transform = r.transform
         orig_bounds = r.bounds
+
+        # Shift raster by georeferenced units (default)
         r.shift(xoff=1, yoff=1)
 
         # Only bounds should change
@@ -1116,6 +1119,27 @@ class TestRaster:
         assert orig_bounds.right + 1 == r.bounds.right
         assert orig_bounds.bottom + 1 == r.bounds.bottom
         assert orig_bounds.top + 1 == r.bounds.top
+
+        # Shift raster using pixel units
+        orig_transform = r.transform
+        orig_bounds = r.bounds
+        orig_res = r.res
+        r.shift(xoff=1, yoff=1, distance_unit="pixel")
+
+        # Only bounds should change
+        assert orig_transform.c + 1 * orig_res[0] == r.transform.c
+        assert orig_transform.f + 1 * orig_res[1] == r.transform.f
+        for attr in ["a", "b", "d", "e"]:
+            assert getattr(orig_transform, attr) == getattr(r.transform, attr)
+
+        assert orig_bounds.left + 1 * orig_res[0] == r.bounds.left
+        assert orig_bounds.right + 1 * orig_res[0] == r.bounds.right
+        assert orig_bounds.bottom + 1 * orig_res[1] == r.bounds.bottom
+        assert orig_bounds.top + 1 * orig_res[1] == r.bounds.top
+
+        # Check that an error is raised for a wrong distance_unit
+        with pytest.raises(ValueError, match="Argument 'distance_unit' should be either 'pixel' or 'georeferenced'."):
+            r.shift(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
