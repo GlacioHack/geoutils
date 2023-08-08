@@ -2140,17 +2140,31 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return dst_r
 
-    def shift(self, xoff: float, yoff: float) -> None:
+    def shift(self,
+              xoff: float,
+              yoff: float,
+              distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced") -> None:
         """
         Shift the raster by a (x,y) offset.
 
+        The shifting only updates the geotransform (no resampling is performed).
+
         :param xoff: Translation x offset.
         :param yoff: Translation y offset.
-
-
+        :param distance_unit: Distance unit, either 'georeferenced' (default) or 'pixel'.
         """
+        if distance_unit not in ["georeferenced", "pixel"]:
+            raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
+
+        # Get transform
         dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
 
+        # Convert pixel offsets to georeferenced units
+        if distance_unit == "pixel":
+            xoff *= self.res[0]
+            yoff *= self.res[1]
+
+        # Overwrite transform by shifted transform
         self.transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
 
     def save(
