@@ -3562,8 +3562,8 @@ class TestArrayInterface:
         try:
             com_dtype = np.promote_types(dtype, ufunc.types[0][0])
         # The promote_types function raises an error for object dtypes (previously returned by find_common_dtypes)
-        # (TypeError needed for backwards compatibility)
-        except (TypeError, np.exceptions.DTypePromotionError):
+        # (TypeError needed for backwards compatibility; also exceptions.DTypePromotionError for NumPy 1.25 and above)
+        except TypeError:
             com_dtype = np.dtype("O")
 
         # Catch warnings
@@ -3626,15 +3626,15 @@ class TestArrayInterface:
         try:
             com_dtype1 = np.promote_types(dtype1, ufunc.types[0][0])
         # The promote_types function raises an error for object dtypes (previously returned by find_common_dtypes)
-        # (TypeError needed for backwards compatibility)
-        except (TypeError, np.exceptions.DTypePromotionError):
+        # (TypeError needed for backwards compatibility; also exceptions.DTypePromotionError for NumPy 1.25 and above)
+        except TypeError:
             com_dtype1 = np.dtype("O")
 
         try:
             com_dtype2 = np.promote_types(dtype2, ufunc.types[0][1])
         # The promote_types function raises an error for object dtypes (previously returned by find_common_dtypes)
-        # (TypeError needed for backwards compatibility)
-        except (TypeError, np.exceptions.DTypePromotionError):
+        # (TypeError needed for backwards compatibility; also exceptions.DTypePromotionError for NumPy 1.25 and above)
+        except TypeError:
             com_dtype2 = np.dtype("O")
 
         # If the two input types can be the same type, pass a tuple with the common type of both
@@ -3642,7 +3642,7 @@ class TestArrayInterface:
         if all(t[0] == t[1] for t in ufunc.types if not any(x in t[0:2] for x in ["m", "M", "q", "Q"])):
             try:
                 com_dtype_both = np.promote_types(com_dtype1, com_dtype2)
-            except (TypeError, np.exceptions.DTypePromotionError):
+            except TypeError:
                 com_dtype_both = np.dtype("O")
             com_dtype_tuple = (com_dtype_both, com_dtype_both)
 
