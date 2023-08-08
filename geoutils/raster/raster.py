@@ -79,6 +79,8 @@ _HANDLED_FUNCTIONS_1NIN = (
         "sum",
         "amax",
         "amin",
+        "max",
+        "min",
         "argmax",
         "argmin",
         "mean",
@@ -893,7 +895,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             dtype2 = rio.dtypes.get_minimum_dtype(other_data)
 
         # Figure out output dtype
-        out_dtype = np.find_common_type([dtype1, dtype2], [])
+        out_dtype = np.promote_types(dtype1, dtype2)
 
         # Figure output nodata
         out_nodata = None
@@ -3091,7 +3093,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         gpd_dtypes = ["uint8", "uint16", "int16", "int32", "float32"]
         list_common_dtype_index = []
         for gpd_type in gpd_dtypes:
-            polygonize_dtype = np.find_common_type([gpd_type, self.dtypes[0]], [])
+            polygonize_dtype = np.promote_types(gpd_type, self.dtypes[0])
             if str(polygonize_dtype) in gpd_dtypes:
                 list_common_dtype_index.append(gpd_dtypes.index(gpd_type))
         if len(list_common_dtype_index) == 0:
