@@ -2140,10 +2140,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return dst_r
 
-    def shift(self,
-              xoff: float,
-              yoff: float,
-              distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced") -> None:
+    def shift(
+        self, xoff: float, yoff: float, distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced"
+    ) -> None:
         """
         Shift the raster by a (x,y) offset.
 
