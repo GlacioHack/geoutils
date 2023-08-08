@@ -2599,6 +2599,8 @@ class TestMask:
     mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125
     # Mask with nodata
     mask_aster_dem = gu.Raster(aster_dem_path) > 2000
+    # Mask from an outline
+    mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
@@ -2731,7 +2733,7 @@ class TestMask:
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_reproject(self, mask: gu.Mask) -> None:
         # Test 1: with a classic resampling (bilinear)
 
@@ -2757,7 +2759,7 @@ class TestMask:
         ):
             mask.reproject(resampling="bilinear")
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_crop(self, mask: gu.Mask) -> None:
         # Test with same bounds -> should be the same #
         crop_geom = mask.bounds
@@ -2818,7 +2820,7 @@ class TestMask:
         # mask_orig.crop(crop_geom2, mode="match_extent")
         # assert mask_cropped.raster_equal(mask_orig)
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_polygonize(self, mask: gu.Mask) -> None:
         # Run default
         vect = mask.polygonize()
@@ -2834,7 +2836,7 @@ class TestMask:
         with pytest.warns(UserWarning, match="In-value converted to 1 for polygonizing boolean mask."):
             mask.polygonize(target_values=2)
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_proximity(self, mask: gu.Mask) -> None:
         # Run default
         rast = mask.proximity()
@@ -2844,7 +2846,7 @@ class TestMask:
         # A mask is a raster, so also need to check this
         assert not isinstance(rast, gu.Mask)
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_save(self, mask: gu.Mask) -> None:
         """Test saving for masks"""
 
