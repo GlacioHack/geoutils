@@ -2189,7 +2189,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :returns: None.
         """
-        dtype = self.data.dtype if dtype is None else dtype
 
         if co_opts is None:
             co_opts = {}
@@ -2212,7 +2211,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             save_data = self.data
 
-            # if masked array, save with masked values replaced by nodata
+            # If the raster is a mask, convert to uint8 before saving and force nodata to 255
+            if save_data.dtype == bool:
+                save_data = save_data.astype("uint8")
+                nodata = 255
+
+            # If masked array, save with masked values replaced by nodata
             if isinstance(save_data, np.ma.masked_array):
                 # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
                 if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
