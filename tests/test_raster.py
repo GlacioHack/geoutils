@@ -3054,7 +3054,7 @@ class TestArithmetic:
         r1 = self.r1
         r2 = self.r2
         r3 = getattr(r1, op)(r2)
-        ctype = np.find_common_type([r1.data.dtype, r2.data.dtype], [])
+        ctype = np.promote_types(r1.data.dtype, r2.data.dtype)
         numpy_output = getattr(r1.data.astype(ctype), op)(r2.data.astype(ctype))
         assert isinstance(r3, gu.Raster)
         assert np.all(r3.data == numpy_output)
@@ -3559,7 +3559,11 @@ class TestArrayInterface:
         ufunc = getattr(np, ufunc_str)
 
         # Find the common dtype between the Raster and the most constrained input type (first character is the input)
-        com_dtype = np.find_common_type([dtype] + [ufunc.types[0][0]], [])
+        try:
+            com_dtype = np.promote_types(dtype, ufunc.types[0][0])
+        # The promote_types function raises an error for object dtypes (previously returned by find_common_dtypes)
+        except np.exceptions.DTypePromotionError:
+            com_dtype = np.dtype("O")
 
         # Catch warnings
         with warnings.catch_warnings():
@@ -3618,13 +3622,25 @@ class TestArrayInterface:
         ufunc = getattr(np, ufunc_str)
 
         # Find the common dtype between the Raster and the most constrained input type (first character is the input)
-        com_dtype1 = np.find_common_type([dtype1] + [ufunc.types[0][0]], [])
-        com_dtype2 = np.find_common_type([dtype2] + [ufunc.types[0][1]], [])
+        try:
+            com_dtype1 = np.promote_types(dtype1, ufunc.types[0][0])
+        # The promote_types function raises an error for object dtypes (previously returned by find_common_dtypes)
+        except np.exceptions.DTypePromotionError:
+            com_dtype1 = np.dtype("O")
+
+        try:
+            com_dtype2 = np.promote_types(dtype2, ufunc.types[0][1])
+        # The promote_types function raises an error for object dtypes (previously returned by find_common_dtypes)
+        except np.exceptions.DTypePromotionError:
+            com_dtype2 = np.dtype("O")
 
         # If the two input types can be the same type, pass a tuple with the common type of both
-        # Below we ignore datetime and timedelta types "m" and "M"
-        if all(t[0] == t[1] for t in ufunc.types if not ("m" or "M") in t[0:2]):
-            com_dtype_both = np.find_common_type([com_dtype1, com_dtype2], [])
+        # Below we ignore datetime and timedelta types "m" and "M", and int64 types "q" and "Q"
+        if all(t[0] == t[1] for t in ufunc.types if not any(x in t[0:2] for x in ["m", "M", "q", "Q"])):
+            try:
+                com_dtype_both = np.promote_types(com_dtype1, com_dtype2)
+            except np.exceptions.DTypePromotionError:
+                com_dtype_both = np.dtype("O")
             com_dtype_tuple = (com_dtype_both, com_dtype_both)
 
         # Otherwise, pass the tuple with each common type
