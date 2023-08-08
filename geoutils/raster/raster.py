@@ -77,6 +77,8 @@ _HANDLED_FUNCTIONS_1NIN = (
     ]
     + [
         "sum",
+        "amax",
+        "amin",
         "max",
         "min",
         "argmax",
