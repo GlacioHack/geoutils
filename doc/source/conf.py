@@ -48,6 +48,8 @@ myst_enable_extensions = ["colon_fence"]
 
 # For myst-nb to find the Jupyter kernel (=environment) to run from
 nb_kernel_rgx_aliases = {".*geoutils.*": "python3"}
+# To raise a Sphinx build error on notebook failure
+nb_execution_raise_on_error = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/", None),
