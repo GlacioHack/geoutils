@@ -44,4 +44,3 @@ else:
     NDArrayBool = np.ndarray  # type: ignore
     MArrayNum = np.ma.masked_array  # type: ignore
     MArrayBool = np.ma.masked_array  # type: ignore
-
