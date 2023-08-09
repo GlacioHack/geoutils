@@ -17,7 +17,7 @@ def subsample_array(
     return_indices: Literal[False] = False,
     *,
     random_state: np.random.RandomState | int | None = None,
-) -> tuple[NDArrayNum, ...]:
+) -> NDArrayNum:
     ...
 
 
@@ -28,7 +28,17 @@ def subsample_array(
     return_indices: Literal[True],
     *,
     random_state: np.random.RandomState | int | None = None,
-) -> NDArrayNum:
+) -> tuple[NDArrayNum, ...]:
+    ...
+
+
+@overload
+def subsample_array(
+    array: NDArrayNum | MArrayNum,
+    subsample: float | int,
+    return_indices: bool = False,
+    random_state: np.random.RandomState | int | None = None,
+) -> NDArrayNum | tuple[NDArrayNum, ...]:
     ...
 
 

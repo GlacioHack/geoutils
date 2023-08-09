@@ -2590,16 +2590,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If for a single value, wrap in a list
         if isinstance(x, (float, np.floating, int, np.integer)):
-            xlist = [x]
-            ylist = [y]
+            x = [x]  # type: ignore
+            y = [y]  # type: ignore
             # For the end of the function
             unwrap = True
         else:
-            xlist = x
-            ylist = y
             unwrap = False
             # Check that array-like objects are the same length
-            if len(xlist) != len(ylist):  # type: ignore
+            if len(x) != len(y):  # type: ignore
                 raise ValueError("Coordinates must be of the same length.")
 
         # Check window parameter
@@ -2631,10 +2629,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if latlon:
             from geoutils import projtools
 
-            xlist, ylist = projtools.reproject_from_latlon((ylist, xlist), self.crs)  # type: ignore
+            x, y = projtools.reproject_from_latlon((y, x), self.crs)  # type: ignore
 
         # Convert coordinates to pixel space
-        rows, cols = rio.transform.rowcol(self.transform, xlist, ylist, op=floor)
+        rows, cols = rio.transform.rowcol(self.transform, x, y, op=floor)
 
         # Loop over all coordinates passed
         for k in range(len(rows)):  # type: ignore
@@ -2712,14 +2710,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             output_val = np.array(list_values)  # type: ignore
             if return_window:
-                output_win = list_windows
+                output_win = list_windows  # type: ignore
 
         if return_window:
             return (output_val, output_win)
         else:
             return output_val
 
-    def coords(self, offset: str = "corner", grid: bool = True) -> tuple[NDArrayNum, NDArrayNum]:
+    def coords(self, offset: str = "corner", grid: bool = True) -> tuple[NDArrayNum, ...]:
         """
         Get coordinates (x,y) of all pixels in the raster.
 
@@ -2744,7 +2742,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             xx += dx / 2  # shift by half a pixel
             yy += dy / 2
         if grid:
-            meshgrid: tuple[NDArrayNum, NDArrayNum] = np.meshgrid(xx[:-1], np.flip(yy[:-1]))  # drop the last element
+            # Drop the last element
+            meshgrid = tuple(np.meshgrid(xx[:-1], np.flip(yy[:-1])))
             return meshgrid
         else:
             return xx[:-1], yy[:-1]
@@ -2876,7 +2875,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def interp_points(
         self,
-        pts: ArrayLike,
+        pts: tuple[list[float], list[float]],
         input_latlon: bool = False,
         mode: str = "linear",
         index: int = 1,
@@ -2910,10 +2909,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             "nearest",
         ], "mode must be mean, linear, cubic, quintic or nearest."
 
-        # get coordinates
+        # Get coordinates
         x, y = list(zip(*pts))
 
-        # if those are in latlon, convert to Raster crs
+        # If those are in latlon, convert to Raster crs
         if input_latlon:
             init_crs = pyproj.CRS(4326)
             dest_crs = pyproj.CRS(self.crs)
@@ -3186,7 +3185,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return_indices: Literal[False] = False,
         *,
         random_state: np.random.RandomState | int | None = None,
-    ) -> tuple[NDArrayNum, ...]:
+    ) -> NDArrayNum:
         ...
 
     @overload
@@ -3196,12 +3195,21 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return_indices: Literal[True],
         *,
         random_state: np.random.RandomState | int | None = None,
-    ) -> NDArrayNum:
+    ) -> tuple[NDArrayNum, ...]:
+        ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: float | int,
+        return_indices: bool = False,
+        random_state: np.random.RandomState | int | None = None,
+    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         ...
 
     def subsample(
         self,
-        subsample: int | float,
+        subsample: float | int,
         return_indices: bool = False,
         random_state: np.random.RandomState | int | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:

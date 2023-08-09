@@ -423,7 +423,9 @@ class TestRaster:
 
         # Fix the random seed
         np.random.seed(42)
-        arr = np.random.randint(low=val_min, high=val_max, size=(width, height), dtype=randint_dtype).astype(dtype)  # type: ignore
+        arr = np.random.randint(
+            low=val_min, high=val_max, size=(width, height), dtype=randint_dtype  # type: ignore
+        ).astype(dtype)
         mask = np.random.randint(0, 2, size=(width, height), dtype=bool)
 
         # Check that we are actually masking stuff
@@ -3572,7 +3574,7 @@ class TestArrayInterface:
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
-            if com_dtype in [str(np.dtype(t[0])) for t in ufunc.types]:
+            if com_dtype in [str(np.dtype(t[0])) for t in ufunc.types]:  # noqa
                 # For a single output
                 if ufunc.nout == 1:
                     assert np.ma.allequal(ufunc(rst.data), ufunc(rst).data)
@@ -3657,7 +3659,7 @@ class TestArrayInterface:
             warnings.filterwarnings("ignore", category=UserWarning)
 
             # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
-            if com_dtype_tuple in [(np.dtype(t[0]), np.dtype(t[1])) for t in ufunc.types]:
+            if com_dtype_tuple in [(np.dtype(t[0]), np.dtype(t[1])) for t in ufunc.types]:  # noqa
                 # For a single output
                 if ufunc.nout == 1:
                     # There exists a single exception due to negative integers as exponent of integers in "power"
