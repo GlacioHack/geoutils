@@ -36,9 +36,12 @@ else:
     Number = Union[int, float, np.integer, np.floating]  # type: ignore
 
     # Make an array-like type (since the array-like numpy type only exists in numpy>=1.20)
-    ArrayLike = Union[np.ndarray, np.ma.masked_array, List[Any], Tuple[Any]]  # type: ignore
     DTypeLike = Union[str, type, np.dtype]  # type: ignore
+    ArrayLike = Union[np.ndarray, np.ma.masked_array, List[Any], Tuple[Any]]  # type: ignore
 
+    # Define generic types for NumPy array and masked-array (behaves as "Any" before 3.9 and plugin)
     NDArrayNum = np.ndarray  # type: ignore
     NDArrayBool = np.ndarray  # type: ignore
     MArrayNum = np.ma.masked_array  # type: ignore
+    MArrayBool = np.ma.masked_array  # type: ignore
+
