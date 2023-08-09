@@ -6,9 +6,6 @@ from typing import Any, List, Tuple, Union
 
 import numpy as np
 
-# Mypy has issues with the builtin Number type (https://github.com/python/mypy/issues/3186)
-Number = Union[int, float, np.integer[Any], np.floating[Any]]
-
 # Only for Python >= 3.9
 if sys.version_info.minor >= 9:
 
@@ -17,6 +14,9 @@ if sys.version_info.minor >= 9:
         DTypeLike,
         NDArray,
     )
+
+    # Mypy has issues with the builtin Number type (https://github.com/python/mypy/issues/3186)
+    Number = Union[int, float, np.integer[Any], np.floating[Any]]
 
     # Simply define here if they exist
     DTypeLike = DTypeLike
@@ -31,6 +31,9 @@ if sys.version_info.minor >= 9:
 
 # For backward compatibility before Python 3.9
 else:
+
+    # Mypy has issues with the builtin Number type (https://github.com/python/mypy/issues/3186)
+    Number = Union[int, float, np.integer, np.floating]  # type: ignore
 
     # Make an array-like type (since the array-like numpy type only exists in numpy>=1.20)
     ArrayLike = Union[np.ndarray, np.ma.masked_array, List[Any], Tuple[Any]]  # type: ignore
