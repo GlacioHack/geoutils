@@ -10,7 +10,6 @@ import warnings
 from collections import abc
 from contextlib import ExitStack
 from math import floor
-from numbers import Number
 from typing import IO, Any, Callable, TypeVar, overload
 
 import affine
@@ -31,7 +30,15 @@ from rasterio.plot import show as rshow
 from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.vector as gv
-from geoutils._typing import AnyNumber, ArrayLike, DTypeLike
+from geoutils._typing import (
+    ArrayLike,
+    DTypeLike,
+    MArrayBool,
+    MArrayNum,
+    NDArrayBool,
+    NDArrayNum,
+    Number,
+)
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -120,7 +127,7 @@ handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
 # Similar to GDAL for int types, but without absurdly long nodata values for floats.
 # For unsigned types, the maximum value is chosen (with a max of 99999).
 # For signed types, the minimum value is chosen (with a min of -99999).
-def _default_nodata(dtype: str | np.dtype | type) -> int:
+def _default_nodata(dtype: DTypeLike) -> int:
     """
     Set the default nodata value for any given dtype, when this is not provided.
     """
@@ -181,7 +188,7 @@ def _load_rio(
     shape: tuple[int, int] | None = None,
     out_count: int | None = None,
     **kwargs: Any,
-) -> np.ma.masked_array:
+) -> MArrayNum:
     r"""
     Load specific bands of the dataset, using :func:`rasterio.read`.
 
@@ -259,7 +266,7 @@ class Raster:
         | dict[str, Any],
         indexes: int | list[int] | None = None,
         load_data: bool = False,
-        downsample: AnyNumber = 1,
+        downsample: Number = 1,
         masked: bool = True,
         nodata: int | float | None = None,
     ) -> None:
@@ -283,7 +290,7 @@ class Raster:
         self.filename: str | None = None
         self.tags: dict[str, Any] = {}
 
-        self._data: np.ma.masked_array | None = None
+        self._data: MArrayNum | None = None
         self._transform: affine.Affine | None = None
         self._crs: CRS | None = None
         self._nodata: int | float | None = nodata
@@ -568,7 +575,7 @@ class Raster:
     @classmethod
     def from_array(
         cls: type[RasterType],
-        data: np.ndarray | np.ma.masked_array,
+        data: NDArrayNum | MArrayNum | NDArrayBool,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
         nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
@@ -720,7 +727,7 @@ class Raster:
 
         return str(s)
 
-    def __getitem__(self, index: Raster | Vector | np.ndarray | list[float] | tuple[float, ...]) -> np.ndarray | Raster:
+    def __getitem__(self, index: Raster | Vector | NDArrayNum | list[float] | tuple[float, ...]) -> NDArrayNum | Raster:
         """
         Index or subset the raster.
 
@@ -753,7 +760,7 @@ class Raster:
         else:
             return self.crop(crop_geom=index, inplace=False)
 
-    def __setitem__(self, index: Mask | np.ndarray, assign: np.ndarray | Number) -> None:
+    def __setitem__(self, index: Mask | NDArrayBool, assign: NDArrayNum | Number) -> None:
         """
         Perform index assignment on the raster.
 
@@ -768,7 +775,7 @@ class Raster:
             if not self.georeferenced_grid_equal(index):
                 raise ValueError("Indexing a raster with a mask requires the two being on the same georeferenced grid.")
 
-            ind = index.data
+            ind = index.data.data
         # If input is array with the same shape
         elif isinstance(index, np.ndarray):
             if np.shape(index) != self.shape:
@@ -820,10 +827,8 @@ class Raster:
         )
 
     def _overloading_check(
-        self: RasterType, other: RasterType | np.ndarray | Number
-    ) -> tuple[
-        np.ma.masked_array, np.ma.masked_array | Number, float | int | tuple[int, ...] | tuple[float, ...] | None
-    ]:
+        self: RasterType, other: RasterType | NDArrayNum | Number
+    ) -> tuple[MArrayNum, MArrayNum | NDArrayNum | Number, float | int | tuple[int, ...] | tuple[float, ...] | None]:
         """
         Before any operation overloading, check input data type and return both self and other data as either
         a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
@@ -843,7 +848,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Check that other is of correct type
         # If not, a NotImplementedError should be raised, in case other's class has a method implemented.
         # See https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
-        if not isinstance(other, (Raster, np.ndarray, Number)):
+        if not isinstance(other, (Raster, np.ndarray, float, int, np.floating, np.integer)):
             raise NotImplementedError(
                 f"Operation between an object of type {type(other)} and a Raster impossible. Must be a Raster, "
                 f"np.ndarray or single number."
@@ -866,19 +871,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             else:
                 raise ValueError("Both rasters must have the same shape, transform and CRS.")
 
-            other_data = other.data
             nodata2 = other.nodata
-            dtype2 = other_data.dtype
+            dtype2 = other.data.dtype
+            other_data: NDArrayNum | MArrayNum | Number = other.data
 
         # Case 2 - other is a numpy array
         elif isinstance(other, np.ndarray):
             # Check that both array have the same shape
 
-            other_data = other
-
             # Squeeze first axis of other data if possible
-            if len(other_data.shape) == 3 and other_data.shape[0] == 1:
-                other_data = other_data.squeeze(axis=0)
+            if len(other.shape) == 3 and other.shape[0] == 1:
+                other_data = other.squeeze(axis=0)
+            else:
+                other_data = other
 
             if self.data.shape == other_data.shape:
                 pass
@@ -908,7 +913,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return self_data, other_data, out_nodata
 
-    def __add__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __add__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Sum two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -927,13 +932,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return out_rst
 
-    def __radd__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+    # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
+    def __radd__(self: RasterType, other: NDArrayNum | Number) -> RasterType:  # type: ignore
         """
         Sum two rasters, or a raster and a numpy array, or a raster and single number.
 
         For when other is first item in the operation (e.g. 1 + rst).
         """
-        return self.__add__(other)
+        return self.__add__(other)  # type: ignore
 
     def __neg__(self: RasterType) -> RasterType:
         """
@@ -943,7 +949,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         return self.from_array(-self.data, self.transform, self.crs, nodata=self.nodata)
 
-    def __sub__(self, other: Raster | np.ndarray | Number) -> Raster:
+    def __sub__(self, other: Raster | NDArrayNum | Number) -> Raster:
         """
         Subtract two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -955,7 +961,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_data = self_data - other_data
         return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
 
-    def __rsub__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+    # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
+    def __rsub__(self: RasterType, other: NDArrayNum | Number) -> RasterType:  # type: ignore
         """
         Subtract two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -965,7 +972,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_data = other_data - self_data
         return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
 
-    def __mul__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __mul__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Multiply two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -978,7 +985,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
-    def __rmul__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+    # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
+    def __rmul__(self: RasterType, other: NDArrayNum | Number) -> RasterType:  # type: ignore
         """
         Multiply two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -986,7 +994,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         return self.__mul__(other)
 
-    def __truediv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __truediv__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         True division of two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -999,7 +1007,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
-    def __rtruediv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+    # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
+    def __rtruediv__(self: RasterType, other: NDArrayNum | Number) -> RasterType:  # type: ignore
         """
         True division of two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -1010,7 +1019,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
-    def __floordiv__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __floordiv__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Floor division of two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -1023,7 +1032,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
-    def __rfloordiv__(self: RasterType, other: np.ndarray | Number) -> RasterType:
+    # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
+    def __rfloordiv__(self: RasterType, other: NDArrayNum | Number) -> RasterType:  # type: ignore
         """
         Floor division of two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -1034,7 +1044,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
-    def __mod__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __mod__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Modulo of two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -1052,7 +1062,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Power of a raster to a number.
         """
         # Check that input is a number
-        if not isinstance(power, Number):
+        if not isinstance(power, (float, int, np.floating, np.integer)):
             raise ValueError("Power needs to be a number.")
 
         # Calculate the product of arrays and save to new Raster
@@ -1061,7 +1071,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
         return out_rst
 
-    def __eq__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:  # type: ignore
+    def __eq__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:  # type: ignore
         """
         Element-wise equality of two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -1076,7 +1086,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __ne__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:  # type: ignore
+    def __ne__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:  # type: ignore
         """
         Element-wise negation of two rasters, or a raster and a numpy array, or a raster and single number.
 
@@ -1091,7 +1101,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __lt__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __lt__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Element-wise lower than comparison of two rasters, or a raster and a numpy array,
         or a raster and single number.
@@ -1107,7 +1117,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __le__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __le__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Element-wise lower or equal comparison of two rasters, or a raster and a numpy array,
         or a raster and single number.
@@ -1123,7 +1133,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __gt__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __gt__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Element-wise greater than comparison of two rasters, or a raster and a numpy array,
         or a raster and single number.
@@ -1139,7 +1149,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
         return out_mask
 
-    def __ge__(self: RasterType, other: RasterType | np.ndarray | Number) -> RasterType:
+    def __ge__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Element-wise greater or equal comparison of two rasters, or a raster and a numpy array,
         or a raster and single number.
@@ -1185,7 +1195,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         out_data = self.data.astype(dtype)
         if inplace:
-            self._data = out_data
+            self._data = out_data  # type: ignore
             return None
         else:
             return self.from_array(out_data, self.transform, self.crs, nodata=self.nodata)
@@ -1330,7 +1340,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self._nodata = new_nodata
 
     @property
-    def data(self) -> np.ma.masked_array:
+    def data(self) -> MArrayNum:
         """
         Array of the raster.
 
@@ -1339,10 +1349,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         if not self.is_loaded:
             self.load()
-        return self._data
+        return self._data  # type: ignore
 
     @data.setter
-    def data(self, new_data: np.ndarray | np.ma.masked_array) -> None:
+    def data(self, new_data: NDArrayNum | MArrayNum) -> None:
         """
         Set the contents of .data and possibly update .nodata.
 
@@ -1488,7 +1498,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         new_crs = CRS.from_user_input(value=new_crs)
         self._crs = new_crs
 
-    def set_mask(self, mask: np.ndarray | Mask) -> None:
+    def set_mask(self, mask: NDArrayBool | Mask) -> None:
         """
         Set a mask on the raster array.
 
@@ -1511,17 +1521,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If the mask is a Mask instance, pass the boolean array
         if isinstance(mask, Mask):
-            mask = mask.data.filled(False)
-        mask = mask.squeeze()
+            mask_arr = mask.data.filled(False)
+        else:
+            mask_arr = mask
+        mask_arr = mask_arr.squeeze()
 
-        if mask.shape != orig_shape:
+        if mask_arr.shape != orig_shape:
             # In case first dimension is more than one (several bands) and other dimensions match
-            if orig_shape[1:] == mask.shape:
-                self.data[:, mask > 0] = np.ma.masked
+            if orig_shape[1:] == mask_arr.shape:
+                self.data[:, mask_arr > 0] = np.ma.masked
             else:
                 raise ValueError(f"mask must be of the same shape as existing data: {orig_shape}.")
         else:
-            self.data[mask > 0] = np.ma.masked
+            self.data[mask_arr > 0] = np.ma.masked
 
     def info(self, stats: bool = False) -> str:
         """
@@ -1572,7 +1584,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return "".join(as_str)
 
-    def copy(self: RasterType, new_array: np.ndarray | None = None) -> RasterType:
+    def copy(self: RasterType, new_array: NDArrayNum | None = None) -> RasterType:
         """
         Copy the raster in-memory.
 
@@ -1601,14 +1613,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
 
     @overload
-    def get_nanarray(self, return_mask: Literal[False] = False) -> np.ndarray:
+    def get_nanarray(self, return_mask: Literal[False] = False) -> NDArrayNum:
         ...
 
     @overload
-    def get_nanarray(self, return_mask: Literal[True]) -> tuple[np.ndarray, np.ndarray]:
+    def get_nanarray(self, return_mask: Literal[True]) -> tuple[NDArrayNum, NDArrayBool]:
         ...
 
-    def get_nanarray(self, return_mask: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    def get_nanarray(self, return_mask: bool = False) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
         Get NaN array from the raster.
 
@@ -1646,9 +1658,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def __array_ufunc__(
         self,
-        ufunc: Callable[[np.ndarray | tuple[np.ndarray, np.ndarray]], np.ndarray | tuple[np.ndarray, np.ndarray]],
+        ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
         method: str,
-        *inputs: Raster | tuple[Raster, Raster] | tuple[np.ndarray, Raster] | tuple[Raster, np.ndarray],
+        *inputs: Raster | tuple[Raster, Raster] | tuple[NDArrayNum, Raster] | tuple[Raster, NDArrayNum],
         **kwargs: Any,
     ) -> Raster | tuple[Raster, Raster]:
         """
@@ -1711,7 +1723,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 ), self.from_array(data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata)
 
     def __array_function__(
-        self, func: Callable[[np.ndarray, Any], Any], types: tuple[type], args: Any, kwargs: Any
+        self, func: Callable[[NDArrayNum, Any], Any], types: tuple[type], args: Any, kwargs: Any
     ) -> Any:
         """
         Method to cast NumPy array function directly on a Raster object by applying it to the masked array.
@@ -1893,7 +1905,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         dst_res: float | abc.Iterable[float] | None = None,
         dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        dst_dtype: np.dtype | None = None,
+        dst_dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
         n_threads: int = 0,
@@ -2116,7 +2128,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If not, uses the dataset instead
         else:
-            dst_data = []
+            dst_data = []  # type: ignore
             for k in range(self.count):
                 with rio.open(self.filename) as ds:
                     band = rio.band(ds, k + 1)
@@ -2171,7 +2183,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         filename: str | pathlib.Path | IO[bytes],
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
-        nodata: AnyNumber | None = None,
+        nodata: Number | None = None,
         compress: str = "deflate",
         tiled: bool = False,
         blank_value: int | float | None = None,
@@ -2215,6 +2227,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Use nodata set by user, otherwise default to self's
         nodata = nodata if nodata is not None else self.nodata
 
+        # Declare type of save_data to work in all occurrences
+        save_data: NDArrayNum
+
+        # Define save_data depending on blank_value argument
         if (self.data is None) & (blank_value is None):
             raise AttributeError("No data loaded, and alternative blank_value not set.")
         elif blank_value is not None:
@@ -2397,7 +2413,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def show(
         self,
-        index: int | None = None,
+        index: int | tuple[int, ...] | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -2445,7 +2461,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # rshow takes care of image dimensions
         # if self.count=3 (4) => plotted as RGB(A)
         if index is None:
-            index = np.arange(1, self.count + 1)
+            index = tuple(range(1, self.count + 1))
         elif isinstance(index, int):
             if index > self.count:
                 raise ValueError(f"Index must be in range 1-{self.count:d}")
@@ -2457,7 +2473,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if self.count == 1:
             data = self.data
         else:
-            data = self.data[index - 1, :, :]
+            data = self.data[np.array(index) - 1, :, :]
 
         # If multiple bands (RGB), cbar does not make sense
         if isinstance(index, abc.Sequence):
@@ -2535,13 +2551,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def value_at_coords(
         self,
-        x: float | ArrayLike,
-        y: float | ArrayLike,
+        x: Number | ArrayLike,
+        y: Number | ArrayLike,
         latlon: bool = False,
         index: int | None = None,
         masked: bool = False,
         window: int | None = None,
-        reducer_function: Callable[[np.ndarray], float] = np.ma.mean,
+        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
         return_window: bool = False,
         boundless: bool = True,
     ) -> Any:
@@ -2587,8 +2603,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If for a single value, wrap in a list
         if isinstance(x, (float, np.floating, int, np.integer)):
-            x = [x]
-            y = [y]
+            x = [x]  # type: ignore
+            y = [y]  # type: ignore
             # For the end of the function
             unwrap = True
         else:
@@ -2633,7 +2649,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Loop over all coordinates passed
         for k in range(len(rows)):  # type: ignore
-            value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], np.ndarray] | Any]
+            value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], NDArrayNum] | Any]
 
             row = rows[k]  # type: ignore
             col = cols[k]  # type: ignore
@@ -2667,7 +2683,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 if not masked:
                     data = data.filled()
                 value = format_value(data)
-                win: np.ndarray | dict[int, np.ndarray] = data
+                win: NDArrayNum | dict[int, NDArrayNum] = data
 
             else:
                 # TODO: if we want to allow sampling multiple bands, need to do it also when data is loaded
@@ -2707,14 +2723,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             output_val = np.array(list_values)  # type: ignore
             if return_window:
-                output_win = list_windows
+                output_win = list_windows  # type: ignore
 
         if return_window:
             return (output_val, output_win)
         else:
             return output_val
 
-    def coords(self, offset: str = "corner", grid: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    def coords(self, offset: str = "corner", grid: bool = True) -> tuple[NDArrayNum, ...]:
         """
         Get coordinates (x,y) of all pixels in the raster.
 
@@ -2739,7 +2755,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             xx += dx / 2  # shift by half a pixel
             yy += dy / 2
         if grid:
-            meshgrid: tuple[np.ndarray, np.ndarray] = np.meshgrid(xx[:-1], np.flip(yy[:-1]))  # drop the last element
+            # Drop the last element
+            meshgrid = tuple(np.meshgrid(xx[:-1], np.flip(yy[:-1])))
             return meshgrid
         else:
             return xx[:-1], yy[:-1]
@@ -2751,7 +2768,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         op: type = np.float32,
         precision: float | None = None,
         shift_area_or_point: bool = False,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get indexes (row,column) of coordinates (x,y).
 
@@ -2832,7 +2849,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return i, j
 
-    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "ul") -> tuple[np.ndarray, np.ndarray]:
+    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "ul") -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of indexes (row,column).
 
@@ -2871,13 +2888,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def interp_points(
         self,
-        pts: ArrayLike,
+        pts: tuple[list[float], list[float]],
         input_latlon: bool = False,
         mode: str = "linear",
         index: int = 1,
         shift_area_or_point: bool = False,
         **kwargs: Any,
-    ) -> np.ndarray:
+    ) -> NDArrayNum:
         """
          Interpolate raster values at a set of points.
 
@@ -2905,10 +2922,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             "nearest",
         ], "mode must be mean, linear, cubic, quintic or nearest."
 
-        # get coordinates
+        # Get coordinates
         x, y = list(zip(*pts))
 
-        # if those are in latlon, convert to Raster crs
+        # If those are in latlon, convert to Raster crs
         if input_latlon:
             init_crs = pyproj.CRS(4326)
             dest_crs = pyproj.CRS(self.crs)
@@ -2976,19 +2993,25 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     @overload
     def to_points(
-        self, subset: float | int, as_array: Literal[True], pixel_offset: Literal["center", "corner"]
-    ) -> Vector:
+        self,
+        subset: float | int,
+        as_array: Literal[False] = False,
+        pixel_offset: Literal["center", "corner"] = "center",
+    ) -> NDArrayNum:
         ...
 
     @overload
     def to_points(
-        self, subset: float | int, as_array: Literal[False], pixel_offset: Literal["center", "corner"]
-    ) -> np.ndarray:
+        self,
+        subset: float | int,
+        as_array: Literal[True],
+        pixel_offset: Literal["center", "corner"] = "center",
+    ) -> Vector:
         ...
 
     def to_points(
         self, subset: float | int = 1, as_array: bool = False, pixel_offset: Literal["center", "corner"] = "center"
-    ) -> np.ndarray | Vector:
+    ) -> NDArrayNum | Vector:
         """
         Convert raster to points.
 
@@ -3047,22 +3070,23 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             pixel_data = np.where(pixel_data.mask, np.nan, pixel_data.data)
 
         # Merge the coordinates and pixel data into a point cloud.
-        points = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
+        points_arr = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
 
         if not as_array:
             points = Vector(
                 gpd.GeoDataFrame(
-                    points[:, 2:],
+                    points_arr[:, 2:],
                     columns=[f"b{i}" for i in range(1, self.count + 1)],
-                    geometry=gpd.points_from_xy(points[:, 0], points[:, 1]),
+                    geometry=gpd.points_from_xy(points_arr[:, 0], points_arr[:, 1]),
                     crs=self.crs,
                 )
             )
-
-        return points
+            return points
+        else:
+            return points_arr
 
     def polygonize(
-        self, target_values: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = "all"
+        self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all"
     ) -> Vector:
         """
         Polygonize the raster into a vector.
@@ -3073,28 +3097,28 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :returns: Vector containing the polygonized geometries.
         """
 
-        # mask a unique value set by a number
-        if isinstance(target_values, Number):
+        # Mask a unique value set by a number
+        if isinstance(target_values, (int, float, np.integer, np.floating)):
             if np.sum(self.data == target_values) == 0:
                 raise ValueError(f"no pixel with in_value {target_values}")
 
             bool_msk = np.array(self.data == target_values).astype(np.uint8)
 
-        # mask values within boundaries set by a tuple
+        # Mask values within boundaries set by a tuple
         elif isinstance(target_values, tuple):
             if np.sum((self.data > target_values[0]) & (self.data < target_values[1])) == 0:
                 raise ValueError(f"no pixel with in_value between {target_values[0]} and {target_values[1]}")
 
             bool_msk = ((self.data > target_values[0]) & (self.data < target_values[1])).astype(np.uint8)
 
-        # mask specific values set by a sequence
+        # Mask specific values set by a sequence
         elif isinstance(target_values, list) or isinstance(target_values, np.ndarray):
-            if np.sum(np.isin(self.data, target_values)) == 0:
+            if np.sum(np.isin(self.data, np.array(target_values))) == 0:
                 raise ValueError("no pixel with in_value " + ", ".join(map("{}".format, target_values)))
 
-            bool_msk = np.isin(self.data, target_values).astype("uint8")
+            bool_msk = np.isin(self.data, np.array(target_values)).astype("uint8")
 
-        # mask all valid values
+        # Mask all valid values
         elif target_values == "all":
             bool_msk = (~self.data.mask).astype("uint8")
 
@@ -3167,12 +3191,41 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return self.copy(new_array=proximity)
 
+    @overload
     def subsample(
         self,
         subsample: int | float,
+        return_indices: Literal[False] = False,
+        *,
+        random_state: np.random.RandomState | int | None = None,
+    ) -> NDArrayNum:
+        ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: int | float,
+        return_indices: Literal[True],
+        *,
+        random_state: np.random.RandomState | int | None = None,
+    ) -> tuple[NDArrayNum, ...]:
+        ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: float | int,
         return_indices: bool = False,
-        random_state: np.random.RandomState | np.random.Generator | int | None = None,
-    ) -> np.ndarray:
+        random_state: np.random.RandomState | int | None = None,
+    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
+        ...
+
+    def subsample(
+        self,
+        subsample: float | int,
+        return_indices: bool = False,
+        random_state: np.random.RandomState | int | None = None,
+    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
         Randomly subsample the raster. Only valid values are considered.
 
@@ -3211,6 +3264,9 @@ class Mask(Raster):
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
         **kwargs: Any,
     ) -> None:
+
+        self._data: MArrayNum | MArrayBool | None = None  # type: ignore
+
         # If a Mask is passed, simply point back to Mask
         if isinstance(filename_or_dataset, Mask):
             for key in filename_or_dataset.__dict__:
@@ -3229,7 +3285,7 @@ class Mask(Raster):
                 self._data = self.data[0, :, :]
 
             # Convert masked array to boolean
-            self._data = self.data.astype(bool)
+            self._data = self.data.astype(bool)  # type: ignore
 
             # Fix nodata to None
             self._nodata = None
@@ -3293,7 +3349,7 @@ class Mask(Raster):
         dst_res: float | abc.Iterable[float] | None = None,
         dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        dst_dtype: np.dtype | None = None,
+        dst_dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
         n_threads: int = 0,
@@ -3301,13 +3357,13 @@ class Mask(Raster):
     ) -> Mask:
         # Depending on resampling, adjust to rasterio supported types
         if resampling in [Resampling.nearest, "nearest"]:
-            self._data = self.data.astype("uint8")
+            self._data = self.data.astype("uint8")  # type: ignore
         else:
             warnings.warn(
                 "Reprojecting a mask with a resampling method other than 'nearest', "
                 "the boolean array will be converted to float during interpolation."
             )
-            self._data = self.data.astype("float32")
+            self._data = self.data.astype("float32")  # type: ignore
 
         # Call Raster.reproject()
         output = super().reproject(
@@ -3326,7 +3382,7 @@ class Mask(Raster):
         )
 
         # Transform back to a boolean array
-        output._data = output.data.astype(bool)
+        output._data = output.data.astype(bool)  # type: ignore
 
         return output
 
@@ -3388,7 +3444,7 @@ class Mask(Raster):
                 return None
 
     def polygonize(
-        self, target_values: Number | tuple[Number, Number] | list[Number] | np.ndarray | Literal["all"] = 1
+        self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1
     ) -> Vector:
         # If target values is passed but does not correspond to 0 or 1, raise a warning
         if not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
@@ -3396,7 +3452,7 @@ class Mask(Raster):
             target_values = 1
 
         # Convert to unsigned integer and pass to parent method
-        self._data = self.data.astype("uint8")
+        self._data = self.data.astype("uint8")  # type: ignore
         return super().polygonize(target_values=target_values)
 
     def proximity(
@@ -3419,7 +3475,7 @@ class Mask(Raster):
         #     target_values = [1]
 
         # Convert to unsigned integer and pass to parent method
-        self._data = self.data.astype("uint8")
+        self._data = self.data.astype("uint8")  # type: ignore
 
         # Need to cast output to Raster before computing proximity, as output will not be boolean
         # (super() would instantiate Mask() again)
@@ -3432,43 +3488,43 @@ class Mask(Raster):
             distance_unit=distance_unit,
         )
 
-    def __and__(self: Mask, other: Mask | np.ndarray) -> Mask:
+    def __and__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
-        self_data, other_data = self._overloading_check(other)[0:2]
+        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
         return self.from_array(
-            data=(self_data & other_data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self_data & other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
         )
 
-    def __rand__(self: Mask, other: Mask | np.ndarray) -> Mask:
+    def __rand__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
 
         return self.__and__(other)
 
-    def __or__(self: Mask, other: Mask | np.ndarray) -> Mask:
+    def __or__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise or between masks, or a mask and an array."""
 
-        self_data, other_data = self._overloading_check(other)[0:2]
+        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
         return self.from_array(
-            data=(self_data | other_data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self_data | other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
         )
 
-    def __ror__(self: Mask, other: Mask | np.ndarray) -> Mask:
+    def __ror__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise or between masks, or a mask and an array."""
 
         return self.__or__(other)
 
-    def __xor__(self: Mask, other: Mask | np.ndarray) -> Mask:
+    def __xor__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise xor between masks, or a mask and an array."""
 
-        self_data, other_data = self._overloading_check(other)[0:2]
+        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
         return self.from_array(
-            data=(self_data ^ other_data), transform=self.transform, crs=self.crs, nodata=self.nodata
+            data=(self_data ^ other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
         )
 
-    def __rxor__(self: Mask, other: Mask | np.ndarray) -> Mask:
+    def __rxor__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise xor between masks, or a mask and an array."""
 
         return self.__xor__(other)
@@ -3491,7 +3547,7 @@ def proximity_from_vector_or_raster(
     geometry_type: str = "boundary",
     in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
     distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
-) -> np.ndarray:
+) -> NDArrayNum:
     """
     (This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector)
     Proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's geometry type

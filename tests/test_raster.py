@@ -20,6 +20,7 @@ from pylint import epylint
 import geoutils as gu
 import geoutils.projtools as pt
 from geoutils import examples
+from geoutils._typing import MArrayNum, NDArrayNum
 from geoutils.misc import resampling_method_from_str
 from geoutils.projtools import reproject_to_latlon
 from geoutils.raster.raster import _default_nodata, _default_rio_attrs
@@ -29,7 +30,7 @@ DO_PLOT = False
 
 def run_gdal_proximity(
     input_raster: gu.Raster, target_values: list[float] | None, distunits: str = "GEO"
-) -> np.ndarray:
+) -> NDArrayNum:
     """Run GDAL's ComputeProximity and return the read numpy array."""
     # Rasterio strongly recommends against importing gdal along rio, so this is done here instead.
     from osgeo import gdal, gdalconst
@@ -412,8 +413,8 @@ class TestRaster:
 
         # Create random values between the lower and upper limit of the data type, max absolute 99999 for floats
         if "int" in dtype:
-            val_min = np.iinfo(int_type=dtype).min
-            val_max = np.iinfo(int_type=dtype).max
+            val_min: int = np.iinfo(int_type=dtype).min  # type: ignore
+            val_max: int = np.iinfo(int_type=dtype).max  # type: ignore
             randint_dtype = dtype
         else:
             val_min = -99999
@@ -422,7 +423,9 @@ class TestRaster:
 
         # Fix the random seed
         np.random.seed(42)
-        arr = np.random.randint(low=val_min, high=val_max, size=(width, height), dtype=randint_dtype).astype(dtype)
+        arr = np.random.randint(
+            low=val_min, high=val_max, size=(width, height), dtype=randint_dtype  # type: ignore
+        ).astype(dtype)
         mask = np.random.randint(0, 2, size=(width, height), dtype=bool)
 
         # Check that we are actually masking stuff
@@ -1675,7 +1678,7 @@ class TestRaster:
         assert img[int(i), int(j)] == val
 
         # Finally, check that interp convert to latlon
-        lat, lon = gu.projtools.reproject_to_latlon((x, y), in_crs=r.crs)
+        lat, lon = gu.projtools.reproject_to_latlon([[x], [y]], in_crs=r.crs)
         val_latlon = r.interp_points([(lat, lon)], order=1, input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
@@ -1718,7 +1721,7 @@ class TestRaster:
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
-        lat, lon = reproject_to_latlon(pts=[xtest0, ytest0], in_crs=r.crs)
+        lat, lon = reproject_to_latlon(pts=[[xtest0], [ytest0]], in_crs=r.crs)
         z_val_2 = r.value_at_coords(lon, lat, latlon=True)
         assert z_val == z_val_2
 
@@ -2039,13 +2042,13 @@ class TestRaster:
 
         # Check it works with most frequent np.dtypes too
         assert _default_nodata(np.dtype("uint8")) == np.iinfo("uint8").max
-        for dtype in [np.dtype("int32"), np.dtype("float32"), np.dtype("float64")]:
-            assert _default_nodata(dtype) == -99999
+        for dtype_obj in [np.dtype("int32"), np.dtype("float32"), np.dtype("float64")]:
+            assert _default_nodata(dtype_obj) == -99999  # type: ignore
 
         # Check it works with most frequent types too
         assert _default_nodata(np.uint8) == np.iinfo("uint8").max
-        for dtype in [np.int32, np.float32, np.float64]:
-            assert _default_nodata(dtype) == -99999
+        for dtype_obj in [np.int32, np.float32, np.float64]:
+            assert _default_nodata(dtype_obj) == -99999
 
         # Check that an error is raised for other types
         expected_message = "No default nodata value set for dtype."
@@ -2105,9 +2108,8 @@ class TestRaster:
             assert np.dtype(rout.dtypes[0]) == dtype
             assert rout.data.dtype == dtype
 
-    @pytest.mark.parametrize(
-        "example", [landsat_b4_path, landsat_b4_crop_path, landsat_rgb_path, aster_dem_path]
-    )  # type: ignore
+    # The multi-band example will not have a colorbar, so not used in tests
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))  # type: ignore
     def test_show_cbar(self, example, figsize) -> None:
         """
@@ -3216,7 +3218,7 @@ class TestArithmetic:
     @classmethod
     def from_array(
         cls: type[TestArithmetic],
-        data: np.ndarray | np.ma.masked_array,
+        data: NDArrayNum | MArrayNum,
         rst_ref: gu.RasterType,
         nodata: int | float | list[int] | list[float] | None = None,
     ) -> gu.Raster:
@@ -3595,7 +3597,7 @@ class TestArrayInterface:
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
-            if com_dtype in (str(np.dtype(t[0])) for t in ufunc.types):
+            if com_dtype in [str(np.dtype(t[0])) for t in ufunc.types]:  # noqa
                 # For a single output
                 if ufunc.nout == 1:
                     assert np.ma.allequal(ufunc(rst.data), ufunc(rst).data)
@@ -3680,7 +3682,7 @@ class TestArrayInterface:
             warnings.filterwarnings("ignore", category=UserWarning)
 
             # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
-            if com_dtype_tuple in ((str(np.dtype(t[0])), str(np.dtype(t[1]))) for t in ufunc.types):
+            if com_dtype_tuple in [(np.dtype(t[0]), np.dtype(t[1])) for t in ufunc.types]:  # noqa
                 # For a single output
                 if ufunc.nout == 1:
                     # There exists a single exception due to negative integers as exponent of integers in "power"

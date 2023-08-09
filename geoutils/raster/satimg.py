@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import rasterio as rio
 
+from geoutils._typing import NDArrayNum
 from geoutils.raster import Raster, RasterType
 
 lsat_sensor = {"C": "OLI/TIRS", "E": "ETM+", "T": "TM", "M": "MSS", "O": "OLI", "TI": "TIRS"}
@@ -427,7 +428,7 @@ class SatelliteImage(Raster):  # type: ignore
 
         return None
 
-    def copy(self, new_array: np.ndarray | None = None) -> SatelliteImage:
+    def copy(self, new_array: NDArrayNum | None = None) -> SatelliteImage:
         new_satimg = super().copy(new_array=new_array)  # type: ignore
         # all objects here are immutable so no need for a copy method (string and datetime)
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
