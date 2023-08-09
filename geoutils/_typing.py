@@ -26,7 +26,7 @@ if sys.version_info.minor >= 9:
     NDArrayNum = NDArray[Union[np.floating[Any], np.integer[Any]]]
     NDArrayBool = NDArray[np.bool[Any]]
     # Define numerical (float or int) masked N-D array type
-    MArrayNum = np.ma.masked_array[Any, Union[np.dtype[np.floating[Any], np.integer[Any]]]]
+    MArrayNum = np.ma.masked_array[Any, np.dtype[Union[np.floating[Any], np.integer[Any]]]]
     MArrayBool = np.ma.masked_array[Any, np.dtype[np.bool[Any]]]
 
 # For backward compatibility before Python 3.9
