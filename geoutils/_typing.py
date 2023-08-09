@@ -7,7 +7,7 @@ from typing import Any, List, Tuple, Union
 import numpy as np
 
 # Mypy has issues with the builtin Number type (https://github.com/python/mypy/issues/3186)
-Number = int | float | np.integer[Any] | np.floating[Any]
+Number = Union[int, float, np.integer[Any], np.floating[Any]]
 
 # Only for Python >= 3.9
 if sys.version_info.minor >= 9:
