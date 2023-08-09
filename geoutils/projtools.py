@@ -305,7 +305,7 @@ def reproject_shape(inshape: BaseGeometry, in_crs: CRS, out_crs: CRS) -> BaseGeo
 
     :returns: Reprojected geometry
     """
-    reproj = pyproj.Transformer.from_crs(in_crs, out_crs, always_xy=True, skip_equivalent=True).transform
+    reproj = pyproj.Transformer.from_crs(in_crs, out_crs, always_xy=True).transform
     return shapely.ops.transform(reproj, inshape)
 
 
