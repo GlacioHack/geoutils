@@ -24,10 +24,10 @@ if sys.version_info.minor >= 9:
 
     # Use NDArray wrapper to easily define numerical (float or int) N-D array types, and boolean N-D array types
     NDArrayNum = NDArray[Union[np.floating[Any], np.integer[Any]]]
-    NDArrayBool = NDArray[np.bool[Any]]
+    NDArrayBool = NDArray[np.bool_[Any]]
     # Define numerical (float or int) masked N-D array type
     MArrayNum = np.ma.masked_array[Any, np.dtype[Union[np.floating[Any], np.integer[Any]]]]
-    MArrayBool = np.ma.masked_array[Any, np.dtype[np.bool[Any]]]
+    MArrayBool = np.ma.masked_array[Any, np.dtype[np.bool_[Any]]]
 
 # For backward compatibility before Python 3.9
 else:
