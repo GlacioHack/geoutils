@@ -7,9 +7,10 @@ import warnings
 import numpy as np
 
 import geoutils as gu
+from geoutils._typing import MArrayNum, NDArrayNum
 
 
-def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
+def get_mask(array: NDArrayNum | MArrayNum) -> NDArrayNum:
     """
     Return the mask of invalid values, whether array is a ndarray with NaNs or a np.ma.masked_array.
 
@@ -22,8 +23,8 @@ def get_mask(array: np.ndarray | np.ma.masked_array) -> np.ndarray:
 
 
 def get_array_and_mask(
-    array: np.ndarray | np.ma.masked_array, check_shape: bool = True, copy: bool = True
-) -> tuple[np.ndarray, np.ndarray]:
+    array: NDArrayNum | MArrayNum, check_shape: bool = True, copy: bool = True
+) -> tuple[NDArrayNum, NDArrayNum]:
     """
     Return array with masked values set to NaN and the associated mask.
     Works whether array is a ndarray with NaNs or a np.ma.masked_array.
@@ -65,7 +66,7 @@ def get_array_and_mask(
     return array_data, invalid_mask
 
 
-def get_valid_extent(array: np.ndarray | np.ma.masked_array) -> tuple[int, ...]:
+def get_valid_extent(array: NDArrayNum | MArrayNum) -> tuple[int, ...]:
     """
     Return (rowmin, rowmax, colmin, colmax), the first/last row/column of array with valid pixels
     """
@@ -78,7 +79,7 @@ def get_valid_extent(array: np.ndarray | np.ma.masked_array) -> tuple[int, ...]:
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
 
 
-def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[np.ndarray, np.ndarray]:
+def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[NDArrayNum, NDArrayNum]:
     """
     Rotate x, y axes of image to get along- and cross-track distances.
     :param raster: Raster to get x,y positions from.

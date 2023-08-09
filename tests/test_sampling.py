@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import geoutils as gu
+from geoutils._typing import NDArrayNum
 
 
 class TestSubsampling:
@@ -33,7 +34,7 @@ class TestSubsampling:
     assert np.count_nonzero(array3D.mask) > 0
 
     @pytest.mark.parametrize("array", [array1D, array2D, array3D])  # type: ignore
-    def test_subsample(self, array: np.ndarray) -> None:
+    def test_subsample(self, array: NDArrayNum) -> None:
         """
         Test gu.raster.subsample_array.
         """

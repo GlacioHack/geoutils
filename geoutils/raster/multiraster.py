@@ -10,6 +10,7 @@ import rasterio.warp
 from tqdm import tqdm
 
 import geoutils as gu
+from geoutils._typing import NDArrayNum
 from geoutils.misc import resampling_method_from_str
 from geoutils.raster import Raster, RasterType, get_array_and_mask
 from geoutils.raster.raster import _default_nodata
@@ -167,7 +168,7 @@ def stack_rasters(
         )
 
     # Make a data list and add all of the reprojected rasters into it.
-    data: list[np.ndarray] = []
+    data: list[NDArrayNum] = []
 
     for raster in tqdm(rasters, disable=not progress):
         # Check that data is loaded, otherwise temporarily load it
@@ -209,7 +210,7 @@ def stack_rasters(
         nodata = reference_raster.nodata
     else:
         nodata = _default_nodata(data.dtype)
-    data[np.isnan(data)] = nodata
+    data[np.isnan(data)] = nodata  # type: ignore
 
     # Save as gu.Raster - needed as some child classes may not accept multiple bands
     r = gu.Raster.from_array(

@@ -8,7 +8,6 @@ from collections import abc
 from math import ceil, floor
 from typing import Literal
 
-import geopandas
 import geopandas as gpd
 import numpy as np
 import pyproj
@@ -18,8 +17,10 @@ from rasterio.crs import CRS
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import Polygon
 
+from geoutils._typing import NDArrayNum, Number
 
-def latlon_to_utm(lat: float, lon: float) -> str:
+
+def latlon_to_utm(lat: Number, lon: Number) -> str:
     """
     Get UTM zone for a given latitude and longitude coordinates.
 
@@ -108,14 +109,14 @@ def _get_utm_ups_crs(df: gpd.GeoDataFrame, method: Literal["centroid"] | Literal
 
 
 def bounds2poly(
-    boundsGeom: list[float] | rio.io.DatasetReader,
+    bounds_geom: list[float] | rio.io.DatasetReader,
     in_crs: CRS | None = None,
     out_crs: CRS | None = None,
 ) -> Polygon:
     """
     Converts self's bounds into a shapely Polygon. Optionally, returns it into a different CRS.
 
-    :param boundsGeom: A geometry with bounds. Can be either a list of coordinates (xmin, ymin, xmax, ymax),\
+    :param bounds_geom: A geometry with bounds. Can be either a list of coordinates (xmin, ymin, xmax, ymax),\
             a rasterio/Raster object, a geoPandas/Vector object
     :param in_crs: Input CRS
     :param out_crs: Output CRS
@@ -123,22 +124,22 @@ def bounds2poly(
     :returns: Output polygon
     """
     # If boundsGeom is a GeoPandas or Vector object (warning, has both total_bounds and bounds attributes)
-    if hasattr(boundsGeom, "total_bounds"):
-        xmin, ymin, xmax, ymax = boundsGeom.total_bounds  # type: ignore
-        in_crs = boundsGeom.crs  # type: ignore
+    if hasattr(bounds_geom, "total_bounds"):
+        xmin, ymin, xmax, ymax = bounds_geom.total_bounds  # type: ignore
+        in_crs = bounds_geom.crs  # type: ignore
     # If boundsGeom is a rasterio or Raster object
-    elif hasattr(boundsGeom, "bounds"):
-        xmin, ymin, xmax, ymax = boundsGeom.bounds  # type: ignore
-        in_crs = boundsGeom.crs  # type: ignore
+    elif hasattr(bounds_geom, "bounds"):
+        xmin, ymin, xmax, ymax = bounds_geom.bounds  # type: ignore
+        in_crs = bounds_geom.crs  # type: ignore
     # if a list of coordinates
-    elif isinstance(boundsGeom, (list, tuple)):
-        xmin, ymin, xmax, ymax = boundsGeom
+    elif isinstance(bounds_geom, (list, tuple)):
+        xmin, ymin, xmax, ymax = bounds_geom
     else:
         raise ValueError(
             "boundsGeom must a list/tuple of coordinates or an object with attributes bounds or total_bounds."
         )
 
-    corners = ((xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax))
+    corners = np.array([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
     if (in_crs is not None) & (out_crs is not None):
         corners = np.transpose(reproject_points(np.transpose(corners), in_crs, out_crs))
@@ -176,7 +177,7 @@ def merge_bounds(
             "or total_bounds"
         )
 
-    output_poly = bounds2poly(boundsGeom=bounds_list[0])
+    output_poly = bounds2poly(bounds_geom=bounds_list[0])
 
     # Compute the merging
     for boundsGeom in bounds_list[1:]:
@@ -238,7 +239,9 @@ def align_bounds(
     return (left, bottom, right, top)
 
 
-def reproject_points(pts: list[list[float]] | np.ndarray, in_crs: CRS, out_crs: CRS) -> tuple[list[float], list[float]]:
+def reproject_points(
+    pts: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
+) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from input_crs to output_crs.
 
@@ -262,7 +265,7 @@ crs_4326 = rio.crs.CRS.from_epsg(4326)
 
 
 def reproject_to_latlon(
-    pts: list[list[float]] | np.ndarray, in_crs: CRS, round_: int = 8
+    pts: list[list[float]] | NDArrayNum, in_crs: CRS, round_: int = 8
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from in_crs to lat/lon.
@@ -279,7 +282,7 @@ def reproject_to_latlon(
 
 
 def reproject_from_latlon(
-    pts: list[list[float]] | tuple[list[float], list[float]] | np.ndarray, out_crs: CRS, round_: int = 2
+    pts: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, out_crs: CRS, round_: int = 2
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from lat/lon to out_crs.

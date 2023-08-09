@@ -38,6 +38,7 @@ from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
+from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.misc import copy_doc
 from geoutils.projtools import (
     _get_bounds_projected,
@@ -1092,7 +1093,7 @@ class Vector:
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.number = 0,
+        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
         as_array: Literal[False] = False,
     ) -> gu.Mask:
@@ -1106,10 +1107,10 @@ class Vector:
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.number = 0,
+        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
         as_array: Literal[True],
-    ) -> np.ndarray:
+    ) -> NDArrayNum:
         ...
 
     def create_mask(
@@ -1119,9 +1120,9 @@ class Vector:
         xres: float | None = None,
         yres: float | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.number = 0,
+        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         as_array: bool = False,
-    ) -> gu.Mask | np.ndarray:
+    ) -> gu.Mask | NDArrayBool:
         """
         Create a mask from the vector features.
 

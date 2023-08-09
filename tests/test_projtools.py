@@ -130,7 +130,7 @@ class TestProjTools:
         randx = np.random.randint(low=img.bounds.left, high=img.bounds.right, size=(nsample,))
         randy = np.random.randint(low=img.bounds.bottom, high=img.bounds.top, size=(nsample,))
 
-        lat, lon = pt.reproject_to_latlon([randx, randy], img.crs)
+        lat, lon = pt.reproject_to_latlon([list(randx), list(randy)], img.crs)
         x, y = pt.reproject_from_latlon([lat, lon], img.crs)
 
         assert np.all(x == randx)

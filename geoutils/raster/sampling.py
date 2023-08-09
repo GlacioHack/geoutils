@@ -2,17 +2,42 @@
 
 from __future__ import annotations
 
+from typing import Literal, overload
+
 import numpy as np
 
+from geoutils._typing import MArrayNum, NDArrayNum
 from geoutils.raster.array import get_mask
 
 
+@overload
 def subsample_array(
-    array: np.ndarray | np.ma.masked_array,
+    array: NDArrayNum | MArrayNum,
+    subsample: float | int,
+    return_indices: Literal[False] = False,
+    *,
+    random_state: np.random.RandomState | int | None = None,
+) -> tuple[NDArrayNum, ...]:
+    ...
+
+
+@overload
+def subsample_array(
+    array: NDArrayNum | MArrayNum,
+    subsample: float | int,
+    return_indices: Literal[True],
+    *,
+    random_state: np.random.RandomState | int | None = None,
+) -> NDArrayNum:
+    ...
+
+
+def subsample_array(
+    array: NDArrayNum | MArrayNum,
     subsample: float | int,
     return_indices: bool = False,
-    random_state: np.random.RandomState | np.random.Generator | int | None = None,
-) -> np.ndarray:
+    random_state: np.random.RandomState | int | None = None,
+) -> NDArrayNum | tuple[NDArrayNum, ...]:
     """
     Randomly subsample a 1D or 2D array by a subsampling factor, taking only non NaN/masked values.
 
@@ -26,8 +51,8 @@ def subsample_array(
     """
     # Define state for random subsampling (to fix results during testing)
     if random_state is None:
-        rnd = np.random.default_rng()
-    elif isinstance(random_state, (np.random.RandomState, np.random.Generator)):
+        rnd: np.random.RandomState | np.random.Generator = np.random.default_rng()
+    elif isinstance(random_state, np.random.RandomState):
         rnd = random_state
     else:
         rnd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(random_state)))
@@ -98,7 +123,7 @@ def _get_closest_rectangle(size: int) -> tuple[int, int]:
     raise NotImplementedError(f"Function criteria not met for rectangle of size: {size}")
 
 
-def subdivide_array(shape: tuple[int, ...], count: int) -> np.ndarray:
+def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     """
     Create indices for subdivison of an array in a number of blocks.
 
