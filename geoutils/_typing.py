@@ -18,7 +18,7 @@ if sys.version_info.minor >= 9:
         NDArray,
     )
 
-    # Simply define here if they exist (for backwards compatibility below)
+    # Simply define here if they exist
     DTypeLike = DTypeLike
     ArrayLike = ArrayLike
 
@@ -29,6 +29,7 @@ if sys.version_info.minor >= 9:
     MArrayNum = np.ma.masked_array[Any, np.dtype[np.floating[Any] | np.integer[Any]]]
     MArrayBool = np.ma.masked_array[Any, np.dtype[np.bool[Any]]]
 
+# For backward compatibility before Python 3.9
 else:
 
     # Make an array-like type (since the array-like numpy type only exists in numpy>=1.20)
