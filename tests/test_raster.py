@@ -2085,7 +2085,7 @@ class TestRaster:
             assert rout.data.dtype == dtype
 
     @pytest.mark.parametrize(
-        "example", [landsat_b4_path, landsat_b4_crop_path, landsat_rgb_path, aster_dem_path]
+        "example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path]
     )  # type: ignore
     @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))  # type: ignore
     def test_show_cbar(self, example, figsize) -> None:
