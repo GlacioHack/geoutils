@@ -3252,7 +3252,7 @@ class Mask(Raster):
         **kwargs: Any,
     ) -> None:
 
-        self._data: MArrayNum | MArrayBool | None = None
+        self._data: MArrayNum | MArrayBool | None = None  # type: ignore
 
         # If a Mask is passed, simply point back to Mask
         if isinstance(filename_or_dataset, Mask):
@@ -3477,7 +3477,7 @@ class Mask(Raster):
 
     def __and__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
-        self_data, other_data = self._overloading_check(other)[0:2]
+        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
         return self.from_array(
             data=(self_data & other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
@@ -3491,7 +3491,7 @@ class Mask(Raster):
     def __or__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise or between masks, or a mask and an array."""
 
-        self_data, other_data = self._overloading_check(other)[0:2]
+        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
         return self.from_array(
             data=(self_data | other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
@@ -3505,7 +3505,7 @@ class Mask(Raster):
     def __xor__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise xor between masks, or a mask and an array."""
 
-        self_data, other_data = self._overloading_check(other)[0:2]
+        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
         return self.from_array(
             data=(self_data ^ other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
