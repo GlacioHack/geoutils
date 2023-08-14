@@ -44,7 +44,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "rasterio",
-        "geopandas >= 0.10.0",
+        "geopandas >= 0.12.0",
         "pyproj",
         "scipy",
         "typing-extensions; python_version < '3.8'",
