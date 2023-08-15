@@ -74,6 +74,7 @@ class Vector:
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
         """
 
+        # If filename is passed
         if isinstance(filename_or_dataset, (str, pathlib.Path)):
             with warnings.catch_warnings():
                 # This warning shows up in numpy 1.21 (2021-07-09)
@@ -81,6 +82,7 @@ class Vector:
                 ds = gpd.read_file(filename_or_dataset)
             self._ds = ds
             self._name: str | gpd.GeoDataFrame | None = filename_or_dataset
+        # If GeoPandas or Shapely object is passed
         elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, shapely.Geometry)):
             self._name = None
             if isinstance(filename_or_dataset, gpd.GeoDataFrame):
