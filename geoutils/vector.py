@@ -89,6 +89,11 @@ class Vector:
                 self._ds = gpd.GeoDataFrame(geometry=filename_or_dataset)
             else:
                 self._ds = gpd.GeoDataFrame({"geometry": [filename_or_dataset]}, crs=None)
+        # If Vector is passed, simply point back to Vector
+        if isinstance(filename_or_dataset, Vector):
+            for key in filename_or_dataset.__dict__:
+                setattr(self, key, filename_or_dataset.__dict__[key])
+            return
         else:
             raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
 

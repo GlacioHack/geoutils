@@ -45,14 +45,18 @@ class TestVector:
         v0 = gu.Vector(self.aster_outlines_path)
         assert isinstance(v0, gu.Vector)
 
-        # Second, with a pathlib path
+        # Third, with a pathlib path
         path = pathlib.Path(self.aster_outlines_path)
         v1 = gu.Vector(path)
         assert isinstance(v1, gu.Vector)
 
-        # Third, with a geopandas dataframe
+        # Fourth, with a geopandas dataframe
         v2 = gu.Vector(gpd.read_file(self.aster_outlines_path))
         assert isinstance(v2, gu.Vector)
+
+        # Fifth, passing a Vector itself (points back to Vector passed)
+        v3 = gu.Raster(v2)
+        assert isinstance(v3, gu.Raster)
 
         # Check errors are raised when filename has wrong type
         with pytest.raises(TypeError, match="Filename argument should be a string, Path or geopandas.GeoDataFrame."):
