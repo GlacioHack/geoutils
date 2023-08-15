@@ -55,8 +55,8 @@ class TestVector:
         assert isinstance(v2, gu.Vector)
 
         # Fifth, passing a Vector itself (points back to Vector passed)
-        v3 = gu.Raster(v2)
-        assert isinstance(v3, gu.Raster)
+        v3 = gu.Vector(v2)
+        assert isinstance(v3, gu.Vector)
 
         # Check errors are raised when filename has wrong type
         with pytest.raises(TypeError, match="Filename argument should be a string, Path or geopandas.GeoDataFrame."):
