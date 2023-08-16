@@ -21,6 +21,7 @@ from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
 from shapely.geometry.multipolygon import MultiPolygon
 from shapely.geometry.polygon import Polygon
+from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
 
@@ -787,13 +788,13 @@ class TestGeoPandasMethods:
 
         # Assert output types
         assert isinstance(output_geoutils, gu.Vector)
-        assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame, shapely.Geometry))
+        assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame, BaseGeometry))
 
         # Separate cases depending on GeoPandas' output
         if isinstance(output_geopandas, gpd.GeoSeries):
             # Assert geoseries equality
             assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
-        elif isinstance(output_geopandas, shapely.Geometry):
+        elif isinstance(output_geopandas, BaseGeometry):
             assert_geodataframe_equal(
                 output_geoutils.ds, gpd.GeoDataFrame({"geometry": [output_geopandas]}, crs=vector.crs)
             )
