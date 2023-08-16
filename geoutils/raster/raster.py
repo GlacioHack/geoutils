@@ -100,7 +100,7 @@ _HANDLED_FUNCTIONS_1NIN = (
         "cumprod",
         "quantile",
         "abs",
-        "absolute"
+        "absolute",
     ]
     + ["sort", "count_nonzero", "unique"]
     + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"]
