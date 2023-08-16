@@ -35,6 +35,7 @@ from pandas._typing import WriteBuffer
 from rasterio import features, warp
 from rasterio.crs import CRS
 from scipy.spatial import Voronoi
+from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
@@ -67,7 +68,7 @@ class Vector:
     See the API for more details.
     """
 
-    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | shapely.Geometry):
+    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry):
         """
         Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
@@ -83,7 +84,7 @@ class Vector:
             self._ds = ds
             self._name: str | gpd.GeoDataFrame | None = filename_or_dataset
         # If GeoPandas or Shapely object is passed
-        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, shapely.Geometry)):
+        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
             self._name = None
             if isinstance(filename_or_dataset, gpd.GeoDataFrame):
                 self._ds = filename_or_dataset
@@ -300,12 +301,12 @@ class Vector:
     ############################################################################
 
     def _override_gdf_output(
-        self, other: gpd.GeoDataFrame | gpd.GeoSeries | shapely.Geometry | pd.Series | Any
+        self, other: gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | pd.Series | Any
     ) -> Vector | pd.Series:
         """Parse outputs of GeoPandas functions to facilitate object manipulation."""
 
         # Raise error if output is not treated separately, should appear in tests
-        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoDataFrame, pd.Series, shapely.Geometry)):
+        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoDataFrame, pd.Series, BaseGeometry)):
             raise ValueError("Not implemented. This error should only be raised in tests.")
 
         # If a GeoDataFrame is the output, return it
@@ -315,7 +316,7 @@ class Vector:
         elif isinstance(other, gpd.GeoSeries):
             return Vector(gpd.GeoDataFrame(geometry=other))
         # If a Shapely Geometry is the output, re-encapsulate in a GeoDataFrame and return it
-        elif isinstance(other, shapely.Geometry):
+        elif isinstance(other, BaseGeometry):
             return Vector(gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs))
         # If a Pandas Series is the output, append it to that of the GeoDataFrame
         else:

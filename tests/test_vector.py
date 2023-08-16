@@ -13,10 +13,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyproj
 import pytest
-import shapely
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 from pandas.testing import assert_series_equal
 from scipy.ndimage import binary_erosion
+from shapely.geometry.base import BaseGeometry
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
 from shapely.geometry.multipolygon import MultiPolygon
@@ -787,13 +787,13 @@ class TestGeoPandasMethods:
 
         # Assert output types
         assert isinstance(output_geoutils, gu.Vector)
-        assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame, shapely.Geometry))
+        assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame, BaseGeometry))
 
         # Separate cases depending on GeoPandas' output
         if isinstance(output_geopandas, gpd.GeoSeries):
             # Assert geoseries equality
             assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
-        elif isinstance(output_geopandas, shapely.Geometry):
+        elif isinstance(output_geopandas, BaseGeometry):
             assert_geodataframe_equal(
                 output_geoutils.ds, gpd.GeoDataFrame({"geometry": [output_geopandas]}, crs=vector.crs)
             )
