@@ -35,8 +35,8 @@ from pandas._typing import WriteBuffer
 from rasterio import features, warp
 from rasterio.crs import CRS
 from scipy.spatial import Voronoi
-from shapely.geometry.polygon import Polygon
 from shapely.geometry.base import BaseGeometry
+from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 from geoutils._typing import NDArrayBool, NDArrayNum

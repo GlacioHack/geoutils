@@ -13,15 +13,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyproj
 import pytest
-import shapely
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 from pandas.testing import assert_series_equal
 from scipy.ndimage import binary_erosion
+from shapely.geometry.base import BaseGeometry
 from shapely.geometry.linestring import LineString
 from shapely.geometry.multilinestring import MultiLineString
 from shapely.geometry.multipolygon import MultiPolygon
 from shapely.geometry.polygon import Polygon
-from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
 
