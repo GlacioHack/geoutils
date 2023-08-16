@@ -99,6 +99,8 @@ _HANDLED_FUNCTIONS_1NIN = (
         "cumsum",
         "cumprod",
         "quantile",
+        "abs",
+        "absolute"
     ]
     + ["sort", "count_nonzero", "unique"]
     + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"]
