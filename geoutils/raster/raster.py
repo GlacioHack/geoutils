@@ -64,8 +64,12 @@ except ImportError:
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
-# List of numpy functions that are handled: nan statistics function, normal statistics function and sorting/counting
+# List of NumPy "array" functions that are handled.
+# Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
+# Array functions include: NaN math and stats, classic math and stats, logical, sorting/counting:
 _HANDLED_FUNCTIONS_1NIN = (
+    # NaN math: https://numpy.org/doc/stable/reference/routines.math.html
+    # and NaN stats: https://numpy.org/doc/stable/reference/routines.statistics.html
     [
         "nansum",
         "nanmax",
@@ -82,6 +86,7 @@ _HANDLED_FUNCTIONS_1NIN = (
         "nancumprod",
         "nanquantile",
     ]
+    # Classic math and stats (same links as above)
     + [
         "sum",
         "amax",
@@ -99,10 +104,14 @@ _HANDLED_FUNCTIONS_1NIN = (
         "cumsum",
         "cumprod",
         "quantile",
+        "abs",
+        "absolute",
+        "gradient",
     ]
+    # Sorting, searching and counting: https://numpy.org/doc/stable/reference/routines.sort.html
     + ["sort", "count_nonzero", "unique"]
+    # Logic functions: https://numpy.org/doc/stable/reference/routines.logic.html
     + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"]
-    + ["gradient"]
 )
 
 _HANDLED_FUNCTIONS_2NIN = [
