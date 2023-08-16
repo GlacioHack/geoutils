@@ -106,7 +106,7 @@ _HANDLED_FUNCTIONS_1NIN = (
         "quantile",
         "abs",
         "absolute",
-        "gradient"
+        "gradient",
     ]
     # Sorting, searching and counting: https://numpy.org/doc/stable/reference/routines.sort.html
     + ["sort", "count_nonzero", "unique"]
