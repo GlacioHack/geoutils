@@ -13,7 +13,7 @@ dependencies:
   - xarray
   - rioxarray
 
-  # Development-specific
+  # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
 
   # Optional dependencies
