@@ -14,25 +14,31 @@ dependencies:
   - rioxarray
 
   # Development-specific
-  - autovizwidget
-  - graphviz
-  - sphinx
-  - myst-nb
-  - sphinx-autodoc-typehints
-  - sphinxcontrib-programoutput
-  - numpydoc
-  - flake8
   - pip
+
+  # Optional dependencies
+  - scikit-image
+
+  # Test dependencies
   - pytest
   - pytest-xdist
   - pytest-lazy-fixture
-  - pylint
-  - typing-extensions
-  - sphinx-gallery
-  - scikit-image
   - pyyaml
-  - sphinx-design
+  - flake8
+  - pylint
+
+  # Doc dependencies
+  - sphinx
   - sphinx-book-theme
+  - sphinx-gallery
+  - sphinx-design
+  - sphinx-autodoc-typehints
+  - sphinxcontrib-programoutput
+  - autovizwidget
+  - graphviz
+  - myst-nb
+  - numpydoc
+  - typing-extensions
 
   - pip:
     - -e ./

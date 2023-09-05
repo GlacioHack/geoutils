@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import warnings
 
 import pytest
@@ -57,11 +58,13 @@ class TestMisc:
         """
         warnings.simplefilter("error")
 
-        current_version = geoutils.version.version
+        current_version = geoutils.__version__
 
         # Set the removal version to be the current version plus the increment (e.g. 0.0.5 + 1 -> 0.0.6)
         removal_version = (
-            current_version[:-1] + str(int(current_version.rsplit(".", 1)[1]) + deprecation_increment)
+            current_version.rsplit(".", 2)[0]
+            + "."
+            + str(int(current_version.rsplit(".", 2)[1]) + deprecation_increment)
             if deprecation_increment is not None
             else None
         )
@@ -101,7 +104,7 @@ class TestMisc:
             with pytest.warns(DeprecationWarning, match="^" + text + "$"):
                 useless_func()
         else:
-            with pytest.raises(ValueError, match="^" + text + "$"):
+            with pytest.raises(ValueError, match=re.escape(text)):
                 useless_func()
 
     def test_diff_environment_yml(self, capsys) -> None:  # type: ignore

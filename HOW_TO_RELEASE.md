@@ -1,11 +1,13 @@
 # How to issue a GeoUtils release
 
-## The easy way
+## GitHub and PyPI
 
-1. Change the version number in setup.py. It can be easily done from GitHub directly without a PR. The version number is important for PyPI as it will determine the file name of the wheel. A name can [never be reused](https://pypi.org/help/#file-name-reuse), even if a file or project have been deleted.
+### The easy way
+
+1. Change the version number in `setup.cfg`. It can be easily done from GitHub directly without a PR. The version number is important for PyPI as it will determine the file name of the wheel. A name can [never be reused](https://pypi.org/help/#file-name-reuse), even if a file or project have been deleted.
 
 2. Follow the steps to [create a new release](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository) on GitHub.
-Use the same release number and tag as in setup.py.
+Use the same release number and tag as in `setup.cfg`.
 
 An automatic GitHub action will start to push and publish the new release to PyPI.
 
@@ -18,7 +20,7 @@ An automatic GitHub action will start to push and publish the new release to PyP
 - Before releasing, you need to delete **both** the tag and the release of the previous release. If you release with the same tag without deletion, it will ignore your commit changing the version number, and PyPI will block the upload again. You're stuck in a circle.
 
 
-## The hard way
+### The hard way
 
  1. Go to your local main repository (not the fork) and ensure your master branch is synced:
        git checkout master
@@ -66,14 +68,24 @@ An automatic GitHub action will start to push and publish the new release to PyP
  15. Issue the release announcement!
 
 
-## conda-forge
-To update the conda-forge distribution of geoutils, a few steps have to be performed manually.
-The process **should** be automatic, but at the moment (September 2022), the automatic process does not function!
-conda-forge distributions work by having a "feedstock" version of the package, containing instructions on how to bundle it for conda.
-The geoutils feedstock is available at [https://github.com/conda-forge/geoutils-feedstock](https://github.com/conda-forge/geoutils-feedstock).
+## Conda-forge
 
-Assuming the dependencies have not changed, only two lines have to be changed in the `meta.yaml` file of the feedstock.
-The new version number has to be specified, as well as the new sha256 checksum for the package.
+Conda-forge distributions work by having a "feedstock" version of the package, containing instructions on how to bundle it for conda.
+The GeoUtils feedstock is available at [https://github.com/conda-forge/geoutils-feedstock](https://github.com/conda-forge/geoutils-feedstock), and only accessible by maintainers.
+
+The process **should** largely be automatic, but at the moment (September 2023), the conda bot does not function for GeoUtils!
+
+### If the conda-forge bot works
+
+To update the conda-forge distribution of GeoUtils, very few steps should have to be performed manually. If the conda bot works, a PR will be opened at [https://github.com/conda-forge/geoutils-feedstock](https://github.com/conda-forge/geoutils-feedstock) within a day of publishing a new GitHub release.
+Assuming the dependencies have not changed, only two lines will be changed in the `meta.yaml` file of the feedstock: (i) the new version number and (ii) the new sha256 checksum for the GitHub-released package. Those will be updated automatically by the bot.
+
+However, if the dependencies or license need to be updated, this has to be done manually. Then, add the bot branch as a remote branch and push the dependency changes to `meta.yaml` (see additional info from conda bot for license).
+
+### If the conda-forge bot does not work
+
+In this case, the PR has to be opened manually, and the new version number and new sha256 checksum have to be updated manually as well.
+
 The most straightforward way to obtain the new sha256 checksum is to run `conda-build` (see below) with the old checksum which will fail, and then copying the new hash of the "SHA256 mismatch: ..." error that arises!
 
 First, the geoutils-feedstock repo has to be forked on GitHub.
@@ -96,6 +108,9 @@ Then, follow these steps for `NEW_VERSION` (substitute with the actual version n
 
 >>> git push -u origin master
 ```
+
+An alternative solution to get the sha256sum is to run `sha256sum` on the release file downloaded from GitHub
+
 Now, a PR can be made from your personal fork to the upstream geoutils-feedstock.
 An automatic linter will say whether the updates conform to the syntax and a CI action will build the package to validate it.
 Note that you have to be a maintainer or have the PR be okayed by a maintainer for the CI action to run.
