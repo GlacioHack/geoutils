@@ -7,7 +7,7 @@ from geoutils.raster import Mask, Raster, SatelliteImage  # noqa
 from geoutils.vector import Vector  # noqa
 
 try:
-    from geoutils.version import version as __version__  # noqa
+    from geoutils._version import __version__ as __version__  # noqa
 except ImportError:  # pragma: no cover
     raise ImportError(
         "geoutils is not properly installed. If you are "

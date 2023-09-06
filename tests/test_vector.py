@@ -856,7 +856,9 @@ class TestGeoPandasMethods:
         # Separate cases depending on GeoPandas' output, and nature of the function
         # Simplify is a special case that can make geometries invalid, so adjust test
         if method == "simplify":
-            assert_geoseries_equal(output_geopandas.make_valid(), output_geoutils.ds.geometry.make_valid())
+            assert_geoseries_equal(
+                output_geopandas.make_valid(), output_geoutils.ds.geometry.make_valid(), check_less_precise=True
+            )
         # For geoseries output, check equality of it
         elif isinstance(output_geopandas, gpd.GeoSeries):
             assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)

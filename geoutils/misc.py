@@ -39,7 +39,7 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
         @functools.wraps(func)
         def new_func(*args, **kwargs):  # type: ignore
             # True if it should warn, False if it should raise an error
-            should_warn = removal_version is None or Version(removal_version) > Version(geoutils.version.version)
+            should_warn = removal_version is None or Version(removal_version) > Version(geoutils.__version__)
 
             # Add text depending on the given arguments and 'should_warn'.
             text = (
@@ -62,7 +62,7 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
             if should_warn and removal_version is not None:
                 text += f" This functionality will be removed in version {removal_version}."
             elif not should_warn:
-                text += f" Current version: {geoutils.version.version}."
+                text += f" Current version: {geoutils.__version__}."
 
             if should_warn:
                 warnings.warn(text, category=DeprecationWarning, stacklevel=2)
