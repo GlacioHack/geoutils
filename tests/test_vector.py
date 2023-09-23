@@ -727,18 +727,18 @@ class TestGeoPandasMethods:
 
         # Check that all positional arguments are the same
         if argspec_upstream.args != argspec_geoutils.args:
-            warnings.warn(f"Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
 
         # Check that the *args and **kwargs argument are declared consistently
         if argspec_upstream.varargs != argspec_geoutils.varargs:
-            warnings.warn(f"Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
 
         if argspec_upstream.varkw != argspec_geoutils.varkw:
-            warnings.warn(f"Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
 
         # Check that default argument values are the same
-        if argspec_upstream.defaults != argspec_geoutils.defaults
-            warnings.warn(f"Default argument of GeoPandas method not consistent in GeoUtils.")
+        if argspec_upstream.defaults != argspec_geoutils.defaults:
+            warnings.warn("Default argument of GeoPandas method not consistent in GeoUtils.")
 
     @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])  # type: ignore
     @pytest.mark.parametrize("method", nongeo_properties)  # type: ignore
