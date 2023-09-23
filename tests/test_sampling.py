@@ -55,14 +55,14 @@ class TestSubsampling:
 
         # Test if subsample < 1
         random_values = gu.raster.subsample_array(array, subsample=0.5)
-        assert np.size(random_values) == int(np.size(array) * 0.5)
+        assert np.size(random_values) == int(np.count_nonzero(~array.mask) * 0.5)
 
         # Test with optional argument return_indices
         indices = gu.raster.subsample_array(array, subsample=0.3, return_indices=True)
         assert np.ndim(indices) == 2
         assert len(indices) == np.ndim(array)
         assert np.ndim(array[indices]) == 1
-        assert np.size(array[indices]) == int(np.size(array) * 0.3)
+        assert np.size(array[indices]) == int(np.count_nonzero(~array.mask) * 0.3)
 
         # Check that we can pass an integer to fix the random state
         sub42 = gu.raster.subsample_array(array, subsample=10, random_state=42)
