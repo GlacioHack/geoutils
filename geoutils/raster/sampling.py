@@ -51,7 +51,7 @@ def subsample_array(
     """
     Randomly subsample a 1D or 2D array by a subsampling factor, taking only non NaN/masked values.
 
-    :param array:
+    :param array: Input array.
     :param subsample: If <= 1, will be considered a fraction of valid pixels to extract.
     If > 1 will be considered the number of pixels to extract.
     :param return_indices: If set to True, will return the extracted indices only.
@@ -67,17 +67,17 @@ def subsample_array(
     else:
         rnd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(random_state)))
 
+    # Remove invalid values and flatten array
+    mask = get_mask(array)  # -> need to remove .squeeze in get_mask
+    valids = np.argwhere(~mask.flatten()).squeeze()
+
     # Get number of points to extract
     if (subsample <= 1) & (subsample > 0):
-        npoints = int(subsample * np.size(array))
+        npoints = int(subsample * np.count_nonzero(~mask))
     elif subsample > 1:
         npoints = int(subsample)
     else:
         raise ValueError("`subsample` must be > 0")
-
-    # Remove invalid values and flatten array
-    mask = get_mask(array)  # -> need to remove .squeeze in get_mask
-    valids = np.argwhere(~mask.flatten()).squeeze()
 
     # Checks that array and npoints are correct
     assert np.ndim(valids) == 1, "Something is wrong with array dimension, check input data and shape"
