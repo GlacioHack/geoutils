@@ -12,8 +12,8 @@ import geopandas as gpd
 import numpy as np
 import pyproj
 import rasterio as rio
-import shapely.ops
 import shapely.geometry
+import shapely.ops
 from rasterio.crs import CRS
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import Polygon
@@ -352,7 +352,9 @@ def _get_bounds_projected(
     return new_bounds
 
 
-def _densify_geometry(line_geometry: shapely.geometry.LineString, densify_pts: int = 5000) -> shapely.geometry.LineString:
+def _densify_geometry(
+    line_geometry: shapely.geometry.LineString, densify_pts: int = 5000
+) -> shapely.geometry.LineString:
     """
     Densify a linestring geometry.
 
@@ -415,7 +417,9 @@ def _get_footprint_projected(
     left, bottom, right, top = bounds
 
     # Create linestring
-    linestring = shapely.geometry.LineString([[left, bottom], [left, top], [right, top], [right, bottom], [left, bottom]])
+    linestring = shapely.geometry.LineString(
+        [[left, bottom], [left, top], [right, top], [right, bottom], [left, bottom]]
+    )
 
     # Densify linestring
     densified_line_geometry = _densify_geometry(linestring, densify_pts=densify_pts)
