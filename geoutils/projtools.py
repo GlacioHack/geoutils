@@ -12,6 +12,7 @@ import geopandas as gpd
 import numpy as np
 import pyproj
 import rasterio as rio
+import shapely.geometry
 import shapely.ops
 from rasterio.crs import CRS
 from shapely.geometry.base import BaseGeometry
@@ -351,7 +352,9 @@ def _get_bounds_projected(
     return new_bounds
 
 
-def _densify_geometry(line_geometry: shapely.LineString, densify_pts: int = 5000) -> shapely.LineString:
+def _densify_geometry(
+    line_geometry: shapely.geometry.LineString, densify_pts: int = 5000
+) -> shapely.geometry.LineString:
     """
     Densify a linestring geometry.
 
@@ -364,7 +367,7 @@ def _densify_geometry(line_geometry: shapely.LineString, densify_pts: int = 5000
     """
 
     # Get the segments (list of linestrings)
-    segments = list(map(shapely.LineString, zip(line_geometry.coords[:-1], line_geometry.coords[1:])))
+    segments = list(map(shapely.geometry.LineString, zip(line_geometry.coords[:-1], line_geometry.coords[1:])))
 
     # To store new coordinate tuples
     xy = []
@@ -390,7 +393,7 @@ def _densify_geometry(line_geometry: shapely.LineString, densify_pts: int = 5000
             xy.append((xp, yp))
 
     # Recreate a new line with densified points
-    densified_line_geometry = shapely.LineString(xy)
+    densified_line_geometry = shapely.geometry.LineString(xy)
 
     return densified_line_geometry
 
@@ -414,13 +417,15 @@ def _get_footprint_projected(
     left, bottom, right, top = bounds
 
     # Create linestring
-    linestring = shapely.LineString([[left, bottom], [left, top], [right, top], [right, bottom], [left, bottom]])
+    linestring = shapely.geometry.LineString(
+        [[left, bottom], [left, top], [right, top], [right, bottom], [left, bottom]]
+    )
 
     # Densify linestring
     densified_line_geometry = _densify_geometry(linestring, densify_pts=densify_pts)
 
     # Get polygon from new linestring
-    densified_poly = shapely.Polygon(densified_line_geometry)
+    densified_poly = Polygon(densified_line_geometry)
 
     # Reproject the polygon
     df = gpd.GeoDataFrame({"geometry": [densified_poly]}, crs=in_crs)
