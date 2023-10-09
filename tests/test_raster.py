@@ -2332,7 +2332,7 @@ class TestRaster:
 
         # Run pylint and parse the stdout as a string, only test
         pylint_output = StringIO()
-        Run([temp_path], reporter=TextReporter(pylint_output), do_exit=False)
+        Run([temp_path], reporter=TextReporter(pylint_output), exit=False)
 
         lint_string = pylint_output.getvalue()
         print(lint_string)  # Print the output for debug purposes
