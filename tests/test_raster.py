@@ -8,6 +8,7 @@ import pathlib
 import re
 import tempfile
 import warnings
+from io import StringIO
 from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
@@ -16,7 +17,6 @@ import pytest
 import rasterio as rio
 import xarray as xr
 from pylint.lint import Run
-from io import StringIO
 from pylint.reporters.text import TextReporter
 
 import geoutils as gu
@@ -2332,7 +2332,7 @@ class TestRaster:
 
         # Run pylint and parse the stdout as a string, only test
         pylint_output = StringIO()
-        Run([temp_path], do_exit=False)
+        Run([temp_path], reporter=TextReporter(pylint_output), do_exit=False)
 
         lint_string = pylint_output.getvalue()
         print(lint_string)  # Print the output for debug purposes
