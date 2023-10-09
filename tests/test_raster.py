@@ -15,7 +15,9 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
-from pylint import epylint
+from pylint.lint import Run
+from io import StringIO
+from pylint.reporters.text import TextReporter
 
 import geoutils as gu
 import geoutils.projtools as pt
@@ -2316,7 +2318,7 @@ class TestRaster:
             [
                 "'''Sample code that should conform to pylint's standards.'''",  # Add docstring
                 "import geoutils as gu",  # Import geoutils
-                "raster = gu.Raster(gu.datasets.get_path('landsat_B4'))",  # Load a raster
+                "raster = gu.Raster(gu.examples.get_path('landsat_B4'))",  # Load a raster
             ]
             + [  # The below statements should not raise a 'no-member' (E1101) error.
                 f"{attribute.upper()} = raster.{attribute}" for attribute in attributes
@@ -2328,9 +2330,11 @@ class TestRaster:
         with open(temp_path, "w") as outfile:
             outfile.write(sample_code)
 
-        # Run pylint and parse the stdout as a string
-        lint_string = epylint.py_run(temp_path, return_std=True)[0].getvalue()
+        # Run pylint and parse the stdout as a string, only test
+        pylint_output = StringIO()
+        Run([temp_path], do_exit=False)
 
+        lint_string = pylint_output.getvalue()
         print(lint_string)  # Print the output for debug purposes
 
         # Bad linting errors are defined here. Currently just "no-member" errors
