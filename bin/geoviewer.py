@@ -57,7 +57,7 @@ def getparser() -> argparse.ArgumentParser:
         dest="band",
         type=int,
         default=None,
-        help="int, which band to display (start at 0) for multiband images (Default is 0).",
+        help="int, for multiband images, which band to display. Starts at 1. (Default is to load all bands and display as rasterio, i.e. asuming RGB and with clipping outside [0-255] for int, [0-1] for float).",
     )
     parser.add_argument(
         "-nocb",
@@ -134,7 +134,7 @@ def main(test_args: Sequence[str] = None) -> None:
         dfact = 1
 
     # Read image
-    img = Raster(args.filename, downsample=dfact)
+    img = Raster(args.filename, downsample=dfact, indexes=args.band)
 
     # Set no data value
     if args.nodata == "default":
@@ -157,7 +157,7 @@ def main(test_args: Sequence[str] = None) -> None:
             perc, _ = args.vmin.split("%")
             try:
                 perc = float(perc)
-                vmin = np.percentile(img.data, perc)
+                vmin = np.percentile(img.data.compressed(), perc)
             except ValueError:  # Case no % sign
                 raise ValueError("vmin must be a float or percentage, currently set to %s" % args.vmin)
 
@@ -172,7 +172,7 @@ def main(test_args: Sequence[str] = None) -> None:
             perc, _ = args.vmax.split("%")
             try:
                 perc = float(perc)
-                vmax = np.percentile(img.data, perc)
+                vmax = np.percentile(img.data.compressed(), perc)
             except ValueError:  # Case no % sign
                 raise ValueError("vmax must be a float or percentage, currently set to %s" % args.vmax)
 
