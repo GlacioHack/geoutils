@@ -59,7 +59,7 @@ def getparser() -> argparse.ArgumentParser:
         dest="band",
         type=int,
         default=None,
-        help="int, for multiband images, which band to display. Starts at 1. (Default is to load all bands and display as rasterio, i.e. asuming RGB and with clipping outside [0-255] for int, [0-1] for float).",
+        help="int, for multiband images, which band to display. Starts at 1. (Default is to load all bands and display as rasterio, i.e. asuming RGB(A) and with clipping outside [0-255] for int, [0-1] for float).",
     )
     parser.add_argument(
         "-nocb",
