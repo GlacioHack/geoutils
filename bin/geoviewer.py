@@ -19,7 +19,7 @@ from geoutils.raster import Raster
 
 def getparser() -> argparse.ArgumentParser:
     # Set up description
-    parser = argparse.ArgumentParser(description="Visualisation tool for any image supported by GDAL.")
+    parser = argparse.ArgumentParser(description="Visualisation tool for any image supported by GDAL. For single band plots (Single band rasters or with option -band) the image will be rendered as a pseudocolor image using the set or default colormap. For 3 or 4 band data, the image will be plotted as an RGB(A) image. For other band counts, an error will be raised and the option -band must be used.")
 
     # Positional arguments
     parser.add_argument("filename", type=str, help="str, path to the image")
@@ -30,7 +30,7 @@ def getparser() -> argparse.ArgumentParser:
         dest="cmap",
         type=str,
         default="default",
-        help="str, a matplotlib colormap string (default is from rcParams).",
+        help="str, a matplotlib colormap string (default is from rcParams). This parameter is ignored for multi-band rasters.",
     )
     parser.add_argument(
         "-vmin",
@@ -39,7 +39,7 @@ def getparser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "float, the minimum value for colorscale, or can be expressed as a "
-            "percentile e.g. 5%% (default is calculated min value)."
+            "percentile e.g. 5%% (default is calculated min value). This parameter is ignored for multi-band rasters."
         ),
     )
     parser.add_argument(
@@ -49,7 +49,7 @@ def getparser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "float, the maximum value for colorscale, or can be expressed as a "
-            "percentile e.g. 95%% (default is calculated max value)."
+            "percentile e.g. 95%% (default is calculated max value). This parameter is ignored for multi-band rasters."
         ),
     )
     parser.add_argument(
@@ -62,7 +62,7 @@ def getparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-nocb",
         dest="nocb",
-        help="If set, will not display a colorbar (Default is to display the colorbar).",
+        help="If set, will not display a colorbar (Default is to display the colorbar for single-band raster). This parameter is ignored for multi-band rasters.",
         action="store_false",
     )
     parser.add_argument(
@@ -213,7 +213,6 @@ def main(test_args: Sequence[str] = None) -> None:
     # plot
     img.show(
         ax=ax,
-        index=args.band,
         cmap=cmap,
         interpolation="nearest",
         vmin=vmin,
