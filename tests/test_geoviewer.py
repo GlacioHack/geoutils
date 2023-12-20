@@ -87,9 +87,7 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
         geoviewer.main([filename, *option])
 
 
-@pytest.mark.parametrize(
-    "filename", [gu.examples.get_path("everest_landsat_rgb")]
-)  # type: ignore
+@pytest.mark.parametrize("filename", [gu.examples.get_path("everest_landsat_rgb")])  # type: ignore
 @pytest.mark.parametrize(
     "option",
     (
@@ -129,7 +127,10 @@ def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: 
 
 
 @pytest.mark.parametrize(
-    "filename", [gu.examples.get_path("everest_landsat_rgb"),]
+    "filename",
+    [
+        gu.examples.get_path("everest_landsat_rgb"),
+    ],
 )  # type: ignore
 @pytest.mark.parametrize(
     "args",

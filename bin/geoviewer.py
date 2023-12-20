@@ -19,7 +19,9 @@ from geoutils.raster import Raster
 
 def getparser() -> argparse.ArgumentParser:
     # Set up description
-    parser = argparse.ArgumentParser(description="Visualisation tool for any image supported by GDAL. For single band plots (Single band rasters or with option -band) the image will be rendered as a pseudocolor image using the set or default colormap. For 3 or 4 band data, the image will be plotted as an RGB(A) image. For other band counts, an error will be raised and the option -band must be used.")
+    parser = argparse.ArgumentParser(
+        description="Visualisation tool for any image supported by GDAL. For single band plots (Single band rasters or with option -band) the image will be rendered as a pseudocolor image using the set or default colormap. For 3 or 4 band data, the image will be plotted as an RGB(A) image. For other band counts, an error will be raised and the option -band must be used."
+    )
 
     # Positional arguments
     parser.add_argument("filename", type=str, help="str, path to the image")
