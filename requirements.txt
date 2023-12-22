@@ -10,5 +10,5 @@ scipy
 tqdm
 xarray
 rioxarray
-setuptools>=42
-setuptools_scm[toml]>=6.2
+setuptools>=64
+setuptools_scm[toml]>=8
