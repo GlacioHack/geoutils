@@ -35,5 +35,5 @@ jobs:
       # Build package, test pip install works, then upload to PyPI with twine
       run: |
         python setup.py sdist bdist_wheel
-        pip install dist/*.tar.gz  
+        pip install dist/*.tar.gz
         twine upload dist/*
