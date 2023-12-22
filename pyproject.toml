@@ -7,13 +7,9 @@ requires = [
 ]
 build-backend = "setuptools.build_meta"
 
-[project]
-name = "geoutils"
-dynamic = ["version"]
-
 # To write version to file
 [tool.setuptools_scm]
-write_to = "geoutils/_version.py"
+version_file = "geoutils/_version.py"
 fallback_version = "0.0.1"
 
 [tool.black]
