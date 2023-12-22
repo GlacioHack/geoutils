@@ -1,11 +1,14 @@
 [build-system]
 # Minimum requirements for the build system to execute.
 requires = [
-    "setuptools>=42",
-    "setuptools_scm[toml]>=6.2",
+    "setuptools>=64",
+    "setuptools_scm[toml]>=8",
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
+
+[project]
+dynamic = ["version"]
 
 # To write version to file
 [tool.setuptools_scm]
