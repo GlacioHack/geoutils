@@ -8,6 +8,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
+name = "geoutils"
 dynamic = ["version"]
 
 # To write version to file
