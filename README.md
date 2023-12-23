@@ -1,7 +1,7 @@
 # GeoUtils: consistent geospatial analysis in Python.
 
 ![](https://readthedocs.org/projects/geoutils/badge/?version=latest)
-[![build](https://github.com/GlacioHack/geoutils/actions/workflows/python-app.yml/badge.svg)](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-app.yml)
+[![build](https://github.com/GlacioHack/geoutils/actions/workflows/python-tests.yml/badge.svg)](https://github.com/GlacioHack/GeoUtils/actions/workflows/python-tests.yml)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
 [![Conda Platforms](https://img.shields.io/conda/pn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
 [![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/geoutils.svg)](https://anaconda.org/conda-forge/geoutils)
