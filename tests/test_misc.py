@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 import warnings
-from copy import copy
 
 import pytest
 import yaml  # type: ignore
@@ -68,7 +67,11 @@ class TestMisc:
                 removal_version_tuple = (current_version.major, current_version.minor + deprecation_increment, 0)
             # Otherwise, increment micro version
             else:
-                removal_version_tuple = (current_version.major, current_version.minor, current_version.micro + deprecation_increment)
+                removal_version_tuple = (
+                    current_version.major,
+                    current_version.minor,
+                    current_version.micro + deprecation_increment,
+                )
 
             # Convert to version
             removal_version = Version(".".join([str(v) for v in removal_version_tuple]))
