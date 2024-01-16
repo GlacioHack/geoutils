@@ -2147,6 +2147,23 @@ class TestRaster:
         img_RGB = gu.Raster(self.landsat_rgb_path)
 
         # Test default plot
+        img.show()
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test with new figure
+        plt.figure()
+        img.show()
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test with provided ax
         ax = plt.subplot(111)
         img.show(ax=ax, title="Simple plotting test")
         if DO_PLOT:

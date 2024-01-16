@@ -19,7 +19,7 @@ from packaging.version import Version
 import geoutils
 
 
-def deprecate(removal_version: str | None = None, details: str | None = None):  # type: ignore
+def deprecate(removal_version: Version | None = None, details: str | None = None):  # type: ignore
     """
     Trigger a DeprecationWarning for the decorated function.
 
@@ -38,8 +38,12 @@ def deprecate(removal_version: str | None = None, details: str | None = None):  
     def deprecator_func(func):  # type: ignore
         @functools.wraps(func)
         def new_func(*args, **kwargs):  # type: ignore
+
+            # Get current base version (without dev changes)
+            current_version = Version(Version(geoutils.__version__).base_version)
+
             # True if it should warn, False if it should raise an error
-            should_warn = removal_version is None or Version(removal_version) > Version(geoutils.__version__)
+            should_warn = removal_version is None or removal_version > current_version
 
             # Add text depending on the given arguments and 'should_warn'.
             text = (
