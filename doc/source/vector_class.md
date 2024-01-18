@@ -165,12 +165,12 @@ See {ref}`core-match-ref` for more details.
 
 The {func}`~geoutils.Vector.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`).
 
-By default, {func}`~geoutils.Vector.crop` is done in-place and keeps all intersecting geometries. It can also be passed the `clip` argument to clip
+By default, {func}`~geoutils.Vector.crop` returns a new {class}`~geoutils.Vector` which keeps all intersecting geometries. It can also be passed the `clip` argument to clip
 intersecting geometries to the extent.
 
 ```{code-cell} ipython3
 # Crop vector to smaller bounds
-vect_crop = vect.crop(crop_geom=(-73.5, -46.6, -73.4, -46.5), inplace=False, clip=True)
+vect_crop = vect.crop(crop_geom=(-73.5, -46.6, -73.4, -46.5), clip=True)
 print(vect_crop.info())
 ```
 

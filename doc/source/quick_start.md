@@ -85,7 +85,7 @@ For convenience and consistency, nearly all of these methods can be passed solel
 # Print initial bounds of the raster
 print(rast.bounds)
 # Crop raster to vector's extent
-rast.crop(vect)
+rast = rast.crop(vect)
 # Print bounds of cropped raster
 print(rast.bounds)
 ```
