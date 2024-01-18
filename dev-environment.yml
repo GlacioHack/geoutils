@@ -35,6 +35,7 @@ dependencies:
   - sphinx-design
   - sphinx-autodoc-typehints
   - sphinxcontrib-programoutput
+  - sphinx-argparse
   - autovizwidget
   - graphviz
   - myst-nb
