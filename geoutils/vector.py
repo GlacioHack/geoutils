@@ -732,7 +732,7 @@ class Vector:
         """
 
         if isinstance(key, (gu.Raster, Vector)):
-            return self.crop(crop_geom=key, clip=False, inplace=False)
+            return self.crop(crop_geom=key, clip=False)
         else:
             return self._override_gdf_output(self.ds.__getitem__(key))
 
@@ -971,6 +971,16 @@ class Vector:
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
+        inplace: Literal[False] = ...,
+    ) -> VectorType:
+        ...
+
+    @overload
+    def crop(
+        self: VectorType,
+        crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
+        clip: bool,
+        *,
         inplace: Literal[True],
     ) -> None:
         ...
@@ -981,17 +991,7 @@ class Vector:
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
-        inplace: Literal[False],
-    ) -> VectorType:
-        ...
-
-    @overload
-    def crop(
-        self: VectorType,
-        crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
-        clip: bool,
-        *,
-        inplace: bool = True,
+        inplace: bool = ...,
     ) -> VectorType | None:
         ...
 
@@ -999,7 +999,8 @@ class Vector:
         self: VectorType,
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool = False,
-        inplace: bool = True,
+        *,
+        inplace: bool = False,
     ) -> VectorType | None:
         """
         Crop the vector to given extent.
