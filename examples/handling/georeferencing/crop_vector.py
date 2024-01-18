@@ -24,7 +24,7 @@ vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 # **First option:** using the raster as a reference to match, we crop the vector. We simply have to pass the :class:`~geoutils.Raster` as single argument to
 # :func:`~geoutils.Vector.crop`. See :ref:`core-match-ref` for more details.
 
-vect.crop(rast)
+vect.crop(rast, inplace=True)
 
 # %%
 # .. note::
@@ -47,7 +47,9 @@ vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 # simple :class:`tuple` of bounds.
 
 bounds = rast.get_bounds_projected(out_crs=vect.crs)
-vect.crop(crop_geom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top))
+vect.crop(
+    crop_geom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top), inplace=True
+)
 
 rast.show(ax="new", cmap="Greys_r", alpha=0.7)
 vect.show(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
