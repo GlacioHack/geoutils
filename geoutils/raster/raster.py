@@ -2100,7 +2100,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 (dst_transform == self.transform) or (dst_transform is None),
                 (dst_crs == self.crs) or (dst_crs is None),
                 (dst_size == self.shape[::-1]) or (dst_size is None),
-                np.all(dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
+                np.all(np.array(dst_res) == self.res) or (dst_res is None),
             ]
         ):
             if (dst_nodata == self.nodata) or (dst_nodata is None):
@@ -2514,12 +2514,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Create axes
         if ax is None:
-            # If no figure exists, get a new axis
-            if len(plt.get_fignums()) == 0:
-                ax0 = plt.gca()
-            # Otherwise, get first axis
-            else:
-                ax0 = plt.gcf().axes[0]
+            ax0 = plt.gca()
         elif isinstance(ax, str) and ax.lower() == "new":
             _, ax0 = plt.subplots()
         elif isinstance(ax, matplotlib.axes.Axes):
