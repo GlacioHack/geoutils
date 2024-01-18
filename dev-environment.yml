@@ -2,7 +2,7 @@ name: geoutils-dev
 channels:
   - conda-forge
 dependencies:
-  - python>=3.8
+  - python>=3.9
   - geopandas>=0.12.0
   - matplotlib
   - pyproj
@@ -13,26 +13,33 @@ dependencies:
   - xarray
   - rioxarray
 
-  # Development-specific
-  - autovizwidget
-  - graphviz
-  - sphinx
-  - myst-nb
-  - sphinx-autodoc-typehints
-  - sphinxcontrib-programoutput
-  - numpydoc
-  - flake8
+  # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
+
+  # Optional dependencies
+  - scikit-image
+
+  # Test dependencies
   - pytest
   - pytest-xdist
   - pytest-lazy-fixture
-  - pylint
-  - typing-extensions
-  - sphinx-gallery
-  - scikit-image
   - pyyaml
+  - flake8
+  - pylint
+
+  # Doc dependencies
+  - sphinx
+  - pydata-sphinx-theme==0.13.3
+  - sphinx-book-theme>=1.0
+  - sphinx-gallery
   - sphinx-design
-  - sphinx-book-theme
+  - sphinx-autodoc-typehints
+  - sphinxcontrib-programoutput
+  - autovizwidget
+  - graphviz
+  - myst-nb
+  - numpydoc
+  - typing-extensions
 
   - pip:
     - -e ./

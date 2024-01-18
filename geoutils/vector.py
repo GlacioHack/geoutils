@@ -35,6 +35,7 @@ from pandas._typing import WriteBuffer
 from rasterio import features, warp
 from rasterio.crs import CRS
 from scipy.spatial import Voronoi
+from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
@@ -67,13 +68,14 @@ class Vector:
     See the API for more details.
     """
 
-    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | shapely.Geometry):
+    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry):
         """
         Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
         """
 
+        # If filename is passed
         if isinstance(filename_or_dataset, (str, pathlib.Path)):
             with warnings.catch_warnings():
                 # This warning shows up in numpy 1.21 (2021-07-09)
@@ -81,7 +83,8 @@ class Vector:
                 ds = gpd.read_file(filename_or_dataset)
             self._ds = ds
             self._name: str | gpd.GeoDataFrame | None = filename_or_dataset
-        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, shapely.Geometry)):
+        # If GeoPandas or Shapely object is passed
+        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
             self._name = None
             if isinstance(filename_or_dataset, gpd.GeoDataFrame):
                 self._ds = filename_or_dataset
@@ -89,6 +92,11 @@ class Vector:
                 self._ds = gpd.GeoDataFrame(geometry=filename_or_dataset)
             else:
                 self._ds = gpd.GeoDataFrame({"geometry": [filename_or_dataset]}, crs=None)
+        # If Vector is passed, simply point back to Vector
+        elif isinstance(filename_or_dataset, Vector):
+            for key in filename_or_dataset.__dict__:
+                setattr(self, key, filename_or_dataset.__dict__[key])
+            return
         else:
             raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
 
@@ -293,12 +301,12 @@ class Vector:
     ############################################################################
 
     def _override_gdf_output(
-        self, other: gpd.GeoDataFrame | gpd.GeoSeries | shapely.Geometry | pd.Series | Any
+        self, other: gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | pd.Series | Any
     ) -> Vector | pd.Series:
         """Parse outputs of GeoPandas functions to facilitate object manipulation."""
 
         # Raise error if output is not treated separately, should appear in tests
-        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoDataFrame, pd.Series, shapely.Geometry)):
+        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoDataFrame, pd.Series, BaseGeometry)):
             raise ValueError("Not implemented. This error should only be raised in tests.")
 
         # If a GeoDataFrame is the output, return it
@@ -308,7 +316,7 @@ class Vector:
         elif isinstance(other, gpd.GeoSeries):
             return Vector(gpd.GeoDataFrame(geometry=other))
         # If a Shapely Geometry is the output, re-encapsulate in a GeoDataFrame and return it
-        elif isinstance(other, shapely.Geometry):
+        elif isinstance(other, BaseGeometry):
             return Vector(gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs))
         # If a Pandas Series is the output, append it to that of the GeoDataFrame
         else:

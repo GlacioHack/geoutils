@@ -135,8 +135,8 @@ dmypy.json
 # Emacs backup files
 *~
 
-# version file
-geoutils/version.py
+# Version file
+geoutils/_version.py
 
 # End of https://www.gitignore.io/api/python
 .vim/

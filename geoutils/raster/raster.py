@@ -64,8 +64,12 @@ except ImportError:
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
-# List of numpy functions that are handled: nan statistics function, normal statistics function and sorting/counting
+# List of NumPy "array" functions that are handled.
+# Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
+# Array functions include: NaN math and stats, classic math and stats, logical, sorting/counting:
 _HANDLED_FUNCTIONS_1NIN = (
+    # NaN math: https://numpy.org/doc/stable/reference/routines.math.html
+    # and NaN stats: https://numpy.org/doc/stable/reference/routines.statistics.html
     [
         "nansum",
         "nanmax",
@@ -82,6 +86,7 @@ _HANDLED_FUNCTIONS_1NIN = (
         "nancumprod",
         "nanquantile",
     ]
+    # Classic math and stats (same links as above)
     + [
         "sum",
         "amax",
@@ -99,10 +104,14 @@ _HANDLED_FUNCTIONS_1NIN = (
         "cumsum",
         "cumprod",
         "quantile",
+        "abs",
+        "absolute",
+        "gradient",
     ]
+    # Sorting, searching and counting: https://numpy.org/doc/stable/reference/routines.sort.html
     + ["sort", "count_nonzero", "unique"]
+    # Logic functions: https://numpy.org/doc/stable/reference/routines.logic.html
     + ["all", "any", "isfinite", "isinf", "isnan", "logical_not"]
-    + ["gradient"]
 )
 
 _HANDLED_FUNCTIONS_2NIN = [
@@ -2091,7 +2100,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 (dst_transform == self.transform) or (dst_transform is None),
                 (dst_crs == self.crs) or (dst_crs is None),
                 (dst_size == self.shape[::-1]) or (dst_size is None),
-                np.all(dst_res == self.res) or (dst_res == self.res[0] == self.res[1]) or (dst_res is None),
+                np.all(np.array(dst_res) == self.res) or (dst_res is None),
             ]
         ):
             if (dst_nodata == self.nodata) or (dst_nodata is None):
@@ -2505,12 +2514,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Create axes
         if ax is None:
-            # If no figure exists, get a new axis
-            if len(plt.get_fignums()) == 0:
-                ax0 = plt.gca()
-            # Otherwise, get first axis
-            else:
-                ax0 = plt.gcf().axes[0]
+            ax0 = plt.gca()
         elif isinstance(ax, str) and ax.lower() == "new":
             _, ax0 = plt.subplots()
         elif isinstance(ax, matplotlib.axes.Axes):

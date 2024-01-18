@@ -17,14 +17,14 @@ jobs:
     strategy:
       matrix:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.9", "3.10", "3.11"]
 
     defaults:
       run:
         shell: bash -l {0}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     # We initiate the environment empty, and check if a key for this environment doesn't already exist in the cache
     - name: Initiate empty environment
@@ -48,7 +48,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 102 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and only
@@ -59,8 +59,8 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
-        pkgs_conda_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "conda"`
-        pkgs_pip_base=`python .github/get_yml_env_nopy.py "environment.yml" --p "pip"`
+        pkgs_conda_base=`python .github/scripts/get_yml_env_nopy.py "environment.yml" --p "conda"`
+        pkgs_pip_base=`python .github/scripts/get_yml_env_nopy.py "environment.yml" --p "pip"`
         mamba install python=${{ matrix.python-version }} $pkgs_conda_base graphviz
         if [[ "$pkgs_pip_base" != "None" ]]; then
           pip install $pkgs_pip_base

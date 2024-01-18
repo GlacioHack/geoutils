@@ -22,8 +22,8 @@ Once installed, the same commands can be run by simply replacing `conda` by `mam
 pip install geoutils
 ```
 
-```{note}
-Setting up GDAL and PROJ may require some extra steps, depending on your operating system and configuration.
+```{warning}
+Updating packages with `pip` (and sometimes `mamba`) can break your installation. If this happens, re-create an environment from scratch pinning directly all your other dependencies during initial solve (e.g., `mamba create -n geoutils-env -c conda-forge geoutils myotherpackage==1.0.0`).
 ```
 
 ## Installing for contributors

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import warnings
 
 import pytest
@@ -57,14 +58,25 @@ class TestMisc:
         """
         warnings.simplefilter("error")
 
-        current_version = geoutils.version.version
+        current_version = Version(Version(geoutils.__version__).base_version)
 
         # Set the removal version to be the current version plus the increment (e.g. 0.0.5 + 1 -> 0.0.6)
-        removal_version = (
-            current_version[:-1] + str(int(current_version.rsplit(".", 1)[1]) + deprecation_increment)
-            if deprecation_increment is not None
-            else None
-        )
+        if deprecation_increment is not None:
+            # If the micro version is already 0 and it is a decrement, decrement minor version instead
+            if current_version.micro == 0 and deprecation_increment == -1:
+                removal_version_tuple = (current_version.major, current_version.minor + deprecation_increment, 0)
+            # Otherwise, increment micro version
+            else:
+                removal_version_tuple = (
+                    current_version.major,
+                    current_version.minor,
+                    current_version.micro + deprecation_increment,
+                )
+
+            # Convert to version
+            removal_version = Version(".".join([str(v) for v in removal_version_tuple]))
+        else:
+            removal_version = None
 
         # Define a function with no use that is marked as deprecated.
         @geoutils.misc.deprecate(removal_version, details=details)  # type: ignore
@@ -76,7 +88,7 @@ class TestMisc:
         assert Version("0.0.10") > Version("0.0.8")
 
         # If True, a warning is expected. If False, a ValueError is expected.
-        should_warn = removal_version is None or Version(removal_version) > Version(current_version)
+        should_warn = removal_version is None or removal_version > current_version
 
         # Add the expected text depending on the parametrization.
         text = (
@@ -101,7 +113,7 @@ class TestMisc:
             with pytest.warns(DeprecationWarning, match="^" + text + "$"):
                 useless_func()
         else:
-            with pytest.raises(ValueError, match="^" + text + "$"):
+            with pytest.raises(ValueError, match=re.escape(text)):
                 useless_func()
 
     def test_diff_environment_yml(self, capsys) -> None:  # type: ignore

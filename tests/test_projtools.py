@@ -7,7 +7,7 @@ import geopandas as gpd
 import numpy as np
 import pyproj.exceptions
 import pytest
-import shapely
+from shapely.geometry import Point, Polygon
 
 import geoutils as gu
 import geoutils.projtools as pt
@@ -108,8 +108,8 @@ class TestProjTools:
         """Check that the function works for UPS with points at high latitude."""
 
         # Create a vector of a single point in geographic coordinates
-        point_north = shapely.Point([0, 84])
-        point_south = shapely.Point([0, -84])
+        point_north = Point([0, 84])
+        point_south = Point([0, -84])
         vect_north = gu.Vector(gpd.GeoDataFrame({"geometry": [point_north]}, crs=pyproj.CRS.from_epsg(4326)))
         vect_south = gu.Vector(gpd.GeoDataFrame({"geometry": [point_south]}, crs=pyproj.CRS.from_epsg(4326)))
 
@@ -204,11 +204,11 @@ class TestProjTools:
 
         # Assert it is a vector containing a polygon geometry
         assert isinstance(footprint, gu.Vector)
-        assert isinstance(footprint.geometry[0], shapely.Polygon)
+        assert isinstance(footprint.geometry[0], Polygon)
 
         # Check that the original corner points were conserved
         left, bottom, right, top = rast_or_vect.bounds
-        corners = [shapely.Point([x, y]) for (x, y) in [(left, bottom), (left, top), (right, top), (right, bottom)]]
+        corners = [Point([x, y]) for (x, y) in [(left, bottom), (left, top), (right, top), (right, bottom)]]
         df = gpd.GeoDataFrame({"geometry": corners}, crs=rast_or_vect.crs)
         df_reproj = df.to_crs(crs=out_crs)
 
