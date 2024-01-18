@@ -1800,6 +1800,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
+    # Also note that in the first overload, only "inplace: Literal[False]" does not work. The ellipsis is
+    # essential, otherwise MyPy gives incompatible return type Optional[Raster].
+    @overload
+    def crop(
+        self: RasterType,
+        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
+        inplace: Literal[False] = ...,
+    ) -> RasterType:
+        ...
+
     @overload
     def crop(
         self: RasterType,
@@ -1807,7 +1819,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
-    ) -> RasterType:
+    ) -> None:
         ...
 
     @overload
@@ -1816,25 +1828,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
-        inplace: Literal[False],
-    ) -> RasterType:
-        ...
-
-    @overload
-    def crop(
-        self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        inplace: bool = False,
-    ) -> RasterType:
+        inplace: bool = ...,
+    ) -> RasterType | None:
         ...
 
     def crop(
         self: RasterType,
         crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
         inplace: bool = False,
-    ) -> RasterType:
+    ) -> RasterType | None:
         """
         Crop the raster to a given extent.
 
@@ -3398,7 +3402,7 @@ class Mask(Raster):
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
-        inplace: Literal[True],
+        inplace: Literal[False] = ...,
     ) -> Mask:
         ...
 
@@ -3408,8 +3412,8 @@ class Mask(Raster):
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
-        inplace: Literal[False],
-    ) -> Mask:
+        inplace: Literal[True],
+    ) -> None:
         ...
 
     @overload
@@ -3417,16 +3421,18 @@ class Mask(Raster):
         self: Mask,
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        inplace: bool = True,
-    ) -> Mask:
+        *,
+        inplace: bool = ...,
+    ) -> Mask | None:
         ...
 
     def crop(
         self: Mask,
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+        *,
         inplace: bool = False,
-    ) -> Mask:
+    ) -> Mask | None:
         # If there is resampling involved during cropping, encapsulate type as in reproject()
         if mode == "match_extent":
             raise ValueError(NotImplementedError)
