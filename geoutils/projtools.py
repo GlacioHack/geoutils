@@ -59,6 +59,9 @@ def utm_to_epsg(utm: str) -> int:
     :return: EPSG of UTM zone.
     """
 
+    if not isinstance(utm, str):
+        raise TypeError("UTM zone must be a str.")
+
     # Whether UTM is passed as single or double digits, homogenize to single-digit
     utm = str(int(utm[:-1])) + utm[-1].upper()
 
