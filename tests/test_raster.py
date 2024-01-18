@@ -1004,7 +1004,6 @@ class TestRaster:
         r_cropped_reproj = r_cropped.reproject(crs=3857)
         r_cropped3 = r.crop(r_cropped_reproj)
 
-
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
         r_cropped4 = r.crop(crop_geom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs))
         assert r_cropped3.raster_equal(r_cropped4)
