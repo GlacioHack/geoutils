@@ -198,9 +198,9 @@ class Vector:
 
         # Ensure that the vector is in the same crs as a reference
         if isinstance(ref_crs, (gu.Raster, rio.io.DatasetReader, Vector, gpd.GeoDataFrame, str)):
-            vect_reproj = self.reproject(dst_ref=ref_crs)
+            vect_reproj = self.reproject(ref=ref_crs)
         elif isinstance(ref_crs, (CRS, int)):
-            vect_reproj = self.reproject(dst_crs=ref_crs)
+            vect_reproj = self.reproject(crs=ref_crs)
         else:
             vect_reproj = self
 
@@ -1040,8 +1040,8 @@ class Vector:
 
     def reproject(
         self: Vector,
-        dst_ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
-        dst_crs: CRS | str | int | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        crs: CRS | str | int | None = None,
     ) -> Vector:
         """
         Reproject vector to a specified coordinate reference system.
@@ -1052,46 +1052,46 @@ class Vector:
 
         To reproject a Vector with different source bounds, first run Vector.crop().
 
-        :param dst_ref: A reference raster or vector whose CRS to use as a reference for reprojection.
+        :param ref: A reference raster or vector whose CRS to use as a reference for reprojection.
             Can be provided as a raster, vector, Rasterio dataset, GeoPandas dataframe, or path to the file.
-        :param dst_crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
+        :param crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
             defaults to self.crs.
 
         :returns: Reprojected vector.
         """
 
-        # Check that either dst_ref or dst_crs is provided
-        if (dst_ref is not None and dst_crs is not None) or (dst_ref is None and dst_crs is None):
-            raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
+        # Check that either ref or crs is provided
+        if (ref is not None and crs is not None) or (ref is None and crs is None):
+            raise ValueError("Either of `ref` or `crs` must be set. Not both.")
 
         # Case a raster or vector is provided as reference
-        if dst_ref is not None:
-            # Check that dst_ref type is either str, Raster or rasterio data set
+        if ref is not None:
+            # Check that ref type is either str, Raster or rasterio data set
             # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
-            if isinstance(dst_ref, (gu.Raster, gu.Vector)):
-                ds_ref = dst_ref
-            elif isinstance(dst_ref, (rio.io.DatasetReader, gpd.GeoDataFrame)):
-                ds_ref = dst_ref
-            elif isinstance(dst_ref, str):
-                if not os.path.exists(dst_ref):
+            if isinstance(ref, (gu.Raster, gu.Vector)):
+                ds_ref = ref
+            elif isinstance(ref, (rio.io.DatasetReader, gpd.GeoDataFrame)):
+                ds_ref = ref
+            elif isinstance(ref, str):
+                if not os.path.exists(ref):
                     raise ValueError("Reference raster or vector path does not exist.")
                 try:
-                    ds_ref = gu.Raster(dst_ref, load_data=False)
+                    ds_ref = gu.Raster(ref, load_data=False)
                 except rasterio.errors.RasterioIOError:
                     try:
-                        ds_ref = Vector(dst_ref)
+                        ds_ref = Vector(ref)
                     except fiona.errors.DriverError:
                         raise ValueError("Could not open raster or vector with rasterio or fiona.")
             else:
-                raise TypeError("Type of dst_ref must be string path to file, Raster or Vector.")
+                raise TypeError("Type of ref must be string path to file, Raster or Vector.")
 
             # Read reprojecting params from ref raster
-            dst_crs = ds_ref.crs
+            crs = ds_ref.crs
         else:
             # Determine user-input target CRS
-            dst_crs = CRS.from_user_input(dst_crs)
+            crs = CRS.from_user_input(crs)
 
-        return Vector(self.ds.to_crs(crs=dst_crs))
+        return Vector(self.ds.to_crs(crs=crs))
 
     @overload
     def create_mask(

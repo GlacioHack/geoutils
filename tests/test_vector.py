@@ -114,7 +114,7 @@ class TestVector:
         v1 = gu.Vector(self.everest_outlines_path)
 
         # First, test with a EPSG integer
-        v1 = v0.reproject(dst_crs=32617)
+        v1 = v0.reproject(crs=32617)
         assert isinstance(v1, gu.Vector)
         assert v1.crs.to_epsg() == 32617
 
@@ -133,20 +133,18 @@ class TestVector:
 
         # Fourth, check that errors are raised when appropriate
         # When no destination CRS is defined, or both dst_crs and dst_ref are passed
-        with pytest.raises(ValueError, match=re.escape("Either of `dst_ref` or `dst_crs` must be set. Not both.")):
+        with pytest.raises(ValueError, match=re.escape("Either of `ref` or `crs` must be set. Not both.")):
             v0.reproject()
-            v0.reproject(dst_ref=r0, dst_crs=32617)
+            v0.reproject(ref=r0, crs=32617)
         # If the path provided does not exist
         with pytest.raises(ValueError, match=re.escape("Reference raster or vector path does not exist.")):
-            v0.reproject(dst_ref="tmp.lol")
+            v0.reproject(ref="tmp.lol")
         # If it exists but cannot be opened by rasterio or fiona
         with pytest.raises(ValueError, match=re.escape("Could not open raster or vector with rasterio or fiona.")):
-            v0.reproject(dst_ref="geoutils/examples.py")
+            v0.reproject(ref="geoutils/examples.py")
         # If input of wrong type
-        with pytest.raises(
-            TypeError, match=re.escape("Type of dst_ref must be string path to file, Raster or Vector.")
-        ):
-            v0.reproject(dst_ref=10)  # type: ignore
+        with pytest.raises(TypeError, match=re.escape("Type of ref must be string path to file, Raster or Vector.")):
+            v0.reproject(ref=10)  # type: ignore
 
     def test_rasterize_proj(self) -> None:
         # Capture the warning on resolution not matching exactly bounds
