@@ -169,23 +169,23 @@ class TestVector:
         assert burned.shape[1] == 1522
 
         # Typically, rasterize returns a raster
-        burned_in2_out1 = vct.rasterize(rst=rst, in_value=2, out_value=1)
+        burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
         assert isinstance(burned_in2_out1, gu.Raster)
 
         # For an in_value of 1 and out_value of 0 (default), it returns a mask
-        burned_mask = vct.rasterize(rst=rst, in_value=1)
+        burned_mask = vct.rasterize(raster=rst, in_value=1)
         assert isinstance(burned_mask, gu.Mask)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
-        assert burned_mask.raster_equal(vct.create_mask(rst=rst))
+        assert burned_mask.raster_equal(vct.create_mask(raster=rst))
 
         # The two rasterization should match
         assert np.all(burned_in2_out1[burned_mask] == 2)
         assert np.all(burned_in2_out1[~burned_mask] == 1)
 
         # Check that errors are raised
-        with pytest.raises(ValueError, match="Only one of rst or crs can be provided."):
-            vct.rasterize(rst=rst, crs=3857)
+        with pytest.raises(ValueError, match="Only one of raster or crs can be provided."):
+            vct.rasterize(raster=rst, crs=3857)
 
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
@@ -358,7 +358,7 @@ class TestSynthetic:
         assert isinstance(mask, gu.Mask)
 
         # Check that an error is raised if xres is not passed
-        with pytest.raises(ValueError, match="At least rst or xres must be set."):
+        with pytest.raises(ValueError, match="At least raster or xres must be set."):
             vector.create_mask()
 
         # Check that an error is raised if buffer is the wrong type

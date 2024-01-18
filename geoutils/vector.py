@@ -1096,7 +1096,7 @@ class Vector:
     @overload
     def create_mask(
         self,
-        rst: str | gu.Raster | None = None,
+        raster: str | gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -1110,7 +1110,7 @@ class Vector:
     @overload
     def create_mask(
         self,
-        rst: str | gu.Raster | None = None,
+        raster: str | gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -1123,7 +1123,7 @@ class Vector:
 
     def create_mask(
         self,
-        rst: gu.Raster | None = None,
+        raster: gu.Raster | None = None,
         crs: CRS | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -1141,11 +1141,11 @@ class Vector:
 
         Vector features which fall outside the bounds of the raster file are not written to the new mask file.
 
-        :param rst: Reference raster to match during rasterization.
-        :param crs: A pyproj or rasterio CRS object (Default to rst.crs if not None then self.crs)
-        :param xres: Output raster spatial resolution in x. Only is rst is None.
-        :param yres: Output raster spatial resolution in y. Only if rst is None. (Default to xres)
-        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None (Default to self bounds)
+        :param raster: Reference raster to match during rasterization.
+        :param crs: A pyproj or rasterio CRS object (Default to raster.crs if not None then self.crs)
+        :param xres: Output raster spatial resolution in x. Only is raster is None.
+        :param yres: Output raster spatial resolution in y. Only if raster is None. (Default to xres)
+        :param bounds: Output raster bounds (left, bottom, right, top). Only if raster is None (Default to self bounds)
         :param buffer: Size of buffer to be added around the features, in the raster's projection units.
             If a negative value is set, will erode the features.
         :param as_array: Return mask as a boolean array
@@ -1153,11 +1153,11 @@ class Vector:
         :returns: A Mask object contain a boolean array
         """
 
-        # If no rst given, use provided dimensions
-        if rst is None:
+        # If no raster given, use provided dimensions
+        if raster is None:
             # At minimum, xres must be set
             if xres is None:
-                raise ValueError("At least rst or xres must be set.")
+                raise ValueError("At least raster or xres must be set.")
             if yres is None:
                 yres = xres
 
@@ -1187,12 +1187,12 @@ class Vector:
             # Calculate raster transform
             transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
-        # otherwise use directly rst's dimensions
-        elif isinstance(rst, gu.Raster):
-            out_shape = rst.shape
-            transform = rst.transform
-            crs = rst.crs
-            bounds = rst.bounds
+        # otherwise use directly raster's dimensions
+        elif isinstance(raster, gu.Raster):
+            out_shape = raster.shape
+            transform = raster.transform
+            crs = raster.crs
+            bounds = raster.bounds
         else:
             raise TypeError("Raster must be a geoutils.Raster or None.")
 
@@ -1204,7 +1204,7 @@ class Vector:
         x1, y1, x2, y2 = warp.transform_bounds(crs, gdf.crs, left, bottom, right, top)
         gdf = gdf.cx[x1:x2, y1:y2]
 
-        # Reproject vector into rst CRS
+        # Reproject vector into raster CRS
         gdf = gdf.to_crs(crs)
 
         # Create a buffer around the features
@@ -1220,9 +1220,9 @@ class Vector:
             shapes=gdf.geometry, fill=0, out_shape=out_shape, transform=transform, default_value=1, dtype="uint8"
         ).astype("bool")
 
-        # Force output mask to be of same dimension as input rst
-        if rst is not None:
-            mask = mask.reshape((rst.count, rst.height, rst.width))  # type: ignore
+        # Force output mask to be of same dimension as input raster
+        if raster is not None:
+            mask = mask.reshape((raster.count, raster.height, raster.width))  # type: ignore
 
         # Return output as mask or as array
         if as_array:
@@ -1232,7 +1232,7 @@ class Vector:
 
     def rasterize(
         self,
-        rst: gu.Raster | None = None,
+        raster: gu.Raster | None = None,
         crs: CRS | int | None = None,
         xres: float | None = None,
         yres: float | None = None,
@@ -1251,13 +1251,14 @@ class Vector:
         Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
         Default is an index from 1 to len(self.ds).
 
-        :param rst: Reference raster to match during rasterization.
-        :param crs: Coordinate reference system as string or EPSG code (Default to rst.crs if not None then self.crs).
-        :param xres: Output raster spatial resolution in x. Only if rst is None.
+        :param raster: Reference raster to match during rasterization.
+        :param crs: Coordinate reference system as string or EPSG code
+            (Default to raster.crs if not None then self.crs).
+        :param xres: Output raster spatial resolution in x. Only if raster is None.
             Must be in units of crs, if set.
-        :param yres: Output raster spatial resolution in y. Only if rst is None.
+        :param yres: Output raster spatial resolution in y. Only if raster is None.
             Must be in units of crs, if set. (Default to xres).
-        :param bounds: Output raster bounds (left, bottom, right, top). Only if rst is None.
+        :param bounds: Output raster bounds (left, bottom, right, top). Only if raster is None.
             Must be in same system as crs, if set. (Default to self bounds).
         :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1).
         :param out_value: Value to be burned outside the polygons (Default is 0).
@@ -1265,24 +1266,24 @@ class Vector:
         :returns: Raster or mask containing the burned geometries.
         """
 
-        if (rst is not None) and (crs is not None):
-            raise ValueError("Only one of rst or crs can be provided.")
+        if (raster is not None) and (crs is not None):
+            raise ValueError("Only one of raster or crs can be provided.")
 
         # Reproject vector into requested CRS or rst CRS first, if needed
         # This has to be done first so that width/height calculated below are correct!
         if crs is None:
             crs = self.ds.crs
 
-        if rst is not None:
-            crs = rst.crs  # type: ignore
+        if raster is not None:
+            crs = raster.crs  # type: ignore
 
         vect = self.ds.to_crs(crs)
 
-        # If no rst given, now use provided dimensions
-        if rst is None:
+        # If no raster given, now use provided dimensions
+        if raster is None:
             # At minimum, xres must be set
             if xres is None:
-                raise ValueError("At least rst or xres must be set.")
+                raise ValueError("At least raster or xres must be set.")
             if yres is None:
                 yres = xres
 
@@ -1305,10 +1306,10 @@ class Vector:
             # Calculate raster transform
             transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
-        # otherwise use directly rst's dimensions
+        # otherwise use directly raster's dimensions
         else:
-            out_shape = rst.shape  # type: ignore
-            transform = rst.transform  # type: ignore
+            out_shape = raster.shape  # type: ignore
+            transform = raster.transform  # type: ignore
 
         # Set default burn value, index from 1 to len(self.ds)
         if in_value is None:

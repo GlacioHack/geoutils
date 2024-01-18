@@ -2383,7 +2383,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             raise NotImplementedError("This is not implemented yet.")
 
-    def intersection(self, rst: str | Raster, match_ref: bool = True) -> tuple[float, float, float, float]:
+    def intersection(self, raster: str | Raster, match_ref: bool = True) -> tuple[float, float, float, float]:
         """
         Returns the bounding box of intersection between this image and another.
 
@@ -2398,15 +2398,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         from geoutils import projtools
 
-        # If input rst is string, open as Raster
-        if isinstance(rst, str):
-            rst = Raster(rst, load_data=False)
+        # If input raster is string, open as Raster
+        if isinstance(raster, str):
+            raster = Raster(raster, load_data=False)
 
-        # Reproject the bounds of rst to self's
-        rst_bounds_sameproj = rst.get_bounds_projected(self.crs)
+        # Reproject the bounds of raster to self's
+        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)
 
         # Calculate intersection of bounding boxes
-        intersection = projtools.merge_bounds([self.bounds, rst_bounds_sameproj], merging_algorithm="intersection")
+        intersection = projtools.merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
 
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(math.isnan(i) for i in intersection):
