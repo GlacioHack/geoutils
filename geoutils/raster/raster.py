@@ -767,7 +767,7 @@ class Raster:
 
         # Otherwise, subset with crop
         else:
-            return self.crop(crop_geom=index, inplace=False)
+            return self.crop(crop_geom=index)
 
     def __setitem__(self, index: Mask | NDArrayBool, assign: NDArrayNum | Number) -> None:
         """
@@ -1807,7 +1807,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
-    ) -> None:
+    ) -> RasterType:
         ...
 
     @overload
@@ -1825,16 +1825,16 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self: RasterType,
         crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        inplace: bool = True,
-    ) -> RasterType | None:
+        inplace: bool = False,
+    ) -> RasterType:
         ...
 
     def crop(
         self: RasterType,
         crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        inplace: bool = True,
-    ) -> RasterType | None:
+        inplace: bool = False,
+    ) -> RasterType:
         """
         Crop the raster to a given extent.
 
@@ -1850,7 +1850,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
         :param inplace: Whether to update the raster in-place.
 
-        :returns: None for in-place cropping (defaults) or a new raster otherwise.
+        :returns: A new raster, or None if cropping in-place.
         """
         assert mode in [
             "match_extent",
@@ -1899,7 +1899,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             self._data = crop_img
             self.transform = tfm
             self.tags["AREA_OR_POINT"] = "Area"  # TODO: Explain why this should have an area interpretation now
-            return None
+            return self
         else:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata)
             newraster.tags["AREA_OR_POINT"] = "Area"
@@ -3155,8 +3155,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         gdf = gpd.GeoDataFrame.from_features(list(results))
         gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
-        gdf.set_geometry(col="geometry", inplace=True)
-        gdf.set_crs(self.crs, inplace=True)
+        gdf = gdf.set_geometry(col="geometry")
+        gdf = gdf.set_crs(self.crs)
 
         return gv.Vector(gdf)
 
@@ -3404,7 +3404,7 @@ class Mask(Raster):
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
-    ) -> None:
+    ) -> Mask:
         ...
 
     @overload
@@ -3423,15 +3423,15 @@ class Mask(Raster):
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         inplace: bool = True,
-    ) -> Mask | None:
+    ) -> Mask:
         ...
 
     def crop(
         self: Mask,
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        inplace: bool = True,
-    ) -> Mask | None:
+        inplace: bool = False,
+    ) -> Mask:
         # If there is resampling involved during cropping, encapsulate type as in reproject()
         if mode == "match_extent":
             raise ValueError(NotImplementedError)
@@ -3446,11 +3446,7 @@ class Mask(Raster):
             #     return output
         # Otherwise, run a classic crop
         else:
-            if not inplace:
-                return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
-            else:
-                super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
-                return None
+            return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
 
     def polygonize(
         self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1
