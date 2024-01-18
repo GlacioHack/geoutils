@@ -202,12 +202,17 @@ class TestVector:
 
         # Crop
         outlines_new = outlines.copy()
-        outlines_new.crop(crop_geom=rst)
+        outlines_new.crop(crop_geom=rst, inplace=True)
+
+        # Check default behaviour - crop and return copy
+        outlines_copy = outlines.crop(crop_geom=rst)
 
         # Crop by passing bounds
         outlines_new_bounds = outlines.copy()
-        outlines_new_bounds.crop(crop_geom=list(rst.bounds))
+        outlines_new_bounds.crop(crop_geom=list(rst.bounds), inplace=True)
         assert_geodataframe_equal(outlines_new.ds, outlines_new_bounds.ds)
+        # Check the return-by-copy as well
+        assert_geodataframe_equal(outlines_copy.ds, outlines_new_bounds.ds)
 
         # Check with bracket call
         outlines_new2 = outlines_new[rst]
@@ -233,7 +238,7 @@ class TestVector:
 
         # Check that error is raised when cropGeom argument is invalid
         with pytest.raises(TypeError, match="Crop geometry must be a Raster, Vector, or list of coordinates."):
-            outlines.crop(1)  # type: ignore
+            outlines.crop(1, inplace=True)  # type: ignore
 
     def test_proximity(self) -> None:
         """

@@ -132,6 +132,7 @@ analysis_examples/index
 :maxdepth: 2
 
 api
+cli
 background
 ```
 

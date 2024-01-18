@@ -85,7 +85,7 @@ For convenience and consistency, nearly all of these methods can be passed solel
 # Print initial bounds of the raster
 print(rast.bounds)
 # Crop raster to vector's extent
-rast.crop(vect)
+rast = rast.crop(vect)
 # Print bounds of cropped raster
 print(rast.bounds)
 ```
@@ -162,6 +162,10 @@ The plotting functionality is named {func}`~geoutils.Raster.show` everywhere, fo
 rast_proximity_to_vec = vect.proximity(rast)
 rast_proximity_to_vec.show(cbar_title="Distance to glacier outline")
 vect.show(rast_proximity_to_vec, fc="none")
+```
+
+```{tip}
+To quickly visualize a raster directly from a terminal, without opening a Python console/notebook, check out our tool `geoviewer.py` in the {ref}`cli` documentation.
 ```
 
 ## Pythonic arithmetic and NumPy interface
