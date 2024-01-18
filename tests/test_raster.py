@@ -1000,7 +1000,7 @@ class TestRaster:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
             )
-            r_cropped_reproj = r_cropped.reproject(dst_crs=3857)
+            r_cropped_reproj = r_cropped.reproject(crs=3857)
         r_cropped3 = r.crop(r_cropped_reproj, inplace=False)
 
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
@@ -1170,22 +1170,22 @@ class TestRaster:
 
         # 1 - if no src_nodata is set and masked values exist, raises an error
         with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
-            _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, dst_nodata=0)
+            _ = r_nodata.reproject(res=r_nodata.res[0] / 2, nodata=0)
 
-        # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
+        # 2 - if no nodata is set and default value conflicts with existing value, a warning is raised
         with pytest.warns(
             UserWarning,
             match=re.escape(
-                f"For reprojection, dst_nodata must be set. Default chosen value "
+                f"For reprojection, nodata must be set. Default chosen value "
                 f"{_default_nodata(r_nodata.dtypes[0])} exists in self.data. This may have unexpected "
                 f"consequences. Consider setting a different nodata with self.set_nodata()."
             ),
         ):
-            _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+            _ = r_nodata.reproject(res=r_nodata.res[0] / 2, src_nodata=default_nodata)
 
         # 3 - if default nodata does not conflict, should not raise a warning
         r_nodata.data[r_nodata.data == default_nodata] = 3
-        _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+        _ = r_nodata.reproject(res=r_nodata.res[0] / 2, src_nodata=default_nodata)
 
         # -- Additional tests -- #
 
@@ -1208,7 +1208,7 @@ class TestRaster:
 
         # Create a raster with different resolution
         dst_res = r.res[0] * 2 / 3
-        r2 = r2b.reproject(dst_res=dst_res)
+        r2 = r2b.reproject(res=dst_res)
         assert r2.res == (dst_res, dst_res)
 
         # Assert the initial rasters are different
@@ -1271,11 +1271,11 @@ class TestRaster:
 
         # reproject raster, and reproject mask. Check that both have same number of masked pixels
         # TODO: should test other resampling algo
-        r_gaps_reproj = r_gaps.reproject(dst_res=dst_res, resampling="nearest")
+        r_gaps_reproj = r_gaps.reproject(res=dst_res, resampling="nearest")
         mask = gu.Raster.from_array(
             r_gaps.data.mask.astype("uint8"), crs=r_gaps.crs, transform=r_gaps.transform, nodata=None
         )
-        mask_reproj = mask.reproject(dst_res=dst_res, dst_nodata=255, resampling="nearest")
+        mask_reproj = mask.reproject(res=dst_res, nodata=255, resampling="nearest")
         # Final masked pixels are those originally masked (=1) and the values masked during reproject, e.g. edges
         tot_masked_true = np.count_nonzero(mask_reproj.data.mask) + np.count_nonzero(mask_reproj.data == 1)
         assert np.count_nonzero(r_gaps_reproj.data.mask) == tot_masked_true
@@ -1290,7 +1290,7 @@ class TestRaster:
 
         # Test dst_size - this should modify the shape, and hence resolution, but not the bounds
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
-        r3 = r.reproject(dst_size=out_size)
+        r3 = r.reproject(size=out_size)
         assert r3.shape == (out_size[1], out_size[0])
         assert r3.res != r.res
         assert r3.bounds == r.bounds
@@ -1301,7 +1301,7 @@ class TestRaster:
         dst_bounds = rio.coords.BoundingBox(
             left=bounds[0], bottom=bounds[1] + r.res[0], right=bounds[2] - 2 * r.res[1], top=bounds[3]
         )
-        r3 = r.reproject(dst_bounds=dst_bounds)
+        r3 = r.reproject(bounds=dst_bounds)
         assert r3.bounds == dst_bounds
         assert r3.res == r.res
 
@@ -1312,12 +1312,12 @@ class TestRaster:
         )
 
         # If bounds are not a multiple of res, the latter will be updated accordingly
-        r3 = r.reproject(dst_bounds=dst_bounds)
+        r3 = r.reproject(bounds=dst_bounds)
         assert r3.bounds == dst_bounds
         assert r3.res != r.res
 
         # Assert that when reprojection creates nodata (voids), if no nodata is set, a default value is set
-        r3 = r.reproject(dst_bounds=dst_bounds)
+        r3 = r.reproject(bounds=dst_bounds)
         if r.nodata is None:
             assert r3.nodata == _default_nodata(r.dtypes[0])
 
@@ -1325,20 +1325,20 @@ class TestRaster:
         # -> check range is preserved (with nearest interpolation)
         r_float = r.astype("float32")  # type: ignore
         if r_float.nodata is None:
-            r3 = r_float.reproject(dst_bounds=dst_bounds, resampling="nearest")
+            r3 = r_float.reproject(bounds=dst_bounds, resampling="nearest")
             assert r3.nodata == -99999
             assert np.min(r3.data.data) == r3.nodata
             assert np.min(r3.data) == np.min(r_float.data)
             assert np.max(r3.data) == np.max(r_float.data)
 
         # Check that dst_nodata works as expected
-        r3 = r_float.reproject(dst_bounds=dst_bounds, dst_nodata=9999)
+        r3 = r_float.reproject(bounds=dst_bounds, nodata=9999)
         assert r3.nodata == 9999
         assert np.max(r3.data.data) == r3.nodata
 
         # If dst_res is set, the resolution will be enforced
         # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
-        r3 = r.reproject(dst_bounds=dst_bounds, dst_res=r.res)
+        r3 = r.reproject(bounds=dst_bounds, res=r.res)
         assert r3.res == r.res
         assert r3.bounds.left == dst_bounds.left
         assert r3.bounds.top == dst_bounds.top
@@ -1347,23 +1347,23 @@ class TestRaster:
 
         # Test dst_crs
         out_crs = rio.crs.CRS.from_epsg(4326)
-        r3 = r.reproject(dst_crs=out_crs)
+        r3 = r.reproject(crs=out_crs)
         assert r3.crs.to_epsg() == 4326
 
         # Test that reproject works from self.ds and yield same result as from in-memory array
         # TO DO: fix issue that default behavior sets nodata to 255 and masks valid values
-        r3 = r.reproject(dst_crs=out_crs, dst_nodata=0)
+        r3 = r.reproject(crs=out_crs, nodata=0)
         r = gu.Raster(example, load_data=False)
-        r4 = r.reproject(dst_crs=out_crs, dst_nodata=0)
+        r4 = r.reproject(crs=out_crs, nodata=0)
         assert r3.raster_equal(r4)
 
         # Test that reproject does not fail with resolution as np.integer or np.float types, single value or tuple
         astype_funcs = [int, np.int32, float, np.float64]
         for astype_func in astype_funcs:
-            r.reproject(dst_res=astype_func(20.5), dst_nodata=0)
+            r.reproject(res=astype_func(20.5), nodata=0)
         for i in range(len(astype_funcs)):
             for j in range(len(astype_funcs)):
-                r.reproject(dst_res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), dst_nodata=0)
+                r.reproject(res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), nodata=0)
 
         # Test that reprojection works for several bands
         for n in [2, 3, 4]:

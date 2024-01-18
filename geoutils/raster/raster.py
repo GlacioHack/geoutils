@@ -1891,7 +1891,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         else:
             bbox = rio.coords.BoundingBox(left=xmin, bottom=ymin, right=xmax, top=ymax)
-            out_rst = self.reproject(dst_bounds=bbox)  # should we instead raise an issue and point to reproject?
+            out_rst = self.reproject(bounds=bbox)  # should we instead raise an issue and point to reproject?
             crop_img = out_rst.data
             tfm = out_rst.transform
 
@@ -1907,14 +1907,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def reproject(
         self: RasterType,
-        dst_ref: RasterType | str | None = None,
-        dst_crs: CRS | str | int | None = None,
-        dst_size: tuple[int, int] | None = None,
-        dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        ref: RasterType | str | None = None,
+        crs: CRS | str | int | None = None,
+        size: tuple[int, int] | None = None,
+        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+        res: float | abc.Iterable[float] | None = None,
+        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        dst_dtype: DTypeLike | None = None,
+        dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         silent: bool = False,
         n_threads: int = 0,
@@ -1930,17 +1930,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Any resampling algorithm implemented in Rasterio can be passed as a string.
 
 
-        :param dst_ref: Reference raster to match resolution, bounds and CRS.
-        :param dst_crs: Destination coordinate reference system as a string or EPSG. If ``dst_ref`` not set,
+        :param ref: Reference raster to match resolution, bounds and CRS.
+        :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
             defaults to this raster's CRS.
-        :param dst_size: Destination size as (x, y). Do not use with ``dst_res``.
-        :param dst_bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
+        :param size: Destination size as (x, y). Do not use with ``res``.
+        :param bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
             right, top bounds in the destination CRS.
-        :param dst_res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
-            Do not use with ``dst_size``.
-        :param dst_nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
+        :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
+            Do not use with ``size``.
+        :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
             not exist, will use GDAL's default.
-        :param dst_dtype: Destination data type of array.
+        :param dtype: Destination data type of array.
         :param src_nodata: Force a source nodata value (read from the metadata by default).
         :param resampling: A Rasterio resampling method, can be passed as a string.
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
@@ -1953,17 +1953,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         """
 
-        # Check that either dst_ref or dst_crs is provided
-        if dst_ref is not None and dst_crs is not None:
-            raise ValueError("Either of `dst_ref` or `dst_crs` must be set. Not both.")
+        # Check that either ref or crs is provided
+        if ref is not None and crs is not None:
+            raise ValueError("Either of `ref` or `crs` must be set. Not both.")
         # If none are provided, simply preserve the CRS
-        elif dst_ref is None and dst_crs is None:
-            dst_crs = self.crs
+        elif ref is None and crs is None:
+            crs = self.crs
 
         # Set output dtype
-        if dst_dtype is None:
+        if dtype is None:
             # Warning: this will not work for multiple bands with different dtypes
-            dst_dtype = self.dtypes[0]
+            dtype = self.dtypes[0]
 
         # Set source nodata if provided
         if src_nodata is None:
@@ -1971,21 +1971,21 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Set destination nodata if provided. This is needed in areas not covered by the input data.
         # If None, will use GeoUtils' default, as rasterio's default is unknown, hence cannot be handled properly.
-        if dst_nodata is None:
-            dst_nodata = self.nodata
-            if dst_nodata is None:
-                dst_nodata = _default_nodata(dst_dtype)
-                # if dst_nodata is already being used, raise a warning.
+        if nodata is None:
+            nodata = self.nodata
+            if nodata is None:
+                nodata = _default_nodata(dtype)
+                # if nodata is already being used, raise a warning.
                 # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
                 if not self.is_loaded:
                     warnings.warn(
-                        f"For reprojection, dst_nodata must be set. Setting default nodata to {dst_nodata}. You may "
-                        f"set a different nodata with `dst_nodata`."
+                        f"For reprojection, nodata must be set. Setting default nodata to {nodata}. You may "
+                        f"set a different nodata with `nodata`."
                     )
 
-                elif dst_nodata in self.data:
+                elif nodata in self.data:
                     warnings.warn(
-                        f"For reprojection, dst_nodata must be set. Default chosen value {dst_nodata} exists in "
+                        f"For reprojection, nodata must be set. Default chosen value {nodata} exists in "
                         f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
                         f"self.set_nodata()."
                     )
@@ -1996,119 +1996,119 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         reproj_kwargs = {
             "src_transform": self.transform,
             "src_crs": self.crs,
-            "dst_crs": dst_crs,
+            "dst_crs": crs,
             "resampling": resampling if isinstance(resampling, Resampling) else resampling_method_from_str(resampling),
             "src_nodata": src_nodata,
-            "dst_nodata": dst_nodata,
+            "dst_nodata": nodata,
         }
 
-        dst_transform = None
+        transform = None
         # Case a raster is provided as reference
-        if dst_ref is not None:
-            # Check that dst_ref type is either str, Raster or rasterio data set
+        if ref is not None:
+            # Check that ref type is either str, Raster or rasterio data set
             # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
-            if isinstance(dst_ref, Raster):
-                ds_ref = dst_ref
-            elif isinstance(dst_ref, str):
-                if not os.path.exists(dst_ref):
+            if isinstance(ref, Raster):
+                ds_ref = ref
+            elif isinstance(ref, str):
+                if not os.path.exists(ref):
                     raise ValueError("Reference raster does not exist.")
-                ds_ref = Raster(dst_ref, load_data=False)
+                ds_ref = Raster(ref, load_data=False)
             else:
-                raise TypeError("Type of dst_ref not understood, must be path to file (str), Raster.")
+                raise TypeError("Type of ref not understood, must be path to file (str), Raster.")
 
             # Read reprojecting params from ref raster
-            dst_crs = ds_ref.crs
-            dst_transform = ds_ref.transform
-            reproj_kwargs.update({"dst_transform": dst_transform})
-            dst_data = np.ones((self.count, ds_ref.shape[0], ds_ref.shape[1]), dtype=dst_dtype)
-            reproj_kwargs.update({"destination": dst_data})
+            crs = ds_ref.crs
+            transform = ds_ref.transform
+            reproj_kwargs.update({"dst_transform": transform})
+            data = np.ones((self.count, ds_ref.shape[0], ds_ref.shape[1]), dtype=dtype)
+            reproj_kwargs.update({"destination": data})
             reproj_kwargs.update({"dst_crs": ds_ref.crs})
         else:
             # Determine target CRS
-            dst_crs = CRS.from_user_input(dst_crs)
+            crs = CRS.from_user_input(crs)
 
-        # If dst_ref is None, check other input arguments
-        if dst_size is not None and dst_res is not None:
-            raise ValueError("dst_size and dst_res both specified. Specify only one.")
+        # If ref is None, check other input arguments
+        if size is not None and res is not None:
+            raise ValueError("size and res both specified. Specify only one.")
 
         # Create a BoundingBox if required
-        if dst_bounds is not None:
-            if not isinstance(dst_bounds, rio.coords.BoundingBox):
-                dst_bounds = rio.coords.BoundingBox(
-                    dst_bounds["left"],
-                    dst_bounds["bottom"],
-                    dst_bounds["right"],
-                    dst_bounds["top"],
+        if bounds is not None:
+            if not isinstance(bounds, rio.coords.BoundingBox):
+                bounds = rio.coords.BoundingBox(
+                    bounds["left"],
+                    bounds["bottom"],
+                    bounds["right"],
+                    bounds["top"],
                 )
 
         # Determine target raster size/resolution
-        if dst_res is not None:
-            if dst_bounds is None:
+        if res is not None:
+            if bounds is None:
                 # Let rasterio determine the maximum bounds of the new raster.
-                reproj_kwargs.update({"dst_resolution": dst_res})
+                reproj_kwargs.update({"dst_resolution": res})
             else:
                 # Bounds specified. First check if xres and yres are different.
-                if isinstance(dst_res, tuple):
-                    xres = dst_res[0]
-                    yres = dst_res[1]
+                if isinstance(res, tuple):
+                    xres = res[0]
+                    yres = res[1]
                 else:
-                    xres = dst_res
-                    yres = dst_res
+                    xres = res
+                    yres = res
 
                 # Calculate new raster size which ensures that pixels have
                 # precisely the resolution specified.
-                dst_width = np.ceil((dst_bounds.right - dst_bounds.left) / xres)
-                dst_height = np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres)
-                dst_size = (int(dst_width), int(dst_height))
+                width = np.ceil((bounds.right - bounds.left) / xres)
+                height = np.ceil(np.abs(bounds.bottom - bounds.top) / yres)
+                size = (int(width), int(height))
 
                 # As a result of precise pixel size, the destination bounds may
                 # have to be adjusted.
-                x1 = dst_bounds.left + (xres * dst_width)
-                y1 = dst_bounds.top - (yres * dst_height)
-                dst_bounds = rio.coords.BoundingBox(top=dst_bounds.top, left=dst_bounds.left, bottom=y1, right=x1)
+                x1 = bounds.left + (xres * width)
+                y1 = bounds.top - (yres * height)
+                bounds = rio.coords.BoundingBox(top=bounds.top, left=bounds.left, bottom=y1, right=x1)
 
-        # Set output shape (Note: dst_size is (ncol, nrow))
-        if dst_size is not None:
-            dst_shape = (self.count, dst_size[1], dst_size[0])
-            dst_data = np.ones(dst_shape, dtype=dst_dtype)
-            reproj_kwargs.update({"destination": dst_data})
+        # Set output shape (Note: size is (ncol, nrow))
+        if size is not None:
+            shape = (self.count, size[1], size[0])
+            data = np.ones(shape, dtype=dtype)
+            reproj_kwargs.update({"destination": data})
         else:
-            dst_shape = (self.count, self.height, self.width)
+            shape = (self.count, self.height, self.width)
 
-        # If dst_bounds is set, will enforce dst_bounds
-        if dst_bounds is not None:
-            if dst_size is None:
+        # If bounds is set, will enforce bounds
+        if bounds is not None:
+            if size is None:
                 # Calculate new raster size which ensures that pixels resolution is as close as possible to original
                 # Raster size is increased by up to one pixel if needed
                 yres, xres = self.res
-                dst_width = int(np.ceil((dst_bounds.right - dst_bounds.left) / xres))
-                dst_height = int(np.ceil(np.abs(dst_bounds.bottom - dst_bounds.top) / yres))
-                dst_size = (dst_width, dst_height)
+                width = int(np.ceil((bounds.right - bounds.left) / xres))
+                height = int(np.ceil(np.abs(bounds.bottom - bounds.top) / yres))
+                size = (width, height)
 
             # Calculate associated transform
-            dst_transform = rio.transform.from_bounds(*dst_bounds, width=dst_size[0], height=dst_size[1])
+            transform = rio.transform.from_bounds(*bounds, width=size[0], height=size[1])
 
             # Specify the output bounds and shape, let rasterio handle the rest
-            reproj_kwargs.update({"dst_transform": dst_transform})
-            dst_data = np.ones((self.count, dst_size[1], dst_size[0]), dtype=dst_dtype)
-            reproj_kwargs.update({"destination": dst_data})
+            reproj_kwargs.update({"dst_transform": transform})
+            data = np.ones((self.count, size[1], size[0]), dtype=dtype)
+            reproj_kwargs.update({"destination": data})
 
         # Check that reprojection is actually needed
-        # Caution, dst_size is (width, height) while shape is (height, width)
+        # Caution, size is (width, height) while shape is (height, width)
         if all(
             [
-                (dst_transform == self.transform) or (dst_transform is None),
-                (dst_crs == self.crs) or (dst_crs is None),
-                (dst_size == self.shape[::-1]) or (dst_size is None),
-                np.all(np.array(dst_res) == self.res) or (dst_res is None),
+                (transform == self.transform) or (transform is None),
+                (crs == self.crs) or (crs is None),
+                (size == self.shape[::-1]) or (size is None),
+                np.all(np.array(res) == self.res) or (res is None),
             ]
         ):
-            if (dst_nodata == self.nodata) or (dst_nodata is None):
+            if (nodata == self.nodata) or (nodata is None):
                 if not silent:
                     warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
                 return self
 
-            elif dst_nodata is not None:
+            elif nodata is not None:
                 if not silent:
                     warnings.warn(
                         "Only nodata is different, consider using the 'set_nodata()' method instead'\
@@ -2133,33 +2133,33 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 raise ValueError("No nodata set, use `src_nodata`.")
 
             # Mask not taken into account by rasterio, need to fill with src_nodata
-            dst_data, dst_transformed = rio.warp.reproject(self.data.filled(src_nodata), **reproj_kwargs)
+            data, transformed = rio.warp.reproject(self.data.filled(src_nodata), **reproj_kwargs)
 
         # If not, uses the dataset instead
         else:
-            dst_data = []  # type: ignore
+            data = []  # type: ignore
             for k in range(self.count):
                 with rio.open(self.filename) as ds:
                     band = rio.band(ds, k + 1)
-                    dst_band, dst_transformed = rio.warp.reproject(band, **reproj_kwargs)
-                    dst_data.append(dst_band.squeeze())
+                    band, transformed = rio.warp.reproject(band, **reproj_kwargs)
+                    data.append(band.squeeze())
 
-            dst_data = np.array(dst_data)
+            data = np.array(data)
 
         # Enforce output type
-        dst_data = np.ma.masked_array(dst_data.astype(dst_dtype), fill_value=dst_nodata)
+        data = np.ma.masked_array(data.astype(dtype), fill_value=nodata)
 
-        if dst_nodata is not None:
-            dst_data.mask = dst_data == dst_nodata
+        if nodata is not None:
+            data.mask = data == nodata
 
         # Check for funny business.
-        if dst_transform is not None:
-            assert dst_transform == dst_transformed
+        if transform is not None:
+            assert transform == transformed
 
         # Write results to a new Raster.
-        dst_r = self.from_array(dst_data, dst_transformed, dst_crs, dst_nodata)
+        r = self.from_array(data, transformed, crs, nodata)
 
-        return dst_r
+        return r
 
     def shift(
         self, xoff: float, yoff: float, distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced"
@@ -3346,14 +3346,14 @@ class Mask(Raster):
 
     def reproject(
         self: Mask,
-        dst_ref: RasterType | str | None = None,
-        dst_crs: CRS | str | int | None = None,
-        dst_size: tuple[int, int] | None = None,
-        dst_bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        dst_res: float | abc.Iterable[float] | None = None,
-        dst_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        ref: RasterType | str | None = None,
+        crs: CRS | str | int | None = None,
+        size: tuple[int, int] | None = None,
+        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+        res: float | abc.Iterable[float] | None = None,
+        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        dst_dtype: DTypeLike | None = None,
+        dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
         n_threads: int = 0,
@@ -3371,14 +3371,14 @@ class Mask(Raster):
 
         # Call Raster.reproject()
         output = super().reproject(
-            dst_ref=dst_ref,  # type: ignore
-            dst_crs=dst_crs,
-            dst_size=dst_size,
-            dst_bounds=dst_bounds,
-            dst_res=dst_res,
-            dst_nodata=dst_nodata,
+            ref=ref,  # type: ignore
+            crs=crs,
+            size=size,
+            bounds=bounds,
+            res=res,
+            nodata=nodata,
             src_nodata=src_nodata,
-            dst_dtype=dst_dtype,
+            dtype=dtype,
             resampling=resampling,
             silent=silent,
             n_threads=n_threads,

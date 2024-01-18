@@ -222,8 +222,8 @@ print(rast.bounds)
 ```{code-cell} ipython3
 # Reproject to smaller bounds and higher resolution
 rast_reproj = rast.reproject(
-    dst_res=0.1,
-    dst_bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
+    res=0.1,
+    bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
     resampling="cubic")
 rast_reproj
 ```
