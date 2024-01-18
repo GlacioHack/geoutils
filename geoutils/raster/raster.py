@@ -2466,6 +2466,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if not self.is_loaded:
             self.load()
 
+        # Set matplotlib interpolation to None by default, to avoid spreading gaps in plots
+        if "interpolation" not in kwargs.keys():
+            kwargs.update({"interpolation": "None"})
+
         # Check if specific band selected, or take all
         # rshow takes care of image dimensions
         # if self.count=3 (4) => plotted as RGB(A)

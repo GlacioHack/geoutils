@@ -164,6 +164,10 @@ rast_proximity_to_vec.show(cbar_title="Distance to glacier outline")
 vect.show(rast_proximity_to_vec, fc="none")
 ```
 
+```{tip}
+To quickly visualize a raster directly from a terminal, without opening a Python console/notebook, check out our tool `geoviewer.py` in the {ref}`cli` documentation.
+```
+
 ## Pythonic arithmetic and NumPy interface
 
 All {class}`~geoutils.Raster` objects support Python arithmetic ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,

@@ -3,7 +3,6 @@
 Geoviewer provides a command line tool for plotting raster and vector data.
 
 TO DO:
-- change so that only needed band is loaded
 - include some options from imviewer: https://github.com/dshean/imview/blob/master/imview/imviewer.py
 """
 from __future__ import annotations
@@ -19,7 +18,9 @@ from geoutils.raster import Raster
 
 def getparser() -> argparse.ArgumentParser:
     # Set up description
-    parser = argparse.ArgumentParser(description="Visualisation tool for any image supported by GDAL.")
+    parser = argparse.ArgumentParser(
+        description="Visualisation tool for any image supported by GDAL. For single band plots (Single band rasters or with option -band) the image will be rendered as a pseudocolor image using the set or default colormap. For 3 or 4 band data, the image will be plotted as an RGB(A) image. For other band counts, an error will be raised and the option -band must be used."
+    )
 
     # Positional arguments
     parser.add_argument("filename", type=str, help="str, path to the image")
@@ -30,7 +31,7 @@ def getparser() -> argparse.ArgumentParser:
         dest="cmap",
         type=str,
         default="default",
-        help="str, a matplotlib colormap string (default is from rcParams).",
+        help="str, a matplotlib colormap string (default is from rcParams). This parameter is ignored for multi-band rasters.",
     )
     parser.add_argument(
         "-vmin",
@@ -39,7 +40,7 @@ def getparser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "float, the minimum value for colorscale, or can be expressed as a "
-            "percentile e.g. 5%% (default is calculated min value)."
+            "percentile e.g. 5%% (default is calculated min value). This parameter is ignored for multi-band rasters."
         ),
     )
     parser.add_argument(
@@ -49,7 +50,7 @@ def getparser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "float, the maximum value for colorscale, or can be expressed as a "
-            "percentile e.g. 95%% (default is calculated max value)."
+            "percentile e.g. 95%% (default is calculated max value). This parameter is ignored for multi-band rasters."
         ),
     )
     parser.add_argument(
@@ -57,12 +58,12 @@ def getparser() -> argparse.ArgumentParser:
         dest="band",
         type=int,
         default=None,
-        help="int, which band to display (start at 0) for multiband images (Default is 0).",
+        help="int, for multiband images, which band to display. Starts at 1. (Default is to load all bands and display as rasterio, i.e. asuming RGB(A) and with clipping outside [0-255] for int, [0-1] for float).",
     )
     parser.add_argument(
         "-nocb",
         dest="nocb",
-        help="If set, will not display a colorbar (Default is to display the colorbar).",
+        help="If set, will not display a colorbar (Default is to display the colorbar for single-band raster). This parameter is ignored for multi-band rasters.",
         action="store_false",
     )
     parser.add_argument(
@@ -134,7 +135,7 @@ def main(test_args: Sequence[str] = None) -> None:
         dfact = 1
 
     # Read image
-    img = Raster(args.filename, downsample=dfact)
+    img = Raster(args.filename, downsample=dfact, indexes=args.band)
 
     # Set no data value
     if args.nodata == "default":
@@ -157,7 +158,7 @@ def main(test_args: Sequence[str] = None) -> None:
             perc, _ = args.vmin.split("%")
             try:
                 perc = float(perc)
-                vmin = np.percentile(img.data, perc)
+                vmin = np.percentile(img.data.compressed(), perc)
             except ValueError:  # Case no % sign
                 raise ValueError("vmin must be a float or percentage, currently set to %s" % args.vmin)
 
@@ -172,7 +173,7 @@ def main(test_args: Sequence[str] = None) -> None:
             perc, _ = args.vmax.split("%")
             try:
                 perc = float(perc)
-                vmax = np.percentile(img.data, perc)
+                vmax = np.percentile(img.data.compressed(), perc)
             except ValueError:  # Case no % sign
                 raise ValueError("vmax must be a float or percentage, currently set to %s" % args.vmax)
 
@@ -213,7 +214,6 @@ def main(test_args: Sequence[str] = None) -> None:
     # plot
     img.show(
         ax=ax,
-        index=args.band,
         cmap=cmap,
         interpolation="nearest",
         vmin=vmin,
