@@ -1388,7 +1388,7 @@ class Vector:
     def proximity(
         self,
         raster: gu.Raster | None = None,
-        grid_size: tuple[int, int] = (1000, 1000),
+        size: tuple[int, int] = (1000, 1000),
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
@@ -1407,7 +1407,7 @@ class Vector:
         See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
 
         :param raster: Raster to burn the proximity grid on.
-        :param grid_size: If no Raster is provided, grid size to use with this Vector's extent and CRS
+        :param size: If no Raster is provided, grid size to use with this Vector's extent and CRS
             (defaults to 1000 x 1000).
         :param geometry_type: Type of geometry to use for the proximity, defaults to 'boundary'.
         :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
@@ -1427,7 +1427,7 @@ class Vector:
             left, bottom, right, top = self.bounds
 
             # Calculate raster transform
-            transform = rio.transform.from_bounds(left, bottom, right, top, grid_size[0], grid_size[1])
+            transform = rio.transform.from_bounds(left, bottom, right, top, size[0], size[1])
 
             raster = gu.Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 

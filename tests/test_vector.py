@@ -270,7 +270,7 @@ class TestVector:
         vector.proximity()
 
         # With specific grid size
-        vector.proximity(grid_size=(100, 100))
+        vector.proximity(size=(100, 100))
 
 
 class TestSynthetic:
