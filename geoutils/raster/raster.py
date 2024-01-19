@@ -3030,7 +3030,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Convert raster to a table of coordinates and their corresponding values.
 
-        Optionally, randomly sub-sample the raster.
+        Optionally, randomly sample the raster.
 
         If 'sample' is either 1, or is equal to the pixel count, all points are returned in order.
         If 'sample' is smaller than 1 (for fractions), or smaller than the pixel count, a random sample
