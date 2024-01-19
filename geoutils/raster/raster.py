@@ -44,7 +44,7 @@ from geoutils.projtools import (
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
-from geoutils.raster.sampling import subsample_array
+from geoutils.raster.sampling import sample_array
 from geoutils.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -208,7 +208,7 @@ def _load_rio(
     :param masked: Whether the mask should be read (if any exists) to use the nodata to mask values.
     :param transform: Create a window from the given transform (to read only parts of the raster)
     :param shape: Expected shape of the read ndarray. Must be given together with the `transform` argument.
-    :param out_count: Specify the count for a subsampled version (to be used with kwargs out_shape).
+    :param out_count: Specify the count for a downsampled version (to be used with kwargs out_shape).
 
     :raises ValueError: If only one of ``transform`` and ``shape`` are given.
 
@@ -217,7 +217,7 @@ def _load_rio(
     \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
     Useful ones are:
     .. hlist::
-    * out_shape : to load a subsampled version, always use with out_count
+    * out_shape : to load a downsampled version, always use with out_count
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
@@ -3208,9 +3208,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self.copy(new_array=proximity)
 
     @overload
-    def subsample(
+    def sample(
         self,
-        subsample: int | float,
+        sample: int | float,
         return_indices: Literal[False] = False,
         *,
         random_state: np.random.RandomState | int | None = None,
@@ -3218,9 +3218,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ...
 
     @overload
-    def subsample(
+    def sample(
         self,
-        subsample: int | float,
+        sample: int | float,
         return_indices: Literal[True],
         *,
         random_state: np.random.RandomState | int | None = None,
@@ -3228,33 +3228,31 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ...
 
     @overload
-    def subsample(
+    def sample(
         self,
-        subsample: float | int,
+        sample: float | int,
         return_indices: bool = False,
         random_state: np.random.RandomState | int | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         ...
 
-    def subsample(
+    def sample(
         self,
-        subsample: float | int,
+        sample: float | int,
         return_indices: bool = False,
         random_state: np.random.RandomState | int | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
-        Randomly subsample the raster. Only valid values are considered.
+        Randomly sample the raster. Only valid values are considered.
 
-        :param subsample: If <= 1, a fraction of the total pixels to extract. If > 1, the number of pixels.
+        :param sample: If <= 1, a fraction of the total pixels to extract. If > 1, the number of pixels.
         :param return_indices: Whether to return the extracted indices only.
         :param random_state: Random state or seed number.
 
-        :return: Array of subsampled valid values, or array of subsampled indices.
+        :return: Array of sampled valid values, or array of sampled indices.
         """
 
-        return subsample_array(
-            array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
-        )
+        return sample_array(array=self.data, sample=sample, return_indices=return_indices, random_state=random_state)
 
 
 class Mask(Raster):
