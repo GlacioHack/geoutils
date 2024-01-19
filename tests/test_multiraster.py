@@ -49,7 +49,7 @@ class stack_merge_images:
             inplace=True,
         )
         if different_crs:
-            self.img2 = self.img2.reproject(dst_crs=different_crs)
+            self.img2 = self.img2.reproject(crs=different_crs)
 
         # To check that use_ref_bounds work - create a img that do not cover the whole extent
         self.img3 = img.copy()

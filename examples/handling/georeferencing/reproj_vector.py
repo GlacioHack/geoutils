@@ -41,5 +41,5 @@ vect_reproj.show(ax="new", fc="none", ec="tab:purple", lw=3)
 # :class:`int`).
 
 # Reproject in UTM zone 45N.
-vect_reproj = vect.reproject(dst_crs=32645)
+vect_reproj = vect.reproject(crs=32645)
 vect_reproj

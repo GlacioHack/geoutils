@@ -114,7 +114,7 @@ class TestVector:
         v1 = gu.Vector(self.everest_outlines_path)
 
         # First, test with a EPSG integer
-        v1 = v0.reproject(dst_crs=32617)
+        v1 = v0.reproject(crs=32617)
         assert isinstance(v1, gu.Vector)
         assert v1.crs.to_epsg() == 32617
 
@@ -133,20 +133,18 @@ class TestVector:
 
         # Fourth, check that errors are raised when appropriate
         # When no destination CRS is defined, or both dst_crs and dst_ref are passed
-        with pytest.raises(ValueError, match=re.escape("Either of `dst_ref` or `dst_crs` must be set. Not both.")):
+        with pytest.raises(ValueError, match=re.escape("Either of `ref` or `crs` must be set. Not both.")):
             v0.reproject()
-            v0.reproject(dst_ref=r0, dst_crs=32617)
+            v0.reproject(ref=r0, crs=32617)
         # If the path provided does not exist
         with pytest.raises(ValueError, match=re.escape("Reference raster or vector path does not exist.")):
-            v0.reproject(dst_ref="tmp.lol")
+            v0.reproject(ref="tmp.lol")
         # If it exists but cannot be opened by rasterio or fiona
         with pytest.raises(ValueError, match=re.escape("Could not open raster or vector with rasterio or fiona.")):
-            v0.reproject(dst_ref="geoutils/examples.py")
+            v0.reproject(ref="geoutils/examples.py")
         # If input of wrong type
-        with pytest.raises(
-            TypeError, match=re.escape("Type of dst_ref must be string path to file, Raster or Vector.")
-        ):
-            v0.reproject(dst_ref=10)  # type: ignore
+        with pytest.raises(TypeError, match=re.escape("Type of ref must be string path to file, Raster or Vector.")):
+            v0.reproject(ref=10)  # type: ignore
 
     def test_rasterize_proj(self) -> None:
         # Capture the warning on resolution not matching exactly bounds
@@ -171,23 +169,23 @@ class TestVector:
         assert burned.shape[1] == 1522
 
         # Typically, rasterize returns a raster
-        burned_in2_out1 = vct.rasterize(rst=rst, in_value=2, out_value=1)
+        burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
         assert isinstance(burned_in2_out1, gu.Raster)
 
         # For an in_value of 1 and out_value of 0 (default), it returns a mask
-        burned_mask = vct.rasterize(rst=rst, in_value=1)
+        burned_mask = vct.rasterize(raster=rst, in_value=1)
         assert isinstance(burned_mask, gu.Mask)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
-        assert burned_mask.raster_equal(vct.create_mask(rst=rst))
+        assert burned_mask.raster_equal(vct.create_mask(raster=rst))
 
         # The two rasterization should match
         assert np.all(burned_in2_out1[burned_mask] == 2)
         assert np.all(burned_in2_out1[~burned_mask] == 1)
 
         # Check that errors are raised
-        with pytest.raises(ValueError, match="Only one of rst or crs can be provided."):
-            vct.rasterize(rst=rst, crs=3857)
+        with pytest.raises(ValueError, match="Only one of raster or crs can be provided."):
+            vct.rasterize(raster=rst, crs=3857)
 
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
@@ -272,7 +270,7 @@ class TestVector:
         vector.proximity()
 
         # With specific grid size
-        vector.proximity(grid_size=(100, 100))
+        vector.proximity(size=(100, 100))
 
 
 class TestSynthetic:
@@ -365,7 +363,7 @@ class TestSynthetic:
         assert isinstance(mask, gu.Mask)
 
         # Check that an error is raised if xres is not passed
-        with pytest.raises(ValueError, match="At least rst or xres must be set."):
+        with pytest.raises(ValueError, match="At least raster or xres must be set."):
             vector.create_mask()
 
         # Check that an error is raised if buffer is the wrong type

@@ -28,7 +28,7 @@ np.random.seed(42)
 x_coords = np.random.uniform(rast.bounds.left + 50, rast.bounds.right - 50, 50)
 y_coords = np.random.uniform(rast.bounds.bottom + 50, rast.bounds.top - 50, 50)
 
-vals = rast.interp_points(pts=list(zip(x_coords, y_coords)))
+vals = rast.interp_points(points=list(zip(x_coords, y_coords)))
 
 # %%
 # Replace by Vector function once done
@@ -50,7 +50,7 @@ rast.tags["AREA_OR_POINT"] = "Point"
 # %%
 # We can interpolate again by shifting according to our interpretation, and changing the resampling algorithm (default to "linear").
 
-vals_shifted = rast.interp_points(pts=list(zip(x_coords, y_coords)), shift_area_or_point=True, mode="quintic")
+vals_shifted = rast.interp_points(points=list(zip(x_coords, y_coords)), shift_area_or_point=True, mode="quintic")
 np.nanmean(vals - vals_shifted)
 
 # %%
