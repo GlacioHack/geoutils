@@ -2330,26 +2330,26 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return ds
 
-    def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
+    def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
         Get raster bounds projected in a specified CRS.
 
         :param out_crs: Output CRS.
-        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+        :param densify_points: Maximum points to be added between image corners to account for non linear edges.
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
 
         """
         # Max points to be added between image corners to account for non linear edges
         # rasterio's default is a bit low for very large images
         # instead, use image dimensions, with a maximum of 50000
-        densify_pts = min(max(self.width, self.height), densify_pts)
+        densify_points = min(max(self.width, self.height), densify_points)
 
         # Calculate new bounds
-        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
+        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
         return new_bounds
 
-    def get_footprint_projected(self, out_crs: CRS, densify_pts: int = 5000) -> Vector:
+    def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> Vector:
         """
         Get raster footprint projected in a specified CRS.
 
@@ -2357,12 +2357,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         the rectangular square footprint of the original projection into the new one.
 
         :param out_crs: Output CRS.
-        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+        :param densify_points: Maximum points to be added between image corners to account for non linear edges.
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
         return Vector(
-            _get_footprint_projected(bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
+            _get_footprint_projected(
+                bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
+            )
         )
 
     def get_metric_crs(
@@ -2900,7 +2902,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def interp_points(
         self,
-        pts: tuple[list[float], list[float]],
+        points: tuple[list[float], list[float]],
         input_latlon: bool = False,
         mode: str = "linear",
         index: int = 1,
@@ -2914,7 +2916,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
          to ensure that the interpolation of points is done at the right location. See parameter description
          of shift_area_or_point for more details.
 
-        :param pts: Point(s) at which to interpolate raster value. If points fall outside of image, value
+        :param points: Point(s) at which to interpolate raster value. If points fall outside of image, value
             returned is nan. Shape should be (N,2).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
         :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is used to
@@ -2924,7 +2926,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
 
-        :returns rpts: Array of raster value(s) for the given points.
+        :returns rpoints: Array of raster value(s) for the given points.
         """
         assert mode in [
             "mean",
@@ -2935,7 +2937,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ], "mode must be mean, linear, cubic, quintic or nearest."
 
         # Get coordinates
-        x, y = list(zip(*pts))
+        x, y = list(zip(*points))
 
         # If those are in latlon, convert to Raster crs
         if input_latlon:
@@ -2949,14 +2951,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
         if self.count == 1:
-            rpts = map_coordinates(self.data.astype(np.float32), [i, j], **kwargs)
+            rpoints = map_coordinates(self.data.astype(np.float32), [i, j], **kwargs)
         else:
-            rpts = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
+            rpoints = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
 
-        rpts = np.array(rpts, dtype=np.float32)
-        rpts[np.array(ind_invalid)] = np.nan
+        rpoints = np.array(rpoints, dtype=np.float32)
+        rpoints[np.array(ind_invalid)] = np.nan
 
-        return rpts
+        return rpoints
 
     def split_bands(self: RasterType, copy: bool = False, subset: list[int] | int | None = None) -> list[Raster]:
         """

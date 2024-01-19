@@ -1724,7 +1724,7 @@ class TestRaster:
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
-        lat, lon = reproject_to_latlon(pts=[[xtest0], [ytest0]], in_crs=r.crs)
+        lat, lon = reproject_to_latlon(points=[[xtest0], [ytest0]], in_crs=r.crs)
         z_val_2 = r.value_at_coords(lon, lat, latlon=True)
         assert z_val == z_val_2
 

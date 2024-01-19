@@ -1348,13 +1348,13 @@ class Vector:
 
     @classmethod
     def from_bounds_projected(
-        cls, raster_or_vector: gu.Raster | VectorType, out_crs: CRS | None = None, densify_pts: int = 5000
+        cls, raster_or_vector: gu.Raster | VectorType, out_crs: CRS | None = None, densify_points: int = 5000
     ) -> VectorType:
         """Create a vector polygon from projected bounds of a raster or vector.
 
         :param raster_or_vector: A raster or vector
         :param out_crs: In which CRS to compute the bounds
-        :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
+        :param densify_points: Maximum points to be added between image corners to account for nonlinear edges.
             Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
@@ -1362,7 +1362,7 @@ class Vector:
             out_crs = raster_or_vector.crs
 
         df = _get_footprint_projected(
-            raster_or_vector.bounds, in_crs=raster_or_vector.crs, out_crs=out_crs, densify_pts=densify_pts
+            raster_or_vector.bounds, in_crs=raster_or_vector.crs, out_crs=out_crs, densify_points=densify_points
         )
 
         return cls(df)  # type: ignore
@@ -1467,21 +1467,21 @@ class Vector:
 
         return vector_buffered
 
-    def get_bounds_projected(self, out_crs: CRS, densify_pts: int = 5000) -> rio.coords.BoundingBox:
+    def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
         Get vector bounds projected in a specified CRS.
 
         :param out_crs: Output CRS.
-        :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
+        :param densify_points: Maximum points to be added between image corners to account for nonlinear edges.
             Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
         # Calculate new bounds
-        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
+        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
         return new_bounds
 
-    def get_footprint_projected(self, out_crs: CRS, densify_pts: int = 5000) -> Vector:
+    def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> Vector:
         """
         Get vector footprint projected in a specified CRS.
 
@@ -1489,12 +1489,14 @@ class Vector:
         the rectangular square footprint of the original projection into the new one.
 
         :param out_crs: Output CRS.
-        :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+        :param densify_points: Maximum points to be added between image corners to account for non linear edges.
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
         return Vector(
-            _get_footprint_projected(bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_pts=densify_pts)
+            _get_footprint_projected(
+                bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
+            )
         )
 
     def get_metric_crs(

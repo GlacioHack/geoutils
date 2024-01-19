@@ -244,20 +244,20 @@ def align_bounds(
 
 
 def reproject_points(
-    pts: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
+    points: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from input_crs to output_crs.
 
-    :param pts: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
+    :param points: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
     :param in_crs: Input CRS
     :param out_crs: Output CRS
 
-    :returns: Reprojected points, of same shape as pts.
+    :returns: Reprojected points, of same shape as points.
     """
-    assert np.shape(pts)[0] == 2, "pts must be of shape (2, N)"
+    assert np.shape(points)[0] == 2, "points must be of shape (2, N)"
 
-    x, y = pts
+    x, y = points
     transformer = pyproj.Transformer.from_crs(in_crs, out_crs)
     xout, yout = transformer.transform(x, y)
     return (xout, yout)
@@ -269,37 +269,37 @@ crs_4326 = rio.crs.CRS.from_epsg(4326)
 
 
 def reproject_to_latlon(
-    pts: list[list[float]] | NDArrayNum, in_crs: CRS, round_: int = 8
+    points: list[list[float]] | NDArrayNum, in_crs: CRS, round_: int = 8
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from in_crs to lat/lon.
 
-    :param pts: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
+    :param points: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
     :param in_crs: Input CRS
     :param round_: Output rounding. Default of 8 ensures cm accuracy
 
-    :returns: Reprojected points, of same shape as pts.
+    :returns: Reprojected points, of same shape as points.
     """
-    proj_pts = reproject_points(pts, in_crs, crs_4326)
-    proj_pts = np.round(proj_pts, round_)
-    return proj_pts
+    proj_points = reproject_points(points, in_crs, crs_4326)
+    proj_points = np.round(proj_points, round_)
+    return proj_points
 
 
 def reproject_from_latlon(
-    pts: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, out_crs: CRS, round_: int = 2
+    points: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, out_crs: CRS, round_: int = 2
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from lat/lon to out_crs.
 
-    :param pts: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
+    :param points: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
     :param out_crs: Output CRS
     :param round_: Output rounding. Default of 2 ensures cm accuracy
 
-    :returns: Reprojected points, of same shape as pts.
+    :returns: Reprojected points, of same shape as points.
     """
-    proj_pts = reproject_points(pts, crs_4326, out_crs)
-    proj_pts = np.round(proj_pts, round_)
-    return proj_pts
+    proj_points = reproject_points(points, crs_4326, out_crs)
+    proj_points = np.round(proj_points, round_)
+    return proj_points
 
 
 def reproject_shape(inshape: BaseGeometry, in_crs: CRS, out_crs: CRS) -> BaseGeometry:
@@ -336,27 +336,27 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 
 
 def _get_bounds_projected(
-    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
+    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_points: int = 5000
 ) -> rio.coords.BoundingBox:
     """
     Get bounds projected in a specified CRS.
 
     :param in_crs: Input CRS.
     :param out_crs: Output CRS.
-    :param densify_pts: Maximum points to be added between image corners to account for nonlinear edges.
+    :param densify_points: Maximum points to be added between image corners to account for nonlinear edges.
     Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
     """
 
     # Calculate new bounds
     left, bottom, right, top = bounds
-    new_bounds = rio.warp.transform_bounds(in_crs, out_crs, left, bottom, right, top, densify_pts)
+    new_bounds = rio.warp.transform_bounds(in_crs, out_crs, left, bottom, right, top, densify_points)
     new_bounds = rio.coords.BoundingBox(*new_bounds)
 
     return new_bounds
 
 
 def _densify_geometry(
-    line_geometry: shapely.geometry.LineString, densify_pts: int = 5000
+    line_geometry: shapely.geometry.LineString, densify_points: int = 5000
 ) -> shapely.geometry.LineString:
     """
     Densify a linestring geometry.
@@ -364,7 +364,7 @@ def _densify_geometry(
     Inspired by: https://gis.stackexchange.com/questions/372912/how-to-densify-linestring-vertices-in-shapely-geopandas.
 
     :param line_geometry: Linestring.
-    :param densify_pts: Number of points to densify each line.
+    :param densify_points: Number of points to densify each line.
 
     :return: Densified linestring.
     """
@@ -382,7 +382,7 @@ def _densify_geometry(
         length_m = seg.length
 
         # Loop over a distance on the segment length
-        densified_seg = np.linspace(0, length_m, 1 + densify_pts)
+        densified_seg = np.linspace(0, length_m, 1 + densify_points)
         # (removing the last point, as it will be the first point of the next segment,
         # except for the last segment)
         if i < len(segments) - 1:
@@ -402,7 +402,7 @@ def _densify_geometry(
 
 
 def _get_footprint_projected(
-    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_pts: int = 5000
+    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_points: int = 5000
 ) -> gpd.GeoDataFrame:
     """
     Get bounding box footprint projected in a specified CRS.
@@ -412,7 +412,7 @@ def _get_footprint_projected(
 
     :param in_crs: Input CRS.
     :param out_crs: Output CRS.
-    :param densify_pts: Maximum points to be added between image corners to account for non linear edges.
+    :param densify_points: Maximum points to be added between image corners to account for non linear edges.
      Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
     """
 
@@ -425,7 +425,7 @@ def _get_footprint_projected(
     )
 
     # Densify linestring
-    densified_line_geometry = _densify_geometry(linestring, densify_pts=densify_pts)
+    densified_line_geometry = _densify_geometry(linestring, densify_points=densify_points)
 
     # Get polygon from new linestring
     densified_poly = Polygon(densified_line_geometry)
