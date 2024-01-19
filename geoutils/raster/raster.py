@@ -3006,7 +3006,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def to_points(
         self,
-        subset: float | int,
+        sample: float | int,
         as_array: Literal[False] = False,
         pixel_offset: Literal["center", "corner"] = "center",
     ) -> NDArrayNum:
@@ -3015,22 +3015,26 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def to_points(
         self,
-        subset: float | int,
+        sample: float | int,
         as_array: Literal[True],
         pixel_offset: Literal["center", "corner"] = "center",
     ) -> Vector:
         ...
 
     def to_points(
-        self, subset: float | int = 1, as_array: bool = False, pixel_offset: Literal["center", "corner"] = "center"
+        self,
+        sample: float | int = 1,
+        as_array: bool = False,
+        pixel_offset: Literal["center", "corner"] = "center",
     ) -> NDArrayNum | Vector:
         """
-        Convert raster to points.
+        Convert raster to a table of coordinates and their corresponding values.
 
-        Optionally, randomly subset the raster.
+        Optionally, randomly sub-sample the raster.
 
-        If 'subset' is either 1 or is equal to the pixel count, all points are returned in order.
-        If 'subset' is smaller than 1 (for fractions) or the pixel count, a random sample is returned.
+        If 'sample' is either 1, or is equal to the pixel count, all points are returned in order.
+        If 'sample' is smaller than 1 (for fractions), or smaller than the pixel count, a random sample
+        of points is returned.
 
         If the raster is not loaded, sampling will be done from disk without loading the entire Raster.
 
@@ -3038,29 +3042,29 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
             * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
 
-        :param subset: The point count or fraction. If 'subset' > 1, it's parsed as a count.
+        :param sample: The point count or fraction. If sample > 1, it's parsed as a count.
         :param as_array: Return an array instead of a vector.
         :param pixel_offset: The point at which to associate the pixel coordinate with ('corner' == upper left).
 
-        :raises ValueError: If the subset count or fraction is poorly formatted.
+        :raises ValueError: If the sample count or fraction is poorly formatted.
 
-        :returns: A ndarray/GeoDataFrame of the shape (N, 2 + count) where N is the subset count.
+        :returns: A GeoDataFrame, or ndarray of the shape (N, 2 + count) where N is the sample count.
         """
         data_size = self.width * self.height
 
-        # Validate the subset argument.
-        if subset <= 0.0:
-            raise ValueError(f"Subset cannot be zero or negative (given value: {subset})")
-        # If the subset is equal to or less than 1, it is assumed to be a fraction.
-        if subset <= 1.0:
-            subset = int(data_size * subset)
+        # Validate the sample argument.
+        if sample <= 0.0:
+            raise ValueError(f"sample cannot be zero or negative (given value: {sample})")
+        # If the sample is equal to or less than 1, it is assumed to be a fraction.
+        if sample <= 1.0:
+            sample = int(data_size * sample)
         else:
-            subset = int(subset)
-        if subset > data_size:
-            raise ValueError(f"Subset cannot exceed the size of the dataset ({subset} vs {data_size})")
+            sample = int(sample)
+        if sample > data_size:
+            raise ValueError(f"sample cannot exceed the size of the dataset ({sample} vs {data_size})")
 
-        # If the subset is smaller than the max size, take a random subset of indices, otherwise take the whole.
-        choice = np.random.randint(0, data_size - 1, subset) if subset != data_size else np.arange(data_size)
+        # If the sample is smaller than the max size, take a random sample of indices, otherwise take the whole.
+        choice = np.random.randint(0, data_size - 1, sample) if sample != data_size else np.arange(data_size)
 
         cols = choice % self.width
         rows = (choice / self.width).astype(int)
