@@ -247,6 +247,102 @@ def _load_rio(
     return data
 
 
+def _get_reproject_params(
+    raster: RasterType,
+    crs: CRS | str | int | None = None,
+    size: tuple[int, int] | None = None,
+    res: int | float | abc.Iterable[float] | None = None,
+    bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+) -> tuple[Affine, tuple[int, int]]:
+    """
+    Returns the parameters (transform, size) needed to reproject a raster to a different grid (resolution or
+    size, bounds) and/or coordinate reference system (CRS).
+
+    If requested bounds are incompatible with output resolution (would result in non integer number of pixels),
+    the bounds are rounded up to the nearest compatible value.
+
+    :param crs: Destination coordinate reference system as a string or EPSG. Defaults to this raster's CRS.
+    :param size: Destination size as (ncol, nrow). Mutually exclusive with ``res``.
+    :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
+        Mutually exclusive with ``size``.
+    :param bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
+        right, top bounds in the destination CRS.
+
+    :returns: Calculated transform and size.
+    """
+    # --- Input sanity checks --- #
+    # check size and res are not both set
+    if (size is not None) and (res is not None):
+        raise ValueError("size and res both specified. Specify only one.")
+
+    # Set CRS to input CRS by default
+    if crs is None:
+        crs = raster.crs
+
+    if size is None:
+        width, height = None, None
+    else:
+        width, height = size
+
+    # Convert bounds to BoundingBox
+    if bounds is not None:
+        if not isinstance(bounds, rio.coords.BoundingBox):
+            bounds = rio.coords.BoundingBox(
+                bounds["left"],
+                bounds["bottom"],
+                bounds["right"],
+                bounds["top"],
+            )
+
+    # --- First, calculate default transform ignoring any change in bounds --- #
+    tmp_transform, tmp_width, tmp_height = rio.warp.calculate_default_transform(
+        raster.crs,
+        crs,
+        raster.width,
+        raster.height,
+        left=raster.bounds.left,
+        right=raster.bounds.right,
+        top=raster.bounds.top,
+        bottom=raster.bounds.bottom,
+        resolution=res,
+        dst_width=width,
+        dst_height=height,
+    )
+
+    # If no bounds specified, can directly use output of rio.warp.calculate_default_transform
+    if bounds is None:
+        dst_size = (tmp_width, tmp_height)
+        dst_transform = tmp_transform
+
+    # --- Second, crop to requested bounds --- #
+    else:
+        # If output size and bounds are known, can use rio.transform.from_bounds to get dst_transform
+        if size is not None:
+            dst_transform = rio.transform.from_bounds(
+                bounds.left, bounds.bottom, bounds.right, bounds.top, size[0], size[1]
+            )
+            dst_size = size
+
+        else:
+            # Otherwise, need to calculate the new output size, rounded up
+            ref_win = rio.windows.from_bounds(*list(bounds), tmp_transform)
+            dst_size = (int(np.ceil(ref_win.width)), int(np.ceil(ref_win.height)))
+
+            if res is not None:
+                # In this case, we force output resolution
+                if isinstance(res, tuple):
+                    dst_transform = rio.transform.from_origin(bounds.left, bounds.top, res[0], res[1])
+                else:
+                    dst_transform = rio.transform.from_origin(bounds.left, bounds.top, res, res)
+            else:
+                # In this case, we force output bounds
+                dst_transform = rio.transform.from_bounds(
+                    bounds.left, bounds.bottom, bounds.right, bounds.top, dst_size[0], dst_size[1]
+                )
+
+    return dst_transform, dst_size
+
+
 class Raster:
     """
     The georeferenced raster.
@@ -2022,11 +2118,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
             # Read reprojecting params from ref raster
             crs = ds_ref.crs
-            transform = ds_ref.transform
-            reproj_kwargs.update({"dst_transform": transform})
-            data = np.ones((self.count, ds_ref.shape[0], ds_ref.shape[1]), dtype=dtype)
-            reproj_kwargs.update({"destination": data})
-            reproj_kwargs.update({"dst_crs": ds_ref.crs})
+            res = ds_ref.res
+            bounds = ds_ref.bounds
+            # transform = ds_ref.transform
+            # reproj_kwargs.update({"dst_transform": transform})
+            # data = np.ones((self.count, ds_ref.shape[0], ds_ref.shape[1]), dtype=dtype)
+            # reproj_kwargs.update({"destination": data})
+            # reproj_kwargs.update({"dst_crs": ds_ref.crs})
         else:
             # Determine target CRS
             crs = CRS.from_user_input(crs)
@@ -2045,57 +2143,65 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     bounds["top"],
                 )
 
-        # Determine target raster size/resolution
-        if res is not None:
-            if bounds is None:
-                # Let rasterio determine the maximum bounds of the new raster.
-                reproj_kwargs.update({"dst_resolution": res})
-            else:
-                # Bounds specified. First check if xres and yres are different.
-                if isinstance(res, tuple):
-                    xres = res[0]
-                    yres = res[1]
-                else:
-                    xres = res
-                    yres = res
+        # Determine target transform and grid size
+        transform, size = _get_reproject_params(self, crs=crs, size=size, res=res, bounds=bounds)
 
-                # Calculate new raster size which ensures that pixels have
-                # precisely the resolution specified.
-                width = np.ceil((bounds.right - bounds.left) / xres)
-                height = np.ceil(np.abs(bounds.bottom - bounds.top) / yres)
-                size = (int(width), int(height))
+        # Specify the output bounds and shape, let rasterio handle the rest
+        reproj_kwargs.update({"dst_transform": transform})
+        data = np.ones((self.count, size[1], size[0]), dtype=dtype)
+        reproj_kwargs.update({"destination": data})
+        reproj_kwargs.update({"dst_crs": crs})
 
-                # As a result of precise pixel size, the destination bounds may
-                # have to be adjusted.
-                x1 = bounds.left + (xres * width)
-                y1 = bounds.top - (yres * height)
-                bounds = rio.coords.BoundingBox(top=bounds.top, left=bounds.left, bottom=y1, right=x1)
+        # if res is not None:
+        #     if bounds is None:
+        #         # Let rasterio determine the maximum bounds of the new raster.
+        #         reproj_kwargs.update({"dst_resolution": res})
+        #     else:
+        #         # Bounds specified. First check if xres and yres are different.
+        #         if isinstance(res, tuple):
+        #             xres = res[0]
+        #             yres = res[1]
+        #         else:
+        #             xres = res
+        #             yres = res
 
-        # Set output shape (Note: size is (ncol, nrow))
-        if size is not None:
-            shape = (self.count, size[1], size[0])
-            data = np.ones(shape, dtype=dtype)
-            reproj_kwargs.update({"destination": data})
-        else:
-            shape = (self.count, self.height, self.width)
+        #         # Calculate new raster size which ensures that pixels have
+        #         # precisely the resolution specified.
+        #         width = np.ceil((bounds.right - bounds.left) / xres)
+        #         height = np.ceil(np.abs(bounds.bottom - bounds.top) / yres)
+        #         size = (int(width), int(height))
 
-        # If bounds is set, will enforce bounds
-        if bounds is not None:
-            if size is None:
-                # Calculate new raster size which ensures that pixels resolution is as close as possible to original
-                # Raster size is increased by up to one pixel if needed
-                yres, xres = self.res
-                width = int(np.ceil((bounds.right - bounds.left) / xres))
-                height = int(np.ceil(np.abs(bounds.bottom - bounds.top) / yres))
-                size = (width, height)
+        #         # As a result of precise pixel size, the destination bounds may
+        #         # have to be adjusted.
+        #         x1 = bounds.left + (xres * width)
+        #         y1 = bounds.top - (yres * height)
+        #         bounds = rio.coords.BoundingBox(top=bounds.top, left=bounds.left, bottom=y1, right=x1)
 
-            # Calculate associated transform
-            transform = rio.transform.from_bounds(*bounds, width=size[0], height=size[1])
+        # # Set output shape (Note: size is (ncol, nrow))
+        # if size is not None:
+        #     shape = (self.count, size[1], size[0])
+        #     data = np.ones(shape, dtype=dtype)
+        #     reproj_kwargs.update({"destination": data})
+        # else:
+        #     shape = (self.count, self.height, self.width)
 
-            # Specify the output bounds and shape, let rasterio handle the rest
-            reproj_kwargs.update({"dst_transform": transform})
-            data = np.ones((self.count, size[1], size[0]), dtype=dtype)
-            reproj_kwargs.update({"destination": data})
+        # # If bounds is set, will enforce bounds
+        # if bounds is not None:
+        #     if size is None:
+        #         # Calculate new raster size which ensures that pixels resolution is as close as possible to original
+        #         # Raster size is increased by up to one pixel if needed
+        #         yres, xres = self.res
+        #         width = int(np.ceil((bounds.right - bounds.left) / xres))
+        #         height = int(np.ceil(np.abs(bounds.bottom - bounds.top) / yres))
+        #         size = (width, height)
+
+        #     # Calculate associated transform
+        #     transform = rio.transform.from_bounds(*bounds, width=size[0], height=size[1])
+
+        #     # Specify the output bounds and shape, let rasterio handle the rest
+        #     reproj_kwargs.update({"dst_transform": transform})
+        #     data = np.ones((self.count, size[1], size[0]), dtype=dtype)
+        #     reproj_kwargs.update({"destination": data})
 
         # Check that reprojection is actually needed
         # Caution, size is (width, height) while shape is (height, width)
