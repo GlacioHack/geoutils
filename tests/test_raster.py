@@ -2779,15 +2779,16 @@ class TestMask:
     def test_reproject(self, mask: gu.Mask) -> None:
         # Test 1: with a classic resampling (bilinear)
 
-        # Reproject mask
-        mask_reproj = mask.reproject()
+        # Reproject mask - resample to 100 x 100 grid
+        # dst_res = tuple(np.array(mask.res)*2)
+        mask_reproj = mask.reproject(size=(100, 100), src_nodata=2)
 
         # Check instance is respected
         assert isinstance(mask_reproj, gu.Mask)
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
-        mask_uint8_reproj = mask_uint8.reproject()
+        mask_uint8_reproj = mask_uint8.reproject(size=(100, 100), src_nodata=2)
         mask_uint8_reproj.data = mask_uint8_reproj.data.astype("bool")
 
         assert mask_reproj.raster_equal(mask_uint8_reproj)
