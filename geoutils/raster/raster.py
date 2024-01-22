@@ -299,7 +299,7 @@ def _get_reproject_params(
     if (
         (crs == raster.crs)
         & ((size is None) | ((height == raster.shape[0]) & (width == raster.shape[1])))
-        & ((res is None) | (res == raster.res))
+        & ((res is None) | np.all(np.array(res) == raster.res))
         & ((bounds is None) | (bounds == raster.bounds))
     ):
         return raster.transform, raster.shape[::-1]
