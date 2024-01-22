@@ -294,6 +294,16 @@ def _get_reproject_params(
                 bounds["top"],
             )
 
+    # If all georeferences are the same as input, skip calculating because of issue in
+    # rio.warp.calculate_default_transform (https://github.com/rasterio/rasterio/issues/3010)
+    if (
+        (crs == raster.crs)
+        & ((size is None) | ((height == raster.shape[0]) & (width == raster.shape[1])))
+        & ((res is None) | (res == raster.res))
+        & ((bounds is None) | (bounds == raster.bounds))
+    ):
+        return raster.transform, raster.shape[::-1]
+
     # --- First, calculate default transform ignoring any change in bounds --- #
     tmp_transform, tmp_width, tmp_height = rio.warp.calculate_default_transform(
         raster.crs,
