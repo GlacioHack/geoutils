@@ -1421,6 +1421,26 @@ class TestRaster:
         r3 = r_nodata.reproject(r2)
         assert r_nodata.nodata == r3.nodata
 
+        # -- Test additional errors raised for argument combinations -- #
+
+        # If both ref and crs are set
+        with pytest.raises(ValueError, match=re.escape("Either of `ref` or `crs` must be set. Not both.")):
+            _ = r.reproject(ref=r2, crs=r.crs)
+
+        # Size and res are mutually exclusive
+        with pytest.raises(ValueError, match=re.escape("size and res both specified. Specify only one.")):
+            _ = r.reproject(size=(10, 10), res=50)
+
+        # If wrong type for `ref`
+        with pytest.raises(
+            TypeError, match=re.escape("Type of ref not understood, must be path to file (str), Raster.")
+        ):
+            _ = r.reproject(ref=3)
+
+        # If input reference is string and file and does not exist
+        with pytest.raises(ValueError, match=re.escape("Reference raster does not exist.")):
+            _ = r.reproject(ref="no_file.tif")
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
         """Check the behaviour of the intersection function"""
