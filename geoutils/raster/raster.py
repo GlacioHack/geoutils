@@ -2070,10 +2070,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         elif ref is None and crs is None:
             crs = self.crs
 
-        # size and res are mutually exclusive
-        if size is not None and res is not None:
-            raise ValueError("size and res both specified. Specify only one.")
-
         # Set output dtype
         if dtype is None:
             # Warning: this will not work for multiple bands with different dtypes
