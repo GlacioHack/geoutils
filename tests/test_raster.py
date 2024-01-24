@@ -1170,8 +1170,13 @@ class TestRaster:
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
         # 1 - if no force_source_nodata is set and masked values exist, raises an error
-        with pytest.raises(ValueError, match=re.escape("No nodata set, set one for the raster with self.set_nodata() or use a "
-                                             "temporary one with `force_source_nodata`.")):
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "No nodata set, set one for the raster with self.set_nodata() or use a "
+                "temporary one with `force_source_nodata`."
+            ),
+        ):
             _ = r_nodata.reproject(res=r_nodata.res[0] / 2, nodata=0)
 
         # 2 - if no nodata is set and default value conflicts with existing value, a warning is raised

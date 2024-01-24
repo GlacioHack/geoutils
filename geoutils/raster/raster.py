@@ -2022,10 +2022,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         res: float | abc.Iterable[float] | None = None,
         grid_size: tuple[int, int] | None = None,
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.bilinear,
-        force_source_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        force_source_nodata: int | float | None = None,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -2082,9 +2082,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             src_nodata = force_source_nodata
             # Raise warning if a different nodata value exists for this raster than the forced one (not None)
             if self.nodata is not None:
-                warnings.warn("Forcing source nodata value of {} despite an existing nodata value of {} in the raster. "
-                              "To silence this warning, use self.set_nodata() before reprojection instead of forcing.".
-                              format(force_source_nodata, self.nodata))
+                warnings.warn(
+                    "Forcing source nodata value of {} despite an existing nodata value of {} in the raster. "
+                    "To silence this warning, use self.set_nodata() before reprojection instead of forcing.".format(
+                        force_source_nodata, self.nodata
+                    )
+                )
 
         # Create a BoundingBox if required
         if bounds is not None:
@@ -2173,7 +2176,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ):
             if (nodata == self.nodata) or (nodata is None):
                 if not silent:
-                    warnings.warn("Output projection, bounds and grid size are identical -> returning self (not a copy!)")
+                    warnings.warn(
+                        "Output projection, bounds and grid size are identical -> returning self (not a copy!)"
+                    )
                 return self
 
             elif nodata is not None:
@@ -2199,8 +2204,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # All masked values must be set to a nodata value for rasterio's reproject to work properly
             # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
             if src_nodata is None and np.sum(self.data.mask) > 0:
-                raise ValueError("No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-                                 "with `force_source_nodata`.")
+                raise ValueError(
+                    "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+                    "with `force_source_nodata`."
+                )
 
             # Mask not taken into account by rasterio, need to fill with src_nodata
             data, transformed = rio.warp.reproject(self.data.filled(src_nodata), **reproj_kwargs)
@@ -2759,7 +2766,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 if self.count == 1:
                     data = self.data[row : row + height, col : col + width]
                 else:
-                    data = self.data[slice(None) if band is None else band - 1, row: row + height, col: col + width]
+                    data = self.data[slice(None) if band is None else band - 1, row : row + height, col : col + width]
                 if not masked:
                     data = data.filled()
                 value = format_value(data)
@@ -3429,10 +3436,10 @@ class Mask(Raster):
         res: float | abc.Iterable[float] | None = None,
         grid_size: tuple[int, int] | None = None,
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        force_source_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.nearest,
+        force_source_nodata: int | float | None = None,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -3455,9 +3462,9 @@ class Mask(Raster):
             grid_size=grid_size,
             bounds=bounds,
             nodata=nodata,
-            force_source_nodata=force_source_nodata,
             dtype=dtype,
             resampling=resampling,
+            force_source_nodata=force_source_nodata,
             silent=silent,
             n_threads=n_threads,
             memory_limit=memory_limit,
