@@ -419,6 +419,8 @@ class Raster:
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_indexes: tuple[int] | None = None
         self._disk_dtypes: tuple[str] | None = None
+        self._disk_transform: affine.Affine | None = None
+        self._downsample: int | float = 1
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
@@ -469,6 +471,7 @@ class Raster:
                 self._disk_shape = (ds.count, ds.height, ds.width)
                 self._disk_indexes = ds.indexes
                 self._disk_dtypes = ds.dtypes
+                self._disk_transform = ds.transform
 
             # Check number of bands to be loaded
             if indexes is None:
@@ -489,6 +492,7 @@ class Raster:
                 out_shape = (down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
+                self._downsample = downsample
 
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
@@ -1976,25 +1980,54 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
         if mode == "match_pixel":
+            # Finding the intersection of requested bounds and original bounds, cropped to image shape
             ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
-            self_win = rio.windows.from_bounds(*self.bounds, transform=self.transform)
+            self_win = rio.windows.from_bounds(*self.bounds, transform=self.transform).crop(*self.shape)
             final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
+
+            # Update bounds and transform accordingly
             new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=self.transform)
             tfm = rio.transform.from_origin(new_xmin, new_ymax, *self.res)
 
             if self.is_loaded:
+                # In case data is loaded on disk, can extract directly from np array
                 (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+
                 if self.count == 1:
                     crop_img = self.data[rowmin:rowmax, colmin:colmax]
                 else:
                     crop_img = self.data[:, rowmin:rowmax, colmin:colmax]
             else:
+
+                assert self._disk_shape is not None  # This should not be the case, sanity check to make mypy happy
+
+                # If data was not loaded, and self's transform was updated (e.g. due to downsampling) need to
+                # get the Window corresponding to on disk data
+                ref_win_disk = rio.windows.from_bounds(
+                    new_xmin, new_ymin, new_xmax, new_ymax, transform=self._disk_transform
+                )
+                self_win_disk = rio.windows.from_bounds(*self.bounds, transform=self._disk_transform).crop(
+                    *self._disk_shape[1:]
+                )
+                final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
+
+                # Round up to downsampling size, to match __init__
+                final_window_disk = rio.windows.round_window_to_full_blocks(
+                    final_window_disk, ((self._downsample, self._downsample),)
+                )
+
+                # Load data for "on_disk" window but out_shape matching in-memory transform -> enforce downsampling
+                # AD (24/04/24): Note that the same issue as #447 occurs here when final_window_disk extends beyond
+                # self's bounds. Using option `boundless=True` solves the issue but causes other tests to fail
+                # This should be fixed with #447 and previous line would be obsolete.
                 with rio.open(self.filename) as raster:
                     crop_img = raster.read(
                         indexes=self._indexes,
                         masked=self._masked,
-                        window=final_window,
+                        window=final_window_disk,
+                        out_shape=(final_window.height, final_window.width),
                     )
+
                 # Squeeze first axis for single-band
                 if len(crop_img.shape) == 3 and crop_img.shape[0] == 1:
                     crop_img = crop_img.squeeze(axis=0)
