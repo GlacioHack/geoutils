@@ -222,8 +222,8 @@ print(rast.bounds)
 ```{code-cell} ipython3
 # Reproject to smaller bounds and higher resolution
 rast_reproj = rast.reproject(
-    dst_res=0.1,
-    dst_bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
+    res=0.1,
+    bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
     resampling="cubic")
 rast_reproj
 ```
@@ -253,12 +253,12 @@ See {ref}`core-match-ref` for more details.
 ```
 
 The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default,
-{func}`~geoutils.Raster.crop` is done in-place.
+{func}`~geoutils.Raster.crop` returns a new Raster.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
 ```{code-cell} ipython3
 # Crop raster to smaller bounds
-rast_crop = rast.crop(crop_geom=(0.3, 0.3, 1, 1), inplace=False)
+rast_crop = rast.crop(crop_geom=(0.3, 0.3, 1, 1))
 print(rast_crop.bounds)
 ```
 

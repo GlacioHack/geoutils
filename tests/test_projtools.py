@@ -189,8 +189,8 @@ class TestProjTools:
     )  # type: ignore
     # Try with geographic, a UTM zone and a Robinson
     @pytest.mark.parametrize("out_crs", [pyproj.CRS.from_epsg(4326), pyproj.CRS.from_epsg(32610)])  # type: ignore
-    @pytest.mark.parametrize("densify_pts", [2, 10, 5000])  # type: ignore
-    def test_get_footprint_projected(self, fn_raster_or_vector: str, out_crs: pyproj.CRS, densify_pts: int) -> None:
+    @pytest.mark.parametrize("densify_points", [2, 10, 5000])  # type: ignore
+    def test_get_footprint_projected(self, fn_raster_or_vector: str, out_crs: pyproj.CRS, densify_points: int) -> None:
         """Test the get footprint projected function."""
 
         # Open raster or vector
@@ -200,7 +200,7 @@ class TestProjTools:
             rast_or_vect = gu.Vector(fn_raster_or_vector)
 
         # Get footprint
-        footprint = rast_or_vect.get_footprint_projected(out_crs=out_crs, densify_pts=densify_pts)
+        footprint = rast_or_vect.get_footprint_projected(out_crs=out_crs, densify_points=densify_points)
 
         # Assert it is a vector containing a polygon geometry
         assert isinstance(footprint, gu.Vector)
@@ -216,4 +216,4 @@ class TestProjTools:
 
         # Check that densification yields a logical amount of points
         # (4 initial corner points times the densification factor + the last point)
-        assert len(footprint.geometry[0].exterior.coords[:]) == densify_pts * 4 + 1
+        assert len(footprint.geometry[0].exterior.coords[:]) == densify_points * 4 + 1

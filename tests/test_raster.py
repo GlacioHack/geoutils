@@ -933,15 +933,15 @@ class TestRaster:
         # -- Test with crop_geom being a list/tuple -- ##
         crop_geom: list[float] = list(r.bounds)
 
-        # Test inplace unloaded cropping conserves the shape
-        r.crop(crop_geom=[crop_geom[0] + r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]])
+        # Test unloaded inplace cropping conserves the shape
+        r.crop(crop_geom=[crop_geom[0] + r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]], inplace=True)
         assert len(r.data.shape) == 2
 
         r = gu.Raster(raster_path)
 
         # Test with same bounds -> should be the same #
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3]]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert r_cropped.raster_equal(r)
 
         # Test with bracket call
@@ -953,28 +953,28 @@ class TestRaster:
 
         # Left
         crop_geom2 = [crop_geom[0] + rand_int * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert list(r_cropped.bounds) == crop_geom2
         assert np.array_equal(r.data[:, rand_int:].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, rand_int:].mask, r_cropped.data.mask)
 
         # Right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_int * r.res[0], crop_geom[3]]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert list(r_cropped.bounds) == crop_geom2
         assert np.array_equal(r.data[:, :-rand_int].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, :-rand_int].mask, r_cropped.data.mask)
 
         # Bottom
         crop_geom2 = [crop_geom[0], crop_geom[1] + rand_int * abs(r.res[1]), crop_geom[2], crop_geom[3]]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert list(r_cropped.bounds) == crop_geom2
         assert np.array_equal(r.data[:-rand_int, :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:-rand_int, :].mask, r_cropped.data.mask)
 
         # Top
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_int * abs(r.res[1])]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert list(r_cropped.bounds) == crop_geom2
         assert np.array_equal(r.data[rand_int:, :].data, r_cropped.data, equal_nan=True)
         assert np.array_equal(r.data[rand_int:, :].mask, r_cropped.data.mask)
@@ -986,13 +986,13 @@ class TestRaster:
             crop_geom[2],
             crop_geom[3] - rand_int * r.res[0],
         )
-        r_cropped = r.crop(crop_geom3, inplace=False)
+        r_cropped = r.crop(crop_geom3)
         assert list(r_cropped.bounds) == list(crop_geom3)
         assert np.array_equal(r.data[rand_int:, :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[rand_int:, :].mask, r_cropped.data.mask)
 
         # -- Test with crop_geom being a Raster -- #
-        r_cropped2 = r.crop(r_cropped, inplace=False)
+        r_cropped2 = r.crop(r_cropped)
         assert r_cropped2.raster_equal(r_cropped)
 
         # Check that bound reprojection is done automatically if the CRS differ
@@ -1000,20 +1000,21 @@ class TestRaster:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
             )
-            r_cropped_reproj = r_cropped.reproject(dst_crs=3857)
-        r_cropped3 = r.crop(r_cropped_reproj, inplace=False)
+
+        r_cropped_reproj = r_cropped.reproject(crs=3857)
+        r_cropped3 = r.crop(r_cropped_reproj)
 
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
-        r_cropped4 = r.crop(crop_geom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs), inplace=False)
+        r_cropped4 = r.crop(crop_geom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs))
         assert r_cropped3.raster_equal(r_cropped4)
 
         # Check with bracket call
         r_cropped5 = r[r_cropped_reproj]
         assert r_cropped4.raster_equal(r_cropped5)
 
-        # -- Test with inplace=True (Default) -- #
+        # -- Test with inplace=True -- #
         r_copy = r.copy()
-        r_copy.crop(r_cropped)
+        r_copy.crop(r_cropped, inplace=True)
         assert r_copy.raster_equal(r_cropped)
 
         # - Test cropping each side with a non integer pixel, mode='match_pixel' - #
@@ -1021,28 +1022,28 @@ class TestRaster:
 
         # left
         crop_geom2 = [crop_geom[0] + rand_float * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
         assert np.array_equal(r.data[:, int(rand_float) :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, int(rand_float) :].mask, r_cropped.data.mask)
 
         # right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_float * r.res[0], crop_geom[3]]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
         assert np.array_equal(r.data[:, : -int(rand_float)].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[:, : -int(rand_float)].mask, r_cropped.data.mask)
 
         # bottom
         crop_geom2 = [crop_geom[0], crop_geom[1] + rand_float * abs(r.res[1]), crop_geom[2], crop_geom[3]]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
         assert np.array_equal(r.data[: -int(rand_float), :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[: -int(rand_float), :].mask, r_cropped.data.mask)
 
         # top
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_float * abs(r.res[1])]
-        r_cropped = r.crop(crop_geom2, inplace=False)
+        r_cropped = r.crop(crop_geom2)
         assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
         assert np.array_equal(r.data[int(rand_float) :, :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[int(rand_float) :, :].mask, r_cropped.data.mask)
@@ -1063,7 +1064,7 @@ class TestRaster:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
             )
-            r_cropped = r.crop(crop_geom2, inplace=False, mode="match_extent")
+            r_cropped = r.crop(crop_geom2, mode="match_extent")
 
         assert list(r_cropped.bounds) == crop_geom2
         # The change in resolution should be less than what would occur with +/- 1 pixel
@@ -1076,7 +1077,7 @@ class TestRaster:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
             )
-            r_cropped2 = r.crop(r_cropped, inplace=False, mode="match_extent")
+            r_cropped2 = r.crop(r_cropped, mode="match_extent")
         assert r_cropped2.raster_equal(r_cropped)
 
         # -- Test with crop_geom being a Vector -- #
@@ -1084,7 +1085,7 @@ class TestRaster:
 
         # First, we reproject manually the outline
         outlines_reproj = gu.Vector(outlines.ds.to_crs(r.crs))
-        r_cropped = r.crop(outlines_reproj, inplace=False)
+        r_cropped = r.crop(outlines_reproj)
 
         # Calculate intersection of the two bounding boxes and make sure crop has same bounds
         win_outlines = rio.windows.from_bounds(*outlines_reproj.bounds, transform=r.transform)
@@ -1094,7 +1095,7 @@ class TestRaster:
         assert list(r_cropped.bounds) == list(new_bounds)
 
         # Second, we check that bound reprojection is done automatically if the CRS differ
-        r_cropped2 = r.crop(outlines, inplace=False)
+        r_cropped2 = r.crop(outlines)
         assert list(r_cropped2.bounds) == list(new_bounds)
 
         # Finally, we check with a bracket call
@@ -1158,40 +1159,172 @@ class TestRaster:
         r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.raster.sample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtypes[0])
-        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.raster.sample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
         # 1 - if no src_nodata is set and masked values exist, raises an error
         with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
-            _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, dst_nodata=0)
+            _ = r_nodata.reproject(res=r_nodata.res[0] / 2, nodata=0)
 
-        # 2 - if no dst_nodata is set and default value conflicts with existing value, a warning is raised
+        # 2 - if no nodata is set and default value conflicts with existing value, a warning is raised
         with pytest.warns(
             UserWarning,
             match=re.escape(
-                f"For reprojection, dst_nodata must be set. Default chosen value "
+                f"For reprojection, nodata must be set. Default chosen value "
                 f"{_default_nodata(r_nodata.dtypes[0])} exists in self.data. This may have unexpected "
                 f"consequences. Consider setting a different nodata with self.set_nodata()."
             ),
         ):
-            _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+            r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+        assert r_test.nodata == default_nodata
 
         # 3 - if default nodata does not conflict, should not raise a warning
         r_nodata.data[r_nodata.data == default_nodata] = 3
-        _ = r_nodata.reproject(dst_res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+        r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+        assert r_test.nodata == default_nodata
 
-        # -- Additional tests -- #
+        # -- Test setting each combination of georeferences bounds, res and size -- #
 
         # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
         if r.nodata is None:
             r.set_nodata(0)
+
+        # - Test size - this should modify the shape, and hence resolution, but not the bounds -
+        out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
+        r_test = r.reproject(size=out_size)
+        assert r_test.shape == (out_size[1], out_size[0])
+        assert r_test.res != r.res
+        assert r_test.bounds == r.bounds
+
+        # - Test bounds -
+        # if bounds is a multiple of res, outptut res should be preserved
+        bounds = np.copy(r.bounds)
+        dst_bounds = rio.coords.BoundingBox(
+            left=bounds[0], bottom=bounds[1] + r.res[0], right=bounds[2] - 2 * r.res[1], top=bounds[3]
+        )
+        r_test = r.reproject(bounds=dst_bounds)
+        assert r_test.bounds == dst_bounds
+        assert r_test.res == r.res
+
+        # Create bounds with 1/2 and 1/3 pixel extra on the right/bottom.
+        bounds = np.copy(r.bounds)
+        dst_bounds = rio.coords.BoundingBox(
+            left=bounds[0], bottom=bounds[1] - r.res[0] / 3.0, right=bounds[2] + r.res[1] / 2.0, top=bounds[3]
+        )
+
+        # If bounds are not a multiple of res, the latter will be updated accordingly
+        r_test = r.reproject(bounds=dst_bounds)
+        assert r_test.bounds == dst_bounds
+        assert r_test.res != r.res
+
+        # - Test size and bounds -
+        r_test = r.reproject(size=out_size, bounds=dst_bounds)
+        assert r_test.shape == (out_size[1], out_size[0])
+        assert r_test.bounds == dst_bounds
+
+        # - Test res -
+        # Using a single value, output res will be enforced, resolution will be different
+        res_single = r.res[0] * 2
+        r_test = r.reproject(res=res_single)
+        assert r_test.res == (res_single, res_single)
+        assert r_test.shape != r.shape
+
+        # Using a tuple
+        res_tuple = (r.res[0] * 0.5, r.res[1] * 4)
+        r_test = r.reproject(res=res_tuple)
+        assert r_test.res == res_tuple
+        assert r_test.shape != r.shape
+
+        # - Test res and bounds -
+        # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
+        # for single res value
+        r_test = r.reproject(bounds=dst_bounds, res=res_single)
+        assert r_test.res == (res_single, res_single)
+        assert r_test.bounds.left == dst_bounds.left
+        assert r_test.bounds.top == dst_bounds.top
+        assert np.abs(r_test.bounds.right - dst_bounds.right) < res_single
+        assert np.abs(r_test.bounds.bottom - dst_bounds.bottom) < res_single
+
+        # For tuple
+        r_test = r.reproject(bounds=dst_bounds, res=res_tuple)
+        assert r_test.res == res_tuple
+        assert r_test.bounds.left == dst_bounds.left
+        assert r_test.bounds.top == dst_bounds.top
+        assert np.abs(r_test.bounds.right - dst_bounds.right) < res_tuple[0]
+        assert np.abs(r_test.bounds.bottom - dst_bounds.bottom) < res_tuple[1]
+
+        # - Test crs -
+        out_crs = rio.crs.CRS.from_epsg(4326)
+        r_test = r.reproject(crs=out_crs)
+        assert r_test.crs.to_epsg() == 4326
+
+        # -- Additional tests --
+        # If nodata falls outside the original image range, check range is preserved (with nearest interpolation)
+        r_float = r.astype("float32")  # type: ignore
+        if r_float.nodata is None:
+            r_test = r_float.reproject(bounds=dst_bounds, resampling="nearest")
+            assert r_test.nodata == -99999
+            assert np.min(r_test.data.data) == r_test.nodata
+            assert np.min(r_test.data) == np.min(r_float.data)
+            assert np.max(r_test.data) == np.max(r_float.data)
+
+        # Check that nodata works as expected
+        r_test = r_float.reproject(bounds=dst_bounds, nodata=9999)
+        assert r_test.nodata == 9999
+        assert np.max(r_test.data.data) == r_test.nodata
+
+        # Test that reproject works the same whether data is already loaded or not
+        assert r.is_loaded
+        r_test1 = r.reproject(crs=out_crs, nodata=0)
+        r_unload = gu.Raster(example, load_data=False)
+        assert not r_unload.is_loaded
+        r_test2 = r_unload.reproject(crs=out_crs, nodata=0)
+        assert r_test1.raster_equal(r_test2)
+
+        # Test that reproject does not fail with resolution as np.integer or np.float types, single value or tuple
+        astype_funcs = [int, np.int32, float, np.float64]
+        for astype_func in astype_funcs:
+            r.reproject(res=astype_func(20.5), nodata=0)
+        for i in range(len(astype_funcs)):
+            for j in range(len(astype_funcs)):
+                r.reproject(res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), nodata=0)
+
+        # Test that reprojection works for several bands
+        for n in [2, 3, 4]:
+            img1 = gu.Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"), transform=rio.transform.from_origin(0, 500, 1, 1), crs=4326
+            )
+
+            img2 = gu.Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"), transform=rio.transform.from_origin(50, 500, 1, 1), crs=4326
+            )
+
+            out_img = img2.reproject(img1)
+            assert np.shape(out_img.data) == (n, 500, 500)
+            assert (out_img.count, *out_img.shape) == (n, 500, 500)
+
+        # Test that the rounding of resolution is correct for large decimal numbers
+        # (we take an example that used to fail, see issue #354 and #357)
+        data = np.ones((4759, 2453))
+        transform = rio.transform.Affine(
+            24.12423878332849, 0.0, 238286.29553975424, 0.0, -24.12423878332849, 6995453.456051373
+        )
+        crs = rio.CRS.from_epsg(32633)
+        nodata = -9999.0
+        rst = gu.Raster.from_array(data=data, transform=transform, crs=crs, nodata=nodata)
+
+        rst_reproj = rst.reproject(bounds=rst.bounds, res=(20.0, 20.0))
+        # This used to be 19.999999999999999 due to floating point precision
+        assert rst_reproj.res == (20.0, 20.0)
+
+        # -- Test match reference functionalities --
 
         # - Create 2 artificial rasters -
         # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
@@ -1208,7 +1341,7 @@ class TestRaster:
 
         # Create a raster with different resolution
         dst_res = r.res[0] * 2 / 3
-        r2 = r2b.reproject(dst_res=dst_res)
+        r2 = r2b.reproject(res=dst_res)
         assert r2.res == (dst_res, dst_res)
 
         # Assert the initial rasters are different
@@ -1218,7 +1351,7 @@ class TestRaster:
         assert r.shape != r2.shape
         assert r.res != r2.res
 
-        # Test reprojecting with dst_ref=r2b (i.e. crop) -> output should have same shape, bounds and data, i.e. be the
+        # Test reprojecting with ref=r2b (i.e. crop) -> output should have same shape, bounds and data, i.e. be the
         # same object
         r3 = r.reproject(r2b)
         assert r3.bounds == r2b.bounds
@@ -1240,7 +1373,7 @@ class TestRaster:
 
             plt.show()
 
-        # Test reprojecting with dst_ref=r2 -> output should have same shape, bounds and transform
+        # Test reprojecting with ref=r2 -> output should have same shape, bounds and transform
         # Data should be slightly different due to difference in input resolution
         r3 = r.reproject(r2)
         assert r3.bounds == r2.bounds
@@ -1265,17 +1398,17 @@ class TestRaster:
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
-        rand_indices = gu.raster.subsample_array(r_gaps.data, nsamples, return_indices=True)
+        rand_indices = gu.raster.sample_array(r_gaps.data, nsamples, return_indices=True)
         r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
         # reproject raster, and reproject mask. Check that both have same number of masked pixels
         # TODO: should test other resampling algo
-        r_gaps_reproj = r_gaps.reproject(dst_res=dst_res, resampling="nearest")
+        r_gaps_reproj = r_gaps.reproject(res=dst_res, resampling="nearest")
         mask = gu.Raster.from_array(
             r_gaps.data.mask.astype("uint8"), crs=r_gaps.crs, transform=r_gaps.transform, nodata=None
         )
-        mask_reproj = mask.reproject(dst_res=dst_res, dst_nodata=255, resampling="nearest")
+        mask_reproj = mask.reproject(res=dst_res, nodata=255, resampling="nearest")
         # Final masked pixels are those originally masked (=1) and the values masked during reproject, e.g. edges
         tot_masked_true = np.count_nonzero(mask_reproj.data.mask) + np.count_nonzero(mask_reproj.data == 1)
         assert np.count_nonzero(r_gaps_reproj.data.mask) == tot_masked_true
@@ -1288,116 +1421,25 @@ class TestRaster:
         r3 = r_nodata.reproject(r2)
         assert r_nodata.nodata == r3.nodata
 
-        # Test dst_size - this should modify the shape, and hence resolution, but not the bounds
-        out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
-        r3 = r.reproject(dst_size=out_size)
-        assert r3.shape == (out_size[1], out_size[0])
-        assert r3.res != r.res
-        assert r3.bounds == r.bounds
+        # -- Test additional errors raised for argument combinations -- #
 
-        # Test dst_bounds
-        # if bounds is a multiple of res, outptut res should be preserved
-        bounds = np.copy(r.bounds)
-        dst_bounds = rio.coords.BoundingBox(
-            left=bounds[0], bottom=bounds[1] + r.res[0], right=bounds[2] - 2 * r.res[1], top=bounds[3]
-        )
-        r3 = r.reproject(dst_bounds=dst_bounds)
-        assert r3.bounds == dst_bounds
-        assert r3.res == r.res
+        # If both ref and crs are set
+        with pytest.raises(ValueError, match=re.escape("Either of `ref` or `crs` must be set. Not both.")):
+            _ = r.reproject(ref=r2, crs=r.crs)
 
-        # Create bounds with 1/2 and 1/3 pixel extra on the right/bottom.
-        bounds = np.copy(r.bounds)
-        dst_bounds = rio.coords.BoundingBox(
-            left=bounds[0], bottom=bounds[1] - r.res[0] / 3.0, right=bounds[2] + r.res[1] / 2.0, top=bounds[3]
-        )
+        # Size and res are mutually exclusive
+        with pytest.raises(ValueError, match=re.escape("size and res both specified. Specify only one.")):
+            _ = r.reproject(size=(10, 10), res=50)
 
-        # If bounds are not a multiple of res, the latter will be updated accordingly
-        r3 = r.reproject(dst_bounds=dst_bounds)
-        assert r3.bounds == dst_bounds
-        assert r3.res != r.res
+        # If wrong type for `ref`
+        with pytest.raises(
+            TypeError, match=re.escape("Type of ref not understood, must be path to file (str), Raster.")
+        ):
+            _ = r.reproject(ref=3)
 
-        # Assert that when reprojection creates nodata (voids), if no nodata is set, a default value is set
-        r3 = r.reproject(dst_bounds=dst_bounds)
-        if r.nodata is None:
-            assert r3.nodata == _default_nodata(r.dtypes[0])
-
-        # Particularly crucial if nodata falls outside the original image range
-        # -> check range is preserved (with nearest interpolation)
-        r_float = r.astype("float32")  # type: ignore
-        if r_float.nodata is None:
-            r3 = r_float.reproject(dst_bounds=dst_bounds, resampling="nearest")
-            assert r3.nodata == -99999
-            assert np.min(r3.data.data) == r3.nodata
-            assert np.min(r3.data) == np.min(r_float.data)
-            assert np.max(r3.data) == np.max(r_float.data)
-
-        # Check that dst_nodata works as expected
-        r3 = r_float.reproject(dst_bounds=dst_bounds, dst_nodata=9999)
-        assert r3.nodata == 9999
-        assert np.max(r3.data.data) == r3.nodata
-
-        # If dst_res is set, the resolution will be enforced
-        # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
-        r3 = r.reproject(dst_bounds=dst_bounds, dst_res=r.res)
-        assert r3.res == r.res
-        assert r3.bounds.left == dst_bounds.left
-        assert r3.bounds.top == dst_bounds.top
-        assert np.abs(r3.bounds.right - dst_bounds.right) < r3.res[1]
-        assert np.abs(r3.bounds.bottom - dst_bounds.bottom) < r3.res[0]
-
-        # Test dst_crs
-        out_crs = rio.crs.CRS.from_epsg(4326)
-        r3 = r.reproject(dst_crs=out_crs)
-        assert r3.crs.to_epsg() == 4326
-
-        # Test that reproject works from self.ds and yield same result as from in-memory array
-        # TO DO: fix issue that default behavior sets nodata to 255 and masks valid values
-        r3 = r.reproject(dst_crs=out_crs, dst_nodata=0)
-        r = gu.Raster(example, load_data=False)
-        r4 = r.reproject(dst_crs=out_crs, dst_nodata=0)
-        assert r3.raster_equal(r4)
-
-        # Test that reproject does not fail with resolution as np.integer or np.float types, single value or tuple
-        astype_funcs = [int, np.int32, float, np.float64]
-        for astype_func in astype_funcs:
-            r.reproject(dst_res=astype_func(20.5), dst_nodata=0)
-        for i in range(len(astype_funcs)):
-            for j in range(len(astype_funcs)):
-                r.reproject(dst_res=(astype_funcs[i](20.5), astype_funcs[j](10.5)), dst_nodata=0)
-
-        # Test that reprojection works for several bands
-        for n in [2, 3, 4]:
-            img1 = gu.Raster.from_array(
-                np.ones((n, 500, 500), dtype="uint8"), transform=rio.transform.from_origin(0, 500, 1, 1), crs=4326
-            )
-
-            img2 = gu.Raster.from_array(
-                np.ones((n, 500, 500), dtype="uint8"), transform=rio.transform.from_origin(50, 500, 1, 1), crs=4326
-            )
-
-            out_img = img2.reproject(img1)
-            assert np.shape(out_img.data) == (n, 500, 500)
-            assert (out_img.count, *out_img.shape) == (n, 500, 500)
-
-        # Test that the rounding of resolution is correct for large rasters
-        # (we take an example that used to fail, see issue #354)
-        data = np.zeros(shape=(5741, 2959), dtype="uint8")
-        transform = rio.transform.Affine(20.0, 0.0, 238286.29553975424, 0.0, -20.0, 6995453.456051373)
-        crs = rio.CRS.from_epsg(32633)
-        nodata = -9999.0
-        rst = gu.Raster.from_array(data=data, transform=transform, crs=crs, nodata=nodata)
-
-        # This large grid geotransform is taken from https://cdn.proj.org/us_nga_egm08_25.tif
-        data2 = np.zeros(shape=(4321, 8640), dtype="uint8")
-        transform2 = rio.transform.Affine(
-            0.041666666666666664, 0.0, -180.02083333333334, 0.0, -0.041666666666666664, 90.02083333333333
-        )
-        crs2 = rio.CRS.from_epsg(4979)
-        rst2 = gu.Raster.from_array(data=data2, transform=transform2, crs=crs2, nodata=None)
-
-        rst2_reproj = rst2.reproject(rst)
-        # This used to be 19.999999999999999 due to floating point precision
-        assert rst2_reproj.res == (20.0, 20.0)
+        # If input reference is string and file and does not exist
+        with pytest.raises(ValueError, match=re.escape("Reference raster does not exist.")):
+            _ = r.reproject(ref="no_file.tif")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
@@ -1723,7 +1765,7 @@ class TestRaster:
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
-        lat, lon = reproject_to_latlon(pts=[[xtest0], [ytest0]], in_crs=r.crs)
+        lat, lon = reproject_to_latlon(points=[[xtest0], [ytest0]], in_crs=r.crs)
         z_val_2 = r.value_at_coords(lon, lat, latlon=True)
         assert z_val == z_val_2
 
@@ -2784,15 +2826,15 @@ class TestMask:
     def test_reproject(self, mask: gu.Mask) -> None:
         # Test 1: with a classic resampling (bilinear)
 
-        # Reproject mask
-        mask_reproj = mask.reproject()
+        # Reproject mask - resample to 100 x 100 grid
+        mask_reproj = mask.reproject(size=(100, 100), src_nodata=2)
 
         # Check instance is respected
         assert isinstance(mask_reproj, gu.Mask)
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
-        mask_uint8_reproj = mask_uint8.reproject()
+        mask_uint8_reproj = mask_uint8.reproject(size=(100, 100), src_nodata=2)
         mask_uint8_reproj.data = mask_uint8_reproj.data.astype("bool")
 
         assert mask_reproj.raster_equal(mask_uint8_reproj)
@@ -2810,7 +2852,7 @@ class TestMask:
     def test_crop(self, mask: gu.Mask) -> None:
         # Test with same bounds -> should be the same #
         crop_geom = mask.bounds
-        mask_cropped = mask.crop(crop_geom, inplace=False)
+        mask_cropped = mask.crop(crop_geom)
         assert mask_cropped.raster_equal(mask)
 
         # Check if instance is respected
@@ -2825,35 +2867,35 @@ class TestMask:
 
         # Left
         crop_geom2 = [crop_geom[0] + rand_int * mask.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
-        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        mask_cropped = mask.crop(crop_geom2)
         assert list(mask_cropped.bounds) == crop_geom2
         assert np.array_equal(mask.data[:, rand_int:].data, mask_cropped.data.data, equal_nan=True)
         assert np.array_equal(mask.data[:, rand_int:].mask, mask_cropped.data.mask)
 
         # Right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_int * mask.res[0], crop_geom[3]]
-        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        mask_cropped = mask.crop(crop_geom2)
         assert list(mask_cropped.bounds) == crop_geom2
         assert np.array_equal(mask.data[:, :-rand_int].data, mask_cropped.data.data, equal_nan=True)
         assert np.array_equal(mask.data[:, :-rand_int].mask, mask_cropped.data.mask)
 
         # Bottom
         crop_geom2 = [crop_geom[0], crop_geom[1] + rand_int * abs(mask.res[1]), crop_geom[2], crop_geom[3]]
-        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        mask_cropped = mask.crop(crop_geom2)
         assert list(mask_cropped.bounds) == crop_geom2
         assert np.array_equal(mask.data[:-rand_int, :].data, mask_cropped.data.data, equal_nan=True)
         assert np.array_equal(mask.data[:-rand_int, :].mask, mask_cropped.data.mask)
 
         # Top
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_int * abs(mask.res[1])]
-        mask_cropped = mask.crop(crop_geom2, inplace=False)
+        mask_cropped = mask.crop(crop_geom2)
         assert list(mask_cropped.bounds) == crop_geom2
         assert np.array_equal(mask.data[rand_int:, :].data, mask_cropped.data, equal_nan=True)
         assert np.array_equal(mask.data[rand_int:, :].mask, mask_cropped.data.mask)
 
         # Test inplace
         mask_orig = mask.copy()
-        mask.crop(crop_geom2)
+        mask.crop(crop_geom2, inplace=True)
         assert list(mask.bounds) == crop_geom2
         assert np.array_equal(mask_orig.data[rand_int:, :].data, mask.data, equal_nan=True)
         assert np.array_equal(mask_orig.data[rand_int:, :].mask, mask.data.mask)

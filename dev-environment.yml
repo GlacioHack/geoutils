@@ -2,7 +2,7 @@ name: geoutils-dev
 channels:
   - conda-forge
 dependencies:
-  - python>=3.9
+  - python>=3.9,<3.12
   - geopandas>=0.12.0
   - matplotlib
   - pyproj
@@ -30,12 +30,13 @@ dependencies:
 
   # Doc dependencies
   - sphinx
-  - pydata-sphinx-theme==0.13.3
+  - pydata-sphinx-theme
   - sphinx-book-theme>=1.0
   - sphinx-gallery
   - sphinx-design
   - sphinx-autodoc-typehints
   - sphinxcontrib-programoutput
+  - sphinx-argparse
   - autovizwidget
   - graphviz
   - myst-nb

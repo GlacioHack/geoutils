@@ -21,8 +21,10 @@ import geoviewer  # noqa
 @pytest.mark.parametrize(
     "option",
     (
+        (),
         ("-cmap", "Reds"),
         ("-vmin", "-10", "-vmax", "10"),
+        ("-vmin", "5%", "-vmax", "95%"),
         ("-band", "1"),
         ("-nocb",),
         ("-clabel", "Test"),
@@ -34,7 +36,7 @@ import geoviewer  # noqa
         ("-noresampl",),
     ),
 )  # type: ignore
-def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
+def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 
@@ -51,7 +53,7 @@ def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
     assert output == ""
 
     # Remove file if it was created
-    if option[0] == "-save":
+    if "-save" in option:
         if os.path.exists("test.png"):
             os.remove("test.png")
 
@@ -60,20 +62,89 @@ def test_geoviewer_valid(capsys, monkeypatch, filename, option):  # type: ignore
     "filename", [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")]
 )  # type: ignore
 @pytest.mark.parametrize(
-    "option",
+    "args",
     (
-        ("-cmap", "Lols"),
-        ("-vmin", "lol"),
-        ("-vmin", "lol2"),
-        ("-figsize", "blabla"),
-        ("-dpi", "300.5"),
-        ("-nodata", "lol"),
+        (("-band", "0"), IndexError),
+        (("-band", "2"), IndexError),
+        (("-cmap", "Lols"), ValueError),
+        (("-cmap", "Lols"), ValueError),
+        (("-vmin", "lol"), ValueError),
+        (("-vmin", "lol2"), ValueError),
+        (("-vmax", "105%"), ValueError),
+        (("-figsize", "blabla"), ValueError),
+        (("-dpi", "300.5"), ValueError),
+        (("-nodata", "lol"), ValueError),
+        (("-nodata", "1e40"), ValueError),
     ),
 )  # type: ignore
-def test_geoviewer_invalid(capsys, monkeypatch, filename, option):  # type: ignore
+def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 
     # To not get exception when testing generic functions such as --help
-    with pytest.raises(ValueError):
+    option, error = args
+    with pytest.raises(error):
+        geoviewer.main([filename, *option])
+
+
+@pytest.mark.parametrize("filename", [gu.examples.get_path("everest_landsat_rgb")])  # type: ignore
+@pytest.mark.parametrize(
+    "option",
+    (
+        (),
+        ("-band", "1"),
+        ("-band", "2"),
+        ("-band", "3"),
+        ("-clabel", "Test"),
+        ("-figsize", "8,8"),
+        ("-max_size", "1000"),
+        ("-save", "test.png"),
+        ("-dpi", "300"),
+        ("-nodata", "99"),
+        ("-noresampl",),
+    ),
+)  # type: ignore
+def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: ignore
+    # To avoid having the plots popping up during execution
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    # To not get exception when testing generic functions such as --help
+    try:
+        geoviewer.main([filename, *option])
+    except SystemExit:
+        pass
+
+    # Capture error output (not stdout, just a plot)
+    output = capsys.readouterr().err
+
+    # No error should be raised
+    assert output == ""
+
+    # Remove file if it was created
+    if "-save" in option:
+        if os.path.exists("test.png"):
+            os.remove("test.png")
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        gu.examples.get_path("everest_landsat_rgb"),
+    ],
+)  # type: ignore
+@pytest.mark.parametrize(
+    "args",
+    (
+        (("-band", "0"), IndexError),
+        (("-band", "4"), IndexError),
+        (("-nodata", "1e40"), ValueError),
+    ),
+)  # type: ignore
+def test_geoviewer_invalid_3band(capsys, monkeypatch, filename, args):  # type: ignore
+    # To avoid having the plots popping up during execution
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    # To not get exception when testing generic functions such as --help
+    option, error = args
+    with pytest.raises(error):
         geoviewer.main([filename, *option])

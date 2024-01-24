@@ -77,7 +77,7 @@ def load_multiple_rasters(
             )
             # Ensure bounds align with the original ones, to avoid resampling at this stage
             new_bounds = gu.projtools.align_bounds(rst.transform, new_bounds)
-            rst.crop(new_bounds, mode="match_pixel")
+            rst.crop(new_bounds, mode="match_pixel", inplace=True)
 
     # Optionally, reproject all rasters to the reference grid
     if reproject:
@@ -94,9 +94,7 @@ def load_multiple_rasters(
 
         # Reproject all rasters
         for index, rst in enumerate(output_rst):
-            out_rst = rst.reproject(
-                dst_crs=ref_rst.crs, dst_bounds=new_bounds, dst_res=ref_rst.res, silent=True, **kwargs
-            )
+            out_rst = rst.reproject(crs=ref_rst.crs, bounds=new_bounds, res=ref_rst.res, silent=True, **kwargs)
             if not out_rst.is_loaded:
                 out_rst.load()
             output_rst[index] = out_rst
@@ -178,11 +176,11 @@ def stack_rasters(
         nodata = reference_raster.nodata or gu.raster.raster._default_nodata(reference_raster.data.dtype)
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
-            dst_bounds=dst_bounds,
-            dst_res=reference_raster.res,
-            dst_crs=reference_raster.crs,
-            dst_dtype=reference_raster.data.dtype,
-            dst_nodata=reference_raster.nodata,
+            bounds=dst_bounds,
+            res=reference_raster.res,
+            crs=reference_raster.crs,
+            dtype=reference_raster.data.dtype,
+            nodata=reference_raster.nodata,
             silent=True,
         )
         reprojected_raster.set_nodata(nodata)
