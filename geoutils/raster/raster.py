@@ -2634,7 +2634,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         x: Number | ArrayLike,
         y: Number | ArrayLike,
         latlon: bool = False,
-        index: int | None = None,
+        band: int | None = None,
         masked: bool = False,
         window: int | None = None,
         reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
@@ -2650,7 +2650,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param x: X (or longitude) coordinate(s).
         :param y: Y (or latitude) coordinate(s).
         :param latlon: Whether coordinates are provided as longitude-latitude.
-        :param index: Band number to extract from (from 1 to self.count).
+        :param band: Band number to extract from (from 1 to self.count).
         :param masked: Whether to return a masked array, or classic array.
         :param window: Window size to read around coordinates. Must be odd.
         :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
@@ -2759,7 +2759,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 if self.count == 1:
                     data = self.data[row : row + height, col : col + width]
                 else:
-                    data = self.data[slice(None) if index is None else index - 1, row : row + height, col : col + width]
+                    data = self.data[slice(None) if band is None else band - 1, row: row + height, col: col + width]
                 if not masked:
                     data = data.filled()
                 value = format_value(data)
@@ -2774,7 +2774,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                         fill_value=self.nodata,
                         boundless=boundless,
                         masked=masked,
-                        indexes=index,
+                        indexes=band,
                     )
                 value = format_value(data)
                 win = data
@@ -2971,7 +2971,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         points: tuple[list[float], list[float]],
         input_latlon: bool = False,
         mode: str = "linear",
-        index: int = 1,
+        band: int = 1,
         shift_area_or_point: bool = False,
         **kwargs: Any,
     ) -> NDArrayNum:
@@ -2988,7 +2988,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is used to
             interpolate the raster value at each point. For more information, see scipy.interpolate.interp2d.
             Default is linear.
-        :param index: The band to use (from 1 to self.count).
+        :param band: The band to use (from 1 to self.count).
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
 
@@ -3019,7 +3019,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if self.count == 1:
             rpoints = map_coordinates(self.data.astype(np.float32), [i, j], **kwargs)
         else:
-            rpoints = map_coordinates(self.data[index - 1, :, :].astype(np.float32), [i, j], **kwargs)
+            rpoints = map_coordinates(self.data[band - 1, :, :].astype(np.float32), [i, j], **kwargs)
 
         rpoints = np.array(rpoints, dtype=np.float32)
         rpoints[np.array(ind_invalid)] = np.nan

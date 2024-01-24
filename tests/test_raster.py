@@ -1777,22 +1777,22 @@ class TestRaster:
         itest = int(itest[0])
         jtest = int(jtest[0])
         # Extract the values
-        z_band1 = r_multi.value_at_coords(xtest0, ytest0, index=1)
-        z_band2 = r_multi.value_at_coords(xtest0, ytest0, index=2)
-        z_band3 = r_multi.value_at_coords(xtest0, ytest0, index=3)
+        z_band1 = r_multi.value_at_coords(xtest0, ytest0, band=1)
+        z_band2 = r_multi.value_at_coords(xtest0, ytest0, band=2)
+        z_band3 = r_multi.value_at_coords(xtest0, ytest0, band=3)
         # Compare to the Raster array slice
         assert list(r_multi.data[:, itest, jtest]) == [z_band1, z_band2, z_band3]
 
         # 3/ Masked argument
         r_multi.data[:, itest, jtest] = np.ma.masked
-        z_not_ma = r_multi.value_at_coords(xtest0, ytest0, index=1)
+        z_not_ma = r_multi.value_at_coords(xtest0, ytest0, band=1)
         assert not np.ma.is_masked(z_not_ma)
-        z_ma = r_multi.value_at_coords(xtest0, ytest0, index=1, masked=True)
+        z_ma = r_multi.value_at_coords(xtest0, ytest0, band=1, masked=True)
         assert np.ma.is_masked(z_ma)
 
         # 4/ Window argument
         val_window, z_window = r_multi.value_at_coords(
-            xtest0, ytest0, index=1, window=3, masked=True, return_window=True
+            xtest0, ytest0, band=1, window=3, masked=True, return_window=True
         )
         assert (
             val_window
@@ -1803,7 +1803,7 @@ class TestRaster:
 
         # 5/ Reducer function argument
         val_window2 = r_multi.value_at_coords(
-            xtest0, ytest0, index=1, window=3, masked=True, reducer_function=np.ma.median
+            xtest0, ytest0, band=1, window=3, masked=True, reducer_function=np.ma.median
         )
         assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
