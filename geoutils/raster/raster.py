@@ -2165,7 +2165,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         reproj_kwargs.update({"dst_crs": crs})
 
         # --- Check that reprojection is actually needed --- #
-        # Caution, size is (width, height) while shape is (height, width)
+        # Caution, grid_size is (width, height) while shape is (height, width)
         if all(
             [
                 (transform == self.transform) or (transform is None),
