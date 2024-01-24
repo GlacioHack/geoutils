@@ -172,6 +172,10 @@ class TestRaster:
 
         r = gu.Raster(example)
 
+        # Check default runs without error (prints to screen)
+        output = r.info()
+        assert output is None
+
         # Check all is good with passing attributes
         with rio.open(example) as dataset:
             for attr in _default_rio_attrs:
@@ -180,7 +184,7 @@ class TestRaster:
         # Check that the stats=True flag doesn't trigger a warning
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="New nodata.*", category=UserWarning)
-            stats = r.info(stats=True)
+            stats = r.info(stats=True, verbose=False)
 
         # Check the stats adapt to nodata values
         if r.dtypes[0] == "uint8":
@@ -196,7 +200,7 @@ class TestRaster:
             with pytest.warns(UserWarning):
                 r.set_nodata(-99999)
 
-        new_stats = r.info(stats=True)
+        new_stats = r.info(stats=True, verbose=False)
         for i, line in enumerate(stats.splitlines()):
             if "MINIMUM" not in line:
                 continue
@@ -1101,6 +1105,39 @@ class TestRaster:
         # Finally, we check with a bracket call
         r_cropped3 = r[outlines]
         assert list(r_cropped3.bounds) == list(new_bounds)
+
+        # -- Test crop works as expected even if transform has been modified, e.g. through downsampling -- #
+        # Test that with downsampling, cropping to same bounds result in same raster
+        r = gu.Raster(raster_path, downsample=5)
+        r_test = r.crop(r.bounds)
+        assert r_test.raster_equal(r)
+
+        # - Test that cropping yields the same results whether data is loaded or not -
+        # With integer cropping (left)
+        rand_int = np.random.randint(1, min(r.shape) - 1)
+        crop_geom2 = [crop_geom[0] + rand_int * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
+        r = gu.Raster(raster_path, downsample=5, load_data=False)
+        assert not r.is_loaded
+        r_crop_unloaded = r.crop(crop_geom2)
+        r.load()
+        r_crop_loaded = r.crop(crop_geom2)
+        # TODO: the following condition should be met once issue #447 is solved
+        # assert r_crop_unloaded.raster_equal(r_crop_loaded)
+        assert r_crop_unloaded.shape == r_crop_loaded.shape
+        assert r_crop_unloaded.transform == r_crop_loaded.transform
+
+        # With a float number of pixels added to the right, mode 'match_pixel'
+        rand_float = np.random.randint(1, min(r.shape) - 1) + 0.25
+        crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] + rand_float * r.res[0], crop_geom[3]]
+        r = gu.Raster(raster_path, downsample=5, load_data=False)
+        assert not r.is_loaded
+        r_crop_unloaded = r.crop(crop_geom2, mode="match_pixel")
+        r.load()
+        r_crop_loaded = r.crop(crop_geom2, mode="match_pixel")
+        # TODO: the following condition should be met once issue #447 is solved
+        # assert r_crop_unloaded.raster_equal(r_crop_loaded)
+        assert r_crop_unloaded.shape == r_crop_loaded.shape
+        assert r_crop_unloaded.transform == r_crop_loaded.transform
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_shift(self, example: str) -> None:
