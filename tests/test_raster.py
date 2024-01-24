@@ -290,7 +290,7 @@ class TestRaster:
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 5 - multiple bands, load one band only
-        r = gu.Raster(self.landsat_rgb_path, load_data=True, indexes=1)
+        r = gu.Raster(self.landsat_rgb_path, load_data=True, bands=1)
         assert r.count == 1
         assert r.count_on_disk == 3
         assert r.indexes == (1,)
@@ -298,7 +298,7 @@ class TestRaster:
         assert r.data.shape == (r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
-        r = gu.Raster(self.landsat_rgb_path, load_data=True, indexes=[2, 3])
+        r = gu.Raster(self.landsat_rgb_path, load_data=True, bands=[2, 3])
         assert r.count == 2
         assert r.count_on_disk == 3
         assert r.indexes == (1, 2)
@@ -307,7 +307,7 @@ class TestRaster:
 
         # Test 7 - load a single band a posteriori calling load()
         r = gu.Raster(self.landsat_rgb_path)
-        r.load(indexes=1)
+        r.load(bands=1)
         assert r.count == 1
         assert r.count_on_disk == 3
         assert r.indexes == (1,)
@@ -316,7 +316,7 @@ class TestRaster:
 
         # Test 8 - load a list of band a posteriori calling load()
         r = gu.Raster(self.landsat_rgb_path)
-        r.load(indexes=[2, 3])
+        r.load(bands=[2, 3])
         assert r.count == 2
         assert r.count_on_disk == 3
         assert r.indexes == (1, 2)
@@ -1169,8 +1169,9 @@ class TestRaster:
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
-        # 1 - if no src_nodata is set and masked values exist, raises an error
-        with pytest.raises(ValueError, match="No nodata set, use `src_nodata`"):
+        # 1 - if no force_source_nodata is set and masked values exist, raises an error
+        with pytest.raises(ValueError, match=re.escape("No nodata set, set one for the raster with self.set_nodata() or use a "
+                                             "temporary one with `force_source_nodata`.")):
             _ = r_nodata.reproject(res=r_nodata.res[0] / 2, nodata=0)
 
         # 2 - if no nodata is set and default value conflicts with existing value, a warning is raised
@@ -1182,12 +1183,12 @@ class TestRaster:
                 f"consequences. Consider setting a different nodata with self.set_nodata()."
             ),
         ):
-            r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+            r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, force_source_nodata=default_nodata)
         assert r_test.nodata == default_nodata
 
         # 3 - if default nodata does not conflict, should not raise a warning
         r_nodata.data[r_nodata.data == default_nodata] = 3
-        r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, src_nodata=default_nodata)
+        r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, force_source_nodata=default_nodata)
         assert r_test.nodata == default_nodata
 
         # -- Test setting each combination of georeferences bounds, res and size -- #
@@ -1198,7 +1199,7 @@ class TestRaster:
 
         # - Test size - this should modify the shape, and hence resolution, but not the bounds -
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
-        r_test = r.reproject(size=out_size)
+        r_test = r.reproject(grid_size=out_size)
         assert r_test.shape == (out_size[1], out_size[0])
         assert r_test.res != r.res
         assert r_test.bounds == r.bounds
@@ -1225,7 +1226,7 @@ class TestRaster:
         assert r_test.res != r.res
 
         # - Test size and bounds -
-        r_test = r.reproject(size=out_size, bounds=dst_bounds)
+        r_test = r.reproject(grid_size=out_size, bounds=dst_bounds)
         assert r_test.shape == (out_size[1], out_size[0])
         assert r_test.bounds == dst_bounds
 
@@ -1429,7 +1430,7 @@ class TestRaster:
 
         # Size and res are mutually exclusive
         with pytest.raises(ValueError, match=re.escape("size and res both specified. Specify only one.")):
-            _ = r.reproject(size=(10, 10), res=50)
+            _ = r.reproject(grid_size=(10, 10), res=50)
 
         # If wrong type for `ref`
         with pytest.raises(
@@ -2225,7 +2226,7 @@ class TestRaster:
 
         # Test plotting single band B/W, add_cbar
         ax = plt.subplot(111)
-        img_RGB.show(index=1, cmap="gray", ax=ax, add_cbar=False, title="Plotting one band B/W")
+        img_RGB.show(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Plotting one band B/W")
         if DO_PLOT:
             plt.show()
         else:
@@ -2413,10 +2414,10 @@ class TestRaster:
         assert img.count == 3
 
         # Extract only one band (then it will not return a list)
-        red2 = img.split_bands(copy=False, subset=1)[0]
+        red2 = img.split_bands(copy=False, bands=1)[0]
 
         # Extract a subset with a list in a weird direction
-        blue2, green2 = img.split_bands(copy=False, subset=[3, 2])
+        blue2, green2 = img.split_bands(copy=False, bands=[3, 2])
 
         # Check that the subset functionality works as expected.
         assert red.raster_equal(red2)
@@ -2441,7 +2442,7 @@ class TestRaster:
         )
 
         # Copy the bands instead of pointing to the same memory.
-        red_c = img.split_bands(copy=True, subset=1)[0]
+        red_c = img.split_bands(copy=True, bands=1)[0]
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
         assert not np.shares_memory(red_c.data, img.data)
@@ -2827,14 +2828,14 @@ class TestMask:
         # Test 1: with a classic resampling (bilinear)
 
         # Reproject mask - resample to 100 x 100 grid
-        mask_reproj = mask.reproject(size=(100, 100), src_nodata=2)
+        mask_reproj = mask.reproject(grid_size=(100, 100), force_source_nodata=2)
 
         # Check instance is respected
         assert isinstance(mask_reproj, gu.Mask)
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
-        mask_uint8_reproj = mask_uint8.reproject(size=(100, 100), src_nodata=2)
+        mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), force_source_nodata=2)
         mask_uint8_reproj.data = mask_uint8_reproj.data.astype("bool")
 
         assert mask_reproj.raster_equal(mask_uint8_reproj)

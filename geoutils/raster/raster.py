@@ -250,7 +250,7 @@ def _load_rio(
 def _get_reproject_params(
     raster: RasterType,
     crs: CRS | str | int | None = None,
-    size: tuple[int, int] | None = None,
+    grid_size: tuple[int, int] | None = None,
     res: int | float | abc.Iterable[float] | None = None,
     bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
 ) -> tuple[Affine, tuple[int, int]]:
@@ -262,7 +262,7 @@ def _get_reproject_params(
     the bounds are rounded up to the nearest compatible value.
 
     :param crs: Destination coordinate reference system as a string or EPSG. Defaults to this raster's CRS.
-    :param size: Destination size as (ncol, nrow). Mutually exclusive with ``res``.
+    :param grid_size: Destination size as (ncol, nrow). Mutually exclusive with ``res``.
     :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
         Mutually exclusive with ``size``.
     :param bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
@@ -272,17 +272,17 @@ def _get_reproject_params(
     """
     # --- Input sanity checks --- #
     # check size and res are not both set
-    if (size is not None) and (res is not None):
+    if (grid_size is not None) and (res is not None):
         raise ValueError("size and res both specified. Specify only one.")
 
     # Set CRS to input CRS by default
     if crs is None:
         crs = raster.crs
 
-    if size is None:
+    if grid_size is None:
         width, height = None, None
     else:
-        width, height = size
+        width, height = grid_size
 
     # Convert bounds to BoundingBox
     if bounds is not None:
@@ -298,7 +298,7 @@ def _get_reproject_params(
     # rio.warp.calculate_default_transform (https://github.com/rasterio/rasterio/issues/3010)
     if (
         (crs == raster.crs)
-        & ((size is None) | ((height == raster.shape[0]) & (width == raster.shape[1])))
+        & ((grid_size is None) | ((height == raster.shape[0]) & (width == raster.shape[1])))
         & ((res is None) | np.all(np.array(res) == raster.res))
         & ((bounds is None) | (bounds == raster.bounds))
     ):
@@ -327,11 +327,11 @@ def _get_reproject_params(
     # --- Second, crop to requested bounds --- #
     else:
         # If output size and bounds are known, can use rio.transform.from_bounds to get dst_transform
-        if size is not None:
+        if grid_size is not None:
             dst_transform = rio.transform.from_bounds(
-                bounds.left, bounds.bottom, bounds.right, bounds.top, size[0], size[1]
+                bounds.left, bounds.bottom, bounds.right, bounds.top, grid_size[0], grid_size[1]
             )
-            dst_size = size
+            dst_size = grid_size
 
         else:
             # Otherwise, need to calculate the new output size, rounded up
@@ -379,7 +379,7 @@ class Raster:
         | rio.io.DatasetReader
         | rio.io.MemoryFile
         | dict[str, Any],
-        indexes: int | list[int] | None = None,
+        bands: int | list[int] | None = None,
         load_data: bool = False,
         downsample: Number = 1,
         masked: bool = True,
@@ -390,7 +390,7 @@ class Raster:
 
         :param filename_or_dataset: Path to file or Rasterio dataset.
 
-        :param indexes: Band(s) to load into the object. Default loads all bands.
+        :param bands: Band(s) to load into the object. Default loads all bands.
 
         :param load_data: Whether to load the array during instantiation. Default is False.
 
@@ -409,7 +409,7 @@ class Raster:
         self._transform: affine.Affine | None = None
         self._crs: CRS | None = None
         self._nodata: int | float | None = nodata
-        self._indexes = indexes
+        self._indexes = bands
         self._indexes_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
         self._out_count: int | None = None
@@ -471,12 +471,12 @@ class Raster:
                 self._disk_dtypes = ds.dtypes
 
             # Check number of bands to be loaded
-            if indexes is None:
+            if bands is None:
                 count = self.count
-            elif isinstance(indexes, int):
+            elif isinstance(bands, int):
                 count = 1
             else:
-                count = len(indexes)
+                count = len(bands)
 
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
@@ -499,7 +499,7 @@ class Raster:
                 # Don't need to pass shape and transform, because out_shape overrides it
                 self.data = _load_rio(
                     ds,
-                    indexes=indexes,
+                    indexes=bands,
                     masked=masked,
                     out_shape=out_shape,
                     out_count=count,
@@ -630,12 +630,12 @@ class Raster:
         """Driver used to read a file on disk."""
         return self._driver
 
-    def load(self, indexes: int | list[int] | None = None, **kwargs: Any) -> None:
+    def load(self, bands: int | list[int] | None = None, **kwargs: Any) -> None:
         """
         Load the raster array from disk.
 
         :param kwargs: Optional keyword arguments sent to '_load_rio()'.
-        :param indexes: Band(s) to load. Note that rasterio begins counting at 1, not 0.
+        :param bands: Band(s) to load. Note that rasterio begins counting at 1, not 0.
 
         :raises ValueError: If the data are already loaded.
         :raises AttributeError: If no 'filename' attribute exists.
@@ -649,15 +649,15 @@ class Raster:
             )
 
         # If no index is passed, use all of them
-        if indexes is None:
+        if bands is None:
             valid_indexes = self.indexes
         # If a new index was pass, redefine out_shape
-        elif isinstance(indexes, (int, list)):
+        elif isinstance(bands, (int, list)):
             # Rewrite properly as a tuple
-            if isinstance(indexes, int):
-                valid_indexes = (indexes,)
+            if isinstance(bands, int):
+                valid_indexes = (bands,)
             else:
-                valid_indexes = tuple(indexes)
+                valid_indexes = tuple(bands)
             # Update out_count if out_shape exists (when a downsampling has been passed)
             if self._out_shape is not None:
                 self._out_count = len(valid_indexes)
@@ -1667,7 +1667,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             f"Filename:             {self.name} \n",
             f"Loaded?               {self.is_loaded} \n",
             f"Modified since load?  {self.is_modified} \n",
-            f"Size:                 {self.width}, {self.height}\n",
+            f"Grid size:                 {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtypes}\n",
             f"Coordinate System:    {[self.crs.to_string() if self.crs is not None else None]}\n",
@@ -2009,7 +2009,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             self._data = crop_img
             self.transform = tfm
             self.tags["AREA_OR_POINT"] = "Area"  # TODO: Explain why this should have an area interpretation now
-            return self
+            return None
         else:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata)
             newraster.tags["AREA_OR_POINT"] = "Area"
@@ -2019,13 +2019,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self: RasterType,
         ref: RasterType | str | None = None,
         crs: CRS | str | int | None = None,
-        size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         res: float | abc.Iterable[float] | None = None,
+        grid_size: tuple[int, int] | None = None,
+        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.bilinear,
+        force_source_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -2043,18 +2043,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param ref: Reference raster to match resolution, bounds and CRS.
         :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
             defaults to this raster's CRS.
-        :param size: Destination size as (x, y). Do not use with ``res``.
+        :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
+            Do not use with ``grid_size``.
+        :param grid_size: Destination grid size as (x, y). Do not use with ``res``.
         :param bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
             right, top bounds in the destination CRS.
-        :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
-            Do not use with ``size``.
         :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
-        :param src_nodata: Force a source nodata value (read from the metadata by default).
         :param resampling: A Rasterio resampling method, can be passed as a string.
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
+        :param force_source_nodata: Force a source nodata value (read from the metadata by default).
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
@@ -2076,8 +2076,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             dtype = self.dtypes[0]
 
         # Set source nodata if provided
-        if src_nodata is None:
+        if force_source_nodata is None:
             src_nodata = self.nodata
+        else:
+            src_nodata = force_source_nodata
+            # Raise warning if a different nodata value exists for this raster than the forced one (not None)
+            if self.nodata is not None:
+                warnings.warn("Forcing source nodata value of {} despite an existing nodata value of {} in the raster. "
+                              "To silence this warning, use self.set_nodata() before reprojection instead of forcing.".
+                              format(force_source_nodata, self.nodata))
 
         # Create a BoundingBox if required
         if bounds is not None:
@@ -2122,7 +2129,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             "dst_nodata": nodata,
         }
 
-        # --- Calculate output georeferences (transform, size)
+        # --- Calculate output georeferences (transform, grid size)
 
         # Case a raster is provided as reference
         if ref is not None:
@@ -2146,11 +2153,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             crs = CRS.from_user_input(crs)
 
         # Determine target transform and grid size
-        transform, size = _get_reproject_params(self, crs=crs, size=size, res=res, bounds=bounds)
+        transform, grid_size = _get_reproject_params(self, crs=crs, grid_size=grid_size, res=res, bounds=bounds)
 
         # Update reprojection options accordingly
         reproj_kwargs.update({"dst_transform": transform})
-        data = np.ones((self.count, size[1], size[0]), dtype=dtype)
+        data = np.ones((self.count, grid_size[1], grid_size[0]), dtype=dtype)
         reproj_kwargs.update({"destination": data})
         reproj_kwargs.update({"dst_crs": crs})
 
@@ -2160,20 +2167,20 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             [
                 (transform == self.transform) or (transform is None),
                 (crs == self.crs) or (crs is None),
-                (size == self.shape[::-1]) or (size is None),
+                (grid_size == self.shape[::-1]) or (grid_size is None),
                 np.all(np.array(res) == self.res) or (res is None),
             ]
         ):
             if (nodata == self.nodata) or (nodata is None):
                 if not silent:
-                    warnings.warn("Output projection, bounds and size are identical -> return self (not a copy!)")
+                    warnings.warn("Output projection, bounds and grid size are identical -> returning self (not a copy!)")
                 return self
 
             elif nodata is not None:
                 if not silent:
                     warnings.warn(
                         "Only nodata is different, consider using the 'set_nodata()' method instead'\
-                    ' -> return self (not a copy!)"
+                    ' -> returning self (not a copy!)"
                     )
                 return self
 
@@ -2192,7 +2199,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # All masked values must be set to a nodata value for rasterio's reproject to work properly
             # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
             if src_nodata is None and np.sum(self.data.mask) > 0:
-                raise ValueError("No nodata set, use `src_nodata`.")
+                raise ValueError("No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+                                 "with `force_source_nodata`.")
 
             # Mask not taken into account by rasterio, need to fill with src_nodata
             data, transformed = rio.warp.reproject(self.data.filled(src_nodata), **reproj_kwargs)
@@ -2486,7 +2494,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def show(
         self,
-        index: int | tuple[int, ...] | None = None,
+        bands: int | tuple[int, ...] | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -2503,7 +2511,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
         you give this method will be passed to it.
 
-        :param index: Band to plot, from 1 to self.count (default is all).
+        :param bands: Bands to plot, from 1 to self.count (default is all).
         :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
         :param vmax: Colorbar maximum value. Default is data max.
@@ -2537,10 +2545,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Check if specific band selected, or take all
         # rshow takes care of image dimensions
         # if self.count=3 (4) => plotted as RGB(A)
-        if index is None:
-            index = tuple(range(1, self.count + 1))
-        elif isinstance(index, int):
-            if index > self.count:
+        if bands is None:
+            bands = tuple(range(1, self.count + 1))
+        elif isinstance(bands, int):
+            if bands > self.count:
                 raise ValueError(f"Index must be in range 1-{self.count:d}")
             pass
         else:
@@ -2550,11 +2558,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if self.count == 1:
             data = self.data
         else:
-            data = self.data[np.array(index) - 1, :, :]
+            data = self.data[np.array(bands) - 1, :, :]
 
         # If multiple bands (RGB), cbar does not make sense
-        if isinstance(index, abc.Sequence):
-            if len(index) > 1:
+        if isinstance(bands, abc.Sequence):
+            if len(bands) > 1:
                 add_cbar = False
 
         # Create colorbar
@@ -3018,30 +3026,30 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return rpoints
 
-    def split_bands(self: RasterType, copy: bool = False, subset: list[int] | int | None = None) -> list[Raster]:
+    def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """
         Split the bands into separate rasters.
 
         :param copy: Copy the bands or return slices of the original data.
-        :param subset: Optional. A subset of band indices to extract (from 1 to self.count). Defaults to all.
+        :param bands: Optional. A list of band indices to extract (from 1 to self.count). Defaults to all.
 
         :returns: A list of Rasters for each band.
         """
-        bands: list[Raster] = []
+        raster_bands: list[Raster] = []
 
-        if subset is None:
+        if bands is None:
             indices = list(np.arange(1, self.count + 1))
-        elif isinstance(subset, int):
-            indices = [subset]
-        elif isinstance(subset, list):
-            indices = subset
+        elif isinstance(bands, int):
+            indices = [bands]
+        elif isinstance(bands, list):
+            indices = bands
         else:
-            raise ValueError(f"'subset' got invalid type: {type(subset)}. Expected list[int], int or None")
+            raise ValueError(f"'subset' got invalid type: {type(bands)}. Expected list[int], int or None")
 
         if copy:
             for band_n in indices:
                 # Generate a new Raster from a copy of the band's data
-                bands.append(
+                raster_bands.append(
                     self.from_array(
                         self.data[band_n - 1, :, :].copy(),
                         transform=self.transform,
@@ -3052,7 +3060,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             for band_n in indices:
                 # Set the data to a slice of the original array
-                bands.append(
+                raster_bands.append(
                     self.from_array(
                         self.data[band_n - 1, :, :],
                         transform=self.transform,
@@ -3061,7 +3069,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     )
                 )
 
-        return bands
+        return raster_bands
 
     @overload
     def to_points(
@@ -3418,11 +3426,11 @@ class Mask(Raster):
         self: Mask,
         ref: RasterType | str | None = None,
         crs: CRS | str | int | None = None,
-        size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         res: float | abc.Iterable[float] | None = None,
+        grid_size: tuple[int, int] | None = None,
+        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
-        src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        force_source_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.nearest,
         silent: bool = False,
@@ -3443,11 +3451,11 @@ class Mask(Raster):
         output = super().reproject(
             ref=ref,  # type: ignore
             crs=crs,
-            size=size,
-            bounds=bounds,
             res=res,
+            grid_size=grid_size,
+            bounds=bounds,
             nodata=nodata,
-            src_nodata=src_nodata,
+            force_source_nodata=force_source_nodata,
             dtype=dtype,
             resampling=resampling,
             silent=silent,
