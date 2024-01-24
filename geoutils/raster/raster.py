@@ -1654,16 +1654,23 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    def info(self, stats: bool = False) -> str:
+    @overload
+    def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None:
+        ...
+
+    @overload
+    def info(self, stats: bool = False, *, verbose: Literal[False]) -> str:
+        ...
+
+    def info(self, stats: bool = False, verbose: bool = True) -> None | str:
         """
-        Summarize information about the raster.
+        Print summary information about the raster.
 
         :param stats: Add statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
             not calculate statistics.
+        :param verbose: If set to True (default) will directly print to screen and return None
 
-
-        :returns: text information about Raster attributes.
-
+        :returns: summary string or None.
         """
         as_str = [
             f"Driver:               {self.driver} \n",
@@ -1701,7 +1708,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     as_str.append(f"[MEAN]:             {np.nanmean(self.data[b, :, :]):.2f}\n")
                     as_str.append(f"[STD DEV]:          {np.nanstd(self.data[b, :, :]):.2f}\n")
 
-        return "".join(as_str)
+        if verbose:
+            print("".join(as_str))
+            return None
+        else:
+            return "".join(as_str)
 
     def copy(self: RasterType, new_array: NDArrayNum | None = None) -> RasterType:
         """

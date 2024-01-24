@@ -172,6 +172,10 @@ class TestRaster:
 
         r = gu.Raster(example)
 
+        # Check default runs without error (prints to screen)
+        output = r.info()
+        assert output is None
+
         # Check all is good with passing attributes
         with rio.open(example) as dataset:
             for attr in _default_rio_attrs:
@@ -180,7 +184,7 @@ class TestRaster:
         # Check that the stats=True flag doesn't trigger a warning
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="New nodata.*", category=UserWarning)
-            stats = r.info(stats=True)
+            stats = r.info(stats=True, verbose=False)
 
         # Check the stats adapt to nodata values
         if r.dtypes[0] == "uint8":
@@ -196,7 +200,7 @@ class TestRaster:
             with pytest.warns(UserWarning):
                 r.set_nodata(-99999)
 
-        new_stats = r.info(stats=True)
+        new_stats = r.info(stats=True, verbose=False)
         for i, line in enumerate(stats.splitlines()):
             if "MINIMUM" not in line:
                 continue
