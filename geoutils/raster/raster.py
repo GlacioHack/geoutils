@@ -549,7 +549,10 @@ class Raster:
     def height(self) -> int:
         """Height of the raster in pixels."""
         if not self.is_loaded:
-            return self._disk_shape[1]  # type: ignore
+            if self._out_shape is not None:
+                return self._out_shape[0]
+            else:
+                return self._disk_shape[1]  # type: ignore
         else:
             # If the raster is single-band
             if len(self.data.shape) == 2:
@@ -562,7 +565,10 @@ class Raster:
     def width(self) -> int:
         """Width of the raster in pixels."""
         if not self.is_loaded:
-            return self._disk_shape[2]  # type: ignore
+            if self._out_shape is not None:
+                return self._out_shape[1]
+            else:
+                return self._disk_shape[2]  # type: ignore
         else:
             # If the raster is single-band
             if len(self.data.shape) == 2:
