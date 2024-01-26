@@ -409,15 +409,15 @@ class Raster:
         self._transform: affine.Affine | None = None
         self._crs: CRS | None = None
         self._nodata: int | float | None = nodata
-        self._indexes = bands
-        self._indexes_loaded: int | tuple[int, ...] | None = None
+        self._bands = bands
+        self._bands_loaded: int | tuple[int, ...] | None = None
         self._masked = masked
         self._out_count: int | None = None
         self._out_shape: tuple[int, int] | None = None
         self._disk_hash: int | None = None
         self._is_modified = True
         self._disk_shape: tuple[int, int, int] | None = None
-        self._disk_indexes: tuple[int] | None = None
+        self._disk_bands: tuple[int] | None = None
         self._disk_dtypes: tuple[str] | None = None
 
         # This is for Raster.from_array to work.
@@ -467,7 +467,7 @@ class Raster:
                 self.tags.update(ds.tags())
 
                 self._disk_shape = (ds.count, ds.height, ds.width)
-                self._disk_indexes = ds.indexes
+                self._disk_bands = ds.indexes
                 self._disk_dtypes = ds.dtypes
 
             # Check number of bands to be loaded
@@ -599,26 +599,34 @@ class Raster:
         return (str(self.data.dtype),) * self.count
 
     @property
-    def indexes_on_disk(self) -> None | tuple[int, ...]:
-        """Indexes of bands on disk if it exists."""
-        if self._disk_indexes is not None:
-            return self._disk_indexes
+    def bands_on_disk(self) -> None | tuple[int, ...]:
+        """Band indexes on disk if a file exists."""
+        if self._disk_bands is not None:
+            return self._disk_bands
         return None
 
     @property
-    def indexes(self) -> tuple[int, ...]:
-        """Indexes of bands loaded in memory if they are, otherwise on disk."""
-        if self._indexes is not None and not self.is_loaded:
-            if isinstance(self._indexes, int):
-                return (self._indexes,)
-            return tuple(self._indexes)
+    def bands(self) -> tuple[int, ...]:
+        """Band indexes loaded in memory if they are, otherwise on disk."""
+        if self._bands is not None and not self.is_loaded:
+            if isinstance(self._bands, int):
+                return (self._bands,)
+            return tuple(self._bands)
         # if self._indexes_loaded is not None:
         #     if isinstance(self._indexes_loaded, int):
         #         return (self._indexes_loaded, )
         #     return tuple(self._indexes_loaded)
         if self.is_loaded:
             return tuple(range(1, self.count + 1))
-        return self.indexes_on_disk  # type: ignore
+        return self.bands_on_disk  # type: ignore
+
+    @property
+    def indexes(self) -> tuple[int, ...]:
+        """
+        Band indexes (duplicate of .bands attribute, mirroring Rasterio naming "indexes").
+        Loaded in memory if they are, otherwise on disk.
+        """
+        return self.bands
 
     @property
     def name(self) -> str | None:
@@ -650,26 +658,26 @@ class Raster:
 
         # If no index is passed, use all of them
         if bands is None:
-            valid_indexes = self.indexes
+            valid_bands = self.bands
         # If a new index was pass, redefine out_shape
         elif isinstance(bands, (int, list)):
             # Rewrite properly as a tuple
             if isinstance(bands, int):
-                valid_indexes = (bands,)
+                valid_bands = (bands,)
             else:
-                valid_indexes = tuple(bands)
+                valid_bands = tuple(bands)
             # Update out_count if out_shape exists (when a downsampling has been passed)
             if self._out_shape is not None:
-                self._out_count = len(valid_indexes)
+                self._out_count = len(valid_bands)
 
-        # Save which indexes are loaded
-        self._indexes_loaded = valid_indexes
+        # Save which bands are loaded
+        self._bands_loaded = valid_bands
 
         # If a downsampled out_shape was defined during instantiation
         with rio.open(self.filename) as dataset:
             self.data = _load_rio(
                 dataset,
-                indexes=list(valid_indexes),
+                indexes=list(valid_bands),
                 masked=self._masked,
                 transform=self.transform,
                 shape=self.shape,
@@ -1991,7 +1999,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             else:
                 with rio.open(self.filename) as raster:
                     crop_img = raster.read(
-                        indexes=self._indexes,
+                        indexes=self._bands,
                         masked=self._masked,
                         window=final_window,
                     )

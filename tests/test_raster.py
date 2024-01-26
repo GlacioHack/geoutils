@@ -229,8 +229,8 @@ class TestRaster:
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.count_on_disk == 1
-        assert r.indexes == (1,)
-        assert r.indexes_on_disk == (1,)
+        assert r.bands == (1,)
+        assert r.bands_on_disk == (1,)
         assert np.array_equal(r.dtypes, ["uint8"])
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
@@ -247,8 +247,8 @@ class TestRaster:
         assert r2.shape == (r2.height, r2.width)
         assert r2.count == 1
         assert r.count_on_disk == 1
-        assert r.indexes == (1,)
-        assert r.indexes_on_disk == (1,)
+        assert r.bands == (1,)
+        assert r.bands_on_disk == (1,)
         assert np.array_equal(r2.dtypes, ["float32"])
         assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
@@ -260,8 +260,8 @@ class TestRaster:
         assert r.is_loaded
         assert r.count == 1
         assert r.count_on_disk == 1
-        assert r.indexes == (1,)
-        assert r.indexes_on_disk == (1,)
+        assert r.bands == (1,)
+        assert r.bands_on_disk == (1,)
         assert r.data.shape == (r.height, r.width)
 
         # Test 3 - single band, loading data
@@ -269,20 +269,20 @@ class TestRaster:
         assert r.is_loaded
         assert r.count == 1
         assert r.count_on_disk == 1
-        assert r.indexes == (1,)
-        assert r.indexes_on_disk == (1,)
+        assert r.bands == (1,)
+        assert r.bands_on_disk == (1,)
         assert r.data.shape == (r.height, r.width)
 
         # Test 4 - multiple bands, load all bands
         r = gu.Raster(self.landsat_rgb_path, load_data=True)
         assert r.count == 3
         assert r.count_on_disk == 3
-        assert r.indexes == (
+        assert r.bands == (
             1,
             2,
             3,
         )
-        assert r.indexes_on_disk == (
+        assert r.bands_on_disk == (
             1,
             2,
             3,
@@ -293,16 +293,16 @@ class TestRaster:
         r = gu.Raster(self.landsat_rgb_path, load_data=True, bands=1)
         assert r.count == 1
         assert r.count_on_disk == 3
-        assert r.indexes == (1,)
-        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.bands == (1,)
+        assert r.bands_on_disk == (1, 2, 3)
         assert r.data.shape == (r.height, r.width)
 
         # Test 6 - multiple bands, load a list of bands
         r = gu.Raster(self.landsat_rgb_path, load_data=True, bands=[2, 3])
         assert r.count == 2
         assert r.count_on_disk == 3
-        assert r.indexes == (1, 2)
-        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.bands == (1, 2)
+        assert r.bands_on_disk == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Test 7 - load a single band a posteriori calling load()
@@ -310,8 +310,8 @@ class TestRaster:
         r.load(bands=1)
         assert r.count == 1
         assert r.count_on_disk == 3
-        assert r.indexes == (1,)
-        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.bands == (1,)
+        assert r.bands_on_disk == (1, 2, 3)
         assert r.data.shape == (r.height, r.width)
 
         # Test 8 - load a list of band a posteriori calling load()
@@ -319,8 +319,8 @@ class TestRaster:
         r.load(bands=[2, 3])
         assert r.count == 2
         assert r.count_on_disk == 3
-        assert r.indexes == (1, 2)
-        assert r.indexes_on_disk == (1, 2, 3)
+        assert r.bands == (1, 2)
+        assert r.bands_on_disk == (1, 2, 3)
         assert r.data.shape == (r.count, r.height, r.width)
 
         # Check that errors are raised when appropriate
@@ -1776,7 +1776,7 @@ class TestRaster:
         assert z_val == z_val_2
 
         # 2/ Band argument
-        # Get the indexes for the multi-band Raster
+        # Get the band indexes for the multi-band Raster
         r_multi = gu.Raster(self.landsat_rgb_path)
         itest, jtest = r_multi.xy2ij(xtest0, ytest0)
         itest = int(itest[0])
