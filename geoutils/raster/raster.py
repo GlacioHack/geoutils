@@ -1943,7 +1943,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
-        inplace: Literal[False] = ...,
+        inplace: Literal[False] = False,
     ) -> RasterType:
         ...
 
@@ -1963,7 +1963,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
-        inplace: bool = ...,
+        inplace: bool = False,
     ) -> RasterType | None:
         ...
 
@@ -2085,8 +2085,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         force_source_nodata: int | float | None = None,
-            *,
-        inplace: Literal[False] = ...,
+        *,
+        inplace: Literal[False] = False,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -2126,7 +2126,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         resampling: Resampling | str = Resampling.bilinear,
         force_source_nodata: int | float | None = None,
         *,
-        inplace: bool = ...,
+        inplace: bool = False,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -3588,7 +3588,7 @@ class Mask(Raster):
         resampling: Resampling | str = Resampling.nearest,
         force_source_nodata: int | float | None = None,
         *,
-        inplace: Literal[True] = ...,
+        inplace: Literal[True],
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -3608,7 +3608,7 @@ class Mask(Raster):
         resampling: Resampling | str = Resampling.nearest,
         force_source_nodata: int | float | None = None,
         *,
-        inplace: bool = ...,
+        inplace: bool = False,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
@@ -3662,9 +3662,9 @@ class Mask(Raster):
         output._data = output.data.astype(bool)  # type: ignore
 
         if inplace:
-            self._transform = output.transform
-            self._crs = output.crs
-            self.data = output._data
+            self._transform = output._transform  # type: ignore
+            self._crs = output._crs  # type: ignore
+            self.data = output._data  # type: ignore
             return None
         else:
             return output
@@ -3677,7 +3677,7 @@ class Mask(Raster):
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
-        inplace: Literal[False] = ...,
+        inplace: Literal[False] = False,
     ) -> Mask:
         ...
 
@@ -3697,7 +3697,7 @@ class Mask(Raster):
         crop_geom: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
-        inplace: bool = ...,
+        inplace: bool = False,
     ) -> Mask | None:
         ...
 
