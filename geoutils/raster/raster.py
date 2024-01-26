@@ -352,6 +352,46 @@ def _get_reproject_params(
 
     return dst_transform, dst_size
 
+def _check_cast_array_raster(input1: RasterType | NDArrayNum, input2: RasterType | NDArrayNum) -> None:
+    """
+    Check the casting between an array and a raster, or raise an (helpful) error message.
+
+    :param input1: Raster or array.
+    :param input2: Raster or array.
+
+    :return: None.
+    """
+
+    if isinstance(input1, Raster) and isinstance(input2, Raster):
+
+        # Check that both rasters have the same shape and georeferences
+        if (input1.data.shape == input2.data.shape) \
+                & (input1.transform == input2.transform) \
+                & (input1.crs == input2.crs):
+            pass
+        else:
+            raise ValueError(
+                "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
+                "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
+                "same grid and CRS than raster2.")
+
+    else:
+
+        # The shape compatibility should be valid even when squeezing
+        if isinstance(input1, np.ndarray):
+            input1 = input1.squeeze()
+        else:
+            input2 = input2.squeeze()
+
+        if input1.shape == input2.shape:
+            pass
+        else:
+            raise ValueError("The raster and array must have the same shape for an arithmetic operation. "
+                             "For example, if the array comes from another raster, use raster1 = "
+                             "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
+                             "than raster2. Or, if the array does not come from a raster, define one with raster = "
+                             "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject.")
+
 
 class Raster:
     """
@@ -983,18 +1023,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         nodata1 = self.nodata
         dtype1 = self.data.dtype
 
+        # Raise error messages if grids don't match (CRS + transform for raster, shape for array)
+        if isinstance(other, (Raster, np.ndarray)):
+            _check_cast_array_raster(self, other)
+
         # Case 1 - other is a Raster
         if isinstance(other, Raster):
-            # Not necessary anymore with implicit loading
-            # # Check that both data are loaded
-            # if not (self.is_loaded & other.is_loaded):
-            #     raise ValueError("Raster's data must be loaded with self.load().")
-
-            # Check that both rasters have the same shape and georeferences
-            if (self.data.shape == other.data.shape) & (self.transform == other.transform) & (self.crs == other.crs):
-                pass
-            else:
-                raise ValueError("Both rasters must have the same shape, transform and CRS.")
 
             nodata2 = other.nodata
             dtype2 = other.data.dtype
@@ -1009,11 +1043,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 other_data = other.squeeze(axis=0)
             else:
                 other_data = other
-
-            if self.data.shape == other_data.shape:
-                pass
-            else:
-                raise ValueError("The raster and array must have the same shape.")
 
             nodata2 = None
             dtype2 = other.dtype
@@ -1843,6 +1872,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
+
+            # Check the casting between Raster and array inputs, and return error messages if not consistent
+            _check_cast_array_raster(inputs[0], inputs[1])
+
             if ufunc.nout == 1:
                 return self.from_array(
                     data=final_ufunc(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
@@ -1903,6 +1936,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             outputs = func(first_arg, *args[1:], **kwargs)  # type: ignore
         else:
             second_arg = args[1].data
+            # Check the casting between Raster and array inputs, and return error messages if not consistent
+            _check_cast_array_raster(first_arg, second_arg)
             outputs = func(first_arg, second_arg, *args[2:], **kwargs)  # type: ignore
 
         # Below, we recast to Raster if the shape was preserved, otherwise return an array
