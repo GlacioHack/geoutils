@@ -2065,6 +2065,66 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             newraster.tags["AREA_OR_POINT"] = "Area"
             return newraster
 
+    @overload
+    def reproject(
+            self: RasterType,
+            ref: RasterType | str | None = None,
+            crs: CRS | str | int | None = None,
+            size: tuple[int, int] | None = None,
+            bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+            res: float | abc.Iterable[float] | None = None,
+            nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            dtype: DTypeLike | None = None,
+            resampling: Resampling | str = Resampling.bilinear,
+            *,
+            inplace: Literal[False] = ...,
+            silent: bool = False,
+            n_threads: int = 0,
+            memory_limit: int = 64,
+    ) -> RasterType:
+        ...
+
+    @overload
+    def reproject(
+            self: RasterType,
+            ref: RasterType | str | None = None,
+            crs: CRS | str | int | None = None,
+            size: tuple[int, int] | None = None,
+            bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+            res: float | abc.Iterable[float] | None = None,
+            nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            dtype: DTypeLike | None = None,
+            resampling: Resampling | str = Resampling.bilinear,
+            *,
+            inplace: Literal[True] = ...,
+            silent: bool = False,
+            n_threads: int = 0,
+            memory_limit: int = 64,
+    ) -> None:
+        ...
+
+    @overload
+    def reproject(
+            self: RasterType,
+            ref: RasterType | str | None = None,
+            crs: CRS | str | int | None = None,
+            size: tuple[int, int] | None = None,
+            bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+            res: float | abc.Iterable[float] | None = None,
+            nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            dtype: DTypeLike | None = None,
+            resampling: Resampling | str = Resampling.bilinear,
+            *,
+            inplace: bool = ...,
+            silent: bool = False,
+            n_threads: int = 0,
+            memory_limit: int = 64,
+    ) -> RasterType | None:
+        ...
+
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -2076,10 +2136,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.bilinear,
+        inplace: bool = False,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> RasterType:
+    ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
 
@@ -2105,6 +2166,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param resampling: A Rasterio resampling method, can be passed as a string.
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
+        :param inplace: Whether to update the raster in-place.
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
@@ -2269,15 +2331,21 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             assert transform == transformed
 
         # Write results to a new Raster.
-        r = self.from_array(data, transformed, crs, nodata)
-
-        return r
+        if inplace:
+            # Order is important here, because calling self.data will use nodata to mask the array properly
+            self._crs = crs
+            self._nodata = nodata
+            self._transform = transform
+            self.data = data
+            return None
+        else:
+            return self.from_array(data, transformed, crs, nodata)
 
     def shift(
         self, xoff: float, yoff: float, distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced"
     ) -> None:
         """
-        Shift the raster by a (x,y) offset.
+        Shift the raster in-place by a (x,y) offset.
 
         The shifting only updates the geotransform (no resampling is performed).
 
@@ -3464,6 +3532,67 @@ class Mask(Raster):
 
         return str(s)
 
+    @overload
+    def reproject(
+            self: Mask,
+            ref: RasterType | str | None = None,
+            crs: CRS | str | int | None = None,
+            size: tuple[int, int] | None = None,
+            bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+            res: float | abc.Iterable[float] | None = None,
+            nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            dtype: DTypeLike | None = None,
+            resampling: Resampling | str = Resampling.nearest,
+            *,
+            inplace: Literal[False] = False,
+            silent: bool = False,
+            n_threads: int = 0,
+            memory_limit: int = 64,
+    ) -> Mask:
+        ...
+
+    @overload
+    def reproject(
+            self: Mask,
+            ref: RasterType | str | None = None,
+            crs: CRS | str | int | None = None,
+            size: tuple[int, int] | None = None,
+            bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+            res: float | abc.Iterable[float] | None = None,
+            nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            dtype: DTypeLike | None = None,
+            resampling: Resampling | str = Resampling.nearest,
+            *,
+            inplace: Literal[True] = ...,
+            silent: bool = False,
+            n_threads: int = 0,
+            memory_limit: int = 64,
+    ) -> None:
+        ...
+
+    @overload
+    def reproject(
+            self: Mask,
+            ref: RasterType | str | None = None,
+            crs: CRS | str | int | None = None,
+            size: tuple[int, int] | None = None,
+            bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+            res: float | abc.Iterable[float] | None = None,
+            nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+            dtype: DTypeLike | None = None,
+            resampling: Resampling | str = Resampling.nearest,
+            *,
+            inplace: bool = ...,
+            silent: bool = False,
+            n_threads: int = 0,
+            memory_limit: int = 64,
+    ) -> Mask | None:
+        ...
+
+
     def reproject(
         self: Mask,
         ref: RasterType | str | None = None,
@@ -3475,10 +3604,11 @@ class Mask(Raster):
         src_nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.nearest,
+        inplace: bool = False,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> Mask:
+    ) -> Mask | None:
         # Depending on resampling, adjust to rasterio supported types
         if resampling in [Resampling.nearest, "nearest"]:
             self._data = self.data.astype("uint8")  # type: ignore
@@ -3500,6 +3630,7 @@ class Mask(Raster):
             src_nodata=src_nodata,
             dtype=dtype,
             resampling=resampling,
+            inplace=False,
             silent=silent,
             n_threads=n_threads,
             memory_limit=memory_limit,
@@ -3508,7 +3639,13 @@ class Mask(Raster):
         # Transform back to a boolean array
         output._data = output.data.astype(bool)  # type: ignore
 
-        return output
+        if inplace:
+            self._transform = output.transform
+            self._crs = output.crs
+            self.data = output._data
+            return None
+        else:
+            return output
 
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
