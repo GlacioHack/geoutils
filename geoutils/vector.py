@@ -971,7 +971,7 @@ class Vector:
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
-        inplace: Literal[False] = ...,
+        inplace: Literal[False] = False,
     ) -> VectorType:
         ...
 
@@ -991,7 +991,7 @@ class Vector:
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
         clip: bool,
         *,
-        inplace: bool = ...,
+        inplace: bool = False,
     ) -> VectorType | None:
         ...
 
@@ -1015,7 +1015,9 @@ class Vector:
             coordinates. If ``crop_geom`` is a raster or a vector, will crop to the bounds. If ``crop_geom`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param clip: Whether to clip the geometry to the given extent (by default keeps all intersecting).
-        :param inplace: Update the vector in-place or return copy.
+        :param inplace: Whether to update the vector in-place.
+
+        :returns: Cropped vector (or None if inplace).
         """
         if isinstance(crop_geom, (gu.Raster, Vector)):
             # For another Vector or Raster, we reproject the bounding box in the same CRS as self
@@ -1039,11 +1041,42 @@ class Vector:
                 new_vector._ds = new_vector.ds.clip(mask=(xmin, ymin, xmax, ymax))
             return new_vector
 
+    @overload
     def reproject(
         self: Vector,
         ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
         crs: CRS | str | int | None = None,
+        *,
+        inplace: Literal[False] = False,
     ) -> Vector:
+        ...
+
+    @overload
+    def reproject(
+        self: Vector,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        crs: CRS | str | int | None = None,
+        *,
+        inplace: Literal[True],
+    ) -> None:
+        ...
+
+    @overload
+    def reproject(
+        self: Vector,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        crs: CRS | str | int | None = None,
+        *,
+        inplace: bool = False,
+    ) -> Vector | None:
+        ...
+
+    def reproject(
+        self: Vector,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        crs: CRS | str | int | None = None,
+        inplace: bool = False,
+    ) -> Vector | None:
         """
         Reproject vector to a specified coordinate reference system.
 
@@ -1057,8 +1090,9 @@ class Vector:
             Can be provided as a raster, vector, Rasterio dataset, GeoPandas dataframe, or path to the file.
         :param crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
             defaults to self.crs.
+        :param inplace: Whether to update the vector in-place.
 
-        :returns: Reprojected vector.
+        :returns: Reprojected vector (or None if inplace).
         """
 
         # Check that either ref or crs is provided
@@ -1092,7 +1126,11 @@ class Vector:
             # Determine user-input target CRS
             crs = CRS.from_user_input(crs)
 
-        return Vector(self.ds.to_crs(crs=crs))
+        if inplace:
+            self.ds = self.ds.to_crs(crs=crs)
+            return None
+        else:
+            return Vector(self.ds.to_crs(crs=crs))
 
     @overload
     def create_mask(

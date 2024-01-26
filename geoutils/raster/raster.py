@@ -1313,7 +1313,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param dtype: Any numpy dtype or string accepted by numpy.astype.
         :param inplace: Whether to modify the raster in-place.
 
-        :returns: Raster with updated dtype.
+        :returns: Raster with updated dtype (or None if inplace).
         """
         # Check that dtype is supported by rasterio
         if not rio.dtypes.check_dtype(dtype):
@@ -1989,7 +1989,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
         :param inplace: Whether to update the raster in-place.
 
-        :returns: A new raster, or None if cropping in-place.
+        :returns: A new raster (or None if inplace).
         """
         assert mode in [
             "match_extent",
@@ -2179,7 +2179,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
 
-        :returns: Reprojected raster.
+        :returns: Reprojected raster (or None if inplace).
 
         """
         # --- Sanity checks on inputs and defaults -- #
