@@ -2083,7 +2083,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # Warning: this will not work for multiple bands with different dtypes
             dtype = self.dtypes[0]
 
-        # Set source nodata if provided
+        # --- Set source nodata if provided -- #
         if force_source_nodata is None:
             src_nodata = self.nodata
         else:
@@ -2097,16 +2097,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     )
                 )
 
-        # Create a BoundingBox if required
-        if bounds is not None:
-            if not isinstance(bounds, rio.coords.BoundingBox):
-                bounds = rio.coords.BoundingBox(
-                    bounds["left"],
-                    bounds["bottom"],
-                    bounds["right"],
-                    bounds["top"],
-                )
-
         # --- Set destination nodata if provided -- #
         # This is needed in areas not covered by the input data.
         # If None, will use GeoUtils' default, as rasterio's default is unknown, hence cannot be handled properly.
@@ -2114,7 +2104,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             nodata = self.nodata
             if nodata is None:
                 nodata = _default_nodata(dtype)
-                # if nodata is already being used, raise a warning.
+                # If nodata is already being used, raise a warning.
                 # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
                 if not self.is_loaded:
                     warnings.warn(
@@ -2128,6 +2118,16 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                         f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
                         f"self.set_nodata()."
                     )
+
+        # Create a BoundingBox if required
+        if bounds is not None:
+            if not isinstance(bounds, rio.coords.BoundingBox):
+                bounds = rio.coords.BoundingBox(
+                    bounds["left"],
+                    bounds["bottom"],
+                    bounds["right"],
+                    bounds["top"],
+                )
 
         from geoutils.misc import resampling_method_from_str
 
