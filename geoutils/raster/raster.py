@@ -352,6 +352,7 @@ def _get_reproject_params(
 
     return dst_transform, dst_size
 
+
 def _check_cast_array_raster(input1: RasterType | NDArrayNum, input2: RasterType | NDArrayNum) -> None:
     """
     Check the casting between an array and a raster, or raise an (helpful) error message.
@@ -365,32 +366,37 @@ def _check_cast_array_raster(input1: RasterType | NDArrayNum, input2: RasterType
     if isinstance(input1, Raster) and isinstance(input2, Raster):
 
         # Check that both rasters have the same shape and georeferences
-        if (input1.data.shape == input2.data.shape) \
-                & (input1.transform == input2.transform) \
-                & (input1.crs == input2.crs):
+        if (
+            (input1.data.shape == input2.data.shape)
+            & (input1.transform == input2.transform)
+            & (input1.crs == input2.crs)
+        ):
             pass
         else:
             raise ValueError(
                 "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
                 "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
-                "same grid and CRS than raster2.")
+                "same grid and CRS than raster2."
+            )
 
     else:
 
         # The shape compatibility should be valid even when squeezing
         if isinstance(input1, np.ndarray):
             input1 = input1.squeeze()
-        else:
+        elif isinstance(input2, np.ndarray):
             input2 = input2.squeeze()
 
         if input1.shape == input2.shape:
             pass
         else:
-            raise ValueError("The raster and array must have the same shape for an arithmetic operation. "
-                             "For example, if the array comes from another raster, use raster1 = "
-                             "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
-                             "than raster2. Or, if the array does not come from a raster, define one with raster = "
-                             "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject.")
+            raise ValueError(
+                "The raster and array must have the same shape for an arithmetic operation. "
+                "For example, if the array comes from another raster, use raster1 = "
+                "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
+                "than raster2. Or, if the array does not come from a raster, define one with raster = "
+                "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+            )
 
 
 class Raster:
@@ -1025,7 +1031,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Raise error messages if grids don't match (CRS + transform for raster, shape for array)
         if isinstance(other, (Raster, np.ndarray)):
-            _check_cast_array_raster(self, other)
+            _check_cast_array_raster(self, other)  # type: ignore
 
         # Case 1 - other is a Raster
         if isinstance(other, Raster):
@@ -1874,7 +1880,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
 
             # Check the casting between Raster and array inputs, and return error messages if not consistent
-            _check_cast_array_raster(inputs[0], inputs[1])
+            _check_cast_array_raster(inputs[0], inputs[1])  # type: ignore
 
             if ufunc.nout == 1:
                 return self.from_array(

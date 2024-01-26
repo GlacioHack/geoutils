@@ -3554,9 +3554,11 @@ class TestArithmetic:
         """
         # Rasters with different CRS, transform, or shape
         # Different shape
-        expected_message = "Both rasters must have the same shape, transform and CRS for an arithmetic operation. " \
-                           "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the " \
-                           "same grid and CRS than raster2."
+        expected_message = (
+            "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
+            "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
+            "same grid and CRS than raster2."
+        )
         with pytest.raises(ValueError, match=re.escape(expected_message)):
             getattr(self.r2, op)(self.r1_wrong_shape)
 
@@ -3569,11 +3571,13 @@ class TestArithmetic:
             getattr(self.r2, op)(self.r1_wrong_transform)
 
         # Array with different shape
-        expected_message = "The raster and array must have the same shape for an arithmetic operation. " \
-                           "For example, if the array comes from another raster, use raster1 = " \
-                           "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS " \
-                           "than raster2. Or, if the array does not come from a raster, define one with raster = " \
-                           "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+        expected_message = (
+            "The raster and array must have the same shape for an arithmetic operation. "
+            "For example, if the array comes from another raster, use raster1 = "
+            "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
+            "than raster2. Or, if the array does not come from a raster, define one with raster = "
+            "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+        )
         # Different shape, masked array
         with pytest.raises(ValueError, match=re.escape(expected_message)):
             getattr(self.r2, op)(self.r1_wrong_shape.data)
@@ -3723,11 +3727,11 @@ class TestArrayInterface:
     assert np.count_nonzero(~mask3) > 0
 
     # Wrong shaped arrays to check errors are raised
-    arr_wrong_shape = np.random.randint(min_val, max_val, (height - 1, width - 1), dtype="int32") \
-                      + np.random.normal(size=(height - 1, width - 1))
+    arr_wrong_shape = np.random.randint(min_val, max_val, (height - 1, width - 1), dtype="int32") + np.random.normal(
+        size=(height - 1, width - 1)
+    )
     wrong_transform = rio.transform.from_bounds(0, 0, 1, 1, width - 1, height - 1)
     mask_wrong_shape = np.random.randint(0, 2, size=(width - 1, height - 1), dtype=bool)
-
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
     @pytest.mark.parametrize(
@@ -4030,29 +4034,34 @@ class TestArrayInterface:
         # assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
         #             outputs_ma[1], outputs_rst[1].data)
 
-
-    @pytest.mark.parametrize("np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in)
-    def test_raise_errors_2nin(self, np_func_name: str):
+    @pytest.mark.parametrize(
+        "np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in
+    )  # type: ignore
+    def test_raise_errors_2nin(self, np_func_name: str) -> None:
         """Check that proper errors are raised when input raster/array don't match (only 2-input functions)."""
 
         # Create Rasters
         ma = np.ma.masked_array(data=self.arr1, mask=self.mask1)
         ma_wrong_shape = np.ma.masked_array(data=self.arr_wrong_shape, mask=self.mask_wrong_shape)
         rst = gu.Raster.from_array(ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma.dtype))
-        rst_wrong_shape = gu.Raster.from_array(ma_wrong_shape, transform=self.transform, crs=4326,
-                                               nodata=_default_nodata(ma_wrong_shape.dtype))
+        rst_wrong_shape = gu.Raster.from_array(
+            ma_wrong_shape, transform=self.transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype)
+        )
         rst_wrong_crs = gu.Raster.from_array(ma, transform=self.transform, crs=32610, nodata=_default_nodata(ma.dtype))
-        rst_wrong_transform = gu.Raster.from_array(ma, transform=self.wrong_transform, crs=4326,
-                                               nodata=_default_nodata(ma_wrong_shape.dtype))
+        rst_wrong_transform = gu.Raster.from_array(
+            ma, transform=self.wrong_transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype)
+        )
 
         # Get ufunc
         np_func = getattr(np, np_func_name)
 
         # Rasters with different CRS, transform, or shape
         # Different shape
-        expected_message = "Both rasters must have the same shape, transform and CRS for an arithmetic operation. " \
-                           "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the " \
-                           "same grid and CRS than raster2."
+        expected_message = (
+            "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
+            "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
+            "same grid and CRS than raster2."
+        )
         with pytest.raises(ValueError, match=re.escape(expected_message)):
             np_func(rst, rst_wrong_shape)
 
@@ -4065,11 +4074,13 @@ class TestArrayInterface:
             np_func(rst, rst_wrong_transform)
 
         # Array with different shape
-        expected_message = "The raster and array must have the same shape for an arithmetic operation. " \
-                           "For example, if the array comes from another raster, use raster1 = " \
-                           "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS " \
-                           "than raster2. Or, if the array does not come from a raster, define one with raster = " \
-                           "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+        expected_message = (
+            "The raster and array must have the same shape for an arithmetic operation. "
+            "For example, if the array comes from another raster, use raster1 = "
+            "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
+            "than raster2. Or, if the array does not come from a raster, define one with raster = "
+            "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+        )
         # Different shape, masked array
         # Check reflectivity just in case (just here, not later)
         with pytest.raises(ValueError, match=re.escape(expected_message)):
