@@ -58,5 +58,5 @@ rast2.show(ax="new", cmap="Blues")
 # Ensure the right nodata value is set
 rast2.set_nodata(0)
 # Pass the desired georeferencing parameters
-rast2_warped = rast2.reproject(size=(100, 100), crs=32645)
+rast2_warped = rast2.reproject(grid_size=(100, 100), crs=32645)
 print(rast2_warped.info())
