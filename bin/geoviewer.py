@@ -135,7 +135,7 @@ def main(test_args: Sequence[str] = None) -> None:
         dfact = 1
 
     # Read image
-    img = Raster(args.filename, downsample=dfact, indexes=args.band)
+    img = Raster(args.filename, downsample=dfact, bands=args.band)
 
     # Set no data value
     if args.nodata == "default":
