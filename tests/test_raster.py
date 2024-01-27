@@ -1514,8 +1514,8 @@ class TestRaster:
 
         # Check when transform is updated (via res)
         r_tmp_res = r.copy()
-        r_res = r_tmp_res.reproject(res=r.res[0]/2)
-        r_tmp_res.reproject(res=r.res[0]/2, inplace=True)
+        r_res = r_tmp_res.reproject(res=r.res[0] / 2)
+        r_tmp_res.reproject(res=r.res[0] / 2, inplace=True)
 
         assert r_res.raster_equal(r_tmp_res)
 
