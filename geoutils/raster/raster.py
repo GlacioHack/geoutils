@@ -359,6 +359,7 @@ def _check_cast_array_raster(input1: RasterType | NDArrayNum, input2: RasterType
 
     :param input1: Raster or array.
     :param input2: Raster or array.
+    :param operation_name: Name of operation to raise in the error message.
 
     :return: None.
     """

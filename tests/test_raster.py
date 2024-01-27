@@ -916,6 +916,8 @@ class TestRaster:
     def test_getitem_setitem(self, example: str) -> None:
         """Test the __getitem__ method ([]) for indexing and __setitem__ for index assignment."""
 
+        # -- First, we test mask or boolean array indexing and assignment, specific to rasters --
+
         # Open a Raster
         rst = gu.Raster(example)
 
@@ -940,29 +942,64 @@ class TestRaster:
         # The rasters should be the same
         assert rst2.raster_equal(rst)
 
-        # Check that errors are raised for both indexing and index assignment
+        # -- Second, we test NumPy indexes (slices, integers, ellipses, new axes) --
+
+        # Indexing
+        assert np.ma.allequal(rst[0], rst.data[0]) # Test an integer
+        assert np.ma.allequal(rst[0:10], rst.data[0:10]) # Test a slice
+        assert np.ma.allequal(rst[np.newaxis, 0], rst.data[np.newaxis, 0]) # Test a new axis
+        assert np.ma.allequal(rst[...], rst.data[...]) # Test an ellipsis
+
+        # Index assignment
+        rst[0] = 1
+        assert np.ma.allequal(rst.data[0], np.ones(np.shape(rst.data[0])))  # Test an integer
+        rst[0:10] = 1
+        assert np.ma.allequal(rst.data[0:10], np.ones(np.shape(rst.data[0:10])))  # Test a slice
+        rst[0, np.newaxis] = 1
+        assert np.ma.allequal(rst.data[0, np.newaxis], np.ones(np.shape(rst.data[0, np.newaxis])))  # Test a new axis
+        rst[...] = 1
+        assert np.ma.allequal(rst.data[...], np.ones(np.shape(rst.data[...])))  # Test an ellipsis
+
+        # -- Finally, we check that errors are raised for both indexing and index assignment --
+
+        # For indexing
+        op_name_index = "an indexing operation"
+        op_name_assign = "an index assignment operation"
+        message_raster = "Both rasters must have the same shape, transform and CRS for {}. " \
+                         "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the " \
+                         "same grid and CRS than raster2."
+        message_array = "The raster and array must have the same shape for {}. " \
+                        "For example, if the array comes from another raster, use raster1 = " \
+                        "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS " \
+                        "than raster2. Or, if the array does not come from a raster, define one with raster = " \
+                        "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+
         # An error when the shape is wrong
-        with pytest.raises(ValueError, match="Indexing a raster with an array requires the two having the same shape."):
+        with pytest.raises(ValueError, match=re.escape(message_array.format(op_name_index))):
             rst[arr[:-1, :-1]]
-            rst[arr[:-1, :-1]] = 1
+
+        # An error when the georeferencing of the Mask does not match
+        mask.shift(1, 1)
+        with pytest.raises(
+            ValueError, match=re.escape(message_raster.format(op_name_index))
+        ):
+            rst[mask]
+
         # A warning when the array type is not boolean
         with pytest.warns(UserWarning, match="Input array was cast to boolean for indexing."):
             rst[arr.astype("uint8")]
             rst[arr.astype("uint8")] = 1
-        # An error when the georeferencing of the Mask does not match
-        mask.shift(1, 1)
+
+        # For index assignment
+        # An error when the shape is wrong
+        with pytest.raises(ValueError, match=re.escape(message_array.format(op_name_assign))):
+            rst[arr[:-1, :-1]] = 1
+
         with pytest.raises(
-            ValueError, match="Indexing a raster with a mask requires the two being on the same georeferenced grid."
+                ValueError, match=re.escape(message_raster.format(op_name_assign))
         ):
-            rst[mask]
             rst[mask] = 1
-        # For assignment, an error when the input index is neither a Mask or a boolean ndarray
-        # (indexing attempts to call crop for differently shaped data)
-        with pytest.raises(
-            ValueError,
-            match="Indexing a raster requires a mask of same georeferenced grid, or a boolean array of same shape.",
-        ):
-            rst["lol"] = 1
+
 
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
@@ -986,10 +1023,6 @@ class TestRaster:
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3]]
         r_cropped = r.crop(crop_geom2)
         assert r_cropped.raster_equal(r)
-
-        # Test with bracket call
-        r_cropped_getitem = r[crop_geom2]
-        assert r_cropped_getitem.raster_equal(r_cropped)
 
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(r.shape) - 1)
@@ -1050,10 +1083,6 @@ class TestRaster:
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
         r_cropped4 = r.crop(crop_geom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs))
         assert r_cropped3.raster_equal(r_cropped4)
-
-        # Check with bracket call
-        r_cropped5 = r[r_cropped_reproj]
-        assert r_cropped4.raster_equal(r_cropped5)
 
         # -- Test with inplace=True -- #
         r_copy = r.copy()
@@ -1140,10 +1169,6 @@ class TestRaster:
         # Second, we check that bound reprojection is done automatically if the CRS differ
         r_cropped2 = r.crop(outlines)
         assert list(r_cropped2.bounds) == list(new_bounds)
-
-        # Finally, we check with a bracket call
-        r_cropped3 = r[outlines]
-        assert list(r_cropped3.bounds) == list(new_bounds)
 
         # -- Test crop works as expected even if transform has been modified, e.g. through downsampling -- #
         # Test that with downsampling, cropping to same bounds result in same raster
@@ -2939,10 +2964,6 @@ class TestMask:
 
         # Check if instance is respected
         assert isinstance(mask_cropped, gu.Mask)
-
-        # Test with bracket call
-        mask_cropped_getitem = mask[crop_geom]
-        assert mask_cropped_getitem.raster_equal(mask_cropped)
 
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(mask.shape) - 1)
