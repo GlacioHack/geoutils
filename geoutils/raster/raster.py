@@ -2364,17 +2364,55 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             return self.from_array(data, transformed, crs, nodata)
 
+    @overload
     def shift(
-        self, xoff: float, yoff: float, distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced"
+        self: RasterType,
+        xoff: float,
+        yoff: float,
+        distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
+        *,
+        inplace: Literal[False] = False,
+    ) -> RasterType:
+        ...
+
+    @overload
+    def shift(
+        self: RasterType,
+        xoff: float,
+        yoff: float,
+        distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
+        *,
+        inplace: Literal[True],
     ) -> None:
+        ...
+
+    @overload
+    def shift(
+        self: RasterType,
+        xoff: float,
+        yoff: float,
+        distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
+        *,
+        inplace: bool = False,
+    ) -> RasterType | None:
+        ...
+
+    def shift(
+        self: RasterType,
+        xoff: float,
+        yoff: float,
+        distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
+        inplace: bool = False,
+    ) -> RasterType | None:
         """
-        Shift the raster in-place by a (x,y) offset.
+        Shift a raster by a (x,y) offset.
 
         The shifting only updates the geotransform (no resampling is performed).
 
         :param xoff: Translation x offset.
         :param yoff: Translation y offset.
         :param distance_unit: Distance unit, either 'georeferenced' (default) or 'pixel'.
+        :param inplace: Whether to modify the raster in-place.
         """
         if distance_unit not in ["georeferenced", "pixel"]:
             raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
@@ -2387,8 +2425,16 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             xoff *= self.res[0]
             yoff *= self.res[1]
 
-        # Overwrite transform by shifted transform
-        self.transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
+        shifted_transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
+
+        if inplace:
+            # Overwrite transform by shifted transform
+            self.transform = shifted_transform
+            return None
+        else:
+            raster_copy = self.copy()
+            raster_copy.transform = shifted_transform
+            return raster_copy
 
     def save(
         self,

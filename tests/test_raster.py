@@ -950,7 +950,7 @@ class TestRaster:
             rst[arr.astype("uint8")]
             rst[arr.astype("uint8")] = 1
         # An error when the georeferencing of the Mask does not match
-        mask.shift(1, 1)
+        mask.shift(1, 1, inplace=True)
         with pytest.raises(
             ValueError, match="Indexing a raster with a mask requires the two being on the same georeferenced grid."
         ):
@@ -1189,7 +1189,7 @@ class TestRaster:
         orig_bounds = r.bounds
 
         # Shift raster by georeferenced units (default)
-        r.shift(xoff=1, yoff=1)
+        r.shift(xoff=1, yoff=1, inplace=True)
 
         # Only bounds should change
         assert orig_transform.c + 1 == r.transform.c
@@ -1206,7 +1206,7 @@ class TestRaster:
         orig_transform = r.transform
         orig_bounds = r.bounds
         orig_res = r.res
-        r.shift(xoff=1, yoff=1, distance_unit="pixel")
+        r.shift(xoff=1, yoff=1, distance_unit="pixel", inplace=True)
 
         # Only bounds should change
         assert orig_transform.c + 1 * orig_res[0] == r.transform.c
