@@ -118,6 +118,11 @@ class TestVector:
         assert isinstance(v1, gu.Vector)
         assert v1.crs.to_epsg() == 32617
 
+        # Check the inplace behaviour matches the not-inplace one
+        v2 = v0.copy()
+        v2.reproject(crs=32617, inplace=True)
+        v2.vector_equal(v1)
+
         # Check that the reprojection is the same as with geopandas
         gpd1 = v0.ds.to_crs(epsg=32617)
         assert_geodataframe_equal(gpd1, v1.ds)

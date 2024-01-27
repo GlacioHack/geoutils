@@ -2359,6 +2359,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             self._crs = crs
             self._nodata = nodata
             self._transform = transform
+            # A little trick to force the right shape of data in, then update the mask properly through the data setter
+            self._data = data.squeeze()
             self.data = data
             return None
         else:

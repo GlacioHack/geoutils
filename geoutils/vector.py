@@ -940,10 +940,20 @@ class Vector:
         else:
             raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
 
-    def vector_equal(self, other: gu.Vector) -> bool:
-        """Check if two vectors are equal."""
+    def vector_equal(self, other: gu.Vector, **kwargs: Any) -> bool:
+        """
+        Check if two vectors are equal.
 
-        return assert_geodataframe_equal(self.ds, other.ds)
+        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
+        """
+
+        try:
+            assert_geodataframe_equal(self.ds, other.ds, **kwargs)
+            vector_eq = True
+        except AssertionError:
+            vector_eq = False
+
+        return vector_eq
 
     @property
     def name(self) -> str | None:
@@ -1126,11 +1136,13 @@ class Vector:
             # Determine user-input target CRS
             crs = CRS.from_user_input(crs)
 
+        new_ds = self.ds.to_crs(crs=crs)
+
         if inplace:
-            self.ds = self.ds.to_crs(crs=crs)
+            self.ds = new_ds
             return None
         else:
-            return Vector(self.ds.to_crs(crs=crs))
+            return Vector(new_ds)
 
     @overload
     def create_mask(
