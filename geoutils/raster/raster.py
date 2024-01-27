@@ -353,7 +353,9 @@ def _get_reproject_params(
     return dst_transform, dst_size
 
 
-def _check_cast_array_raster(input1: RasterType | NDArrayNum, input2: RasterType | NDArrayNum, operation_name: str) -> None:
+def _check_cast_array_raster(
+    input1: RasterType | NDArrayNum, input2: RasterType | NDArrayNum, operation_name: str
+) -> None:
     """
     Check the casting between an array and a raster, or raise an (helpful) error message.
 
@@ -944,7 +946,7 @@ class Raster:
 
         # First, check index
         if isinstance(index, (Mask, np.ndarray)):
-            _check_cast_array_raster(self, index, operation_name="an index assignment operation")
+            _check_cast_array_raster(self, index, operation_name="an index assignment operation")  # type: ignore
 
         # If input is Mask with the same shape and georeferencing
         if isinstance(index, Mask):

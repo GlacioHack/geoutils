@@ -945,10 +945,10 @@ class TestRaster:
         # -- Second, we test NumPy indexes (slices, integers, ellipses, new axes) --
 
         # Indexing
-        assert np.ma.allequal(rst[0], rst.data[0]) # Test an integer
-        assert np.ma.allequal(rst[0:10], rst.data[0:10]) # Test a slice
-        assert np.ma.allequal(rst[np.newaxis, 0], rst.data[np.newaxis, 0]) # Test a new axis
-        assert np.ma.allequal(rst[...], rst.data[...]) # Test an ellipsis
+        assert np.ma.allequal(rst[0], rst.data[0])  # Test an integer
+        assert np.ma.allequal(rst[0:10], rst.data[0:10])  # Test a slice
+        assert np.ma.allequal(rst[np.newaxis, 0], rst.data[np.newaxis, 0])  # Test a new axis
+        assert np.ma.allequal(rst[...], rst.data[...])  # Test an ellipsis
 
         # Index assignment
         rst[0] = 1
@@ -965,14 +965,18 @@ class TestRaster:
         # For indexing
         op_name_index = "an indexing operation"
         op_name_assign = "an index assignment operation"
-        message_raster = "Both rasters must have the same shape, transform and CRS for {}. " \
-                         "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the " \
-                         "same grid and CRS than raster2."
-        message_array = "The raster and array must have the same shape for {}. " \
-                        "For example, if the array comes from another raster, use raster1 = " \
-                        "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS " \
-                        "than raster2. Or, if the array does not come from a raster, define one with raster = " \
-                        "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+        message_raster = (
+            "Both rasters must have the same shape, transform and CRS for {}. "
+            "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
+            "same grid and CRS than raster2."
+        )
+        message_array = (
+            "The raster and array must have the same shape for {}. "
+            "For example, if the array comes from another raster, use raster1 = "
+            "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
+            "than raster2. Or, if the array does not come from a raster, define one with raster = "
+            "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+        )
 
         # An error when the shape is wrong
         with pytest.raises(ValueError, match=re.escape(message_array.format(op_name_index))):
@@ -980,9 +984,7 @@ class TestRaster:
 
         # An error when the georeferencing of the Mask does not match
         mask.shift(1, 1)
-        with pytest.raises(
-            ValueError, match=re.escape(message_raster.format(op_name_index))
-        ):
+        with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_index))):
             rst[mask]
 
         # A warning when the array type is not boolean
@@ -995,11 +997,8 @@ class TestRaster:
         with pytest.raises(ValueError, match=re.escape(message_array.format(op_name_assign))):
             rst[arr[:-1, :-1]] = 1
 
-        with pytest.raises(
-                ValueError, match=re.escape(message_raster.format(op_name_assign))
-        ):
+        with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_assign))):
             rst[mask] = 1
-
 
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
