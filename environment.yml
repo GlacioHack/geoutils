@@ -12,3 +12,4 @@ dependencies:
   - tqdm
   - xarray
   - rioxarray
+  - geocube
