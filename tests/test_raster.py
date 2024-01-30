@@ -2964,6 +2964,8 @@ class TestMask:
 
         # Check instance is respected
         assert isinstance(mask_reproj, gu.Mask)
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
@@ -2990,6 +2992,8 @@ class TestMask:
 
         # Check if instance is respected
         assert isinstance(mask_cropped, gu.Mask)
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
 
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(mask.shape) - 1)
@@ -3042,6 +3046,8 @@ class TestMask:
     def test_polygonize(self, mask: gu.Mask) -> None:
         # Run default
         vect = mask.polygonize()
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
 
         # Check the output is cast into a vector
         assert isinstance(vect, gu.Vector)
@@ -3058,6 +3064,8 @@ class TestMask:
     def test_proximity(self, mask: gu.Mask) -> None:
         # Run default
         rast = mask.proximity()
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
 
         # Check that output is cast back into a raster
         assert isinstance(rast, gu.Raster)
