@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 
 import matplotlib.pyplot as plt
 import pytest
@@ -39,6 +40,10 @@ import geoviewer  # noqa
 def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
+
+    # The everest example will raise errors
+    if "B4" in os.path.basename(filename):
+        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
 
     # To not get exception when testing generic functions such as --help
     try:
@@ -81,6 +86,10 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 
+    # The everest example will raise errors
+    if "B4" in os.path.basename(filename):
+        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+
     # To not get exception when testing generic functions such as --help
     option, error = args
     with pytest.raises(error):
@@ -107,6 +116,10 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
 def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
+
+    # The everest RGB example will raise errors
+    if "RGB" in os.path.basename(filename):
+        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
 
     # To not get exception when testing generic functions such as --help
     try:

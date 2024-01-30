@@ -499,7 +499,9 @@ class TestSynthetic:
         # Check with buffers that should not overlap
         # ------------------------------------------
         buffer_size = 2
-        buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
+        # We force metric = False, so buffer should raise a GeoPandas warning
+        with pytest.warns(UserWarning, match="Geometry is in a geographic CRS.*"):
+            buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
         assert len(buffer.ds) == len(two_squares.ds)
@@ -527,7 +529,9 @@ class TestSynthetic:
         # Case 2 - Check with buffers that overlap -> this case is actually not the expected result !
         # -------------------------------
         buffer_size = 5
-        buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
+        # We force metric = False, so buffer should raise a GeoPandas warning
+        with pytest.warns(UserWarning, match="Geometry is in a geographic CRS.*"):
+            buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
         assert len(buffer.ds) == len(two_squares.ds)
