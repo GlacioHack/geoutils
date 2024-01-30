@@ -2967,6 +2967,11 @@ class TestMask:
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
 
+        # Check inplace behaviour works
+        mask_tmp = mask.copy()
+        mask_tmp.reproject(grid_size=(100, 100), force_source_nodata=2, inplace=True)
+        assert mask_tmp.raster_equal(mask_reproj)
+
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
         mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), force_source_nodata=2)
@@ -2994,6 +2999,11 @@ class TestMask:
         assert isinstance(mask_cropped, gu.Mask)
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
+
+        # Check inplace behaviour works
+        mask_tmp = mask.copy()
+        mask_tmp.crop(crop_geom, inplace=True)
+        assert mask_tmp.raster_equal(mask_cropped)
 
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(mask.shape) - 1)

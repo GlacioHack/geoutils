@@ -3753,6 +3753,8 @@ class Mask(Raster):
         if inplace:
             self._transform = output._transform  # type: ignore
             self._crs = output._crs  # type: ignore
+            # Little trick to force the shape, same as in Raster.reproject()
+            self._data = output._data  # type: ignore
             self.data = output._data  # type: ignore
             return None
         else:
