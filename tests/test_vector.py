@@ -719,8 +719,9 @@ class TestGeoPandasMethods:
         list_missing = [method for method in covered_methods if method not in self.all_declared]
 
         if len(list_missing) != 0:
-            warnings.warn(f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}",
-                          NeedToImplementWarning)
+            warnings.warn(
+                f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}", NeedToImplementWarning
+            )
 
     @pytest.mark.parametrize("method", nongeo_methods + geo_methods)  # type: ignore
     def test_overridden_funcs_args(self, method: str) -> None:
