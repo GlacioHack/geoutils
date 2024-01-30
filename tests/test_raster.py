@@ -947,6 +947,7 @@ class TestRaster:
         # Indexing
         assert np.ma.allequal(rst[0], rst.data[0])  # Test an integer
         assert np.ma.allequal(rst[0:10], rst.data[0:10])  # Test a slice
+        # New axis adds a dimension, but the 0 index reduces one, so we still get a 2D raster
         assert np.ma.allequal(rst[np.newaxis, 0], rst.data[np.newaxis, 0])  # Test a new axis
         assert np.ma.allequal(rst[...], rst.data[...])  # Test an ellipsis
 
@@ -955,6 +956,7 @@ class TestRaster:
         assert np.ma.allequal(rst.data[0], np.ones(np.shape(rst.data[0])))  # Test an integer
         rst[0:10] = 1
         assert np.ma.allequal(rst.data[0:10], np.ones(np.shape(rst.data[0:10])))  # Test a slice
+        # Same as above for the new axis
         rst[0, np.newaxis] = 1
         assert np.ma.allequal(rst.data[0, np.newaxis], np.ones(np.shape(rst.data[0, np.newaxis])))  # Test a new axis
         rst[...] = 1
@@ -4082,6 +4084,7 @@ class TestArrayInterface:
         np_func = getattr(np, np_func_name)
 
         # Strange errors happening only for these 4 functions...
+        # See issue #457
         if np_func_name not in ["allclose", "isclose", "array_equal", "array_equiv"]:
 
             # Rasters with different CRS, transform, or shape
