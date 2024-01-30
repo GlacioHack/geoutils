@@ -1871,8 +1871,8 @@ class TestRaster:
         itest0 = 120
         jtest0 = 451
         # This is the center of the pixel
-        xtest0 = 496975
-        ytest0 = 3099095
+        xtest0 = 496975.0
+        ytest0 = 3099095.0
 
         # Verify coordinates match indexes
         x_out, y_out = r.ij2xy(itest0, jtest0, offset="center")
