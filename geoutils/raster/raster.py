@@ -2415,6 +2415,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param yoff: Translation y offset.
         :param distance_unit: Distance unit, either 'georeferenced' (default) or 'pixel'.
         :param inplace: Whether to modify the raster in-place.
+
+        :returns: Shifted raster (or None if inplace).
         """
         if distance_unit not in ["georeferenced", "pixel"]:
             raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
