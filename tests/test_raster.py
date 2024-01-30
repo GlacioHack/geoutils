@@ -985,7 +985,7 @@ class TestRaster:
             rst[arr[:-1, :-1]]
 
         # An error when the georeferencing of the Mask does not match
-        mask.shift(1, 1)
+        mask.shift(1, 1, inplace=True)
         with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_index))):
             rst[mask]
 
@@ -1215,7 +1215,14 @@ class TestRaster:
         orig_bounds = r.bounds
 
         # Shift raster by georeferenced units (default)
-        r.shift(xoff=1, yoff=1)
+        # Check the default behaviour is not inplace
+        r_notinplace = r.shift(xoff=1, yoff=1)
+        assert isinstance(r_notinplace, gu.Raster)
+
+        # Check inplace
+        r.shift(xoff=1, yoff=1, inplace=True)
+        # Both shifts should have yielded the same transform
+        assert r.transform == r_notinplace.transform
 
         # Only bounds should change
         assert orig_transform.c + 1 == r.transform.c
@@ -1232,7 +1239,7 @@ class TestRaster:
         orig_transform = r.transform
         orig_bounds = r.bounds
         orig_res = r.res
-        r.shift(xoff=1, yoff=1, distance_unit="pixel")
+        r.shift(xoff=1, yoff=1, distance_unit="pixel", inplace=True)
 
         # Only bounds should change
         assert orig_transform.c + 1 * orig_res[0] == r.transform.c
@@ -1502,7 +1509,7 @@ class TestRaster:
 
             plt.show()
 
-        # - Check that if mask is modified afterwards, it is taken into account during reproject - #
+        # -- Check that if mask is modified afterwards, it is taken into account during reproject -- #
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
@@ -1528,6 +1535,22 @@ class TestRaster:
 
         r3 = r_nodata.reproject(r2)
         assert r_nodata.nodata == r3.nodata
+
+        # -- Check inplace behaviour works -- #
+
+        # Check when transform is updated (via res)
+        r_tmp_res = r.copy()
+        r_res = r_tmp_res.reproject(res=r.res[0] / 2)
+        r_tmp_res.reproject(res=r.res[0] / 2, inplace=True)
+
+        assert r_res.raster_equal(r_tmp_res)
+
+        # Check when CRS is updated
+        r_tmp_crs = r.copy()
+        r_crs = r_tmp_crs.reproject(crs=out_crs)
+        r_tmp_crs.reproject(crs=out_crs, inplace=True)
+
+        assert r_crs.raster_equal(r_tmp_crs)
 
         # -- Test additional errors raised for argument combinations -- #
 
