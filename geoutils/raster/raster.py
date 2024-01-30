@@ -3830,7 +3830,7 @@ class Mask(Raster):
         output = super().polygonize(target_values=target_values)
 
         # Convert array back to boolean
-        self._data = self.data.astype(bool)
+        self._data = self.data.astype(bool)  # type: ignore
 
         return output
 
@@ -3853,10 +3853,11 @@ class Mask(Raster):
         #     warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
         #     target_values = [1]
 
-
         # Need to cast output to Raster before computing proximity, as output will not be boolean
         # (super() would instantiate Mask() again)
-        raster = Raster({"data": self.data.astype("uint8"), "transform": self.transform, "crs": self.crs, "nodata": self.nodata})
+        raster = Raster(
+            {"data": self.data.astype("uint8"), "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+        )
         return raster.proximity(
             vector=vector,
             target_values=target_values,
