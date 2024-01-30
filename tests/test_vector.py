@@ -219,10 +219,6 @@ class TestVector:
         # Check the return-by-copy as well
         assert_geodataframe_equal(outlines_copy.ds, outlines_new_bounds.ds)
 
-        # Check with bracket call
-        outlines_new2 = outlines_new[rst]
-        assert_geodataframe_equal(outlines_new.ds, outlines_new2.ds)
-
         # Verify that geometries intersect with raster bound
         rst_poly = gu.projtools.bounds2poly(rst.bounds)
         intersects_new = []

@@ -725,16 +725,10 @@ class Vector:
 
     def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Vector:
         """
-        Index the geodataframe or crop the vector.
-
-        If a raster, vector or tuple is passed, crops to its bounds.
-        Otherwise, indexes the geodataframe.
+        Index the geodataframe.
         """
 
-        if isinstance(key, (gu.Raster, Vector)):
-            return self.crop(crop_geom=key, clip=False)
-        else:
-            return self._override_gdf_output(self.ds.__getitem__(key))
+        return self._override_gdf_output(self.ds.__getitem__(key))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def __setitem__(self, key: Any, value: Any) -> None:
