@@ -561,6 +561,10 @@ class TestSynthetic:
         two_squares.buffer_without_overlap(buffer_size, plot=True)
 
 
+class NeedToImplementWarning(FutureWarning):
+    """Warning to remember to implement new GeoPandas methods"""
+
+
 class TestGeoPandasMethods:
     # Use two synthetic vectors
     poly = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
@@ -715,7 +719,8 @@ class TestGeoPandasMethods:
         list_missing = [method for method in covered_methods if method not in self.all_declared]
 
         if len(list_missing) != 0:
-            warnings.warn(f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}")
+            warnings.warn(f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}",
+                          NeedToImplementWarning)
 
     @pytest.mark.parametrize("method", nongeo_methods + geo_methods)  # type: ignore
     def test_overridden_funcs_args(self, method: str) -> None:
@@ -735,18 +740,18 @@ class TestGeoPandasMethods:
 
         # Check that all positional arguments are the same
         if argspec_upstream.args != argspec_geoutils.args:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
         # Check that the *args and **kwargs argument are declared consistently
         if argspec_upstream.varargs != argspec_geoutils.varargs:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
         if argspec_upstream.varkw != argspec_geoutils.varkw:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
         # Check that default argument values are the same
         if argspec_upstream.defaults != argspec_geoutils.defaults:
-            warnings.warn("Default argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Default argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
     @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])  # type: ignore
     @pytest.mark.parametrize("method", nongeo_properties)  # type: ignore

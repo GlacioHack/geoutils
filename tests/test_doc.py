@@ -2,6 +2,7 @@
 import os
 import platform
 import shutil
+import warnings
 
 import sphinx.cmd.build
 
@@ -12,6 +13,10 @@ class TestDocs:
 
     def test_build(self) -> None:
         """Try building the documentation and see if it works."""
+
+        # Ignore all user warnings raised in the documentation
+        # (some are shown on purpose in certain examples, so they shouldn't make the test fail)
+        warnings.filterwarnings("ignore", category=UserWarning)
 
         # Building the doc fails on Windows for the CLI section
         if (platform.system() == "Linux") or (platform.system() == "Darwin"):
