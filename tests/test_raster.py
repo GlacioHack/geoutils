@@ -36,6 +36,7 @@ def run_gdal_proximity(
     """Run GDAL's ComputeProximity and return the read numpy array."""
     # Rasterio strongly recommends against importing gdal along rio, so this is done here instead.
     from osgeo import gdal, gdalconst
+
     gdal.UseExceptions()
 
     # Initiate empty GDAL raster for proximity output
@@ -1075,9 +1076,7 @@ class TestRaster:
 
         # Check that bound reprojection is done automatically if the CRS differ
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="For reprojection, nodata must be set.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
 
             r_cropped_reproj = r_cropped.reproject(crs=3857)
             r_cropped3 = r.crop(r_cropped_reproj)
@@ -1135,9 +1134,7 @@ class TestRaster:
 
         # Filter warning about nodata not set in reprojection (because match_extent triggers reproject)
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="For reprojection, nodata must be set.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
             r_cropped = r.crop(crop_geom2, mode="match_extent")
 
         assert list(r_cropped.bounds) == crop_geom2
@@ -1148,9 +1145,7 @@ class TestRaster:
 
         # Filter warning about nodata not set in reprojection (because match_extent triggers reproject)
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="For reprojection, nodata must be set.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
             r_cropped2 = r.crop(r_cropped, mode="match_extent")
         assert r_cropped2.raster_equal(r_cropped)
 
@@ -3084,12 +3079,14 @@ class TestMask:
         # TODO: Generalize raster_equal for masks?
 
         # Check all attributes are equal
-        assert all([
-                  np.ma.allequal(saved.data, mask.data),
-                  saved.transform == mask.transform,
-                  saved.crs == mask.crs,
-                  saved.nodata == mask.nodata
-        ])
+        assert all(
+            [
+                np.ma.allequal(saved.data, mask.data),
+                saved.transform == mask.transform,
+                saved.crs == mask.crs,
+                saved.nodata == mask.nodata,
+            ]
+        )
 
         # Clean up temporary folder - fails on Windows
         try:
@@ -3813,7 +3810,9 @@ class TestArrayInterface:
             nodata: int | None = _default_nodata(dtype)
         else:
             nodata = None
-            warnings.filterwarnings("ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*"
+            )
 
         # Create Raster
         ma1 = np.ma.masked_array(data=self.arr1.astype(dtype), mask=self.mask1)
@@ -3917,7 +3916,9 @@ class TestArrayInterface:
         # Catch warnings
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            warnings.filterwarnings("ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*"
+            )
 
             # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
             if com_dtype_tuple in [(np.dtype(t[0]), np.dtype(t[1])) for t in ufunc.types]:  # noqa
