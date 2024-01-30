@@ -60,8 +60,8 @@ documentation.
     Raster.width
     Raster.count
     Raster.count_on_disk
-    Raster.indexes
-    Raster.indexes_on_disk
+    Raster.bands
+    Raster.bands_on_disk
     Raster.res
     Raster.bounds
     Raster.dtypes
