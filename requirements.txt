@@ -1,15 +1,15 @@
 # This file is auto-generated from environment.yml, do not modify.
 # See that file for comments about the need/usage of each dependency.
 
-geopandas>=0.12.0,<1
-matplotlib==3.*
-pyproj==3.*
-rasterio>=1.3,<2
-pandas==1.*
-numpy==1.*
-scipy==1.*
+geopandas>=0.12.0
+matplotlib
+pyproj
+rasterio>=1.3
+pandas
+numpy
+scipy
 tqdm
 xarray
-rioxarray==0.*
+rioxarray
 setuptools>=64
 setuptools_scm[toml]>=8
