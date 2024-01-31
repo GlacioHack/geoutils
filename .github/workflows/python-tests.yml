@@ -60,7 +60,7 @@ jobs:
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
         python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "graphviz" "environment.yml"
-        mamba env update -n xdem-dev -f environment-ci-py${{ matrix.python-version }}.yml
+        mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
     - name: Install project
       run: pip install -e . --no-dependencies
