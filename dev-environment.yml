@@ -12,6 +12,7 @@ dependencies:
   - tqdm
   - xarray
   - rioxarray
+  - pandas
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
