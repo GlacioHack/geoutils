@@ -21,7 +21,7 @@ dependencies:
   - scikit-image
 
   # Test dependencies
-  - pytest
+  - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixture
   - pyyaml
