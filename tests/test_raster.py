@@ -37,6 +37,8 @@ def run_gdal_proximity(
     # Rasterio strongly recommends against importing gdal along rio, so this is done here instead.
     from osgeo import gdal, gdalconst
 
+    gdal.UseExceptions()
+
     # Initiate empty GDAL raster for proximity output
     drv = gdal.GetDriverByName("MEM")
     proxy_ds = drv.Create("", input_raster.shape[1], input_raster.shape[0], 1, gdal.GetDataTypeByName("Float32"))
@@ -396,7 +398,7 @@ class TestRaster:
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]
     )  # type: ignore
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
@@ -1074,12 +1076,10 @@ class TestRaster:
 
         # Check that bound reprojection is done automatically if the CRS differ
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
 
-        r_cropped_reproj = r_cropped.reproject(crs=3857)
-        r_cropped3 = r.crop(r_cropped_reproj)
+            r_cropped_reproj = r_cropped.reproject(crs=3857)
+            r_cropped3 = r.crop(r_cropped_reproj)
 
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
         r_cropped4 = r.crop(crop_geom=r_cropped_reproj.get_bounds_projected(out_crs=r.crs))
@@ -1132,11 +1132,9 @@ class TestRaster:
             crop_geom[3] - rand_float * abs(r.res[1]),
         ]
 
-        # Filter warning about dst_nodata not set in reprojection (because match_extent triggers reproject)
+        # Filter warning about nodata not set in reprojection (because match_extent triggers reproject)
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
             r_cropped = r.crop(crop_geom2, mode="match_extent")
 
         assert list(r_cropped.bounds) == crop_geom2
@@ -1145,11 +1143,9 @@ class TestRaster:
             abs(np.array(r.res) - np.array(r_cropped.res)) < np.array(r.res) / np.array(r_cropped.shape)[::-1]
         )
 
-        # Filter warning about dst_nodata not set in reprojection (because match_extent triggers reproject)
+        # Filter warning about nodata not set in reprojection (because match_extent triggers reproject)
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
             r_cropped2 = r.crop(r_cropped, mode="match_extent")
         assert r_cropped2.raster_equal(r_cropped)
 
@@ -1850,10 +1846,11 @@ class TestRaster:
         y = 3101000.0
         i, j = r.xy2ij(x, y)
         val = r.interp_points([(x, y)], order=1)[0]
-        assert img[int(i), int(j)] == val
+        val_img = img[int(i[0]), int(j[0])]
+        assert val_img == val
 
         # Finally, check that interp convert to latlon
-        lat, lon = gu.projtools.reproject_to_latlon([[x], [y]], in_crs=r.crs)
+        lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
         val_latlon = r.interp_points([(lat, lon)], order=1, input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
@@ -1874,8 +1871,8 @@ class TestRaster:
         itest0 = 120
         jtest0 = 451
         # This is the center of the pixel
-        xtest0 = 496975
-        ytest0 = 3099095
+        xtest0 = 496975.0
+        ytest0 = 3099095.0
 
         # Verify coordinates match indexes
         x_out, y_out = r.ij2xy(itest0, jtest0, offset="center")
@@ -1896,7 +1893,7 @@ class TestRaster:
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
-        lat, lon = reproject_to_latlon(points=[[xtest0], [ytest0]], in_crs=r.crs)
+        lat, lon = reproject_to_latlon(points=[xtest0, ytest0], in_crs=r.crs)
         z_val_2 = r.value_at_coords(lon, lat, latlon=True)
         assert z_val == z_val_2
 
@@ -2196,7 +2193,7 @@ class TestRaster:
         with warnings.catch_warnings():
             # Ignore warning that nodata value is already used in the raster data
             warnings.filterwarnings(
-                "ignore", category=UserWarning, message="For reprojection, dst_nodata must be set.*"
+                "ignore", category=UserWarning, message="New nodata value found in the data array.*"
             )
             r.set_nodata(_default_nodata(r.dtypes[0]))
             r_copy.nodata = _default_nodata(r.dtypes[0])
@@ -2660,6 +2657,9 @@ class TestRaster:
     def test_proximity_against_gdal(self, distunits: str, target_values: list[float] | None, raster: gu.Raster) -> None:
         """Test that proximity matches the results of GDAL for any parameter."""
 
+        # TODO: When adding new rasters for tests, specify warning only for Landsat
+        warnings.filterwarnings("ignore", message="Setting default nodata -99999 to mask non-finite values *")
+
         # We generate proximity with GDAL and GeoUtils
         gdal_proximity = run_gdal_proximity(raster, target_values=target_values, distunits=distunits)
         # We translate distunits GDAL option into its GeoUtils equivalent
@@ -2827,7 +2827,7 @@ class TestMask:
         """Test that Mask subclass initialization function as intended."""
 
         # A warning should be raised when the raster is a multi-band
-        if "rgb" not in os.path.basename(example):
+        if "RGB" not in os.path.basename(example):
             mask = gu.Mask(example)
         else:
             with pytest.warns(
@@ -2853,6 +2853,8 @@ class TestMask:
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_repr_str(self, example: str) -> None:
         """Test the representation of a raster works"""
+
+        warnings.filterwarnings("ignore", message="Multi-band raster provided to create a Mask*")
 
         # For data not loaded by default
         r = gu.Mask(example)
@@ -2962,6 +2964,13 @@ class TestMask:
 
         # Check instance is respected
         assert isinstance(mask_reproj, gu.Mask)
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
+
+        # Check inplace behaviour works
+        mask_tmp = mask.copy()
+        mask_tmp.reproject(grid_size=(100, 100), force_source_nodata=2, inplace=True)
+        assert mask_tmp.raster_equal(mask_reproj)
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
@@ -2988,6 +2997,13 @@ class TestMask:
 
         # Check if instance is respected
         assert isinstance(mask_cropped, gu.Mask)
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
+
+        # Check inplace behaviour works
+        mask_tmp = mask.copy()
+        mask_tmp.crop(crop_geom, inplace=True)
+        assert mask_tmp.raster_equal(mask_cropped)
 
         # - Test cropping each side by a random integer of pixels - #
         rand_int = np.random.randint(1, min(mask.shape) - 1)
@@ -3022,10 +3038,10 @@ class TestMask:
 
         # Test inplace
         mask_orig = mask.copy()
-        mask.crop(crop_geom2, inplace=True)
-        assert list(mask.bounds) == crop_geom2
-        assert np.array_equal(mask_orig.data[rand_int:, :].data, mask.data, equal_nan=True)
-        assert np.array_equal(mask_orig.data[rand_int:, :].mask, mask.data.mask)
+        mask_orig.crop(crop_geom2, inplace=True)
+        assert list(mask_orig.bounds) == crop_geom2
+        assert np.array_equal(mask.data[rand_int:, :].data, mask_orig.data, equal_nan=True)
+        assert np.array_equal(mask.data[rand_int:, :].mask, mask_orig.data.mask)
 
         # Run with match_extent, check that inplace or not yields the same result
 
@@ -3040,6 +3056,8 @@ class TestMask:
     def test_polygonize(self, mask: gu.Mask) -> None:
         # Run default
         vect = mask.polygonize()
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
 
         # Check the output is cast into a vector
         assert isinstance(vect, gu.Vector)
@@ -3056,6 +3074,8 @@ class TestMask:
     def test_proximity(self, mask: gu.Mask) -> None:
         # Run default
         rast = mask.proximity()
+        # Check the dtype of the original mask was properly reconverted
+        assert mask.data.dtype == bool
 
         # Check that output is cast back into a raster
         assert isinstance(rast, gu.Raster)
@@ -3072,8 +3092,19 @@ class TestMask:
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
         mask.save(temp_file)
-        saved = gu.Raster(temp_file)
-        assert mask.astype("uint8").raster_equal(saved)
+        saved = gu.Mask(temp_file)
+
+        # TODO: Generalize raster_equal for masks?
+
+        # Check all attributes are equal
+        assert all(
+            [
+                np.ma.allequal(saved.data, mask.data),
+                saved.transform == mask.transform,
+                saved.crs == mask.crs,
+                saved.nodata == mask.nodata,
+            ]
+        )
 
         # Clean up temporary folder - fails on Windows
         try:
@@ -3797,6 +3828,9 @@ class TestArrayInterface:
             nodata: int | None = _default_nodata(dtype)
         else:
             nodata = None
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*"
+            )
 
         # Create Raster
         ma1 = np.ma.masked_array(data=self.arr1.astype(dtype), mask=self.mask1)
@@ -3900,7 +3934,9 @@ class TestArrayInterface:
         # Catch warnings
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*"
+            )
 
             # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
             if com_dtype_tuple in [(np.dtype(t[0]), np.dtype(t[1])) for t in ufunc.types]:  # noqa

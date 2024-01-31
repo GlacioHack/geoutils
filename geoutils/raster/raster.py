@@ -986,8 +986,8 @@ class Raster:
         - The raster's transform, crs and nodata values.
         """
 
-        if not isinstance(other, type(self)):  # TODO: Possibly add equals to SatelliteImage?
-            return NotImplemented
+        if not isinstance(other, Raster):  # TODO: Possibly add equals to SatelliteImage?
+            raise NotImplementedError("Equality with other object than Raster not supported by raster_equal.")
         return all(
             [
                 np.array_equal(self.data.data, other.data.data, equal_nan=True),
@@ -2541,7 +2541,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             save_data = self.data
 
             # If the raster is a mask, convert to uint8 before saving and force nodata to 255
-            if save_data.dtype == bool:
+            if self.data.dtype == bool:
                 save_data = save_data.astype("uint8")
                 nodata = 255
 
@@ -3744,12 +3744,17 @@ class Mask(Raster):
             memory_limit=memory_limit,
         )
 
-        # Transform back to a boolean array
+        # Transform output back to a boolean array
         output._data = output.data.astype(bool)  # type: ignore
+
+        # Transform self back to boolean array
+        self._data = self.data.astype(bool)  # type: ignore
 
         if inplace:
             self._transform = output._transform  # type: ignore
             self._crs = output._crs  # type: ignore
+            # Little trick to force the shape, same as in Raster.reproject()
+            self._data = output._data  # type: ignore
             self.data = output._data  # type: ignore
             return None
         else:
@@ -3820,7 +3825,14 @@ class Mask(Raster):
 
         # Convert to unsigned integer and pass to parent method
         self._data = self.data.astype("uint8")  # type: ignore
-        return super().polygonize(target_values=target_values)
+
+        # Get output from parent method
+        output = super().polygonize(target_values=target_values)
+
+        # Convert array back to boolean
+        self._data = self.data.astype(bool)  # type: ignore
+
+        return output
 
     def proximity(
         self,
@@ -3841,12 +3853,11 @@ class Mask(Raster):
         #     warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
         #     target_values = [1]
 
-        # Convert to unsigned integer and pass to parent method
-        self._data = self.data.astype("uint8")  # type: ignore
-
         # Need to cast output to Raster before computing proximity, as output will not be boolean
         # (super() would instantiate Mask() again)
-        raster = Raster({"data": self.data, "transform": self.transform, "crs": self.crs, "nodata": self.nodata})
+        raster = Raster(
+            {"data": self.data.astype("uint8"), "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+        )
         return raster.proximity(
             vector=vector,
             target_values=target_values,
@@ -3933,6 +3944,10 @@ def proximity_from_vector_or_raster(
     # 1/ First, if there is a vector input, we rasterize the geometry type
     # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
     if vector is not None:
+
+        # TODO: Only when using centroid... Maybe we should leave this operation to the user anyway?
+        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS.*")
+
         # We create a geodataframe with the geometry type
         boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
         # We mask the pixels that make up the geometry type

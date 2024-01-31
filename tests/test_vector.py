@@ -486,7 +486,7 @@ class TestSynthetic:
         assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
 
         # And this time, it is the reprojected GeoDataFrame that should almost match (within a tolerance of 10e-06)
-        assert all(direct_gpd_buffer.ds.geom_almost_equals(two_squares_geographic_buffered_reproj.ds))
+        assert all(direct_gpd_buffer.ds.geom_equals_exact(two_squares_geographic_buffered_reproj.ds, tolerance=10e-6))
 
     def test_buffer_without_overlap(self, monkeypatch) -> None:  # type: ignore
         """
@@ -499,7 +499,9 @@ class TestSynthetic:
         # Check with buffers that should not overlap
         # ------------------------------------------
         buffer_size = 2
-        buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
+        # We force metric = False, so buffer should raise a GeoPandas warning
+        with pytest.warns(UserWarning, match="Geometry is in a geographic CRS.*"):
+            buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
         assert len(buffer.ds) == len(two_squares.ds)
@@ -527,7 +529,9 @@ class TestSynthetic:
         # Case 2 - Check with buffers that overlap -> this case is actually not the expected result !
         # -------------------------------
         buffer_size = 5
-        buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
+        # We force metric = False, so buffer should raise a GeoPandas warning
+        with pytest.warns(UserWarning, match="Geometry is in a geographic CRS.*"):
+            buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
         assert len(buffer.ds) == len(two_squares.ds)
@@ -555,6 +559,10 @@ class TestSynthetic:
         # Check that plotting runs without errors and close it
         monkeypatch.setattr(plt, "show", lambda: None)
         two_squares.buffer_without_overlap(buffer_size, plot=True)
+
+
+class NeedToImplementWarning(FutureWarning):
+    """Warning to remember to implement new GeoPandas methods"""
 
 
 class TestGeoPandasMethods:
@@ -711,7 +719,9 @@ class TestGeoPandasMethods:
         list_missing = [method for method in covered_methods if method not in self.all_declared]
 
         if len(list_missing) != 0:
-            warnings.warn(f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}")
+            warnings.warn(
+                f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}", NeedToImplementWarning
+            )
 
     @pytest.mark.parametrize("method", nongeo_methods + geo_methods)  # type: ignore
     def test_overridden_funcs_args(self, method: str) -> None:
@@ -731,18 +741,18 @@ class TestGeoPandasMethods:
 
         # Check that all positional arguments are the same
         if argspec_upstream.args != argspec_geoutils.args:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
         # Check that the *args and **kwargs argument are declared consistently
         if argspec_upstream.varargs != argspec_geoutils.varargs:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
         if argspec_upstream.varkw != argspec_geoutils.varkw:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
         # Check that default argument values are the same
         if argspec_upstream.defaults != argspec_geoutils.defaults:
-            warnings.warn("Default argument of GeoPandas method not consistent in GeoUtils.")
+            warnings.warn("Default argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
     @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])  # type: ignore
     @pytest.mark.parametrize("method", nongeo_properties)  # type: ignore
