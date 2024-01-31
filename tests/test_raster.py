@@ -1381,6 +1381,13 @@ class TestRaster:
         assert r_test.crs.to_epsg() == 4326
 
         # -- Additional tests --
+        # First, make sure dst_bounds extend beyond current extent to create nodata
+        dst_bounds = rio.coords.BoundingBox(
+            left=bounds[0], bottom=bounds[1] - r.res[0], right=bounds[2] + 2 * r.res[1], top=bounds[3]
+        )
+        r_test = r.reproject(bounds=dst_bounds)
+        assert np.count_nonzero(r_test.data.mask) > 0
+
         # If nodata falls outside the original image range, check range is preserved (with nearest interpolation)
         r_float = r.astype("float32")  # type: ignore
         if r_float.nodata is None:
