@@ -3,15 +3,16 @@ channels:
   - conda-forge
 dependencies:
   - python>=3.9,<3.12
-  - geopandas>=0.12.0
-  - matplotlib
-  - pyproj
-  - rasterio>=1.3
-  - numpy
-  - scipy
+  - geopandas>=0.12.0,<1
+  - matplotlib=3.*
+  - pyproj=3.*
+  - rasterio>=1.3,<2
+  - pandas=1.*
+  - numpy=1.*
+  - scipy=1.*
   - tqdm
   - xarray
-  - rioxarray
+  - rioxarray=0.*
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
@@ -20,7 +21,7 @@ dependencies:
   - scikit-image
 
   # Test dependencies
-  - pytest
+  - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixture
   - pyyaml
