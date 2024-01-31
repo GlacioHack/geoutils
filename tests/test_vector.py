@@ -486,7 +486,7 @@ class TestSynthetic:
         assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
 
         # And this time, it is the reprojected GeoDataFrame that should almost match (within a tolerance of 10e-06)
-        assert all(direct_gpd_buffer.ds.geom_equals_exact(two_squares_geographic_buffered_reproj.ds))
+        assert all(direct_gpd_buffer.ds.geom_equals_exact(two_squares_geographic_buffered_reproj.ds, tolerance=10e-6))
 
     def test_buffer_without_overlap(self, monkeypatch) -> None:  # type: ignore
         """
