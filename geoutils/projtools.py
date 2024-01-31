@@ -244,7 +244,7 @@ def align_bounds(
 
 
 def reproject_points(
-    points: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
+    points: list[list[float]] | list[float] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from input_crs to output_crs.
@@ -269,7 +269,7 @@ crs_4326 = rio.crs.CRS.from_epsg(4326)
 
 
 def reproject_to_latlon(
-    points: list[list[float]] | NDArrayNum, in_crs: CRS, round_: int = 8
+    points: list[list[float]] | list[float] | NDArrayNum, in_crs: CRS, round_: int = 8
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from in_crs to lat/lon.
