@@ -48,6 +48,7 @@ def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: 
     # To not get exception when testing generic functions such as --help
     try:
         geoviewer.main([filename, *option])
+        plt.close()
     except SystemExit:
         pass
 
@@ -124,6 +125,7 @@ def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: 
     # To not get exception when testing generic functions such as --help
     try:
         geoviewer.main([filename, *option])
+        plt.close()
     except SystemExit:
         pass
 
