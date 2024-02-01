@@ -977,7 +977,7 @@ class Raster:
             self._data[:, ind] = assign  # type: ignore
         return None
 
-    def raster_equal(self, other: object) -> bool:
+    def raster_equal(self, other: RasterType) -> bool:
         """
         Check if two rasters are equal.
 
@@ -3604,7 +3604,6 @@ class Mask(Raster):
 
             # Convert masked array to boolean
             self._data = self.data.astype(bool)  # type: ignore
-
 
     def __repr__(self) -> str:
         """Convert mask to string representation."""
