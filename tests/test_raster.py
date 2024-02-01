@@ -2960,12 +2960,15 @@ class TestMask:
         # Test 1: with a classic resampling (bilinear)
 
         # Reproject mask - resample to 100 x 100 grid
+        mask_orig = mask.copy()
         mask_reproj = mask.reproject(grid_size=(100, 100), force_source_nodata=2)
 
         # Check instance is respected
         assert isinstance(mask_reproj, gu.Mask)
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
+        # Check the original mask was not modified during reprojection
+        assert mask_orig.raster_equal(mask)
 
         # Check inplace behaviour works
         mask_tmp = mask.copy()
@@ -2991,6 +2994,8 @@ class TestMask:
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_crop(self, mask: gu.Mask) -> None:
         # Test with same bounds -> should be the same #
+
+        mask_orig = mask.copy()
         crop_geom = mask.bounds
         mask_cropped = mask.crop(crop_geom)
         assert mask_cropped.raster_equal(mask)
@@ -2999,6 +3004,8 @@ class TestMask:
         assert isinstance(mask_cropped, gu.Mask)
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
+        # Check the original mask was not modified during cropping
+        assert mask_orig.raster_equal(mask)
 
         # Check inplace behaviour works
         mask_tmp = mask.copy()
@@ -3054,10 +3061,14 @@ class TestMask:
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_polygonize(self, mask: gu.Mask) -> None:
+
+        mask_orig = mask.copy()
         # Run default
         vect = mask.polygonize()
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
+        # Check the original mask was not modified during polygonizing
+        assert mask_orig.raster_equal(mask)
 
         # Check the output is cast into a vector
         assert isinstance(vect, gu.Vector)
@@ -3072,10 +3083,14 @@ class TestMask:
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_proximity(self, mask: gu.Mask) -> None:
+
+        mask_orig = mask.copy()
         # Run default
         rast = mask.proximity()
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
+        # Check the original mask was not modified during reprojection
+        assert mask_orig.raster_equal(mask)
 
         # Check that output is cast back into a raster
         assert isinstance(rast, gu.Raster)
@@ -3094,17 +3109,12 @@ class TestMask:
         mask.save(temp_file)
         saved = gu.Mask(temp_file)
 
-        # TODO: Generalize raster_equal for masks?
+        # A raster (or mask) in-memory has more information than on disk, we need to update it before checking equality
+        # The values in its .data.data that are masked in .data.mask are not necessarily equal to the nodata value
+        mask.data.data[mask.data.mask] = True  # The default nodata 255 is converted to boolean True on masked values
 
         # Check all attributes are equal
-        assert all(
-            [
-                np.ma.allequal(saved.data, mask.data),
-                saved.transform == mask.transform,
-                saved.crs == mask.crs,
-                saved.nodata == mask.nodata,
-            ]
-        )
+        assert mask.raster_equal(saved)
 
         # Clean up temporary folder - fails on Windows
         try:
