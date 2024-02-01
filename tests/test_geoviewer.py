@@ -43,7 +43,7 @@ def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: 
 
     # The everest example will raise errors when setting a nodata value that exists
     if "B4" in os.path.basename(filename) and len(option) > 0 and option[0] == "-nodata":
-        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*")
 
     # To not get exception when testing generic functions such as --help
     try:
@@ -89,7 +89,7 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
 
     # The everest example will raise errors when setting a nodata value that exists
     if "B4" in os.path.basename(filename) and len(args) > 0 and args[0] == "-nodata":
-        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*")
 
     # To not get exception when testing generic functions such as --help
     option, error = args
@@ -120,7 +120,7 @@ def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: 
 
     # The everest RGB example will raise errors when setting a nodata value that exists
     if "RGB" in os.path.basename(filename) and len(option) > 0 and option[0] == "-nodata":
-        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*")
 
     # To not get exception when testing generic functions such as --help
     try:

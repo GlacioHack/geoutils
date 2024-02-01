@@ -427,7 +427,6 @@ class Raster:
         bands: int | list[int] | None = None,
         load_data: bool = False,
         downsample: Number = 1,
-        masked: bool = True,
         nodata: int | float | None = None,
     ) -> None:
         """
@@ -440,8 +439,6 @@ class Raster:
         :param load_data: Whether to load the array during instantiation. Default is False.
 
         :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
-
-        :param masked: Whether to load the array as a NumPy masked-array, with nodata values masked. Default is True.
 
         :param nodata: Nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
@@ -456,7 +453,7 @@ class Raster:
         self._nodata: int | float | None = nodata
         self._bands = bands
         self._bands_loaded: int | tuple[int, ...] | None = None
-        self._masked = masked
+        self._masked = True
         self._out_count: int | None = None
         self._out_shape: tuple[int, int] | None = None
         self._disk_hash: int | None = None
@@ -549,7 +546,7 @@ class Raster:
                 self.data = _load_rio(
                     ds,
                     indexes=bands,
-                    masked=masked,
+                    masked=self._masked,
                     out_shape=out_shape,
                     out_count=count,
                 )  # type: ignore
@@ -1069,8 +1066,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         out_nodata = None
         if (nodata2 is not None) and (out_dtype == dtype2):
             out_nodata = nodata2
-        if (nodata1 is not None) and (out_dtype == dtype1):
+        elif (nodata1 is not None) and (out_dtype == dtype1):
             out_nodata = nodata1
+        # For some cases the promote_types is neither (uint8 and int8 = int16),
+        # And the minimum dtype of any integer is uint8
+        elif (nodata1 is not None) or (nodata2 is not None):
+            out_nodata = nodata1 if not None else nodata2
 
         self_data = self.data
 
@@ -1329,18 +1330,25 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return out_mask
 
     @overload
-    def astype(self, dtype: DTypeLike, inplace: Literal[False] = False) -> Raster:
+    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False) -> Raster:
         ...
 
     @overload
-    def astype(self, dtype: DTypeLike, inplace: Literal[True]) -> None:
+    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
         ...
 
-    def astype(self, dtype: DTypeLike, inplace: bool = False) -> Raster | None:
+    @overload
+    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False) -> Raster | None:
+        ...
+
+    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, inplace: bool = False) -> Raster | None:
         """
         Convert data type of the raster.
 
+        By default, converts the nodata value to the default of the new data type.
+
         :param dtype: Any numpy dtype or string accepted by numpy.astype.
+        :param convert_nodata: Whether to convert the nodata value to the default of the new dtype.
         :param inplace: Whether to modify the raster in-place.
 
         :returns: Raster with updated dtype (or None if inplace).
@@ -1357,11 +1365,18 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             )
 
         out_data = self.data.astype(dtype)
+
         if inplace:
             self._data = out_data  # type: ignore
+            if convert_nodata:
+                self.set_nodata(new_nodata=_default_nodata(dtype))
             return None
         else:
-            return self.from_array(out_data, self.transform, self.crs, nodata=self.nodata)
+            if convert_nodata:
+                nodata = _default_nodata(dtype)
+            else:
+                nodata = self.nodata
+            return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
 
     @property
     def is_modified(self) -> bool:
@@ -1461,21 +1476,22 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             if np.count_nonzero(index_new_nodatas) > 0:
                 if update_array and update_mask:
                     warnings.warn(
-                        message="New nodata value found in the data array. Those will be masked, and the old "
-                        "nodata cells will now take the same value. Use set_nodata() with update_array=False "
-                        "and/or update_mask=False to change this behaviour.",
+                        message="New nodata value cells already exist in the data array. These cells will now be "
+                                "masked, and the old nodata value cells will update to the same new value. "
+                                "Use set_nodata() with update_array=False or update_mask=False to change "
+                                "this behaviour.",
                         category=UserWarning,
                     )
                 elif update_array:
                     warnings.warn(
-                        "New nodata value found in the data array. The old nodata cells will now take the same "
-                        "value. Use set_nodata() with update_array=False to change this behaviour.",
+                        "New nodata value cells already exist in the data array. The old nodata cells will update to "
+                        "the same new value. Use set_nodata() with update_array=False to change this behaviour.",
                         category=UserWarning,
                     )
                 elif update_mask:
                     warnings.warn(
-                        "New nodata value found in the data array. Those will be masked. Use set_nodata() "
-                        "with update_mask=False to change this behaviour.",
+                        "New nodata value cells already exist in the data array. These cells will now be masked. "
+                        "Use set_nodata() with update_mask=False to change this behaviour.",
                         category=UserWarning,
                     )
 
@@ -1611,6 +1627,19 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # 4/ If the new data is classic ndarray
         else:
             self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
+
+        # Finally, mask values equal to the nodata value in case they weren't masked, but raise a warning
+        if np.count_nonzero(np.logical_and(~self._data.mask, self._data.data == self.nodata)) > 0:
+            # This can happen during a numerical operation, especially for integer values that max out with a modulo
+            # It can also happen with from_array()
+            warnings.warn(category=UserWarning,
+                          message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
+                                  "If this happened when creating or updating the array, to silence this warning, "
+                                  "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
+                                  "to creating or updating the raster.\n"
+                                  "If this happened during a numerical operation, use astype() prior to the operation "
+                                  "to convert to a data type that won't derive the nodata values (e.g., a float type).")
+            self._data[self._data.data == self.nodata] = np.ma.masked
 
     @property
     def transform(self) -> affine.Affine:
