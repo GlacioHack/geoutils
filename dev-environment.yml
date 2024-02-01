@@ -22,7 +22,7 @@ dependencies:
   # Test dependencies
   - pytest
   - pytest-xdist
-  - pytest-lazy-fixture
+  - pytest-lazy-fixture=0.5.*
   - pyyaml
   - flake8
   - pylint
