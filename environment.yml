@@ -3,7 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - python>=3.9,<3.12
-  - geopandas>=0.12.0
+  - geopandas>=0.12.0,<0.14
   - matplotlib
   - pyproj
   - rasterio>=1.3
