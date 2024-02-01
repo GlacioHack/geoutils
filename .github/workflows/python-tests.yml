@@ -36,6 +36,7 @@ jobs:
         use-mamba: true
         channel-priority: strict
         activate-environment: geoutils-dev
+        python-version:
 
     - name: Get month for resetting cache
       id: get-date
