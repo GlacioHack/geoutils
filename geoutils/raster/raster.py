@@ -334,9 +334,9 @@ def _get_reproject_params(
             dst_size = grid_size
 
         else:
-            # Otherwise, need to calculate the new output size, rounded up
-            ref_win = rio.windows.from_bounds(*list(bounds), tmp_transform)
-            dst_size = (int(np.ceil(ref_win.width)), int(np.ceil(ref_win.height)))
+            # Otherwise, need to calculate the new output size, rounded to nearest integer
+            ref_win = rio.windows.from_bounds(*list(bounds), tmp_transform).round_lengths()
+            dst_size = (int(ref_win.width), int(ref_win.height))
 
             if res is not None:
                 # In this case, we force output resolution

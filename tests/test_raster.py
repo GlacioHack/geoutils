@@ -1377,19 +1377,26 @@ class TestRaster:
         assert r_test.crs.to_epsg() == 4326
 
         # -- Additional tests --
+        # First, make sure dst_bounds extend beyond current extent to create nodata
+        dst_bounds = rio.coords.BoundingBox(
+            left=bounds[0], bottom=bounds[1] - r.res[0], right=bounds[2] + 2 * r.res[1], top=bounds[3]
+        )
+        r_test = r.reproject(bounds=dst_bounds)
+        assert np.count_nonzero(r_test.data.mask) > 0
+
         # If nodata falls outside the original image range, check range is preserved (with nearest interpolation)
         r_float = r.astype("float32")  # type: ignore
-        if r_float.nodata is None:
+        if (r_float.nodata < np.min(r_float)) or (r_float.nodata > np.max(r_float)):
             r_test = r_float.reproject(bounds=dst_bounds, resampling="nearest")
-            assert r_test.nodata == -99999
-            assert np.min(r_test.data.data) == r_test.nodata
-            assert np.min(r_test.data) == np.min(r_float.data)
+            assert r_test.nodata == r_float.nodata
+            assert np.count_nonzero(r_test.data.data == r_test.nodata) > 0  # Some values should be set to nodata
+            assert np.min(r_test.data) == np.min(r_float.data)  # But min and max should not be affected
             assert np.max(r_test.data) == np.max(r_float.data)
 
         # Check that nodata works as expected
         r_test = r_float.reproject(bounds=dst_bounds, nodata=9999)
         assert r_test.nodata == 9999
-        assert np.max(r_test.data.data) == r_test.nodata
+        assert np.count_nonzero(r_test.data.data == r_test.nodata) > 0
 
         # Test that reproject works the same whether data is already loaded or not
         assert r.is_loaded
