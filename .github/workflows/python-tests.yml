@@ -36,6 +36,7 @@ jobs:
         use-mamba: true
         channel-priority: strict
         activate-environment: geoutils-dev
+        python-version:
 
     - name: Get month for resetting cache
       id: get-date
@@ -48,7 +49,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 1 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -60,7 +61,7 @@ jobs:
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
         python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "graphviz" "environment.yml"
-        mamba env update -n xdem-dev -f environment-ci-py${{ matrix.python-version }}.yml
+        mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
     - name: Install project
       run: pip install -e . --no-dependencies
