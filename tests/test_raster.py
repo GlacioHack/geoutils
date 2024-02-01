@@ -574,7 +574,6 @@ class TestRaster:
         ):
             rst.data = rst.data.reshape(new_shape)
 
-
         # Last part: Check the replacing of nodata values that were unmasked
 
         # Check that feeding an array with a nodata value unmasked raises the warning and corrects it
@@ -598,7 +597,6 @@ class TestRaster:
             print(new_raster.data[0, 0])
             print(new_raster.nodata)
         assert new_raster.data.mask[0, 0]
-
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_get_nanarray(self, example: str) -> None:
@@ -2265,24 +2263,24 @@ class TestRaster:
         with pytest.raises(TypeError, match="dtype 1 not understood."):
             _default_nodata(1)  # type: ignore
 
-
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_astype(self, example: str) -> None:
 
-        warnings.filterwarnings("ignore", category=UserWarning,
-                                message="Unmasked values equal to the nodata value found in data array.*")
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message="Unmasked values equal to the nodata value found in data array.*"
+        )
 
         # Load raster
         r = gu.Raster(example)
 
         all_dtypes = ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]
 
-        dtypes_preserving = list(np.unique([np.promote_types(r.dtypes[0], dtype) for dtype in all_dtypes]))
+        dtypes_preserving = list({np.promote_types(r.dtypes[0], dtype) for dtype in all_dtypes})
         dtypes_nonpreserving = [dtype for dtype in all_dtypes if dtype not in dtypes_preserving]
 
         # Test changing dtypes that does not modify the data
-        for dtype in dtypes_preserving:
-            rout = r.astype(dtype)  # type: ignore
+        for target_dtype in dtypes_preserving:
+            rout = r.astype(target_dtype)  # type: ignore
 
             if "LE71" in os.path.basename(example):
                 assert np.ma.allequal(r.data, rout.data)  # Only the same array ignoring nodata values
@@ -2290,22 +2288,24 @@ class TestRaster:
                 assert np.array_equal(r.data.data, rout.data.data)  # Not the same array anymore with conversion
                 assert np.array_equal(r.data.mask, rout.data.mask)
 
-            assert np.dtype(rout.dtypes[0]) == dtype
-            assert rout.data.dtype == dtype
+            assert np.dtype(rout.dtypes[0]) == target_dtype
+            assert rout.data.dtype == target_dtype
             # For any data type, data should be recast to the new type
-            assert rout.nodata == _default_nodata(dtype)
+            assert rout.nodata == _default_nodata(target_dtype)
 
         # Test dtypes that will modify the data
-        for dtype in dtypes_nonpreserving:
+        for target_dtype2 in dtypes_nonpreserving:
 
             with pytest.warns(UserWarning, match="dtype conversion will result in a loss of information.*"):
-                rout = r.astype(dtype)  # type: ignore
+                rout = r.astype(target_dtype2)  # type: ignore
 
-            assert np.array_equal(r.data.data.astype(dtype), rout.data.data)  # Not the same array anymore with conversion
+            assert np.array_equal(
+                r.data.data.astype(target_dtype2), rout.data.data
+            )  # Not the same array anymore with conversion
 
-            assert np.dtype(rout.dtypes[0]) == dtype
-            assert rout.data.dtype == dtype
-            assert rout.nodata == _default_nodata(dtype)
+            assert np.dtype(rout.dtypes[0]) == target_dtype2
+            assert rout.data.dtype == target_dtype2
+            assert rout.nodata == _default_nodata(target_dtype2)
 
         # Test modify in place
         dtype = np.float64
@@ -2515,8 +2515,11 @@ class TestRaster:
     def test_from_array(self, example: str) -> None:
 
         if "LE71" in os.path.basename(example):
-            warnings.filterwarnings("ignore", category=UserWarning,
-                                    message="Unmasked values equal to the nodata value found in data array.*")
+            warnings.filterwarnings(
+                "ignore",
+                category=UserWarning,
+                message="Unmasked values equal to the nodata value found in data array.*",
+            )
 
         # Test that from_array works if nothing is changed
         # -> most tests already performed in test_copy and data.setter, no need for many more
@@ -2686,8 +2689,11 @@ class TestRaster:
                 warnings.filterwarnings(
                     "ignore", category=UserWarning, message="dtype conversion will result in a " "loss of information.*"
                 )
-                warnings.filterwarnings("ignore", category=UserWarning,
-                                        message="Unmasked values equal to the nodata value found in data array.*")
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message="Unmasked values equal to the nodata value found in data array.*",
+                )
                 img_dtype = img_dtype.astype(dtype)
             value = np.unique(img_dtype)[0]
             img_dtype.polygonize(target_values=value)
@@ -3891,9 +3897,11 @@ class TestArrayInterface:
         with warnings.catch_warnings():
             # For integer data types, unmasked nodata values can be created
             if "int" in str(dtype):
-                warnings.filterwarnings("ignore",
-                                        category=UserWarning,
-                                        message="Unmasked values equal to the nodata value found in data array.*")
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message="Unmasked values equal to the nodata value found in data array.*",
+                )
             ma1 = np.ma.masked_array(data=self.arr1.astype(dtype), mask=self.mask1)
             rst = gu.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata)
 
@@ -3911,7 +3919,6 @@ class TestArrayInterface:
         # Catch warnings
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-
 
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
             if com_dtype in [str(np.dtype(t[0])) for t in ufunc.types]:  # noqa
@@ -3960,9 +3967,11 @@ class TestArrayInterface:
 
         with warnings.catch_warnings():
             if any("int" in dtype for dtype in [str(dtype1), str(dtype2)]):
-                warnings.filterwarnings("ignore",
-                                        category=UserWarning,
-                                        message="Unmasked values equal to the nodata value found in data array.*")
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message="Unmasked values equal to the nodata value found in data array.*",
+                )
             ma1 = np.ma.masked_array(data=self.arr1.astype(dtype1), mask=self.mask1)
             ma2 = np.ma.masked_array(data=self.arr2.astype(dtype2), mask=self.mask2)
             rst1 = gu.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata1)
@@ -4055,9 +4064,11 @@ class TestArrayInterface:
         with warnings.catch_warnings():
             # For integer data types, unmasked nodata values can be created
             if "int" in str(dtype):
-                warnings.filterwarnings("ignore",
-                                        category=UserWarning,
-                                        message="Unmasked values equal to the nodata value found in data array.*")
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message="Unmasked values equal to the nodata value found in data array.*",
+                )
             ma1 = np.ma.masked_array(data=self.arr1.astype(dtype), mask=self.mask1)
             rst = gu.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata)
 
@@ -4139,9 +4150,11 @@ class TestArrayInterface:
         with warnings.catch_warnings():
             # For integer data types, unmasked nodata values can be created
             if any("int" in dtype for dtype in [str(dtype1), str(dtype2)]):
-                warnings.filterwarnings("ignore",
-                                        category=UserWarning,
-                                        message="Unmasked values equal to the nodata value found in data array.*")
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message="Unmasked values equal to the nodata value found in data array.*",
+                )
             ma1 = np.ma.masked_array(data=self.arr1.astype(dtype1), mask=self.mask1)
             ma2 = np.ma.masked_array(data=self.arr2.astype(dtype2), mask=self.mask2)
             rst1 = gu.Raster.from_array(ma1, transform=self.transform, crs=None, nodata=nodata1)

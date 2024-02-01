@@ -1372,10 +1372,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 self.set_nodata(new_nodata=_default_nodata(dtype))
             return None
         else:
-            if convert_nodata:
-                nodata = _default_nodata(dtype)
-            else:
+            if not convert_nodata:
                 nodata = self.nodata
+            else:
+                nodata = _default_nodata(dtype)
             return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
 
     @property
@@ -1477,9 +1477,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 if update_array and update_mask:
                     warnings.warn(
                         message="New nodata value cells already exist in the data array. These cells will now be "
-                                "masked, and the old nodata value cells will update to the same new value. "
-                                "Use set_nodata() with update_array=False or update_mask=False to change "
-                                "this behaviour.",
+                        "masked, and the old nodata value cells will update to the same new value. "
+                        "Use set_nodata() with update_array=False or update_mask=False to change "
+                        "this behaviour.",
                         category=UserWarning,
                     )
                 elif update_array:
@@ -1632,13 +1632,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if np.count_nonzero(np.logical_and(~self._data.mask, self._data.data == self.nodata)) > 0:
             # This can happen during a numerical operation, especially for integer values that max out with a modulo
             # It can also happen with from_array()
-            warnings.warn(category=UserWarning,
-                          message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
-                                  "If this happened when creating or updating the array, to silence this warning, "
-                                  "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
-                                  "to creating or updating the raster.\n"
-                                  "If this happened during a numerical operation, use astype() prior to the operation "
-                                  "to convert to a data type that won't derive the nodata values (e.g., a float type).")
+            warnings.warn(
+                category=UserWarning,
+                message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
+                "If this happened when creating or updating the array, to silence this warning, "
+                "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
+                "to creating or updating the raster.\n"
+                "If this happened during a numerical operation, use astype() prior to the operation "
+                "to convert to a data type that won't derive the nodata values (e.g., a float type).",
+            )
             self._data[self._data.data == self.nodata] = np.ma.masked
 
     @property
