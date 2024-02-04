@@ -594,8 +594,6 @@ class TestRaster:
         with pytest.warns(UserWarning, match="Unmasked values equal to the nodata value found in data array.*"):
             # Issue during numerical operation
             new_raster = raster + 1
-            print(new_raster.data[0, 0])
-            print(new_raster.nodata)
         assert new_raster.data.mask[0, 0]
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
@@ -4200,8 +4198,6 @@ class TestArrayInterface:
         output_rst = ufunc_2nin_1nout((rst1, rst2, rst3))
         output_ma = ufunc_2nin_1nout((ma1, ma2, ma3))
 
-        print(np.shape(output_ma))
-        print(np.shape(output_rst.data))
         assert np.ma.allequal(output_rst.data, output_ma)
 
         # Methods reduce only supports function that output a single value
