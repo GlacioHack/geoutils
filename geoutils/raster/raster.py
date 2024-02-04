@@ -977,7 +977,7 @@ class Raster:
             self._data[:, ind] = assign  # type: ignore
         return None
 
-    def raster_equal(self, other: object) -> bool:
+    def raster_equal(self, other: RasterType) -> bool:
         """
         Check if two rasters are equal.
 
@@ -986,12 +986,23 @@ class Raster:
         - The raster's transform, crs and nodata values.
         """
 
+        # If the mask is just "False", it is equivalent to being equal to an array of False
+        if isinstance(self.data.mask, np.bool_):
+            self_mask = np.zeros(np.shape(self.data), dtype=bool)
+        else:
+            self_mask = self.data.mask
+
+        if isinstance(other.data.mask, np.bool_):
+            other_mask = np.zeros(np.shape(other.data), dtype=bool)
+        else:
+            other_mask = other.data.mask
+
         if not isinstance(other, Raster):  # TODO: Possibly add equals to SatelliteImage?
             raise NotImplementedError("Equality with other object than Raster not supported by raster_equal.")
         return all(
             [
                 np.array_equal(self.data.data, other.data.data, equal_nan=True),
-                np.array_equal(self.data.mask, other.data.mask),
+                np.array_equal(self_mask, other_mask),
                 self.data.fill_value == other.data.fill_value,
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
@@ -3585,14 +3596,14 @@ class Mask(Raster):
                 )
                 self._data = self.data[0, :, :]
 
-            # Convert masked array to boolean
-            self._data = self.data.astype(bool)  # type: ignore
+            # Force dtypes
+            self._dtypes = (bool,)
 
             # Fix nodata to None
             self._nodata = None
 
-            # Define in dtypes
-            self._dtypes = (bool,)
+            # Convert masked array to boolean
+            self._data = self.data.astype(bool)  # type: ignore
 
     def __repr__(self) -> str:
         """Convert mask to string representation."""
