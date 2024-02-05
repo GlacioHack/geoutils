@@ -101,7 +101,9 @@ class TestMultiRaster:
         """Test stack_rasters"""
 
         # Silence the reprojection warning for default nodata value
-        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*"
+        )
         warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
 
         # Merge the two overlapping DEMs and check that output bounds and shape is correct
@@ -171,7 +173,9 @@ class TestMultiRaster:
         # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
 
         # Silence the reprojection warning for default nodata value
-        warnings.filterwarnings("ignore", category=UserWarning, message="New nodata value found in the data array.*")
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*"
+        )
         warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
 
         # Ignore warning already checked in test_stack_rasters
