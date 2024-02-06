@@ -42,7 +42,7 @@ In particular, GeoUtils:
 
 
 ```{note}
-More on these core features of GeoUtils in the {ref}`quick-start`, or {ref}`core-index` for details.
+More on these core features of GeoUtils in the {ref}`feature-overview`, or {ref}`core-index` for details.
 ```
 
 ## Why the need for GeoUtils?
