@@ -28,7 +28,7 @@ Alternatively, start your own notebook to test GeoUtils at [![Binder](https://my
 ## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes
 
 In GeoUtils, geospatial handling is object-based and revolves around {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.
-These link to either **on-disk** or **in-memory** datasets, opened by instantiating the class.
+These link to either **on-disk** or **in-memory** datasets, opened by instantiating the class with a file path.
 
 ```{code-cell} ipython3
 import geoutils as gu
