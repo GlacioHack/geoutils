@@ -14,8 +14,8 @@ kernelspec:
 
 # Quick start
 
-A short code example using several end-user functionalities of GeoUtils. For a more detailed example of all features, 
-have a look at the {ref}`feature-overview` page! Or, to find an example about 
+A short code example using several end-user functionalities of GeoUtils. For a more detailed example of all features,
+have a look at the {ref}`feature-overview` page! Or, to find an example about
 a specific functionality, jump to {ref}`quick-gallery` right below.
 
 ## Short example
@@ -23,27 +23,27 @@ a specific functionality, jump to {ref}`quick-gallery` right below.
 ```{note}
 :class: margin
 
-Most functions examplified here normally require many lines of code using several independent packages with inconsistent 
+Most functions examplified here normally require many lines of code using several independent packages with inconsistent
 geospatial syntax and volatile passing of metadata that can lead to errors!
 
 In GeoUtils, **these higher-level operations are tested to ensure robustness and consistency**. 🙂
 ```
 
-The package functionalities revolve around the 
+The package functionalities revolve around the
 {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes, from which most methods can be called.
-Below, in a few lines, we load a raster and a vector, crop them to a common extent, re-assign raster values around 
+Below, in a few lines, we load a raster and a vector, crop them to a common extent, re-assign raster values around
 a buffer of the vector, perform calculations on the modified raster, and finally plot and save it!
 
 <!--- An empty margin to add some vertical padding --->
 ```{margin}
-&nbsp;              
+&nbsp;
 ```
 
 
 ```{note}
 :class: margin
 
-**We notice a ``Userwarning``:** No nodata value was defined in the GeoTIFF file, so GeoUtils automatically defined 
+**We notice a ``Userwarning``:** No nodata value was defined in the GeoTIFF file, so GeoUtils automatically defined
 one compatible with the data type to use during operations.
 ```
 
