@@ -3235,13 +3235,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         band: int = 1,
         input_latlon: bool = False,
         shift_area_or_point: bool = False,
+        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum:
         """
          Interpolate raster values at a set of points.
 
-         Uses scipy.ndimage.map_coordinates if the Raster is on a regular grid, otherwise uses scipy.interpn
-         on a rectilinear grid.
+         Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid, otherwise uses scipy.interpn
+         on a regular grid.
 
          Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
          to ensure that the interpolation of points is done at the right location. See parameter description
@@ -3249,13 +3250,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :param points: Point(s) at which to interpolate raster value. If points fall outside of image, value
             returned is nan. Shape should be (N,2).
-        :param method: One of 'nearest', 'linear', 'cubic', or 'quintic'. Determines what type of spline is used to
-            interpolate the raster value at each point. For more information, see scipy.interpolate.interp2d.
+        :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', or 'quintic'. For more information,
+        see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
             Default is linear.
-        :param band: The band to use (from 1 to self.count).
+        :param band: Band to use (from 1 to self.count).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
+        :param force_scipy_function: Force to use either map_coordinates or interpn. Mainly for testing purposes.
 
         :returns rpoints: Array of raster value(s) for the given points.
         """
@@ -3279,7 +3281,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             array = array[band - 1, :, :]
 
         # If the raster is on an equal grid, use scipy.ndimage.map_coordinates
-        if self.res[0] == self.res[1]:
+        force_map_coords = force_scipy_function is not None and force_scipy_function == "map_coordinates"
+        if self.res[0] == self.res[1] or force_map_coords:
 
             # Convert method name into order
             method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5}
