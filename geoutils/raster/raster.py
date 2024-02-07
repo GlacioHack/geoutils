@@ -27,8 +27,8 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
-from scipy.ndimage import distance_transform_edt, map_coordinates
 from scipy.interpolate import interpn
+from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.vector as gv
 from geoutils._typing import (
