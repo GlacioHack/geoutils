@@ -1766,8 +1766,8 @@ class TestRaster:
         # r.ds.index(x, y, op=np.float32)
         # Out[34]: (75.0, 302.0)
 
-    def test_xy2ij_and_interp(self) -> None:
-        """Test xy2ij with shift_area_or_point argument, and related interp function"""
+    def test_xy2ij(self) -> None:
+        """Test xy2ij with shift_area_or_point argument, and compare to interp_points function for consistency."""
 
         # First, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
         # at the center of pixel
@@ -1882,6 +1882,55 @@ class TestRaster:
         lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
         val_latlon = r.interp_points([(lat, lon)], method="linear", input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
+
+    def test_interp_points__synthetic(self) -> None:
+        """Test interp_points function with synthetic data."""
+
+        # We flip the array up/down to facilitate index comparison of Y axis
+        arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
+        transform = rio.transform.from_bounds(0.5, 0.5, 3.5, 3.5, 3, 3)
+        raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
+
+        # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
+        points_x = [1, 2, 3, 1, 2, 3, 1, 2, 3]
+        points_y = [1, 1, 1, 2, 2, 2, 3, 3, 3]
+
+        coords_x, coords_y = raster.coords(offset="center")
+        assert np.array_equal(coords_x.flatten(), points_x)
+        assert np.array_equal(np.flip(coords_y.flatten()), points_y)
+
+        points = np.array((points_x, points_y)).T
+        raster_points = raster.interp_points(points, method="linear")
+
+        for i in range(3):
+            for j in range(3):
+                assert raster_points[3 * i + j] == arr[i, j]
+
+        # Check bilinear interpolation inside the grid
+        points_in = [(1.5, 1.5), (1.5, 2.5), (2.5, 1.5), (2.5, 2.5)]
+        raster_points_in = raster.interp_points(points_in, method="linear")
+        for point in points_in:
+            # The values are 1 off from Python indexes
+            x = point[0] - 1
+            y = point[1] - 1
+            # Get four closest points on the grid
+            xlow = int(x - 0.5)
+            xupp = int(x + 0.5)
+            ylow = int(y - 0.5)
+            yupp = int(y + 0.5)
+            # Check the bilinear interpolation matches the mean value of those 4 points (equivalent as its the middle)
+            assert raster_points_in[points_in.index(point)] == np.mean([arr[xlow, ylow], arr[xupp, ylow], arr[xupp, yupp], arr[xlow, yupp]])
+
+        # Check bilinear extrapolation for points at 1 spacing outside from the input grid
+        points_out = (
+                [(0, i) for i in np.arange(1, 4)]
+                + [(i, 0) for i in np.arange(1, 4)]
+                + [(4, i) for i in np.arange(1, 4)]
+                + [(i, 4) for i in np.arange(4, 1)]
+        )
+        raster_points_out = raster.interp_points(points_out)
+        assert all(~np.isfinite(raster_points_out))
+
 
     def test_value_at_coords(self) -> None:
         """
