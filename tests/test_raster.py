@@ -1922,7 +1922,7 @@ class TestRaster:
         points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in)
         points_in = np.array((points_x_in, points_y_in)).T
 
-        # Here again compare methods, but independently for linear and cubic
+        # Here again compare methods
         raster_points_in = raster.interp_points(points_in, method="linear")
         raster_points_in_interpn = raster.interp_points(points_in, method="linear", force_scipy_function="interpn")
 
@@ -1947,6 +1947,47 @@ class TestRaster:
         )
         raster_points_out = raster.interp_points(points_out)
         assert all(~np.isfinite(raster_points_out))
+
+        # To use cubic or quintic, we need a larger grid (minimum 6x6, but let's aim bigger with 50x50)
+        arr = np.flipud(np.arange(1, 2501).reshape((50, 50)))
+        transform = rio.transform.from_bounds(0, 0, 50, 50, 50, 50)
+        raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
+
+        # For this, get random points
+        np.random.seed(42)
+        index_x_in_rand = np.random.randint(low=8, high=42, size=(10,)) + np.random.normal(scale=0.3)
+        index_y_in_rand = np.random.randint(low=8, high=42, size=(10,)) + np.random.normal(scale=0.3)
+        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand)
+        points_in_rand = np.array((points_x_rand, points_y_rand)).T
+
+        for method in ["nearest", "linear", "cubic", "quintic"]:
+            raster_points_mapcoords = raster.interp_points(points_in_rand,
+                                                           method=method,
+                                                           force_scipy_function="map_coordinates")
+            raster_points_interpn = raster.interp_points(points_in_rand,
+                                                         method=method,
+                                                         force_scipy_function="interpn")
+
+            assert np.array_equal(raster_points_mapcoords, raster_points_interpn)
+
+        # Check that, outside the edge, the interpolation fails and returns a NaN
+        np.random.seed(42)
+        index_x_edge_rand = [-0.5, -0.5, -0.5, 25, 25, 49.5, 49.5, 49.5]
+        index_y_edge_rand = [-0.5, 25, 49.5, -0.5, 49.5, -0.5, 25, 49.5]
+        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_edge_rand, j=index_y_edge_rand)
+        points_edge_rand = np.array((points_x_rand, points_y_rand)).T
+
+        # Nearest doesn't apply, just linear and above
+        for method in ["cubic", "quintic"]:
+            raster_points_mapcoords_edge = raster.interp_points(points_edge_rand,
+                                                                method=method,
+                                                                force_scipy_function="map_coordinates")
+            raster_points_interpn_edge = raster.interp_points(points_edge_rand,
+                                                              method=method,
+                                                              force_scipy_function="interpn")
+
+            assert all(~np.isfinite(raster_points_mapcoords_edge))
+            assert all(~np.isfinite(raster_points_interpn_edge))
 
     def test_value_at_coords(self) -> None:
         """
