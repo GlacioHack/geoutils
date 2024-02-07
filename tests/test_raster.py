@@ -1940,14 +1940,13 @@ class TestRaster:
 
         # Check bilinear extrapolation for points at 1 spacing outside from the input grid
         points_out = (
-                [(-1, i) for i in np.arange(1, 4)]
-                + [(i, -1) for i in np.arange(1, 4)]
-                + [(4, i) for i in np.arange(1, 4)]
-                + [(i, 4) for i in np.arange(4, 1)]
+            [(-1, i) for i in np.arange(1, 4)]
+            + [(i, -1) for i in np.arange(1, 4)]
+            + [(4, i) for i in np.arange(1, 4)]
+            + [(i, 4) for i in np.arange(4, 1)]
         )
         raster_points_out = raster.interp_points(points_out)
         assert all(~np.isfinite(raster_points_out))
-
 
     def test_value_at_coords(self) -> None:
         """
