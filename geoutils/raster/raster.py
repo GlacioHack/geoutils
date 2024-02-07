@@ -3282,7 +3282,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If the raster is on an equal grid, use scipy.ndimage.map_coordinates
         force_map_coords = force_scipy_function is not None and force_scipy_function == "map_coordinates"
-        if self.res[0] == self.res[1] or force_map_coords:
+        force_interpn = force_scipy_function is not None and force_scipy_function == "interpn"
+
+        if (self.res[0] == self.res[1] or force_map_coords) and not force_interpn:
 
             # Convert method name into order
             method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5}
@@ -3300,7 +3302,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Otherwise, use scipy.interpolate.interpn
         else:
 
-            xycoords = self.coords(offset="center", grid=False)
+            xycoords = self.coords(offset="corner", grid=False)
 
             # Let interpolation outside the bounds not raise any error by default
             if "bounds_error" not in kwargs.keys():
@@ -3309,7 +3311,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             if "fill_value" not in kwargs.keys():
                 kwargs.update({"fill_value": np.nan})
 
-            rpoints = interpn(xycoords, self.get_nanarray(), np.array([i, j]), method=method, **kwargs)
+            rpoints = interpn(xycoords, self.get_nanarray(), np.array([i, j]).T, method=method, **kwargs)
 
         rpoints = np.array(rpoints, dtype=np.float32)
         rpoints[np.array(ind_invalid)] = np.nan

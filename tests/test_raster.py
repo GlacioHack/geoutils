@@ -1888,43 +1888,60 @@ class TestRaster:
 
         # We flip the array up/down to facilitate index comparison of Y axis
         arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
-        transform = rio.transform.from_bounds(0.5, 0.5, 3.5, 3.5, 3, 3)
+        transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
 
         # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
-        points_x = [1, 2, 3, 1, 2, 3, 1, 2, 3]
-        points_y = [1, 1, 1, 2, 2, 2, 3, 3, 3]
+        index_x = [0, 1, 2, 0, 1, 2, 0, 1, 2]
+        index_y = [0, 0, 0, 1, 1, 1, 2, 2, 2]
 
-        coords_x, coords_y = raster.coords(offset="center")
-        assert np.array_equal(coords_x.flatten(), points_x)
-        assert np.array_equal(np.flip(coords_y.flatten()), points_y)
-
+        # The actual X/Y coords will be offset by one because Y axis is inverted and pixel coords is upper-left corner
+        points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
         points = np.array((points_x, points_y)).T
-        raster_points = raster.interp_points(points, method="linear")
+
+        # The following 4 methods should yield the same result because:
+        # Nearest = Linear interpolation at the location of a data point
+        # Regular grid = Equal grid interpolation at the location of a data point
+        raster_points = raster.interp_points(points, method="nearest")
+        raster_points_lin = raster.interp_points(points, method="linear")
+        raster_points_interpn = raster.interp_points(points, method="nearest", force_scipy_function="interpn")
+        raster_points_interpn_lin = raster.interp_points(points, method="linear", force_scipy_function="interpn")
+
+        assert np.array_equal(raster_points, raster_points_lin)
+        assert np.array_equal(raster_points, raster_points_interpn)
+        assert np.array_equal(raster_points, raster_points_interpn_lin)
 
         for i in range(3):
             for j in range(3):
-                assert raster_points[3 * i + j] == arr[i, j]
+                ind = 3 * i + j
+                assert raster_points[ind] == arr[index_x[ind], index_y[ind]]
 
-        # Check bilinear interpolation inside the grid
-        points_in = [(1.5, 1.5), (1.5, 2.5), (2.5, 1.5), (2.5, 2.5)]
+        # Check bilinear interpolation values inside the grid (same here, offset by 1 between X and Y)
+        index_x_in = [0.5, 0.5, 1.5, 1.5]
+        index_y_in = [0.5, 1.5, 0.5, 1.5]
+        points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in)
+        points_in = np.array((points_x_in, points_y_in)).T
+
+        # Here again compare methods, but independently for linear and cubic
         raster_points_in = raster.interp_points(points_in, method="linear")
-        for point in points_in:
-            # The values are 1 off from Python indexes
-            x = point[0] - 1
-            y = point[1] - 1
-            # Get four closest points on the grid
-            xlow = int(x - 0.5)
-            xupp = int(x + 0.5)
-            ylow = int(y - 0.5)
-            yupp = int(y + 0.5)
+        raster_points_in_interpn = raster.interp_points(points_in, method="linear", force_scipy_function="interpn")
+
+        assert np.array_equal(raster_points_in, raster_points_in_interpn)
+
+        for i in range(len(points_in)):
+
+            xlow = int(index_x_in[i] - 0.5)
+            xupp = int(index_x_in[i] + 0.5)
+            ylow = int(index_y_in[i] - 0.5)
+            yupp = int(index_y_in[i] + 0.5)
+
             # Check the bilinear interpolation matches the mean value of those 4 points (equivalent as its the middle)
-            assert raster_points_in[points_in.index(point)] == np.mean([arr[xlow, ylow], arr[xupp, ylow], arr[xupp, yupp], arr[xlow, yupp]])
+            assert raster_points_in[i] == np.mean([arr[xlow, ylow], arr[xupp, ylow], arr[xupp, yupp], arr[xlow, yupp]])
 
         # Check bilinear extrapolation for points at 1 spacing outside from the input grid
         points_out = (
-                [(0, i) for i in np.arange(1, 4)]
-                + [(i, 0) for i in np.arange(1, 4)]
+                [(-1, i) for i in np.arange(1, 4)]
+                + [(i, -1) for i in np.arange(1, 4)]
                 + [(4, i) for i in np.arange(1, 4)]
                 + [(i, 4) for i in np.arange(4, 1)]
         )
