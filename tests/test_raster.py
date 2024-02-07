@@ -1834,7 +1834,7 @@ class TestRaster:
             list_z_ind.append(z_ind)
 
         # First order interpolation
-        rpts = r.interp_points(pts, order=1)
+        rpts = r.interp_points(pts, method="linear")
         # The values interpolated should be equal
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
@@ -1866,7 +1866,7 @@ class TestRaster:
             z_ind = img[int(i[k]), int(j[k])]
             list_z_ind.append(z_ind)
 
-        rpts = r.interp_points(pts, order=1)
+        rpts = r.interp_points(pts, method="linear")
 
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
@@ -1874,13 +1874,13 @@ class TestRaster:
         x = 493120.0
         y = 3101000.0
         i, j = r.xy2ij(x, y)
-        val = r.interp_points([(x, y)], order=1)[0]
+        val = r.interp_points([(x, y)], method="linear")[0]
         val_img = img[int(i[0]), int(j[0])]
         assert val_img == val
 
         # Finally, check that interp convert to latlon
         lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
-        val_latlon = r.interp_points([(lat, lon)], order=1, input_latlon=True)[0]
+        val_latlon = r.interp_points([(lat, lon)], method="linear", input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
     def test_value_at_coords(self) -> None:

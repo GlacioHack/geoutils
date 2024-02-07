@@ -28,6 +28,7 @@ from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from scipy.ndimage import distance_transform_edt, map_coordinates
+from scipy.interpolate import interpn
 
 import geoutils.vector as gv
 from geoutils._typing import (
@@ -3230,14 +3231,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     def interp_points(
         self,
         points: tuple[list[float], list[float]],
-        input_latlon: bool = False,
-        mode: str = "linear",
+        method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
         band: int = 1,
+        input_latlon: bool = False,
         shift_area_or_point: bool = False,
         **kwargs: Any,
     ) -> NDArrayNum:
         """
          Interpolate raster values at a set of points.
+
+         Uses scipy.ndimage.map_coordinates if the Raster is on a regular grid, otherwise uses scipy.interpn
+         on a rectilinear grid.
 
          Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
          to ensure that the interpolation of points is done at the right location. See parameter description
@@ -3245,28 +3249,21 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :param points: Point(s) at which to interpolate raster value. If points fall outside of image, value
             returned is nan. Shape should be (N,2).
-        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
-        :param mode: One of 'linear', 'cubic', or 'quintic'. Determines what type of spline is used to
+        :param method: One of 'nearest', 'linear', 'cubic', or 'quintic'. Determines what type of spline is used to
             interpolate the raster value at each point. For more information, see scipy.interpolate.interp2d.
             Default is linear.
         :param band: The band to use (from 1 to self.count).
+        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
             attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
 
         :returns rpoints: Array of raster value(s) for the given points.
         """
-        assert mode in [
-            "mean",
-            "linear",
-            "cubic",
-            "quintic",
-            "nearest",
-        ], "mode must be mean, linear, cubic, quintic or nearest."
 
         # Get coordinates
         x, y = list(zip(*points))
 
-        # If those are in latlon, convert to Raster crs
+        # If those are in latlon, convert to Raster CRS
         if input_latlon:
             init_crs = pyproj.CRS(4326)
             dest_crs = pyproj.CRS(self.crs)
@@ -3277,10 +3274,39 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
-        if self.count == 1:
-            rpoints = map_coordinates(self.data.astype(np.float32), [i, j], **kwargs)
+        array = self.get_nanarray()
+        if self.count != 1:
+            array = array[band - 1, :, :]
+
+        # If the raster is on an equal grid, use scipy.ndimage.map_coordinates
+        if self.res[0] == self.res[1]:
+
+            # Convert method name into order
+            method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5}
+            order = method_to_order[method]
+
+            # Remove default spline pre-filtering that is activated by default
+            if "prefilter" not in kwargs.keys():
+                kwargs.update({"prefilter": False})
+            # Change default constant value to NaN for interpolation outside the image bounds
+            if "cval" not in kwargs.keys():
+                kwargs.update({"cval": np.nan})
+
+            rpoints = map_coordinates(array, [i, j], order=order, **kwargs)
+
+        # Otherwise, use scipy.interpolate.interpn
         else:
-            rpoints = map_coordinates(self.data[band - 1, :, :].astype(np.float32), [i, j], **kwargs)
+
+            xycoords = self.coords(offset="center", grid=False)
+
+            # Let interpolation outside the bounds not raise any error by default
+            if "bounds_error" not in kwargs.keys():
+                kwargs.update({"bounds_error": False})
+            # Return NaN outside image bounds
+            if "fill_value" not in kwargs.keys():
+                kwargs.update({"fill_value": np.nan})
+
+            rpoints = interpn(xycoords, self.get_nanarray(), np.array([i, j]), method=method, **kwargs)
 
         rpoints = np.array(rpoints, dtype=np.float32)
         rpoints[np.array(ind_invalid)] = np.nan
