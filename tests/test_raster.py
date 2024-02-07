@@ -1961,12 +1961,10 @@ class TestRaster:
         points_in_rand = np.array((points_x_rand, points_y_rand)).T
 
         for method in ["nearest", "linear", "cubic", "quintic"]:
-            raster_points_mapcoords = raster.interp_points(points_in_rand,
-                                                           method=method,
-                                                           force_scipy_function="map_coordinates")
-            raster_points_interpn = raster.interp_points(points_in_rand,
-                                                         method=method,
-                                                         force_scipy_function="interpn")
+            raster_points_mapcoords = raster.interp_points(
+                points_in_rand, method=method, force_scipy_function="map_coordinates"
+            )
+            raster_points_interpn = raster.interp_points(points_in_rand, method=method, force_scipy_function="interpn")
 
             assert np.array_equal(raster_points_mapcoords, raster_points_interpn)
 
@@ -1979,12 +1977,12 @@ class TestRaster:
 
         # Nearest doesn't apply, just linear and above
         for method in ["cubic", "quintic"]:
-            raster_points_mapcoords_edge = raster.interp_points(points_edge_rand,
-                                                                method=method,
-                                                                force_scipy_function="map_coordinates")
-            raster_points_interpn_edge = raster.interp_points(points_edge_rand,
-                                                              method=method,
-                                                              force_scipy_function="interpn")
+            raster_points_mapcoords_edge = raster.interp_points(
+                points_edge_rand, method=method, force_scipy_function="map_coordinates"
+            )
+            raster_points_interpn_edge = raster.interp_points(
+                points_edge_rand, method=method, force_scipy_function="interpn"
+            )
 
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
