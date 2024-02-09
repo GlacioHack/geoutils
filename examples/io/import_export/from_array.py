@@ -29,7 +29,7 @@ rast
 
 # %%
 # We can print info on the raster.
-print(rast.info())
+rast.info()
 
 # %%
 # The array has been automatically cast into a :class:`~numpy.ma.MaskedArray`, to respect :class:`~geoutils.Raster.nodata` values.
@@ -49,4 +49,4 @@ rast
 # %%
 # The different functionalities of GeoUtils will respect :class:`~geoutils.Raster.nodata` values, starting with :func:`~geoutils.Raster.show`,
 # which will ignore them during plotting (transparent).
-rast.show(cmap="copper")
+rast.plot(cmap="copper")

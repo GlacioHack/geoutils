@@ -30,7 +30,7 @@ import geoutils as gu
 
 # Initiate a raster from disk
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-print(rast.info())
+rast.info()
 
 # Estimate a universal metric CRS for the raster
 rast.get_metric_crs()
@@ -61,7 +61,7 @@ For this, the original rectangular footprint polygon lines are densified to resp
 # Get raster footprint in geographic CRS
 rast_footprint = rast.get_footprint_projected(4326)
 
-rast_footprint.show()
+rast_footprint.plot()
 ```
 
 This is for instance useful to check for intersection with other data.

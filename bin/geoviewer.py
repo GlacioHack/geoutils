@@ -212,7 +212,7 @@ def main(test_args: Sequence[str] = None) -> None:
     ax = fig.add_subplot(111)
 
     # plot
-    img.show(
+    img.plot(
         ax=ax,
         cmap=cmap,
         interpolation="nearest",

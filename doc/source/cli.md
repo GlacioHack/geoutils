@@ -1,7 +1,7 @@
 (cli)=
-# Command Line Interface
+# Command line interface
 
-This page lists all CLI functionalities of GeoUtils.
+This page lists all command line interface (CLI) functionalities of GeoUtils.
 These commands can be run directly from a terminal, without having to launch a Python console.
 
 ## geoviewer.py

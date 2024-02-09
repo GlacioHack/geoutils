@@ -93,7 +93,7 @@ documentation.
 .. autosummary::
     :toctree: gen_modules/
 
-    Raster.show
+    Raster.plot
 ```
 
 ### Get or update data methods
@@ -107,6 +107,7 @@ documentation.
     Raster.set_mask
     Raster.set_nodata
     Raster.get_nanarray
+    Raster.subsample
 ```
 
 ### I/O methods
@@ -313,6 +314,15 @@ The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bou
     Vector.reproject
     Vector.rasterize
     Vector.proximity
+```
+
+### Plotting
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Vector.plot
 ```
 
 ### Create mask

@@ -16,15 +16,15 @@ rast2 = gu.Raster(filename_rast2)
 
 # %%
 # The first raster has larger extent and higher resolution than the second one.
-print(rast1.info())
-print(rast2.info())
+rast1.info()
+rast2.info()
 
 # %%
 # Let's plot the first raster, with the warped extent of the second one.
 
-rast1.show(cmap="Blues")
+rast1.plot(cmap="Blues")
 vect_bounds_rast2 = gu.Vector.from_bounds_projected(rast2)
-vect_bounds_rast2.show(fc="none", ec="r", lw=2)
+vect_bounds_rast2.plot(fc="none", ec="r", lw=2)
 
 # %%
 # **First option:** using the second raster as a reference to match, we reproject the first one. We simply have to pass the second :class:`~geoutils.Raster`
@@ -43,13 +43,13 @@ rast1_warped
 #
 # Now the shape and georeferencing should be the same as that of the second raster, shown above.
 
-print(rast1_warped.info())
+rast1_warped.info()
 
 # %%
 # We can plot the two rasters next to one another
 
-rast1_warped.show(ax="new", cmap="Reds")
-rast2.show(ax="new", cmap="Blues")
+rast1_warped.plot(ax="new", cmap="Reds")
+rast2.plot(ax="new", cmap="Blues")
 
 # %%
 # **Second option:** we can pass any georeferencing argument to :func:`~geoutils.Raster.reproject`, such as ``dst_size`` and ``dst_crs``, and will only
@@ -59,4 +59,4 @@ rast2.show(ax="new", cmap="Blues")
 rast2.set_nodata(0)
 # Pass the desired georeferencing parameters
 rast2_warped = rast2.reproject(grid_size=(100, 100), crs=32645)
-print(rast2_warped.info())
+rast2_warped.info()

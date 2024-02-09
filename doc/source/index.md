@@ -24,33 +24,14 @@ title: GeoUtils
 GeoUtils is a Python package for **accessible**, **efficient** and **reliable** geospatial analysis.
 ::::
 
-```{tip}
+```{important}
 :class: margin
-**Run any page of this documentation interactively** by clicking the top launch button!
-
-Or **start your own test notebook**: [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/GlacioHack/geoutils/main).
+GeoUtils ``v0.1`` is released, with most features drafted 3 years ago now finalized 🎉! We are working on an **Xarray accessor** and a few other features for 2024.
 ```
-
-**Accessible** owing to its convenient object-based structure, intuitive match-reference operations and familiar geospatial dependencies
-([Rasterio](https://rasterio.readthedocs.io/en/latest/), [Rioxarray](https://corteva.github.io/rioxarray/stable/),
-[GeoPandas](https://geopandas.org/en/stable/docs.html), [PyProj](https://pyproj4.github.io/pyproj/stable/index.html)).
-
-**Efficient** owing to its implicit lazy loading functionalities, logical integration with pythonic operators and array interfacing
-([NumPy](https://numpy.org/doc/stable/), [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/)).
-
-**Reliable** owing to its consistent higher-level operations respecting geospatial intricacies such as nodata values and pixel interpretation, ensured by
-its testing suite and type checking ([Pytest](https://docs.pytest.org/en/7.2.x/), [Mypy](https://mypy-lang.org/)).
 
 ----------------
 
 # Where to start?
-
-```{important}
-:class: margin
-GeoUtils is in early stages of development and its features might evolve rapidly. Note the version you are working on for
-**reproducibility**!
-We are working on making features fully consistent for the first long-term release ``v0.1`` (likely sometime in 2023).
-```
 
 ::::{grid} 1 2 2 3
 :gutter: 1 1 1 2
@@ -106,6 +87,7 @@ If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.
 about_geoutils
 how_to_install
 quick_start
+feature_overview
 ```
 
 ```{toctree}
