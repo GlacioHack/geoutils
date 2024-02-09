@@ -55,7 +55,6 @@ class TestDocs:
             """
 
         os.chdir(current_dir)
-        
 
     def test_build(self) -> None:
         """Try building the documentation and see if it works."""
