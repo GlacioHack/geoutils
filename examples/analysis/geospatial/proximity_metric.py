@@ -18,14 +18,14 @@ vect = vect[vect["RGIId"] == "RGI60-15.10055"]
 rast.crop(vect)
 
 # Plot the raster and vector
-rast.show(cmap="Blues")
-vect.reproject(rast).show(fc="none", ec="k", lw=2)
+rast.plot(cmap="Blues")
+vect.reproject(rast).plot(fc="none", ec="k", lw=2)
 
 # %%
 # We use the raster as a reference to match for rasterizing the proximity distances with :func:`~geoutils.Vector.proximity`. See :ref:`core-match-ref` for more details.
 
 proximity = vect.proximity(rast)
-proximity.show(cmap="viridis")
+proximity.plot(cmap="viridis")
 
 # %%
 # Proximity can also be computed to target pixels of a raster, or that of a mask
@@ -34,17 +34,17 @@ proximity.show(cmap="viridis")
 import numpy as np
 
 mask_200 = np.abs(rast - 200) < 30
-mask_200.show()
+mask_200.plot()
 
 # %%
 # Because a mask is :class:`bool`, no need to pass target pixels
 
 proximity_mask = mask_200.proximity()
-proximity_mask.show(cmap="viridis")
+proximity_mask.plot(cmap="viridis")
 
 # %%
 # By default, proximity is computed using the georeference unit from a :class:`~geoutils.Raster`'s :attr:`~geoutils.Raster.res`, here **meters**. It can also
 # be computed in pixels.
 
 proximity_mask = mask_200.proximity(distance_unit="pixel")
-proximity_mask.show(cmap="viridis")
+proximity_mask.plot(cmap="viridis")

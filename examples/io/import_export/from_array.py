@@ -49,4 +49,4 @@ rast
 # %%
 # The different functionalities of GeoUtils will respect :class:`~geoutils.Raster.nodata` values, starting with :func:`~geoutils.Raster.show`,
 # which will ignore them during plotting (transparent).
-rast.show(cmap="copper")
+rast.plot(cmap="copper")
