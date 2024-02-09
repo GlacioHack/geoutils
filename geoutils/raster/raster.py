@@ -3574,14 +3574,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         """
         Randomly sample the raster. Only valid values are considered.
 
-        :param subsample: Subsample size. If <= 1, a fraction of the total pixels to extract. If > 1, the number of pixels.
+        :param subsample: Subsample size. If <= 1, a fraction of the total pixels to extract.
+            If > 1, the number of pixels.
         :param return_indices: Whether to return the extracted indices only.
         :param random_state: Random state or seed number.
 
         :return: Array of sampled valid values, or array of sampled indices.
         """
 
-        return subsample_array(array=self.data, sample=sample, return_indices=return_indices, random_state=random_state)
+        return subsample_array(
+            array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
+        )
 
 
 class Mask(Raster):
