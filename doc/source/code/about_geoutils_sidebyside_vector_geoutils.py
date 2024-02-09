@@ -1,6 +1,7 @@
 ####
 # Part not shown in the doc, to get data files ready
 import geoutils
+
 landsat_b4_path = geoutils.examples.get_path("everest_landsat_b4")
 everest_outlines_path = geoutils.examples.get_path("everest_rgi_outlines")
 geoutils.Raster(landsat_b4_path).save("myraster.tif")
@@ -27,6 +28,7 @@ values = rast[mask]
 ####
 # Part not shown in the doc, to get data files ready
 import os
+
 for file in ["myraster.tif", "myvector.gpkg"]:
     os.remove(file)
 ####

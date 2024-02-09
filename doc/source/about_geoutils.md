@@ -114,11 +114,11 @@ header-rows: 1
         :language: python
         :lines: 10-25
     ```
-    
+
   - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_vector_geopandas.py
         :language: python
         :lines: 10-40
     ```
-    
+
 `````
