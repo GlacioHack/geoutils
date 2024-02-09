@@ -81,12 +81,12 @@ For convenience and consistency, nearly all of these methods can be passed solel
 
 
 ```{code-cell} ipython3
-# Print initial bounds of the raster
-print(rast.bounds)
-# Crop raster to vector's extent
-rast = rast.crop(vect)
-# Print bounds of cropped raster
-print(rast.bounds)
+# Print initial bounds of the vector
+print(vect.bounds)
+# Crop vector to raster's extent, and add clipping option (otherwise keeps all intersecting features)
+vect_cropped = vect.crop(rast, clip=True)
+# Print bounds of cropped + clipped vector
+print(vect_cropped.bounds)
 ```
 
 ```{margin}
@@ -193,8 +193,8 @@ All {class}`~geoutils.Raster` classes also support Python logical comparison ope
 {func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.Mask`, a subclass of {class}`~geoutils.Raster`.
 
 ```{code-cell} ipython3
-# Get mask of an AOI: infrared index above 0.7, at least 200 m from glaciers
-mask_aoi = np.logical_and(rast > 0.7, rast_proximity_to_vec > 200)
+# Get mask of an AOI: infrared index above 0.6, at least 200 m from glaciers
+mask_aoi = np.logical_and(rast > 0.6, rast_proximity_to_vec > 200)
 ```
 
 Masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a {class}`~numpy.ma.MaskedArray` of indexed values.
@@ -215,7 +215,7 @@ vect_aoi = mask_aoi.polygonize()
 ```{code-cell} ipython3
 # Plot result
 rast.show(cmap='Reds', cbar_title='Normalized infrared')
-vect_aoi.show(fc='none', ec='k', lw=0.5)
+vect_aoi.show(fc='none', ec='k', lw=0.75)
 ```
 
 ## Saving to file
@@ -253,8 +253,8 @@ rast = gu.SatelliteImage(filename_rast, silent=False)
 In a few lines, we:
  - **easily handled georeferencing** operations on rasters and vectors,
  - performed numerical calculations **inherently respecting invalid data**,
- - **naturally casted to a mask** from a logical operation on raster, and
- - **straightforwardly vectorized a mask** by harnessing overloaded subclass methods.
+ - **casted to a mask** implicitly from a logical operation on raster, and
+ - **vectorized a mask** by harnessing overloaded subclass methods.
 
 **Our result:** a vector of high infrared absorption indexes at least 200 meters away from glaciers
 near Everest, which likely corresponds to **perennial snowfields**.
