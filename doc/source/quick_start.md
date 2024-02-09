@@ -75,8 +75,8 @@ import numpy as np
 calc_rast = np.log(rast / 2) + 3.5
 
 # Plot raster and vector, using raster as projection-reference for vector
-calc_rast.show(cmap='Spectral', cbar_title='My calculation')
-vect_buff.show(calc_rast, fc='none', ec='k', lw=0.5)
+calc_rast.plot(cmap='Spectral', cbar_title='My calculation')
+vect_buff.plot(calc_rast, fc='none', ec='k', lw=0.5)
 
 # Save to file
 calc_rast.save("mycalc.tif")
