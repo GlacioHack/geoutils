@@ -65,7 +65,7 @@ rast = rast.crop(vect)
 # Buffer the vector by 500 meters no matter its current projection system
 vect_buff = vect.buffer_metric(500)
 
-# Create boolean mask of vector on same grid/CRS as raster using it as "match-reference"
+# Create mask of vector on same grid/CRS as raster using it as "match-reference"
 mask_buff = vect_buff.create_mask(rast)
 
 # Re-assign values of pixels in the mask while performing a sum
