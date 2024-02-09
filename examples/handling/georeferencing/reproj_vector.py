@@ -17,8 +17,8 @@ vect = gu.Vector(filename_vect)
 
 # %%
 # The two objects are in different projections.
-print(rast.info())
-print(vect.info())
+rast.info()
+vect.info()
 
 # %%
 # Let's plot the two in their original projection.

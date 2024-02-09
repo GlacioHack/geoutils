@@ -29,7 +29,7 @@ rast
 
 # %%
 # We can print info on the raster.
-print(rast.info())
+rast.info()
 
 # %%
 # The array has been automatically cast into a :class:`~numpy.ma.MaskedArray`, to respect :class:`~geoutils.Raster.nodata` values.

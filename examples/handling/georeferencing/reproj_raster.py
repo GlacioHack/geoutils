@@ -16,8 +16,8 @@ rast2 = gu.Raster(filename_rast2)
 
 # %%
 # The first raster has larger extent and higher resolution than the second one.
-print(rast1.info())
-print(rast2.info())
+rast1.info()
+rast2.info()
 
 # %%
 # Let's plot the first raster, with the warped extent of the second one.
@@ -43,7 +43,7 @@ rast1_warped
 #
 # Now the shape and georeferencing should be the same as that of the second raster, shown above.
 
-print(rast1_warped.info())
+rast1_warped.info()
 
 # %%
 # We can plot the two rasters next to one another
@@ -59,4 +59,4 @@ rast2.plot(ax="new", cmap="Blues")
 rast2.set_nodata(0)
 # Pass the desired georeferencing parameters
 rast2_warped = rast2.reproject(grid_size=(100, 100), crs=32645)
-print(rast2_warped.info())
+rast2_warped.info()

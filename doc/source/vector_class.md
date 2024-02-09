@@ -56,7 +56,7 @@ Detailed information on the {class}`~geoutils.Vector` is printed using {func}`~g
 
 ```{code-cell} ipython3
 # Print details of vector
-print(vect.info())
+vect.info()
 ```
 
 A {class}`~geoutils.Vector` is saved to file by calling {func}`~geoutils.Raster.save` with a {class}`str` or a {class}`pathlib.Path`.
@@ -171,7 +171,7 @@ intersecting geometries to the extent.
 ```{code-cell} ipython3
 # Crop vector to smaller bounds
 vect_crop = vect.crop(crop_geom=(-73.5, -46.6, -73.4, -46.5), clip=True)
-print(vect_crop.info())
+vect_crop.info()
 ```
 
 ## Rasterize
