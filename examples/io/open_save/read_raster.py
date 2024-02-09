@@ -28,7 +28,7 @@ print(rast.info())
 
 # %%
 # The data will be loaded explicitly by any function requiring its :attr:`~geoutils.Raster.data`, such as :func:`~geoutils.Raster.show`.
-rast.show(cmap="Greys_r")
+rast.plot(cmap="Greys_r")
 
 # %%
 # Opening can be performed with several parameters, for instance choosing a single band with ``index`` and re-sampling with ``downsample``, to subset a 3-band

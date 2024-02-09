@@ -23,8 +23,8 @@ print(vect.bounds)
 
 # %%
 # Let's plot the raster and vector.
-rast.show(cmap="Purples")
-vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
+rast.plot(cmap="Purples")
+vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **First option:** using the vector as a reference to match, we reproject the raster. We simply have to pass the :class:`~geoutils.Vector`
@@ -39,8 +39,8 @@ rast.crop(vect, inplace=True)
 #      By default, :func:`~geoutils.Raster.crop` is done in-place, replacing ``rast``. This behaviour can be modified by passing ``inplace=False``.
 #
 
-rast.show(ax="new", cmap="Purples")
-vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
+rast.plot(ax="new", cmap="Purples")
+vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Raster.crop`, including another :class:`~geoutils.Raster` or a
@@ -48,5 +48,5 @@ vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
 
 rast.crop((rast.bounds.left + 1000, rast.bounds.bottom, rast.bounds.right, rast.bounds.top - 500), inplace=True)
 
-rast.show(ax="new", cmap="Purples")
-vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
+rast.plot(ax="new", cmap="Purples")
+vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)

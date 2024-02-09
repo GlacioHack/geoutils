@@ -44,7 +44,7 @@ from geoutils.projtools import (
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
-from geoutils.raster.sampling import sample_array
+from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -2753,7 +2753,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
         return intersection  # type: ignore
 
-    def show(
+    def plot(
         self,
         bands: int | tuple[int, ...] | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
@@ -2793,7 +2793,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             import matplotlib.pyplot as plt
             ax1 = plt.subplot(111)
             mpl_kws = {'cmap':'seismic'}
-            myimage.show(ax=ax1, mpl_kws)
+            myimage.plot(ax=ax1, mpl_kws)
         """
         # If data is not loaded, need to load it
         if not self.is_loaded:
@@ -3335,7 +3335,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def to_points(
         self,
-        sample: float | int,
+        subsample: float | int,
         as_array: Literal[False] = False,
         pixel_offset: Literal["center", "corner"] = "center",
     ) -> NDArrayNum:
@@ -3344,7 +3344,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def to_points(
         self,
-        sample: float | int,
+        subsample: float | int,
         as_array: Literal[True],
         pixel_offset: Literal["center", "corner"] = "center",
     ) -> Vector:
@@ -3352,7 +3352,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     def to_points(
         self,
-        sample: float | int = 1,
+        subsample: float | int = 1,
         as_array: bool = False,
         pixel_offset: Literal["center", "corner"] = "center",
     ) -> NDArrayNum | Vector:
@@ -3371,7 +3371,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
             * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
 
-        :param sample: The point count or fraction. If sample > 1, it's parsed as a count.
+        :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
         :param as_array: Return an array instead of a vector.
         :param pixel_offset: The point at which to associate the pixel coordinate with ('corner' == upper left).
 
@@ -3382,13 +3382,13 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         data_size = self.width * self.height
 
         # Validate the sample argument.
-        if sample <= 0.0:
-            raise ValueError(f"sample cannot be zero or negative (given value: {sample})")
+        if subsample <= 0.0:
+            raise ValueError(f"subsample cannot be zero or negative (given value: {subsample})")
         # If the sample is equal to or less than 1, it is assumed to be a fraction.
-        if sample <= 1.0:
-            sample = int(data_size * sample)
+        if subsample <= 1.0:
+            sample = int(data_size * subsample)
         else:
-            sample = int(sample)
+            sample = int(subsample)
         if sample > data_size:
             raise ValueError(f"sample cannot exceed the size of the dataset ({sample} vs {data_size})")
 
@@ -3537,9 +3537,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return self.copy(new_array=proximity)
 
     @overload
-    def sample(
+    def subsample(
         self,
-        sample: int | float,
+        subsample: int | float,
         return_indices: Literal[False] = False,
         *,
         random_state: np.random.RandomState | int | None = None,
@@ -3547,9 +3547,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ...
 
     @overload
-    def sample(
+    def subsample(
         self,
-        sample: int | float,
+        subsample: int | float,
         return_indices: Literal[True],
         *,
         random_state: np.random.RandomState | int | None = None,
@@ -3557,31 +3557,31 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         ...
 
     @overload
-    def sample(
+    def subsample(
         self,
-        sample: float | int,
+        subsample: float | int,
         return_indices: bool = False,
         random_state: np.random.RandomState | int | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         ...
 
-    def sample(
+    def subsample(
         self,
-        sample: float | int,
+        subsample: float | int,
         return_indices: bool = False,
         random_state: np.random.RandomState | int | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
         Randomly sample the raster. Only valid values are considered.
 
-        :param sample: If <= 1, a fraction of the total pixels to extract. If > 1, the number of pixels.
+        :param subsample: Subsample size. If <= 1, a fraction of the total pixels to extract. If > 1, the number of pixels.
         :param return_indices: Whether to return the extracted indices only.
         :param random_state: Random state or seed number.
 
         :return: Array of sampled valid values, or array of sampled indices.
         """
 
-        return sample_array(array=self.data, sample=sample, return_indices=return_indices, random_state=random_state)
+        return subsample_array(array=self.data, sample=sample, return_indices=return_indices, random_state=random_state)
 
 
 class Mask(Raster):
