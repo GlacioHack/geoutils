@@ -54,7 +54,8 @@ class TestDocs:
                 list(executor.map(run_code, filenames))
             """
 
-            os.chdir(current_dir)
+        os.chdir(current_dir)
+        
 
     def test_build(self) -> None:
         """Try building the documentation and see if it works."""
