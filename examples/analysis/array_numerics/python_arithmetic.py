@@ -15,12 +15,12 @@ rast = gu.Raster(filename_rast)
 rast
 
 # %% We plot the original raster.
-rast.show(cmap="Greys_r")
+rast.plot(cmap="Greys_r")
 
 # %%
 # Performing arithmetic operations implicitly loads the data.
 rast = (rast + 1.0) ** 0.5 / 5
-rast.show(cmap="Greys_r")
+rast.plot(cmap="Greys_r")
 
 # %%
 #
@@ -37,7 +37,7 @@ mask
 # :class:`Masks<geoutils.Mask>` support python logical operators to be combined together
 
 mask = (rast >= 3) | (rast % 2 == 0) & (rast != 80)
-mask.show()
+mask.plot()
 
 # %%
 # Finally, :class:`Masks<geoutils.Mask>` can be used for indexing and assigning to a :class:`Rasters<geoutils.Raster>`

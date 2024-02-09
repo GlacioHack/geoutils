@@ -20,17 +20,17 @@ vect_buff = vect.buffer_metric(buffer_size=500)
 
 # %%
 # Let's plot the raster and vector
-ax = vect.show()
-vect_buff.show(ec="k", fc="none")
+ax = vect.plot()
+vect_buff.plot(ec="k", fc="none")
 
 # %%
 # Many buffers are overlapping. To compute a buffer without overlap, one can use :func:`~geoutils.Vector.buffer_without_overlap`.
 #
 vect_buff_nolap = vect.buffer_without_overlap(buffer_size=500)
-vect.show(ax="new")
-vect_buff_nolap.show(ec="k", fc="none")
+vect.plot(ax="new")
+vect_buff_nolap.plot(ec="k", fc="none")
 
 # %%
 # We plot with color to see that the attributes are retained for every feature.
-vect_buff_nolap.show(ax="new", column="Area")
-vect.show(ec="k", column="Area", alpha=0.5)
+vect_buff_nolap.plot(ax="new", column="Area")
+vect.plot(ec="k", column="Area", alpha=0.5)

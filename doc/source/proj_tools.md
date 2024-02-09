@@ -61,7 +61,7 @@ For this, the original rectangular footprint polygon lines are densified to resp
 # Get raster footprint in geographic CRS
 rast_footprint = rast.get_footprint_projected(4326)
 
-rast_footprint.show()
+rast_footprint.plot()
 ```
 
 This is for instance useful to check for intersection with other data.

@@ -1286,13 +1286,13 @@ class TestRaster:
         r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.raster.sample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtypes[0])
-        rand_indices = gu.raster.sample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
@@ -1503,13 +1503,13 @@ class TestRaster:
 
         if DO_PLOT:
             fig1, ax1 = plt.subplots()
-            r.show(ax=ax1, title="Raster 1")
+            r.plot(ax=ax1, title="Raster 1")
 
             fig2, ax2 = plt.subplots()
-            r2b.show(ax=ax2, title="Raster 2")
+            r2b.plot(ax=ax2, title="Raster 2")
 
             fig3, ax3 = plt.subplots()
-            r3.show(ax=ax3, title="Raster 1 reprojected to Raster 2")
+            r3.plot(ax=ax3, title="Raster 1 reprojected to Raster 2")
 
             plt.show()
 
@@ -1524,13 +1524,13 @@ class TestRaster:
 
         if DO_PLOT:
             fig1, ax1 = plt.subplots()
-            r.show(ax=ax1, title="Raster 1")
+            r.plot(ax=ax1, title="Raster 1")
 
             fig2, ax2 = plt.subplots()
-            r2.show(ax=ax2, title="Raster 2")
+            r2.plot(ax=ax2, title="Raster 2")
 
             fig3, ax3 = plt.subplots()
-            r3.show(ax=ax3, title="Raster 1 reprojected to Raster 2")
+            r3.plot(ax=ax3, title="Raster 1 reprojected to Raster 2")
 
             plt.show()
 
@@ -1538,7 +1538,7 @@ class TestRaster:
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
-        rand_indices = gu.raster.sample_array(r_gaps.data, nsamples, return_indices=True)
+        rand_indices = gu.raster.subsample_array(r_gaps.data, nsamples, return_indices=True)
         r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
@@ -2335,7 +2335,7 @@ class TestRaster:
         # Plot raster with cbar
         r0 = gu.Raster(example)
         fig, ax = plt.subplots(figsize=(figsize, figsize))
-        r0.show(
+        r0.plot(
             ax=ax,
             add_cbar=True,
         )
@@ -2362,7 +2362,7 @@ class TestRaster:
         img_RGB = gu.Raster(self.landsat_rgb_path)
 
         # Test default plot
-        img.show()
+        img.plot()
         if DO_PLOT:
             plt.show()
         else:
@@ -2371,7 +2371,7 @@ class TestRaster:
 
         # Test with new figure
         plt.figure()
-        img.show()
+        img.plot()
         if DO_PLOT:
             plt.show()
         else:
@@ -2380,7 +2380,7 @@ class TestRaster:
 
         # Test with provided ax
         ax = plt.subplot(111)
-        img.show(ax=ax, title="Simple plotting test")
+        img.plot(ax=ax, title="Simple plotting test")
         if DO_PLOT:
             plt.show()
         else:
@@ -2389,7 +2389,7 @@ class TestRaster:
 
         # Test plot RGB
         ax = plt.subplot(111)
-        img_RGB.show(ax=ax, title="Plotting RGB")
+        img_RGB.plot(ax=ax, title="Plotting RGB")
         if DO_PLOT:
             plt.show()
         else:
@@ -2398,7 +2398,7 @@ class TestRaster:
 
         # Test plotting single band B/W, add_cbar
         ax = plt.subplot(111)
-        img_RGB.show(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Plotting one band B/W")
+        img_RGB.plot(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Plotting one band B/W")
         if DO_PLOT:
             plt.show()
         else:
@@ -2407,7 +2407,7 @@ class TestRaster:
 
         # Test vmin, vmax and cbar_title
         ax = plt.subplot(111)
-        img.show(
+        img.plot(
             cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax, title="Testing vmin, vmax and cbar_title"
         )
         if DO_PLOT:

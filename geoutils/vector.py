@@ -163,7 +163,7 @@ class Vector:
 
         return "".join(as_str)
 
-    def show(
+    def plot(
         self,
         ref_crs: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | CRS | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
@@ -1591,7 +1591,7 @@ class Vector:
             >>> buffer = outlines.buffer_without_overlap(500)
             >>> ax = buffer.ds.plot()  # doctest: +SKIP
             >>> outlines.ds.plot(ax=ax, ec='k', fc='none')  # doctest: +SKIP
-            >>> plt.show()  # doctest: +SKIP
+            >>> plt.plot()  # doctest: +SKIP
         """
 
         # Project in local UTM if metric is True

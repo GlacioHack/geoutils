@@ -27,7 +27,7 @@ vect.info()
 
 # %%
 # Let's plot by vector area
-vect.show(column="Area", cbar_title="Area (km²)")
+vect.plot(column="Area", cbar_title="Area (km²)")
 
 # %%
 # Finally, a vector is saved using :func:`~geoutils.Vector.save`.

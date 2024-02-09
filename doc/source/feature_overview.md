@@ -153,14 +153,14 @@ For advanced plotting tools to create "publication-quality" figures, see [Cartop
 [GeoPlot](https://residentmario.github.io/geoplot/index.html).
 ```
 
-The plotting functionality is named {func}`~geoutils.Raster.show` everywhere, for consistency. Here again, a {class}`~geoutils.Raster` or
+The plotting functionality is named {func}`~geoutils.Raster.plot` everywhere, for consistency. Here again, a {class}`~geoutils.Raster` or
 {class}`~geoutils.Vector` can be passed as a **reference to match** to ensure all data is displayed on the same grid and projection.
 
 ```{code-cell} ipython3
 # Plot proximity to vector
 rast_proximity_to_vec = vect.proximity(rast)
-rast_proximity_to_vec.show(cbar_title="Distance to glacier outline")
-vect.show(rast_proximity_to_vec, fc="none")
+rast_proximity_to_vec.plot(cbar_title="Distance to glacier outline")
+vect.plot(rast_proximity_to_vec, fc="none")
 ```
 
 ```{tip}
@@ -214,8 +214,8 @@ vect_aoi = mask_aoi.polygonize()
 
 ```{code-cell} ipython3
 # Plot result
-rast.show(cmap='Reds', cbar_title='Normalized infrared')
-vect_aoi.show(fc='none', ec='k', lw=0.75)
+rast.plot(cmap='Reds', cbar_title='Normalized infrared')
+vect_aoi.plot(fc='none', ec='k', lw=0.75)
 ```
 
 ## Saving to file
