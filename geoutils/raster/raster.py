@@ -3251,8 +3251,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         :param points: Point(s) at which to interpolate raster value. If points fall outside of image, value
             returned is nan. Shape should be (N,2).
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', or 'quintic'. For more information,
-        see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
-            Default is linear.
+            see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
         :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
