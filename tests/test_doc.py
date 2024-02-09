@@ -14,6 +14,7 @@ class TestDocs:
     def test_example_code(self) -> None:
         """Try running each python script in the doc/source/code\
                 directory and check that it doesn't raise an error."""
+        current_dir = os.getcwd()
         os.chdir(os.path.join(self.docs_dir, "source"))
 
         def run_code(filename: str) -> None:
@@ -44,7 +45,6 @@ class TestDocs:
         # Some of the doc scripts in code/ fails on Windows due to permission errors
         if (platform.system() == "Linux") or (platform.system() == "Darwin"):
 
-            current_dir = os.getcwd()
             for filename in filenames:
                 run_code(filename)
             """
