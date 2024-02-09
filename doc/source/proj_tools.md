@@ -30,7 +30,7 @@ import geoutils as gu
 
 # Initiate a raster from disk
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-print(rast.info())
+rast.info()
 
 # Estimate a universal metric CRS for the raster
 rast.get_metric_crs()

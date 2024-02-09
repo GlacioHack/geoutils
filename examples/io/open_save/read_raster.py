@@ -24,7 +24,7 @@ rast
 #        A raster can also be instantiated with a :class:`rasterio.io.DatasetReader` or a :class:`rasterio.io.MemoryFile`, see :ref:`sphx_glr_io_examples_import_export_import_raster.py`.
 #
 # We can print more info on the raster.
-print(rast.info())
+rast.info()
 
 # %%
 # The data will be loaded explicitly by any function requiring its :attr:`~geoutils.Raster.data`, such as :func:`~geoutils.Raster.show`.

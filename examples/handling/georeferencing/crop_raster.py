@@ -18,7 +18,7 @@ vect = vect[vect["RGIId"] == "RGI60-15.10055"]
 
 # %%
 # The first raster has larger extent and higher resolution than the vector.
-print(rast.info())
+rast.info()
 print(vect.bounds)
 
 # %%
