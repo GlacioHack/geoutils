@@ -189,9 +189,9 @@ html_theme_options = {
         "notebook_interface": "jupyterlab",  # For launching Binder in Jupyterlab to open MD files as notebook (downloads them otherwise)
     },
     "announcement": (
-        '⚠️ Our 0.1 release refactored several early-development functions for long-term stability, '
+        "⚠️ Our 0.1 release refactored several early-development functions for long-term stability, "
         'to update your code see <a href="https://github.com/GlacioHack/geoutils/releases/tag/v0.1.0">here</a>. ⚠️'
-        '<br>Future changes will come with deprecation warnings! 🙂'
+        "<br>Future changes will come with deprecation warnings! 🙂"
     )
     # "logo_only": True,
     # "icon_links": [
