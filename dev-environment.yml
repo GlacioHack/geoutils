@@ -13,6 +13,7 @@ dependencies:
   - tqdm
   - xarray
   - rioxarray=0.*
+  - python-pdal
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
