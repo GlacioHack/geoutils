@@ -1924,12 +1924,17 @@ class TestRaster:
 
         # Warnings should be raised when AREA_OR_POINT is None similarly, we ignore them from now on
         if tag_aop is None and shift_aop:
-            warnings.filterwarnings("ignore", category=UserWarning,
-                                    message="Attribute AREA_OR_POINT undefined in self.tags*")
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, message="Attribute AREA_OR_POINT undefined in self.tags*"
+            )
 
         raster_points_lin = raster.interp_points(points, method="linear", shift_area_or_point=shift_aop)
-        raster_points_interpn = raster.interp_points(points, method="nearest", force_scipy_function="interpn", shift_area_or_point=shift_aop)
-        raster_points_interpn_lin = raster.interp_points(points, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop)
+        raster_points_interpn = raster.interp_points(
+            points, method="nearest", force_scipy_function="interpn", shift_area_or_point=shift_aop
+        )
+        raster_points_interpn_lin = raster.interp_points(
+            points, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop
+        )
 
         assert np.array_equal(raster_points, raster_points_lin)
         assert np.array_equal(raster_points, raster_points_interpn)
@@ -1956,7 +1961,9 @@ class TestRaster:
 
         # Here again compare methods
         raster_points_in = raster.interp_points(points_in, method="linear", shift_area_or_point=shift_aop)
-        raster_points_in_interpn = raster.interp_points(points_in, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop)
+        raster_points_in_interpn = raster.interp_points(
+            points_in, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop
+        )
 
         assert np.array_equal(raster_points_in, raster_points_in_interpn)
 
@@ -1997,7 +2004,9 @@ class TestRaster:
             raster_points_mapcoords = raster.interp_points(
                 points_in_rand, method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
             )
-            raster_points_interpn = raster.interp_points(points_in_rand, method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop)
+            raster_points_interpn = raster.interp_points(
+                points_in_rand, method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
+            )
 
             assert np.array_equal(raster_points_mapcoords, raster_points_interpn)
 
