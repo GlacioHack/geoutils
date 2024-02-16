@@ -1892,6 +1892,8 @@ class TestRaster:
         arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
         transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
+
+        # Define the AREA_OR_POINT attribute
         raster.tags = {"AREA_OR_POINT": tag_aop}
 
         # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
@@ -1922,7 +1924,7 @@ class TestRaster:
         else:
             raster_points = raster.interp_points(points, method="nearest", shift_area_or_point=shift_aop)
 
-        # Warnings should be raised when AREA_OR_POINT is None similarly, we ignore them from now on
+        # Warnings should be raised when AREA_OR_POINT is None everywhere, so we ignore them from now on
         if tag_aop is None and shift_aop:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="Attribute AREA_OR_POINT undefined in self.tags*"
