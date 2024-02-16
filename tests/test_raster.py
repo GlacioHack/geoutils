@@ -1883,29 +1883,53 @@ class TestRaster:
         val_latlon = r.interp_points([(lat, lon)], method="linear", input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
-    def test_interp_points__synthetic(self) -> None:
+    @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
+    @pytest.mark.parametrize("shift_aop", [True, False])  # type: ignore
+    def test_interp_points__synthetic(self, tag_aop: str | None, shift_aop: bool) -> None:
         """Test interp_points function with synthetic data."""
 
         # We flip the array up/down to facilitate index comparison of Y axis
         arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
         transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
+        raster.tags = {"AREA_OR_POINT": tag_aop}
 
         # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
         index_x = [0, 1, 2, 0, 1, 2, 0, 1, 2]
         index_y = [0, 0, 0, 1, 1, 1, 2, 2, 2]
 
         # The actual X/Y coords will be offset by one because Y axis is inverted and pixel coords is upper-left corner
-        points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
+
+        # For the single case of "Point" and shift=True, shift the point coordinates to match the calculations below
+        # All other cases should pass without this shift (for tag=None, "Area" is the default)
+        if shift_aop and tag_aop == "Point":
+            reindex_x = [ix - 0.5 for ix in index_x]
+            reindex_y = [iy - 0.5 for iy in index_y]
+            points_x, points_y = raster.ij2xy(i=reindex_x, j=reindex_y)
+        else:
+            points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
+
         points = np.array((points_x, points_y)).T
 
         # The following 4 methods should yield the same result because:
         # Nearest = Linear interpolation at the location of a data point
         # Regular grid = Equal grid interpolation at the location of a data point
-        raster_points = raster.interp_points(points, method="nearest")
-        raster_points_lin = raster.interp_points(points, method="linear")
-        raster_points_interpn = raster.interp_points(points, method="nearest", force_scipy_function="interpn")
-        raster_points_interpn_lin = raster.interp_points(points, method="linear", force_scipy_function="interpn")
+
+        # Check warning is raised if AREA_OR_POINT is None
+        if tag_aop is None and shift_aop:
+            with pytest.warns(UserWarning, match="Attribute AREA_OR_POINT undefined in self.tags*"):
+                raster_points = raster.interp_points(points, method="nearest", shift_area_or_point=shift_aop)
+        else:
+            raster_points = raster.interp_points(points, method="nearest", shift_area_or_point=shift_aop)
+
+        # Warnings should be raised when AREA_OR_POINT is None similarly, we ignore them from now on
+        if tag_aop is None and shift_aop:
+            warnings.filterwarnings("ignore", category=UserWarning,
+                                    message="Attribute AREA_OR_POINT undefined in self.tags*")
+
+        raster_points_lin = raster.interp_points(points, method="linear", shift_area_or_point=shift_aop)
+        raster_points_interpn = raster.interp_points(points, method="nearest", force_scipy_function="interpn", shift_area_or_point=shift_aop)
+        raster_points_interpn_lin = raster.interp_points(points, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop)
 
         assert np.array_equal(raster_points, raster_points_lin)
         assert np.array_equal(raster_points, raster_points_interpn)
@@ -1919,12 +1943,20 @@ class TestRaster:
         # Check bilinear interpolation values inside the grid (same here, offset by 1 between X and Y)
         index_x_in = [0.5, 0.5, 1.5, 1.5]
         index_y_in = [0.5, 1.5, 0.5, 1.5]
-        points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in)
+
+        # Again, exception for "Point"
+        if shift_aop and tag_aop == "Point":
+            reindex_x_in = [ix - 0.5 for ix in index_x_in]
+            reindex_y_in = [iy - 0.5 for iy in index_y_in]
+            points_x_in, points_y_in = raster.ij2xy(i=reindex_x_in, j=reindex_y_in)
+        else:
+            points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in)
+
         points_in = np.array((points_x_in, points_y_in)).T
 
         # Here again compare methods
-        raster_points_in = raster.interp_points(points_in, method="linear")
-        raster_points_in_interpn = raster.interp_points(points_in, method="linear", force_scipy_function="interpn")
+        raster_points_in = raster.interp_points(points_in, method="linear", shift_area_or_point=shift_aop)
+        raster_points_in_interpn = raster.interp_points(points_in, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop)
 
         assert np.array_equal(raster_points_in, raster_points_in_interpn)
 
@@ -1952,6 +1984,7 @@ class TestRaster:
         arr = np.flipud(np.arange(1, 2501).reshape((50, 50)))
         transform = rio.transform.from_bounds(0, 0, 50, 50, 50, 50)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
+        raster.tags = {"AREA_OR_POINT": tag_aop}
 
         # For this, get random points
         np.random.seed(42)
@@ -1962,9 +1995,9 @@ class TestRaster:
 
         for method in ["nearest", "linear", "cubic", "quintic"]:
             raster_points_mapcoords = raster.interp_points(
-                points_in_rand, method=method, force_scipy_function="map_coordinates"
+                points_in_rand, method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
             )
-            raster_points_interpn = raster.interp_points(points_in_rand, method=method, force_scipy_function="interpn")
+            raster_points_interpn = raster.interp_points(points_in_rand, method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop)
 
             assert np.array_equal(raster_points_mapcoords, raster_points_interpn)
 
@@ -1972,16 +2005,24 @@ class TestRaster:
         np.random.seed(42)
         index_x_edge_rand = [-0.5, -0.5, -0.5, 25, 25, 49.5, 49.5, 49.5]
         index_y_edge_rand = [-0.5, 25, 49.5, -0.5, 49.5, -0.5, 25, 49.5]
-        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_edge_rand, j=index_y_edge_rand)
+
+        # Again, exception for "Point"
+        if shift_aop and tag_aop == "Point":
+            reindex_x_edge_rand = [ix - 0.5 for ix in index_x_edge_rand]
+            reindex_y_edge_rand = [iy - 0.5 for iy in index_y_edge_rand]
+            points_x_rand, points_y_rand = raster.ij2xy(i=reindex_x_edge_rand, j=reindex_y_edge_rand)
+        else:
+            points_x_rand, points_y_rand = raster.ij2xy(i=index_x_edge_rand, j=index_y_edge_rand)
+
         points_edge_rand = np.array((points_x_rand, points_y_rand)).T
 
         # Nearest doesn't apply, just linear and above
         for method in ["cubic", "quintic"]:
             raster_points_mapcoords_edge = raster.interp_points(
-                points_edge_rand, method=method, force_scipy_function="map_coordinates"
+                points_edge_rand, method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
             )
             raster_points_interpn_edge = raster.interp_points(
-                points_edge_rand, method=method, force_scipy_function="interpn"
+                points_edge_rand, method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
             )
 
             assert all(~np.isfinite(raster_points_mapcoords_edge))
