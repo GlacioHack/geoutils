@@ -90,13 +90,13 @@ header-rows: 1
 * - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_raster_geoutils.py
         :language: python
-        :lines: 12-29
+        :lines: 14-29
     ```
 
   - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_raster_rasterio.py
         :language: python
-        :lines: 10-62
+        :lines: 11-57
     ```
 `````
 
@@ -112,13 +112,13 @@ header-rows: 1
 * - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_vector_geoutils.py
         :language: python
-        :lines: 10-25
+        :lines: 11-26
     ```
 
   - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_vector_geopandas.py
         :language: python
-        :lines: 10-40
+        :lines: 11-34
     ```
 
 `````
