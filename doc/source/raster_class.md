@@ -34,24 +34,24 @@ A {class}`~geoutils.Raster` also contains many derivative attributes, with namin
 A first category includes georeferencing attributes directly derived from {attr}`~geoutils.Raster.transform`, namely: {attr}`~geoutils.Raster.shape`,
 {attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds`.
 
-A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.indexes` and
-{attr}`~geoutils.Raster.dtypes`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and their indexes.
+A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.bands` and
+{attr}`~geoutils.Raster.dtypes`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and the band indexes.
 
 ```{important}
-The {attr}`~geoutils.Raster.indexes` of {class}`rasterio.io.DatasetReader` start from 1 and not 0, be careful when instantiating or loading from a
+The {attr}`~geoutils.Raster.bands` of {class}`rasterio.io.DatasetReader` start from 1 and not 0, be careful when instantiating or loading from a
 multi-band raster!
 ```
 
 Finally, the remaining attributes are only relevant when instantiating from a **on-disk** file: {attr}`~geoutils.Raster.name`, {attr}`~geoutils.Raster.driver`,
-{attr}`~geoutils.Raster.count_on_disk`, {attr}`~geoutils.Raster.indexes_on_disk`, {attr}`~geoutils.Raster.is_loaded` and {attr}`~geoutils.Raster.is_modified`.
+{attr}`~geoutils.Raster.count_on_disk`, {attr}`~geoutils.Raster.bands_on_disk`, {attr}`~geoutils.Raster.is_loaded` and {attr}`~geoutils.Raster.is_modified`.
 
 
 ```{note}
-The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.indexes` attributes always exist, while {attr}`~geoutils.Raster.count_on_disk` and
-{attr}`~geoutils.Raster.indexes_on_disk` only refers to the number of bands on the **on-disk** dataset, if it exists.
+The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.bands` attributes always exist, while {attr}`~geoutils.Raster.count_on_disk` and
+{attr}`~geoutils.Raster.bands_on_disk` only refers to the number of bands on the **on-disk** dataset, if it exists.
 
 For example, {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.count_on_disk` will differ when a single band is loaded from a
-3-band **on-disk** file, by passing a single index to the `indexes` argument in {class}`~geoutils.Raster` or {func}`~geoutils.Raster.load`.
+3-band **on-disk** file, by passing a single index to the `bands` argument in {class}`~geoutils.Raster` or {func}`~geoutils.Raster.load`.
 ```
 
 The complete list of {class}`~geoutils.Raster` attributes with description is available in {ref}`dedicated sections of the API<api-raster-attrs>`.
