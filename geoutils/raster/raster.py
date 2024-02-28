@@ -876,7 +876,6 @@ class Raster:
         else:
             str_data = "\n       ".join(self.data.__str__().split("\n"))
 
-        # Over-ride Raster's method to remove nodata value (always None)
         # Use <pre> to keep white spaces, <span> to keep line breaks
         s = (
             '<pre><span style="white-space: pre-wrap"><b><em>'
@@ -888,6 +887,8 @@ class Raster:
             + "\n            ".join(self.transform.__str__().split("\n"))
             + "\n  <b>crs=</b>"
             + self.crs.__str__()
+            + "\n  <b>nodata=</b>"
+            + self.nodata.__str__()
             + ")</span></pre>"
         )
 
