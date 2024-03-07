@@ -3425,7 +3425,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def to_pointcloud(
         self,
-        data_columns: str | list[str] = None,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        store_auxiliary_bands: bool = False,
         subsample: float | int = 1,
         *,
         as_array: Literal[False] = False,
@@ -3437,7 +3439,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     @overload
     def to_pointcloud(
         self,
-        data_columns: str | list[str] = None,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        store_auxiliary_bands: bool = False,
         subsample: float | int = 1,
         *,
         as_array: Literal[True],
@@ -3448,26 +3452,40 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
     @overload
     def to_pointcloud(
-            self,
-            data_column_names: str | list[str] = None,
-            subsample: float | int = 1,
-            *,
-            as_array: bool = False,
-            random_state: np.random.RandomState | int | None = None,
-            force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        self,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        store_auxiliary_bands: bool = False,
+        subsample: float | int = 1,
+        *,
+        as_array: bool = False,
+        random_state: np.random.RandomState | int | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum | Vector:
         ...
 
     def to_pointcloud(
         self,
-        data_column_names: str | list[str] = None,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        store_auxiliary_bands: bool = False,
         subsample: float | int = 1,
         as_array: bool = False,
         random_state: np.random.RandomState | int | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum | Vector:
         """
-        Convert raster to point cloud with one data column per band (names default to "b1", "b2", etc).
+        Convert raster to point cloud.
+
+        A point cloud is a vector of point geometries associated to a data column, and possibly other auxiliary data
+        columns, see geoutils.PointCloud.
+
+        For a single band raster, the main data column name of the point cloud defaults to "b1" and stores values of
+        that single band.
+        For a multi-band raster, the main data column name of the point cloud defaults to "bX" where X is the data band
+        index chosen by the user (defaults to 1, the first band).
+        Optionally, all other bands can also be stored in columns "b1", "b2", etc. For more specific band selection,
+        use Raster.split_bands previous to converting to point cloud.
 
         Optionally, randomly subsample valid pixels (nodata values are skipped).
         If 'subsample' is either 1, or is equal to the pixel count, all valid points are returned.
@@ -3481,7 +3499,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
             * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
 
-        :param data_column_names: Names of data columns to use for band values.
+        :param data_column_name: Name of point cloud data column to use, defaults to "b1".
+        :param data_band: (Only for multi-band rasters) Band to use for data column, defaults to first. Band counting
+            starts at 1.
+        :param store_auxiliary_bands: (Only for multi-band rasters) Whether to save other bands as auxiliary data
+            columns, defaults to False.
         :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
         :param as_array: Return an array instead of a vector.
         :param random_state: Random state or seed number.
@@ -3490,15 +3512,24 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
-        :returns: A vector, or ndarray of the shape (N, 2 + count) where N is the sample count.
+        :returns: A point cloud, or ndarray of the shape (N, 2 + count) where N is the sample count.
         """
 
-        # Format data columns input into list if it is a string
-        if isinstance(data_column_names, str):
-            data_column_names = [data_column_names]
-        if not self.count == len(data_column_names):
-            raise ValueError(f"Data column names {data_column_names} must be a list of same length as "
-                             f"raster band count {self.count}.")
+        # Input checks
+        if not isinstance(data_column_name, str):
+            raise ValueError("Data column name must be a string.")
+        if not isinstance(data_band, int) and (1 < data_band or self.count < data_band):
+            raise ValueError(f"Data band number must be between 1 and the total number of bands of {self.count}.")
+
+        # Rename data column if a different band is selected but the name is still default
+        if data_band != 1 and data_column_name == "b1":
+            data_column_name = "b" + str(data_band)
+
+        # Extract all bands if storing, otherwise the single one
+        if store_auxiliary_bands:
+            bands_to_extract = None
+        else:
+            bands_to_extract = data_band
 
         if self.is_loaded:
 
@@ -3507,7 +3538,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         else:
             # Load only mask of valid data from disk
-            valid_mask = self._load_only_mask()
+            valid_mask = self._load_only_mask(bands=bands_to_extract)
 
             # Get subsample on valid mask
             indices = subsample_array(array=valid_mask, subsample=subsample, random_state=random_state,
@@ -3515,6 +3546,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Extract the coordinates at subsampled pixels with valid data
         # To extract data, we always use "upper left" which rasterio interprets as the exact coordinates of the raster
+        # Further below we redefine output coordinates based on point interpretation
         x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset="ul"))
 
         # If the Raster is loaded, pick from the data while ignoring the mask
@@ -3522,27 +3554,38 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             if self.count == 1:
                 pixel_data = self.data[indices[0], indices[1]]
             else:
-                pixel_data = self.data[:, indices[0], indices[1]]
+                if store_auxiliary_bands:
+                    pixel_data = self.data[:, indices[0], indices[1]]
+                else:
+                    pixel_data = self.data[data_band - 1, indices[0], indices[1]]
 
         # Otherwise use rasterio.sample to load only requested pixels
         else:
             with rio.open(self.filename) as raster:
-                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords)))).T
+                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords))), indexes=bands_to_extract).T
 
         # Fill masked array with NaNs before writing to points
-        pixel_data = pixel_data.filled(np.nan)
+        if np.ma.is_masked(pixel_data):
+            pixel_data = pixel_data.filled(np.nan)
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation
-        x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset=force_pixel_offset))
+        x_coords_2, y_coords_2 = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset=force_pixel_offset))
 
         # Merge the coordinates and pixel data into a point cloud.
-        points_arr = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
+        points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T
+
+        # Define column names
+        if store_auxiliary_bands:
+            all_column_names = [f"b{i}" for i in range(1, self.count + 1)]
+            all_column_names[data_band - 1] = data_column_name
+        else:
+            all_column_names = [data_column_name]
 
         if not as_array:
             points = Vector(
                 gpd.GeoDataFrame(
                     points_arr[:, 2:],
-                    columns=data_column_names if not None else [f"b{i}" for i in range(1, self.count + 1)],
+                    columns=all_column_names,
                     geometry=gpd.points_from_xy(points_arr[:, 0], points_arr[:, 1]),
                     crs=self.crs,
                 )
