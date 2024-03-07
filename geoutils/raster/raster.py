@@ -192,6 +192,7 @@ _default_rio_attrs = [
 
 def _load_rio(
     dataset: rio.io.DatasetReader,
+    only_mask: bool = False,
     indexes: int | list[int] | None = None,
     masked: bool = False,
     transform: Affine | None = None,
@@ -205,6 +206,7 @@ def _load_rio(
     Ensure that ``self.data.ndim=3`` for ease of use (needed e.g. in show).
 
     :param dataset: Dataset to read (opened with :func:`rasterio.open`).
+    :param only_mask: Read only the dataset mask.
     :param indexes: Band(s) to load. Note that rasterio begins counting at 1, not 0.
     :param masked: Whether the mask should be read (if any exists) to use the nodata to mask values.
     :param transform: Create a window from the given transform (to read only parts of the raster)
@@ -242,11 +244,16 @@ def _load_rio(
             window = None
 
     if indexes is None:
-        data = dataset.read(masked=masked, window=window, **kwargs)
+        if only_mask:
+            data = dataset.read_masks(masked=masked, window=window, **kwargs)
+        else:
+            data = dataset.read(masked=masked, window=window, **kwargs)
     else:
-        data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
+        if only_mask:
+            data = dataset.read_masks(indexes=indexes, masked=masked, window=window, **kwargs)
+        else:
+            data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
     return data
-
 
 def _get_reproject_params(
     raster: RasterType,
@@ -691,12 +698,64 @@ class Raster:
         """Driver used to read a file on disk."""
         return self._driver
 
+    def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
+        """
+        Load only the raster mask from disk and return as independent array (not stored in any class attributes).
+
+        :param bands: Band(s) to load. Note that rasterio begins counting at 1, not 0.
+        :param kwargs: Optional keyword arguments sent to '_load_rio()'.
+
+        :raises ValueError: If the data are already loaded.
+        :raises AttributeError: If no 'filename' attribute exists.
+        """
+        if self.is_loaded:
+            raise ValueError("Data are already loaded.")
+
+        if self.filename is None:
+            raise AttributeError(
+                "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
+            )
+
+        out_count = self._out_count
+        # If no index is passed, use all of them
+        if bands is None:
+            valid_bands = self.bands
+        # If a new index was pass, redefine out_shape
+        elif isinstance(bands, (int, list)):
+            # Rewrite properly as a tuple
+            if isinstance(bands, int):
+                valid_bands = (bands,)
+            else:
+                valid_bands = tuple(bands)
+            # Update out_count if out_shape exists (when a downsampling has been passed)
+            if self._out_shape is not None:
+                out_count = len(valid_bands)
+
+        # If a downsampled out_shape was defined during instantiation
+        with rio.open(self.filename) as dataset:
+            mask = _load_rio(
+                dataset,
+                only_mask=True,
+                indexes=list(valid_bands),
+                masked=self._masked,
+                transform=self.transform,
+                shape=self.shape,
+                out_shape=self._out_shape,
+                out_count=out_count,
+                **kwargs,
+            )
+
+        # Valid data is equal to 255, invalid is equal to zero
+        mask_bool = mask == 255
+
+        return mask_bool
+
     def load(self, bands: int | list[int] | None = None, **kwargs: Any) -> None:
         """
         Load the raster array from disk.
 
-        :param kwargs: Optional keyword arguments sent to '_load_rio()'.
         :param bands: Band(s) to load. Note that rasterio begins counting at 1, not 0.
+        :param kwargs: Optional keyword arguments sent to '_load_rio()'.
 
         :raises ValueError: If the data are already loaded.
         :raises AttributeError: If no 'filename' attribute exists.
@@ -3364,86 +3423,117 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return raster_bands
 
     @overload
-    def to_points(
+    def to_pointcloud(
         self,
-        subsample: float | int,
+        data_columns: str | list[str] = None,
+        subsample: float | int = 1,
+        *,
         as_array: Literal[False] = False,
-        pixel_offset: Literal["center", "corner"] = "center",
+        random_state: np.random.RandomState | int | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum:
         ...
 
     @overload
-    def to_points(
+    def to_pointcloud(
         self,
-        subsample: float | int,
+        data_columns: str | list[str] = None,
+        subsample: float | int = 1,
+        *,
         as_array: Literal[True],
-        pixel_offset: Literal["center", "corner"] = "center",
+        random_state: np.random.RandomState | int | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> Vector:
         ...
 
-    def to_points(
+    @overload
+    def to_pointcloud(
+            self,
+            data_column_names: str | list[str] = None,
+            subsample: float | int = 1,
+            *,
+            as_array: bool = False,
+            random_state: np.random.RandomState | int | None = None,
+            force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+    ) -> NDArrayNum | Vector:
+        ...
+
+    def to_pointcloud(
         self,
+        data_column_names: str | list[str] = None,
         subsample: float | int = 1,
         as_array: bool = False,
-        pixel_offset: Literal["center", "corner"] = "center",
+        random_state: np.random.RandomState | int | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum | Vector:
         """
-        Convert raster to a table of coordinates and their corresponding values.
+        Convert raster to point cloud with one data column per band (names default to "b1", "b2", etc).
 
-        Optionally, randomly sample the raster.
+        Optionally, randomly subsample valid pixels (nodata values are skipped).
+        If 'subsample' is either 1, or is equal to the pixel count, all valid points are returned.
+        If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
+        of valid points is returned.
 
-        If 'sample' is either 1, or is equal to the pixel count, all points are returned in order.
-        If 'sample' is smaller than 1 (for fractions), or smaller than the pixel count, a random sample
-        of points is returned.
-
-        If the raster is not loaded, sampling will be done from disk without loading the entire Raster.
+        If the raster is not loaded, sampling will be done from disk using rasterio.sample after loading only the masks
+        of the dataset.
 
         Formats:
             * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
             * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
 
+        :param data_column_names: Names of data columns to use for band values.
         :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
         :param as_array: Return an array instead of a vector.
-        :param pixel_offset: The point at which to associate the pixel coordinate with ('corner' == upper left).
+        :param random_state: Random state or seed number.
+        :param force_pixel_offset: Force offset to derive point coordinate with. Raster coordinates normally only
+            associate to upper-left corner "ul" ("Area" definition) or center ("Point" definition).
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
-        :returns: A GeoDataFrame, or ndarray of the shape (N, 2 + count) where N is the sample count.
+        :returns: A vector, or ndarray of the shape (N, 2 + count) where N is the sample count.
         """
-        data_size = self.width * self.height
 
-        # Validate the sample argument.
-        if subsample <= 0.0:
-            raise ValueError(f"subsample cannot be zero or negative (given value: {subsample})")
-        # If the sample is equal to or less than 1, it is assumed to be a fraction.
-        if subsample <= 1.0:
-            sample = int(data_size * subsample)
+        # Format data columns input into list if it is a string
+        if isinstance(data_column_names, str):
+            data_column_names = [data_column_names]
+        if not self.count == len(data_column_names):
+            raise ValueError(f"Data column names {data_column_names} must be a list of same length as "
+                             f"raster band count {self.count}.")
+
+        if self.is_loaded:
+
+            # Get subsample indices on raster directly
+            indices = self.subsample(subsample=subsample, random_state=random_state, return_indices=True)
+
         else:
-            sample = int(subsample)
-        if sample > data_size:
-            raise ValueError(f"sample cannot exceed the size of the dataset ({sample} vs {data_size})")
+            # Load only mask of valid data from disk
+            valid_mask = self._load_only_mask()
 
-        # If the sample is smaller than the max size, take a random sample of indices, otherwise take the whole.
-        choice = np.random.randint(0, data_size - 1, sample) if sample != data_size else np.arange(data_size)
+            # Get subsample on valid mask
+            indices = subsample_array(array=valid_mask, subsample=subsample, random_state=random_state,
+                                      return_indices=True)
 
-        cols = choice % self.width
-        rows = (choice / self.width).astype(int)
+        # Extract the coordinates at subsampled pixels with valid data
+        # To extract data, we always use "upper left" which rasterio interprets as the exact coordinates of the raster
+        x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset="ul"))
 
-        # Extract the coordinates of the pixels and filter by the chosen pixels.
-        x_coords, y_coords = (np.array(a) for a in self.ij2xy(rows, cols, offset=pixel_offset))
-
-        # If the Raster is loaded, pick from the data, otherwise use the disk-sample method from rasterio.
+        # If the Raster is loaded, pick from the data while ignoring the mask
         if self.is_loaded:
             if self.count == 1:
-                pixel_data = self.data[rows, cols]
+                pixel_data = self.data[indices[0], indices[1]]
             else:
-                pixel_data = self.data[:, rows, cols]
+                pixel_data = self.data[:, indices[0], indices[1]]
+
+        # Otherwise use rasterio.sample to load only requested pixels
         else:
             with rio.open(self.filename) as raster:
                 pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords)))).T
 
-        if isinstance(pixel_data, np.ma.masked_array):
-            pixel_data = np.where(pixel_data.mask, np.nan, pixel_data.data)
+        # Fill masked array with NaNs before writing to points
+        pixel_data = pixel_data.filled(np.nan)
+
+        # Now we force the coordinates we define for the point cloud, according to pixel interpretation
+        x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset=force_pixel_offset))
 
         # Merge the coordinates and pixel data into a point cloud.
         points_arr = np.vstack((x_coords.reshape(1, -1), y_coords.reshape(1, -1), pixel_data)).T
@@ -3452,7 +3542,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             points = Vector(
                 gpd.GeoDataFrame(
                     points_arr[:, 2:],
-                    columns=[f"b{i}" for i in range(1, self.count + 1)],
+                    columns=data_column_names if not None else [f"b{i}" for i in range(1, self.count + 1)],
                     geometry=gpd.points_from_xy(points_arr[:, 0], points_arr[:, 1]),
                     crs=self.crs,
                 )

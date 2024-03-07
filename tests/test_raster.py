@@ -2966,8 +2966,12 @@ class TestRaster:
         # With only inside proximity
         raster1.proximity(vector=vector, in_or_out="in")
 
-    def test_to_points(self) -> None:
-        """Test the outputs of the to_points method and that it doesn't load if not needed."""
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    def test_to_pointcloud(self, example: str) -> None:
+        """Test to_pointcloud with real data."""
+
+    def test_to_pointcloud__synthetic(self) -> None:
+        """Test to_pointcloud method with synthetic data."""
 
         # Create a small raster to test point sampling on
         img0 = gu.Raster.from_array(
@@ -2975,24 +2979,24 @@ class TestRaster:
         )
 
         # Sample the whole raster (fraction==1)
-        points = img0.to_points(1, as_array=True)
+        points = img0.to_pointcloud(subsample=1, as_array=True)
 
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
         assert isinstance(points, np.ndarray)
         assert points.shape == (25, 3)
         assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
 
-        assert img0.to_points(0.2, as_array=True).shape == (5, 3)
+        assert img0.to_pointcloud(subsample=0.2, as_array=True).shape == (5, 3)
 
         # Try with a single-band raster
         img1 = gu.Raster(self.aster_dem_path)
 
-        points = img1.to_points(10, as_array=True)
+        points = img1.to_pointcloud(subsample=10, as_array=True)
 
         assert points.shape == (10, 3)
         assert not img1.is_loaded
 
-        points_frame = img1.to_points(10)
+        points_frame = img1.to_pointcloud(subsample=10)
 
         assert isinstance(points_frame, gu.Vector)
         assert np.array_equal(points_frame.ds.columns, ["b1", "geometry"])
@@ -3001,12 +3005,12 @@ class TestRaster:
         # Try with a multi-band raster
         img2 = gu.Raster(self.landsat_rgb_path)
 
-        points = img2.to_points(10, as_array=True)
+        points = img2.to_pointcloud(subsample=10, as_array=True)
 
         assert points.shape == (10, 5)
         assert not img2.is_loaded
 
-        points_frame = img2.to_points(10)
+        points_frame = img2.to_pointcloud(subsample=10)
 
         assert isinstance(points_frame, gu.Vector)
         assert np.array_equal(points_frame.ds.columns, ["b1", "b2", "b3", "geometry"])

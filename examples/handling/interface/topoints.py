@@ -21,7 +21,7 @@ rast.plot(cmap="terrain")
 # %%
 # We convert the raster to points. By default, this returns a vector with columb geometry burned.
 
-pts_rast = rast.to_points()
+pts_rast = rast.to_pointcloud()
 pts_rast
 
 # %%
