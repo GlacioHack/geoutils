@@ -11,6 +11,7 @@ from collections import abc
 from contextlib import ExitStack
 from math import floor
 from typing import IO, Any, Callable, TypeVar, overload
+from packaging.version import Version
 
 import affine
 import geopandas as gpd
@@ -48,6 +49,7 @@ from geoutils.projtools import (
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
+from geoutils.misc import deprecate
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -3440,6 +3442,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 )
 
         return raster_bands
+
+    @deprecate(Version("0.3.0"), "Raster.to_points() is deprecated in favor of Raster.to_pointcloud() and "
+                                 "will be removed in v0.3.")
+    def to_points(self, **kwargs):  # type: ignore
+
+        self.to_pointcloud(**kwargs)  # type: ignore
 
     @overload
     def to_pointcloud(
