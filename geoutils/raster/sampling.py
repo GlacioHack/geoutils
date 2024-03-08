@@ -7,7 +7,7 @@ from typing import Literal, overload
 import numpy as np
 
 from geoutils._typing import MArrayNum, NDArrayNum
-from geoutils.raster.array import get_mask
+from geoutils.raster.array import get_mask_from_array
 
 
 @overload
@@ -68,7 +68,7 @@ def subsample_array(
         rnd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(random_state)))
 
     # Remove invalid values and flatten array
-    mask = get_mask(array)  # -> need to remove .squeeze in get_mask
+    mask = get_mask_from_array(array)  # -> need to remove .squeeze in get_mask
     valids = np.argwhere(~mask.flatten()).squeeze()
 
     # Get number of points to extract

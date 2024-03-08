@@ -45,7 +45,7 @@ from geoutils.projtools import (
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
-from geoutils.raster.array import get_mask
+from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
 
@@ -747,8 +747,11 @@ class Raster:
                 **kwargs,
             )
 
-        # Valid data is equal to 255, invalid is equal to zero
-        mask_bool = mask == 255
+        # Rasterio says the mask should be returned in 2D for a single band but it seems not
+        mask = mask.squeeze()
+
+        # Valid data is equal to 255, invalid is equal to zero (see Rasterio doc)
+        mask_bool = mask == 0
 
         return mask_bool
 
@@ -1048,23 +1051,13 @@ class Raster:
         - The raster's transform, crs and nodata values.
         """
 
-        # If the mask is just "False", it is equivalent to being equal to an array of False
-        if isinstance(self.data.mask, np.bool_):
-            self_mask = np.zeros(np.shape(self.data), dtype=bool)
-        else:
-            self_mask = self.data.mask
-
-        if isinstance(other.data.mask, np.bool_):
-            other_mask = np.zeros(np.shape(other.data), dtype=bool)
-        else:
-            other_mask = other.data.mask
-
         if not isinstance(other, Raster):  # TODO: Possibly add equals to SatelliteImage?
             raise NotImplementedError("Equality with other object than Raster not supported by raster_equal.")
         return all(
             [
                 np.array_equal(self.data.data, other.data.data, equal_nan=True),
-                np.array_equal(self_mask, other_mask),
+                # Use getmaskarray to avoid comparing boolean with array when mask=False
+                np.array_equal(np.ma.getmaskarray(self.data.mask), np.ma.getmaskarray(other.data.mask)),
                 self.data.fill_value == other.data.fill_value,
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
@@ -1909,7 +1902,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :param return_mask: Whether to return the mask of valid data.
 
-        :returns Array with masked data as NaNs, (Optional) Mask of valid data.
+        :returns Array with masked data as NaNs, (Optional) Mask of invalid data.
         """
 
         # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
@@ -1929,6 +1922,28 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             return nanarray, np.copy(np.ma.getmaskarray(self.data).squeeze())
         else:
             return nanarray
+
+    def get_mask(self) -> NDArrayBool:
+        """
+        Get mask from the raster.
+
+        The mask is always returned as a boolean array, even if there is no mask to .data and thus .data.mask = a
+        single False value, nomask property of masked arrays.
+
+        If the raster is not loaded, reads only the mask from disk to optimize memory usage.
+
+        :return:
+        """
+        # If it is loaded, use NumPy's getmaskarray function to deal with False values
+        if self.is_loaded:
+            mask = np.ma.getmaskarray(self.data)
+        # Otherwise, load from Rasterio and deal with the possibility of having a single value "False" mask manually
+        else:
+            mask = self._load_only_mask()
+            if isinstance(mask, np.bool_):
+                mask = np.zeros(self.shape, dtype=bool)
+
+        return mask
 
     # This is interfering with __array_ufunc__ and __array_function__, so better to leave out and specify
     # behaviour directly in those.
@@ -3532,17 +3547,16 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # The valid mask is considered only for the data band
         if self.is_loaded:
             if self.count == 1:
-                self_mask = get_mask(self.data)  # This is to avoid the case where the mask is just "False"
-                valid_mask = ~self_mask
+                self_mask = get_mask_from_array(self.data)  # This is to avoid the case where the mask is just "False"
             else:
-                self_mask = get_mask(
+                self_mask = get_mask_from_array(
                     self.data[data_band - 1, :, :]
                 )  # This is to avoid the case where the mask is just "False"
-                valid_mask = ~self_mask
+            valid_mask = ~self_mask
 
         # Load only mask of valid data from disk if array not loaded
         else:
-            valid_mask = self._load_only_mask(bands=data_band)
+            valid_mask = ~self._load_only_mask(bands=data_band)
 
         # Get subsample on valid mask
         # Build a low memory boolean masked array with invalid values masked to pass to subsampling

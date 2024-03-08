@@ -10,7 +10,7 @@ import geoutils as gu
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 
 
-def get_mask(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
+def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
     """
     Return the mask of invalid values, whether array is a ndarray with NaNs or a np.ma.masked_array.
 
@@ -59,7 +59,7 @@ def get_array_and_mask(
     array_data = np.array(array).squeeze() if copy else np.asarray(array).squeeze()
 
     # Get the mask of invalid pixels and set nans if it is occupied.
-    invalid_mask = get_mask(array)
+    invalid_mask = get_mask_from_array(array)
     if np.any(invalid_mask):
         array_data[invalid_mask] = np.nan
 
@@ -71,7 +71,7 @@ def get_valid_extent(array: NDArrayNum | NDArrayBool | MArrayNum) -> tuple[int, 
     Return (rowmin, rowmax, colmin, colmax), the first/last row/column of array with valid pixels
     """
     if not array.dtype == "bool":
-        valid_mask = ~get_mask(array)
+        valid_mask = ~get_mask_from_array(array)
     else:
         # Not sure why Mypy is not recognizing that the type of the array can only be bool here
         valid_mask = array  # type: ignore
