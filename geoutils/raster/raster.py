@@ -46,6 +46,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
 )
 from geoutils.raster.sampling import subsample_array
+from geoutils.raster.array import get_mask
 from geoutils.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -245,12 +246,12 @@ def _load_rio(
 
     if indexes is None:
         if only_mask:
-            data = dataset.read_masks(masked=masked, window=window, **kwargs)
+            data = dataset.read_masks(window=window, **kwargs)
         else:
             data = dataset.read(masked=masked, window=window, **kwargs)
     else:
         if only_mask:
-            data = dataset.read_masks(indexes=indexes, masked=masked, window=window, **kwargs)
+            data = dataset.read_masks(indexes=indexes, window=window, **kwargs)
         else:
             data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
     return data
@@ -817,7 +818,9 @@ class Raster:
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
-        :param data: Input array.
+        Expects a 2D (single band) or 3D (multi-band) array of the raster. The first axis corresponds to bands.
+
+        :param data: Input array, 2D for single band or 3D for multi-band (bands should be first axis).
         :param transform: Affine 2D transform. Either a tuple(x_res, 0.0, top_left_x,
             0.0, y_res, top_left_y) or an affine.Affine object.
         :param crs: Coordinate reference system. Either a rasterio CRS,
@@ -3487,7 +3490,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Optionally, all other bands can also be stored in columns "b1", "b2", etc. For more specific band selection,
         use Raster.split_bands previous to converting to point cloud.
 
-        Optionally, randomly subsample valid pixels (nodata values are skipped).
+        Optionally, randomly subsample valid pixels of the data band (nodata values are skipped).
         If 'subsample' is either 1, or is equal to the pixel count, all valid points are returned.
         If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
         of valid points is returned.
@@ -3525,24 +3528,24 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if data_band != 1 and data_column_name == "b1":
             data_column_name = "b" + str(data_band)
 
-        # Extract all bands if storing, otherwise the single one
-        if store_auxiliary_bands:
-            bands_to_extract = None
-        else:
-            bands_to_extract = data_band
-
+        # The valid mask is considered only for the data band
         if self.is_loaded:
+            if self.count == 1:
+                self_mask = get_mask(self.data)  # This is to avoid the case where the mask is just "False"
+                valid_mask = ~self_mask
+            else:
+                self_mask = get_mask(self.data[data_band - 1, :, :])  # This is to avoid the case where the mask is just "False"
+                valid_mask = ~self_mask
 
-            # Get subsample indices on raster directly
-            indices = self.subsample(subsample=subsample, random_state=random_state, return_indices=True)
-
+        # Load only mask of valid data from disk if array not loaded
         else:
-            # Load only mask of valid data from disk
-            valid_mask = self._load_only_mask(bands=bands_to_extract)
+            valid_mask = self._load_only_mask(bands=data_band)
 
-            # Get subsample on valid mask
-            indices = subsample_array(array=valid_mask, subsample=subsample, random_state=random_state,
-                                      return_indices=True)
+        # Get subsample on valid mask
+        # Build a low memory boolean masked array with invalid values masked to pass to subsampling
+        ma_valid = np.ma.masked_array(data=np.ones(np.shape(valid_mask), dtype=bool), mask=~valid_mask)
+        # Take a subsample within the valid values
+        indices = subsample_array(array=ma_valid, subsample=subsample, random_state=random_state, return_indices=True)
 
         # Extract the coordinates at subsampled pixels with valid data
         # To extract data, we always use "upper left" which rasterio interprets as the exact coordinates of the raster
@@ -3561,11 +3564,17 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Otherwise use rasterio.sample to load only requested pixels
         else:
+            # Sample all bands if storing auxiliary, otherwise the single one
+            if store_auxiliary_bands:
+                bands_to_extract = None
+            else:
+                bands_to_extract = data_band
+
             with rio.open(self.filename) as raster:
-                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords))), indexes=bands_to_extract).T
+                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords), indexes=bands_to_extract))).T
 
         # Fill masked array with NaNs before writing to points
-        if np.ma.is_masked(pixel_data):
+        if np.ma.isMaskedArray(pixel_data):
             pixel_data = pixel_data.filled(np.nan)
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation

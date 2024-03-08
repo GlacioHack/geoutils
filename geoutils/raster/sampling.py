@@ -72,6 +72,14 @@ def subsample_array(
     valids = np.argwhere(~mask.flatten()).squeeze()
 
     # Get number of points to extract
+    # If subsample is one, we don't perform subsampling any operation, we return the valid array or indices
+    if subsample == 1:
+        unraveled_indices = np.unravel_index(valids, array.shape)
+        if return_indices:
+            return unraveled_indices
+
+        else:
+            return array[unraveled_indices]
     if (subsample <= 1) & (subsample > 0):
         npoints = int(subsample * np.count_nonzero(~mask))
     elif subsample > 1:
@@ -90,7 +98,6 @@ def subsample_array(
 
     if return_indices:
         return unraveled_indices
-
     else:
         return array[unraveled_indices]
 
