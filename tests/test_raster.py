@@ -2991,7 +2991,7 @@ class TestRaster:
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
         assert isinstance(points_arr, np.ndarray)
         assert points_arr.shape == (25, 3)
-        assert points.ds.shape == (25, 2)   # One less column here due to geometry storing X and Y
+        assert points.ds.shape == (25, 2)  # One less column here due to geometry storing X and Y
         # Check that X, Y and Z arrays are equal to raster array input independently of value order
         x_coords, y_coords = img0.ij2xy(i=np.arange(0, 5), j=np.arange(0, 5))
         assert np.array_equal(np.sort(np.asarray(points_arr[:, 0])), np.sort(np.tile(x_coords, 5)))

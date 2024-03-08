@@ -45,8 +45,8 @@ from geoutils.projtools import (
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
-from geoutils.raster.sampling import subsample_array
 from geoutils.raster.array import get_mask
+from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -255,6 +255,7 @@ def _load_rio(
         else:
             data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
     return data
+
 
 def _get_reproject_params(
     raster: RasterType,
@@ -3534,7 +3535,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 self_mask = get_mask(self.data)  # This is to avoid the case where the mask is just "False"
                 valid_mask = ~self_mask
             else:
-                self_mask = get_mask(self.data[data_band - 1, :, :])  # This is to avoid the case where the mask is just "False"
+                self_mask = get_mask(
+                    self.data[data_band - 1, :, :]
+                )  # This is to avoid the case where the mask is just "False"
                 valid_mask = ~self_mask
 
         # Load only mask of valid data from disk if array not loaded
