@@ -11,7 +11,6 @@ from collections import abc
 from contextlib import ExitStack
 from math import floor
 from typing import IO, Any, Callable, TypeVar, overload
-from packaging.version import Version
 
 import affine
 import geopandas as gpd
@@ -24,6 +23,7 @@ import rasterio.warp
 import rasterio.windows
 from affine import Affine
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.features import shapes
@@ -41,6 +41,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.misc import deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -49,7 +50,6 @@ from geoutils.projtools import (
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
-from geoutils.misc import deprecate
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -3443,8 +3443,10 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return raster_bands
 
-    @deprecate(Version("0.3.0"), "Raster.to_points() is deprecated in favor of Raster.to_pointcloud() and "
-                                 "will be removed in v0.3.")
+    @deprecate(
+        Version("0.3.0"),
+        "Raster.to_points() is deprecated in favor of Raster.to_pointcloud() and " "will be removed in v0.3.",
+    )
     def to_points(self, **kwargs):  # type: ignore
 
         self.to_pointcloud(**kwargs)  # type: ignore
