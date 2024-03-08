@@ -107,6 +107,7 @@ documentation.
     Raster.set_mask
     Raster.set_nodata
     Raster.get_nanarray
+    Raster.get_mask
     Raster.subsample
 ```
 

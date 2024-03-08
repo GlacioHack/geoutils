@@ -1057,7 +1057,7 @@ class Raster:
             [
                 np.array_equal(self.data.data, other.data.data, equal_nan=True),
                 # Use getmaskarray to avoid comparing boolean with array when mask=False
-                np.array_equal(np.ma.getmaskarray(self.data.mask), np.ma.getmaskarray(other.data.mask)),
+                np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),
                 self.data.fill_value == other.data.fill_value,
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
@@ -3506,7 +3506,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Optionally, all other bands can also be stored in columns "b1", "b2", etc. For more specific band selection,
         use Raster.split_bands previous to converting to point cloud.
 
-        Optionally, randomly subsample valid pixels of the data band (nodata values are skipped).
+        Optionally, randomly subsample valid pixels for the data band (nodata values are skipped, but only for the band
+        that will be used as data column of the point cloud).
         If 'subsample' is either 1, or is equal to the pixel count, all valid points are returned.
         If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
         of valid points is returned.
@@ -3544,7 +3545,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if data_band != 1 and data_column_name == "b1":
             data_column_name = "b" + str(data_band)
 
-        # The valid mask is considered only for the data band
+        # We do 2D subsampling on the data band only, regardless of valid masks on other bands
         if self.is_loaded:
             if self.count == 1:
                 self_mask = get_mask_from_array(self.data)  # This is to avoid the case where the mask is just "False"
