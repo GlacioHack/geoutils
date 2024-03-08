@@ -332,7 +332,7 @@ A {class}`~geoutils.Raster` can be exported to different formats, to facilitate 
 Those include exporting to:
 - a {class}`xarray.Dataset` with {class}`~geoutils.Raster.to_xarray`,
 - a {class}`rasterio.io.DatasetReader` with {class}`~geoutils.Raster.to_rio_dataset`,
-- a {class}`numpy.ndarray` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_points`.
+- a {class}`numpy.ndarray` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_pointcloud`.
 
 ```{code-cell} ipython3
 # Export to rasterio dataset-reader through a memoryfile
@@ -341,7 +341,7 @@ rast_reproj.to_rio_dataset()
 
 ```{code-cell} ipython3
 # Export to geopandas dataframe
-rast_reproj.to_points()
+rast_reproj.to_pointcloud()
 ```
 
 ```{code-cell} ipython3

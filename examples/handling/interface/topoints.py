@@ -27,4 +27,4 @@ pts_rast
 # %%
 # We plot the point vector.
 
-pts_rast.plot(column="b1", cmap="terrain", legend=True)
+pts_rast.ds.plot(column="b1", cmap="terrain", legend=True)
