@@ -3576,9 +3576,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             with rio.open(self.filename) as raster:
                 pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords), indexes=bands_to_extract))).T
 
-        # Fill masked array with NaNs before writing to points
+        # At this point there should not be any nodata anymore, so we can transform everything to normal array
         if np.ma.isMaskedArray(pixel_data):
-            pixel_data = pixel_data.filled(np.nan)
+            pixel_data = pixel_data.data
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation
         x_coords_2, y_coords_2 = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset=force_pixel_offset))
