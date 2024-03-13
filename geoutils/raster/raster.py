@@ -30,6 +30,7 @@ from rasterio.plot import show as rshow
 from scipy.interpolate import interpn
 from scipy.ndimage import distance_transform_edt, map_coordinates
 
+import geoutils
 import geoutils.vector as gv
 from geoutils._typing import (
     ArrayLike,
@@ -47,6 +48,7 @@ from geoutils.projtools import (
 )
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
+from geoutils import config
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -464,6 +466,7 @@ class Raster:
         self._disk_dtypes: tuple[str] | None = None
         self._disk_transform: affine.Affine | None = None
         self._downsample: int | float = 1
+        self._area_or_point: Literal["Area", "Point"] | None = None
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
@@ -473,7 +476,7 @@ class Raster:
             self.transform: rio.transform.Affine = filename_or_dataset["transform"]
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
             for key in filename_or_dataset:
-                if key in ["data", "transform", "crs", "nodata"]:
+                if key in ["data", "transform", "crs", "nodata", "area_or_point"]:
                     continue
                 setattr(self, key, filename_or_dataset[key])
             return
@@ -510,6 +513,8 @@ class Raster:
                 self._name = ds.name
                 self._driver = ds.driver
                 self.tags.update(ds.tags())
+
+                self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
                 self._disk_shape = (ds.count, ds.height, ds.width)
                 self._disk_bands = ds.indexes
@@ -687,6 +692,25 @@ class Raster:
         return self._name
 
     @property
+    def area_or_point(self) -> Literal["Area", "Point"] | None:
+        return self._area_or_point
+
+    @area_or_point.setter
+    def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
+        """Pixel interpretation of the raster."""
+
+        # Check input
+        if new_area_or_point is not None and isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]:
+            raise ValueError("New pixel interpretation must be 'Area', 'Point' or None.")
+
+        # Set new input
+        self._area_or_point = new_area_or_point
+
+        # Update tag only if not None
+        if new_area_or_point is not None:
+            self.tags.update({"AREA_OR_POINT": new_area_or_point})
+
+    @property
     def driver(self) -> str | None:
         """Driver used to read a file on disk."""
         return self._driver
@@ -755,6 +779,7 @@ class Raster:
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
         nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        area_or_point: Literal["Area", "Point"] | None = None,
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
@@ -764,6 +789,7 @@ class Raster:
         :param crs: Coordinate reference system. Either a rasterio CRS,
             or an EPSG integer.
         :param nodata: Nodata value.
+        :param area_or_point: Pixel interpretation of the raster, will be stored in AREA_OR_POINT metadata.
 
         :returns: Raster created from the provided array and georeferencing.
 
@@ -789,10 +815,10 @@ class Raster:
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
         if data.dtype == bool:
-            return Mask({"data": data, "transform": transform, "crs": crs, "nodata": nodata})  # type: ignore
+            return Mask({"data": data, "transform": transform, "crs": crs, "nodata": nodata, "area_or_point": area_or_point})  # type: ignore
         # Otherwise, keep as a given RasterType subclass
         else:
-            return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
+            return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata, "area_or_point": area_or_point})
 
     def to_rio_dataset(self) -> rio.io.DatasetReader:
         """Export to a Rasterio in-memory dataset."""
@@ -975,6 +1001,11 @@ class Raster:
         else:
             self._data[:, ind] = assign  # type: ignore
         return None
+
+    def _pixel_interpretation_equal(self, other: RasterType) -> bool:
+        """Check if two raster pixel interpretation are equal."""
+
+        return self.area_or_point == other.area_or_point
 
     def raster_equal(self, other: RasterType) -> bool:
         """
@@ -1815,7 +1846,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             data = self.data.copy()
 
-        cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata)
+        cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=self.area_or_point)
 
         return cp
 
@@ -1827,6 +1858,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :return: Whether the two objects have the same georeferenced grid.
         """
+
+        if geoutils.config["warn_area_or_point"]:
+            area_or_point = self._pixel_interpretation_equal(other)
 
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
 
