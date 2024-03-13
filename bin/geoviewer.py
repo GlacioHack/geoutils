@@ -181,7 +181,7 @@ def main(test_args: Sequence[str] = None) -> None:
         vmax = None
 
     # color map
-    # Get the list of existing color maps
+    # Get the list of existing color maps, including reversed maps
     mpl_cmap_list = list(plt.cm.datad.keys())
     mpl_cmap_list.extend([cmap + "_r" for cmap in mpl_cmap_list])
 
