@@ -728,12 +728,18 @@ class Raster:
 
     @property
     def area_or_point(self) -> Literal["Area", "Point"] | None:
+        """Pixel interpretation of the raster."""
         return self._area_or_point
 
     @area_or_point.setter
     def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
-        """Pixel interpretation of the raster."""
+        """
+        Setter for pixel interpretation, overrides previous metadata.
 
+        :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
+
+        :return: None.
+        """
         # Check input
         if new_area_or_point is not None and not (isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]):
             raise ValueError("New pixel interpretation must be 'Area', 'Point' or None.")
