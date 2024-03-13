@@ -596,6 +596,47 @@ class TestRaster:
             new_raster = raster + 1
         assert new_raster.data.mask[0, 0]
 
+    def test_area_or_point(self):
+        """Check area or point attribute getter, setter and related warnings"""
+
+        # 1/ Getter and instantiation
+        # Check existing file based on a priori knowledge
+        raster_point = gu.Raster(self.landsat_b4_path)
+        assert raster_point.area_or_point == "Point"
+
+        raster_area = gu.Raster(self.aster_dem_path)
+        assert raster_area.area_or_point == "Area"
+
+        # 2/ Setter
+        # For None, it will remove the key from the tags dictionary
+        raster_point.area_or_point = None
+        assert raster_point.area_or_point is None
+        assert "AREA_OR_POINT" not in raster_point.tags
+
+        # For a good value, it will update the tags
+        raster_point.area_or_point = "Point"
+        assert raster_point.area_or_point == "Point"
+        assert "AREA_OR_POINT" in raster_point.tags and raster_point.tags["AREA_OR_POINT"] == "Point"
+
+        # 3/ With function creating a single Raster
+
+        # From array
+        raster_point_fromarray = gu.Raster.from_array(data=raster_point.data, transform=raster_point.transform,
+                                                      area_or_point=raster_point.area_or_point, crs=raster_point.crs)
+        assert raster_point.area_or_point == raster_point_fromarray.area_or_point
+
+        # Copy
+        raster_point_copy = raster_point.copy()
+        assert raster_point.area_or_point == raster_point_copy.area_or_point
+
+        # 4/ With function casting from several Rasters
+
+
+        # with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+        #     r
+
+
+
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_get_nanarray(self, example: str) -> None:
         """
