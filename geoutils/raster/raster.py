@@ -728,7 +728,12 @@ class Raster:
 
     @property
     def area_or_point(self) -> Literal["Area", "Point"] | None:
-        """Pixel interpretation of the raster."""
+        """
+        Pixel interpretation of the raster, based on the "AREA_OR_POINT" raster metadata.
+
+        If pixel interpretation is "Area", the value of the pixel is associated with the upper left corner of the pixel.
+        If pixel interpretation is "Point", the value of the pixel is associated with the center of the pixel.
+        """
         return self._area_or_point
 
     @area_or_point.setter
@@ -3166,61 +3171,38 @@ class Raster:
         else:
             return output_val
 
-    def coords(self, offset: str = "corner", grid: bool = True) -> tuple[NDArrayNum, ...]:
-        """
-        Get coordinates (x,y) of all pixels in the raster.
-
-        :param offset: coordinate type. If 'corner', returns corner coordinates of pixels.
-            If 'center', returns center coordinates. Default is corner.
-        :param grid: Return grid
-
-        :returns x,y: Arrays of the (x,y) coordinates.
-        """
-        assert offset in [
-            "corner",
-            "center",
-        ], f"ctype is not one of 'corner', 'center': {offset}"
-
-        dx = self.res[0]
-        dy = self.res[1]
-
-        xx = np.linspace(self.bounds.left, self.bounds.right, self.width + 1)[:: int(np.sign(dx))]
-        yy = np.linspace(self.bounds.bottom, self.bounds.top, self.height + 1)[:: int(np.sign(dy))]
-
-        if offset == "center":
-            xx += dx / 2  # shift by half a pixel
-            yy += dy / 2
-        if grid:
-            # Drop the last element
-            meshgrid = tuple(np.meshgrid(xx[:-1], np.flip(yy[:-1])))
-            return meshgrid
-        else:
-            return xx[:-1], yy[:-1]
-
     def xy2ij(
         self,
         x: ArrayLike,
         y: ArrayLike,
         op: type = np.float32,
         precision: float | None = None,
-        shift_area_or_point: bool = False,
+        shift_area_or_point: bool | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get indexes (row,column) of coordinates (x,y).
 
-        Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
+        By default, the indexes are shifted with the interpretation of pixel coordinates "AREA_OR_POINT" of the raster,
         to ensure that the indexes of points represent the right location. See parameter description of
         shift_area_or_point for more details.
+
+        This function is reversible with ij2xy for any pixel interpretation.
 
         :param x: X coordinates.
         :param y: Y coordinates.
         :param op: Operator to compute index.
         :param precision: Precision passed to :func:`rasterio.transform.rowcol`.
-        :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
-            attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
 
         :returns i, j: Indices of (x,y) in the image.
         """
+
+        # If undefined, default to the global system config
+        if shift_area_or_point is None:
+            shift_area_or_point = config["shift_area_or_point"]
+
         # Input checks
         if op not in [np.float32, np.float64, float]:
             raise UserWarning(
@@ -3254,25 +3236,12 @@ class Raster:
 
         # If the user wants to shift according to the interpretation
         if shift_area_or_point:
-            # If AREA_OR_POINT attribute does not exist, use the most typical "Area"
-            if self.tags.get("AREA_OR_POINT") is not None:
-                area_or_point = self.tags.get("AREA_OR_POINT")
-                if not isinstance(area_or_point, str):
-                    raise TypeError('Attribute self.tags["AREA_OR_POINT"] must be a string.')
-                if area_or_point.lower() not in ["area", "point"]:
-                    raise ValueError('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
-            else:
-                area_or_point = "Area"
-                warnings.warn(
-                    category=UserWarning,
-                    message='Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).',
-                )
 
             # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
-            if area_or_point.lower() == "point":
+            if self.area_or_point is not None and self.area_or_point == "Point":
                 if not isinstance(i.flat[0], (np.floating, float)):
                     raise ValueError(
-                        "Operator must return np.floating values to perform area_or_point subpixel index shifting."
+                        "Operator must return np.floating values to perform pixel interpretation shifting."
                     )
 
                 i += 0.5
@@ -3285,22 +3254,73 @@ class Raster:
 
         return i, j
 
-    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "ul") -> tuple[NDArrayNum, NDArrayNum]:
+    def ij2xy(self, i: ArrayLike, j: ArrayLike, shift_area_or_point: bool | None = None, force_offset: str | None = None) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of indexes (row,column).
 
-        Defaults to upper-left, for which this function is fully reversible with xy2ij.
+        By default, the indexes are shifted with the interpretation of pixel coordinates "AREA_OR_POINT" of the
+        raster, to ensure that the indexes of points represent the right location. See parameter description of
+        shift_area_or_point for more details.
+
+        This function is reversible with xy2ij for any pixel interpretation.
 
         :param i: Row (i) index of pixel.
         :param j: Column (j) index of pixel.
-        :param offset: Return coordinates as "center" of pixel, or any corner (upper-left "ul", "ur", "ll", lr").
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+        :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
+            any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
 
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-        x, y = rio.transform.xy(self.transform, i, j, offset=offset)
+        # If undefined, default to the global system config
+        if shift_area_or_point is None:
+            shift_area_or_point = config["shift_area_or_point"]
+
+        # Shift by half a pixel back for "Point" interpretation
+        if shift_area_or_point and force_offset is None:
+            if self.area_or_point is not None and self.area_or_point == "Point":
+                print("Here")
+                i = np.asarray(i) - 0.5
+                j = np.asarray(j) - 0.5
+
+        # Default offset is upper-left for raster coordinates
+        if force_offset is None:
+            force_offset = "ul"
+
+        x, y = rio.transform.xy(self.transform, i, j, offset=force_offset)
 
         return x, y
+
+    def coords(self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None) -> \
+    tuple[NDArrayNum, ...]:
+        """
+        Get coordinates (x,y) of all pixels in the raster.
+
+        :param grid: Whether to return mesh grids of coordinates matrices.
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+        :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
+            any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
+
+        :returns x,y: Arrays of the (x,y) coordinates.
+        """
+
+        # The coordinates are extracted from indexes 0 to shape
+        _, yy = self.ij2xy(i=np.arange(self.height-1, -1, -1), j=0, shift_area_or_point=shift_area_or_point,
+                           force_offset=force_offset)
+        xx, _ = self.ij2xy(i=0, j=np.arange(self.width), shift_area_or_point=shift_area_or_point,
+                           force_offset=force_offset)
+
+        # If grid is True, return coordinate grids
+        if grid:
+            meshgrid = tuple(np.meshgrid(xx, np.flip(yy)))
+            return meshgrid
+        else:
+            return np.asarray(xx), np.asarray(yy)
 
     def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
