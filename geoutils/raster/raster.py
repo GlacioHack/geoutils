@@ -21,6 +21,8 @@ import pyproj
 import rasterio as rio
 import rasterio.warp
 import rasterio.windows
+import rioxarray
+import xarray as xr
 from affine import Affine
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from rasterio.crs import CRS
@@ -53,15 +55,6 @@ try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal  # type: ignore
-
-try:
-    import rioxarray
-    import xarray as xr
-
-    _has_rioxarray = True
-except ImportError:
-    rioxarray = None
-    _has_rioxarray = False
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
@@ -2650,8 +2643,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :returns: xarray DataArray
         """
-        if not _has_rioxarray:
-            raise ImportError("rioxarray is required for this functionality.")
 
         ds = rioxarray.open_rasterio(self.to_rio_dataset())
         if name is not None:
