@@ -21,6 +21,8 @@ import pyproj
 import rasterio as rio
 import rasterio.warp
 import rasterio.windows
+import rioxarray
+import xarray as xr
 from affine import Affine
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from rasterio.crs import CRS
@@ -29,8 +31,6 @@ from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from scipy.interpolate import interpn
 from scipy.ndimage import distance_transform_edt, map_coordinates
-import rioxarray
-import xarray as xr
 
 import geoutils.vector as gv
 from geoutils._typing import (
