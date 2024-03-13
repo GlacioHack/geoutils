@@ -24,6 +24,7 @@ import geoviewer  # noqa
     (
         (),
         ("-cmap", "Reds"),
+        ("-cmap", "Reds_r"),
         ("-vmin", "-10", "-vmax", "10"),
         ("-vmin", "5%", "-vmax", "95%"),
         ("-band", "1"),
