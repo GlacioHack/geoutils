@@ -11,5 +11,3 @@ scipy==1.*
 tqdm
 xarray
 rioxarray==0.*
-setuptools>=64
-setuptools_scm[toml]>=8
