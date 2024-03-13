@@ -29,6 +29,8 @@ from rasterio.features import shapes
 from rasterio.plot import show as rshow
 from scipy.interpolate import interpn
 from scipy.ndimage import distance_transform_edt, map_coordinates
+import rioxarray
+import xarray as xr
 
 import geoutils.vector as gv
 from geoutils._typing import (
@@ -53,15 +55,6 @@ try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal  # type: ignore
-
-try:
-    import rioxarray
-    import xarray as xr
-
-    _has_rioxarray = True
-except ImportError:
-    rioxarray = None
-    _has_rioxarray = False
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
@@ -2650,8 +2643,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :returns: xarray DataArray
         """
-        if not _has_rioxarray:
-            raise ImportError("rioxarray is required for this functionality.")
 
         ds = rioxarray.open_rasterio(self.to_rio_dataset())
         if name is not None:
