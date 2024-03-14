@@ -1,9 +1,9 @@
 """Test configuration file."""
 import geoutils as gu
 
-class TestConfig:
 
-    def test_config_defaults(self):
+class TestConfig:
+    def test_config_defaults(self) -> None:
         """Check defaults compared to file"""
 
         # Read file
@@ -12,7 +12,7 @@ class TestConfig:
 
         assert default_config == gu.config
 
-    def test_config_set(self):
+    def test_config_set(self) -> None:
         """Check setting a non-default config argument by user"""
 
         # Default is True
@@ -26,8 +26,7 @@ class TestConfig:
         gu.config["shift_area_or_point"] = True
         assert gu.config["shift_area_or_point"]
 
-
-    def test_config_validator(self):
+    def test_config_validator(self) -> None:
         """Check setting a config argument with a wrong input type converts it automatically"""
 
         # We input an "off" value, that should be converted to False

@@ -597,7 +597,7 @@ class TestRaster:
             new_raster = raster + 1
         assert new_raster.data.mask[0, 0]
 
-    def test_area_or_point(self):
+    def test_area_or_point(self) -> None:
         """Check area or point attribute getter, setter and related warnings"""
 
         # 1/ Getter and instantiation
@@ -622,8 +622,12 @@ class TestRaster:
         # 3/ With function creating a single Raster
 
         # From array
-        raster_point_fromarray = gu.Raster.from_array(data=raster_point.data, transform=raster_point.transform,
-                                                      area_or_point=raster_point.area_or_point, crs=raster_point.crs)
+        raster_point_fromarray = gu.Raster.from_array(
+            data=raster_point.data,
+            transform=raster_point.transform,
+            area_or_point=raster_point.area_or_point,
+            crs=raster_point.crs,
+        )
         assert raster_point.area_or_point == raster_point_fromarray.area_or_point
 
         # Copy
@@ -632,11 +636,8 @@ class TestRaster:
 
         # 4/ With function casting from several Rasters
 
-
         # with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
         #     r
-
-
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_get_nanarray(self, example: str) -> None:
@@ -725,17 +726,23 @@ class TestRaster:
             # Upper left
             assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top, shift_area_or_point=False) == (0, 0)
             # Upper right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top, shift_area_or_point=False) == (
+            assert rst_down.xy2ij(
+                rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top, shift_area_or_point=False
+            ) == (
                 0,
                 rst_down.width + 1,
             )
             # Bottom right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom, shift_area_or_point=False) == (
+            assert rst_down.xy2ij(
+                rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom, shift_area_or_point=False
+            ) == (
                 rst_down.height,
                 rst_down.width + 1,
             )
             # One pixel right and down
-            assert rst_down.xy2ij(rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1], shift_area_or_point=False) == (
+            assert rst_down.xy2ij(
+                rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1], shift_area_or_point=False
+            ) == (
                 1,
                 1,
             )
@@ -1781,7 +1788,10 @@ class TestRaster:
         assert rst.ij2xy([0], [0], force_offset="center") == ([xmin_center], [ymax_center])
         assert rst.ij2xy([rst.shape[0] - 1], [0], force_offset="center") == ([xmin_center], [ymin_center])
         assert rst.ij2xy([0], [rst.shape[1] - 1], force_offset="center") == ([xmax_center], [ymax_center])
-        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], force_offset="center") == ([xmax_center], [ymin_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], force_offset="center") == (
+            [xmax_center],
+            [ymin_center],
+        )
 
         # Same checks for offset="ll", "ul", "ur", "lr
         lims_ll = [xmin, ymin, xmax - rst.res[0], ymax - rst.res[1]]
@@ -2039,7 +2049,9 @@ class TestRaster:
         index_x_edge_rand = [-0.5, -0.5, -0.5, 25, 25, 49.5, 49.5, 49.5]
         index_y_edge_rand = [-0.5, 25, 49.5, -0.5, 49.5, -0.5, 25, 49.5]
 
-        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_edge_rand, j=index_y_edge_rand, shift_area_or_point=shift_aop)
+        points_x_rand, points_y_rand = raster.ij2xy(
+            i=index_x_edge_rand, j=index_y_edge_rand, shift_area_or_point=shift_aop
+        )
 
         points_edge_rand = np.array((points_x_rand, points_y_rand)).T
 
