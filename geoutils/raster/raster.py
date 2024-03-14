@@ -3282,7 +3282,6 @@ class Raster:
         # Shift by half a pixel back for "Point" interpretation
         if shift_area_or_point and force_offset is None:
             if self.area_or_point is not None and self.area_or_point == "Point":
-                print("Here")
                 i = np.asarray(i) - 0.5
                 j = np.asarray(j) - 0.5
 
@@ -3348,7 +3347,7 @@ class Raster:
         method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
         band: int = 1,
         input_latlon: bool = False,
-        shift_area_or_point: bool = False,
+        shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum:
@@ -3368,8 +3367,9 @@ class Raster:
             see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
-        :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
-            attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_scipy_function: Force to use either map_coordinates or interpn. Mainly for testing purposes.
 
         :returns rpoints: Array of raster value(s) for the given points.
@@ -3385,7 +3385,7 @@ class Raster:
             transformer = pyproj.Transformer.from_crs(init_crs, dest_crs)
             x, y = transformer.transform(x, y)
 
-        i, j = self.xy2ij(x, y, op=np.float32, shift_area_or_point=shift_area_or_point)
+        i, j = self.xy2ij(x, y, shift_area_or_point=shift_area_or_point)
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
@@ -3414,8 +3414,8 @@ class Raster:
 
         # Otherwise, use scipy.interpolate.interpn
         else:
-
-            xycoords = self.coords(offset="corner", grid=False)
+            # Get lower-left corner coordinates
+            xycoords = self.coords(grid=False, force_offset="ll")
 
             # Let interpolation outside the bounds not raise any error by default
             if "bounds_error" not in kwargs.keys():
