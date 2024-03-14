@@ -723,19 +723,19 @@ class TestRaster:
 
             # - Test that xy2ij are consistent with new image -
             # Upper left
-            assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top) == (0, 0)
+            assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top, shift_area_or_point=False) == (0, 0)
             # Upper right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top) == (
+            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top, shift_area_or_point=False) == (
                 0,
                 rst_down.width + 1,
             )
             # Bottom right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom) == (
+            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom, shift_area_or_point=False) == (
                 rst_down.height,
                 rst_down.width + 1,
             )
             # One pixel right and down
-            assert rst_down.xy2ij(rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1]) == (
+            assert rst_down.xy2ij(rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1], shift_area_or_point=False) == (
                 1,
                 1,
             )
@@ -1858,13 +1858,13 @@ class TestRaster:
         assert np.all(j % 1 == 0)
 
         # Those should all be .5 because values refer to the center and are shifted
-        i, j = r.xy2ij(xrand, yrand)
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0.5)
         assert np.all(j % 1 == 0.5)
 
         # Force "Area", should refer to corner
         r.area_or_point = "Area"
-        i, j = r.xy2ij(xrand, yrand)
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0)
         assert np.all(j % 1 == 0)
 

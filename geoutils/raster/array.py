@@ -90,8 +90,8 @@ def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[NDArray
 
     myang = np.deg2rad(along_track_angle)
 
-    # Get grid coordinates
-    xx, yy = raster.coords(grid=True)
+    # Get grid coordinates (only relative is important, we don't care about offsets, so let's fix lower-left)
+    xx, yy = raster.coords(grid=True, force_offset="ll")
     xx -= np.min(xx)
     yy -= np.min(yy)
 
