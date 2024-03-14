@@ -508,12 +508,14 @@ class Raster:
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
-            # Important to pass the nodata before the data setter, which uses it in turn
+            # To have "area_or_point" user input go through checks of the set() function without shifting the transform
+            self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
+            # Same things here, and also important to pass the nodata before the data setter, which uses it in turn
             self._nodata = filename_or_dataset["nodata"]
             self.data = filename_or_dataset["data"]
             self.transform: rio.transform.Affine = filename_or_dataset["transform"]
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
-            self.area_or_point = filename_or_dataset["area_or_point"]
+
             for key in filename_or_dataset:
                 if key in ["data", "transform", "crs", "nodata", "area_or_point"]:
                     continue
@@ -730,46 +732,98 @@ class Raster:
         """Name of the file on disk, if it exists."""
         return self._name
 
-    @property
-    def area_or_point(self) -> Literal["Area", "Point"] | None:
+    def set_area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None,
+                                shift_area_or_point: bool | None = None):
         """
-        Pixel interpretation of the raster, based on the "AREA_OR_POINT" raster metadata.
+        Set new pixel interpretation of the raster.
 
-        If pixel interpretation is "Area", the value of the pixel is associated with the upper left corner of the pixel.
-        If pixel interpretation is "Point", the value of the pixel is associated with the center of the pixel.
-        """
-        return self._area_or_point
+        Overwrites the `area_or_point` attribute and updates "AREA_OR_POINT" in raster metadata tags.
 
-    @area_or_point.setter
-    def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
-        """
-        Setter for pixel interpretation, overrides previous metadata.
+        Optionally, shifts the raster to correct value coordinates in relation to interpretation:
+
+        - By half a pixel (right and downwards) if old interpretation was "Area" and new is "Point",
+        - By half a pixel (left and upwards) if old interpretration was "Point" and new is "Area",
+        - No shift for all other cases.
 
         :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
 
         :return: None.
         """
+
+        # If undefined, default to the global system config
+        if shift_area_or_point is None:
+            shift_area_or_point = config["shift_area_or_point"]
+
         # Check input
         if new_area_or_point is not None and not (
-            isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]
+                isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]
         ):
             raise ValueError("New pixel interpretation must be 'Area', 'Point' or None.")
 
-        # Set new input as exactly "Area" or "Point"
+        # Update string input as exactly "Area" or "Point"
         if new_area_or_point is not None:
             if new_area_or_point.lower() == "area":
-                self._area_or_point = "Area"
+                new_area_or_point = "Area"
             else:
-                self._area_or_point = "Point"
-        else:
-            self._area_or_point = None
+                new_area_or_point = "Point"
 
+        # Save old area or point
+        old_area_or_point = self.area_or_point
+
+        # Set new interpretation
+        self._area_or_point = new_area_or_point
         # Update tag only if not None
         if new_area_or_point is not None:
             self.tags.update({"AREA_OR_POINT": new_area_or_point})
         else:
             if "AREA_OR_POINT" in self.tags:
                 self.tags.pop("AREA_OR_POINT")
+
+        # If shift is True, and both interpretation were different strings, a change is needed
+        if shift_area_or_point and isinstance(old_area_or_point, str) and isinstance(new_area_or_point, str) \
+                and old_area_or_point != new_area_or_point:
+            # If the new one is Point, we shift back by half a pixel
+            if new_area_or_point == "Point":
+                xoff = 0.5
+                yoff = -0.5
+            # Otherwise we shift forward half a pixel
+            else:
+                xoff = -0.5
+                yoff = 0.5
+            # We perform the shift in place
+            self.shift(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
+
+    @property
+    def area_or_point(self) -> Literal["Area", "Point"] | None:
+        """
+        Pixel interpretation of the raster.
+
+        Based on the "AREA_OR_POINT" raster metadata:
+
+        - If pixel interpretation is "Area", the value of the pixel is associated with the upper left corner of the pixel.
+        - If pixel interpretation is "Point", the value of the pixel is associated with the center of the pixel.
+
+        When setting with self.area_or_point = new_area_or_point, uses the default arguments of
+        self.set_area_or_point().
+        """
+        return self._area_or_point
+
+    @area_or_point.setter
+    def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
+        """
+        Setter for pixel interpretation.
+
+        Uses default arguments of self.set_area_or_point(): shifts by half a pixel going from "Area" to "Point",
+        or the opposite.
+
+        :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
+
+        :return: None.
+        """
+        self.set_area_or_point(new_area_or_point=new_area_or_point)
 
     @property
     def driver(self) -> str | None:
@@ -1241,9 +1295,7 @@ class Raster:
 
         Returns a raster with -self.data.
         """
-        return self.from_array(
-            -self.data, self.transform, self.crs, nodata=self.nodata, area_or_point=self.area_or_point
-        )
+        return self.copy(-self.data)
 
     def __sub__(self, other: Raster | NDArrayNum | Number) -> Raster:
         """
@@ -1532,6 +1584,8 @@ class Raster:
     def nodata(self) -> int | float | None:
         """
         Nodata value of the raster.
+
+        When setting with self.nodata = new_nodata, uses the default arguments of self.set_nodata().
 
         :returns: Nodata value
         """
@@ -2223,6 +2277,9 @@ class Raster:
         if isinstance(crop_geom, (Raster, Vector)):
             # For another Vector or Raster, we reproject the bounding box in the same CRS as self
             xmin, ymin, xmax, ymax = crop_geom.get_bounds_projected(out_crs=self.crs)
+            if isinstance(crop_geom, Raster):
+                # Raise a warning if the reference is a raster that has a different pixel interpretation
+                _cast_pixel_interpretation(self.area_or_point, crop_geom.area_or_point)
         elif isinstance(crop_geom, (list, tuple)):
             xmin, ymin, xmax, ymax = crop_geom
         else:
@@ -2290,11 +2347,9 @@ class Raster:
         if inplace:
             self._data = crop_img
             self.transform = tfm
-            self.tags["AREA_OR_POINT"] = "Area"  # TODO: Explain why this should have an area interpretation now
             return None
         else:
-            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata)
-            newraster.tags["AREA_OR_POINT"] = "Area"
+            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
 
     @overload
@@ -2483,6 +2538,8 @@ class Raster:
             # Check that ref type is either str, Raster or rasterio data set
             # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
             if isinstance(ref, Raster):
+                # Raise a warning if the reference is a raster that has a different pixel interpretation
+                _cast_pixel_interpretation(self.area_or_point, ref.area_or_point)
                 ds_ref = ref
             elif isinstance(ref, str):
                 if not os.path.exists(ref):
@@ -2588,7 +2645,7 @@ class Raster:
             self.data = data
             return None
         else:
-            return self.from_array(data, transformed, crs, nodata)
+            return self.from_array(data, transformed, crs, nodata, self.area_or_point)
 
     @overload
     def shift(
@@ -3509,22 +3566,16 @@ class Raster:
             for band_n in indices:
                 # Generate a new Raster from a copy of the band's data
                 raster_bands.append(
-                    self.from_array(
+                    self.copy(
                         self.data[band_n - 1, :, :].copy(),
-                        transform=self.transform,
-                        crs=self.crs,
-                        nodata=self.nodata,
                     )
                 )
         else:
             for band_n in indices:
                 # Set the data to a slice of the original array
                 raster_bands.append(
-                    self.from_array(
+                    self.copy(
                         self.data[band_n - 1, :, :],
-                        transform=self.transform,
-                        crs=self.crs,
-                        nodata=self.nodata,
                     )
                 )
 
@@ -4119,9 +4170,7 @@ class Mask(Raster):
         """Bitwise and between masks, or a mask and an array."""
         self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
-        return self.from_array(
-            data=(self_data & other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
-        )
+        return self.copy(self_data & other_data)  # type: ignore
 
     def __rand__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
@@ -4133,9 +4182,7 @@ class Mask(Raster):
 
         self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
-        return self.from_array(
-            data=(self_data | other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
-        )
+        return self.copy(self_data | other_data)  # type: ignore
 
     def __ror__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise or between masks, or a mask and an array."""
@@ -4147,9 +4194,7 @@ class Mask(Raster):
 
         self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
 
-        return self.from_array(
-            data=(self_data ^ other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
-        )
+        return self.copy(self_data ^ other_data)  # type: ignore
 
     def __rxor__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise xor between masks, or a mask and an array."""
@@ -4159,7 +4204,7 @@ class Mask(Raster):
     def __invert__(self: Mask) -> Mask:
         """Bitwise inversion of a mask."""
 
-        return self.from_array(data=~self.data, transform=self.transform, crs=self.crs, nodata=self.nodata)
+        return self.copy(~self.data)
 
 
 # -----------------------------------------

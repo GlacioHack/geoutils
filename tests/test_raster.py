@@ -619,6 +619,40 @@ class TestRaster:
         assert raster_point.area_or_point == "Point"
         assert "AREA_OR_POINT" in raster_point.tags and raster_point.tags["AREA_OR_POINT"] == "Point"
 
+        # 2.5/ Setter shift and using set_area_or_point() with options
+        old_transform = raster_point.transform
+        # Setting "Area" from "Point" will shift the transform by default
+        raster_point.area_or_point = "Area"
+        assert raster_point.area_or_point == "Area"
+        assert raster_point.transform != old_transform
+
+        # Setting "Pixel" should give back the original transform
+        raster_point.area_or_point = "Point"
+        assert raster_point.area_or_point == "Point"
+        assert raster_point.transform == old_transform
+
+        # Setting None or "Pixel" should trigger no shift
+        raster_point.area_or_point = "Point"
+        assert raster_point.area_or_point == "Point"
+        assert raster_point.transform == old_transform
+        raster_point.area_or_point = None
+        assert raster_point.area_or_point is None
+        assert raster_point.transform == old_transform
+
+        # Setting "Area" passing a shift argument of False also shouldn't
+        raster_point.set_area_or_point("Area", shift_area_or_point=False)
+        assert raster_point.area_or_point == "Area"
+        raster_point.transform == old_transform
+
+        # Setting "Area" with a globally False argument of shift_area_or_point also shouldn't
+        geoutils.config["shift_area_or_point"] = False
+        raster_point.set_area_or_point("Point")
+        assert raster_point.area_or_point == "Point"
+        raster_point.transform == old_transform
+
+        # We reset the config argument
+        geoutils.config["shift_area_or_point"] = True
+
         # 3/ With function creating a single Raster
 
         # From array
@@ -1271,6 +1305,15 @@ class TestRaster:
         assert r_crop_unloaded.shape == r_crop_loaded.shape
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 
+        # - Check warning is raised for pixel interpretation of match-reference geometry -
+        # -- Check warning for area_or_point works -- #
+        r.set_area_or_point("Area", shift_area_or_point=False)
+        r2 = r.copy()
+        r2.set_area_or_point("Point", shift_area_or_point=False)
+
+        with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+            r.crop(r2)
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_shift(self, example: str) -> None:
         """Tests shift works as intended"""
@@ -1646,6 +1689,14 @@ class TestRaster:
         with pytest.raises(ValueError, match=re.escape("Reference raster does not exist.")):
             _ = r.reproject(ref="no_file.tif")
 
+        # -- Check warning for area_or_point works -- #
+        r.set_area_or_point("Area", shift_area_or_point=False)
+        r2 = r.copy()
+        r2.set_area_or_point("Point", shift_area_or_point=False)
+
+        with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+            r.reproject(r2)
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
         """Check the behaviour of the intersection function"""
@@ -1873,7 +1924,7 @@ class TestRaster:
         assert np.all(j % 1 == 0.5)
 
         # Force "Area", should refer to corner
-        r.area_or_point = "Area"
+        r.set_area_or_point("Area", shift_area_or_point=False)
         i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0)
         assert np.all(j % 1 == 0)
@@ -1951,8 +2002,8 @@ class TestRaster:
         transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
 
-        # Define the AREA_OR_POINT attribute
-        raster.area_or_point = tag_aop
+        # Define the AREA_OR_POINT attribute without re-transforming
+        raster.set_area_or_point(tag_aop, shift_area_or_point=False)
 
         # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
         index_x = [0, 1, 2, 0, 1, 2, 0, 1, 2]
@@ -2025,7 +2076,7 @@ class TestRaster:
         arr = np.flipud(np.arange(1, 2501).reshape((50, 50)))
         transform = rio.transform.from_bounds(0, 0, 50, 50, 50, 50)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
-        raster.area_or_point = tag_aop
+        raster.set_area_or_point(tag_aop, shift_area_or_point=False)
 
         # For this, get random points
         np.random.seed(42)
@@ -2837,6 +2888,8 @@ class TestRaster:
 
         img1 = gu.Raster(self.landsat_b4_path)
         img2 = gu.Raster(self.landsat_b4_crop_path)
+        # Set img2 pixel interpretation as "Point" to match "img1" and avoid any warnings
+        img2.set_area_or_point("Point", shift_area_or_point=False)
         img1.set_nodata(0)
         img2.set_nodata(0)
 
