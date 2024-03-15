@@ -1304,14 +1304,22 @@ class TestRaster:
         assert r_crop_unloaded.shape == r_crop_loaded.shape
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 
-        # - Check warning is raised for pixel interpretation of match-reference geometry -
-        # -- Check warning for area_or_point works -- #
+        # - Check related to pixel interpretation -
+
+        # Check warning for a different area_or_point for the match-reference geometry works
         r.set_area_or_point("Area", shift_area_or_point=False)
         r2 = r.copy()
         r2.set_area_or_point("Point", shift_area_or_point=False)
 
         with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
             r.crop(r2)
+
+        # Check that cropping preserves the interpretation
+        crop_geom = [crop_geom[0] + r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
+        r_crop = r.crop(crop_geom)
+        assert r_crop.area_or_point == "Area"
+        r2_crop = r2.crop(crop_geom)
+        assert r2_crop.area_or_point == "Point"
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_shift(self, example: str) -> None:
@@ -1695,6 +1703,12 @@ class TestRaster:
 
         with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
             r.reproject(r2)
+
+        # Check that reprojecting preserves interpretation
+        r_reproj = r.reproject(res=r.res[0] * 2)
+        assert r_reproj.area_or_point == "Area"
+        r2_reproj = r2.reproject(res=r2.res[0] * 2)
+        assert r2_reproj.area_or_point == "Point"
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
