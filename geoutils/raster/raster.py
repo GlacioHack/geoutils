@@ -390,11 +390,11 @@ def _cast_pixel_interpretation(
 def _cast_numeric_array_raster(
     raster: RasterType, other: RasterType | NDArrayNum | Number, operation_name: str
 ) -> tuple[
-        MArrayNum,
-        MArrayNum | NDArrayNum | Number,
-        float | int | tuple[int, ...] | tuple[float, ...] | None,
-        Literal["Area", "Point"] | None,
-    ]:
+    MArrayNum,
+    MArrayNum | NDArrayNum | Number,
+    float | int | tuple[int, ...] | tuple[float, ...] | None,
+    Literal["Area", "Point"] | None,
+]:
     """
     Cast a raster and another raster or array or number to arrays with proper metadata, or raise an error message.
 
@@ -426,7 +426,7 @@ def _cast_numeric_array_raster(
         other_data: NDArrayNum | MArrayNum | Number = other.data
 
         # Check that both rasters have the same shape and georeferences
-        if raster.georeferenced_grid_equal(other):
+        if raster.georeferenced_grid_equal(other):  # type: ignore
             pass
         else:
             raise ValueError(
@@ -467,7 +467,7 @@ def _cast_numeric_array_raster(
     nodata1 = raster.nodata
     dtype1 = raster.data.dtype
 
-    # 1/ Ouput nodata depending on common data type
+    # 1/ Output nodata depending on common data type
     out_dtype = np.promote_types(dtype1, dtype2)
 
     out_nodata = None
@@ -1240,7 +1240,9 @@ class Raster:
         Otherwise, other must be a single number.
         """
         # Check inputs and return compatible data, output dtype and nodata value
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
 
         # Run calculation
         out_data = self_data + other_data
@@ -1275,7 +1277,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data - other_data
         return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
 
@@ -1286,7 +1290,9 @@ class Raster:
 
         For when other is first item in the operation (e.g. 1 - rst).
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = other_data - self_data
         return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
 
@@ -1298,7 +1304,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data * other_data
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
@@ -1320,7 +1328,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data / other_data
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
@@ -1332,7 +1342,9 @@ class Raster:
 
         For when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = other_data / self_data
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
@@ -1345,7 +1357,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data // other_data
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
@@ -1357,7 +1371,9 @@ class Raster:
 
         For when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = other_data // self_data
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
@@ -1370,7 +1386,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data % other_data
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
@@ -1399,7 +1417,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data == other_data
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
@@ -1414,7 +1434,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data != other_data
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
@@ -1430,7 +1452,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data < other_data
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
@@ -1446,7 +1470,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data <= other_data
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
@@ -1462,7 +1488,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data > other_data
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
@@ -1478,7 +1506,9 @@ class Raster:
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _, aop = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data >= other_data
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
@@ -2076,7 +2106,7 @@ class Raster:
                 raster = inputs[0]
                 other = inputs[1]
             else:
-                raster = inputs[1]
+                raster = inputs[1]  # type: ignore
                 other = inputs[0]
             nodata, aop = _cast_numeric_array_raster(raster, other, "an arithmetic operation")[-2:]  # type: ignore
 
@@ -4154,7 +4184,9 @@ class Mask(Raster):
 
     def __and__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
-        self_data, other_data = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")[0:2]  # type: ignore
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
 
         return self.copy(self_data & other_data)  # type: ignore
 
@@ -4166,7 +4198,9 @@ class Mask(Raster):
     def __or__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise or between masks, or a mask and an array."""
 
-        self_data, other_data = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")[0:2]  # type: ignore
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
 
         return self.copy(self_data | other_data)  # type: ignore
 
@@ -4178,7 +4212,9 @@ class Mask(Raster):
     def __xor__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise xor between masks, or a mask and an array."""
 
-        self_data, other_data = _cast_numeric_array_raster(self, other, operation_name="an arithmetic operation")[0:2]  # type: ignore
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
 
         return self.copy(self_data ^ other_data)  # type: ignore
 
