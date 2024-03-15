@@ -642,14 +642,13 @@ class TestRaster:
         # Setting "Area" passing a shift argument of False also shouldn't
         raster_point.set_area_or_point("Area", shift_area_or_point=False)
         assert raster_point.area_or_point == "Area"
-        raster_point.transform == old_transform
+        assert raster_point.transform == old_transform
 
         # Setting "Area" with a globally False argument of shift_area_or_point also shouldn't
         geoutils.config["shift_area_or_point"] = False
         raster_point.set_area_or_point("Point")
         assert raster_point.area_or_point == "Point"
-        raster_point.transform == old_transform
-
+        assert raster_point.transform == old_transform
         # We reset the config argument
         geoutils.config["shift_area_or_point"] = True
 
