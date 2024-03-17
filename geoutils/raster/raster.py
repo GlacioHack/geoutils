@@ -1336,18 +1336,24 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return out_mask
 
     @overload
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False) -> Raster:
+    def astype(
+        self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False
+    ) -> RasterType:
         ...
 
     @overload
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
+    def astype(self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
         ...
 
     @overload
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False) -> Raster | None:
+    def astype(
+        self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False
+    ) -> RasterType | None:
         ...
 
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, inplace: bool = False) -> Raster | None:
+    def astype(
+        self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, inplace: bool = False
+    ) -> RasterType | None:
         """
         Convert data type of the raster.
 
@@ -2630,7 +2636,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 dst.gcps = (rio_gcps, gcps_crs)
 
     @classmethod
-    def from_xarray(cls, ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
+    def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
         """
         Create raster from a xarray.DataArray.
 
