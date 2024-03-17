@@ -363,7 +363,7 @@ class TestRaster:
     def test_to_xarray(self, example: str):
         """Test the export to a xarray dataset"""
 
-        # Open raster and export to rio dataset
+        # Open raster and export to xarray dataset
         rst = gu.Raster(example)
         ds = rst.to_xarray()
 
@@ -394,6 +394,21 @@ class TestRaster:
             assert np.array_equal(rst.data.data, ds.data)
         else:
             assert np.array_equal(rst.data.data, ds.data.squeeze())
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_from_xarray(self, example: str):
+        """Test the import from a xarray dataset"""
+
+        warnings.filterwarnings("ignore")
+
+        # Open raster and export to xarray, then import to xarray dataset
+        rst = gu.Raster(example)
+        ds = rst.to_xarray()
+        rst_2 = gu.Raster.from_xarray(ds=ds)
+
+        # Exporting to a Xarray dataset results in loss of information to float32
+        # Check that the output equals the input converted to float32 (not fully reversible)
+        assert rst.astype("float32", convert_nodata=False).raster_equal(rst_2)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(

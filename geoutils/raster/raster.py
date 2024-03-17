@@ -2629,22 +2629,51 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
                 dst.gcps = (rio_gcps, gcps_crs)
 
+    @classmethod
+    def from_xarray(cls, ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
+        """
+        Create raster from a xarray.DataArray.
+
+        This conversion loads the xarray.DataArray in memory. Use functions of the Xarray accessor directly
+        to avoid this behaviour.
+
+        :param ds: Data array.
+        :param dtype: Cast the array to a certain dtype.
+
+        :return: Raster.
+        """
+
+        # Define main attributes
+        crs = ds.rio.crs
+        transform = ds.rio.transform(recalc=True)
+        nodata = ds.rio.nodata
+
+        # TODO: Add tags and area_or_point with PR #509
+        raster = cls.from_array(data=ds.data, transform=transform, crs=crs, nodata=nodata)
+
+        if dtype is not None:
+            raster = raster.astype(dtype)
+
+        return raster
+
     def to_xarray(self, name: str | None = None) -> xr.DataArray:
         """
         Convert raster to a xarray.DataArray.
 
-        This method uses rioxarray to generate a DataArray with associated
-        geo-referencing information.
+        This converts integer-type rasters into float32.
 
-        See the documentation of rioxarray and xarray for more information on
-        the methods and attributes of the resulting DataArray.
+        :param name: Name attribute for the data array.
 
-        :param name: Name attribute for the DataArray.
-
-        :returns: xarray DataArray
+        :returns: Data array.
         """
 
-        ds = rioxarray.open_rasterio(self.to_rio_dataset())
+        # If type was integer, cast to float to be able to save nodata values in the xarray data array
+        if np.issubdtype(self.dtypes[0], np.integer):
+            updated_raster = self.astype(np.float32, convert_nodata=False)
+        else:
+            updated_raster = self
+
+        ds = rioxarray.open_rasterio(updated_raster.to_rio_dataset())
         if name is not None:
             ds.name = name
 
