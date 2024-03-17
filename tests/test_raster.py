@@ -2212,6 +2212,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # By default, the array should have been updated
         if old_nodata is not None:
@@ -2250,6 +2251,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # By default, the array should have been updated similarly for the old nodata
         if old_nodata is not None:
@@ -2292,6 +2294,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # Now, the array should not have been updated, so the entire array should be unchanged except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
@@ -2320,6 +2323,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # The array should have been updated
         if old_nodata is not None:
@@ -2346,6 +2350,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # The array should not have been updated except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
