@@ -1529,6 +1529,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Update the nodata value
         self._nodata = new_nodata
+        self.data.fill_value = new_nodata
 
     @property
     def data(self) -> MArrayNum:
@@ -2675,6 +2676,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If type was integer, cast to float to be able to save nodata values in the xarray data array
         if np.issubdtype(self.dtypes[0], np.integer):
+            # Nodata conversion is not needed in this direction (integer towards float), we can maintain the original
             updated_raster = self.astype(np.float32, convert_nodata=False)
         else:
             updated_raster = self
