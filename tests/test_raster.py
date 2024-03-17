@@ -418,7 +418,6 @@ class TestRaster:
             rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtypes[0])
             assert rst3.raster_equal(rst)
 
-
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
         "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]
