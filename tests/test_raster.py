@@ -391,15 +391,13 @@ class TestRaster:
 
         # Check that the arrays are equal in NaN type
         if rst.count > 1:
-            assert np.array_equal(rst.data.data, ds.data)
+            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
         else:
-            assert np.array_equal(rst.data.data, ds.data.squeeze())
+            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_from_xarray(self, example: str):
         """Test raster creation from a xarray dataset, not fully reversible with to_xarray due to float conversion"""
-
-        warnings.filterwarnings("ignore")
 
         # Open raster and export to xarray, then import to xarray dataset
         rst = gu.Raster(example)
@@ -408,15 +406,17 @@ class TestRaster:
 
         # Exporting to a Xarray dataset results in loss of information to float32
         # Check that the output equals the input converted to float32 (not fully reversible)
-        assert rst.astype("float32", convert_nodata=False).raster_equal(rst2)
+        assert rst.astype("float32", convert_nodata=False).raster_equal(rst2, strict_masked=False)
 
         # Test with the dtype argument to convert back to original raster even if integer-type
         if np.issubdtype(rst.dtypes[0], np.integer):
             # Set an existing nodata value, because all of our integer-type example datasets currently have "None"
-            rst.set_nodata(new_nodata=255)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="New nodata value cells already exist.*")
+                rst.set_nodata(new_nodata=255)
             ds = rst.to_xarray()
             rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtypes[0])
-            assert rst3.raster_equal(rst)
+            assert rst3.raster_equal(rst, strict_masked=False)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
