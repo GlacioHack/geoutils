@@ -998,15 +998,15 @@ class Raster:
 
         if strict_masked:
             names = ["data.data", "data.mask", "data.fill_value", "dtype", "transform", "crs", "nodata"]
-            equalities =  [
-                    np.array_equal(self.data.data, other.data.data, equal_nan=True),
-                    np.array_equal(self_mask, other_mask),
-                    self.data.fill_value == other.data.fill_value,
-                    self.data.dtype == other.data.dtype,
-                    self.transform == other.transform,
-                    self.crs == other.crs,
-                    self.nodata == other.nodata,
-                ]
+            equalities = [
+                np.array_equal(self.data.data, other.data.data, equal_nan=True),
+                np.array_equal(self_mask, other_mask),
+                self.data.fill_value == other.data.fill_value,
+                self.data.dtype == other.data.dtype,
+                self.transform == other.transform,
+                self.crs == other.crs,
+                self.nodata == other.nodata,
+            ]
         else:
             names = ["data", "data.fill_value", "dtype", "transform", "crs", "nodata"]
             equalities = [
@@ -1015,14 +1015,16 @@ class Raster:
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
                 self.crs == other.crs,
-                self.nodata == other.nodata
-                ]
+                self.nodata == other.nodata,
+            ]
 
         complete_equality = all(equalities)
 
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
-            warnings.warn(category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
+            warnings.warn(
+                category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
+            )
 
         return complete_equality
 
