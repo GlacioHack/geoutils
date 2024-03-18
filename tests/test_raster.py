@@ -3465,6 +3465,21 @@ class TestArithmetic:
         r2.set_nodata(34)
         assert not r1.raster_equal(r2)
 
+        # Change value of a masked cell
+        r1.data[0, 0] = np.ma.masked
+        r1.data.data[0, 0] = 0
+        r2 = r1.copy()
+        r2.data.data[0, 0] = 10
+        assert not r1.raster_equal(r2)
+        assert r1.raster_equal(r2, strict_masked=False)
+
+        # Check that a warning is raised with useful information without equality
+        with pytest.warns(UserWarning, match="Equality failed for: data.data."):
+            assert not r1.raster_equal(r2, warn_failure_reason=True)
+
+        # But no warning is raised for an equality
+        assert r1.raster_equal(r2, strict_masked=False, warn_failure_reason=True)
+
     def test_equal_georeferenced_grid(self) -> None:
         """
         Test that equal for shape, crs and transform work as expected

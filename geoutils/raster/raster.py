@@ -978,7 +978,7 @@ class Raster:
         - The raster's transform, crs and nodata values.
 
         :param other: Other raster.
-        :param strict_masked: Whether to check if masked pixels (in .data.mask) have the same value (in .data.data).
+        :param strict_masked: Whether to check if masked cells (in .data.mask) have the same value (in .data.data).
         :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
         """
 
