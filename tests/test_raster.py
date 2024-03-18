@@ -3232,7 +3232,7 @@ class TestMask:
             match="Reprojecting a mask with a resampling method other than 'nearest', "
             "the boolean array will be converted to float during interpolation.",
         ):
-            mask.reproject(resampling="bilinear")
+            mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_crop(self, mask: gu.Mask) -> None:
