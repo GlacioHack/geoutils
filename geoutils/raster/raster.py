@@ -807,9 +807,9 @@ class Raster:
             driver="GTiff",
         ) as ds:
             if self.count == 1:
-                ds.write(self.data.filled(self.nodata)[np.newaxis, :, :])
+                ds.write(self.data[np.newaxis, :, :])
             else:
-                ds.write(self.data.filled(self.nodata))
+                ds.write(self.data)
 
         # Then open as a DatasetReader
         return mfh.open()
