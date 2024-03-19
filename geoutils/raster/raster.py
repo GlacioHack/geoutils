@@ -378,7 +378,7 @@ def _cast_pixel_interpretation(
         area_or_point_out = None
         msg = (
             'One raster has a pixel interpretation "Area" and the other "Point". To silence this warning, '
-            "either correct the pixel interpretation of one raster (see ), or deactivate "
+            "either correct the pixel interpretation of one raster, or deactivate "
             'warnings of pixel interpretation with geoutils.config["warn_area_or_point"]=False.'
         )
         if config["warn_area_or_point"]:
@@ -439,7 +439,7 @@ def _cast_numeric_array_raster(
     elif isinstance(other, np.ndarray):
 
         # Squeeze first axis of other data if possible
-        if len(other.shape) == 3 and other.shape[0] == 1:
+        if other.ndim == 3 and other.shape[0] == 1:
             other_data = other.squeeze(axis=0)
         else:
             other_data = other
@@ -476,8 +476,8 @@ def _cast_numeric_array_raster(
         out_nodata = nodata2
     elif (nodata1 is not None) and (out_dtype == dtype1):
         out_nodata = nodata1
-    # For some cases the promoted output type is none if the inputs (e.g. inputs uint8 and int8 = int16 output)
-    # And the minimum dtype of any integer is uint8
+    # In some cases the promoted output type does not match any inputs
+    # (e.g. for inputs "uint8" and "int8", output is "int16")
     elif (nodata1 is not None) or (nodata2 is not None):
         out_nodata = nodata1 if not None else nodata2
 
@@ -678,7 +678,7 @@ class Raster:
     def count(self) -> int:
         """Count of bands loaded in memory if they are, otherwise the one on disk."""
         if self.is_loaded:
-            if len(self.data.shape) == 2:
+            if self.data.ndim == 2:
                 return 1
             else:
                 return int(self.data.shape[0])
@@ -695,7 +695,7 @@ class Raster:
                 return self._disk_shape[1]  # type: ignore
         else:
             # If the raster is single-band
-            if len(self.data.shape) == 2:
+            if self.data.ndim == 2:
                 return int(self.data.shape[0])
             # Or multi-band
             else:
@@ -711,7 +711,7 @@ class Raster:
                 return self._disk_shape[2]  # type: ignore
         else:
             # If the raster is single-band
-            if len(self.data.shape) == 2:
+            if self.data.ndim == 2:
                 return int(self.data.shape[1])
             # Or multi-band
             else:
@@ -1738,11 +1738,11 @@ class Raster:
         if not isinstance(new_data, np.ndarray):
             raise ValueError("New data must be a numpy array.")
 
-        if len(new_data.shape) not in [2, 3]:
+        if new_data.ndim not in [2, 3]:
             raise ValueError("Data array must have 2 or 3 dimensions.")
 
         # Squeeze 3D data if the band axis is of length 1
-        if len(new_data.shape) == 3 and new_data.shape[0] == 1:
+        if new_data.ndim == 3 and new_data.shape[0] == 1:
             new_data = new_data.squeeze(axis=0)
 
         # Check that new_data has correct shape
@@ -2351,7 +2351,7 @@ class Raster:
                     )
 
                 # Squeeze first axis for single-band
-                if len(crop_img.shape) == 3 and crop_img.shape[0] == 1:
+                if crop_img.ndim == 3 and crop_img.shape[0] == 1:
                     crop_img = crop_img.squeeze(axis=0)
 
         else:

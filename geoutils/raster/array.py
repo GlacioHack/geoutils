@@ -41,7 +41,7 @@ def get_array_and_mask(
         array = array.data
 
     if check_shape:
-        if len(array.shape) > 2 and array.shape[0] > 1:
+        if array.ndim > 2 and array.shape[0] > 1:
             raise ValueError(
                 f"Invalid array shape given: {array.shape}." "Expected 2D array or 3D array where arr.shape[0] == 1"
             )
@@ -90,7 +90,9 @@ def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[NDArray
 
     myang = np.deg2rad(along_track_angle)
 
-    # Get grid coordinates (only relative is important, we don't care about offsets, so let's fix lower-left)
+    # Get grid coordinates
+    # (only relative is important, we don't care about offsets, so let's fix lower-left to make the tests easier
+    # by starting nicely at 0,0)
     xx, yy = raster.coords(grid=True, force_offset="ll")
     xx -= np.min(xx)
     yy -= np.min(yy)

@@ -19,7 +19,6 @@ import xarray as xr
 from pylint.lint import Run
 from pylint.reporters.text import TextReporter
 
-import geoutils
 import geoutils as gu
 import geoutils.projtools as pt
 from geoutils import examples
@@ -626,12 +625,12 @@ class TestRaster:
         assert raster_point.area_or_point == "Area"
         assert raster_point.transform != old_transform
 
-        # Setting "Pixel" should give back the original transform
+        # Setting "Point" should give back the original transform
         raster_point.area_or_point = "Point"
         assert raster_point.area_or_point == "Point"
         assert raster_point.transform == old_transform
 
-        # Setting None or "Pixel" should trigger no shift
+        # Setting None or "Point" should trigger no shift
         raster_point.area_or_point = "Point"
         assert raster_point.area_or_point == "Point"
         assert raster_point.transform == old_transform
@@ -645,12 +644,12 @@ class TestRaster:
         assert raster_point.transform == old_transform
 
         # Setting "Area" with a globally False argument of shift_area_or_point also shouldn't
-        geoutils.config["shift_area_or_point"] = False
+        gu.config["shift_area_or_point"] = False
         raster_point.set_area_or_point("Point")
         assert raster_point.area_or_point == "Point"
         assert raster_point.transform == old_transform
         # We reset the config argument
-        geoutils.config["shift_area_or_point"] = True
+        gu.config["shift_area_or_point"] = True
 
         # 3/ With function creating a single Raster
 
@@ -667,10 +666,6 @@ class TestRaster:
         raster_point_copy = raster_point.copy()
         assert raster_point.area_or_point == raster_point_copy.area_or_point
 
-        # 4/ With function casting from several Rasters
-
-        # with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
-        #     r
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_get_nanarray(self, example: str) -> None:
@@ -1875,7 +1870,7 @@ class TestRaster:
         # Check that default coordinate is upper-left
 
         # With shift from pixel interpretation, coordinates will be half a pixel back for "Point"
-        if rst.area_or_point is not None and rst.area_or_point == "Point" and geoutils.config["shift_area_or_point"]:
+        if rst.area_or_point is not None and rst.area_or_point == "Point" and gu.config["shift_area_or_point"]:
             # Shift is backward in X, forward in Y
             lims_ul[0] = lims_ul[0] - 0.5 * rst.res[0]
             lims_ul[1] = lims_ul[1] + 0.5 * rst.res[1]
@@ -1900,7 +1895,6 @@ class TestRaster:
         yrand = ymax + np.random.randint(low=0, high=rst.height, size=(10,)) * list(rst.transform)[4]
 
         # Test reversibility for any point or area interpretation
-        print(rst.area_or_point)
         i, j = rst.xy2ij(xrand, yrand)
         xnew, ynew = rst.ij2xy(i, j)
         assert all(xnew == xrand)
@@ -3445,8 +3439,8 @@ class TestArithmetic:
     # TODO: Add the case where a mask exists in the array, as in test_data_setter
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-    r1 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
-    r2 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
+    r1 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area")
+    r2 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area")
 
     # Tests with different dtype
     r1_f32 = gu.Raster.from_array(
@@ -3486,6 +3480,10 @@ class TestArithmetic:
     transform2 = rio.transform.from_bounds(0, 0, 2, 2, width, height)
     r1_wrong_transform = gu.Raster.from_array(
         np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
+    )
+
+    r1_wrong_aop = gu.Raster.from_array(
+        np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform, crs=None, area_or_point="Point"
     )
 
     # Tests with child class
@@ -3996,6 +3994,11 @@ class TestArithmetic:
         with pytest.raises(NotImplementedError, match=expected_message):
             getattr(self.r1, op)("some_string")
 
+        # Different area or point interpretation for two-raster input
+        with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+            getattr(self.r2, op)(self.r1_wrong_aop)
+
+
     @pytest.mark.parametrize("power", [2, 3.14, -1])  # type: ignore
     def test_power(self, power: float | int) -> None:
         if power > 0:  # Integers to negative integer powers are not allowed.
@@ -4482,13 +4485,16 @@ class TestArrayInterface:
         # Create Rasters
         ma = np.ma.masked_array(data=self.arr1, mask=self.mask1)
         ma_wrong_shape = np.ma.masked_array(data=self.arr_wrong_shape, mask=self.mask_wrong_shape)
-        rst = gu.Raster.from_array(ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma.dtype))
+        rst = gu.Raster.from_array(ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma.dtype), area_or_point="Area")
         rst_wrong_shape = gu.Raster.from_array(
             ma_wrong_shape, transform=self.transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype)
         )
         rst_wrong_crs = gu.Raster.from_array(ma, transform=self.transform, crs=32610, nodata=_default_nodata(ma.dtype))
         rst_wrong_transform = gu.Raster.from_array(
             ma, transform=self.wrong_transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype)
+        )
+        rst_wrong_aop = gu.Raster.from_array(
+            ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype), area_or_point="Point"
         )
 
         # Get ufunc
@@ -4500,25 +4506,25 @@ class TestArrayInterface:
 
             # Rasters with different CRS, transform, or shape
             # Different shape
-            expected_message = (
+            georef_tworaster_message = (
                 "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
                 "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
                 "same grid and CRS than raster2."
             )
 
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
                 np_func(rst, rst_wrong_shape)
 
             # Different CRS
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
                 np_func(rst, rst_wrong_crs)
 
             # Different transform
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
                 np_func(rst, rst_wrong_transform)
 
             # Array with different shape
-            expected_message = (
+            georef_raster_array_message = (
                 "The raster and array must have the same shape for an arithmetic operation. "
                 "For example, if the array comes from another raster, use raster1 = "
                 "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
@@ -4527,13 +4533,18 @@ class TestArrayInterface:
             )
             # Different shape, masked array
             # Check reflectivity just in case (just here, not later)
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(ma_wrong_shape, rst)
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(rst, ma_wrong_shape)
 
             # Different shape, normal array with NaNs
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(ma_wrong_shape.filled(np.nan), rst)
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(rst, ma_wrong_shape.filled(np.nan))
+
+            aop_message = 'One raster has a pixel interpretation "Area" and the other "Point".*'
+
+            with pytest.raises(UserWarning, match=aop_message):
+                np_func(rst, rst_wrong_aop)
