@@ -53,6 +53,10 @@ class TestSubsampling:
         random_values = gu.raster.subsample_array(array, subsample=1)
         assert np.all(np.sort(random_values) == array[~array.mask])
 
+        # Check that order is preserved for subsample = 1 (no random sampling, simply returns valid mask)
+        random_values_2 = gu.raster.subsample_array(array, subsample=1)
+        assert np.array_equal(random_values, random_values_2)
+
         # Test if subsample < 1
         random_values = gu.raster.subsample_array(array, subsample=0.5)
         assert np.size(random_values) == int(np.count_nonzero(~array.mask) * 0.5)

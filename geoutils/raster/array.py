@@ -7,10 +7,10 @@ import warnings
 import numpy as np
 
 import geoutils as gu
-from geoutils._typing import MArrayNum, NDArrayNum
+from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 
 
-def get_mask(array: NDArrayNum | MArrayNum) -> NDArrayNum:
+def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
     """
     Return the mask of invalid values, whether array is a ndarray with NaNs or a np.ma.masked_array.
 
@@ -24,7 +24,7 @@ def get_mask(array: NDArrayNum | MArrayNum) -> NDArrayNum:
 
 def get_array_and_mask(
     array: NDArrayNum | MArrayNum, check_shape: bool = True, copy: bool = True
-) -> tuple[NDArrayNum, NDArrayNum]:
+) -> tuple[NDArrayNum, NDArrayBool]:
     """
     Return array with masked values set to NaN and the associated mask.
     Works whether array is a ndarray with NaNs or a np.ma.masked_array.
@@ -59,21 +59,22 @@ def get_array_and_mask(
     array_data = np.array(array).squeeze() if copy else np.asarray(array).squeeze()
 
     # Get the mask of invalid pixels and set nans if it is occupied.
-    invalid_mask = get_mask(array)
+    invalid_mask = get_mask_from_array(array)
     if np.any(invalid_mask):
         array_data[invalid_mask] = np.nan
 
     return array_data, invalid_mask
 
 
-def get_valid_extent(array: NDArrayNum | MArrayNum) -> tuple[int, ...]:
+def get_valid_extent(array: NDArrayNum | NDArrayBool | MArrayNum) -> tuple[int, ...]:
     """
     Return (rowmin, rowmax, colmin, colmax), the first/last row/column of array with valid pixels
     """
     if not array.dtype == "bool":
-        valid_mask = ~get_mask(array)
+        valid_mask = ~get_mask_from_array(array)
     else:
-        valid_mask = array
+        # Not sure why Mypy is not recognizing that the type of the array can only be bool here
+        valid_mask = array  # type: ignore
     cols_nonzero = np.where(np.count_nonzero(valid_mask, axis=0) > 0)[0]
     rows_nonzero = np.where(np.count_nonzero(valid_mask, axis=1) > 0)[0]
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]

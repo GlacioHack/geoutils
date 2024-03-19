@@ -339,6 +339,24 @@ class TestRaster:
             r.filename = None
             r.load()
 
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_load_only_mask(self, example: str) -> None:
+        """
+        Test that loading only mask works properly.
+        """
+
+        # Load raster with and without loading
+        r_loaded = gu.Raster(example, load_data=True)
+        r_notloaded = gu.Raster(example)
+
+        # Get the mask for the two options
+        mask_loaded = np.ma.getmaskarray(r_loaded.data)
+        mask_notloaded = r_notloaded._load_only_mask()
+
+        # Data should not be loaded and masks should be equal
+        assert not r_notloaded.is_loaded
+        assert np.array_equal(mask_notloaded, mask_loaded)
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_to_rio_dataset(self, example: str):
         """Test the export to a rasterio dataset"""
@@ -363,7 +381,7 @@ class TestRaster:
     def test_to_xarray(self, example: str):
         """Test the export to a xarray dataset"""
 
-        # Open raster and export to rio dataset
+        # Open raster and export to xarray dataset
         rst = gu.Raster(example)
         ds = rst.to_xarray()
 
@@ -391,9 +409,32 @@ class TestRaster:
 
         # Check that the arrays are equal in NaN type
         if rst.count > 1:
-            assert np.array_equal(rst.data.data, ds.data)
+            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
         else:
-            assert np.array_equal(rst.data.data, ds.data.squeeze())
+            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_from_xarray(self, example: str):
+        """Test raster creation from a xarray dataset, not fully reversible with to_xarray due to float conversion"""
+
+        # Open raster and export to xarray, then import to xarray dataset
+        rst = gu.Raster(example)
+        ds = rst.to_xarray()
+        rst2 = gu.Raster.from_xarray(ds=ds)
+
+        # Exporting to a Xarray dataset results in loss of information to float32
+        # Check that the output equals the input converted to float32 (not fully reversible)
+        assert rst.astype("float32", convert_nodata=False).raster_equal(rst2, strict_masked=False)
+
+        # Test with the dtype argument to convert back to original raster even if integer-type
+        if np.issubdtype(rst.dtypes[0], np.integer):
+            # Set an existing nodata value, because all of our integer-type example datasets currently have "None"
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="New nodata value cells already exist.*")
+                rst.set_nodata(new_nodata=255)
+            ds = rst.to_xarray()
+            rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtypes[0])
+            assert rst3.raster_equal(rst, strict_masked=False)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
@@ -2275,6 +2316,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # By default, the array should have been updated
         if old_nodata is not None:
@@ -2313,6 +2355,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # By default, the array should have been updated similarly for the old nodata
         if old_nodata is not None:
@@ -2355,6 +2398,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # Now, the array should not have been updated, so the entire array should be unchanged except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
@@ -2383,6 +2427,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # The array should have been updated
         if old_nodata is not None:
@@ -2409,6 +2454,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # The array should not have been updated except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
@@ -3058,51 +3104,155 @@ class TestRaster:
         # With only inside proximity
         raster1.proximity(vector=vector, in_or_out="in")
 
-    def test_to_points(self) -> None:
-        """Test the outputs of the to_points method and that it doesn't load if not needed."""
+    def test_to_pointcloud(self) -> None:
+        """Test to_pointcloud method."""
+
+        # 1/ Single band synthetic data
 
         # Create a small raster to test point sampling on
-        img0 = gu.Raster.from_array(
-            np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
-        )
+        img_arr = np.arange(25, dtype="int32").reshape(5, 5)
+        img0 = gu.Raster.from_array(img_arr, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
 
         # Sample the whole raster (fraction==1)
-        points = img0.to_points(1, as_array=True)
+        points = img0.to_pointcloud()
+        points_arr = img0.to_pointcloud(as_array=True)
+
+        # Check output types
+        assert isinstance(points, gu.Vector)
+        assert isinstance(points_arr, np.ndarray)
+
+        # Check that both outputs (array or vector) are fully consistent, order matters here
+        assert np.array_equal(points.ds.geometry.x.values, points_arr[:, 0])
+        assert np.array_equal(points.ds.geometry.y.values, points_arr[:, 1])
+        assert np.array_equal(points.ds["b1"].values, points_arr[:, 2])
 
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
-        assert isinstance(points, np.ndarray)
-        assert points.shape == (25, 3)
-        assert np.array_equal(np.asarray(points[:, 0]), np.tile(np.linspace(0.5, 4.5, 5), 5))
+        assert points_arr.shape == (25, 3)
+        assert points.ds.shape == (25, 2)  # One less column here due to geometry storing X and Y
+        # Check that X, Y and Z arrays are equal to raster array input independently of value order
+        x_coords, y_coords = img0.ij2xy(i=np.arange(0, 5), j=np.arange(0, 5))
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 0])), np.sort(np.tile(x_coords, 5)))
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 1])), np.sort(np.tile(y_coords, 5)))
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 2])), np.sort(img_arr.ravel()))
 
-        assert img0.to_points(0.2, as_array=True).shape == (5, 3)
+        # Check that subsampling works properly
+        points_arr = img0.to_pointcloud(subsample=0.2, as_array=True)
+        assert points_arr.shape == (5, 3)
 
-        # Try with a single-band raster
+        # All values should be between 0 and 25
+        assert all(0 <= points_arr[:, 2]) and all(points_arr[:, 2] < 25)
+
+        # 2/ Multi-band synthetic data
+        img_arr = np.arange(25, dtype="int32").reshape(5, 5)
+        img_3d_arr = np.stack((img_arr, 25 + img_arr, 50 + img_arr), axis=0)
+        img3d = gu.Raster.from_array(img_3d_arr, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
+
+        # Sample the whole raster (fraction==1)
+        points = img3d.to_pointcloud(auxiliary_data_bands=[2, 3])
+        points_arr = img3d.to_pointcloud(as_array=True, auxiliary_data_bands=[2, 3])
+
+        # Check equality between both output types
+        assert np.array_equal(points.ds.geometry.x.values, points_arr[:, 0])
+        assert np.array_equal(points.ds.geometry.y.values, points_arr[:, 1])
+        assert np.array_equal(points.ds["b1"].values, points_arr[:, 2])
+        assert np.array_equal(points.ds["b2"].values, points_arr[:, 3])
+        assert np.array_equal(points.ds["b3"].values, points_arr[:, 4])
+
+        # Check it is the right data
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 0])), np.sort(np.tile(x_coords, 5)))
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 1])), np.sort(np.tile(y_coords, 5)))
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 2])), np.sort(img_3d_arr[0, :, :].ravel()))
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 3])), np.sort(img_3d_arr[1, :, :].ravel()))
+        assert np.array_equal(np.sort(np.asarray(points_arr[:, 4])), np.sort(img_3d_arr[2, :, :].ravel()))
+
+        # With a subsample
+        points_arr = img3d.to_pointcloud(as_array=True, subsample=10, auxiliary_data_bands=[2, 3])
+        assert points_arr.shape == (10, 5)
+
+        # Check the values are still good
+        assert all(0 <= points_arr[:, 2]) and all(points_arr[:, 2] < 25)
+        assert all(25 <= points_arr[:, 3]) and all(points_arr[:, 3] < 50)
+        assert all(50 <= points_arr[:, 4]) and all(points_arr[:, 4] < 75)
+
+        # 3/ Single-band real raster with nodata values
         img1 = gu.Raster(self.aster_dem_path)
 
-        points = img1.to_points(10, as_array=True)
+        # Get a large sample to ensure they should be some NaNs normally
+        points_arr = img1.to_pointcloud(subsample=10000, as_array=True, random_state=42)
+        points = img1.to_pointcloud(subsample=10000, random_state=42)
 
-        assert points.shape == (10, 3)
+        # This should not load the image
         assert not img1.is_loaded
 
-        points_frame = img1.to_points(10)
+        # The subsampled values should be valid and the right shape
+        assert points_arr.shape == (10000, 3)
+        assert points.ds.shape == (10000, 2)  # One less column here due to geometry storing X and Y
+        assert all(np.isfinite(points_arr[:, 2]))
 
-        assert isinstance(points_frame, gu.Vector)
-        assert np.array_equal(points_frame.ds.columns, ["b1", "geometry"])
-        assert points_frame.crs == img1.crs
+        # The output should respect the default band naming and the input CRS
+        assert np.array_equal(points.ds.columns, ["b1", "geometry"])
+        assert points.crs == img1.crs
 
-        # Try with a multi-band raster
+        # Try setting the band name
+        points = img1.to_pointcloud(data_column_name="lol", subsample=10)
+        assert np.array_equal(points.ds.columns, ["lol", "geometry"])
+
+        # 4/ Multi-band real raster
         img2 = gu.Raster(self.landsat_rgb_path)
 
-        points = img2.to_points(10, as_array=True)
+        # By default only loads a single band without loading
+        points_arr = img2.to_pointcloud(subsample=10, as_array=True)
+        points = img2.to_pointcloud(subsample=10)
 
-        assert points.shape == (10, 5)
+        assert points_arr.shape == (10, 3)
+        assert points.ds.shape == (10, 2)  # One less column here due to geometry storing X and Y
         assert not img2.is_loaded
 
-        points_frame = img2.to_points(10)
+        # Storing auxiliary bands
+        points_arr = img2.to_pointcloud(subsample=10, as_array=True, auxiliary_data_bands=[2, 3])
+        points = img2.to_pointcloud(subsample=10, auxiliary_data_bands=[2, 3])
+        assert points_arr.shape == (10, 5)
+        assert points.ds.shape == (10, 4)  # One less column here due to geometry storing X and Y
+        assert not img2.is_loaded
+        assert np.array_equal(points.ds.columns, ["b1", "b2", "b3", "geometry"])
 
-        assert isinstance(points_frame, gu.Vector)
-        assert np.array_equal(points_frame.ds.columns, ["b1", "b2", "b3", "geometry"])
-        assert points_frame.crs == img2.crs
+        # Try setting the column name of a specific band while storing all
+        points = img2.to_pointcloud(subsample=10, data_column_name="yes", data_band=2, auxiliary_data_bands=[1, 3])
+        assert np.array_equal(points.ds.columns, ["yes", "b1", "b3", "geometry"])
+
+        # 5/ Error raising
+        with pytest.raises(ValueError, match="Data column name must be a string.*"):
+            img1.to_pointcloud(data_column_name=1)  # type: ignore
+        with pytest.raises(
+            ValueError,
+            match=re.escape("Data band number must be an integer between 1 and the total number of bands (3)."),
+        ):
+            img2.to_pointcloud(data_band=4)
+        with pytest.raises(
+            ValueError, match="Passing auxiliary column names requires passing auxiliary data band numbers as well."
+        ):
+            img2.to_pointcloud(auxiliary_column_names=["a"])
+        with pytest.raises(
+            ValueError, match="Auxiliary data band number must be an iterable containing only integers."
+        ):
+            img2.to_pointcloud(auxiliary_data_bands=[1, 2.5])  # type: ignore
+            img2.to_pointcloud(auxiliary_data_bands="lol")  # type: ignore
+        with pytest.raises(
+            ValueError,
+            match=re.escape("Auxiliary data band numbers must be between 1 and the total number of bands (3)."),
+        ):
+            img2.to_pointcloud(auxiliary_data_bands=[0])
+            img2.to_pointcloud(auxiliary_data_bands=[4])
+        with pytest.raises(
+            ValueError, match=re.escape("Main data band 1 should not be listed in auxiliary data bands [1, 2].")
+        ):
+            img2.to_pointcloud(auxiliary_data_bands=[1, 2])
+        with pytest.raises(ValueError, match="Auxiliary column names must be an iterable containing only strings."):
+            img2.to_pointcloud(auxiliary_data_bands=[2, 3], auxiliary_column_names=["lol", 1])
+        with pytest.raises(
+            ValueError, match="Length of auxiliary column name and data band numbers should be the same*"
+        ):
+            img2.to_pointcloud(auxiliary_data_bands=[2, 3], auxiliary_column_names=["lol", "lol2", "lol3"])
 
 
 class TestMask:
@@ -3296,7 +3446,7 @@ class TestMask:
             match="Reprojecting a mask with a resampling method other than 'nearest', "
             "the boolean array will be converted to float during interpolation.",
         ):
-            mask.reproject(resampling="bilinear")
+            mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_crop(self, mask: gu.Mask) -> None:
@@ -3532,6 +3682,22 @@ class TestArithmetic:
         r2 = r1.copy()
         r2.set_nodata(34)
         assert not r1.raster_equal(r2)
+
+        # Change value of a masked cell
+        r2 = r1.copy()
+        r2.data[0, 0] = np.ma.masked
+        r2.data.data[0, 0] = 0
+        r3 = r2.copy()
+        r3.data.data[0, 0] = 10
+        assert not r2.raster_equal(r3)
+        assert r2.raster_equal(r3, strict_masked=False)
+
+        # Check that a warning is raised with useful information without equality
+        with pytest.warns(UserWarning, match="Equality failed for: data.data."):
+            assert not r2.raster_equal(r3, warn_failure_reason=True)
+
+        # But no warning is raised for an equality
+        assert r2.raster_equal(r3, strict_masked=False, warn_failure_reason=True)
 
     def test_equal_georeferenced_grid(self) -> None:
         """

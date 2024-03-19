@@ -19,12 +19,12 @@ rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 500, rast.bo
 rast.plot(cmap="terrain")
 
 # %%
-# We convert the raster to points. By default, this returns a vector with columb geometry burned.
+# We convert the raster to points. By default, this returns a vector with column geometry burned.
 
-pts_rast = rast.to_points()
+pts_rast = rast.to_pointcloud()
 pts_rast
 
 # %%
 # We plot the point vector.
 
-pts_rast.plot(column="b1", cmap="terrain", legend=True)
+pts_rast.plot(ax="new", column="b1", cmap="terrain", legend=True)
