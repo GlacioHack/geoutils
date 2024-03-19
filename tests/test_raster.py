@@ -707,6 +707,80 @@ class TestRaster:
         raster_point_copy = raster_point.copy()
         assert raster_point.area_or_point == raster_point_copy.area_or_point
 
+    def test_consistency_shift_area_or_point(self) -> None:
+        """
+        Check that the pixel interpration shifts for rasters (in set_area_or_point) and for points (xy2ij and
+        interp_points) are consistent.
+        """
+
+        # Create a small raster to test on
+        rst_arr = np.arange(25, dtype="int32").reshape(5, 5)
+        rst = gu.Raster.from_array(rst_arr, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
+
+        # Below, we compare the coordinates of shifted raster and shifted points
+
+        # 0/ Without shift, should always be the same for "Area", as nothing happens
+
+        # For "Area", all the same
+        rst01 = rst.copy()
+        rst01.set_area_or_point("Area", shift_area_or_point=False)
+        ul1 = (rst01.bounds.left, rst01.bounds.top)
+        ul2 = rst01.ij2xy(0, 0)
+        # We can simply check that the upper left corner is at the same coordinates
+        assert ul1 == ul2
+
+        # For "Point", 0.5/0.5 index shift should match the upper left corner
+        rst02 = rst.copy()
+        rst02.set_area_or_point("Point", shift_area_or_point=False)
+        ul1 = (rst02.bounds.left, rst02.bounds.top)
+        ul2 = rst02.ij2xy(0.5, 0.5)
+        # We can simply check that the upper left corner is at the same coordinates
+        assert ul1 == ul2
+
+        # 1/ Shifting from "Point" to "Area"
+
+        # As a raster: set to "Point" without shift, then shift to "Area"
+        rst1 = rst.copy()
+        rst1.set_area_or_point("Point", shift_area_or_point=False)
+        rst1.set_area_or_point("Area")  # This shifts the transform and thus upper-left coordinates
+        ul1 = (rst1.bounds.left, rst1.bounds.top)
+
+        # As point: set to "Point" and simply extract the coordinates which already includes shifting in ij2xy
+        rst2 = rst.copy()
+        rst2.set_area_or_point("Point", shift_area_or_point=False)
+        # Upper left coordinates should match the 0/0 pixel
+        ul2 = rst2.ij2xy(0, 0)
+
+        assert ul1 == ul2
+
+        # An "Area" raster with the same georeferencing as a "Point" raster is shifted left
+        # and upwards by half a pixel (according to gdalinfo,
+        # e.g. https://github.com/opengeospatial/ogcapi-coverages/issues/92)
+        assert rst1.bounds.left == rst.bounds.left - rst.res[0] / 2
+        assert rst1.bounds.top == rst.bounds.top + rst.res[1] / 2
+
+        # 2/ From "Area" to "Point"
+
+        # As a raster: set to "Area" without shift, then shift to "Point"
+        rst1 = rst.copy()
+        rst1.set_area_or_point("Area", shift_area_or_point=False)
+        rst1.set_area_or_point("Point")  # This shifts the transform and thus upper-left coordinates
+        ul1 = (rst1.bounds.left, rst1.bounds.top)
+
+        # As point: set to "Point" and simply extract the coordinates
+        rst2 = rst.copy()
+        rst2.set_area_or_point("Area", shift_area_or_point=False)
+        # Upper left coordinates should match 0.5/0.5 pixel
+        ul2 = rst2.ij2xy(0.5, 0.5)
+
+        assert ul1 == ul2
+
+        # A "Point" raster with the same georeferencing as an "Area" raster is shifted right
+        # and downwards by half a pixel (according to gdalinfo,
+        # e.g. https://github.com/opengeospatial/ogcapi-coverages/issues/92)
+        assert rst1.bounds.left == rst.bounds.left + rst.res[0] / 2
+        assert rst1.bounds.top == rst.bounds.top - rst.res[1] / 2
+
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_get_nanarray(self, example: str) -> None:
         """

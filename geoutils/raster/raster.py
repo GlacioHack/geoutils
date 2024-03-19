@@ -845,6 +845,9 @@ class Raster:
             and isinstance(new_area_or_point, str)
             and old_area_or_point != new_area_or_point
         ):
+            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij), but because
+            # the Y axis is inverted, a minus signs is added to shift the coordinate (even if the unit is in pixel)
+
             # If the new one is Point, we shift back by half a pixel
             if new_area_or_point == "Point":
                 xoff = 0.5
