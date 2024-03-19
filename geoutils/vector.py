@@ -206,12 +206,7 @@ class Vector:
 
         # Create axes, or get current ones by default (like in matplotlib)
         if ax is None:
-            # If no figure exists, get a new axis
-            if len(plt.get_fignums()) == 0:
-                ax0 = plt.gca()
-            # Otherwise, get first axis
-            else:
-                ax0 = plt.gcf().axes[0]
+            ax0 = plt.gca()
         elif isinstance(ax, str) and ax.lower() == "new":
             _, ax0 = plt.subplots()
         elif isinstance(ax, matplotlib.axes.Axes):

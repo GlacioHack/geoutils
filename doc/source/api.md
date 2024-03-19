@@ -107,6 +107,7 @@ documentation.
     Raster.set_mask
     Raster.set_nodata
     Raster.get_nanarray
+    Raster.get_mask
     Raster.subsample
 ```
 
@@ -118,7 +119,7 @@ documentation.
 
     Raster.load
     Raster.save
-    Raster.to_points
+    Raster.to_pointcloud
     Raster.to_rio_dataset
     Raster.to_xarray
 ```
