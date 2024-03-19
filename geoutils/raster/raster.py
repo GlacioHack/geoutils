@@ -3944,7 +3944,9 @@ class Raster:
             pixel_data = pixel_data.data
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation
-        x_coords_2, y_coords_2 = (np.array(a) for a in self.ij2xy(indices[0], indices[1], force_offset=force_pixel_offset))
+        x_coords_2, y_coords_2 = (
+            np.array(a) for a in self.ij2xy(indices[0], indices[1], force_offset=force_pixel_offset)
+        )
 
         # Merge the coordinates and pixel data into a point cloud.
         points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T

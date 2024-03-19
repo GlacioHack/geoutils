@@ -707,7 +707,6 @@ class TestRaster:
         raster_point_copy = raster_point.copy()
         assert raster_point.area_or_point == raster_point_copy.area_or_point
 
-
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_get_nanarray(self, example: str) -> None:
         """
@@ -3589,8 +3588,12 @@ class TestArithmetic:
     # TODO: Add the case where a mask exists in the array, as in test_data_setter
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-    r1 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area")
-    r2 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area")
+    r1 = gu.Raster.from_array(
+        np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
+    )
+    r2 = gu.Raster.from_array(
+        np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
+    )
 
     # Tests with different dtype
     r1_f32 = gu.Raster.from_array(
@@ -3633,7 +3636,10 @@ class TestArithmetic:
     )
 
     r1_wrong_aop = gu.Raster.from_array(
-        np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform, crs=None, area_or_point="Point"
+        np.random.randint(0, 255, (height, width)).astype("float32"),
+        transform=transform,
+        crs=None,
+        area_or_point="Point",
     )
 
     # Tests with child class
@@ -4164,7 +4170,6 @@ class TestArithmetic:
         with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
             getattr(self.r2, op)(self.r1_wrong_aop)
 
-
     @pytest.mark.parametrize("power", [2, 3.14, -1])  # type: ignore
     def test_power(self, power: float | int) -> None:
         if power > 0:  # Integers to negative integer powers are not allowed.
@@ -4651,7 +4656,9 @@ class TestArrayInterface:
         # Create Rasters
         ma = np.ma.masked_array(data=self.arr1, mask=self.mask1)
         ma_wrong_shape = np.ma.masked_array(data=self.arr_wrong_shape, mask=self.mask_wrong_shape)
-        rst = gu.Raster.from_array(ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma.dtype), area_or_point="Area")
+        rst = gu.Raster.from_array(
+            ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma.dtype), area_or_point="Area"
+        )
         rst_wrong_shape = gu.Raster.from_array(
             ma_wrong_shape, transform=self.transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype)
         )
