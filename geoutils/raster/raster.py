@@ -969,13 +969,17 @@ class Raster:
             self._data[:, ind] = assign  # type: ignore
         return None
 
-    def raster_equal(self, other: RasterType) -> bool:
+    def raster_equal(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False) -> bool:
         """
         Check if two rasters are equal.
 
         This means that are equal:
         - The raster's masked array's data (including masked values), mask, fill_value and dtype,
         - The raster's transform, crs and nodata values.
+
+        :param other: Other raster.
+        :param strict_masked: Whether to check if masked cells (in .data.mask) have the same value (in .data.data).
+        :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
         """
 
         # If the mask is just "False", it is equivalent to being equal to an array of False
@@ -991,8 +995,10 @@ class Raster:
 
         if not isinstance(other, Raster):  # TODO: Possibly add equals to SatelliteImage?
             raise NotImplementedError("Equality with other object than Raster not supported by raster_equal.")
-        return all(
-            [
+
+        if strict_masked:
+            names = ["data.data", "data.mask", "data.fill_value", "dtype", "transform", "crs", "nodata"]
+            equalities = [
                 np.array_equal(self.data.data, other.data.data, equal_nan=True),
                 np.array_equal(self_mask, other_mask),
                 self.data.fill_value == other.data.fill_value,
@@ -1001,7 +1007,26 @@ class Raster:
                 self.crs == other.crs,
                 self.nodata == other.nodata,
             ]
-        )
+        else:
+            names = ["data", "data.fill_value", "dtype", "transform", "crs", "nodata"]
+            equalities = [
+                np.ma.allequal(self.data, other.data),
+                self.data.fill_value == other.data.fill_value,
+                self.data.dtype == other.data.dtype,
+                self.transform == other.transform,
+                self.crs == other.crs,
+                self.nodata == other.nodata,
+            ]
+
+        complete_equality = all(equalities)
+
+        if not complete_equality and warn_failure_reason:
+            where_fail = np.nonzero(~np.array(equalities))[0]
+            warnings.warn(
+                category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
+            )
+
+        return complete_equality
 
     def _overloading_check(
         self: RasterType, other: RasterType | NDArrayNum | Number
@@ -1336,18 +1361,24 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         return out_mask
 
     @overload
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False) -> Raster:
+    def astype(
+        self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False
+    ) -> RasterType:
         ...
 
     @overload
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
+    def astype(self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
         ...
 
     @overload
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False) -> Raster | None:
+    def astype(
+        self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False
+    ) -> RasterType | None:
         ...
 
-    def astype(self, dtype: DTypeLike, convert_nodata: bool = True, inplace: bool = False) -> Raster | None:
+    def astype(
+        self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, inplace: bool = False
+    ) -> RasterType | None:
         """
         Convert data type of the raster.
 
@@ -1523,6 +1554,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Update the nodata value
         self._nodata = new_nodata
+        self.data.fill_value = new_nodata
 
     @property
     def data(self) -> MArrayNum:
@@ -2629,22 +2661,55 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
                 dst.gcps = (rio_gcps, gcps_crs)
 
+    @classmethod
+    def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
+        """
+        Create raster from a xarray.DataArray.
+
+        This conversion loads the xarray.DataArray in memory. Use functions of the Xarray accessor directly
+        to avoid this behaviour.
+
+        :param ds: Data array.
+        :param dtype: Cast the array to a certain dtype.
+
+        :return: Raster.
+        """
+
+        # Define main attributes
+        crs = ds.rio.crs
+        transform = ds.rio.transform(recalc=True)
+        nodata = ds.rio.nodata
+
+        # TODO: Add tags and area_or_point with PR #509
+        raster = cls.from_array(data=ds.data, transform=transform, crs=crs, nodata=nodata)
+
+        if dtype is not None:
+            raster = raster.astype(dtype)
+
+        return raster
+
     def to_xarray(self, name: str | None = None) -> xr.DataArray:
         """
         Convert raster to a xarray.DataArray.
 
-        This method uses rioxarray to generate a DataArray with associated
-        geo-referencing information.
+        This converts integer-type rasters into float32.
 
-        See the documentation of rioxarray and xarray for more information on
-        the methods and attributes of the resulting DataArray.
+        :param name: Name attribute for the data array.
 
-        :param name: Name attribute for the DataArray.
-
-        :returns: xarray DataArray
+        :returns: Data array.
         """
 
-        ds = rioxarray.open_rasterio(self.to_rio_dataset())
+        # If type was integer, cast to float to be able to save nodata values in the xarray data array
+        if np.issubdtype(self.dtypes[0], np.integer):
+            # Nodata conversion is not needed in this direction (integer towards float), we can maintain the original
+            updated_raster = self.astype(np.float32, convert_nodata=False)
+        else:
+            updated_raster = self
+
+        ds = rioxarray.open_rasterio(updated_raster.to_rio_dataset(), masked=True)
+        # When reading as masked, the nodata is not written to the dataset so we do it manually
+        ds.rio.set_nodata(self.nodata)
+
         if name is not None:
             ds.name = name
 

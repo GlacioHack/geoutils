@@ -363,7 +363,7 @@ class TestRaster:
     def test_to_xarray(self, example: str):
         """Test the export to a xarray dataset"""
 
-        # Open raster and export to rio dataset
+        # Open raster and export to xarray dataset
         rst = gu.Raster(example)
         ds = rst.to_xarray()
 
@@ -391,9 +391,32 @@ class TestRaster:
 
         # Check that the arrays are equal in NaN type
         if rst.count > 1:
-            assert np.array_equal(rst.data.data, ds.data)
+            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
         else:
-            assert np.array_equal(rst.data.data, ds.data.squeeze())
+            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_from_xarray(self, example: str):
+        """Test raster creation from a xarray dataset, not fully reversible with to_xarray due to float conversion"""
+
+        # Open raster and export to xarray, then import to xarray dataset
+        rst = gu.Raster(example)
+        ds = rst.to_xarray()
+        rst2 = gu.Raster.from_xarray(ds=ds)
+
+        # Exporting to a Xarray dataset results in loss of information to float32
+        # Check that the output equals the input converted to float32 (not fully reversible)
+        assert rst.astype("float32", convert_nodata=False).raster_equal(rst2, strict_masked=False)
+
+        # Test with the dtype argument to convert back to original raster even if integer-type
+        if np.issubdtype(rst.dtypes[0], np.integer):
+            # Set an existing nodata value, because all of our integer-type example datasets currently have "None"
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="New nodata value cells already exist.*")
+                rst.set_nodata(new_nodata=255)
+            ds = rst.to_xarray()
+            rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtypes[0])
+            assert rst3.raster_equal(rst, strict_masked=False)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
@@ -2189,6 +2212,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # By default, the array should have been updated
         if old_nodata is not None:
@@ -2227,6 +2251,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # By default, the array should have been updated similarly for the old nodata
         if old_nodata is not None:
@@ -2269,6 +2294,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # Now, the array should not have been updated, so the entire array should be unchanged except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
@@ -2297,6 +2323,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # The array should have been updated
         if old_nodata is not None:
@@ -2323,6 +2350,7 @@ class TestRaster:
 
         # The nodata value should have been set in the metadata
         assert r.nodata == new_nodata
+        assert r.data.fill_value == new_nodata
 
         # The array should not have been updated except for the pixel
         assert np.array_equal(r.data.data[~mask_pixel_artificially_set], r_copy.data.data[~mask_pixel_artificially_set])
@@ -3204,7 +3232,7 @@ class TestMask:
             match="Reprojecting a mask with a resampling method other than 'nearest', "
             "the boolean array will be converted to float during interpolation.",
         ):
-            mask.reproject(resampling="bilinear")
+            mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_crop(self, mask: gu.Mask) -> None:
@@ -3436,6 +3464,22 @@ class TestArithmetic:
         r2 = r1.copy()
         r2.set_nodata(34)
         assert not r1.raster_equal(r2)
+
+        # Change value of a masked cell
+        r2 = r1.copy()
+        r2.data[0, 0] = np.ma.masked
+        r2.data.data[0, 0] = 0
+        r3 = r2.copy()
+        r3.data.data[0, 0] = 10
+        assert not r2.raster_equal(r3)
+        assert r2.raster_equal(r3, strict_masked=False)
+
+        # Check that a warning is raised with useful information without equality
+        with pytest.warns(UserWarning, match="Equality failed for: data.data."):
+            assert not r2.raster_equal(r3, warn_failure_reason=True)
+
+        # But no warning is raised for an equality
+        assert r2.raster_equal(r3, strict_masked=False, warn_failure_reason=True)
 
     def test_equal_georeferenced_grid(self) -> None:
         """
