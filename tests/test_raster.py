@@ -3007,7 +3007,6 @@ class TestRaster:
         assert np.array_equal(points.ds["b1"].values, points_arr[:, 2])
 
         # Validate that 25 points were sampled (equating to img1.height * img1.width) with x, y, and band0 values.
-        assert isinstance(points_arr, np.ndarray)
         assert points_arr.shape == (25, 3)
         assert points.ds.shape == (25, 2)  # One less column here due to geometry storing X and Y
         # Check that X, Y and Z arrays are equal to raster array input independently of value order
@@ -3029,8 +3028,8 @@ class TestRaster:
         img3d = gu.Raster.from_array(img_3d_arr, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
 
         # Sample the whole raster (fraction==1)
-        points = img3d.to_pointcloud(store_auxiliary_bands=True)
-        points_arr = img3d.to_pointcloud(as_array=True, store_auxiliary_bands=True)
+        points = img3d.to_pointcloud(auxiliary_data_bands=[2, 3])
+        points_arr = img3d.to_pointcloud(as_array=True, auxiliary_data_bands=[2, 3])
 
         # Check equality between both output types
         assert np.array_equal(points.ds.geometry.x.values, points_arr[:, 0])
@@ -3047,7 +3046,7 @@ class TestRaster:
         assert np.array_equal(np.sort(np.asarray(points_arr[:, 4])), np.sort(img_3d_arr[2, :, :].ravel()))
 
         # With a subsample
-        points_arr = img3d.to_pointcloud(as_array=True, subsample=10, store_auxiliary_bands=True)
+        points_arr = img3d.to_pointcloud(as_array=True, subsample=10, auxiliary_data_bands=[2, 3])
         assert points_arr.shape == (10, 5)
 
         # Check the values are still good
@@ -3090,17 +3089,36 @@ class TestRaster:
         assert not img2.is_loaded
 
         # Storing auxiliary bands
-        points_arr = img2.to_pointcloud(subsample=10, as_array=True, store_auxiliary_bands=True)
-        points = img2.to_pointcloud(subsample=10, store_auxiliary_bands=True)
+        points_arr = img2.to_pointcloud(subsample=10, as_array=True, auxiliary_data_bands=[2, 3])
+        points = img2.to_pointcloud(subsample=10, auxiliary_data_bands=[2, 3])
         assert points_arr.shape == (10, 5)
         assert points.ds.shape == (10, 4)  # One less column here due to geometry storing X and Y
         assert not img2.is_loaded
         assert np.array_equal(points.ds.columns, ["b1", "b2", "b3", "geometry"])
 
         # Try setting the column name of a specific band while storing all
-        points = img2.to_pointcloud(subsample=10, data_column_name="yes", data_band=2, store_auxiliary_bands=True)
-        assert np.array_equal(points.ds.columns, ["b1", "yes", "b3", "geometry"])
+        points = img2.to_pointcloud(subsample=10, data_column_name="yes", data_band=2, auxiliary_data_bands=[1, 3])
+        assert np.array_equal(points.ds.columns, ["yes", "b1", "b3", "geometry"])
 
+        # 5/ Error raising
+        with pytest.raises(ValueError, match="Data column name must be a string.*"):
+            img1.to_pointcloud(data_column_name=1)  # type: ignore
+        with pytest.raises(ValueError, match=re.escape("Data band number must be an integer between 1 and the total number of bands (3).")):
+            img2.to_pointcloud(data_band=4)
+        with pytest.raises(ValueError, match="Passing auxiliary column names requires passing auxiliary data band numbers as well."):
+            img2.to_pointcloud(auxiliary_column_names=["a"])
+        with pytest.raises(ValueError, match="Auxiliary data band number must be an iterable containing only integers."):
+            img2.to_pointcloud(auxiliary_data_bands=[1, 2.5])  # type: ignore
+            img2.to_pointcloud(auxiliary_data_bands="lol")  # type: ignore
+        with pytest.raises(ValueError, match=re.escape("Auxiliary data band numbers must be between 1 and the total number of bands (3).")):
+            img2.to_pointcloud(auxiliary_data_bands=[0])
+            img2.to_pointcloud(auxiliary_data_bands=[4])
+        with pytest.raises(ValueError, match=re.escape("Main data band 1 should not be listed in auxiliary data bands [1, 2].")):
+            img2.to_pointcloud(auxiliary_data_bands=[1, 2])
+        with pytest.raises(ValueError, match="Auxiliary column names must be an iterable containing only strings."):
+            img2.to_pointcloud(auxiliary_data_bands=[2, 3], auxiliary_column_names=["lol", 1])
+        with pytest.raises(ValueError, match="Length of auxiliary column name and data band numbers should be the same*"):
+            img2.to_pointcloud(auxiliary_data_bands=[2, 3], auxiliary_column_names=["lol", "lol2", "lol3"])
 
 class TestMask:
     # Paths to example data

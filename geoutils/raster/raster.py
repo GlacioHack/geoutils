@@ -10,7 +10,7 @@ import warnings
 from collections import abc
 from contextlib import ExitStack
 from math import floor
-from typing import IO, Any, Callable, TypeVar, overload
+from typing import IO, Any, Callable, TypeVar, overload, Iterable
 
 import affine
 import geopandas as gpd
@@ -3456,7 +3456,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        store_auxiliary_bands: bool = False,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
         *,
         as_array: Literal[False] = False,
@@ -3470,7 +3471,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        store_auxiliary_bands: bool = False,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
         *,
         as_array: Literal[True],
@@ -3484,7 +3486,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        store_auxiliary_bands: bool = False,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
         *,
         as_array: bool = False,
@@ -3497,7 +3500,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        store_auxiliary_bands: bool = False,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
         as_array: bool = False,
         random_state: np.random.RandomState | int | None = None,
@@ -3529,11 +3533,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
             * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
 
-        :param data_column_name: Name of point cloud data column to use, defaults to "b1".
+        :param data_column_name: Name to use for point cloud data column, defaults to "bX" where X is the data band
+            number.
         :param data_band: (Only for multi-band rasters) Band to use for data column, defaults to first. Band counting
             starts at 1.
-        :param store_auxiliary_bands: (Only for multi-band rasters) Whether to save other bands as auxiliary data
-            columns, defaults to False.
+        :param auxiliary_data_bands: (Only for multi-band rasters) Whether to save other band numbers as auxiliary data
+            columns, defaults to none.
+        :param auxiliary_column_names: (Only for multi-band rasters) Names to use for auxiliary data bands, only if
+            auxiliary data bands is not none, defaults to "b1", "b2", etc.
         :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
         :param as_array: Return an array instead of a vector.
         :param random_state: Random state or seed number.
@@ -3542,18 +3549,53 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
-        :returns: A point cloud, or ndarray of the shape (N, 2 + count) where N is the sample count.
+        :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
         # Input checks
+
+        # Main data column checks
         if not isinstance(data_column_name, str):
             raise ValueError("Data column name must be a string.")
-        if not isinstance(data_band, int) and (1 < data_band or self.count < data_band):
-            raise ValueError(f"Data band number must be between 1 and the total number of bands of {self.count}.")
+        if not (isinstance(data_band, int) and data_band >= 1 and data_band <= self.count):
+            raise ValueError(f"Data band number must be an integer between 1 and the total number of bands ({self.count}).")
 
         # Rename data column if a different band is selected but the name is still default
         if data_band != 1 and data_column_name == "b1":
             data_column_name = "b" + str(data_band)
+
+        # Auxiliary data columns checks
+        if auxiliary_column_names is not None and auxiliary_data_bands is None:
+            raise ValueError("Passing auxiliary column names requires passing auxiliary data band numbers as well.")
+        if auxiliary_data_bands is not None:
+            if not (isinstance(auxiliary_data_bands, Iterable) and all(isinstance(b, int) for b in auxiliary_data_bands)):
+                raise ValueError("Auxiliary data band number must be an iterable containing only integers.")
+            if any((1 > b or self.count < b) for b in auxiliary_data_bands):
+                raise ValueError(f"Auxiliary data band numbers must be between 1 and the total number of bands ({self.count}).")
+            if data_band in auxiliary_data_bands:
+                raise ValueError(f"Main data band {data_band} should not be listed in auxiliary data bands {auxiliary_data_bands}.")
+
+            # Ensure auxiliary column name is defined if auxiliary data bands is not None
+            if auxiliary_column_names is not None:
+                if not (isinstance(auxiliary_column_names, Iterable) and all(isinstance(b, str) for b in auxiliary_column_names)):
+                    raise ValueError("Auxiliary column names must be an iterable containing only strings.")
+                if not len(auxiliary_column_names) == len(auxiliary_data_bands):
+                    raise ValueError(f"Length of auxiliary column name and data band numbers should be the same, "
+                                     f"found {len(auxiliary_column_names)} and {len(auxiliary_data_bands)} respectively.")
+
+            else:
+                auxiliary_column_names = [f"b{i}" for i in auxiliary_data_bands]
+
+            # Define bigger list with all bands and names
+            all_bands = [data_band] + auxiliary_data_bands
+            all_column_names = [data_column_name] + auxiliary_column_names
+
+        else:
+            all_bands = [data_band]
+            all_column_names = [data_column_name]
+
+        # Band indexes in the array are band number minus one
+        all_indexes = [b - 1 for b in all_bands]
 
         # We do 2D subsampling on the data band only, regardless of valid masks on other bands
         if self.is_loaded:
@@ -3575,31 +3617,24 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Take a subsample within the valid values
         indices = subsample_array(array=ma_valid, subsample=subsample, random_state=random_state, return_indices=True)
 
-        # Extract the coordinates at subsampled pixels with valid data
-        # To extract data, we always use "upper left" which rasterio interprets as the exact coordinates of the raster
-        # Further below we redefine output coordinates based on point interpretation
-        x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset="ul"))
-
         # If the Raster is loaded, pick from the data while ignoring the mask
         if self.is_loaded:
             if self.count == 1:
                 pixel_data = self.data[indices[0], indices[1]]
             else:
-                if store_auxiliary_bands:
-                    pixel_data = self.data[:, indices[0], indices[1]]
-                else:
-                    pixel_data = self.data[data_band - 1, indices[0], indices[1]]
+                # TODO: Combining both indexes at once could reduce memory usage?
+                pixel_data = self.data[all_indexes, :][:, indices[0], indices[1]]
 
         # Otherwise use rasterio.sample to load only requested pixels
         else:
-            # Sample all bands if storing auxiliary, otherwise the single one
-            if store_auxiliary_bands:
-                bands_to_extract = None
-            else:
-                bands_to_extract = data_band
+            # Extract the coordinates at subsampled pixels with valid data
+            # To extract data, we always use "upper left" which rasterio interprets as the exact raster coordinates
+            # Further below we redefine output coordinates based on point interpretation
+            x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset="ul"))
 
             with rio.open(self.filename) as raster:
-                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords), indexes=bands_to_extract))).T
+                # Rasterio uses indexes (starts at 1)
+                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords), indexes=all_bands))).T
 
         # At this point there should not be any nodata anymore, so we can transform everything to normal array
         if np.ma.isMaskedArray(pixel_data):
@@ -3610,13 +3645,6 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Merge the coordinates and pixel data into a point cloud.
         points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T
-
-        # Define column names
-        if store_auxiliary_bands:
-            all_column_names = [f"b{i}" for i in range(1, self.count + 1)]
-            all_column_names[data_band - 1] = data_column_name
-        else:
-            all_column_names = [data_column_name]
 
         if not as_array:
             points = Vector(
