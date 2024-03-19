@@ -3103,22 +3103,37 @@ class TestRaster:
         # 5/ Error raising
         with pytest.raises(ValueError, match="Data column name must be a string.*"):
             img1.to_pointcloud(data_column_name=1)  # type: ignore
-        with pytest.raises(ValueError, match=re.escape("Data band number must be an integer between 1 and the total number of bands (3).")):
+        with pytest.raises(
+            ValueError,
+            match=re.escape("Data band number must be an integer between 1 and the total number of bands (3)."),
+        ):
             img2.to_pointcloud(data_band=4)
-        with pytest.raises(ValueError, match="Passing auxiliary column names requires passing auxiliary data band numbers as well."):
+        with pytest.raises(
+            ValueError, match="Passing auxiliary column names requires passing auxiliary data band numbers as well."
+        ):
             img2.to_pointcloud(auxiliary_column_names=["a"])
-        with pytest.raises(ValueError, match="Auxiliary data band number must be an iterable containing only integers."):
+        with pytest.raises(
+            ValueError, match="Auxiliary data band number must be an iterable containing only integers."
+        ):
             img2.to_pointcloud(auxiliary_data_bands=[1, 2.5])  # type: ignore
             img2.to_pointcloud(auxiliary_data_bands="lol")  # type: ignore
-        with pytest.raises(ValueError, match=re.escape("Auxiliary data band numbers must be between 1 and the total number of bands (3).")):
+        with pytest.raises(
+            ValueError,
+            match=re.escape("Auxiliary data band numbers must be between 1 and the total number of bands (3)."),
+        ):
             img2.to_pointcloud(auxiliary_data_bands=[0])
             img2.to_pointcloud(auxiliary_data_bands=[4])
-        with pytest.raises(ValueError, match=re.escape("Main data band 1 should not be listed in auxiliary data bands [1, 2].")):
+        with pytest.raises(
+            ValueError, match=re.escape("Main data band 1 should not be listed in auxiliary data bands [1, 2].")
+        ):
             img2.to_pointcloud(auxiliary_data_bands=[1, 2])
         with pytest.raises(ValueError, match="Auxiliary column names must be an iterable containing only strings."):
             img2.to_pointcloud(auxiliary_data_bands=[2, 3], auxiliary_column_names=["lol", 1])
-        with pytest.raises(ValueError, match="Length of auxiliary column name and data band numbers should be the same*"):
+        with pytest.raises(
+            ValueError, match="Length of auxiliary column name and data band numbers should be the same*"
+        ):
             img2.to_pointcloud(auxiliary_data_bands=[2, 3], auxiliary_column_names=["lol", "lol2", "lol3"])
+
 
 class TestMask:
     # Paths to example data

@@ -10,7 +10,7 @@ import warnings
 from collections import abc
 from contextlib import ExitStack
 from math import floor
-from typing import IO, Any, Callable, TypeVar, overload, Iterable
+from typing import IO, Any, Callable, Iterable, TypeVar, overload
 
 import affine
 import geopandas as gpd
@@ -3558,7 +3558,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if not isinstance(data_column_name, str):
             raise ValueError("Data column name must be a string.")
         if not (isinstance(data_band, int) and data_band >= 1 and data_band <= self.count):
-            raise ValueError(f"Data band number must be an integer between 1 and the total number of bands ({self.count}).")
+            raise ValueError(
+                f"Data band number must be an integer between 1 and the total number of bands ({self.count})."
+            )
 
         # Rename data column if a different band is selected but the name is still default
         if data_band != 1 and data_column_name == "b1":
@@ -3568,20 +3570,31 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if auxiliary_column_names is not None and auxiliary_data_bands is None:
             raise ValueError("Passing auxiliary column names requires passing auxiliary data band numbers as well.")
         if auxiliary_data_bands is not None:
-            if not (isinstance(auxiliary_data_bands, Iterable) and all(isinstance(b, int) for b in auxiliary_data_bands)):
+            if not (
+                isinstance(auxiliary_data_bands, Iterable) and all(isinstance(b, int) for b in auxiliary_data_bands)
+            ):
                 raise ValueError("Auxiliary data band number must be an iterable containing only integers.")
             if any((1 > b or self.count < b) for b in auxiliary_data_bands):
-                raise ValueError(f"Auxiliary data band numbers must be between 1 and the total number of bands ({self.count}).")
+                raise ValueError(
+                    f"Auxiliary data band numbers must be between 1 and the total number of bands ({self.count})."
+                )
             if data_band in auxiliary_data_bands:
-                raise ValueError(f"Main data band {data_band} should not be listed in auxiliary data bands {auxiliary_data_bands}.")
+                raise ValueError(
+                    f"Main data band {data_band} should not be listed in auxiliary data bands {auxiliary_data_bands}."
+                )
 
             # Ensure auxiliary column name is defined if auxiliary data bands is not None
             if auxiliary_column_names is not None:
-                if not (isinstance(auxiliary_column_names, Iterable) and all(isinstance(b, str) for b in auxiliary_column_names)):
+                if not (
+                    isinstance(auxiliary_column_names, Iterable)
+                    and all(isinstance(b, str) for b in auxiliary_column_names)
+                ):
                     raise ValueError("Auxiliary column names must be an iterable containing only strings.")
                 if not len(auxiliary_column_names) == len(auxiliary_data_bands):
-                    raise ValueError(f"Length of auxiliary column name and data band numbers should be the same, "
-                                     f"found {len(auxiliary_column_names)} and {len(auxiliary_data_bands)} respectively.")
+                    raise ValueError(
+                        f"Length of auxiliary column name and data band numbers should be the same, "
+                        f"found {len(auxiliary_column_names)} and {len(auxiliary_data_bands)} respectively."
+                    )
 
             else:
                 auxiliary_column_names = [f"b{i}" for i in auxiliary_data_bands]
