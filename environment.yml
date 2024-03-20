@@ -13,3 +13,4 @@ dependencies:
   - tqdm
   - xarray
   - rioxarray=0.*
+  - python-pdal
