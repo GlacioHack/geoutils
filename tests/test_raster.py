@@ -637,6 +637,150 @@ class TestRaster:
             new_raster = raster + 1
         assert new_raster.data.mask[0, 0]
 
+    def test_area_or_point(self) -> None:
+        """Check area or point attribute getter, setter and related warnings"""
+
+        # 1/ Getter and instantiation
+        # Check existing file based on a priori knowledge
+        raster_point = gu.Raster(self.landsat_b4_path)
+        assert raster_point.area_or_point == "Point"
+
+        raster_area = gu.Raster(self.aster_dem_path)
+        assert raster_area.area_or_point == "Area"
+
+        # 2/ Setter
+        # For None, it will remove the key from the tags dictionary
+        raster_point.area_or_point = None
+        assert raster_point.area_or_point is None
+        assert "AREA_OR_POINT" not in raster_point.tags
+
+        # For a good value, it will update the tags
+        raster_point.area_or_point = "Point"
+        assert raster_point.area_or_point == "Point"
+        assert "AREA_OR_POINT" in raster_point.tags and raster_point.tags["AREA_OR_POINT"] == "Point"
+
+        # 2.5/ Setter shift and using set_area_or_point() with options
+        old_transform = raster_point.transform
+        # Setting "Area" from "Point" will shift the transform by default
+        raster_point.area_or_point = "Area"
+        assert raster_point.area_or_point == "Area"
+        assert raster_point.transform != old_transform
+
+        # Setting "Point" should give back the original transform
+        raster_point.area_or_point = "Point"
+        assert raster_point.area_or_point == "Point"
+        assert raster_point.transform == old_transform
+
+        # Setting None or "Point" should trigger no shift
+        raster_point.area_or_point = "Point"
+        assert raster_point.area_or_point == "Point"
+        assert raster_point.transform == old_transform
+        raster_point.area_or_point = None
+        assert raster_point.area_or_point is None
+        assert raster_point.transform == old_transform
+
+        # Setting "Area" passing a shift argument of False also shouldn't
+        raster_point.set_area_or_point("Area", shift_area_or_point=False)
+        assert raster_point.area_or_point == "Area"
+        assert raster_point.transform == old_transform
+
+        # Setting "Area" with a globally False argument of shift_area_or_point also shouldn't
+        gu.config["shift_area_or_point"] = False
+        raster_point.set_area_or_point("Point")
+        assert raster_point.area_or_point == "Point"
+        assert raster_point.transform == old_transform
+        # We reset the config argument
+        gu.config["shift_area_or_point"] = True
+
+        # 3/ With function creating a single Raster
+
+        # From array
+        raster_point_fromarray = gu.Raster.from_array(
+            data=raster_point.data,
+            transform=raster_point.transform,
+            area_or_point=raster_point.area_or_point,
+            crs=raster_point.crs,
+        )
+        assert raster_point.area_or_point == raster_point_fromarray.area_or_point
+
+        # Copy
+        raster_point_copy = raster_point.copy()
+        assert raster_point.area_or_point == raster_point_copy.area_or_point
+
+    def test_consistency_shift_area_or_point(self) -> None:
+        """
+        Check that the pixel interpration shifts for rasters (in set_area_or_point) and for points (xy2ij and
+        interp_points) are consistent.
+        """
+
+        # Create a small raster to test on
+        rst_arr = np.arange(25, dtype="int32").reshape(5, 5)
+        rst = gu.Raster.from_array(rst_arr, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
+
+        # Below, we compare the coordinates of shifted raster and shifted points
+
+        # 0/ Without shift, should always be the same for "Area", as nothing happens
+
+        # For "Area", all the same
+        rst01 = rst.copy()
+        rst01.set_area_or_point("Area", shift_area_or_point=False)
+        ul1 = (rst01.bounds.left, rst01.bounds.top)
+        ul2 = rst01.ij2xy(0, 0)
+        # We can simply check that the upper left corner is at the same coordinates
+        assert ul1 == ul2
+
+        # For "Point", 0.5/0.5 index shift should match the upper left corner
+        rst02 = rst.copy()
+        rst02.set_area_or_point("Point", shift_area_or_point=False)
+        ul1 = (rst02.bounds.left, rst02.bounds.top)
+        ul2 = rst02.ij2xy(0.5, 0.5)
+        # We can simply check that the upper left corner is at the same coordinates
+        assert ul1 == ul2
+
+        # 1/ Shifting from "Point" to "Area"
+
+        # As a raster: set to "Point" without shift, then shift to "Area"
+        rst1 = rst.copy()
+        rst1.set_area_or_point("Point", shift_area_or_point=False)
+        rst1.set_area_or_point("Area")  # This shifts the transform and thus upper-left coordinates
+        ul1 = (rst1.bounds.left, rst1.bounds.top)
+
+        # As point: set to "Point" and simply extract the coordinates which already includes shifting in ij2xy
+        rst2 = rst.copy()
+        rst2.set_area_or_point("Point", shift_area_or_point=False)
+        # Upper left coordinates should match the 0/0 pixel
+        ul2 = rst2.ij2xy(0, 0)
+
+        assert ul1 == ul2
+
+        # An "Area" raster with the same georeferencing as a "Point" raster is shifted left
+        # and upwards by half a pixel (according to gdalinfo,
+        # e.g. https://github.com/opengeospatial/ogcapi-coverages/issues/92)
+        assert rst1.bounds.left == rst.bounds.left - rst.res[0] / 2
+        assert rst1.bounds.top == rst.bounds.top + rst.res[1] / 2
+
+        # 2/ From "Area" to "Point"
+
+        # As a raster: set to "Area" without shift, then shift to "Point"
+        rst1 = rst.copy()
+        rst1.set_area_or_point("Area", shift_area_or_point=False)
+        rst1.set_area_or_point("Point")  # This shifts the transform and thus upper-left coordinates
+        ul1 = (rst1.bounds.left, rst1.bounds.top)
+
+        # As point: set to "Point" and simply extract the coordinates
+        rst2 = rst.copy()
+        rst2.set_area_or_point("Area", shift_area_or_point=False)
+        # Upper left coordinates should match 0.5/0.5 pixel
+        ul2 = rst2.ij2xy(0.5, 0.5)
+
+        assert ul1 == ul2
+
+        # A "Point" raster with the same georeferencing as an "Area" raster is shifted right
+        # and downwards by half a pixel (according to gdalinfo,
+        # e.g. https://github.com/opengeospatial/ogcapi-coverages/issues/92)
+        assert rst1.bounds.left == rst.bounds.left + rst.res[0] / 2
+        assert rst1.bounds.top == rst.bounds.top - rst.res[1] / 2
+
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_get_nanarray(self, example: str) -> None:
         """
@@ -722,19 +866,25 @@ class TestRaster:
 
             # - Test that xy2ij are consistent with new image -
             # Upper left
-            assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top) == (0, 0)
+            assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top, shift_area_or_point=False) == (0, 0)
             # Upper right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top) == (
+            assert rst_down.xy2ij(
+                rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top, shift_area_or_point=False
+            ) == (
                 0,
                 rst_down.width + 1,
             )
             # Bottom right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom) == (
+            assert rst_down.xy2ij(
+                rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom, shift_area_or_point=False
+            ) == (
                 rst_down.height,
                 rst_down.width + 1,
             )
             # One pixel right and down
-            assert rst_down.xy2ij(rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1]) == (
+            assert rst_down.xy2ij(
+                rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1], shift_area_or_point=False
+            ) == (
                 1,
                 1,
             )
@@ -1263,6 +1413,23 @@ class TestRaster:
         assert r_crop_unloaded.shape == r_crop_loaded.shape
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 
+        # - Check related to pixel interpretation -
+
+        # Check warning for a different area_or_point for the match-reference geometry works
+        r.set_area_or_point("Area", shift_area_or_point=False)
+        r2 = r.copy()
+        r2.set_area_or_point("Point", shift_area_or_point=False)
+
+        with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+            r.crop(r2)
+
+        # Check that cropping preserves the interpretation
+        crop_geom = [crop_geom[0] + r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
+        r_crop = r.crop(crop_geom)
+        assert r_crop.area_or_point == "Area"
+        r2_crop = r2.crop(crop_geom)
+        assert r2_crop.area_or_point == "Point"
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_shift(self, example: str) -> None:
         """Tests shift works as intended"""
@@ -1638,6 +1805,20 @@ class TestRaster:
         with pytest.raises(ValueError, match=re.escape("Reference raster does not exist.")):
             _ = r.reproject(ref="no_file.tif")
 
+        # -- Check warning for area_or_point works -- #
+        r.set_area_or_point("Area", shift_area_or_point=False)
+        r2 = r.copy()
+        r2.set_area_or_point("Point", shift_area_or_point=False)
+
+        with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+            r.reproject(r2)
+
+        # Check that reprojecting preserves interpretation
+        r_reproj = r.reproject(res=r.res[0] * 2)
+        assert r_reproj.area_or_point == "Area"
+        r2_reproj = r2.reproject(res=r2.res[0] * 2)
+        assert r2_reproj.area_or_point == "Point"
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:
         """Check the behaviour of the intersection function"""
@@ -1762,40 +1943,72 @@ class TestRaster:
             assert intersection == (0.0, 0.0, 0.0, 0.0)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_ij2xy_xy2ij(self, example: str) -> None:
-        """Test ij2xy and that the two functions are reversible."""
+    def test_ij2xy(self, example: str) -> None:
+        """Test the outputs of ij2xy and that the function is reversible with xy2ij."""
 
         # Open raster
         rst = gu.Raster(example)
         xmin, ymin, xmax, ymax = rst.bounds
 
-        # Check ij2xy manually for the four corners
+        # Check ij2xy manually for the four corners and center
+        # With "force_offset", no considerations of pixel interpolation
 
         # With offset="center", should be pixel center
         xmin_center = xmin + rst.res[0] / 2
         ymin_center = ymin + rst.res[1] / 2
         xmax_center = xmax - rst.res[0] / 2
         ymax_center = ymax - rst.res[1] / 2
-        assert rst.ij2xy([0], [0], offset="center") == ([xmin_center], [ymax_center])
-        assert rst.ij2xy([rst.shape[0] - 1], [0], offset="center") == ([xmin_center], [ymin_center])
-        assert rst.ij2xy([0], [rst.shape[1] - 1], offset="center") == ([xmax_center], [ymax_center])
-        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], offset="center") == ([xmax_center], [ymin_center])
+        assert rst.ij2xy([0], [0], force_offset="center") == ([xmin_center], [ymax_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [0], force_offset="center") == ([xmin_center], [ymin_center])
+        assert rst.ij2xy([0], [rst.shape[1] - 1], force_offset="center") == ([xmax_center], [ymax_center])
+        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], force_offset="center") == (
+            [xmax_center],
+            [ymin_center],
+        )
 
-        # With offset="ll", lower-left
-        xmin_center = xmin
-        ymin_center = ymin
-        xmax_center = xmax - rst.res[0]
-        ymax_center = ymax - rst.res[1]
-        assert rst.ij2xy([0], [0], offset="ll") == ([xmin_center], [ymax_center])
-        assert rst.ij2xy([rst.shape[0] - 1], [0], offset="ll") == ([xmin_center], [ymin_center])
-        assert rst.ij2xy([0], [rst.shape[1] - 1], offset="ll") == ([xmax_center], [ymax_center])
-        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], offset="ll") == ([xmax_center], [ymin_center])
+        # Same checks for offset="ll", "ul", "ur", "lr
+        lims_ll = [xmin, ymin, xmax - rst.res[0], ymax - rst.res[1]]
+        lims_ul = [xmin, ymin + rst.res[1], xmax - rst.res[0], ymax]
+        lims_lr = [xmin + rst.res[0], ymin, xmax, ymax - rst.res[1]]
+        lims_ur = [xmin + rst.res[0], ymin + rst.res[1], xmax, ymax]
+        offsets = ["ll", "ul", "lr", "ur"]
+        list_lims = [lims_ll, lims_ul, lims_lr, lims_ur]
+        for i in range(len(list_lims)):
+            offset = offsets[i]
+            lim = list_lims[i]
+            assert rst.ij2xy([0], [0], force_offset=offset) == ([lim[0]], [lim[3]])
+            assert rst.ij2xy([rst.shape[0] - 1], [0], force_offset=offset) == ([lim[0]], [lim[1]])
+            assert rst.ij2xy([0], [rst.shape[1] - 1], force_offset=offset) == ([lim[2]], [lim[3]])
+            assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], force_offset=offset) == ([lim[2]], [lim[1]])
+
+        # Check that default coordinate is upper-left
+
+        # With shift from pixel interpretation, coordinates will be half a pixel back for "Point"
+        if rst.area_or_point is not None and rst.area_or_point == "Point" and gu.config["shift_area_or_point"]:
+            # Shift is backward in X, forward in Y
+            lims_ul[0] = lims_ul[0] - 0.5 * rst.res[0]
+            lims_ul[1] = lims_ul[1] + 0.5 * rst.res[1]
+            lims_ul[2] = lims_ul[2] - 0.5 * rst.res[0]
+            lims_ul[3] = lims_ul[3] + 0.5 * rst.res[1]
+
+        assert rst.ij2xy([0], [0]) == ([lims_ul[0]], [lims_ul[3]])
+        assert rst.ij2xy([rst.shape[0] - 1], [0]) == ([lims_ul[0]], [lims_ul[1]])
+        assert rst.ij2xy([0], [rst.shape[1] - 1]) == ([lims_ul[2]], [lims_ul[3]])
+        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1]) == ([lims_ul[2]], [lims_ul[1]])
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_xy2ij_ij2xy_reversible(self, example: str):
+
+        # Open raster
+        rst = gu.Raster(example)
+        xmin, ymin, xmax, ymax = rst.bounds
 
         # We generate random points within the boundaries of the image
+        np.random.seed(42)
         xrand = np.random.randint(low=0, high=rst.width, size=(10,)) * list(rst.transform)[0] + xmin
         yrand = ymax + np.random.randint(low=0, high=rst.height, size=(10,)) * list(rst.transform)[4]
 
-        # Test reversibility (only works with default upper-left offset)
+        # Test reversibility for any point or area interpretation
         i, j = rst.xy2ij(xrand, yrand)
         xnew, ynew = rst.ij2xy(i, j)
         assert all(xnew == xrand)
@@ -1813,7 +2026,7 @@ class TestRaster:
         # First, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
         # at the center of pixel
         r = gu.Raster(self.landsat_b4_path)
-        assert r.tags["AREA_OR_POINT"] == "Point"
+        assert r.area_or_point == "Point"
         xmin, ymin, xmax, ymax = r.bounds
 
         # We generate random points within the boundaries of the image
@@ -1822,7 +2035,7 @@ class TestRaster:
         pts = list(zip(xrand, yrand))
 
         # Get decimal indexes based on "Point", should refer to the corner still (shift False by default)
-        i, j = r.xy2ij(xrand, yrand)
+        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=False)
         assert np.all(i % 1 == 0)
         assert np.all(j % 1 == 0)
 
@@ -1832,34 +2045,10 @@ class TestRaster:
         assert np.all(j % 1 == 0.5)
 
         # Force "Area", should refer to corner
-        r.tags.update({"AREA_OR_POINT": "Area"})
+        r.set_area_or_point("Area", shift_area_or_point=False)
         i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
         assert np.all(i % 1 == 0)
         assert np.all(j % 1 == 0)
-
-        # Check errors are raised when type of tag is incorrect
-        r0 = r.copy()
-        # When the tag is not a string
-        r0.tags.update({"AREA_OR_POINT": 1})
-        with pytest.raises(TypeError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be a string.')):
-            r0.xy2ij(xrand, yrand, shift_area_or_point=True)
-        # When the tag is not "Area" or "Point"
-        r0.tags.update({"AREA_OR_POINT": "Pt"})
-        with pytest.raises(
-            ValueError, match=re.escape('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
-        ):
-            r0.xy2ij(xrand, yrand, shift_area_or_point=True)
-
-        # Check that the function warns when no tag is defined
-        r0.tags.pop("AREA_OR_POINT")
-        with pytest.warns(
-            UserWarning,
-            match=re.escape('Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).'),
-        ):
-            i0, j0 = r0.xy2ij(xrand, yrand, shift_area_or_point=True)
-        # And that it defaults to "Area"
-        assert all(i == i0)
-        assert all(j == j0)
 
         # Now, we calculate the mean of values in each 2x2 slices of the data, and compare with interpolation at order 1
         list_z_ind = []
@@ -1883,13 +2072,13 @@ class TestRaster:
         xrand = np.random.uniform(low=xmin, high=xmax, size=(1000,))
         yrand = np.random.uniform(low=ymin, high=ymax, size=(1000,))
         pts = list(zip(xrand, yrand))
-        rpts = r.interp_points(pts)
+        r.interp_points(pts)
 
         # Second, test after a crop: the Raster now has an Area interpretation, those should fall right on the integer
         # pixel indexes
         r2 = gu.Raster(self.landsat_b4_crop_path)
         r.crop(r2)
-        assert r.tags["AREA_OR_POINT"] == "Area"
+        assert r.area_or_point == "Area"
 
         xmin, ymin, xmax, ymax = r.bounds
 
@@ -1934,23 +2123,15 @@ class TestRaster:
         transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
 
-        # Define the AREA_OR_POINT attribute
-        raster.tags = {"AREA_OR_POINT": tag_aop}
+        # Define the AREA_OR_POINT attribute without re-transforming
+        raster.set_area_or_point(tag_aop, shift_area_or_point=False)
 
         # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
         index_x = [0, 1, 2, 0, 1, 2, 0, 1, 2]
         index_y = [0, 0, 0, 1, 1, 1, 2, 2, 2]
 
         # The actual X/Y coords will be offset by one because Y axis is inverted and pixel coords is upper-left corner
-
-        # For the single case of "Point" and shift=True, shift the point coordinates to match the calculations below
-        # All other cases should pass without this shift (for tag=None, "Area" is the default)
-        if shift_aop and tag_aop == "Point":
-            reindex_x = [ix - 0.5 for ix in index_x]
-            reindex_y = [iy - 0.5 for iy in index_y]
-            points_x, points_y = raster.ij2xy(i=reindex_x, j=reindex_y)
-        else:
-            points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
+        points_x, points_y = raster.ij2xy(i=index_x, j=index_y, shift_area_or_point=shift_aop)
 
         points = np.array((points_x, points_y)).T
 
@@ -1958,19 +2139,7 @@ class TestRaster:
         # Nearest = Linear interpolation at the location of a data point
         # Regular grid = Equal grid interpolation at the location of a data point
 
-        # Check warning is raised if AREA_OR_POINT is None
-        if tag_aop is None and shift_aop:
-            with pytest.warns(UserWarning, match="Attribute AREA_OR_POINT undefined in self.tags*"):
-                raster_points = raster.interp_points(points, method="nearest", shift_area_or_point=shift_aop)
-        else:
-            raster_points = raster.interp_points(points, method="nearest", shift_area_or_point=shift_aop)
-
-        # Warnings should be raised when AREA_OR_POINT is None everywhere, so we ignore them from now on
-        if tag_aop is None and shift_aop:
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="Attribute AREA_OR_POINT undefined in self.tags*"
-            )
-
+        raster_points = raster.interp_points(points, method="nearest", shift_area_or_point=shift_aop)
         raster_points_lin = raster.interp_points(points, method="linear", shift_area_or_point=shift_aop)
         raster_points_interpn = raster.interp_points(
             points, method="nearest", force_scipy_function="interpn", shift_area_or_point=shift_aop
@@ -1992,13 +2161,7 @@ class TestRaster:
         index_x_in = [0.5, 0.5, 1.5, 1.5]
         index_y_in = [0.5, 1.5, 0.5, 1.5]
 
-        # Again, exception for "Point"
-        if shift_aop and tag_aop == "Point":
-            reindex_x_in = [ix - 0.5 for ix in index_x_in]
-            reindex_y_in = [iy - 0.5 for iy in index_y_in]
-            points_x_in, points_y_in = raster.ij2xy(i=reindex_x_in, j=reindex_y_in)
-        else:
-            points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in)
+        points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in, shift_area_or_point=shift_aop)
 
         points_in = np.array((points_x_in, points_y_in)).T
 
@@ -2034,13 +2197,13 @@ class TestRaster:
         arr = np.flipud(np.arange(1, 2501).reshape((50, 50)))
         transform = rio.transform.from_bounds(0, 0, 50, 50, 50, 50)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
-        raster.tags = {"AREA_OR_POINT": tag_aop}
+        raster.set_area_or_point(tag_aop, shift_area_or_point=False)
 
         # For this, get random points
         np.random.seed(42)
         index_x_in_rand = np.random.randint(low=8, high=42, size=(10,)) + np.random.normal(scale=0.3)
         index_y_in_rand = np.random.randint(low=8, high=42, size=(10,)) + np.random.normal(scale=0.3)
-        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand)
+        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand, shift_area_or_point=shift_aop)
         points_in_rand = np.array((points_x_rand, points_y_rand)).T
 
         for method in ["nearest", "linear", "cubic", "quintic"]:
@@ -2058,13 +2221,9 @@ class TestRaster:
         index_x_edge_rand = [-0.5, -0.5, -0.5, 25, 25, 49.5, 49.5, 49.5]
         index_y_edge_rand = [-0.5, 25, 49.5, -0.5, 49.5, -0.5, 25, 49.5]
 
-        # Again, exception for "Point"
-        if shift_aop and tag_aop == "Point":
-            reindex_x_edge_rand = [ix - 0.5 for ix in index_x_edge_rand]
-            reindex_y_edge_rand = [iy - 0.5 for iy in index_y_edge_rand]
-            points_x_rand, points_y_rand = raster.ij2xy(i=reindex_x_edge_rand, j=reindex_y_edge_rand)
-        else:
-            points_x_rand, points_y_rand = raster.ij2xy(i=index_x_edge_rand, j=index_y_edge_rand)
+        points_x_rand, points_y_rand = raster.ij2xy(
+            i=index_x_edge_rand, j=index_y_edge_rand, shift_area_or_point=shift_aop
+        )
 
         points_edge_rand = np.array((points_x_rand, points_y_rand)).T
 
@@ -2101,7 +2260,7 @@ class TestRaster:
         ytest0 = 3099095.0
 
         # Verify coordinates match indexes
-        x_out, y_out = r.ij2xy(itest0, jtest0, offset="center")
+        x_out, y_out = r.ij2xy(itest0, jtest0, force_offset="center")
         assert x_out == xtest0
         assert y_out == ytest0
 
@@ -2677,10 +2836,14 @@ class TestRaster:
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_coords(self, example: str) -> None:
+
         img = gu.Raster(self.landsat_b4_path)
 
-        # With corner argument
-        xx0, yy0 = img.coords(offset="corner", grid=False)
+        # With lower left argument
+        xx0, yy0 = img.coords(grid=False, force_offset="ll")
+
+        assert len(xx0) == img.width
+        assert len(yy0) == img.height
 
         assert xx0[0] == pytest.approx(img.bounds.left)
         assert xx0[-1] == pytest.approx(img.bounds.right - img.res[0])
@@ -2693,7 +2856,7 @@ class TestRaster:
             assert yy0[-1] == pytest.approx(img.bounds.bottom + img.res[1])
 
         # With center argument
-        xx, yy = img.coords(offset="center", grid=False)
+        xx, yy = img.coords(grid=False, force_offset="center")
         hx = img.res[0] / 2
         hy = img.res[1] / 2
         assert xx[0] == pytest.approx(img.bounds.left + hx)
@@ -2707,7 +2870,7 @@ class TestRaster:
             assert yy[0] == pytest.approx(img.bounds.bottom - hy)
 
         # With grid argument (default argument, repeated here for clarity)
-        xxgrid, yygrid = img.coords(offset="corner", grid=True)
+        xxgrid, yygrid = img.coords(grid=True, force_offset="ll")
         assert np.array_equal(xxgrid, np.repeat(xx0[np.newaxis, :], img.height, axis=0))
         assert np.array_equal(yygrid, np.flipud(np.repeat(yy0[:, np.newaxis], img.width, axis=1)))
 
@@ -2851,6 +3014,8 @@ class TestRaster:
 
         img1 = gu.Raster(self.landsat_b4_path)
         img2 = gu.Raster(self.landsat_b4_crop_path)
+        # Set img2 pixel interpretation as "Point" to match "img1" and avoid any warnings
+        img2.set_area_or_point("Point", shift_area_or_point=False)
         img1.set_nodata(0)
         img2.set_nodata(0)
 
@@ -3497,8 +3662,12 @@ class TestArithmetic:
     # TODO: Add the case where a mask exists in the array, as in test_data_setter
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-    r1 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
-    r2 = gu.Raster.from_array(np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
+    r1 = gu.Raster.from_array(
+        np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
+    )
+    r2 = gu.Raster.from_array(
+        np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
+    )
 
     # Tests with different dtype
     r1_f32 = gu.Raster.from_array(
@@ -3538,6 +3707,13 @@ class TestArithmetic:
     transform2 = rio.transform.from_bounds(0, 0, 2, 2, width, height)
     r1_wrong_transform = gu.Raster.from_array(
         np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
+    )
+
+    r1_wrong_aop = gu.Raster.from_array(
+        np.random.randint(0, 255, (height, width)).astype("float32"),
+        transform=transform,
+        crs=None,
+        area_or_point="Point",
     )
 
     # Tests with child class
@@ -4064,6 +4240,10 @@ class TestArithmetic:
         with pytest.raises(NotImplementedError, match=expected_message):
             getattr(self.r1, op)("some_string")
 
+        # Different area or point interpretation for two-raster input
+        with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+            getattr(self.r2, op)(self.r1_wrong_aop)
+
     @pytest.mark.parametrize("power", [2, 3.14, -1])  # type: ignore
     def test_power(self, power: float | int) -> None:
         if power > 0:  # Integers to negative integer powers are not allowed.
@@ -4550,13 +4730,18 @@ class TestArrayInterface:
         # Create Rasters
         ma = np.ma.masked_array(data=self.arr1, mask=self.mask1)
         ma_wrong_shape = np.ma.masked_array(data=self.arr_wrong_shape, mask=self.mask_wrong_shape)
-        rst = gu.Raster.from_array(ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma.dtype))
+        rst = gu.Raster.from_array(
+            ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma.dtype), area_or_point="Area"
+        )
         rst_wrong_shape = gu.Raster.from_array(
             ma_wrong_shape, transform=self.transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype)
         )
         rst_wrong_crs = gu.Raster.from_array(ma, transform=self.transform, crs=32610, nodata=_default_nodata(ma.dtype))
         rst_wrong_transform = gu.Raster.from_array(
             ma, transform=self.wrong_transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype)
+        )
+        rst_wrong_aop = gu.Raster.from_array(
+            ma, transform=self.transform, crs=4326, nodata=_default_nodata(ma_wrong_shape.dtype), area_or_point="Point"
         )
 
         # Get ufunc
@@ -4568,25 +4753,25 @@ class TestArrayInterface:
 
             # Rasters with different CRS, transform, or shape
             # Different shape
-            expected_message = (
+            georef_tworaster_message = (
                 "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
                 "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
                 "same grid and CRS than raster2."
             )
 
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
                 np_func(rst, rst_wrong_shape)
 
             # Different CRS
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
                 np_func(rst, rst_wrong_crs)
 
             # Different transform
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
                 np_func(rst, rst_wrong_transform)
 
             # Array with different shape
-            expected_message = (
+            georef_raster_array_message = (
                 "The raster and array must have the same shape for an arithmetic operation. "
                 "For example, if the array comes from another raster, use raster1 = "
                 "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
@@ -4595,13 +4780,18 @@ class TestArrayInterface:
             )
             # Different shape, masked array
             # Check reflectivity just in case (just here, not later)
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(ma_wrong_shape, rst)
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(rst, ma_wrong_shape)
 
             # Different shape, normal array with NaNs
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(ma_wrong_shape.filled(np.nan), rst)
-            with pytest.raises(ValueError, match=re.escape(expected_message)):
+            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
                 np_func(rst, ma_wrong_shape.filled(np.nan))
+
+            aop_message = 'One raster has a pixel interpretation "Area" and the other "Point".*'
+
+            with pytest.raises(UserWarning, match=aop_message):
+                np_func(rst, rst_wrong_aop)

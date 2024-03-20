@@ -176,7 +176,7 @@ class TestArray:
         )
 
         # First, we get initial coords
-        xx, yy = r1.coords(grid=True)
+        xx, yy = r1.coords(grid=True, force_offset="ll")
 
         # Rotating the coordinates 90 degrees should be the same as rotating the array
         xx90, yy90 = gu.raster.get_xy_rotated(r1, along_track_angle=90)

@@ -34,6 +34,7 @@ from scipy.interpolate import interpn
 from scipy.ndimage import distance_transform_edt, map_coordinates
 
 import geoutils.vector as gv
+from geoutils._config import config
 from geoutils._typing import (
     ArrayLike,
     DTypeLike,
@@ -358,23 +359,78 @@ def _get_reproject_params(
     return dst_transform, dst_size
 
 
-def _check_cast_array_raster(
-    input1: RasterType | NDArrayNum, input2: RasterType | NDArrayNum, operation_name: str
-) -> None:
+def _cast_pixel_interpretation(
+    area_or_point1: Literal["Area", "Point"] | None, area_or_point2: Literal["Area", "Point"] | None
+) -> Literal["Area", "Point"] | None:
     """
-    Check the casting between an array and a raster, or raise an (helpful) error message.
+    Cast two pixel interpretations and warn if not castable.
 
-    :param input1: Raster or array.
-    :param input2: Raster or array.
+    Casts to:
+     - "Area" if both are "Area",
+     - "Point" if both are "Point",
+     - None if any of the interpretation is None, or
+     - None if one is "Area" and the other "Point" (and raises a warning).
+    """
+
+    # If one is None, cast to None
+    if area_or_point1 is None or area_or_point2 is None:
+        area_or_point_out = None
+    # If both are equal and not None
+    elif area_or_point1 == area_or_point2:
+        area_or_point_out = area_or_point1
+    else:
+        area_or_point_out = None
+        msg = (
+            'One raster has a pixel interpretation "Area" and the other "Point". To silence this warning, '
+            "either correct the pixel interpretation of one raster, or deactivate "
+            'warnings of pixel interpretation with geoutils.config["warn_area_or_point"]=False.'
+        )
+        if config["warn_area_or_point"]:
+            warnings.warn(message=msg, category=UserWarning)
+
+    return area_or_point_out
+
+
+def _cast_numeric_array_raster(
+    raster: RasterType, other: RasterType | NDArrayNum | Number, operation_name: str
+) -> tuple[
+    MArrayNum,
+    MArrayNum | NDArrayNum | Number,
+    float | int | tuple[int, ...] | tuple[float, ...] | None,
+    Literal["Area", "Point"] | None,
+]:
+    """
+    Cast a raster and another raster or array or number to arrays with proper metadata, or raise an error message.
+
+    :param raster: Raster.
+    :param other: Raster or array or number.
     :param operation_name: Name of operation to raise in the error message.
 
-    :return: None.
+    :return: Returns array objects, nodata value and pixel interpretation.
     """
 
-    if isinstance(input1, Raster) and isinstance(input2, Raster):
+    # Check first input is a raster
+    if not isinstance(raster, Raster):
+        raise ValueError("Developer error: Only a raster should be passed as first argument to this function.")
+
+    # Check that other is of correct type
+    # If not, a NotImplementedError should be raised, in case other's class has a method implemented.
+    # See https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
+    if not isinstance(other, (Raster, np.ndarray, float, int, np.floating, np.integer)):
+        raise NotImplementedError(
+            f"Operation between an object of type {type(other)} and a Raster impossible. Must be a Raster, "
+            f"np.ndarray or single number."
+        )
+
+    # If other is a raster
+    if isinstance(other, Raster):
+
+        nodata2 = other.nodata
+        dtype2 = other.data.dtype
+        other_data: NDArrayNum | MArrayNum | Number = other.data
 
         # Check that both rasters have the same shape and georeferences
-        if input1.georeferenced_grid_equal(input2):
+        if raster.georeferenced_grid_equal(other):  # type: ignore
             pass
         else:
             raise ValueError(
@@ -383,15 +439,18 @@ def _check_cast_array_raster(
                 "same grid and CRS than raster2."
             )
 
-    else:
+    # If other is an array
+    elif isinstance(other, np.ndarray):
 
-        # The shape compatibility should be valid even when squeezing
-        if isinstance(input1, np.ndarray):
-            input1 = input1.squeeze()
-        elif isinstance(input2, np.ndarray):
-            input2 = input2.squeeze()
+        # Squeeze first axis of other data if possible
+        if other.ndim == 3 and other.shape[0] == 1:
+            other_data = other.squeeze(axis=0)
+        else:
+            other_data = other
+        nodata2 = None
+        dtype2 = other.dtype
 
-        if input1.shape == input2.shape:
+        if raster.shape == other_data.shape:
             pass
         else:
             raise ValueError(
@@ -401,6 +460,38 @@ def _check_cast_array_raster(
                 "than raster2. Or, if the array does not come from a raster, define one with raster = "
                 "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
             )
+
+    # If other is a single number
+    else:
+        other_data = other
+        nodata2 = None
+        dtype2 = rio.dtypes.get_minimum_dtype(other_data)
+
+    # Get raster dtype and nodata
+    nodata1 = raster.nodata
+    dtype1 = raster.data.dtype
+
+    # 1/ Output nodata depending on common data type
+    out_dtype = np.promote_types(dtype1, dtype2)
+
+    out_nodata = None
+    # Priority to nodata of first raster if both match the output dtype
+    if (nodata2 is not None) and (out_dtype == dtype2):
+        out_nodata = nodata2
+    elif (nodata1 is not None) and (out_dtype == dtype1):
+        out_nodata = nodata1
+    # In some cases the promoted output type does not match any inputs
+    # (e.g. for inputs "uint8" and "int8", output is "int16")
+    elif (nodata1 is not None) or (nodata2 is not None):
+        out_nodata = nodata1 if not None else nodata2
+
+    # 2/ Output pixel interpretation
+    if isinstance(other, Raster):
+        area_or_point = _cast_pixel_interpretation(raster.area_or_point, other.area_or_point)
+    else:
+        area_or_point = raster.area_or_point
+
+    return raster.data, other_data, out_nodata, area_or_point
 
 
 class Raster:
@@ -468,16 +559,20 @@ class Raster:
         self._disk_dtypes: tuple[str] | None = None
         self._disk_transform: affine.Affine | None = None
         self._downsample: int | float = 1
+        self._area_or_point: Literal["Area", "Point"] | None = None
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
-            # Important to pass the nodata before the data setter, which uses it in turn
+            # To have "area_or_point" user input go through checks of the set() function without shifting the transform
+            self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
+            # Same things here, and also important to pass the nodata before the data setter, which uses it in turn
             self._nodata = filename_or_dataset["nodata"]
             self.data = filename_or_dataset["data"]
             self.transform: rio.transform.Affine = filename_or_dataset["transform"]
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
+
             for key in filename_or_dataset:
-                if key in ["data", "transform", "crs", "nodata"]:
+                if key in ["data", "transform", "crs", "nodata", "area_or_point"]:
                     continue
                 setattr(self, key, filename_or_dataset[key])
             return
@@ -514,6 +609,8 @@ class Raster:
                 self._name = ds.name
                 self._driver = ds.driver
                 self.tags.update(ds.tags())
+
+                self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
                 self._disk_shape = (ds.count, ds.height, ds.width)
                 self._disk_bands = ds.indexes
@@ -585,7 +682,7 @@ class Raster:
     def count(self) -> int:
         """Count of bands loaded in memory if they are, otherwise the one on disk."""
         if self.is_loaded:
-            if len(self.data.shape) == 2:
+            if self.data.ndim == 2:
                 return 1
             else:
                 return int(self.data.shape[0])
@@ -602,7 +699,7 @@ class Raster:
                 return self._disk_shape[1]  # type: ignore
         else:
             # If the raster is single-band
-            if len(self.data.shape) == 2:
+            if self.data.ndim == 2:
                 return int(self.data.shape[0])
             # Or multi-band
             else:
@@ -618,7 +715,7 @@ class Raster:
                 return self._disk_shape[2]  # type: ignore
         else:
             # If the raster is single-band
-            if len(self.data.shape) == 2:
+            if self.data.ndim == 2:
                 return int(self.data.shape[1])
             # Or multi-band
             else:
@@ -689,6 +786,107 @@ class Raster:
     def name(self) -> str | None:
         """Name of the file on disk, if it exists."""
         return self._name
+
+    def set_area_or_point(
+        self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
+    ) -> None:
+        """
+        Set new pixel interpretation of the raster.
+
+        Overwrites the `area_or_point` attribute and updates "AREA_OR_POINT" in raster metadata tags.
+
+        Optionally, shifts the raster to correct value coordinates in relation to interpretation:
+
+        - By half a pixel (right and downwards) if old interpretation was "Area" and new is "Point",
+        - By half a pixel (left and upwards) if old interpretration was "Point" and new is "Area",
+        - No shift for all other cases.
+
+        :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+
+        :return: None.
+        """
+
+        # If undefined, default to the global system config
+        if shift_area_or_point is None:
+            shift_area_or_point = config["shift_area_or_point"]
+
+        # Check input
+        if new_area_or_point is not None and not (
+            isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]
+        ):
+            raise ValueError("New pixel interpretation must be 'Area', 'Point' or None.")
+
+        # Update string input as exactly "Area" or "Point"
+        if new_area_or_point is not None:
+            if new_area_or_point.lower() == "area":
+                new_area_or_point = "Area"
+            else:
+                new_area_or_point = "Point"
+
+        # Save old area or point
+        old_area_or_point = self.area_or_point
+
+        # Set new interpretation
+        self._area_or_point = new_area_or_point
+        # Update tag only if not None
+        if new_area_or_point is not None:
+            self.tags.update({"AREA_OR_POINT": new_area_or_point})
+        else:
+            if "AREA_OR_POINT" in self.tags:
+                self.tags.pop("AREA_OR_POINT")
+
+        # If shift is True, and both interpretation were different strings, a change is needed
+        if (
+            shift_area_or_point
+            and isinstance(old_area_or_point, str)
+            and isinstance(new_area_or_point, str)
+            and old_area_or_point != new_area_or_point
+        ):
+            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij), but because
+            # the Y axis is inverted, a minus signs is added to shift the coordinate (even if the unit is in pixel)
+
+            # If the new one is Point, we shift back by half a pixel
+            if new_area_or_point == "Point":
+                xoff = 0.5
+                yoff = -0.5
+            # Otherwise we shift forward half a pixel
+            else:
+                xoff = -0.5
+                yoff = 0.5
+            # We perform the shift in place
+            self.shift(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
+
+    @property
+    def area_or_point(self) -> Literal["Area", "Point"] | None:
+        """
+        Pixel interpretation of the raster.
+
+        Based on the "AREA_OR_POINT" raster metadata:
+
+        - If pixel interpretation is "Area", the value of the pixel is associated with its upper left corner.
+        - If pixel interpretation is "Point", the value of the pixel is associated with its center.
+
+        When setting with self.area_or_point = new_area_or_point, uses the default arguments of
+        self.set_area_or_point().
+        """
+        return self._area_or_point
+
+    @area_or_point.setter
+    def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
+        """
+        Setter for pixel interpretation.
+
+        Uses default arguments of self.set_area_or_point(): shifts by half a pixel going from "Area" to "Point",
+        or the opposite.
+
+        :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
+
+        :return: None.
+        """
+        self.set_area_or_point(new_area_or_point=new_area_or_point)
 
     @property
     def driver(self) -> str | None:
@@ -814,6 +1012,8 @@ class Raster:
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
         nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        area_or_point: Literal["Area", "Point"] | None = None,
+        tags: dict[str, Any] = None,
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
@@ -825,6 +1025,8 @@ class Raster:
         :param crs: Coordinate reference system. Either a rasterio CRS,
             or an EPSG integer.
         :param nodata: Nodata value.
+        :param area_or_point: Pixel interpretation of the raster, will be stored in AREA_OR_POINT metadata.
+        :param tags: Metadata stored in a dictionary.
 
         :returns: Raster created from the provided array and georeferencing.
 
@@ -847,13 +1049,35 @@ class Raster:
         if isinstance(crs, int):
             crs = CRS.from_epsg(crs)
 
+        # Define tags as empty dictionary if not defined
+        if tags is None:
+            tags = {}
+
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
         if data.dtype == bool:
-            return Mask({"data": data, "transform": transform, "crs": crs, "nodata": nodata})  # type: ignore
+            return Mask(
+                {
+                    "data": data,
+                    "transform": transform,
+                    "crs": crs,
+                    "nodata": nodata,
+                    "area_or_point": area_or_point,
+                    "tags": tags,
+                }
+            )  # type: ignore
         # Otherwise, keep as a given RasterType subclass
         else:
-            return cls({"data": data, "transform": transform, "crs": crs, "nodata": nodata})
+            return cls(
+                {
+                    "data": data,
+                    "transform": transform,
+                    "crs": crs,
+                    "nodata": nodata,
+                    "area_or_point": area_or_point,
+                    "tags": tags,
+                }
+            )
 
     def to_rio_dataset(self) -> rio.io.DatasetReader:
         """Export to a Rasterio in-memory dataset."""
@@ -974,7 +1198,7 @@ class Raster:
         """
 
         if isinstance(index, (Mask, np.ndarray)):
-            _check_cast_array_raster(self, index, operation_name="an indexing operation")  # type: ignore
+            _cast_numeric_array_raster(self, index, operation_name="an indexing operation")  # type: ignore
 
         # If input is Mask with the same shape and georeferencing
         if isinstance(index, Mask):
@@ -1006,7 +1230,7 @@ class Raster:
 
         # First, check index
         if isinstance(index, (Mask, np.ndarray)):
-            _check_cast_array_raster(self, index, operation_name="an index assignment operation")  # type: ignore
+            _cast_numeric_array_raster(self, index, operation_name="an index assignment operation")  # type: ignore
 
         # If input is Mask with the same shape and georeferencing
         if isinstance(index, Mask):
@@ -1086,86 +1310,6 @@ class Raster:
 
         return complete_equality
 
-    def _overloading_check(
-        self: RasterType, other: RasterType | NDArrayNum | Number
-    ) -> tuple[MArrayNum, MArrayNum | NDArrayNum | Number, float | int | tuple[int, ...] | tuple[float, ...] | None]:
-        """
-        Before any operation overloading, check input data type and return both self and other data as either
-        a np.ndarray or number, converted to the minimum compatible dtype between both datasets.
-        Also returns the best compatible nodata value.
-
-        The nodata value is set in the following order:
-        - to nodata of self, if output dtype is same as self's dtype
-        - to nodata of other, if other is of Raster type and output dtype is same as other's dtype
-        - otherwise falls to default nodata value for the output dtype (only if masked values -> done externally)
-
-        Inputs:
-        :param other: The other data set to be used in the operation.
-
-        :returns: a tuple containing, self.data converted to the compatible dtype, other data converted to \
-np.ndarray or number and correct dtype, the compatible nodata value.
-        """
-        # Check that other is of correct type
-        # If not, a NotImplementedError should be raised, in case other's class has a method implemented.
-        # See https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
-        if not isinstance(other, (Raster, np.ndarray, float, int, np.floating, np.integer)):
-            raise NotImplementedError(
-                f"Operation between an object of type {type(other)} and a Raster impossible. Must be a Raster, "
-                f"np.ndarray or single number."
-            )
-
-        # Get self's dtype and nodata
-        nodata1 = self.nodata
-        dtype1 = self.data.dtype
-
-        # Raise error messages if grids don't match (CRS + transform for raster, shape for array)
-        if isinstance(other, (Raster, np.ndarray)):
-            _check_cast_array_raster(self, other, operation_name="an arithmetic operation")  # type: ignore
-
-        # Case 1 - other is a Raster
-        if isinstance(other, Raster):
-
-            nodata2 = other.nodata
-            dtype2 = other.data.dtype
-            other_data: NDArrayNum | MArrayNum | Number = other.data
-
-        # Case 2 - other is a numpy array
-        elif isinstance(other, np.ndarray):
-            # Check that both array have the same shape
-
-            # Squeeze first axis of other data if possible
-            if len(other.shape) == 3 and other.shape[0] == 1:
-                other_data = other.squeeze(axis=0)
-            else:
-                other_data = other
-
-            nodata2 = None
-            dtype2 = other.dtype
-
-        # Case 3 - other is a single number
-        else:
-            other_data = other
-            nodata2 = None
-            dtype2 = rio.dtypes.get_minimum_dtype(other_data)
-
-        # Figure out output dtype
-        out_dtype = np.promote_types(dtype1, dtype2)
-
-        # Figure output nodata
-        out_nodata = None
-        if (nodata2 is not None) and (out_dtype == dtype2):
-            out_nodata = nodata2
-        elif (nodata1 is not None) and (out_dtype == dtype1):
-            out_nodata = nodata1
-        # For some cases the promote_types is neither (uint8 and int8 = int16),
-        # And the minimum dtype of any integer is uint8
-        elif (nodata1 is not None) or (nodata2 is not None):
-            out_nodata = nodata1 if not None else nodata2
-
-        self_data = self.data
-
-        return self_data, other_data, out_nodata
-
     def __add__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
         Sum two rasters, or a raster and a numpy array, or a raster and single number.
@@ -1175,13 +1319,15 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         Otherwise, other must be a single number.
         """
         # Check inputs and return compatible data, output dtype and nodata value
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
 
         # Run calculation
         out_data = self_data + other_data
 
         # Save to output Raster
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
 
         return out_rst
 
@@ -1200,7 +1346,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         Returns a raster with -self.data.
         """
-        return self.from_array(-self.data, self.transform, self.crs, nodata=self.nodata)
+        return self.copy(-self.data)
 
     def __sub__(self, other: Raster | NDArrayNum | Number) -> Raster:
         """
@@ -1210,9 +1356,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data - other_data
-        return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
     def __rsub__(self: RasterType, other: NDArrayNum | Number) -> RasterType:  # type: ignore
@@ -1221,9 +1369,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         For when other is first item in the operation (e.g. 1 - rst).
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = other_data - self_data
-        return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
 
     def __mul__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
@@ -1233,9 +1383,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data * other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
@@ -1255,9 +1407,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data / other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
@@ -1267,9 +1421,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         For when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = other_data / self_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
 
     def __floordiv__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1280,9 +1436,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data // other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
@@ -1292,9 +1450,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         For when other is first item in the operation (e.g. 1/rst).
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = other_data // self_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
 
     def __mod__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1305,9 +1465,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, nodata = self._overloading_check(other)
+        self_data, other_data, nodata, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data % other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
 
     def __pow__(self: RasterType, power: int | float) -> RasterType:
@@ -1321,7 +1483,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         # Calculate the product of arrays and save to new Raster
         out_data = self.data**power
         nodata = self.nodata
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=self.area_or_point)
         return out_rst
 
     def __eq__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:  # type: ignore
@@ -1334,9 +1496,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _ = self._overloading_check(other)
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data == other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
 
     def __ne__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:  # type: ignore
@@ -1349,9 +1513,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _ = self._overloading_check(other)
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data != other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
 
     def __lt__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1365,9 +1531,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _ = self._overloading_check(other)
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data < other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
 
     def __le__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1381,9 +1549,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _ = self._overloading_check(other)
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data <= other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
 
     def __gt__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1397,9 +1567,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _ = self._overloading_check(other)
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data > other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
 
     def __ge__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1413,9 +1585,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         If other is a np.ndarray, it must have the same shape.
         Otherwise, other must be a single number.
         """
-        self_data, other_data, _ = self._overloading_check(other)
+        self_data, other_data, _, aop = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"
+        )
         out_data = self_data >= other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None)
+        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
 
     @overload
@@ -1471,7 +1645,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                 nodata = self.nodata
             else:
                 nodata = _default_nodata(dtype)
-            return self.from_array(out_data, self.transform, self.crs, nodata=nodata)
+            return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=self.area_or_point)
 
     @property
     def is_modified(self) -> bool:
@@ -1495,6 +1669,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
     def nodata(self) -> int | float | None:
         """
         Nodata value of the raster.
+
+        When setting with self.nodata = new_nodata, uses the default arguments of self.set_nodata().
 
         :returns: Nodata value
         """
@@ -1648,11 +1824,11 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if not isinstance(new_data, np.ndarray):
             raise ValueError("New data must be a numpy array.")
 
-        if len(new_data.shape) not in [2, 3]:
+        if new_data.ndim not in [2, 3]:
             raise ValueError("Data array must have 2 or 3 dimensions.")
 
         # Squeeze 3D data if the band axis is of length 1
-        if len(new_data.shape) == 3 and new_data.shape[0] == 1:
+        if new_data.ndim == 3 and new_data.shape[0] == 1:
             new_data = new_data.squeeze(axis=0)
 
         # Check that new_data has correct shape
@@ -1852,11 +2028,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             f"Grid size:                 {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtypes}\n",
-            f"Coordinate System:    {[self.crs.to_string() if self.crs is not None else None]}\n",
-            f"NoData Value:         {self.nodata}\n",
-            "Pixel Size:           {}, {}\n".format(*self.res),
-            "Upper Left Corner:    {}, {}\n".format(*self.bounds[:2]),
-            "Lower Right Corner:   {}, {}\n".format(*self.bounds[2:]),
+            f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}\n",
+            f"Nodata value:         {self.nodata}\n",
+            f"Pixel interpretation: {self.area_or_point}\n",
+            "Pixel size:           {}, {}\n".format(*self.res),
+            "Upper left corner:    {}, {}\n".format(*self.bounds[:2]),
+            "Lower right corner:   {}, {}\n".format(*self.bounds[2:]),
         ]
 
         if stats:
@@ -1898,7 +2075,14 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             data = self.data.copy()
 
-        cp = self.from_array(data=data, transform=self.transform, crs=self.crs, nodata=self.nodata)
+        cp = self.from_array(
+            data=data,
+            transform=self.transform,
+            crs=self.crs,
+            nodata=self.nodata,
+            area_or_point=self.area_or_point,
+            tags=self.tags,
+        )
 
         return cp
 
@@ -2014,25 +2198,25 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if ufunc.nin == 1:
             # If the universal function has only one output
             if ufunc.nout == 1:
-                return self.from_array(
-                    data=final_ufunc(inputs[0].data, **kwargs),  # type: ignore
-                    transform=self.transform,
-                    crs=self.crs,
-                    nodata=self.nodata,
-                )  # type: ignore
+                return self.copy(new_array=final_ufunc(inputs[0].data, **kwargs))  # type: ignore
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
                 output = final_ufunc(inputs[0].data, **kwargs)  # type: ignore
-                return self.from_array(
-                    data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
-                ), self.from_array(data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata)
+                return self.copy(new_array=output[0]), self.copy(new_array=output[1])
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
 
             # Check the casting between Raster and array inputs, and return error messages if not consistent
-            _check_cast_array_raster(inputs[0], inputs[1], "an arithmetic operation")  # type: ignore
+            # TODO: Use nodata value derived here after fixing issue #517
+            if isinstance(inputs[0], Raster):
+                raster = inputs[0]
+                other = inputs[1]
+            else:
+                raster = inputs[1]  # type: ignore
+                other = inputs[0]
+            nodata, aop = _cast_numeric_array_raster(raster, other, "an arithmetic operation")[-2:]  # type: ignore
 
             if ufunc.nout == 1:
                 return self.from_array(
@@ -2040,14 +2224,21 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     transform=self.transform,
                     crs=self.crs,
                     nodata=self.nodata,
+                    area_or_point=aop,
                 )
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
                 output = final_ufunc(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
                 return self.from_array(
-                    data=output[0], transform=self.transform, crs=self.crs, nodata=self.nodata
-                ), self.from_array(data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata)
+                    data=output[0],
+                    transform=self.transform,
+                    crs=self.crs,
+                    nodata=self.nodata,
+                    area_or_point=aop,
+                ), self.from_array(
+                    data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                )
 
     def __array_function__(
         self, func: Callable[[NDArrayNum, Any], Any], types: tuple[type], args: Any, kwargs: Any
@@ -2090,28 +2281,54 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             first_arg = args[0].data
 
         # Separate one and two input functions
+        cast_required = False
+        aop = None  # The None value is never used (aop only used when cast_required = True)
         if func.__name__ in _HANDLED_FUNCTIONS_1NIN:
             outputs = func(first_arg, *args[1:], **kwargs)  # type: ignore
+        # Two input functions require casting
         else:
-            second_arg = args[1].data
             # Check the casting between Raster and array inputs, and return error messages if not consistent
-            _check_cast_array_raster(first_arg, second_arg, operation_name="an arithmetic operation")
+            # TODO: Use nodata below, but after fixing issue #517
+            if isinstance(args[0], Raster):
+                raster = args[0]
+                other = args[1]
+            else:
+                raster = args[1]
+                other = args[0]
+            nodata, aop = _cast_numeric_array_raster(raster, other, operation_name="an arithmetic operation")[-2:]
+            cast_required = True
+            second_arg = args[1].data
             outputs = func(first_arg, second_arg, *args[2:], **kwargs)  # type: ignore
 
         # Below, we recast to Raster if the shape was preserved, otherwise return an array
         # First, if there are several outputs in a tuple which are arrays
         if isinstance(outputs, tuple) and isinstance(outputs[0], np.ndarray):
             if all(output.shape == args[0].data.shape for output in outputs):
-                return (
-                    self.from_array(data=output, transform=self.transform, crs=self.crs, nodata=self.nodata)
-                    for output in outputs
-                )
+
+                # If casting was not necessary, copy all attributes except array
+                # Otherwise update array, nodata and
+                if cast_required:
+                    return (
+                        self.from_array(
+                            data=output, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                        )
+                        for output in outputs
+                    )
+                else:
+                    return (self.copy(new_array=output) for output in outputs)
             else:
                 return outputs
         # Second, if there is a single output which is an array
         elif isinstance(outputs, np.ndarray):
             if outputs.shape == args[0].data.shape:
-                return self.from_array(data=outputs, transform=self.transform, crs=self.crs, nodata=self.nodata)
+
+                # If casting was not necessary, copy all attributes except array
+                if cast_required:
+                    return self.from_array(
+                        data=outputs, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                    )
+                else:
+                    return self.copy(new_array=outputs)
             else:
                 return outputs
         # Else, return outputs directly
@@ -2184,6 +2401,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if isinstance(crop_geom, (Raster, Vector)):
             # For another Vector or Raster, we reproject the bounding box in the same CRS as self
             xmin, ymin, xmax, ymax = crop_geom.get_bounds_projected(out_crs=self.crs)
+            if isinstance(crop_geom, Raster):
+                # Raise a warning if the reference is a raster that has a different pixel interpretation
+                _cast_pixel_interpretation(self.area_or_point, crop_geom.area_or_point)
         elif isinstance(crop_geom, (list, tuple)):
             xmin, ymin, xmax, ymax = crop_geom
         else:
@@ -2239,7 +2459,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
                     )
 
                 # Squeeze first axis for single-band
-                if len(crop_img.shape) == 3 and crop_img.shape[0] == 1:
+                if crop_img.ndim == 3 and crop_img.shape[0] == 1:
                     crop_img = crop_img.squeeze(axis=0)
 
         else:
@@ -2251,11 +2471,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         if inplace:
             self._data = crop_img
             self.transform = tfm
-            self.tags["AREA_OR_POINT"] = "Area"  # TODO: Explain why this should have an area interpretation now
             return None
         else:
-            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata)
-            newraster.tags["AREA_OR_POINT"] = "Area"
+            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
 
     @overload
@@ -2444,6 +2662,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # Check that ref type is either str, Raster or rasterio data set
             # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
             if isinstance(ref, Raster):
+                # Raise a warning if the reference is a raster that has a different pixel interpretation
+                _cast_pixel_interpretation(self.area_or_point, ref.area_or_point)
                 ds_ref = ref
             elif isinstance(ref, str):
                 if not os.path.exists(ref):
@@ -2549,7 +2769,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             self.data = data
             return None
         else:
-            return self.from_array(data, transformed, crs, nodata)
+            return self.from_array(data, transformed, crs, nodata, self.area_or_point)
 
     @overload
     def shift(
@@ -3209,61 +3429,38 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         else:
             return output_val
 
-    def coords(self, offset: str = "corner", grid: bool = True) -> tuple[NDArrayNum, ...]:
-        """
-        Get coordinates (x,y) of all pixels in the raster.
-
-        :param offset: coordinate type. If 'corner', returns corner coordinates of pixels.
-            If 'center', returns center coordinates. Default is corner.
-        :param grid: Return grid
-
-        :returns x,y: Arrays of the (x,y) coordinates.
-        """
-        assert offset in [
-            "corner",
-            "center",
-        ], f"ctype is not one of 'corner', 'center': {offset}"
-
-        dx = self.res[0]
-        dy = self.res[1]
-
-        xx = np.linspace(self.bounds.left, self.bounds.right, self.width + 1)[:: int(np.sign(dx))]
-        yy = np.linspace(self.bounds.bottom, self.bounds.top, self.height + 1)[:: int(np.sign(dy))]
-
-        if offset == "center":
-            xx += dx / 2  # shift by half a pixel
-            yy += dy / 2
-        if grid:
-            # Drop the last element
-            meshgrid = tuple(np.meshgrid(xx[:-1], np.flip(yy[:-1])))
-            return meshgrid
-        else:
-            return xx[:-1], yy[:-1]
-
     def xy2ij(
         self,
         x: ArrayLike,
         y: ArrayLike,
         op: type = np.float32,
         precision: float | None = None,
-        shift_area_or_point: bool = False,
+        shift_area_or_point: bool | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get indexes (row,column) of coordinates (x,y).
 
-        Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
+        By default, the indexes are shifted with the interpretation of pixel coordinates "AREA_OR_POINT" of the raster,
         to ensure that the indexes of points represent the right location. See parameter description of
         shift_area_or_point for more details.
+
+        This function is reversible with ij2xy for any pixel interpretation.
 
         :param x: X coordinates.
         :param y: Y coordinates.
         :param op: Operator to compute index.
         :param precision: Precision passed to :func:`rasterio.transform.rowcol`.
-        :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
-            attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
 
         :returns i, j: Indices of (x,y) in the image.
         """
+
+        # If undefined, default to the global system config
+        if shift_area_or_point is None:
+            shift_area_or_point = config["shift_area_or_point"]
+
         # Input checks
         if op not in [np.float32, np.float64, float]:
             raise UserWarning(
@@ -3297,25 +3494,12 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # If the user wants to shift according to the interpretation
         if shift_area_or_point:
-            # If AREA_OR_POINT attribute does not exist, use the most typical "Area"
-            if self.tags.get("AREA_OR_POINT") is not None:
-                area_or_point = self.tags.get("AREA_OR_POINT")
-                if not isinstance(area_or_point, str):
-                    raise TypeError('Attribute self.tags["AREA_OR_POINT"] must be a string.')
-                if area_or_point.lower() not in ["area", "point"]:
-                    raise ValueError('Attribute self.tags["AREA_OR_POINT"] must be one of "Area" or "Point".')
-            else:
-                area_or_point = "Area"
-                warnings.warn(
-                    category=UserWarning,
-                    message='Attribute AREA_OR_POINT undefined in self.tags, using "Area" as default (no shift).',
-                )
 
             # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
-            if area_or_point.lower() == "point":
+            if self.area_or_point is not None and self.area_or_point == "Point":
                 if not isinstance(i.flat[0], (np.floating, float)):
                     raise ValueError(
-                        "Operator must return np.floating values to perform area_or_point subpixel index shifting."
+                        "Operator must return np.floating values to perform pixel interpretation shifting."
                     )
 
                 i += 0.5
@@ -3328,22 +3512,80 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         return i, j
 
-    def ij2xy(self, i: ArrayLike, j: ArrayLike, offset: str = "ul") -> tuple[NDArrayNum, NDArrayNum]:
+    def ij2xy(
+        self, i: ArrayLike, j: ArrayLike, shift_area_or_point: bool | None = None, force_offset: str | None = None
+    ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of indexes (row,column).
 
-        Defaults to upper-left, for which this function is fully reversible with xy2ij.
+        By default, the indexes are shifted with the interpretation of pixel coordinates "AREA_OR_POINT" of the
+        raster, to ensure that the indexes of points represent the right location. See parameter description of
+        shift_area_or_point for more details.
+
+        This function is reversible with xy2ij for any pixel interpretation.
 
         :param i: Row (i) index of pixel.
         :param j: Column (j) index of pixel.
-        :param offset: Return coordinates as "center" of pixel, or any corner (upper-left "ul", "ur", "ll", lr").
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+        :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
+            any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
 
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-        x, y = rio.transform.xy(self.transform, i, j, offset=offset)
+        # If undefined, default to the global system config
+        if shift_area_or_point is None:
+            shift_area_or_point = config["shift_area_or_point"]
+
+        # Shift by half a pixel back for "Point" interpretation
+        if shift_area_or_point and force_offset is None:
+            if self.area_or_point is not None and self.area_or_point == "Point":
+                i = np.asarray(i) - 0.5
+                j = np.asarray(j) - 0.5
+
+        # Default offset is upper-left for raster coordinates
+        if force_offset is None:
+            force_offset = "ul"
+
+        x, y = rio.transform.xy(self.transform, i, j, offset=force_offset)
 
         return x, y
+
+    def coords(
+        self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None
+    ) -> tuple[NDArrayNum, ...]:
+        """
+        Get coordinates (x,y) of all pixels in the raster.
+
+        :param grid: Whether to return mesh grids of coordinates matrices.
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+        :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
+            any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
+
+        :returns x,y: Arrays of the (x,y) coordinates.
+        """
+
+        # The coordinates are extracted from indexes 0 to shape
+        _, yy = self.ij2xy(
+            i=np.arange(self.height - 1, -1, -1),
+            j=0,
+            shift_area_or_point=shift_area_or_point,
+            force_offset=force_offset,
+        )
+        xx, _ = self.ij2xy(
+            i=0, j=np.arange(self.width), shift_area_or_point=shift_area_or_point, force_offset=force_offset
+        )
+
+        # If grid is True, return coordinate grids
+        if grid:
+            meshgrid = tuple(np.meshgrid(xx, np.flip(yy)))
+            return meshgrid
+        else:
+            return np.asarray(xx), np.asarray(yy)
 
     def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
@@ -3371,7 +3613,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
         method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
         band: int = 1,
         input_latlon: bool = False,
-        shift_area_or_point: bool = False,
+        shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum:
@@ -3391,8 +3633,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
-        :param shift_area_or_point: Shifts index to center pixel coordinates if GDAL's AREA_OR_POINT
-            attribute (in self.tags) is "Point", keeps the corner pixel coordinate for "Area".
+        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
+            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_scipy_function: Force to use either map_coordinates or interpn. Mainly for testing purposes.
 
         :returns rpoints: Array of raster value(s) for the given points.
@@ -3408,7 +3651,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             transformer = pyproj.Transformer.from_crs(init_crs, dest_crs)
             x, y = transformer.transform(x, y)
 
-        i, j = self.xy2ij(x, y, op=np.float32, shift_area_or_point=shift_area_or_point)
+        i, j = self.xy2ij(x, y, shift_area_or_point=shift_area_or_point)
 
         ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
 
@@ -3437,8 +3680,8 @@ np.ndarray or number and correct dtype, the compatible nodata value.
 
         # Otherwise, use scipy.interpolate.interpn
         else:
-
-            xycoords = self.coords(offset="corner", grid=False)
+            # Get lower-left corner coordinates
+            xycoords = self.coords(grid=False, force_offset="ll")
 
             # Let interpolation outside the bounds not raise any error by default
             if "bounds_error" not in kwargs.keys():
@@ -3478,22 +3721,16 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             for band_n in indices:
                 # Generate a new Raster from a copy of the band's data
                 raster_bands.append(
-                    self.from_array(
+                    self.copy(
                         self.data[band_n - 1, :, :].copy(),
-                        transform=self.transform,
-                        crs=self.crs,
-                        nodata=self.nodata,
                     )
                 )
         else:
             for band_n in indices:
                 # Set the data to a slice of the original array
                 raster_bands.append(
-                    self.from_array(
+                    self.copy(
                         self.data[band_n - 1, :, :],
-                        transform=self.transform,
-                        crs=self.crs,
-                        nodata=self.nodata,
                     )
                 )
 
@@ -3699,7 +3936,7 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             # Extract the coordinates at subsampled pixels with valid data
             # To extract data, we always use "upper left" which rasterio interprets as the exact raster coordinates
             # Further below we redefine output coordinates based on point interpretation
-            x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset="ul"))
+            x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], force_offset="ul"))
 
             with rio.open(self.filename) as raster:
                 # Rasterio uses indexes (starts at 1)
@@ -3710,7 +3947,9 @@ np.ndarray or number and correct dtype, the compatible nodata value.
             pixel_data = pixel_data.data
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation
-        x_coords_2, y_coords_2 = (np.array(a) for a in self.ij2xy(indices[0], indices[1], offset=force_pixel_offset))
+        x_coords_2, y_coords_2 = (
+            np.array(a) for a in self.ij2xy(indices[0], indices[1], force_offset=force_pixel_offset)
+        )
 
         # Merge the coordinates and pixel data into a point cloud.
         points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T
@@ -4199,7 +4438,13 @@ class Mask(Raster):
         # Need to cast output to Raster before computing proximity, as output will not be boolean
         # (super() would instantiate Mask() again)
         raster = Raster(
-            {"data": self.data.astype("uint8"), "transform": self.transform, "crs": self.crs, "nodata": self.nodata}
+            {
+                "data": self.data.astype("uint8"),
+                "transform": self.transform,
+                "crs": self.crs,
+                "nodata": self.nodata,
+                "area_or_point": self.area_or_point,
+            }
         )
         return raster.proximity(
             vector=vector,
@@ -4211,11 +4456,11 @@ class Mask(Raster):
 
     def __and__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
-        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
 
-        return self.from_array(
-            data=(self_data & other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
-        )
+        return self.copy(self_data & other_data)  # type: ignore
 
     def __rand__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise and between masks, or a mask and an array."""
@@ -4225,11 +4470,11 @@ class Mask(Raster):
     def __or__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise or between masks, or a mask and an array."""
 
-        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
 
-        return self.from_array(
-            data=(self_data | other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
-        )
+        return self.copy(self_data | other_data)  # type: ignore
 
     def __ror__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise or between masks, or a mask and an array."""
@@ -4239,11 +4484,11 @@ class Mask(Raster):
     def __xor__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise xor between masks, or a mask and an array."""
 
-        self_data, other_data = self._overloading_check(other)[0:2]  # type: ignore
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
 
-        return self.from_array(
-            data=(self_data ^ other_data), transform=self.transform, crs=self.crs, nodata=self.nodata  # type: ignore
-        )
+        return self.copy(self_data ^ other_data)  # type: ignore
 
     def __rxor__(self: Mask, other: Mask | NDArrayBool) -> Mask:
         """Bitwise xor between masks, or a mask and an array."""
@@ -4253,7 +4498,7 @@ class Mask(Raster):
     def __invert__(self: Mask) -> Mask:
         """Bitwise inversion of a mask."""
 
-        return self.from_array(data=~self.data, transform=self.transform, crs=self.crs, nodata=self.nodata)
+        return self.copy(~self.data)
 
 
 # -----------------------------------------
