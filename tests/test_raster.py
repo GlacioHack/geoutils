@@ -357,6 +357,24 @@ class TestRaster:
         assert not r_notloaded.is_loaded
         assert np.array_equal(mask_notloaded, mask_loaded)
 
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_get_mask(self, example: str) -> None:
+        """
+        Test that getting mask works properly (similar to _load_only_mask).
+        """
+
+        # Load raster with and without loading
+        r_loaded = gu.Raster(example, load_data=True)
+        r_notloaded = gu.Raster(example)
+
+        # Get the mask for the two options
+        mask_loaded = r_loaded.get_mask()
+        mask_notloaded = r_notloaded.get_mask()
+
+        # Data should not be loaded and masks should be equal
+        assert not r_notloaded.is_loaded
+        assert np.array_equal(mask_notloaded, mask_loaded)
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_to_rio_dataset(self, example: str):
         """Test the export to a rasterio dataset"""
