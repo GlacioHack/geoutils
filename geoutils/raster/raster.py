@@ -746,7 +746,7 @@ class Raster:
 
     @property
     def dtype(self) -> str:
-        """Data type for each raster band (string representation)."""
+        """Data type of the raster (string representation)."""
         if not self.is_loaded and self._disk_dtype is not None:
             return self._disk_dtype
         return str(self.data.dtype)
