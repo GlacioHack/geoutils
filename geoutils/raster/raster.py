@@ -556,7 +556,7 @@ class Raster:
         self._is_modified = True
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_bands: tuple[int] | None = None
-        self._disk_dtype: tuple[str] | None = None
+        self._disk_dtype: str | None = None
         self._disk_transform: affine.Affine | None = None
         self._downsample: int | float = 1
         self._area_or_point: Literal["Area", "Point"] | None = None
