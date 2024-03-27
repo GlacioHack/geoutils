@@ -35,7 +35,7 @@ A first category includes georeferencing attributes directly derived from {attr}
 {attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds`.
 
 A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.bands` and
-{attr}`~geoutils.Raster.dtypes`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and the band indexes.
+{attr}`~geoutils.Raster.dtype`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and the band indexes.
 
 ```{important}
 The {attr}`~geoutils.Raster.bands` of {class}`rasterio.io.DatasetReader` start from 1 and not 0, be careful when instantiating or loading from a
@@ -150,14 +150,14 @@ might result in larger memory usage than in the original {class}`~geoutils.Raste
 Thanks to the {ref}`core-array-funcs`, **NumPy functions applied directly to a {class}`~geoutils.Raster` will respect {class}`~geoutils.Raster.nodata`
 values** as well as if computing with the {class}`~numpy.ma.MaskedArray` or an unmasked {class}`~numpy.ndarray` filled with {class}`~numpy.nan`.
 
-Additionally, the {class}`~geoutils.Raster` will automatically cast between different {class}`dtypes<numpy.dtype>`, and possibly re-define missing
+Additionally, the {class}`~geoutils.Raster` will automatically cast between different {class}`dtype<numpy.dtype>`, and possibly re-define missing
 {class}`nodatas<geoutils.Raster.nodata>`.
 ```
 
 ## Arithmetic
 
 A {class}`~geoutils.Raster` can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
-{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will output one or two {class}`Rasters<geoutils.Raster>`. NumPy coercion rules apply for {class}`dtypes<numpy.dtype>`.
+{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will output one or two {class}`Rasters<geoutils.Raster>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
 
 ```{code-cell} ipython3
 # Add 1 and divide raster by 2

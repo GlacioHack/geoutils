@@ -179,7 +179,7 @@ rast += 1
 ```
 
 Additionally, the {class}`~geoutils.Raster` object possesses a NumPy masked-array interface that allows to apply to it any [NumPy universal function](https://numpy.org/doc/stable/reference/ufuncs.html) and
-most other NumPy array functions, while logically casting {class}`dtypes<numpy.dtype>` and respecting {attr}`~geoutils.Raster.nodata` values.
+most other NumPy array functions, while logically casting {class}`dtype<numpy.dtype>` and respecting {attr}`~geoutils.Raster.nodata` values.
 
 ```{code-cell} ipython3
 # Apply a normalization to the raster
@@ -204,7 +204,7 @@ Masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a
 values_aoi = rast[mask_aoi]
 ```
 
-Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtypes<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
+Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
 {class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{code-cell} ipython3
