@@ -117,22 +117,10 @@ class TestSatelliteImage:
         # Check the object is a SatelliteImage
         assert isinstance(r2, gu.SatelliteImage)
 
-        # check all immutable attributes are equal
-        raster_attrs = [
-            "bounds",
-            "count",
-            "crs",
-            "dtypes",
-            "height",
-            "indexes",
-            "nodata",
-            "res",
-            "shape",
-            "transform",
-            "width",
-        ]
+        # Check all immutable attributes are equal
+        raster_attrs = [attr for attr in gu.raster.raster._default_rio_attrs if attr not in ["driver", "filename", "name"]]
         satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
-        # using list directly available in Class
+        # Using list directly available in class
         attrs = raster_attrs + satimg_attrs
         all_attrs = attrs + gu.raster.satimg.satimg_attrs
         for attr in all_attrs:

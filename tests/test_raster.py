@@ -236,7 +236,7 @@ class TestRaster:
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
-        assert np.array_equal(r.dtype, ["uint8"])
+        assert r.dtype == "uint8"
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
@@ -254,7 +254,7 @@ class TestRaster:
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
-        assert np.array_equal(r2.dtype, ["float32"])
+        assert r2.dtype == "float32"
         assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
         assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
@@ -910,17 +910,17 @@ class TestRaster:
         # Test negation
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert np.array_equal(r3.dtype, ["uint8"])
+        assert r3.dtype == "uint8"
 
         # Test addition
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert np.array_equal(r3.dtype, ["uint8"])
+        assert r3.dtype == "uint8"
 
         # Test subtraction
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert np.array_equal(r3.dtype, ["uint8"])
+        assert r3.dtype == "uint8"
 
         # Test with dtype Float32
         r1 = gu.Raster.from_array(
@@ -928,15 +928,15 @@ class TestRaster:
         )
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert np.array_equal(r3.dtype, ["float32"])
+        assert r3.dtype == "float32"
 
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert np.array_equal(r3.dtype, ["float32"])
+        assert r3.dtype == "float32"
 
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert np.array_equal(r3.dtype, ["float32"])
+        assert r3.dtype == "float32"
 
         # Check that errors are properly raised
         # different shapes

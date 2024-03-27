@@ -175,7 +175,6 @@ _default_rio_attrs = [
     "count",
     "crs",
     "driver",
-    "dtypes",
     "height",
     "indexes",
     "name",
