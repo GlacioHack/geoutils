@@ -64,7 +64,7 @@ documentation.
     Raster.bands_on_disk
     Raster.res
     Raster.bounds
-    Raster.dtypes
+    Raster.dtype
     Raster.is_loaded
     Raster.is_modified
     Raster.name

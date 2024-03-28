@@ -30,7 +30,7 @@ Universal functions can take one or two inputs, and return one or two outputs. T
 the output will be a {class}`~geoutils.Raster`. If there is a second input, it can be a {class}`~geoutils.Raster` or {class}`~numpy.ndarray` with
 matching georeferencing or shape, respectively.
 
-These functions inherently support the casting of different {attr}`~geoutils.Raster.dtypes` and values masked by {attr}`~geoutils.Raster.nodata` in the
+These functions inherently support the casting of different {attr}`~geoutils.Raster.dtype` and values masked by {attr}`~geoutils.Raster.nodata` in the
 {class}`~numpy.ma.MaskedArray`.
 
 Below, we re-use the same example created in {ref}`core-py-ops`.

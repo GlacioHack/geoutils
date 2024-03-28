@@ -188,13 +188,13 @@ class TestRaster:
             stats = r.info(stats=True, verbose=False)
 
         # Check the stats adapt to nodata values
-        if r.dtypes[0] == "uint8":
+        if r.dtype == "uint8":
             # Validate that the mask is respected by adding 0 values (there are none to begin with.)
             r.data.ravel()[:1000] = 0
             # Set the nodata value to 0, then validate that they are excluded from the new minimum, and warning raised
             with pytest.warns(UserWarning):
                 r.set_nodata(0)
-        elif r.dtypes[0] == "float32":
+        elif r.dtype == "float32":
             # We do the same with -99999 here
             r.data.ravel()[:1000] = -99999
             # And replace the nodata value, and warning raised
@@ -236,7 +236,7 @@ class TestRaster:
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
-        assert np.array_equal(r.dtypes, ["uint8"])
+        assert r.dtype == "uint8"
         assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
         assert np.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
@@ -254,7 +254,7 @@ class TestRaster:
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
-        assert np.array_equal(r2.dtypes, ["float32"])
+        assert r2.dtype == "float32"
         assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
         assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
@@ -445,13 +445,13 @@ class TestRaster:
         assert rst.astype("float32", convert_nodata=False).raster_equal(rst2, strict_masked=False)
 
         # Test with the dtype argument to convert back to original raster even if integer-type
-        if np.issubdtype(rst.dtypes[0], np.integer):
+        if np.issubdtype(rst.dtype, np.integer):
             # Set an existing nodata value, because all of our integer-type example datasets currently have "None"
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message="New nodata value cells already exist.*")
                 rst.set_nodata(new_nodata=255)
             ds = rst.to_xarray()
-            rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtypes[0])
+            rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtype)
             assert rst3.raster_equal(rst, strict_masked=False)
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
@@ -928,17 +928,17 @@ class TestRaster:
         # Test negation
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert np.array_equal(r3.dtypes, ["uint8"])
+        assert r3.dtype == "uint8"
 
         # Test addition
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert np.array_equal(r3.dtypes, ["uint8"])
+        assert r3.dtype == "uint8"
 
         # Test subtraction
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert np.array_equal(r3.dtypes, ["uint8"])
+        assert r3.dtype == "uint8"
 
         # Test with dtype Float32
         r1 = gu.Raster.from_array(
@@ -946,15 +946,15 @@ class TestRaster:
         )
         r3 = -r1
         assert np.all(r3.data == -r1.data)
-        assert np.array_equal(r3.dtypes, ["float32"])
+        assert r3.dtype == "float32"
 
         r3 = r1 + r2
         assert np.all(r3.data == r1.data + r2.data)
-        assert np.array_equal(r3.dtypes, ["float32"])
+        assert r3.dtype == "float32"
 
         r3 = r1 - r2
         assert np.all(r3.data == r1.data - r2.data)
-        assert np.array_equal(r3.dtypes, ["float32"])
+        assert r3.dtype == "float32"
 
         # Check that errors are properly raised
         # different shapes
@@ -1061,13 +1061,13 @@ class TestRaster:
         assert r.raster_equal(r2)
 
         # -- Fifth test: check that the new_array argument works when providing a new dtype ##
-        if "int" in r.dtypes[0]:
+        if "int" in r.dtype:
             new_dtype = "float32"
         else:
             new_dtype = "uint8"
         r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
 
-        assert r2.dtypes[0] == new_dtype
+        assert r2.dtype == new_dtype
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_is_modified(self, example: str) -> None:
@@ -1517,7 +1517,7 @@ class TestRaster:
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # make sure at least one pixel is set at default nodata for test
-        default_nodata = _default_nodata(r_nodata.dtypes[0])
+        default_nodata = _default_nodata(r_nodata.dtype)
         rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
@@ -1537,7 +1537,7 @@ class TestRaster:
             UserWarning,
             match=re.escape(
                 f"For reprojection, nodata must be set. Default chosen value "
-                f"{_default_nodata(r_nodata.dtypes[0])} exists in self.data. This may have unexpected "
+                f"{_default_nodata(r_nodata.dtype)} exists in self.data. This may have unexpected "
                 f"consequences. Consider setting a different nodata with self.set_nodata()."
             ),
         ):
@@ -2397,7 +2397,7 @@ class TestRaster:
         old_nodata = r.nodata
         # We chose nodata that doesn't exist in the raster yet for both our examples (for uint8, the default value of
         # 255 exist, so we replace by 0)
-        new_nodata = _default_nodata(r.dtypes[0]) if not r.dtypes[0] == "uint8" else 0
+        new_nodata = _default_nodata(r.dtype) if not r.dtype == "uint8" else 0
 
         # -- First, test set_nodata() with default parameters --
 
@@ -2560,11 +2560,11 @@ class TestRaster:
 
         # A ValueError if nodata value is incompatible with dtype
         expected_message = r"nodata value .* incompatible with self.dtype .*"
-        if "int" in r.dtypes[0]:
+        if "int" in r.dtype:
             with pytest.raises(ValueError, match=expected_message):
                 # Feed a floating numeric to an integer type
                 r.set_nodata(0.5)
-        elif "float" in r.dtypes[0]:
+        elif "float" in r.dtype:
             # Feed a floating value not supported by our example data
             with pytest.raises(ValueError, match=expected_message):
                 r.set_nodata(np.finfo("longdouble").min)
@@ -2604,8 +2604,8 @@ class TestRaster:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*"
             )
-            r.set_nodata(_default_nodata(r.dtypes[0]))
-            r_copy.nodata = _default_nodata(r.dtypes[0])
+            r.set_nodata(_default_nodata(r.dtype))
+            r_copy.nodata = _default_nodata(r.dtype)
 
         assert r.raster_equal(r_copy)
 
@@ -2652,7 +2652,7 @@ class TestRaster:
 
         all_dtypes = ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]
 
-        dtypes_preserving = list({np.promote_types(r.dtypes[0], dtype) for dtype in all_dtypes})
+        dtypes_preserving = list({np.promote_types(r.dtype, dtype) for dtype in all_dtypes})
         dtypes_nonpreserving = [dtype for dtype in all_dtypes if dtype not in dtypes_preserving]
 
         # Test changing dtypes that does not modify the data
@@ -2665,7 +2665,7 @@ class TestRaster:
                 assert np.array_equal(r.data.data, rout.data.data)  # Not the same array anymore with conversion
                 assert np.array_equal(r.data.mask, rout.data.mask)
 
-            assert np.dtype(rout.dtypes[0]) == target_dtype
+            assert np.dtype(rout.dtype) == target_dtype
             assert rout.data.dtype == target_dtype
             # For any data type, data should be recast to the new type
             assert rout.nodata == _default_nodata(target_dtype)
@@ -2680,7 +2680,7 @@ class TestRaster:
                 r.data.data.astype(target_dtype2), rout.data.data
             )  # Not the same array anymore with conversion
 
-            assert np.dtype(rout.dtypes[0]) == target_dtype2
+            assert np.dtype(rout.dtype) == target_dtype2
             assert rout.data.dtype == target_dtype2
             assert rout.nodata == _default_nodata(target_dtype2)
 
@@ -2690,7 +2690,7 @@ class TestRaster:
         out = r2.astype(dtype, inplace=True)
         assert out is None
         assert np.ma.allequal(r.data, r2.data)
-        assert np.dtype(r2.dtypes[0]) == dtype
+        assert np.dtype(r2.dtype) == dtype
         assert r2.data.dtype == dtype
         assert r2.nodata == _default_nodata(dtype)
 
@@ -2700,7 +2700,7 @@ class TestRaster:
         out = r3.astype(dtype, inplace=True, convert_nodata=False)
         assert out is None
         assert np.ma.allequal(r.data, r3.data)
-        assert np.dtype(r3.dtypes[0]) == dtype
+        assert np.dtype(r3.dtype) == dtype
         assert r3.data.dtype == dtype
         assert r3.nodata == r.nodata
 
@@ -3388,7 +3388,7 @@ class TestMask:
         # Check output is the correct instance
         assert isinstance(mask, gu.Mask)
         # Check the dtypes metadata
-        assert mask.dtypes[0] == "bool"
+        assert mask.dtype == "bool"
         # Check the nodata
         assert mask.nodata is None
         # Check the nbands metadata

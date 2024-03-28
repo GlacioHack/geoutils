@@ -38,7 +38,7 @@ In particular, GeoUtils:
 - Strives to rely on **lazy operations** under-the-hood to avoid unnecessary data loading,
 - Allows for **match-reference operations** to facilitate geospatial handling,
 - Re-implements **several of [GDAL](https://gdal.org/)'s features** missing in other packages (e.g., proximity, gdalDEM),
-- Naturally handles **different `dtypes` and `nodata`** values through its NumPy masked-array interface.
+- Naturally handles **different `dtype` and `nodata`** values through its NumPy masked-array interface.
 
 
 ```{note}

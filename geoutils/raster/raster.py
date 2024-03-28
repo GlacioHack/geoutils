@@ -175,7 +175,6 @@ _default_rio_attrs = [
     "count",
     "crs",
     "driver",
-    "dtypes",
     "height",
     "indexes",
     "name",
@@ -556,7 +555,7 @@ class Raster:
         self._is_modified = True
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_bands: tuple[int] | None = None
-        self._disk_dtypes: tuple[str] | None = None
+        self._disk_dtype: str | None = None
         self._disk_transform: affine.Affine | None = None
         self._downsample: int | float = 1
         self._area_or_point: Literal["Area", "Point"] | None = None
@@ -614,7 +613,7 @@ class Raster:
 
                 self._disk_shape = (ds.count, ds.height, ds.width)
                 self._disk_bands = ds.indexes
-                self._disk_dtypes = ds.dtypes
+                self._disk_dtype = ds.dtypes[0]
                 self._disk_transform = ds.transform
 
             # Check number of bands to be loaded
@@ -746,11 +745,11 @@ class Raster:
         return self._data is not None
 
     @property
-    def dtypes(self) -> tuple[str, ...]:
-        """Data type for each raster band (string representation)."""
-        if not self.is_loaded and self._disk_dtypes is not None:
-            return self._disk_dtypes
-        return (str(self.data.dtype),) * self.count
+    def dtype(self) -> str:
+        """Data type of the raster (string representation)."""
+        if not self.is_loaded and self._disk_dtype is not None:
+            return self._disk_dtype
+        return str(self.data.dtype)
 
     @property
     def bands_on_disk(self) -> None | tuple[int, ...]:
@@ -1092,7 +1091,7 @@ class Raster:
             height=self.height,
             width=self.width,
             count=self.count,
-            dtype=self.dtypes[0],
+            dtype=self.dtype,
             crs=self.crs,
             transform=self.transform,
             nodata=self.nodata,
@@ -1729,8 +1728,8 @@ class Raster:
             raise ValueError("Type of nodata not understood, must be float or int.")
 
         if new_nodata is not None:
-            if not rio.dtypes.can_cast_dtype(new_nodata, self.dtypes[0]):
-                raise ValueError(f"nodata value {new_nodata} incompatible with self.dtype {self.dtypes[0]}")
+            if not rio.dtypes.can_cast_dtype(new_nodata, self.dtype):
+                raise ValueError(f"nodata value {new_nodata} incompatible with self.dtype {self.dtype}")
 
         # If we update mask or array, get the masked array
         if update_array or update_mask:
@@ -1838,8 +1837,8 @@ class Raster:
             dtype = str(self._data.dtype)
             orig_shape = self._data.shape
         # If filename exists
-        elif self._disk_dtypes is not None:
-            dtype = self._disk_dtypes[0]
+        elif self._disk_dtype is not None:
+            dtype = self._disk_dtype
             if self._out_count == 1:
                 orig_shape = self._out_shape
             else:
@@ -2027,7 +2026,7 @@ class Raster:
             f"Modified since load?  {self.is_modified} \n",
             f"Grid size:                 {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
-            f"Data types:           {self.dtypes}\n",
+            f"Data types:           {self.dtype}\n",
             f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}\n",
             f"Nodata value:         {self.nodata}\n",
             f"Pixel interpretation: {self.area_or_point}\n",
@@ -2596,7 +2595,7 @@ class Raster:
         # Set output dtype
         if dtype is None:
             # Warning: this will not work for multiple bands with different dtypes
-            dtype = self.dtypes[0]
+            dtype = self.dtype
 
         # --- Set source nodata if provided -- #
         if force_source_nodata is None:
@@ -3000,7 +2999,7 @@ class Raster:
         """
 
         # If type was integer, cast to float to be able to save nodata values in the xarray data array
-        if np.issubdtype(self.dtypes[0], np.integer):
+        if np.issubdtype(self.dtype, np.integer):
             # Nodata conversion is not needed in this direction (integer towards float), we can maintain the original
             updated_raster = self.astype(np.float32, convert_nodata=False)
         else:
@@ -4012,7 +4011,7 @@ class Raster:
         gpd_dtypes = ["uint8", "uint16", "int16", "int32", "float32"]
         list_common_dtype_index = []
         for gpd_type in gpd_dtypes:
-            polygonize_dtype = np.promote_types(gpd_type, self.dtypes[0])
+            polygonize_dtype = np.promote_types(gpd_type, self.dtype)
             if str(polygonize_dtype) in gpd_dtypes:
                 list_common_dtype_index.append(gpd_dtypes.index(gpd_type))
         if len(list_common_dtype_index) == 0:
