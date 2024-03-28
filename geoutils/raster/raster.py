@@ -2136,14 +2136,14 @@ class Raster:
 
     def get_mask(self) -> NDArrayBool:
         """
-        Get mask from the raster.
-
-        The mask is always returned as a boolean array, even if there is no mask to .data and thus .data.mask = a
-        single False value, nomask property of masked arrays.
+        Get mask of invalid values from the raster.
 
         If the raster is not loaded, reads only the mask from disk to optimize memory usage.
 
-        :return:
+        The mask is always returned as a boolean array, even if there is no mask associated to .data (nomask property
+        of masked arrays).
+
+        :return: The mask of invalid values in the raster.
         """
         # If it is loaded, use NumPy's getmaskarray function to deal with False values
         if self.is_loaded:
