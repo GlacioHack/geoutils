@@ -2080,9 +2080,14 @@ class Raster:
 
         # Cast nodata if the new array has incompatible type with the old nodata value, and casting is True
         # Except if nodata is None or dtype is bool, then just pass it on
-        if new_array is not None and cast_nodata and self.nodata is not None and data.dtype != bool \
-                and not rio.dtypes.can_cast_dtype(self.nodata, data.dtype):
-            nodata = _default_nodata(data.dtype)
+        if (
+            new_array is not None
+            and cast_nodata
+            and self.nodata is not None
+            and data.dtype != bool
+            and not rio.dtypes.can_cast_dtype(self.nodata, data.dtype)
+        ):
+            nodata: int | float | None = _default_nodata(data.dtype)
         else:
             nodata = self.nodata
 
