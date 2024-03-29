@@ -567,7 +567,7 @@ class Raster:
             self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
 
             # Need to set nodata before the data setter, which uses it
-            # We trick set_nodata into knowing the data type by fixing self._disk_dtype, then removing it
+            # We trick set_nodata into knowing the data type by setting self._disk_dtype, then unsetting it
             # (as a raster created from an array doesn't have a disk dtype)
             if np.dtype(filename_or_dataset["data"].dtype) != bool:  # Exception for Mask class
                 self._disk_dtype = filename_or_dataset["data"].dtype
