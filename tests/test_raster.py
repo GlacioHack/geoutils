@@ -1061,13 +1061,31 @@ class TestRaster:
         assert r.raster_equal(r2)
 
         # -- Fifth test: check that the new_array argument works when providing a new dtype ##
+        # For an integer dataset cast to float, or opposite (the exploradores dataset will cast from float to int)
         if "int" in r.dtype:
             new_dtype = "float32"
         else:
             new_dtype = "uint8"
-        r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
 
+        # This should work all the types by default due to automatic casting
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Unmasked values equal to the nodata value*")
+            r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
         assert r2.dtype == new_dtype
+
+        # However, the new nodata will differ if casting was done
+        if np.promote_types(r.dtype, new_dtype) != new_dtype:
+            assert r2.nodata != r.nodata
+        else:
+            assert r2.nodata == r.nodata
+
+        # The copy should fail if the data type is not compatible
+        if np.promote_types(r.dtype, new_dtype) != new_dtype:
+            with pytest.raises(ValueError, match="Nodata value *"):
+                r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
+        else:
+            r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
+            assert r2.dtype == new_dtype
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_is_modified(self, example: str) -> None:
@@ -2559,7 +2577,7 @@ class TestRaster:
             r.set_nodata(new_nodata="this_should_not_work")  # type: ignore
 
         # A ValueError if nodata value is incompatible with dtype
-        expected_message = r"nodata value .* incompatible with self.dtype .*"
+        expected_message = r"Nodata value .* incompatible with self.dtype .*"
         if "int" in r.dtype:
             with pytest.raises(ValueError, match=expected_message):
                 # Feed a floating numeric to an integer type
