@@ -390,14 +390,29 @@ def _cast_pixel_interpretation(
     return area_or_point_out
 
 
+def _cast_nodata(out_dtype: DTypeLike, nodata: int | float | None) -> int | float | None:
+    """
+    Cast nodata value for output data type to default nodata if incompatible.
+
+    :param out_dtype: Dtype of output array.
+    :param nodata: Nodata value.
+
+    :return: Cast nodata value.
+    """
+
+    if out_dtype == bool:
+        nodata = None
+    if nodata is not None and not rio.dtypes.can_cast_dtype(nodata, out_dtype):
+        nodata = _default_nodata(out_dtype)
+    else:
+        nodata = nodata
+
+    return nodata
+
+
 def _cast_numeric_array_raster(
     raster: RasterType, other: RasterType | NDArrayNum | Number, operation_name: str
-) -> tuple[
-    MArrayNum,
-    MArrayNum | NDArrayNum | Number,
-    float | int | tuple[int, ...] | tuple[float, ...] | None,
-    Literal["Area", "Point"] | None,
-]:
+) -> tuple[MArrayNum, MArrayNum | NDArrayNum | Number, float | int | None, Literal["Area", "Point"] | None]:
     """
     Cast a raster and another raster or array or number to arrays with proper metadata, or raise an error message.
 
@@ -1019,9 +1034,10 @@ class Raster:
         data: NDArrayNum | MArrayNum | NDArrayBool,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        nodata: int | float | None = None,
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
+        cast_nodata: bool = True,
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
@@ -1034,6 +1050,8 @@ class Raster:
         :param nodata: Nodata value.
         :param area_or_point: Pixel interpretation of the raster, will be stored in AREA_OR_POINT metadata.
         :param tags: Metadata stored in a dictionary.
+        :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
+            compatible. If False, will raise an error when incompatible.
 
         :returns: Raster created from the provided array and georeferencing.
 
@@ -1049,6 +1067,10 @@ class Raster:
         # Define tags as empty dictionary if not defined
         if tags is None:
             tags = {}
+
+        # Cast nodata if the new array has incompatible type with the old nodata value
+        if cast_nodata:
+            nodata = _cast_nodata(data.dtype, nodata)
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
@@ -2078,26 +2100,15 @@ class Raster:
         else:
             data = self.data.copy()
 
-        # Cast nodata if the new array has incompatible type with the old nodata value, and casting is True
-        # Except if nodata is None or dtype is bool, then just pass it on
-        if (
-            new_array is not None
-            and cast_nodata
-            and self.nodata is not None
-            and data.dtype != bool
-            and not rio.dtypes.can_cast_dtype(self.nodata, data.dtype)
-        ):
-            nodata: int | float | None = _default_nodata(data.dtype)
-        else:
-            nodata = self.nodata
-
+        # Send to from_array
         cp = self.from_array(
             data=data,
             transform=self.transform,
             crs=self.crs,
-            nodata=nodata,
+            nodata=self.nodata,
             area_or_point=self.area_or_point,
             tags=self.tags,
+            cast_nodata=cast_nodata,
         )
 
         return cp
