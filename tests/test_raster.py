@@ -2945,6 +2945,21 @@ class TestRaster:
         with pytest.raises(TypeError, match="The transform argument needs to be Affine or tuple."):
             gu.Raster.from_array(data=img.data, transform="lol", crs=None, nodata=None)  # type: ignore
 
+    def test_from_array__nodata_casting(self):
+        """Check nodata casting of from_array that affects of all other functionalities (copy, etc)"""
+
+        rst = gu.Raster(self.landsat_b4_path)
+        warnings.filterwarnings("ignore", message="New nodata value cells already exist*")
+        rst.set_nodata(255)
+
+        # Check that a not-compatible nodata will raise an error if casting is not true
+        with pytest.raises(ValueError, match="Nodata value*"):
+            rst.from_array(data=rst.data, crs=rst.crs, transform=rst.transform, nodata=-99999, cast_nodata=False)
+
+        # Otherwise it is re-cast automatically
+        rst2 = rst.from_array(data=rst.data, crs=rst.crs, transform=rst.transform, nodata=-99999)
+        assert rst2.nodata == _default_nodata(rst.data.dtype)
+
     def test_type_hints(self) -> None:
         """Test that pylint doesn't raise errors on valid code."""
         # Create a temporary directory and a temporary filename
