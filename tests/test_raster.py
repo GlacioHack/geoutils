@@ -2945,7 +2945,7 @@ class TestRaster:
         with pytest.raises(TypeError, match="The transform argument needs to be Affine or tuple."):
             gu.Raster.from_array(data=img.data, transform="lol", crs=None, nodata=None)  # type: ignore
 
-    def test_from_array__nodata_casting(self):
+    def test_from_array__nodata_casting(self) -> None:
         """Check nodata casting of from_array that affects of all other functionalities (copy, etc)"""
 
         rst = gu.Raster(self.landsat_b4_path)
