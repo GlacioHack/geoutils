@@ -2234,7 +2234,7 @@ class TestRaster:
 
             # Not exactly equal in floating point precision since changes in Scipy 1.13.0,
             # see https://github.com/GlacioHack/geoutils/issues/533
-            assert np.array_equal(raster_points_mapcoords, raster_points_interpn, abs=0.01)
+            assert np.allclose(raster_points_mapcoords, raster_points_interpn, atol=0.01)
 
         # Check that, outside the edge, the interpolation fails and returns a NaN
         np.random.seed(42)
