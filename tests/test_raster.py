@@ -1067,7 +1067,7 @@ class TestRaster:
         else:
             new_dtype = "uint8"
 
-        # This should work all the types by default due to automatic casting
+        # This should work for all the types by default due to automatic casting
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Unmasked values equal to the nodata value*")
             r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
