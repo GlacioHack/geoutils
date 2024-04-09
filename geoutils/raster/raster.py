@@ -390,14 +390,29 @@ def _cast_pixel_interpretation(
     return area_or_point_out
 
 
+def _cast_nodata(out_dtype: DTypeLike, nodata: int | float | None) -> int | float | None:
+    """
+    Cast nodata value for output data type to default nodata if incompatible.
+
+    :param out_dtype: Dtype of output array.
+    :param nodata: Nodata value.
+
+    :return: Cast nodata value.
+    """
+
+    if out_dtype == bool:
+        nodata = None
+    if nodata is not None and not rio.dtypes.can_cast_dtype(nodata, out_dtype):
+        nodata = _default_nodata(out_dtype)
+    else:
+        nodata = nodata
+
+    return nodata
+
+
 def _cast_numeric_array_raster(
     raster: RasterType, other: RasterType | NDArrayNum | Number, operation_name: str
-) -> tuple[
-    MArrayNum,
-    MArrayNum | NDArrayNum | Number,
-    float | int | tuple[int, ...] | tuple[float, ...] | None,
-    Literal["Area", "Point"] | None,
-]:
+) -> tuple[MArrayNum, MArrayNum | NDArrayNum | Number, float | int | None, Literal["Area", "Point"] | None]:
     """
     Cast a raster and another raster or array or number to arrays with proper metadata, or raise an error message.
 
@@ -562,10 +577,19 @@ class Raster:
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
+
             # To have "area_or_point" user input go through checks of the set() function without shifting the transform
             self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
-            # Same things here, and also important to pass the nodata before the data setter, which uses it in turn
-            self._nodata = filename_or_dataset["nodata"]
+
+            # Need to set nodata before the data setter, which uses it
+            # We trick set_nodata into knowing the data type by setting self._disk_dtype, then unsetting it
+            # (as a raster created from an array doesn't have a disk dtype)
+            if np.dtype(filename_or_dataset["data"].dtype) != bool:  # Exception for Mask class
+                self._disk_dtype = filename_or_dataset["data"].dtype
+                self.set_nodata(filename_or_dataset["nodata"], update_array=False, update_mask=False)
+                self._disk_dtype = None
+
+            # Then, we can set the data, transform and crs
             self.data = filename_or_dataset["data"]
             self.transform: rio.transform.Affine = filename_or_dataset["transform"]
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
@@ -1010,9 +1034,10 @@ class Raster:
         data: NDArrayNum | MArrayNum | NDArrayBool,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
-        nodata: int | float | tuple[int, ...] | tuple[float, ...] | None = None,
+        nodata: int | float | None = None,
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
+        cast_nodata: bool = True,
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
@@ -1021,11 +1046,12 @@ class Raster:
         :param data: Input array, 2D for single band or 3D for multi-band (bands should be first axis).
         :param transform: Affine 2D transform. Either a tuple(x_res, 0.0, top_left_x,
             0.0, y_res, top_left_y) or an affine.Affine object.
-        :param crs: Coordinate reference system. Either a rasterio CRS,
-            or an EPSG integer.
+        :param crs: Coordinate reference system. Any CRS supported by Pyproj (e.g., CRS object, EPSG integer).
         :param nodata: Nodata value.
         :param area_or_point: Pixel interpretation of the raster, will be stored in AREA_OR_POINT metadata.
         :param tags: Metadata stored in a dictionary.
+        :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
+            compatible. If False, will raise an error when incompatible.
 
         :returns: Raster created from the provided array and georeferencing.
 
@@ -1038,19 +1064,13 @@ class Raster:
             >>> transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
             >>> myim = Raster.from_array(data, transform, 32645)
         """
-        if not isinstance(transform, Affine):
-            if isinstance(transform, tuple):
-                transform = Affine(*transform)
-            else:
-                raise TypeError("The transform argument needs to be Affine or tuple.")
-
-        # Enable shortcut to create CRS from an EPSG ID.
-        if isinstance(crs, int):
-            crs = CRS.from_epsg(crs)
-
         # Define tags as empty dictionary if not defined
         if tags is None:
             tags = {}
+
+        # Cast nodata if the new array has incompatible type with the old nodata value
+        if cast_nodata:
+            nodata = _cast_nodata(data.dtype, nodata)
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
@@ -1729,7 +1749,7 @@ class Raster:
 
         if new_nodata is not None:
             if not rio.dtypes.can_cast_dtype(new_nodata, self.dtype):
-                raise ValueError(f"nodata value {new_nodata} incompatible with self.dtype {self.dtype}")
+                raise ValueError(f"Nodata value {new_nodata} incompatible with self.dtype {self.dtype}.")
 
         # If we update mask or array, get the masked array
         if update_array or update_mask:
@@ -1787,7 +1807,10 @@ class Raster:
 
         # Update the nodata value
         self._nodata = new_nodata
-        self.data.fill_value = new_nodata
+
+        # Update the fill value only if the data is loaded
+        if self.is_loaded:
+            self.data.fill_value = new_nodata
 
     @property
     def data(self) -> MArrayNum:
@@ -2061,19 +2084,23 @@ class Raster:
         else:
             return "".join(as_str)
 
-    def copy(self: RasterType, new_array: NDArrayNum | None = None) -> RasterType:
+    def copy(self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> RasterType:
         """
         Copy the raster in-memory.
 
         :param new_array: New array to use in the copied raster.
+        :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
+            compatible. If False, will raise an error when incompatible.
 
         :return: Copy of the raster.
         """
+        # Define new array
         if new_array is not None:
             data = new_array
         else:
             data = self.data.copy()
 
+        # Send to from_array
         cp = self.from_array(
             data=data,
             transform=self.transform,
@@ -2081,6 +2108,7 @@ class Raster:
             nodata=self.nodata,
             area_or_point=self.area_or_point,
             tags=self.tags,
+            cast_nodata=cast_nodata,
         )
 
         return cp

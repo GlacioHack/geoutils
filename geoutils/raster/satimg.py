@@ -428,8 +428,8 @@ class SatelliteImage(Raster):  # type: ignore
 
         return None
 
-    def copy(self, new_array: NDArrayNum | None = None) -> SatelliteImage:
-        new_satimg = super().copy(new_array=new_array)  # type: ignore
+    def copy(self, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> SatelliteImage:
+        new_satimg = super().copy(new_array=new_array, cast_nodata=cast_nodata)  # type: ignore
         # all objects here are immutable so no need for a copy method (string and datetime)
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
         for attrs in satimg_attrs:

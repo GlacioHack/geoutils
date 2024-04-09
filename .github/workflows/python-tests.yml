@@ -90,6 +90,11 @@ jobs:
     - name: Setup pip dependencies
       run: pip install pytest-cov coveralls coveragepy-lcov
 
+    - name: Print conda environment (for debugging)
+      run: |
+        conda info
+        conda list
+
     - name: Test with pytest
       run: pytest -ra --cov=geoutils/
 
