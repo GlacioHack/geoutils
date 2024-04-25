@@ -4,24 +4,24 @@ Module for dask-delayed functions for out-of-memory raster operations.
 import warnings
 from typing import Any, Literal
 
-import numpy as np
-import dask.delayed
 import dask.array as da
-import pandas as pd
+import dask.delayed
 import geopandas as gpd
-
+import numpy as np
+import pandas as pd
 import rasterio as rio
 from scipy.interpolate import interpn
 
-from geoutils.projtools import _get_footprint_projected, _get_bounds_projected
+from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 
 # 1/ SUBSAMPLING
 # Getting an exact subsample size out-of-memory only for valid values is not supported directly by Dask/Xarray
 
-# It is not trivial because we don't know where valid values will be in advance, and because of ragged output (varying 
+# It is not trivial because we don't know where valid values will be in advance, and because of ragged output (varying
 # output length considerations), which prevents from using high-level functions with good efficiency
-# We thus follow https://blog.dask.org/2021/07/02/ragged-output (the dask.array.map_blocks solution has a larger RAM 
+# We thus follow https://blog.dask.org/2021/07/02/ragged-output (the dask.array.map_blocks solution has a larger RAM
 # usage by having to drop an axis and re-chunk along 1D of the 2D array, so we use the dask.delayed solution instead)
+
 
 def _random_state_from_user_input(random_state: np.random.RandomState | int | None = None) -> np.random.RandomState:
     """Define random state based on varied user input."""
@@ -37,6 +37,7 @@ def _random_state_from_user_input(random_state: np.random.RandomState | int | No
 
     return rnd
 
+
 def _get_subsample_size_from_user_input(subsample: int | float, total_nb_valids: int) -> int:
     """Get subsample size based on a user input of either integer size or fraction of the number of valid points."""
 
@@ -48,14 +49,20 @@ def _get_subsample_size_from_user_input(subsample: int | float, total_nb_valids:
         # Use the number of valid points if larger than subsample asked by user
         npoints = min(int(subsample), total_nb_valids)
         if subsample > total_nb_valids:
-            warnings.warn(f"Subsample value of {subsample} is larger than the number of valid pixels of {total_nb_valids},"
-                          f"using all valid pixels as a subsample.", category=UserWarning)
+            warnings.warn(
+                f"Subsample value of {subsample} is larger than the number of valid pixels of {total_nb_valids},"
+                f"using all valid pixels as a subsample.",
+                category=UserWarning,
+            )
     else:
         raise ValueError("Subsample must be > 0.")
 
     return npoints
 
-def _get_indices_block_per_subsample(xxs: np.ndarray, num_chunks: tuple[int, int], nb_valids_per_block: list[int]) -> list[list[int]]:
+
+def _get_indices_block_per_subsample(
+    xxs: np.ndarray, num_chunks: tuple[int, int], nb_valids_per_block: list[int]
+) -> list[list[int]]:
     """
     Get list of 1D valid subsample indices relative to the block for each block.
 
@@ -78,7 +85,7 @@ def _get_indices_block_per_subsample(xxs: np.ndarray, num_chunks: tuple[int, int
     xxs = np.sort(xxs)
 
     # We define a list of indices per block
-    relative_ind_per_block = [[] for _ in range((num_chunks[0] * num_chunks[1]))]
+    relative_ind_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
     k = 0  # K is the block number
     for x in xxs:
 
@@ -93,10 +100,12 @@ def _get_indices_block_per_subsample(xxs: np.ndarray, num_chunks: tuple[int, int
 
     return relative_ind_per_block
 
+
 @dask.delayed
 def _delayed_nb_valids(arr_chunk: np.ndarray) -> np.ndarray:
     """Count number of valid values per block."""
     return np.array([np.count_nonzero(np.isfinite(arr_chunk))]).reshape((1, 1))
+
 
 @dask.delayed
 def _delayed_subsample_block(arr_chunk: np.ndarray, subsample_indices: np.ndarray) -> np.ndarray:
@@ -106,8 +115,11 @@ def _delayed_subsample_block(arr_chunk: np.ndarray, subsample_indices: np.ndarra
 
     return s_chunk
 
+
 @dask.delayed
-def _delayed_subsample_indices_block(arr_chunk: np.ndarray, subsample_indices: np.ndarray, block_id: dict[str, Any]) -> np.ndarray:
+def _delayed_subsample_indices_block(
+    arr_chunk: np.ndarray, subsample_indices: np.ndarray, block_id: dict[str, Any]
+) -> np.ndarray:
     """Return 2D indices from the subsampled 1D valid indices per block."""
 
     # Unravel indices of valid data to the shape of the block
@@ -119,10 +131,13 @@ def _delayed_subsample_indices_block(arr_chunk: np.ndarray, subsample_indices: n
 
     return np.hstack((ix, iy))
 
-def delayed_subsample(darr: da.Array,
-                      subsample: int | float = 1,
-                      return_indices: bool = False,
-                      random_state: np.random.RandomState | int | None = None) -> np.ndarray:
+
+def delayed_subsample(
+    darr: da.Array,
+    subsample: int | float = 1,
+    return_indices: bool = False,
+    random_state: np.random.RandomState | int | None = None,
+) -> np.ndarray:
     """
     Subsample a raster at valid values on out-of-memory chunks.
 
@@ -155,7 +170,9 @@ def delayed_subsample(darr: da.Array,
 
     # Compute number of valid points for each block out-of-memory
     blocks = darr.to_delayed().ravel()
-    list_delayed_valids = [da.from_delayed(_delayed_nb_valids(b), shape=(1, 1), dtype=np.dtype("int32")) for b in blocks]
+    list_delayed_valids = [
+        da.from_delayed(_delayed_nb_valids(b), shape=(1, 1), dtype=np.dtype("int32")) for b in blocks
+    ]
     nb_valids_per_block = np.concatenate([dask.compute(*list_delayed_valids)])
 
     # Sum to get total number of valid points
@@ -168,7 +185,9 @@ def delayed_subsample(darr: da.Array,
     indices_1d = rnd.choice(total_nb_valids, subsample_size, replace=False)
 
     # Sort which indexes belong to which chunk
-    ind_per_block = _get_indices_block_per_subsample(indices_1d, num_chunks=darr.numblocks, nb_valids_per_block=nb_valids_per_block)
+    ind_per_block = _get_indices_block_per_subsample(
+        indices_1d, num_chunks=darr.numblocks, nb_valids_per_block=nb_valids_per_block
+    )
 
     # To just get the subsample without indices
     if not return_indices:
@@ -179,8 +198,9 @@ def delayed_subsample(darr: da.Array,
             if len(ind_per_block[i]) > 0
         ]
         # Cast output to the right expected dtype and length, then compute and concatenate
-        list_subsamples_delayed = [da.from_delayed(s, shape=(nb_valids_per_block[i]), dtype=darr.dtype)
-                                   for i, s in enumerate(list_subsamples)]
+        list_subsamples_delayed = [
+            da.from_delayed(s, shape=(nb_valids_per_block[i]), dtype=darr.dtype) for i, s in enumerate(list_subsamples)
+        ]
         subsamples = np.concatenate(dask.compute(*list_subsamples_delayed), axis=0)
 
         return subsamples
@@ -190,11 +210,14 @@ def delayed_subsample(darr: da.Array,
         # Get robust list of starts (using what is done in block_id of dask.array.map_blocks)
         # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
         from dask.utils import cached_cumsum
+
         starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
         num_chunks = darr.numblocks
         # Get the starts per 1D block ID by unravelling starting indexes for each block
         indexes_xi, indexes_yi = np.unravel_index(np.arange(len(blocks)), shape=(num_chunks[0], num_chunks[1]))
-        block_ids = [{"xstart": starts[0][indexes_xi[i]], "ystart": starts[1][indexes_yi[i]]} for i in range(len(blocks))]
+        block_ids = [
+            {"xstart": starts[0][indexes_xi[i]], "ystart": starts[1][indexes_yi[i]]} for i in range(len(blocks))
+        ]
 
         # Task delayed subsample indices to be computed for each block, skipping blocks with no values to sample
         list_subsample_indices = [
@@ -203,8 +226,10 @@ def delayed_subsample(darr: da.Array,
             if len(ind_per_block[i]) > 0
         ]
         # Cast output to the right expected dtype and length, then compute and concatenate
-        list_subsamples_indices_delayed = [da.from_delayed(s, shape=(2, len(ind_per_block[i])), dtype=np.dtype("int32"))
-                                           for i, s in enumerate(list_subsample_indices)]
+        list_subsamples_indices_delayed = [
+            da.from_delayed(s, shape=(2, len(ind_per_block[i])), dtype=np.dtype("int32"))
+            for i, s in enumerate(list_subsample_indices)
+        ]
         indices = np.concatenate(dask.compute(*list_subsamples_indices_delayed), axis=0)
 
         return indices[:, 0], indices[:, 1]
@@ -219,6 +244,7 @@ def delayed_subsample(darr: da.Array,
 
 # Code structure inspired by https://blog.dask.org/2021/07/02/ragged-output and the "block_id" in map_blocks
 
+
 def _get_interp_indices_per_block(interp_x, interp_y, starts, num_chunks, chunksize, xres, yres):
     """Map blocks where each pair of interpolation coordinates will have to be computed."""
 
@@ -229,17 +255,21 @@ def _get_interp_indices_per_block(interp_x, interp_y, starts, num_chunks, chunks
     #  (as it uses array instead of nested lists, and nested lists grow in RAM very fast)
 
     # We use one bucket per block, assuming a flattened blocks shape
-    ind_per_block = [[] for _ in range((num_chunks[0] * num_chunks[1]))]
+    ind_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
     for i, (x, y) in enumerate(zip(interp_x, interp_y)):
         # Because it is a regular grid, we know exactly in which block ID the coordinate will fall
-        block_i_1d = int((x - starts[0][0]) / (xres * chunksize[0])) * num_chunks[1] + int((y - starts[1][0])/ (yres * chunksize[1]))
+        block_i_1d = int((x - starts[0][0]) / (xres * chunksize[0])) * num_chunks[1] + int(
+            (y - starts[1][0]) / (yres * chunksize[1])
+        )
         ind_per_block[block_i_1d].append(i)
 
     return ind_per_block
 
 
 @dask.delayed
-def _delayed_interp_points_block(arr_chunk: np.ndarray, block_id: dict[str, Any], interp_coords: np.ndarray) -> np.ndarray:
+def _delayed_interp_points_block(
+    arr_chunk: np.ndarray, block_id: dict[str, Any], interp_coords: np.ndarray
+) -> np.ndarray:
     """
     Interpolate block in 2D out-of-memory for a regular or equal grid.
     """
@@ -248,8 +278,8 @@ def _delayed_interp_points_block(arr_chunk: np.ndarray, block_id: dict[str, Any]
     xs, ys, xres, yres = (block_id["xstart"], block_id["ystart"], block_id["xres"], block_id["yres"])
 
     # Reconstruct the coordinates from xi/yi/xres/yres (as it has to be a regular grid)
-    x_coords = np.arange(xs, xs + xres*arr_chunk.shape[0], xres)
-    y_coords = np.arange(ys, ys + yres*arr_chunk.shape[1], yres)
+    x_coords = np.arange(xs, xs + xres * arr_chunk.shape[0], xres)
+    y_coords = np.arange(ys, ys + yres * arr_chunk.shape[1], yres)
 
     # TODO: Use scipy.map_coordinates for an equal grid as in Raster.interp_points?
 
@@ -259,10 +289,13 @@ def _delayed_interp_points_block(arr_chunk: np.ndarray, block_id: dict[str, Any]
     # And return the interpolated array
     return interp_chunk
 
-def delayed_interp_points(darr: da.Array,
-                          points: tuple[list[float], list[float]],
-                          resolution: tuple[float, float],
-                          method: Literal["nearest", "linear", "cubic", "quintic"] = "linear") -> np.ndarray:
+
+def delayed_interp_points(
+    darr: da.Array,
+    points: tuple[list[float], list[float]],
+    resolution: tuple[float, float],
+    method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
+) -> np.ndarray:
     """
     Interpolate raster at point coordinates on out-of-memory chunks.
 
@@ -293,33 +326,41 @@ def delayed_interp_points(darr: da.Array,
     # Get robust list of starts (using what is done in block_id of dask.array.map_blocks)
     # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
     from dask.utils import cached_cumsum
+
     starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
     num_chunks = expanded.numblocks
 
     # Get samples indices per blocks
-    ind_per_block = _get_interp_indices_per_block(points[0, :], points[1, :], starts, num_chunks, chunksize, resolution[0], resolution[1])
+    ind_per_block = _get_interp_indices_per_block(
+        points[0, :], points[1, :], starts, num_chunks, chunksize, resolution[0], resolution[1]
+    )
 
     # Create a delayed object for each block, and flatten the blocks into a 1d shape
     blocks = expanded.to_delayed().ravel()
 
     # Build the block IDs by unravelling starting indexes for each block
     indexes_xi, indexes_yi = np.unravel_index(np.arange(len(blocks)), shape=(num_chunks[0], num_chunks[1]))
-    block_ids = [{"xstart": starts[0][indexes_xi[i]] - map_depth[method],
-                  "ystart": starts[1][indexes_yi[i]] - map_depth[method],
-                  "xres": resolution[0],
-                  "yres": resolution[1]}
-                 for i in range(len(blocks))]
+    block_ids = [
+        {
+            "xstart": starts[0][indexes_xi[i]] - map_depth[method],
+            "ystart": starts[1][indexes_yi[i]] - map_depth[method],
+            "xres": resolution[0],
+            "yres": resolution[1],
+        }
+        for i in range(len(blocks))
+    ]
 
     # Compute values delayed
-    list_interp = [_delayed_interp_points_block(blocks[i],
-                                                block_ids[i],
-                                                points[:, ind_per_block[i]])
-                                                for i, data_chunk in enumerate(blocks)
-                                                if len(ind_per_block[i]) > 0
-                   ]
+    list_interp = [
+        _delayed_interp_points_block(blocks[i], block_ids[i], points[:, ind_per_block[i]])
+        for i, data_chunk in enumerate(blocks)
+        if len(ind_per_block[i]) > 0
+    ]
 
     # We define the expected output shape and dtype to simplify things for Dask
-    list_interp_delayed = [da.from_delayed(p, shape=(1, len(ind_per_block[i])), dtype=darr.dtype) for i, p in enumerate(list_interp)]
+    list_interp_delayed = [
+        da.from_delayed(p, shape=(1, len(ind_per_block[i])), dtype=darr.dtype) for i, p in enumerate(list_interp)
+    ]
     interp_points = np.concatenate(dask.compute(*list_interp_delayed), axis=0)
 
     # Re-order per-block output points to match their original indices
@@ -328,6 +369,7 @@ def delayed_interp_points(darr: da.Array,
     interp_points = np.array(interp_points)[argsort]
 
     return interp_points
+
 
 # 3/ REPROJECT
 # Part of the code (defining a GeoGrid and GeoTiling classes) in inspired by
@@ -391,13 +433,10 @@ class GeoGrid:
             crs = self.crs
         return _get_footprint_projected(self.bounds, in_crs=self.crs, out_crs=crs, densify_points=100)
 
-    def shift(self,
-        xoff: float,
-        yoff: float,
-        distance_unit: Literal["georeferenced"] | Literal["pixel"] = "pixel"):
+    def shift(self, xoff: float, yoff: float, distance_unit: Literal["georeferenced"] | Literal["pixel"] = "pixel"):
         """Shift geogrid, not inplace."""
 
-        if distance_unit not in["georeferenced", "pixel"]:
+        if distance_unit not in ["georeferenced", "pixel"]:
             raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
 
         # Get transform
@@ -422,14 +461,23 @@ def _get_block_ids_per_chunk(chunks: tuple[tuple[int, ...], tuple[int, ...]]) ->
     # Get robust list of chunk locations (using what is done in block_id of dask.array.map_blocks)
     # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
     from dask.utils import cached_cumsum
+
     starts = [cached_cumsum(c, initial_zero=True) for c in chunks]
     nb_blocks = num_chunks[0] * num_chunks[1]
     ixi, iyi = np.unravel_index(np.arange(nb_blocks), shape=(num_chunks[0], num_chunks[1]))
-    block_ids = [{"num_block": i, "ys": starts[0][ixi[i]],  "xs": starts[1][iyi[i]],
-                  "ye": starts[0][ixi[i] + 1], "xe":  starts[1][iyi[i] + 1]}
-                 for i in range(nb_blocks)]
+    block_ids = [
+        {
+            "num_block": i,
+            "ys": starts[0][ixi[i]],
+            "xs": starts[1][iyi[i]],
+            "ye": starts[0][ixi[i] + 1],
+            "xe": starts[1][iyi[i] + 1],
+        }
+        for i in range(nb_blocks)
+    ]
 
     return block_ids
+
 
 class ChunkedGeoGrid:
     """
@@ -485,12 +533,27 @@ def _chunks2d_from_chunksizes_shape(chunksizes: tuple[int, int], shape: tuple[in
     """Get tuples of chunk sizes for X/Y dimensions based on chunksizes and array shape."""
 
     # Chunksize is fixed, except for the last chunk depending on the shape
-    chunks_y = tuple(min(chunksizes[0], shape[0] - i*chunksizes[0],) for i in range(int(np.ceil(shape[0]/chunksizes[0]))))
-    chunks_x = tuple(min(chunksizes[1], shape[1] - i*chunksizes[1],) for i in range(int(np.ceil(shape[1]/chunksizes[1]))))
+    chunks_y = tuple(
+        min(
+            chunksizes[0],
+            shape[0] - i * chunksizes[0],
+        )
+        for i in range(int(np.ceil(shape[0] / chunksizes[0])))
+    )
+    chunks_x = tuple(
+        min(
+            chunksizes[1],
+            shape[1] - i * chunksizes[1],
+        )
+        for i in range(int(np.ceil(shape[1] / chunksizes[1])))
+    )
 
     return chunks_y, chunks_x
 
-def _combined_blocks_shape_transform(sub_block_ids: list[dict[str, int]], src_geogrid: GeoGrid) -> tuple[dict[str, Any], list[dict[str, int]]]:
+
+def _combined_blocks_shape_transform(
+    sub_block_ids: list[dict[str, int]], src_geogrid: GeoGrid
+) -> tuple[dict[str, Any], list[dict[str, int]]]:
     """Derive combined shape and transform from a subset of several blocks (for source input during reprojection)."""
 
     # Get combined shape by taking min of X/Y starting indices, max of X/Y ending indices
@@ -503,7 +566,10 @@ def _combined_blocks_shape_transform(sub_block_ids: list[dict[str, int]], src_ge
 
     # Compute relative block indexes that will be needed to reconstruct a square array in the delayed function,
     # by subtracting the minimum starting indices in X/Y
-    relative_block_indexes = [{"r"+s1+s2: b[s1+s2] - minmaxs["min_"+s1+"s"] for s1 in ["x", "y"] for s2 in ["s", "e"]} for b in sub_block_ids]
+    relative_block_indexes = [
+        {"r" + s1 + s2: b[s1 + s2] - minmaxs["min_" + s1 + "s"] for s1 in ["x", "y"] for s2 in ["s", "e"]}
+        for b in sub_block_ids
+    ]
 
     combined_meta = {"src_shape": combined_shape, "src_transform": tuple(combined_transform)}
 
@@ -511,9 +577,11 @@ def _combined_blocks_shape_transform(sub_block_ids: list[dict[str, int]], src_ge
 
 
 @dask.delayed
-def _delayed_reproject_per_block(*src_arrs: tuple[np.ndarray], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any) -> np.ndarray:
+def _delayed_reproject_per_block(
+    *src_arrs: tuple[np.ndarray], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
+) -> np.ndarray:
     """
-    Delayed reprojection per destination block (need to rebuild a square source array combined from intersecting blocks).
+    Delayed reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
     """
 
     # If no source chunk intersects, we return a chunk of destination nodata values
@@ -529,7 +597,7 @@ def _delayed_reproject_per_block(*src_arrs: tuple[np.ndarray], block_ids: list[d
     # Then fill it with the source chunks values
     for i, arr in enumerate(src_arrs):
         bid = block_ids[i]
-        comb_src_arr[bid["rys"]:bid["rye"], bid["rxs"]:bid["rxe"]] = arr
+        comb_src_arr[bid["rys"] : bid["rye"], bid["rxs"] : bid["rxe"]] = arr
 
     # Now, we can simply call Rasterio!
 
@@ -541,31 +609,33 @@ def _delayed_reproject_per_block(*src_arrs: tuple[np.ndarray], block_ids: list[d
     dst_arr = np.zeros(combined_meta["dst_shape"], dtype=comb_src_arr.dtype)
 
     _ = rio.warp.reproject(
-            comb_src_arr,
-            dst_arr,
-            src_transform=src_transform,
-            src_crs=kwargs["src_crs"],
-            dst_transform=dst_transform,
-            dst_crs=kwargs["dst_crs"],
-            resampling=kwargs["resampling"],
-            src_nodata=kwargs["src_nodata"],
-            dst_nodata=kwargs["dst_nodata"],
-        )
+        comb_src_arr,
+        dst_arr,
+        src_transform=src_transform,
+        src_crs=kwargs["src_crs"],
+        dst_transform=dst_transform,
+        dst_crs=kwargs["dst_crs"],
+        resampling=kwargs["resampling"],
+        src_nodata=kwargs["src_nodata"],
+        dst_nodata=kwargs["dst_nodata"],
+    )
 
     return dst_arr
 
 
-def delayed_reproject(darr: da.Array,
-                      src_transform: rio.transform.Affine,
-                      src_crs: rio.crs.CRS,
-                      dst_transform: rio.transform.Affine,
-                      dst_shape: tuple[int, int],
-                      dst_crs: rio.crs.CRS,
-                      resampling: rio.enums.Resampling,
-                      src_nodata: int | float = None,
-                      dst_nodata: int | float = None,
-                      dst_chunksizes: tuple[int, int] = None,
-                      **kwargs: Any) -> da.Array:
+def delayed_reproject(
+    darr: da.Array,
+    src_transform: rio.transform.Affine,
+    src_crs: rio.crs.CRS,
+    dst_transform: rio.transform.Affine,
+    dst_shape: tuple[int, int],
+    dst_crs: rio.crs.CRS,
+    resampling: rio.enums.Resampling,
+    src_nodata: int | float = None,
+    dst_nodata: int | float = None,
+    dst_chunksizes: tuple[int, int] = None,
+    **kwargs: Any,
+) -> da.Array:
     """
     Reproject georeferenced raster on out-of-memory chunks.
 
@@ -614,8 +684,12 @@ def delayed_reproject(darr: da.Array,
     # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
     # transform of each tuples of source blocks
     src_block_ids = np.array(src_geotiling.get_block_locations())
-    meta_params = [_combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)
-                   if len(sbid) > 0 else ({}, []) for sbid in dest2source]
+    meta_params = [
+        _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)
+        if len(sbid) > 0
+        else ({}, [])
+        for sbid in dest2source
+    ]
     # We also add the output transform/shape for this destination chunk in the combined meta
     # (those are the only two that are chunk-specific)
     dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
@@ -625,28 +699,40 @@ def delayed_reproject(darr: da.Array,
     # 4/ Call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
 
     # Add fixed arguments to keywords
-    kwargs.update({"src_nodata": src_nodata, "dst_nodata": dst_nodata, "resampling": resampling,
-                   "src_crs": src_crs, "dst_crs": dst_crs})
+    kwargs.update(
+        {
+            "src_nodata": src_nodata,
+            "dst_nodata": dst_nodata,
+            "resampling": resampling,
+            "src_crs": src_crs,
+            "dst_crs": dst_crs,
+        }
+    )
 
     # Create a delayed object for each block, and flatten the blocks into a 1d shape
     blocks = darr.to_delayed().ravel()
     # Run the delayed reprojection, looping for each destination block
-    list_reproj = [_delayed_reproject_per_block(*blocks[dest2source[i]],
-                                                block_ids=meta_params[i][1],
-                                                combined_meta=meta_params[i][0],
-                                                **kwargs)
-                   for i in range(len(dest2source))
-                   ]
+    list_reproj = [
+        _delayed_reproject_per_block(
+            *blocks[dest2source[i]], block_ids=meta_params[i][1], combined_meta=meta_params[i][0], **kwargs
+        )
+        for i in range(len(dest2source))
+    ]
 
     # We define the expected output shape and dtype to simplify things for Dask
-    list_reproj_delayed = [da.from_delayed(r, shape=dst_block_geogrids[i].shape, dtype=darr.dtype) for i, r in
-                           enumerate(list_reproj)]
+    list_reproj_delayed = [
+        da.from_delayed(r, shape=dst_block_geogrids[i].shape, dtype=darr.dtype) for i, r in enumerate(list_reproj)
+    ]
 
     # Array comes out as flat blocks x chunksize0 (varying) x chunksize1 (varying), so we can't reshape directly
     # We need to unravel the flattened blocks indices to align X/Y, then concatenate all columns, then rows
-    indexes_xi, indexes_yi = np.unravel_index(np.arange(len(dest2source)), shape=(len(dst_chunks[0]), len(dst_chunks[1])))
+    indexes_xi, indexes_yi = np.unravel_index(
+        np.arange(len(dest2source)), shape=(len(dst_chunks[0]), len(dst_chunks[1]))
+    )
 
-    lists_columns = [[l for i, l in enumerate(list_reproj_delayed) if j == indexes_xi[i]] for j in range(len(dst_chunks[0]))]
+    lists_columns = [
+        [l for i, l in enumerate(list_reproj_delayed) if j == indexes_xi[i]] for j in range(len(dst_chunks[0]))
+    ]
     concat_columns = [da.concatenate(c, axis=1) for c in lists_columns]
     concat_all = da.concatenate(concat_columns, axis=0)
 

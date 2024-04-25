@@ -1,16 +1,20 @@
 """Tests for dask functions (temporarily in xDEM, might move to GeoUtils)."""
 import os
 
+import dask
 import numpy as np
 import pytest
-import xarray as xr
-import dask.array as da
-from pyproj import CRS
 import rasterio as rio
-import dask
+import xarray as xr
+from pyproj import CRS
 
 from geoutils.examples import _EXAMPLES_DIRECTORY
-from geoutils.raster.delayed import delayed_subsample, delayed_interp_points, delayed_reproject
+from geoutils.raster.delayed import (
+    delayed_interp_points,
+    delayed_reproject,
+    delayed_subsample,
+)
+
 
 class TestDelayed:
 
@@ -65,8 +69,8 @@ class TestDelayed:
         interp1 = delayed_interp_points(darr=darr, points=(interp_x, interp_y), resolution=(1, 1))
 
         # Interpolate directly with Xarray and compare results are the same
-        xx = xr.DataArray(interp_x, dims='z', name='x')
-        yy = xr.DataArray(interp_y, dims='z', name='y')
+        xx = xr.DataArray(interp_x, dims="z", name="x")
+        yy = xr.DataArray(interp_y, dims="z", name="y")
         interp2 = ds.test.interp(x=xx, y=yy)
         interp2.compute()
         interp2 = np.array(interp2.values)
@@ -80,7 +84,7 @@ class TestDelayed:
         ds = xr.open_dataset(self.fn_tmp, chunks={"x": self.chunksize, "y": self.chunksize})
         darr = ds["test"].data
 
-        dask.config.set(scheduler='single-threaded')
+        dask.config.set(scheduler="single-threaded")
 
         src_shape = darr.shape
 
@@ -97,7 +101,6 @@ class TestDelayed:
         dst_chunksizes = (7, 5)
 
         # Build an intersecting dst_transform that is not aligned
-        src_res = (src_transform[0], abs(src_transform[4]))
         bounds = rio.coords.BoundingBox(*rio.transform.array_bounds(src_shape[0], src_shape[1], src_transform))
         # First, an aligned transform in the new CRS that allows to get
         # temporary new bounds and resolution in the units of the new CRS
@@ -116,8 +119,9 @@ class TestDelayed:
         tmp_res = (tmp_transform[0], abs(tmp_transform[4]))
         tmp_bounds = rio.coords.BoundingBox(*rio.transform.array_bounds(dst_shape[0], dst_shape[1], tmp_transform))
         # Now we modify the destination grid by changing bounds by a bit + the resolution
-        dst_transform = rio.transform.from_origin(tmp_bounds.left + 100*tmp_res[0], tmp_bounds.top + 150*tmp_res[0],
-                                                  tmp_res[0]*2.5, tmp_res[1]*0.7)
+        dst_transform = rio.transform.from_origin(
+            tmp_bounds.left + 100 * tmp_res[0], tmp_bounds.top + 150 * tmp_res[0], tmp_res[0] * 2.5, tmp_res[1] * 0.7
+        )
 
         # Other arguments
         src_nodata = -9999
@@ -125,9 +129,18 @@ class TestDelayed:
         resampling = rio.enums.Resampling.bilinear
 
         # Run delayed reproject
-        reproj_arr = delayed_reproject(darr, src_transform=src_transform, src_crs=src_crs, dst_transform=dst_transform,
-                                       dst_crs=dst_crs, dst_shape=dst_shape, src_nodata=src_nodata, dst_nodata=dst_nodata,
-                                       resampling=resampling, dst_chunksizes=dst_chunksizes)
+        reproj_arr = delayed_reproject(
+            darr,
+            src_transform=src_transform,
+            src_crs=src_crs,
+            dst_transform=dst_transform,
+            dst_crs=dst_crs,
+            dst_shape=dst_shape,
+            src_nodata=src_nodata,
+            dst_nodata=dst_nodata,
+            resampling=resampling,
+            dst_chunksizes=dst_chunksizes,
+        )
 
         # Save file out-of-memory
         # TODO: Would need to wrap the georef data in the netCDF, but not needed to test this
