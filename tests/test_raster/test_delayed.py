@@ -22,7 +22,7 @@ class TestDelayed:
         ds = xr.Dataset(data_vars={"test": data_arr})
         encoding_kwargs = {"test": {"chunksizes": (100, 100)}}
         ds.to_netcdf(fn_tmp, encoding=encoding_kwargs)
-        del ds, da, data
+        del ds, data_arr, data
 
     # Chunk size in memory
     chunksize = 500
