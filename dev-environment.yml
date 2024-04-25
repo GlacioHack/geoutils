@@ -12,6 +12,7 @@ dependencies:
   - scipy=1.*
   - tqdm
   - xarray
+  - dask
   - rioxarray=0.*
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
