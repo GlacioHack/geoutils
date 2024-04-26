@@ -1,7 +1,7 @@
 """Tests for dask-delayed functions."""
 import os
 from tempfile import NamedTemporaryFile
-from typing import Callable, Any
+from typing import Any, Callable
 
 import dask.array as da
 import numpy as np
@@ -9,8 +9,10 @@ import pandas as pd
 import pytest
 import rasterio as rio
 import xarray as xr
-from pyproj import CRS
 from dask.distributed import Client, LocalCluster
+from dask_memusage import install
+from pluggy import PluggyTeardownRaisedWarning
+from pyproj import CRS
 
 from geoutils.examples import _EXAMPLES_DIRECTORY
 from geoutils.raster.delayed import (
@@ -19,29 +21,30 @@ from geoutils.raster.delayed import (
     delayed_subsample,
 )
 
-from pluggy import PluggyTeardownRaisedWarning
-from dask_memusage import install
-
 # Ignore teardown warning given by Dask when closing the local cluster (due to dask-memusage plugin)
 pytestmark = pytest.mark.filterwarnings("ignore", category=PluggyTeardownRaisedWarning)
 
-# Fixture to use a single cluster for the entire module
-@pytest.fixture(scope='module')
+
+@pytest.fixture(scope="module")  # type: ignore
 def cluster():
+    """Fixture to use a single cluster for the entire module (otherwise raise runtime errors)."""
     # Need cluster to be single-threaded to use dask-memusage confidently
     dask_cluster = LocalCluster(n_workers=2, threads_per_worker=1, dashboard_address=None)
     yield dask_cluster
     dask_cluster.close()
 
-def _run_dask_measuring_memusage(cluster, dask_func: Callable, *args_dask_func: Any, **kwargs_dask_func: Any) -> tuple[Any, float]:
+
+def _run_dask_measuring_memusage(
+    cluster: Any, dask_func: Callable[..., Any], *args_dask_func: Any, **kwargs_dask_func: Any
+) -> tuple[Any, float]:
     """Run a dask function monitoring its memory usage."""
 
-    # Create a name temporary file that won't delete immediatley
+    # Create a name temporary file that won't delete immediately
     fn_tmp_csv = NamedTemporaryFile(suffix=".csv", delete=False).name
 
     # Setup cluster and client within context managers for a clean shutdown
     install(cluster.scheduler, fn_tmp_csv)
-    with Client(cluster) as client:
+    with Client(cluster) as _:
         outputs = dask_func(*args_dask_func, **kwargs_dask_func)
 
     # Read memusage file and cleanup
@@ -55,6 +58,7 @@ def _run_dask_measuring_memusage(cluster, dask_func: Callable, *args_dask_func: 
     memusage_mb = np.max(df.max_memory_mb[ind_nonzero]) - np.min(df.max_memory_mb[ind_nonzero])
 
     return outputs, memusage_mb
+
 
 def _estimate_subsample_memusage(darr: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int) -> float:
     """
@@ -87,11 +91,12 @@ def _estimate_subsample_memusage(darr: da.Array, chunksizes_in_mem: tuple[int, i
     meta_memusage = list_per_block + list_all_blocks
 
     # Final estimate of memory usage of operation in MB
-    max_op_memusage = fac_dask_margin * (chunk_memusage + sample_memusage + out_memusage + meta_memusage) / (2 ** 20)
+    max_op_memusage = fac_dask_margin * (chunk_memusage + sample_memusage + out_memusage + meta_memusage) / (2**20)
     # We add a base memory usage of ~50 MB + 10MB per 1000 chunks (loaded in background by Dask even on tiny data)
     max_op_memusage += 50 + 10 * (num_chunks / 1000)
 
     return max_op_memusage
+
 
 def _estimate_interp_points_memusage(darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int) -> float:
     """
@@ -125,14 +130,19 @@ def _estimate_interp_points_memusage(darr: da.Array, chunksizes_in_mem: tuple[in
     meta_memusage = list_per_block + list_all_blocks + dict_all_blocks
 
     # Final estimate of memory usage of operation in MB
-    max_op_memusage = fac_dask_margin * (chunk_memusage + out_memusage + meta_memusage) / (2 ** 20)
+    max_op_memusage = fac_dask_margin * (chunk_memusage + out_memusage + meta_memusage) / (2**20)
     # We add a base memory usage of ~50 MB + 10MB per 1000 chunks (loaded in background by Dask even on tiny data)
     max_op_memusage += 50 + 10 * (num_chunks / 1000)
 
     return max_op_memusage
 
-def _estimate_reproject_memusage(darr: da.Array, chunksizes_in_mem: tuple[int, int], dst_chunksizes: tuple[int, int],
-                                 rel_res_fac: tuple[float, float]) -> float:
+
+def _estimate_reproject_memusage(
+    darr: da.Array,
+    chunksizes_in_mem: tuple[int, int],
+    dst_chunksizes: tuple[int, int],
+    rel_res_fac: tuple[float, float],
+) -> float:
     """
     Estimate the theoretical memory usage of the delayed reprojection method.
     (we don't need to be super precise, just within a factor of ~2 to check memory usage performs as expected)
@@ -153,7 +163,7 @@ def _estimate_reproject_memusage(darr: da.Array, chunksizes_in_mem: tuple[int, i
     nb_source_chunks_per_dest = 8 * x_rel_source_chunks * y_rel_source_chunks
 
     # Combined memory usage of one chunk operation = squared array made from combined chunksize + original chunks
-    total_nb = np.ceil(np.sqrt(nb_source_chunks_per_dest))**2 + nb_source_chunks_per_dest
+    total_nb = np.ceil(np.sqrt(nb_source_chunks_per_dest)) ** 2 + nb_source_chunks_per_dest
     # We multiply the memory usage of a single chunk to the number of loaded/combined chunks
     chunk_memusage = darr.dtype.itemsize * np.prod(chunksizes_in_mem) * total_nb
 
@@ -170,19 +180,21 @@ def _estimate_reproject_memusage(darr: da.Array, chunksizes_in_mem: tuple[int, i
     meta_memusage = combined_meta + dict_all_blocks
 
     # Final estimate of memory usage of operation in MB
-    max_op_memusage = fac_dask_margin * (chunk_memusage + out_memusage + meta_memusage) / (2 ** 20)
+    max_op_memusage = fac_dask_margin * (chunk_memusage + out_memusage + meta_memusage) / (2**20)
     # We add a base memory usage of ~50 MB + 10MB per 1000 chunks (loaded in background by Dask even on tiny data)
     max_op_memusage += 50 + 10 * (num_chunks / 1000)
 
     return max_op_memusage
 
 
-def _build_dst_transform_shifted_newres(src_transform: rio.transform.Affine,
-                                        src_shape: tuple[int, int],
-                                        src_crs: CRS,
-                                        dst_crs: CRS,
-                                        bounds_rel_shift: tuple[float, float],
-                                        res_rel_fac: tuple[float, float]) -> rio.transform.Affine:
+def _build_dst_transform_shifted_newres(
+    src_transform: rio.transform.Affine,
+    src_shape: tuple[int, int],
+    src_crs: CRS,
+    dst_crs: CRS,
+    bounds_rel_shift: tuple[float, float],
+    res_rel_fac: tuple[float, float],
+) -> rio.transform.Affine:
     """
     Build a destination transform intersecting the source transform given source/destination shapes,
     and possibly introducing a relative shift in upper-left bound and multiplicative change in resolution.
@@ -212,9 +224,11 @@ def _build_dst_transform_shifted_newres(src_transform: rio.transform.Affine,
         west=tmp_bounds.left + bounds_rel_shift[0] * tmp_res[0] * src_shape[1],
         north=tmp_bounds.top + 150 * bounds_rel_shift[0] * tmp_res[1] * src_shape[0],
         xsize=tmp_res[0] / res_rel_fac[0],
-        ysize=tmp_res[1] / res_rel_fac[1])
+        ysize=tmp_res[1] / res_rel_fac[1],
+    )
 
     return dst_transform
+
 
 class TestDelayed:
     """
@@ -229,12 +243,11 @@ class TestDelayed:
         subsample and interp_points, or destination chunksizes to map output of reproject).
     2. During execution, we capture memory usage and check that only the expected amount of memory
         (one or several chunk combinations + metadata) is indeed used during the compute() call.
-     """
+    """
 
     # Write big test files on disk out-of-memory, with different input shapes not necessarily aligned between themselves
     # or with chunks
-    fn_nc_shape = {"test_square.nc": (10000, 10000),
-                   "test_complex.nc": (5511, 6768)}
+    fn_nc_shape = {"test_square.nc": (10000, 10000), "test_complex.nc": (5511, 6768)}
     # We can use a constant value for storage chunks, it doesn't have any influence on the accuracy of delayed methods
     # (can change slightly RAM usage, but pretty stable as long as chunksizes in memory are larger and
     # significantly bigger)
@@ -254,9 +267,9 @@ class TestDelayed:
             writer = ds.to_netcdf(fn, encoding=encoding_kwargs, compute=False)
             writer.compute()
 
-    @pytest.mark.parametrize("fn", list_fn)
-    @pytest.mark.parametrize("chunksizes_in_mem", [(2000, 2000), (1241, 3221)])
-    @pytest.mark.parametrize("subsample_size", [100, 100000])
+    @pytest.mark.parametrize("fn", list_fn)  # type: ignore
+    @pytest.mark.parametrize("chunksizes_in_mem", [(2000, 2000), (1241, 3221)])  # type: ignore
+    @pytest.mark.parametrize("subsample_size", [100, 100000])  # type: ignore
     def test_delayed_subsample(self, fn: str, chunksizes_in_mem: tuple[int, int], subsample_size: int, cluster: Any):
         """
         Checks for delayed subsampling function, both for output and memory usage.
@@ -272,15 +285,17 @@ class TestDelayed:
 
         # 1/ Estimation of theoretical memory usage of the subsampling script
 
-        max_op_memusage = _estimate_subsample_memusage(darr=darr, chunksizes_in_mem=chunksizes_in_mem,
-                                                       subsample_size=subsample_size)
+        max_op_memusage = _estimate_subsample_memusage(
+            darr=darr, chunksizes_in_mem=chunksizes_in_mem, subsample_size=subsample_size
+        )
 
         # 2/ Run delayed subsample with dask memory usage monitoring
 
         # Derive subsample from delayed function
         # (passed to wrapper function to measure memory usage during execution)
-        sub, measured_op_memusage = _run_dask_measuring_memusage(cluster, delayed_subsample, darr,
-                                                                 subsample=subsample_size, random_state=42)
+        sub, measured_op_memusage = _run_dask_measuring_memusage(
+            cluster, delayed_subsample, darr, subsample=subsample_size, random_state=42
+        )
 
         # Check the measured memory usage is smaller than the maximum estimated one
         assert measured_op_memusage < max_op_memusage
@@ -297,9 +312,9 @@ class TestDelayed:
         sub2 = np.array(darr.vindex[indices[0], indices[1]])
         assert np.array_equal(sub, sub2)
 
-    @pytest.mark.parametrize("fn", list_fn)
-    @pytest.mark.parametrize("chunksizes_in_mem", [(2000, 2000), (1241, 3221)])
-    @pytest.mark.parametrize("ninterp", [100, 100000])
+    @pytest.mark.parametrize("fn", list_fn)  # type: ignore
+    @pytest.mark.parametrize("chunksizes_in_mem", [(2000, 2000), (1241, 3221)])  # type: ignore
+    @pytest.mark.parametrize("ninterp", [100, 100000])  # type: ignore
     def test_delayed_interp_points(self, fn: str, chunksizes_in_mem: tuple[int, int], ninterp: int, cluster: Any):
         """
         Checks for delayed interpolate points function.
@@ -318,14 +333,15 @@ class TestDelayed:
         interp_y = rng.choice(ds.y.size, ninterp) + rng.random(ninterp)
 
         # 1/ Estimation of theoretical memory usage of the subsampling script
-        max_op_memusage = _estimate_interp_points_memusage(darr=darr, chunksizes_in_mem=chunksizes_in_mem,
-                                                           ninterp=ninterp)
-
+        max_op_memusage = _estimate_interp_points_memusage(
+            darr=darr, chunksizes_in_mem=chunksizes_in_mem, ninterp=ninterp
+        )
 
         # 2/ Run interpolation of random point coordinates with memory monitoring
 
-        interp1, measured_op_memusage = _run_dask_measuring_memusage(cluster, delayed_interp_points, darr,
-                                                                     points=(interp_x, interp_y), resolution=(1, 1))
+        interp1, measured_op_memusage = _run_dask_measuring_memusage(
+            cluster, delayed_interp_points, darr, points=(interp_x, interp_y), resolution=(1, 1)
+        )
         # Check the measured memory usage is smaller than the maximum estimated one
         assert measured_op_memusage < max_op_memusage
 
@@ -340,19 +356,25 @@ class TestDelayed:
 
         assert np.array_equal(interp1, interp2, equal_nan=True)
 
-    @pytest.mark.parametrize("fn", list_fn)
-    @pytest.mark.parametrize("chunksizes_in_mem", [(2000, 2000), (1241, 3221)])
-    @pytest.mark.parametrize("dst_chunksizes", [(2000, 2000), (1398, 2983)])
+    @pytest.mark.parametrize("fn", list_fn)  # type: ignore
+    @pytest.mark.parametrize("chunksizes_in_mem", [(2000, 2000), (1241, 3221)])  # type: ignore
+    @pytest.mark.parametrize("dst_chunksizes", [(2000, 2000), (1398, 2983)])  # type: ignore
     # Shift upper left corner of output bounds (relative to projected input bounds) by fractions of the raster size
-    @pytest.mark.parametrize("dst_bounds_rel_shift", [(0, 0), (-0.2, 0.5)])
+    @pytest.mark.parametrize("dst_bounds_rel_shift", [(0, 0), (-0.2, 0.5)])  # type: ignore
     # Modify output resolution (relative to projected input resolution) by a factor
-    @pytest.mark.parametrize("dst_res_rel_fac", [(1, 1), (2.1, 0.54)])
+    @pytest.mark.parametrize("dst_res_rel_fac", [(1, 1), (2.1, 0.54)])  # type: ignore
     # Same for shape
-    @pytest.mark.parametrize("dst_shape_diff", [(0, 0), (-28, 117)])
-    def test_delayed_reproject(self, fn: str, chunksizes_in_mem: tuple[int, int],
-                               dst_chunksizes: tuple[int, int], dst_bounds_rel_shift: tuple[float, float],
-                               dst_res_rel_fac: tuple[float, float], dst_shape_diff: tuple[int, int],
-                               cluster: Any):
+    @pytest.mark.parametrize("dst_shape_diff", [(0, 0), (-28, 117)])  # type: ignore
+    def test_delayed_reproject(
+        self,
+        fn: str,
+        chunksizes_in_mem: tuple[int, int],
+        dst_chunksizes: tuple[int, int],
+        dst_bounds_rel_shift: tuple[float, float],
+        dst_res_rel_fac: tuple[float, float],
+        dst_shape_diff: tuple[int, int],
+        cluster: Any,
+    ):
         """
         Checks for the delayed reproject function.
         Variables that influence specifically the delayed function are:
@@ -393,14 +415,20 @@ class TestDelayed:
         resampling = rio.enums.Resampling.bilinear
 
         # Get shifted dst_transform with new resolution
-        dst_transform = _build_dst_transform_shifted_newres(src_transform=src_transform, src_crs=src_crs, dst_crs=dst_crs,
-                                                            src_shape=src_shape, bounds_rel_shift=dst_bounds_rel_shift,
-                                                            res_rel_fac=dst_res_rel_fac)
+        dst_transform = _build_dst_transform_shifted_newres(
+            src_transform=src_transform,
+            src_crs=src_crs,
+            dst_crs=dst_crs,
+            src_shape=src_shape,
+            bounds_rel_shift=dst_bounds_rel_shift,
+            res_rel_fac=dst_res_rel_fac,
+        )
 
         # 1/ Estimation of theoretical memory usage of the subsampling script
 
-        max_op_memusage = _estimate_reproject_memusage(darr, chunksizes_in_mem=chunksizes_in_mem, dst_chunksizes=dst_chunksizes,
-                                                       rel_res_fac=dst_res_rel_fac)
+        max_op_memusage = _estimate_reproject_memusage(
+            darr, chunksizes_in_mem=chunksizes_in_mem, dst_chunksizes=dst_chunksizes, rel_res_fac=dst_res_rel_fac
+        )
 
         # 2/ Run delayed reproject with memory monitoring
 
@@ -408,7 +436,7 @@ class TestDelayed:
         # (delayed_reproject returns a delayed array that might not fit in memory, unlike subsampling/interpolation)
         fn_tmp_out = os.path.join(_EXAMPLES_DIRECTORY, os.path.splitext(os.path.basename(fn))[0] + "_reproj.nc")
 
-        def reproject_and_write(*args, **kwargs):
+        def reproject_and_write(*args: Any, **kwargs: Any) -> None:
 
             # Run delayed reprojection
             reproj_arr_tmp = delayed_reproject(*args, **kwargs)
@@ -456,20 +484,19 @@ class TestDelayed:
 
         # Keeping this to visualize Rasterio resampling issue
         # if PLOT:
-            # import matplotlib.pyplot as plt
-            # plt.figure()
-            # plt.imshow((reproj_arr - dst_arr), cmap="RdYlBu", vmin=-0.2, vmax=0.2, interpolation="None")
-            # plt.colorbar()
-            # plt.savefig("/home/atom/ongoing/diff_close_zero.png", dpi=500)
-            # plt.figure()
-            # plt.imshow(np.abs(reproj_arr - dst_arr), cmap="RdYlBu", vmin=99997, vmax=100001, interpolation="None")
-            # plt.colorbar()
-            # plt.savefig("/home/atom/ongoing/diff_nodata.png", dpi=500)
-            # plt.figure()
-            # plt.imshow(dst_arr, cmap="RdYlBu", vmin=-1, vmax=1, interpolation="None")
-            # plt.colorbar()
-            # plt.savefig("/home/atom/ongoing/dst.png", dpi=500)
-
+        # import matplotlib.pyplot as plt
+        # plt.figure()
+        # plt.imshow((reproj_arr - dst_arr), cmap="RdYlBu", vmin=-0.2, vmax=0.2, interpolation="None")
+        # plt.colorbar()
+        # plt.savefig("/home/atom/ongoing/diff_close_zero.png", dpi=500)
+        # plt.figure()
+        # plt.imshow(np.abs(reproj_arr - dst_arr), cmap="RdYlBu", vmin=99997, vmax=100001, interpolation="None")
+        # plt.colorbar()
+        # plt.savefig("/home/atom/ongoing/diff_nodata.png", dpi=500)
+        # plt.figure()
+        # plt.imshow(dst_arr, cmap="RdYlBu", vmin=-1, vmax=1, interpolation="None")
+        # plt.colorbar()
+        # plt.savefig("/home/atom/ongoing/dst.png", dpi=500)
 
         # Due to (what appears to be) Rasterio errors, we have to remain large here: even though some reprojections
         # are pretty good, some can get a bit nasty
