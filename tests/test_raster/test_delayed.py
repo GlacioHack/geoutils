@@ -224,11 +224,11 @@ class TestDelayed:
     the function outputs against the ones from in-memory methods.
 
     In details:
-    1. We compare to the in-memory function output for the set of input variables that are used to build the delayed
+    1. We compare with the in-memory function output only for the set of input variables that influence the delayed
         algorithm and might lead to new errors (for example: array shape to get subsample/points locations for
-        subsample and interp_points, or destination  chunksizes to map output of reproject).
+        subsample and interp_points, or destination chunksizes to map output of reproject).
     2. During execution, we capture memory usage and check that only the expected amount of memory
-        (one or several chunk combinations + metadata) is used during the compute() call.
+        (one or several chunk combinations + metadata) is indeed used during the compute() call.
      """
 
     # Write big test files on disk out-of-memory, with different input shapes not necessarily aligned between themselves
@@ -260,7 +260,7 @@ class TestDelayed:
     def test_delayed_subsample(self, fn: str, chunksizes_in_mem: tuple[int, int], subsample_size: int, cluster: Any):
         """
         Checks for delayed subsampling function, both for output and memory usage.
-        Variables that influence specifically the delayed function tested here:
+        Variables that influence specifically the delayed function are:
         - Input chunksizes,
         - Input array shape,
         - Number of subsampled points.
@@ -303,7 +303,7 @@ class TestDelayed:
     def test_delayed_interp_points(self, fn: str, chunksizes_in_mem: tuple[int, int], ninterp: int, cluster: Any):
         """
         Checks for delayed interpolate points function.
-        Variables that influence specifically the delayed function tested here:
+        Variables that influence specifically the delayed function are:
         - Input chunksizes,
         - Input array shape,
         - Number of interpolated points.
@@ -355,7 +355,7 @@ class TestDelayed:
                                cluster: Any):
         """
         Checks for the delayed reproject function.
-        Variables that influence specifically the delayed function tested here:
+        Variables that influence specifically the delayed function are:
         - Input/output chunksizes,
         - Input array shape,
         - Output geotransform relative to projected input geotransform,
