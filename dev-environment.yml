@@ -28,6 +28,8 @@ dependencies:
   - pyyaml
   - flake8
   - pylint
+  - netcdf4  # To write synthetic data with chunksizes
+  - dask-memusage
 
   # Doc dependencies
   - sphinx

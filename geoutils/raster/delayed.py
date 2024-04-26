@@ -84,6 +84,7 @@ def _get_indices_block_per_subsample(
     # We can write a faster algorithm by sorting
     xxs = np.sort(xxs)
 
+    # TODO: Write nested lists into array format to further save RAM?
     # We define a list of indices per block
     relative_ind_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
     k = 0  # K is the block number
@@ -372,8 +373,9 @@ def delayed_interp_points(
 
 
 # 3/ REPROJECT
-# Part of the code (defining a GeoGrid and GeoTiling classes) in inspired by
-# https://github.com/opendatacube/odc-geo/pull/88, modified to be more concise and rely only on Rasterio/GeoPandas
+# Part of the code (defining a GeoGrid and GeoTiling classes) is inspired by
+# https://github.com/opendatacube/odc-geo/pull/88, modified to be concise, stand-alone and rely only on
+# Rasterio/GeoPandas
 # Could be submitted as a PR to Rioxarray? (but not sure the dependency to GeoPandas would work there)
 
 # We define a GeoGrid and GeoTiling class (which composes GeoGrid) to consistently deal with georeferenced footprints
@@ -444,8 +446,13 @@ class GeoGrid:
 
         # Convert pixel offsets to georeferenced units
         if distance_unit == "pixel":
-            xoff *= self.res[0]
-            yoff *= self.res[1]
+            # Multiplying the offset by the resolution might amplify floating precision issues
+            # xoff *= self.res[0]
+            # yoff *= self.res[1]
+
+            # Using the boundaries instead!
+            xoff = xoff / self.shape[1] * (self.bounds.right - self.bounds.left)
+            yoff = yoff / self.shape[0] * (self.bounds.top - self.bounds.bottom)
 
         shifted_transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
 
@@ -597,7 +604,7 @@ def _delayed_reproject_per_block(
     # Then fill it with the source chunks values
     for i, arr in enumerate(src_arrs):
         bid = block_ids[i]
-        comb_src_arr[bid["rys"] : bid["rye"], bid["rxs"] : bid["rxe"]] = arr
+        comb_src_arr[bid["rys"]:bid["rye"], bid["rxs"]:bid["rxe"]] = arr
 
     # Now, we can simply call Rasterio!
 
