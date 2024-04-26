@@ -1,6 +1,7 @@
 """
 Module for dask-delayed functions for out-of-memory raster operations.
 """
+from __future__ import annotations
 import warnings
 from typing import Any, Literal, TypeVar
 
