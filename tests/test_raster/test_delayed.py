@@ -1,5 +1,6 @@
 """Tests for dask-delayed functions."""
 from __future__ import annotations
+
 import os
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable
