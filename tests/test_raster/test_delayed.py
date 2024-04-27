@@ -348,8 +348,14 @@ class TestDelayed:
         # Interpolate directly with Xarray (loads a lot in memory) and check results are exactly the same
         xx = xr.DataArray(interp_x, dims="z", name="x")
         yy = xr.DataArray(interp_y, dims="z", name="y")
-        ds = xr.DataArray(data=darr, dims=["x", "y"], coords={"x": np.arange(0, darr.shape[0] * res[0], res[0]),
-                                                              "y": np.arange(0, darr.shape[1] * res[1], res[1])})
+        ds = xr.DataArray(
+            data=darr,
+            dims=["x", "y"],
+            coords={
+                "x": np.arange(0, darr.shape[0] * res[0], res[0]),
+                "y": np.arange(0, darr.shape[1] * res[1], res[1]),
+            },
+        )
         interp2 = ds.interp(x=xx, y=yy)
         interp2.compute()
         interp2 = np.array(interp2.values)
