@@ -490,9 +490,9 @@ class TestRaster:
 
         # Fix the random seed
         rng = np.random.default_rng(42)
-        arr = rng.integers(
-            low=val_min, high=val_max, size=(width, height), dtype=randint_dtype  # type: ignore
-        ).astype(dtype)
+        arr = rng.integers(low=val_min, high=val_max, size=(width, height), dtype=randint_dtype).astype(  # type: ignore
+            dtype
+        )
         mask = rng.integers(0, 2, size=(width, height), dtype=bool)
 
         # Check that we are actually masking stuff
@@ -919,12 +919,8 @@ class TestRaster:
         rng = np.random.default_rng(42)
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-        r1 = gu.Raster.from_array(
-            rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
-        )
-        r2 = gu.Raster.from_array(
-            rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
-        )
+        r1 = gu.Raster.from_array(rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
+        r2 = gu.Raster.from_array(rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
 
         # Test negation
         r3 = -r1
