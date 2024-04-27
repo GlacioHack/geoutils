@@ -169,10 +169,11 @@ class TestArray:
         """Check the function to rotate array."""
 
         # Create an artificial raster
+        rng = np.random.default_rng(42)
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
         r1 = gu.Raster.from_array(
-            np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None
+            rng.integers(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
 
         # First, we get initial coords
