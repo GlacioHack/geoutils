@@ -242,7 +242,7 @@ class TestDelayed:
     In details:
     Set 1. We capture memory usage during the .compute() calls and check that only the expected amount of memory that
         we estimate independently (bytes used by one or several chunk combinations + metadata) is indeed used.
-    Set 2. We compare the outputs with the in-memory function specifically for input variables that influence the delayed
+    Set 2. We compare outputs with the in-memory function specifically for input variables that influence the delayed
         algorithm and might lead to new errors (for example: array shape to get subsample/points locations for
         subsample and interp_points, or destination chunksizes to map output of reproject).
 
@@ -282,7 +282,7 @@ class TestDelayed:
             small_darr = rng.normal(size=small_shape[0] * small_shape[1])
             # Add about half nodata values
             if w:
-                ind_nodata = rng.choice(small_darr.size, size=int(small_darr.size/2), replace=False)
+                ind_nodata = rng.choice(small_darr.size, size=int(small_darr.size / 2), replace=False)
                 small_darr[list(ind_nodata)] = np.nan
             small_darr = small_darr.reshape(small_shape[0], small_shape[1])
             list_small_darr.append(small_darr)
@@ -322,8 +322,9 @@ class TestDelayed:
     @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
     @pytest.mark.parametrize("ninterp", [2, 100])  # type: ignore
     @pytest.mark.parametrize("res", [(0.5, 2), (1, 1)])  # type: ignore
-    def test_delayed_interp_points__output(self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int,
-                                           res: tuple[float, float]):
+    def test_delayed_interp_points__output(
+        self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int, res: tuple[float, float]
+    ):
         """
         Checks for delayed interpolate points function.
         Variables that influence specifically the delayed function are:
@@ -363,13 +364,13 @@ class TestDelayed:
     # Same for shape
     @pytest.mark.parametrize("dst_shape_diff", [(0, 0), (-28, 117)])  # type: ignore
     def test_delayed_reproject__output(
-            self,
-            darr: da.Array,
-            chunksizes_in_mem: tuple[int, int],
-            dst_chunksizes: tuple[int, int],
-            dst_bounds_rel_shift: tuple[float, float],
-            dst_res_rel_fac: tuple[float, float],
-            dst_shape_diff: tuple[int, int],
+        self,
+        darr: da.Array,
+        chunksizes_in_mem: tuple[int, int],
+        dst_chunksizes: tuple[int, int],
+        dst_bounds_rel_shift: tuple[float, float],
+        dst_res_rel_fac: tuple[float, float],
+        dst_shape_diff: tuple[int, int],
     ):
         """
         Checks for the delayed reproject function.
@@ -427,7 +428,8 @@ class TestDelayed:
             src_nodata=src_nodata,
             dst_nodata=dst_nodata,
             resampling=resampling,
-            dst_chunksizes=dst_chunksizes, )
+            dst_chunksizes=dst_chunksizes,
+        )
 
         # 3/ Outputs check: load in memory and compare with a direct Rasterio reproject
         reproj_arr = np.array(reproj_arr)
@@ -461,7 +463,7 @@ class TestDelayed:
         # plt.colorbar()
         # plt.savefig("/home/atom/ongoing/dst.png", dpi=500)
 
-        # Due to (what appears to be) Rasterio errors, we have to remain unprecise for the checks here:
+        # Due to (what appears to be) Rasterio errors, we have to remain imprecise for the checks here:
         # even though some reprojections are pretty good, some can get a bit nasty
 
         # Check that little data (less than 10% of pixels) are significantly different
@@ -478,8 +480,9 @@ class TestDelayed:
     @pytest.mark.parametrize("fn", [fn_large])  # type: ignore
     @pytest.mark.parametrize("chunksizes_in_mem", [(1000, 1000), (2500, 2500)])  # type: ignore
     @pytest.mark.parametrize("subsample_size", [100, 100000])  # type: ignore
-    def test_delayed_subsample__memusage(self, fn: str, chunksizes_in_mem: tuple[int, int], subsample_size: int,
-                                         cluster: Any):
+    def test_delayed_subsample__memusage(
+        self, fn: str, chunksizes_in_mem: tuple[int, int], subsample_size: int, cluster: Any
+    ):
         """
         Checks for delayed subsampling function for memory usage on big file.
         (and also runs output checks as not long or too memory intensive in this case)
@@ -523,8 +526,9 @@ class TestDelayed:
     @pytest.mark.parametrize("fn", [fn_large])  # type: ignore
     @pytest.mark.parametrize("chunksizes_in_mem", [(1000, 1000), (2500, 2500)])  # type: ignore
     @pytest.mark.parametrize("ninterp", [100, 1000000])  # type: ignore
-    def test_delayed_interp_points__memusage(self, fn: str, chunksizes_in_mem: tuple[int, int], ninterp: int,
-                                             cluster: Any):
+    def test_delayed_interp_points__memusage(
+        self, fn: str, chunksizes_in_mem: tuple[int, int], ninterp: int, cluster: Any
+    ):
         """
         Checks for delayed interpolate points function for memory usage on a big file.
         Variables that influence memory usage are:
@@ -558,12 +562,12 @@ class TestDelayed:
     @pytest.mark.parametrize("dst_chunksizes", [(1000, 1000), (2500, 2500)])  # type: ignore
     @pytest.mark.parametrize("dst_bounds_rel_shift", [(1, 1), (2, 2)])  # type: ignore
     def test_delayed_reproject__memusage(
-            self,
-            fn: str,
-            chunksizes_in_mem: tuple[int, int],
-            dst_chunksizes: tuple[int, int],
-            dst_bounds_rel_shift: tuple[float, float],
-            cluster: Any,
+        self,
+        fn: str,
+        chunksizes_in_mem: tuple[int, int],
+        dst_chunksizes: tuple[int, int],
+        dst_bounds_rel_shift: tuple[float, float],
+        cluster: Any,
     ):
         """
         Checks for the delayed reproject function for memory usage on a big file.
