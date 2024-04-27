@@ -3781,7 +3781,7 @@ class Raster:
         subsample: float | int = 1,
         *,
         as_array: Literal[False] = False,
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum:
         ...
@@ -3796,7 +3796,7 @@ class Raster:
         subsample: float | int = 1,
         *,
         as_array: Literal[True],
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> Vector:
         ...
@@ -3811,7 +3811,7 @@ class Raster:
         subsample: float | int = 1,
         *,
         as_array: bool = False,
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum | Vector:
         ...
@@ -3824,7 +3824,7 @@ class Raster:
         auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
         as_array: bool = False,
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum | Vector:
         """
@@ -4106,7 +4106,7 @@ class Raster:
         subsample: int | float,
         return_indices: Literal[False] = False,
         *,
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum:
         ...
 
@@ -4116,7 +4116,7 @@ class Raster:
         subsample: int | float,
         return_indices: Literal[True],
         *,
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
     ) -> tuple[NDArrayNum, ...]:
         ...
 
@@ -4125,7 +4125,7 @@ class Raster:
         self,
         subsample: float | int,
         return_indices: bool = False,
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         ...
 
@@ -4133,7 +4133,7 @@ class Raster:
         self,
         subsample: float | int,
         return_indices: bool = False,
-        random_state: np.random.RandomState | int | None = None,
+        random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
         Randomly sample the raster. Only valid values are considered.
