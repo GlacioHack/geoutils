@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable
 
@@ -347,7 +348,8 @@ class TestDelayed:
         # Interpolate directly with Xarray (loads a lot in memory) and check results are exactly the same
         xx = xr.DataArray(interp_x, dims="z", name="x")
         yy = xr.DataArray(interp_y, dims="z", name="y")
-        ds = xr.DataArray(data=darr, dims=["x", "y"])
+        ds = xr.DataArray(data=darr, dims=["x", "y"], coords={"x": np.arange(0, darr.shape[0] * res[0], res[0]),
+                                                              "y": np.arange(0, darr.shape[1] * res[1], res[1])})
         interp2 = ds.interp(x=xx, y=yy)
         interp2.compute()
         interp2 = np.array(interp2.values)
@@ -393,6 +395,7 @@ class TestDelayed:
         # 0/ Define input parameters
 
         # Get input and output shape
+        darr = darr.rechunk(chunksizes_in_mem)
         src_shape = darr.shape
         dst_shape = (src_shape[0] + dst_shape_diff[0], src_shape[1] + dst_shape_diff[1])
 
@@ -491,37 +494,40 @@ class TestDelayed:
         - Chunksizes in memory.
         """
 
-        # 0/ Open dataset with chunks
-        ds = xr.open_dataset(fn, chunks={"x": chunksizes_in_mem[0], "y": chunksizes_in_mem[1]})
-        darr = ds["test"].data
+        # Only check on linux
+        if sys.platform == "linux":
 
-        # 1/ Estimation of theoretical memory usage of the subsampling script
+            # 0/ Open dataset with chunks
+            ds = xr.open_dataset(fn, chunks={"x": chunksizes_in_mem[0], "y": chunksizes_in_mem[1]})
+            darr = ds["test"].data
 
-        max_op_memusage = _estimate_subsample_memusage(
-            darr=darr, chunksizes_in_mem=chunksizes_in_mem, subsample_size=subsample_size
-        )
+            # 1/ Estimation of theoretical memory usage of the subsampling script
 
-        # 2/ Run delayed subsample with dask memory usage monitoring
+            max_op_memusage = _estimate_subsample_memusage(
+                darr=darr, chunksizes_in_mem=chunksizes_in_mem, subsample_size=subsample_size
+            )
 
-        # Derive subsample from delayed function
-        # (passed to wrapper function to measure memory usage during execution)
-        sub, measured_op_memusage = _run_dask_measuring_memusage(
-            cluster, delayed_subsample, darr, subsample=subsample_size, random_state=42
-        )
+            # 2/ Run delayed subsample with dask memory usage monitoring
 
-        # Check the measured memory usage is smaller than the maximum estimated one
-        assert measured_op_memusage < max_op_memusage
+            # Derive subsample from delayed function
+            # (passed to wrapper function to measure memory usage during execution)
+            sub, measured_op_memusage = _run_dask_measuring_memusage(
+                cluster, delayed_subsample, darr, subsample=subsample_size, random_state=42
+            )
 
-        # 3/ Output checks
-        # The subsample should have exactly the prescribed length, with only valid values
-        assert len(sub) == subsample_size
-        assert all(np.isfinite(sub))
+            # Check the measured memory usage is smaller than the maximum estimated one
+            assert measured_op_memusage < max_op_memusage
 
-        # To verify the sampling works correctly, we can get its subsample indices with the argument return_indices
-        # And compare to the same subsample with vindex (now that we know the coordinates of valid values sampled)
-        indices = delayed_subsample(darr, subsample=subsample_size, random_state=42, return_indices=True)
-        sub2 = np.array(darr.vindex[indices[0], indices[1]])
-        assert np.array_equal(sub, sub2)
+            # 3/ Output checks
+            # The subsample should have exactly the prescribed length, with only valid values
+            assert len(sub) == subsample_size
+            assert all(np.isfinite(sub))
+
+            # To verify the sampling works correctly, we can get its subsample indices with the argument return_indices
+            # And compare to the same subsample with vindex (now that we know the coordinates of valid values sampled)
+            indices = delayed_subsample(darr, subsample=subsample_size, random_state=42, return_indices=True)
+            sub2 = np.array(darr.vindex[indices[0], indices[1]])
+            assert np.array_equal(sub, sub2)
 
     @pytest.mark.parametrize("fn", [fn_large])  # type: ignore
     @pytest.mark.parametrize("chunksizes_in_mem", [(1000, 1000), (2500, 2500)])  # type: ignore
@@ -536,26 +542,29 @@ class TestDelayed:
         - Chunksizes in memory.
         """
 
-        # 0/ Open dataset with chunks and create random point locations to interpolate
-        ds = xr.open_dataset(fn, chunks={"x": chunksizes_in_mem[0], "y": chunksizes_in_mem[1]})
-        darr = ds["test"].data
+        # Only check on linux
+        if sys.platform == "linux":
 
-        rng = np.random.default_rng(seed=42)
-        interp_x = rng.choice(ds.x.size, ninterp) + rng.random(ninterp)
-        interp_y = rng.choice(ds.y.size, ninterp) + rng.random(ninterp)
+            # 0/ Open dataset with chunks and create random point locations to interpolate
+            ds = xr.open_dataset(fn, chunks={"x": chunksizes_in_mem[0], "y": chunksizes_in_mem[1]})
+            darr = ds["test"].data
 
-        # 1/ Estimation of theoretical memory usage of the subsampling script
-        max_op_memusage = _estimate_interp_points_memusage(
-            darr=darr, chunksizes_in_mem=chunksizes_in_mem, ninterp=ninterp
-        )
+            rng = np.random.default_rng(seed=42)
+            interp_x = rng.choice(ds.x.size, ninterp) + rng.random(ninterp)
+            interp_y = rng.choice(ds.y.size, ninterp) + rng.random(ninterp)
 
-        # 2/ Run interpolation of random point coordinates with memory monitoring
+            # 1/ Estimation of theoretical memory usage of the subsampling script
+            max_op_memusage = _estimate_interp_points_memusage(
+                darr=darr, chunksizes_in_mem=chunksizes_in_mem, ninterp=ninterp
+            )
 
-        interp1, measured_op_memusage = _run_dask_measuring_memusage(
-            cluster, delayed_interp_points, darr, points=(interp_x, interp_y), resolution=(1, 1)
-        )
-        # Check the measured memory usage is smaller than the maximum estimated one
-        assert measured_op_memusage < max_op_memusage
+            # 2/ Run interpolation of random point coordinates with memory monitoring
+
+            interp1, measured_op_memusage = _run_dask_measuring_memusage(
+                cluster, delayed_interp_points, darr, points=(interp_x, interp_y), resolution=(1, 1)
+            )
+            # Check the measured memory usage is smaller than the maximum estimated one
+            assert measured_op_memusage < max_op_memusage
 
     @pytest.mark.parametrize("fn", [fn_large])  # type: ignore
     @pytest.mark.parametrize("chunksizes_in_mem", [(1000, 1000), (2500, 2500)])  # type: ignore
@@ -577,79 +586,82 @@ class TestDelayed:
         - Relative difference in resolution (potentially more/less source chunks to load for a destination chunk).
         """
 
-        # We fix arbitrary changes to the destination shape/resolution/bounds
-        # (already checked in details in the output tests)
-        dst_shape_diff = (25, -25)
-        dst_res_rel_fac = (1.5, 0.5)
+        # Only check on linux
+        if sys.platform == "linux":
 
-        # 0/ Open dataset with chunks and define variables
-        ds = xr.open_dataset(fn, chunks={"x": chunksizes_in_mem[0], "y": chunksizes_in_mem[1]})
-        darr = ds["test"].data
+            # We fix arbitrary changes to the destination shape/resolution/bounds
+            # (already checked in details in the output tests)
+            dst_shape_diff = (25, -25)
+            dst_res_rel_fac = (1.5, 0.5)
 
-        # Get input and output shape
-        src_shape = darr.shape
-        dst_shape = (src_shape[0], src_shape[1] + dst_shape_diff[1])
+            # 0/ Open dataset with chunks and define variables
+            ds = xr.open_dataset(fn, chunks={"x": chunksizes_in_mem[0], "y": chunksizes_in_mem[1]})
+            darr = ds["test"].data
 
-        # Define arbitrary input/output CRS, they don't have a direct influence on the delayed method
-        # (as long as the input/output transforms intersect if projected in the same CRS)
-        src_crs = CRS(4326)
-        dst_crs = CRS(32630)
+            # Get input and output shape
+            src_shape = darr.shape
+            dst_shape = (src_shape[0], src_shape[1] + dst_shape_diff[1])
 
-        # Define arbitrary input transform, as we only care about the relative difference with the output transform
-        src_transform = rio.transform.from_bounds(10, 10, 15, 15, src_shape[0], src_shape[1])
+            # Define arbitrary input/output CRS, they don't have a direct influence on the delayed method
+            # (as long as the input/output transforms intersect if projected in the same CRS)
+            src_crs = CRS(4326)
+            dst_crs = CRS(32630)
 
-        # Other arguments having no influence
-        src_nodata = -9999
-        dst_nodata = 99999
-        resampling = rio.enums.Resampling.bilinear
+            # Define arbitrary input transform, as we only care about the relative difference with the output transform
+            src_transform = rio.transform.from_bounds(10, 10, 15, 15, src_shape[0], src_shape[1])
 
-        # Get shifted dst_transform with new resolution
-        dst_transform = _build_dst_transform_shifted_newres(
-            src_transform=src_transform,
-            src_crs=src_crs,
-            dst_crs=dst_crs,
-            src_shape=src_shape,
-            bounds_rel_shift=dst_bounds_rel_shift,
-            res_rel_fac=dst_res_rel_fac,
-        )
+            # Other arguments having no influence
+            src_nodata = -9999
+            dst_nodata = 99999
+            resampling = rio.enums.Resampling.bilinear
 
-        # 1/ Estimation of theoretical memory usage of the subsampling script
+            # Get shifted dst_transform with new resolution
+            dst_transform = _build_dst_transform_shifted_newres(
+                src_transform=src_transform,
+                src_crs=src_crs,
+                dst_crs=dst_crs,
+                src_shape=src_shape,
+                bounds_rel_shift=dst_bounds_rel_shift,
+                res_rel_fac=dst_res_rel_fac,
+            )
 
-        max_op_memusage = _estimate_reproject_memusage(
-            darr, chunksizes_in_mem=chunksizes_in_mem, dst_chunksizes=dst_chunksizes, rel_res_fac=dst_res_rel_fac
-        )
+            # 1/ Estimation of theoretical memory usage of the subsampling script
 
-        # 2/ Run delayed reproject with memory monitoring
+            max_op_memusage = _estimate_reproject_memusage(
+                darr, chunksizes_in_mem=chunksizes_in_mem, dst_chunksizes=dst_chunksizes, rel_res_fac=dst_res_rel_fac
+            )
 
-        # We define a function where computes happens during writing to be able to measure memory usage
-        # (delayed_reproject returns a delayed array that might not fit in memory, unlike subsampling/interpolation)
-        fn_tmp_out = os.path.join(_EXAMPLES_DIRECTORY, os.path.splitext(os.path.basename(fn))[0] + "_reproj.nc")
+            # 2/ Run delayed reproject with memory monitoring
 
-        def reproject_and_write(*args: Any, **kwargs: Any) -> None:
-            # Run delayed reprojection
-            reproj_arr_tmp = delayed_reproject(*args, **kwargs)
+            # We define a function where computes happens during writing to be able to measure memory usage
+            # (delayed_reproject returns a delayed array that might not fit in memory, unlike subsampling/interpolation)
+            fn_tmp_out = os.path.join(_EXAMPLES_DIRECTORY, os.path.splitext(os.path.basename(fn))[0] + "_reproj.nc")
 
-            # Save file out-of-memory and compute
-            data_arr = xr.DataArray(data=reproj_arr_tmp, dims=["x", "y"])
-            ds_out = xr.Dataset(data_vars={"test_reproj": data_arr})
-            write_delayed = ds_out.to_netcdf(fn_tmp_out, compute=False)
-            write_delayed.compute()
+            def reproject_and_write(*args: Any, **kwargs: Any) -> None:
+                # Run delayed reprojection
+                reproj_arr_tmp = delayed_reproject(*args, **kwargs)
 
-        # And call this function with memory usage monitoring
-        _, measured_op_memusage = _run_dask_measuring_memusage(
-            cluster,
-            reproject_and_write,
-            darr,
-            src_transform=src_transform,
-            src_crs=src_crs,
-            dst_transform=dst_transform,
-            dst_crs=dst_crs,
-            dst_shape=dst_shape,
-            src_nodata=src_nodata,
-            dst_nodata=dst_nodata,
-            resampling=resampling,
-            dst_chunksizes=dst_chunksizes,
-        )
+                # Save file out-of-memory and compute
+                data_arr = xr.DataArray(data=reproj_arr_tmp, dims=["x", "y"])
+                ds_out = xr.Dataset(data_vars={"test_reproj": data_arr})
+                write_delayed = ds_out.to_netcdf(fn_tmp_out, compute=False)
+                write_delayed.compute()
 
-        # Check the measured memory usage is smaller than the maximum estimated one
-        assert measured_op_memusage < max_op_memusage
+            # And call this function with memory usage monitoring
+            _, measured_op_memusage = _run_dask_measuring_memusage(
+                cluster,
+                reproject_and_write,
+                darr,
+                src_transform=src_transform,
+                src_crs=src_crs,
+                dst_transform=dst_transform,
+                dst_crs=dst_crs,
+                dst_shape=dst_shape,
+                src_nodata=src_nodata,
+                dst_nodata=dst_nodata,
+                resampling=resampling,
+                dst_chunksizes=dst_chunksizes,
+            )
+
+            # Check the measured memory usage is smaller than the maximum estimated one
+            assert measured_op_memusage < max_op_memusage

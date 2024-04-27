@@ -357,8 +357,8 @@ def delayed_interp_points(
     indexes_xi, indexes_yi = np.unravel_index(np.arange(len(blocks)), shape=(num_chunks[0], num_chunks[1]))
     block_ids = [
         {
-            "xstart": starts[0][indexes_xi[i]] - map_depth[method],
-            "ystart": starts[1][indexes_yi[i]] - map_depth[method],
+            "xstart": (starts[0][indexes_xi[i]] - map_depth[method]) * resolution[0],
+            "ystart": (starts[1][indexes_yi[i]] - map_depth[method]) * resolution[1],
             "xres": resolution[0],
             "yres": resolution[1],
         }
