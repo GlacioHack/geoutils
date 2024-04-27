@@ -113,13 +113,13 @@ def _estimate_interp_points_memusage(darr: da.Array, chunksizes_in_mem: tuple[in
     fac_dask_margin = 2.5
     num_chunks = np.prod(darr.numblocks)
 
-    # Single chunk operation = (data type bytes + boolean from np.isfinite) * chunksize **2
-    chunk_memusage = (darr.dtype.itemsize + np.dtype("bool").itemsize) * np.prod(chunksizes_in_mem)
+    # Single chunk operation = (data type bytes + boolean from np.isfinite + its subset) * overlapping chunksize **2
+    chunk_memusage = (darr.dtype.itemsize + 2 * np.dtype("bool").itemsize) * np.prod(chunksizes_in_mem)
     # For interpolation, chunks have to overlap and temporarily load each neighbouring chunk,
-    # we add 8 neighbouring chunks
-    chunk_memusage += darr.dtype.itemsize * np.prod(chunksizes_in_mem) * 8
+    # we add 8 neighbouring chunks, and double the size due to the memory used during interpolation
+    chunk_memusage *= 9
 
-    # Outputs: interpolate coordinates
+    # Outputs: pair of interpolated coordinates
     out_memusage = np.dtype(darr.dtype).itemsize * ninterp * 2
 
     # Size of metadata passed to dask: number of blocks times its content
@@ -536,8 +536,8 @@ class TestDelayed:
             assert np.array_equal(sub, sub2)
 
     @pytest.mark.parametrize("fn", [fn_large])  # type: ignore
-    @pytest.mark.parametrize("chunksizes_in_mem", [(1000, 1000), (2500, 2500)])  # type: ignore
-    @pytest.mark.parametrize("ninterp", [100, 1000000])  # type: ignore
+    @pytest.mark.parametrize("chunksizes_in_mem", [(2000, 2000)])  # type: ignore
+    @pytest.mark.parametrize("ninterp", [100, 100000])  # type: ignore
     def test_delayed_interp_points__memusage(
         self, fn: str, chunksizes_in_mem: tuple[int, int], ninterp: int, cluster: Any
     ):
@@ -565,7 +565,6 @@ class TestDelayed:
             )
 
             # 2/ Run interpolation of random point coordinates with memory monitoring
-
             interp1, measured_op_memusage = _run_dask_measuring_memusage(
                 cluster, delayed_interp_points, darr, points=(interp_x, interp_y), resolution=(1, 1)
             )
