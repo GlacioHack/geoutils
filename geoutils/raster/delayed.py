@@ -8,11 +8,11 @@ from typing import Any, Literal, TypeVar
 
 import dask.array as da
 import dask.delayed
-from dask.utils import cached_cumsum
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio as rio
+from dask.utils import cached_cumsum
 from scipy.interpolate import interpn
 
 from geoutils._typing import NDArrayNum
@@ -28,7 +28,9 @@ from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 # usage by having to drop an axis and re-chunk along 1D of the 2D array, so we use the dask.delayed solution instead)
 
 
-def _get_subsample_size_from_user_input(subsample: int | float, total_nb_valids: int, silence_max_subsample: bool) -> int:
+def _get_subsample_size_from_user_input(
+    subsample: int | float, total_nb_valids: int, silence_max_subsample: bool
+) -> int:
     """Get subsample size based on a user input of either integer size or fraction of the number of valid points."""
 
     # If value is between 0 and 1, use a fraction
@@ -174,8 +176,9 @@ def delayed_subsample(
     total_nb_valids = np.sum(nb_valids_per_block)
 
     # Get subsample size (depending on user input)
-    subsample_size = _get_subsample_size_from_user_input(subsample=subsample, total_nb_valids=total_nb_valids,
-                                                         silence_max_subsample=silence_max_subsample)
+    subsample_size = _get_subsample_size_from_user_input(
+        subsample=subsample, total_nb_valids=total_nb_valids, silence_max_subsample=silence_max_subsample
+    )
 
     # Get random 1D indexes for the subsample size
     indices_1d = rng.choice(total_nb_valids, subsample_size, replace=False)
@@ -649,7 +652,7 @@ def _delayed_reproject_per_block(
         resampling=kwargs["resampling"],
         src_nodata=kwargs["src_nodata"],
         dst_nodata=kwargs["dst_nodata"],
-        num_threads=1  # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
+        num_threads=1,  # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
     )
 
     return dst_arr

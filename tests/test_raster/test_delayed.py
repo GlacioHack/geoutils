@@ -5,7 +5,6 @@ import os
 import sys
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable
-import time
 
 import dask.array as da
 import numpy as np
