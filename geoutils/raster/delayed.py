@@ -8,6 +8,7 @@ from typing import Any, Literal, TypeVar
 
 import dask.array as da
 import dask.delayed
+from dask.utils import cached_cumsum
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ from geoutils._typing import NDArrayNum
 from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 
 # 1/ SUBSAMPLING
+# At the date of April 2024:
 # Getting an exact subsample size out-of-memory only for valid values is not supported directly by Dask/Xarray
 
 # It is not trivial because we don't know where valid values will be in advance, and because of ragged output (varying
@@ -26,24 +28,7 @@ from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 # usage by having to drop an axis and re-chunk along 1D of the 2D array, so we use the dask.delayed solution instead)
 
 
-def _random_state_from_user_input(
-    random_state: np.random.RandomState | int | None = None,
-) -> np.random.RandomState | np.random.Generator:
-    """Define random state based on varied user input."""
-
-    # Define state for random sampling (to fix results during testing)
-    # Not using the legacy random call is crucial for RAM usage: https://github.com/numpy/numpy/issues/14169
-    if random_state is None:
-        rnd: np.random.RandomState | np.random.Generator = np.random.default_rng()
-    elif isinstance(random_state, np.random.RandomState):
-        rnd = random_state
-    else:
-        rnd = np.random.default_rng(seed=42)
-
-    return rnd
-
-
-def _get_subsample_size_from_user_input(subsample: int | float, total_nb_valids: int) -> int:
+def _get_subsample_size_from_user_input(subsample: int | float, total_nb_valids: int, silence_max_subsample: bool) -> int:
     """Get subsample size based on a user input of either integer size or fraction of the number of valid points."""
 
     # If value is between 0 and 1, use a fraction
@@ -54,11 +39,12 @@ def _get_subsample_size_from_user_input(subsample: int | float, total_nb_valids:
         # Use the number of valid points if larger than subsample asked by user
         npoints = min(int(subsample), total_nb_valids)
         if subsample > total_nb_valids:
-            warnings.warn(
-                f"Subsample value of {subsample} is larger than the number of valid pixels of {total_nb_valids},"
-                f"using all valid pixels as a subsample.",
-                category=UserWarning,
-            )
+            if not silence_max_subsample:
+                warnings.warn(
+                    f"Subsample value of {subsample} is larger than the number of valid pixels of {total_nb_valids},"
+                    f"using all valid pixels as a subsample.",
+                    category=UserWarning,
+                )
     else:
         raise ValueError("Subsample must be > 0.")
 
@@ -66,7 +52,7 @@ def _get_subsample_size_from_user_input(subsample: int | float, total_nb_valids:
 
 
 def _get_indices_block_per_subsample(
-    xxs: NDArrayNum, num_chunks: tuple[int, int], nb_valids_per_block: list[int]
+    indices_1d: NDArrayNum, num_chunks: tuple[int, int], nb_valids_per_block: list[int]
 ) -> list[list[int]]:
     """
     Get list of 1D valid subsample indices relative to the block for each block.
@@ -76,7 +62,7 @@ def _get_indices_block_per_subsample(
     valid values in that block (while the input indices go from zero to the total number of valid values in the full
     array).
 
-    :param xxs: Subsample 1D indexes among a total number of valid values.
+    :param indices_1d: Subsample 1D indexes among a total number of valid values.
     :param num_chunks: Number of chunks in X and Y.
     :param nb_valids_per_block: Number of valid pixels per block.
 
@@ -87,24 +73,24 @@ def _get_indices_block_per_subsample(
     valids_cumsum = np.cumsum(nb_valids_per_block)
 
     # We can write a faster algorithm by sorting
-    xxs = np.sort(xxs)
+    indices_1d = np.sort(indices_1d)
 
     # TODO: Write nested lists into array format to further save RAM?
     # We define a list of indices per block
-    relative_ind_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
+    relative_index_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
     k = 0  # K is the block number
-    for x in xxs:
+    for i in indices_1d:
 
         # Move to the next block K where current 1D subsample index is, if not in this one
-        while x >= valids_cumsum[k]:
+        while i >= valids_cumsum[k]:
             k += 1
 
         # Add 1D subsample index  relative to first subsample index of this block
-        first_xindex_block = valids_cumsum[k - 1] if k >= 1 else 0  # The first 1D valid subsample index of the block
-        relative_xindex = x - first_xindex_block
-        relative_ind_per_block[k].append(relative_xindex)
+        first_index_block = valids_cumsum[k - 1] if k >= 1 else 0  # The first 1D valid subsample index of the block
+        relative_index = i - first_index_block
+        relative_index_per_block[k].append(relative_index)
 
-    return relative_ind_per_block
+    return relative_index_per_block
 
 
 @dask.delayed  # type: ignore
@@ -142,7 +128,8 @@ def delayed_subsample(
     darr: da.Array,
     subsample: int | float = 1,
     return_indices: bool = False,
-    random_state: np.random.RandomState | int | None = None,
+    random_state: int | np.random.Generator | None = None,
+    silence_max_subsample: bool = False,
 ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
     """
     Subsample a raster at valid values on out-of-memory chunks.
@@ -167,12 +154,14 @@ def delayed_subsample(
         If > 1 will be considered the number of valid pixels to extract.
     :param return_indices: If set to True, will return the extracted indices only.
     :param random_state: Random state, or seed number to use for random calculations.
+    :param silence_max_subsample: Whether to silence the warning for the subsample size being larger than the total
+        number of valid points (warns by default).
 
     :return: Subsample of values from the array (optionally, their indexes).
     """
 
     # Get random state
-    rnd = _random_state_from_user_input(random_state=random_state)
+    rng = np.random.default_rng(random_state)
 
     # Compute number of valid points for each block out-of-memory
     blocks = darr.to_delayed().ravel()
@@ -185,10 +174,11 @@ def delayed_subsample(
     total_nb_valids = np.sum(nb_valids_per_block)
 
     # Get subsample size (depending on user input)
-    subsample_size = _get_subsample_size_from_user_input(subsample=subsample, total_nb_valids=total_nb_valids)
+    subsample_size = _get_subsample_size_from_user_input(subsample=subsample, total_nb_valids=total_nb_valids,
+                                                         silence_max_subsample=silence_max_subsample)
 
     # Get random 1D indexes for the subsample size
-    indices_1d = rnd.choice(total_nb_valids, subsample_size, replace=False)
+    indices_1d = rng.choice(total_nb_valids, subsample_size, replace=False)
 
     # Sort which indexes belong to which chunk
     ind_per_block = _get_indices_block_per_subsample(
@@ -213,10 +203,10 @@ def delayed_subsample(
 
     # To return indices
     else:
-        # Get robust list of starts (using what is done in block_id of dask.array.map_blocks)
+        # Get starting 2D index for each chunk of the full array
+        # (mirroring what is done in block_id of dask.array.map_blocks)
         # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
-        from dask.utils import cached_cumsum
-
+        # This list also includes the last index as well (not used here)
         starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
         num_chunks = darr.numblocks
         # Get the starts per 1D block ID by unravelling starting indexes for each block
@@ -242,6 +232,7 @@ def delayed_subsample(
 
 
 # 2/ POINT INTERPOLATION ON REGULAR OR EQUAL GRID
+# At the date of April 2024:
 # This functionality is not covered efficiently by Dask/Xarray, because they need to support rectilinear grids, which
 # is difficult when interpolating in the chunked dimensions, and loads nearly all array memory when using .interp().
 
@@ -267,6 +258,8 @@ def _get_interp_indices_per_block(
     # TODO 2: Check if computing block_i_id matricially + using an == comparison (possibly delayed) to get index
     #  per block is not more computationally efficient?
     #  (as it uses array instead of nested lists, and nested lists grow in RAM very fast)
+
+    # The argument "starts" contains the list of chunk first X/Y index for the full array, plus the last index
 
     # We use one bucket per block, assuming a flattened blocks shape
     ind_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
@@ -338,10 +331,8 @@ def delayed_interp_points(
     chunksize = darr.chunksize
     expanded = da.overlap.overlap(darr, depth=map_depth[method], boundary=np.nan)
 
-    # Get robust list of starts (using what is done in block_id of dask.array.map_blocks)
-    # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
-    from dask.utils import cached_cumsum
-
+    # Get starting 2D index for each chunk of the full array
+    # (mirroring what is done in block_id of dask.array.map_blocks)
     starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
     num_chunks = expanded.numblocks
 
@@ -367,7 +358,7 @@ def delayed_interp_points(
 
     # Compute values delayed
     list_interp = [
-        _delayed_interp_points_block(blocks[i], block_ids[i], points_arr[:, ind_per_block[i]])
+        _delayed_interp_points_block(data_chunk, block_ids[i], points_arr[:, ind_per_block[i]])
         for i, data_chunk in enumerate(blocks)
         if len(ind_per_block[i]) > 0
     ]
@@ -387,6 +378,7 @@ def delayed_interp_points(
 
 
 # 3/ REPROJECT
+# At the date of April 2024: not supported by Rioxarray
 # Part of the code (defining a GeoGrid and GeoTiling classes) is inspired by
 # https://github.com/opendatacube/odc-geo/pull/88, modified to be concise, stand-alone and rely only on
 # Rasterio/GeoPandas
@@ -434,23 +426,24 @@ class GeoGrid:
     def res(self) -> tuple[int, int]:
         return self.transform[0], abs(self.transform[4])
 
-    @property
-    def bounds(self) -> rio.coords.BoundingBox:
-        return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
-
     def bounds_projected(self, crs: rio.crs.CRS = None) -> rio.coords.BoundingBox:
         if crs is None:
             crs = self.crs
-        return _get_bounds_projected(bounds=self.bounds, in_crs=self.crs, out_crs=crs)
+        bounds = rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
+        return _get_bounds_projected(bounds=bounds, in_crs=self.crs, out_crs=crs)
 
     @property
-    def footprint(self) -> gpd.GeoDataFrame:
-        return _get_footprint_projected(self.bounds, in_crs=self.crs, out_crs=self.crs, densify_points=100)
+    def bounds(self) -> rio.coords.BoundingBox:
+        return self.bounds_projected()
 
     def footprint_projected(self, crs: rio.crs.CRS = None) -> gpd.GeoDataFrame:
         if crs is None:
             crs = self.crs
         return _get_footprint_projected(self.bounds, in_crs=self.crs, out_crs=crs, densify_points=100)
+
+    @property
+    def footprint(self) -> gpd.GeoDataFrame:
+        return self.footprint_projected()
 
     @classmethod
     def from_dict(cls: type[GeoGridType], dict_meta: dict[str, Any]) -> GeoGridType:
@@ -473,11 +466,11 @@ class GeoGrid:
 
         # Convert pixel offsets to georeferenced units
         if distance_unit == "pixel":
-            # Multiplying the offset by the resolution might amplify floating precision issues
+            # Can either multiply the offset by the resolution
             # xoff *= self.res[0]
             # yoff *= self.res[1]
 
-            # Using the boundaries instead!
+            # Or use the boundaries instead! (maybe less floating point issues? doesn't seem to matter in tests)
             xoff = xoff / self.shape[1] * (self.bounds.right - self.bounds.left)
             yoff = yoff / self.shape[0] * (self.bounds.top - self.bounds.bottom)
 
@@ -499,6 +492,7 @@ def _get_block_ids_per_chunk(chunks: tuple[tuple[int, ...], tuple[int, ...]]) ->
     starts = [cached_cumsum(c, initial_zero=True) for c in chunks]
     nb_blocks = num_chunks[0] * num_chunks[1]
     ixi, iyi = np.unravel_index(np.arange(nb_blocks), shape=(num_chunks[0], num_chunks[1]))
+    # Starting and ending indexes "s" and "e" for both X/Y, to place the chunk in the full array
     block_ids = [
         {
             "num_block": i,
@@ -546,7 +540,7 @@ class ChunkedGeoGrid:
         for bid in block_ids:
             # We get the block size
             block_shape = (bid["ye"] - bid["ys"], bid["xe"] - bid["xs"])
-            # Build a temporary geogrid with the same transform as the full grid
+            # Build a temporary geogrid with the same transform as the full grid, but with the chunk shape
             geogrid_tmp = GeoGrid(transform=self.grid.transform, crs=self.grid.crs, shape=block_shape)
             # And shift it to the right location (X is positive in index direction, Y is negative)
             geogrid_block = geogrid_tmp.shift(xoff=bid["xs"], yoff=-bid["ys"])
@@ -622,7 +616,8 @@ def _delayed_reproject_per_block(
 
     # If no source chunk intersects, we return a chunk of destination nodata values
     if len(src_arrs) == 0:
-        dst_arr = np.zeros(combined_meta["dst_shape"], dtype=np.dtype("float64"))
+        # We can use float32 to return NaN, will be cast to other floating type later if that's not source array dtype
+        dst_arr = np.zeros(combined_meta["dst_shape"], dtype=np.dtype("float32"))
         dst_arr[:] = kwargs["dst_nodata"]
         return dst_arr
 
@@ -654,6 +649,7 @@ def _delayed_reproject_per_block(
         resampling=kwargs["resampling"],
         src_nodata=kwargs["src_nodata"],
         dst_nodata=kwargs["dst_nodata"],
+        num_threads=1  # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
     )
 
     return dst_arr
@@ -717,7 +713,7 @@ def delayed_reproject(
     # overlap, then map indexes of source blocks that intersect a given destination block
     src_footprints = src_geotiling.get_block_footprints(crs=dst_crs)
     dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
-    dest2source = [np.where(dst.intersects(src_footprints).geometry.values)[0] for dst in dst_footprints]
+    dest2source = [np.where(dst.intersects(src_footprints).values)[0] for dst in dst_footprints]
 
     # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
     # transform of each tuples of source blocks

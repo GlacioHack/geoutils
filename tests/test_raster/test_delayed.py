@@ -5,6 +5,7 @@ import os
 import sys
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable
+import time
 
 import dask.array as da
 import numpy as np
@@ -247,7 +248,8 @@ class TestDelayed:
         algorithm and might lead to new errors (for example: array shape to get subsample/points locations for
         subsample and interp_points, or destination chunksizes to map output of reproject).
 
-    We start with output checks which run faster when ordered before (maybe due to the cluster memory monitoring after).
+    We start with set 2: output checks which run faster when ordered before
+    (maybe due to the cluster memory monitoring after).
     """
 
     # Define random seed for generating test data
@@ -306,7 +308,6 @@ class TestDelayed:
         # 1/ We run the delayed function after re-chunking
         darr = darr.rechunk(chunksizes_in_mem)
         sub = delayed_subsample(darr, subsample=subsample_size, random_state=42)
-
         # 2/ Output checks
 
         # # The subsample should have exactly the prescribed length, with only valid values
@@ -390,9 +391,9 @@ class TestDelayed:
         """
 
         # Keeping this commented here if we need to redo local tests due to Rasterio errors
-        # fn = list_fn[0]
-        # chunksizes_in_mem = (2000, 2000)
-        # dst_chunksizes = (1398, 2983)  # (2000, 2000)
+        # darr = list_small_darr[0]
+        # chunksizes_in_mem = list_small_chunksizes_in_mem[0]
+        # dst_chunksizes = list_small_chunksizes_in_mem[0]  # (2000, 2000)
         # dst_bounds_rel_shift = (0, 0)
         # dst_res_rel_fac = (0.45, 0.45)  # (1, 1)
         # dst_shape_diff = (0, 0)
