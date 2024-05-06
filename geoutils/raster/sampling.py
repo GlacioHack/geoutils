@@ -16,7 +16,7 @@ def subsample_array(
     subsample: float | int,
     return_indices: Literal[False] = False,
     *,
-    random_state: np.random.RandomState | int | None = None,
+    random_state: int | np.random.Generator | None = None,
 ) -> NDArrayNum:
     ...
 
@@ -27,7 +27,7 @@ def subsample_array(
     subsample: float | int,
     return_indices: Literal[True],
     *,
-    random_state: np.random.RandomState | int | None = None,
+    random_state: int | np.random.Generator | None = None,
 ) -> tuple[NDArrayNum, ...]:
     ...
 
@@ -37,7 +37,7 @@ def subsample_array(
     array: NDArrayNum | MArrayNum,
     subsample: float | int,
     return_indices: bool = False,
-    random_state: np.random.RandomState | int | None = None,
+    random_state: int | np.random.Generator | None = None,
 ) -> NDArrayNum | tuple[NDArrayNum, ...]:
     ...
 
@@ -46,7 +46,7 @@ def subsample_array(
     array: NDArrayNum | MArrayNum,
     subsample: float | int,
     return_indices: bool = False,
-    random_state: np.random.RandomState | int | None = None,
+    random_state: int | np.random.Generator | None = None,
 ) -> NDArrayNum | tuple[NDArrayNum, ...]:
     """
     Randomly subsample a 1D or 2D array by a sampling factor, taking only non NaN/masked values.
@@ -60,12 +60,7 @@ def subsample_array(
     :returns: The subsampled array (1D) or the indices to extract (same shape as input array)
     """
     # Define state for random sampling (to fix results during testing)
-    if random_state is None:
-        rnd: np.random.RandomState | np.random.Generator = np.random.default_rng()
-    elif isinstance(random_state, np.random.RandomState):
-        rnd = random_state
-    else:
-        rnd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(random_state)))
+    rng = np.random.default_rng(random_state)
 
     # Remove invalid values and flatten array
     mask = get_mask_from_array(array)  # -> need to remove .squeeze in get_mask
@@ -92,7 +87,7 @@ def subsample_array(
         npoints = np.size(valids)
 
     # Randomly extract npoints without replacement
-    indices = rnd.choice(valids, npoints, replace=False)
+    indices = rng.choice(valids, npoints, replace=False)
     unraveled_indices = np.unravel_index(indices, array.shape)
 
     if return_indices:
