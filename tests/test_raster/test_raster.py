@@ -489,18 +489,18 @@ class TestRaster:
             randint_dtype = "int32"
 
         # Fix the random seed
-        np.random.seed(42)
-        arr = np.random.randint(
-            low=val_min, high=val_max, size=(width, height), dtype=randint_dtype  # type: ignore
-        ).astype(dtype)
-        mask = np.random.randint(0, 2, size=(width, height), dtype=bool)
+        rng = np.random.default_rng(42)
+        arr = rng.integers(low=val_min, high=val_max, size=(width, height), dtype=randint_dtype).astype(  # type: ignore
+            dtype
+        )
+        mask = rng.integers(0, 2, size=(width, height), dtype=bool)
 
         # Check that we are actually masking stuff
         assert np.count_nonzero(mask) > 0
 
         # Add a random floating point value if the data type is float
         if "float" in dtype:
-            arr += np.random.normal(size=(width, height))
+            arr += rng.normal(size=(width, height))
 
         # Use either the default nodata or None
         if nodata_init == "type_default":
@@ -556,7 +556,7 @@ class TestRaster:
             # We set one random unmasked value to NaN
             indices = np.indices(np.shape(arr))
             ind_nm = indices[:, ~mask]
-            rand_ind = np.random.randint(low=0, high=ind_nm.shape[1], size=1)[0]
+            rand_ind = rng.integers(low=0, high=ind_nm.shape[1], size=1)[0]
             arr_with_unmasked_nodata[ind_nm[0, rand_ind], ind_nm[1, rand_ind]] = np.nan
 
             if nodata is None:
@@ -916,14 +916,11 @@ class TestRaster:
         Test addition, subtraction and negation on a Raster object.
         """
         # Create fake rasters with random values in 0-255 and dtype uint8
+        rng = np.random.default_rng(42)
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-        r1 = gu.Raster.from_array(
-            np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
-        )
-        r2 = gu.Raster.from_array(
-            np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
-        )
+        r1 = gu.Raster.from_array(rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
+        r2 = gu.Raster.from_array(rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None)
 
         # Test negation
         r3 = -r1
@@ -942,7 +939,7 @@ class TestRaster:
 
         # Test with dtype Float32
         r1 = gu.Raster.from_array(
-            np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform, crs=None
+            rng.integers(0, 255, (height, width)).astype("float32"), transform=transform, crs=None
         )
         r3 = -r1
         assert np.all(r3.data == -r1.data)
@@ -959,7 +956,7 @@ class TestRaster:
         # Check that errors are properly raised
         # different shapes
         r1 = gu.Raster.from_array(
-            np.random.randint(0, 255, (height + 1, width)).astype("float32"), transform=transform, crs=None
+            rng.integers(0, 255, (height + 1, width)).astype("float32"), transform=transform, crs=None
         )
         expected_message = "Both rasters must have the same shape, transform and CRS."
         with pytest.raises(ValueError, match=expected_message):
@@ -970,7 +967,7 @@ class TestRaster:
 
         # different CRS
         r1 = gu.Raster.from_array(
-            np.random.randint(0, 255, (height, width)).astype("float32"),
+            rng.integers(0, 255, (height, width)).astype("float32"),
             transform=transform,
             crs=rio.crs.CRS.from_epsg(4326),
         )
@@ -984,7 +981,7 @@ class TestRaster:
         # different transform
         transform2 = rio.transform.from_bounds(0, 0, 2, 2, width, height)
         r1 = gu.Raster.from_array(
-            np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
+            rng.integers(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
         )
 
         with pytest.raises(ValueError, match=expected_message):
@@ -1173,7 +1170,8 @@ class TestRaster:
         rst = gu.Raster(example)
 
         # Create a boolean array of the same shape, and a mask of the same transform/crs
-        arr = np.random.randint(low=0, high=2, size=rst.shape, dtype=bool)
+        rng = np.random.default_rng(42)
+        arr = rng.integers(low=0, high=2, size=rst.shape, dtype=bool)
         mask = gu.Mask.from_array(data=arr, transform=rst.transform, crs=rst.crs)
 
         # Check that indexing works with both of those
@@ -1277,7 +1275,8 @@ class TestRaster:
         assert r_cropped.raster_equal(r)
 
         # - Test cropping each side by a random integer of pixels - #
-        rand_int = np.random.randint(1, min(r.shape) - 1)
+        rng = np.random.default_rng(42)
+        rand_int = rng.integers(1, min(r.shape) - 1)
 
         # Left
         crop_geom2 = [crop_geom[0] + rand_int * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
@@ -1340,7 +1339,7 @@ class TestRaster:
         assert r_copy.raster_equal(r_cropped)
 
         # - Test cropping each side with a non integer pixel, mode='match_pixel' - #
-        rand_float = np.random.randint(1, min(r.shape) - 1) + 0.25
+        rand_float = rng.integers(1, min(r.shape) - 1) + 0.25
 
         # left
         crop_geom2 = [crop_geom[0] + rand_float * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
@@ -1373,7 +1372,7 @@ class TestRaster:
         # -- Test with mode='match_extent' -- #
         # Test all sides at once, with rand_float less than half the smallest extent
         # The cropped extent should exactly match the requested extent, res will be changed accordingly
-        rand_float = np.random.randint(1, min(r.shape) / 2 - 1) + 0.25
+        rand_float = rng.integers(1, min(r.shape) / 2 - 1) + 0.25
         crop_geom2 = [
             crop_geom[0] + rand_float * r.res[0],
             crop_geom[1] + rand_float * abs(r.res[1]),
@@ -1424,7 +1423,7 @@ class TestRaster:
 
         # - Test that cropping yields the same results whether data is loaded or not -
         # With integer cropping (left)
-        rand_int = np.random.randint(1, min(r.shape) - 1)
+        rand_int = rng.integers(1, min(r.shape) - 1)
         crop_geom2 = [crop_geom[0] + rand_int * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
         r = gu.Raster(raster_path, downsample=5, load_data=False)
         assert not r.is_loaded
@@ -1437,7 +1436,7 @@ class TestRaster:
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 
         # With a float number of pixels added to the right, mode 'match_pixel'
-        rand_float = np.random.randint(1, min(r.shape) - 1) + 0.25
+        rand_float = rng.integers(1, min(r.shape) - 1) + 0.25
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] + rand_float * r.res[0], crop_geom[3]]
         r = gu.Raster(raster_path, downsample=5, load_data=False)
         assert not r.is_loaded
@@ -1714,7 +1713,8 @@ class TestRaster:
         # for r2b, bounds are cropped to the upper left by an integer number of pixels (i.e. crop)
         # for r2, resolution is also set to 2/3 the input res
         min_size = min(r.shape)
-        rand_int = np.random.randint(min_size / 10, min(r.shape) - min_size / 10)
+        rng = np.random.default_rng(42)
+        rand_int = rng.integers(min_size / 10, min(r.shape) - min_size / 10)
         new_transform = rio.transform.from_origin(
             r.bounds.left + rand_int * r.res[0], r.bounds.top - rand_int * abs(r.res[1]), r.res[0], r.res[1]
         )
@@ -1873,7 +1873,8 @@ class TestRaster:
 
         # -- Test with a second raster cropped to a smaller extent -- #
         # First with integer pixel cropped -> intersection should match smaller raster
-        rand_int = np.random.randint(1, min(r.shape) / 2 - 1)
+        rng = np.random.default_rng(42)
+        rand_int = rng.integers(1, min(r.shape) / 2 - 1)
         bounds_new = [
             bounds_orig[0] + rand_int * r.res[0],
             bounds_orig[1] + rand_int * abs(r.res[1]),
@@ -1885,7 +1886,7 @@ class TestRaster:
         assert intersection == r_cropped.bounds
 
         # Second with non-matching resolution, two cases
-        rand_float = np.random.randint(1, min(r.shape) / 2 - 1) + 0.25
+        rand_float = rng.integers(1, min(r.shape) / 2 - 1) + 0.25
         bounds_new = [
             bounds_orig[0] + rand_float * r.res[0],
             bounds_orig[1] + rand_float * abs(r.res[1]),
@@ -2040,9 +2041,9 @@ class TestRaster:
         xmin, ymin, xmax, ymax = rst.bounds
 
         # We generate random points within the boundaries of the image
-        np.random.seed(42)
-        xrand = np.random.randint(low=0, high=rst.width, size=(10,)) * list(rst.transform)[0] + xmin
-        yrand = ymax + np.random.randint(low=0, high=rst.height, size=(10,)) * list(rst.transform)[4]
+        rng = np.random.default_rng(42)
+        xrand = rng.integers(low=0, high=rst.width, size=(10,)) * list(rst.transform)[0] + xmin
+        yrand = ymax + rng.integers(low=0, high=rst.height, size=(10,)) * list(rst.transform)[4]
 
         # Test reversibility for any point or area interpretation
         i, j = rst.xy2ij(xrand, yrand)
@@ -2066,8 +2067,9 @@ class TestRaster:
         xmin, ymin, xmax, ymax = r.bounds
 
         # We generate random points within the boundaries of the image
-        xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
-        yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
+        rng = np.random.default_rng(42)
+        xrand = rng.integers(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
+        yrand = ymax + rng.integers(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
 
         # Get decimal indexes based on "Point", should refer to the corner still (shift False by default)
@@ -2105,8 +2107,8 @@ class TestRaster:
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
         # Test there is no failure with random coordinates (edge effects, etc)
-        xrand = np.random.uniform(low=xmin, high=xmax, size=(1000,))
-        yrand = np.random.uniform(low=ymin, high=ymax, size=(1000,))
+        xrand = rng.uniform(low=xmin, high=xmax, size=(1000,))
+        yrand = rng.uniform(low=ymin, high=ymax, size=(1000,))
         pts = list(zip(xrand, yrand))
         r.interp_points(pts)
 
@@ -2120,8 +2122,8 @@ class TestRaster:
 
         # We can test with several method for the exact indexes: interp, and simple read should
         # give back the same values that fall right on the coordinates
-        xrand = np.random.randint(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
-        yrand = ymax + np.random.randint(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
+        xrand = rng.integers(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
+        yrand = ymax + rng.integers(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
         pts = list(zip(xrand, yrand))
         # By default, i and j are returned as integers
         i, j = r.xy2ij(xrand, yrand, op=np.float32)
@@ -2236,9 +2238,9 @@ class TestRaster:
         raster.set_area_or_point(tag_aop, shift_area_or_point=False)
 
         # For this, get random points
-        np.random.seed(42)
-        index_x_in_rand = np.random.randint(low=8, high=42, size=(10,)) + np.random.normal(scale=0.3)
-        index_y_in_rand = np.random.randint(low=8, high=42, size=(10,)) + np.random.normal(scale=0.3)
+        rng = np.random.default_rng(42)
+        index_x_in_rand = rng.integers(low=8, high=42, size=(10,)) + rng.normal(scale=0.3)
+        index_y_in_rand = rng.integers(low=8, high=42, size=(10,)) + rng.normal(scale=0.3)
         points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand, shift_area_or_point=shift_aop)
         points_in_rand = np.array((points_x_rand, points_y_rand)).T
 
@@ -2255,7 +2257,6 @@ class TestRaster:
             assert np.allclose(raster_points_mapcoords, raster_points_interpn, atol=0.01)
 
         # Check that, outside the edge, the interpolation fails and returns a NaN
-        np.random.seed(42)
         index_x_edge_rand = [-0.5, -0.5, -0.5, 25, 25, 49.5, 49.5, 49.5]
         index_y_edge_rand = [-0.5, 25, 49.5, -0.5, 49.5, -0.5, 25, 49.5]
 
@@ -3393,9 +3394,9 @@ class TestMask:
     # Synthetic data
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-    np.random.seed(42)
-    arr = np.random.randint(low=0, high=2, size=(1, width, height), dtype=bool)
-    arr_mask = np.random.randint(0, 2, size=(1, width, height), dtype=bool)
+    rng = np.random.default_rng(42)
+    arr = rng.integers(low=0, high=2, size=(1, width, height), dtype=bool)
+    arr_mask = rng.integers(0, 2, size=(1, width, height), dtype=bool)
     mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
 
     # Mask without nodata
@@ -3596,7 +3597,8 @@ class TestMask:
         assert mask_tmp.raster_equal(mask_cropped)
 
         # - Test cropping each side by a random integer of pixels - #
-        rand_int = np.random.randint(1, min(mask.shape) - 1)
+        rng = np.random.default_rng(42)
+        rand_int = rng.integers(1, min(mask.shape) - 1)
 
         # Left
         crop_geom2 = [crop_geom[0] + rand_int * mask.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
@@ -3713,23 +3715,24 @@ class TestArithmetic:
 
     # Create fake rasters with random values in 0-255 and dtype uint8
     # TODO: Add the case where a mask exists in the array, as in test_data_setter
+    rng = np.random.default_rng(42)
     width = height = 5
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
     r1 = gu.Raster.from_array(
-        np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
+        rng.integers(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
     )
     r2 = gu.Raster.from_array(
-        np.random.randint(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
+        rng.integers(1, 255, (height, width), dtype="uint8"), transform=transform, crs=None, area_or_point="Area"
     )
 
     # Tests with different dtype
     r1_f32 = gu.Raster.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
+        rng.integers(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
     )
 
     # Test with nodata value set
     r1_nodata = gu.Raster.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"),
+        rng.integers(1, 255, (height, width)).astype("float32"),
         transform=transform,
         crs=None,
         nodata=_default_nodata("float32"),
@@ -3737,7 +3740,7 @@ class TestArithmetic:
 
     # Test with 0 values
     r2_zero = gu.Raster.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"),
+        rng.integers(1, 255, (height, width)).astype("float32"),
         transform=transform,
         crs=None,
         nodata=_default_nodata("float32"),
@@ -3746,24 +3749,24 @@ class TestArithmetic:
 
     # Create rasters with different shape, crs or transforms for testing errors
     r1_wrong_shape = gu.Raster.from_array(
-        np.random.randint(0, 255, (height + 1, width)).astype("float32"),
+        rng.integers(0, 255, (height + 1, width)).astype("float32"),
         transform=transform,
         crs=None,
     )
 
     r1_wrong_crs = gu.Raster.from_array(
-        np.random.randint(0, 255, (height, width)).astype("float32"),
+        rng.integers(0, 255, (height, width)).astype("float32"),
         transform=transform,
         crs=rio.crs.CRS.from_epsg(4326),
     )
 
     transform2 = rio.transform.from_bounds(0, 0, 2, 2, width, height)
     r1_wrong_transform = gu.Raster.from_array(
-        np.random.randint(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
+        rng.integers(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
     )
 
     r1_wrong_aop = gu.Raster.from_array(
-        np.random.randint(0, 255, (height, width)).astype("float32"),
+        rng.integers(0, 255, (height, width)).astype("float32"),
         transform=transform,
         crs=None,
         area_or_point="Point",
@@ -3771,7 +3774,7 @@ class TestArithmetic:
 
     # Tests with child class
     satimg = gu.SatelliteImage.from_array(
-        np.random.randint(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
+        rng.integers(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
     )
 
     def test_raster_equal(self) -> None:
@@ -3913,7 +3916,8 @@ class TestArithmetic:
         r2 = self.r2
         r2_zero = self.r2_zero
         satimg = self.satimg
-        array = np.random.randint(1, 255, (self.height, self.width)).astype("float64")
+        rng = np.random.default_rng(42)
+        array = rng.integers(1, 255, (self.height, self.width)).astype("float64")
         floatval = 3.14
         intval = 1
 
@@ -4014,7 +4018,8 @@ class TestArithmetic:
         warnings.filterwarnings("ignore", message="invalid value encountered")
 
         # Test various inputs: Raster with different dtypes, np.ndarray, single number
-        array = np.random.randint(1, 255, (self.height, self.width)).astype("float64")
+        rng = np.random.default_rng(42)
+        array = rng.integers(1, 255, (self.height, self.width)).astype("float64")
         floatval = 3.14
         intval = 1
 
@@ -4081,8 +4086,9 @@ class TestArithmetic:
         r1 = self.r1
         r1_f32 = self.r1_f32
         r2 = self.r2
-        array_3d = np.random.randint(1, 255, (1, self.height, self.width)).astype("uint8")
-        array_2d = np.random.randint(1, 255, (self.height, self.width)).astype("uint8")
+        rng = np.random.default_rng(42)
+        array_3d = rng.integers(1, 255, (1, self.height, self.width)).astype("uint8")
+        array_2d = rng.integers(1, 255, (self.height, self.width)).astype("uint8")
         floatval = 3.14
 
         # Addition
@@ -4156,8 +4162,9 @@ class TestArithmetic:
         r1 = self.r1
         r1_f32 = self.r1_f32
         r2 = self.r2
-        array_3d = np.random.randint(1, 255, (1, self.height, self.width)).astype("uint8")
-        array_2d = np.random.randint(1, 255, (self.height, self.width)).astype("uint8")
+        rng = np.random.default_rng(42)
+        array_3d = rng.integers(1, 255, (1, self.height, self.width)).astype("uint8")
+        array_2d = rng.integers(1, 255, (self.height, self.width)).astype("uint8")
         floatval = 3.14
 
         # Equality
@@ -4226,7 +4233,8 @@ class TestArithmetic:
         r1 = self.r1
         m1 = self.r1 > 128
         m2 = self.r2 > 128
-        array_2d = np.random.randint(1, 255, (self.height, self.width)).astype("uint8") > 128
+        rng = np.random.default_rng(42)
+        array_2d = rng.integers(1, 255, (self.height, self.width)).astype("uint8") > 128
 
         # Bitwise or
         assert (m1 | m2).raster_equal(self.from_array(m1.data | m2.data, rst_ref=r1))
@@ -4416,16 +4424,16 @@ class TestArrayInterface:
     min_val = np.iinfo("int32").min
     max_val = np.iinfo("int32").max
     transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-    np.random.seed(42)
-    arr1 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
-    arr2 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
+    rng = np.random.default_rng(42)
+    arr1 = rng.integers(min_val, max_val, (height, width), dtype="int32") + rng.normal(size=(height, width))
+    arr2 = rng.integers(min_val, max_val, (height, width), dtype="int32") + rng.normal(size=(height, width))
     # This third one is to try ufunc methods like reduce()
-    arr3 = np.random.randint(min_val, max_val, (height, width), dtype="int32") + np.random.normal(size=(height, width))
+    arr3 = rng.integers(min_val, max_val, (height, width), dtype="int32") + rng.normal(size=(height, width))
 
-    # Create two random masks
-    mask1 = np.random.randint(0, 2, size=(width, height), dtype=bool)
-    mask2 = np.random.randint(0, 2, size=(width, height), dtype=bool)
-    mask3 = np.random.randint(0, 2, size=(width, height), dtype=bool)
+    # Create random masks
+    mask1 = rng.integers(0, 2, size=(width, height), dtype=bool)
+    mask2 = rng.integers(0, 2, size=(width, height), dtype=bool)
+    mask3 = rng.integers(0, 2, size=(width, height), dtype=bool)
 
     # Assert that there is at least one unmasked value
     assert np.count_nonzero(~mask1) > 0
@@ -4433,11 +4441,11 @@ class TestArrayInterface:
     assert np.count_nonzero(~mask3) > 0
 
     # Wrong shaped arrays to check errors are raised
-    arr_wrong_shape = np.random.randint(min_val, max_val, (height - 1, width - 1), dtype="int32") + np.random.normal(
+    arr_wrong_shape = rng.integers(min_val, max_val, (height - 1, width - 1), dtype="int32") + rng.normal(
         size=(height - 1, width - 1)
     )
     wrong_transform = rio.transform.from_bounds(0, 0, 1, 1, width - 1, height - 1)
-    mask_wrong_shape = np.random.randint(0, 2, size=(width - 1, height - 1), dtype=bool)
+    mask_wrong_shape = rng.integers(0, 2, size=(width - 1, height - 1), dtype=bool)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
     @pytest.mark.parametrize(
@@ -4576,6 +4584,13 @@ class TestArrayInterface:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*"
             )
+            # TODO: Find out why only bitwise has this behaviour
+            if ufunc_str == "bitwise_or":
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message="Unmasked values equal to the nodata value found in data array.*",
+                )
 
             # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
             if com_dtype_tuple in [(np.dtype(t[0]), np.dtype(t[1])) for t in ufunc.types]:  # noqa

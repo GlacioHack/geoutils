@@ -24,9 +24,9 @@ import geopandas as gpd
 import numpy as np
 
 # Replace by Raster function once done
-np.random.seed(42)
-x_coords = np.random.uniform(rast.bounds.left + 50, rast.bounds.right - 50, 50)
-y_coords = np.random.uniform(rast.bounds.bottom + 50, rast.bounds.top - 50, 50)
+rng = np.random.default_rng(42)
+x_coords = rng.uniform(rast.bounds.left + 50, rast.bounds.right - 50, 50)
+y_coords = rng.uniform(rast.bounds.bottom + 50, rast.bounds.top - 50, 50)
 
 vals = rast.value_at_coords(x=x_coords, y=y_coords)
 
