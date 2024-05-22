@@ -1,4 +1,5 @@
 """Tests for dask-delayed functions."""
+
 from __future__ import annotations
 
 import os
@@ -292,10 +293,18 @@ class TestDelayed:
     # List of in-memory chunksize for small tests
     list_small_chunksizes_in_mem = [(10, 10), (7, 19)]
 
-    @pytest.mark.parametrize("darr", list_small_darr)  # type: ignore
+    # create a corresponding boolean array for each numerical dask array
+    # every finite numerical value (valid numerical value) corresponds to True (valid boolean value).
+    darr_bool = []
+    for small_darr in list_small_darr:
+        darr_bool.append(da.where(da.isfinite(small_darr), True, False))
+
+    @pytest.mark.parametrize("darr, darr_bool", list(zip(list_small_darr, darr_bool)))  # type: ignore
     @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
     @pytest.mark.parametrize("subsample_size", [2, 100, 100000])  # type: ignore
-    def test_delayed_subsample__output(self, darr: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int):
+    def test_delayed_subsample__output(
+        self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int
+    ):
         """
         Checks for delayed subsampling function for output accuracy.
         Variables that influence specifically the delayed function and might lead to new errors are:
@@ -318,6 +327,15 @@ class TestDelayed:
         indices = delayed_subsample(darr, subsample=subsample_size, random_state=42, return_indices=True)
         sub2 = np.array(darr.vindex[indices[0], indices[1]])
         assert np.array_equal(sub, sub2)
+
+        # Finally, to verify that a boolean array, with valid values at the same locations as the numerical array,
+        # leads to the same results, we compare the samples values and the samples indices.
+        darr_bool = darr_bool.rechunk(chunksizes_in_mem)
+        indices_bool = delayed_subsample(darr_bool, subsample=subsample_size, random_state=42, return_indices=True)
+        sub_bool = np.array(darr.vindex[indices_bool])
+        assert np.array_equal(sub, sub_bool)
+        assert np.array_equal(indices, indices_bool)
+
 
     @pytest.mark.parametrize("darr", list_small_darr)  # type: ignore
     @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore

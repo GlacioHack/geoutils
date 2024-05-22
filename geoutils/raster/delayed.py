@@ -1,6 +1,7 @@
 """
 Module for dask-delayed functions for out-of-memory raster operations.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -15,7 +16,7 @@ import rasterio as rio
 from dask.utils import cached_cumsum
 from scipy.interpolate import interpn
 
-from geoutils._typing import NDArrayNum
+from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 
 # 1/ SUBSAMPLING
@@ -96,28 +97,37 @@ def _get_indices_block_per_subsample(
 
 
 @dask.delayed  # type: ignore
-def _delayed_nb_valids(arr_chunk: NDArrayNum) -> NDArrayNum:
+def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool) -> NDArrayNum:
     """Count number of valid values per block."""
+    if arr_chunk.dtype == "bool":
+        return np.array([np.count_nonzero(arr_chunk)]).reshape((1, 1))
     return np.array([np.count_nonzero(np.isfinite(arr_chunk))]).reshape((1, 1))
 
 
 @dask.delayed  # type: ignore
-def _delayed_subsample_block(arr_chunk: NDArrayNum, subsample_indices: NDArrayNum) -> NDArrayNum:
+def _delayed_subsample_block(
+    arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum
+) -> NDArrayNum | NDArrayBool:
     """Subsample the valid values at the corresponding 1D valid indices per block."""
 
-    s_chunk = arr_chunk[np.isfinite(arr_chunk)][subsample_indices]
-
-    return s_chunk
+    if arr_chunk.dtype == "bool":
+        return arr_chunk[arr_chunk][subsample_indices]
+    return arr_chunk[np.isfinite(arr_chunk)][subsample_indices]
 
 
 @dask.delayed  # type: ignore
 def _delayed_subsample_indices_block(
-    arr_chunk: NDArrayNum, subsample_indices: NDArrayNum, block_id: dict[str, Any]
+    arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum, block_id: dict[str, Any]
 ) -> NDArrayNum:
     """Return 2D indices from the subsampled 1D valid indices per block."""
 
-    # Unravel indices of valid data to the shape of the block
-    ix, iy = np.unravel_index(np.argwhere(np.isfinite(arr_chunk.flatten()))[subsample_indices], shape=arr_chunk.shape)
+    if arr_chunk.dtype == "bool":
+        ix, iy = np.unravel_index(np.argwhere(arr_chunk.flatten())[subsample_indices], shape=arr_chunk.shape)
+    else:
+        #  Unravel indices of valid data to the shape of the block
+        ix, iy = np.unravel_index(
+            np.argwhere(np.isfinite(arr_chunk.flatten()))[subsample_indices], shape=arr_chunk.shape
+        )
 
     # Convert to full-array indexes by adding the row and column starting indexes for this block
     ix += block_id["xstart"]
@@ -151,7 +161,10 @@ def delayed_subsample(
     return_indices=True, then sample your arrays out-of-memory with .vindex[indices[0], indices[1]]
     (this assumes that these arrays have valid values at the same locations).
 
-    :param darr: Input dask array.
+    Only valid values are sampled. If passing a numerical array, then only finite values are considered valid values.
+    If passing a boolean array, then only True values are considered valid values.
+
+    :param darr: Input dask array. This can be a boolean or a numerical array.
     :param subsample: Subsample size. If <= 1, will be considered a fraction of valid pixels to extract.
         If > 1 will be considered the number of valid pixels to extract.
     :param return_indices: If set to True, will return the extracted indices only.
@@ -722,9 +735,11 @@ def delayed_reproject(
     # transform of each tuples of source blocks
     src_block_ids = np.array(src_geotiling.get_block_locations())
     meta_params = [
-        _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)
-        if len(sbid) > 0
-        else ({}, [])
+        (
+            _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)
+            if len(sbid) > 0
+            else ({}, [])
+        )
         for sbid in dest2source
     ]
     # We also add the output transform/shape for this destination chunk in the combined meta
