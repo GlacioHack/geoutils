@@ -10,4 +10,5 @@ numpy==1.*
 scipy==1.*
 tqdm
 xarray
+dask
 rioxarray==0.*
