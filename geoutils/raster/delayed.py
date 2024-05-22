@@ -111,13 +111,13 @@ def _delayed_subsample_block(
     """Subsample the valid values at the corresponding 1D valid indices per block."""
 
     if arr_chunk.dtype == "bool":
-        return arr_chunk[arr_chunk][subsample_indices]  # type: ignore
+        return arr_chunk[arr_chunk][subsample_indices]
     return arr_chunk[np.isfinite(arr_chunk)][subsample_indices]
 
 
 @dask.delayed  # type: ignore
 def _delayed_subsample_indices_block(
-    arr_chunk: NDArrayNum, subsample_indices: NDArrayNum, block_id: dict[str, Any]
+    arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum, block_id: dict[str, Any]
 ) -> NDArrayNum:
     """Return 2D indices from the subsampled 1D valid indices per block."""
 
@@ -161,7 +161,10 @@ def delayed_subsample(
     return_indices=True, then sample your arrays out-of-memory with .vindex[indices[0], indices[1]]
     (this assumes that these arrays have valid values at the same locations).
 
-    :param darr: Input dask array.
+    Only valid values are sampled. If passing a numerical array, then only finite values are considered valid values.
+    If passing a boolean array, then only True values are considered valid values.
+
+    :param darr: Input dask array. This can be a boolean or a numerical array.
     :param subsample: Subsample size. If <= 1, will be considered a fraction of valid pixels to extract.
         If > 1 will be considered the number of valid pixels to extract.
     :param return_indices: If set to True, will return the extracted indices only.
