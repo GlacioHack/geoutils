@@ -293,8 +293,8 @@ class TestDelayed:
     # List of in-memory chunksize for small tests
     list_small_chunksizes_in_mem = [(10, 10), (7, 19)]
 
-    # create a corresponding boolean array for each numerical dask array
-    # every finite numerical value (valid numerical value) corresponds to True (valid boolean value).
+    # Create a corresponding boolean array for each numerical dask array
+    # Every finite numerical value (valid numerical value) corresponds to True (valid boolean value).
     darr_bool = []
     for small_darr in list_small_darr:
         darr_bool.append(da.where(da.isfinite(small_darr), True, False))
@@ -335,7 +335,6 @@ class TestDelayed:
         sub_bool = np.array(darr.vindex[indices_bool])
         assert np.array_equal(sub, sub_bool)
         assert np.array_equal(indices, indices_bool)
-
 
     @pytest.mark.parametrize("darr", list_small_darr)  # type: ignore
     @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
