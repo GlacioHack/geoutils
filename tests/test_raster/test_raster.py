@@ -3421,6 +3421,7 @@ class TestRaster:
         img2_full = gu.Raster.from_pointcloud_regular(pc2_full, transform=transform, shape=shape, nodata=nodata)
         assert img2.raster_equal(img2_full, warn_failure_reason=True, strict_masked=False)
 
+
 class TestMask:
     # Paths to example data
     landsat_b4_path = examples.get_path("everest_landsat_b4")
