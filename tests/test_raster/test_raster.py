@@ -3437,7 +3437,9 @@ class TestRaster:
         with pytest.raises(ValueError, match="Grid coordinates must be regular*"):
             grid_coords1[0][0] += 1
             gu.Raster.from_pointcloud_regular(pc1, grid_coords=grid_coords1)  # type: ignore
-        with pytest.raises(ValueError, match="Either grid coordinates or both geotransform and shape must be provided."):
+        with pytest.raises(
+            ValueError, match="Either grid coordinates or both geotransform and shape must be provided."
+        ):
             gu.Raster.from_pointcloud_regular(pc1)
 
 

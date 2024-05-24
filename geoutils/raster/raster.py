@@ -4026,9 +4026,11 @@ class Raster:
         if grid_coords is not None:
 
             # Input checks
-            if (not isinstance(grid_coords, tuple) or
-               not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1) or
-               not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)):
+            if (
+                not isinstance(grid_coords, tuple)
+                or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
+                or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
+            ):
                 raise TypeError("Input grid coordinates must be 1D arrays.")
 
             diff_x = np.diff(grid_coords[0])
