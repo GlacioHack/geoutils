@@ -3381,6 +3381,45 @@ class TestRaster:
         ):
             img2.to_pointcloud(auxiliary_data_bands=[2, 3], auxiliary_column_names=["lol", "lol2", "lol3"])
 
+    def test_from_pointcloud(self) -> None:
+        """Test from_pointcloud method."""
+
+        # 1/ Create a small raster to test point sampling on
+        shape = (5, 5)
+        nodata = 100
+        img_arr = np.arange(np.prod(shape), dtype="int32").reshape(shape)
+        transform = rio.transform.from_origin(0, 5, 1, 1)
+        img1 = gu.Raster.from_array(img_arr, transform=transform, crs=4326, nodata=nodata)
+
+        # With subsampling
+        pc1 = img1.to_pointcloud(subsample=10)
+        img1_sub = gu.Raster.from_pointcloud_regular(pc1, transform=transform, shape=shape)
+
+        # Check that number of valid values are equal to point cloud size
+        assert np.count_nonzero(~img1_sub.data.mask) == 10
+
+        # With no subsampling, should get the exact same raster back
+        pc1_full = img1.to_pointcloud()
+        img1_full = gu.Raster.from_pointcloud_regular(pc1_full, transform=transform, shape=shape, nodata=nodata)
+        assert img1.raster_equal(img1_full, warn_failure_reason=True)
+
+        # 2/ Single-band real raster with nodata values
+        img2 = gu.Raster(self.aster_dem_path)
+        nodata = img2.nodata
+        transform = img2.transform
+        shape = img2.shape
+
+        # With subsampling
+        pc2 = img2.to_pointcloud(subsample=10000, random_state=42)
+        img2_sub = gu.Raster.from_pointcloud_regular(pc2, transform=transform, shape=shape, nodata=nodata)
+
+        # Check that number of valid values are equal to point cloud size
+        assert np.count_nonzero(~img2_sub.data.mask) == 10000
+
+        # With no subsampling, should get the exact same raster back
+        pc2_full = img2.to_pointcloud()
+        img2_full = gu.Raster.from_pointcloud_regular(pc2_full, transform=transform, shape=shape, nodata=nodata)
+        assert img2.raster_equal(img2_full, warn_failure_reason=True, strict_masked=False)
 
 class TestMask:
     # Paths to example data
