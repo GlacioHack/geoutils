@@ -3939,7 +3939,9 @@ class Raster:
         if skip_nodata:
             if self.is_loaded:
                 if self.count == 1:
-                    self_mask = get_mask_from_array(self.data)  # This is to avoid the case where the mask is just "False"
+                    self_mask = get_mask_from_array(
+                        self.data
+                    )  # This is to avoid the case where the mask is just "False"
                 else:
                     self_mask = get_mask_from_array(
                         self.data[data_band - 1, :, :]
@@ -3949,7 +3951,7 @@ class Raster:
             # Load only mask of valid data from disk if array not loaded
             else:
                 valid_mask = ~self._load_only_mask(bands=data_band)
-        # If we are not skipping nodata values, valid mask is everwhere
+        # If we are not skipping nodata values, valid mask is everywhere
         else:
             if self.count == 1:
                 valid_mask = np.ones(self.data.shape, dtype=bool)
