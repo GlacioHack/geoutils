@@ -3324,6 +3324,13 @@ class TestRaster:
         points = img1.to_pointcloud(data_column_name="lol", subsample=10)
         assert np.array_equal(points.ds.columns, ["lol", "geometry"])
 
+        # Keeping the nodata values
+        points_invalid = img1.to_pointcloud(subsample=10000, random_state=42, skip_nodata=False)
+
+        # The subsampled values should not all be valid and the right shape
+        assert points_invalid.ds.shape == (10000, 2)  # One less column here due to geometry storing X and Y
+        assert any(~np.isfinite(points_invalid["b1"].values))
+
         # 4/ Multi-band real raster
         img2 = gu.Raster(self.landsat_rgb_path)
 
