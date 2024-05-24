@@ -3779,6 +3779,7 @@ class Raster:
         auxiliary_data_bands: list[int] | None = None,
         auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
+        skip_nodata: bool = True,
         *,
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
@@ -3794,6 +3795,7 @@ class Raster:
         auxiliary_data_bands: list[int] | None = None,
         auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
+        skip_nodata: bool = True,
         *,
         as_array: Literal[True],
         random_state: int | np.random.Generator | None = None,
@@ -3809,6 +3811,7 @@ class Raster:
         auxiliary_data_bands: list[int] | None = None,
         auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
+        skip_nodata: bool = True,
         *,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
@@ -3823,6 +3826,7 @@ class Raster:
         auxiliary_data_bands: list[int] | None = None,
         auxiliary_column_names: list[str] | None = None,
         subsample: float | int = 1,
+        skip_nodata: bool = True,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
@@ -3840,11 +3844,11 @@ class Raster:
         Optionally, all other bands can also be stored in columns "b1", "b2", etc. For more specific band selection,
         use Raster.split_bands previous to converting to point cloud.
 
-        Optionally, randomly subsample valid pixels for the data band (nodata values are skipped, but only for the band
-        that will be used as data column of the point cloud).
-        If 'subsample' is either 1, or is equal to the pixel count, all valid points are returned.
+        Optionally, randomly subsample valid pixels for the data band (nodata values can be skipped, but only for the
+        band that will be used as data column of the point cloud).
+        If 'subsample' is either 1, or is equal to the pixel count, all (valid) points are returned.
         If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
-        of valid points is returned.
+        of (valid) points is returned.
 
         If the raster is not loaded, sampling will be done from disk using rasterio.sample after loading only the masks
         of the dataset.
@@ -3862,6 +3866,7 @@ class Raster:
         :param auxiliary_column_names: (Only for multi-band rasters) Names to use for auxiliary data bands, only if
             auxiliary data bands is not none, defaults to "b1", "b2", etc.
         :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
+        :param skip_nodata: Whether to skip nodata values.
         :param as_array: Return an array instead of a vector.
         :param random_state: Random state or seed number.
         :param force_pixel_offset: Force offset to derive point coordinate with. Raster coordinates normally only
@@ -3931,18 +3936,25 @@ class Raster:
         all_indexes = [b - 1 for b in all_bands]
 
         # We do 2D subsampling on the data band only, regardless of valid masks on other bands
-        if self.is_loaded:
-            if self.count == 1:
-                self_mask = get_mask_from_array(self.data)  # This is to avoid the case where the mask is just "False"
-            else:
-                self_mask = get_mask_from_array(
-                    self.data[data_band - 1, :, :]
-                )  # This is to avoid the case where the mask is just "False"
-            valid_mask = ~self_mask
+        if skip_nodata:
+            if self.is_loaded:
+                if self.count == 1:
+                    self_mask = get_mask_from_array(self.data)  # This is to avoid the case where the mask is just "False"
+                else:
+                    self_mask = get_mask_from_array(
+                        self.data[data_band - 1, :, :]
+                    )  # This is to avoid the case where the mask is just "False"
+                valid_mask = ~self_mask
 
-        # Load only mask of valid data from disk if array not loaded
+            # Load only mask of valid data from disk if array not loaded
+            else:
+                valid_mask = ~self._load_only_mask(bands=data_band)
+        # If we are not skipping nodata values, valid mask is everwhere
         else:
-            valid_mask = ~self._load_only_mask(bands=data_band)
+            if self.count == 1:
+                valid_mask = np.ones(self.data.shape, dtype=bool)
+            else:
+                valid_mask = np.ones(self.data[0, :].shape, dtype=bool)
 
         # Get subsample on valid mask
         # Build a low memory boolean masked array with invalid values masked to pass to subsampling
@@ -3972,6 +3984,10 @@ class Raster:
         # At this point there should not be any nodata anymore, so we can transform everything to normal array
         if np.ma.isMaskedArray(pixel_data):
             pixel_data = pixel_data.data
+
+        # If nodata values were not skipped, convert them to NaNs
+        if skip_nodata is False:
+            pixel_data[pixel_data == self.nodata] = np.nan
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation
         x_coords_2, y_coords_2 = (
