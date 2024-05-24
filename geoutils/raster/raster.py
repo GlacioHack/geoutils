@@ -4026,13 +4026,10 @@ class Raster:
         if grid_coords is not None:
 
             # Input checks
-            if (
-                not isinstance(grid_coords[0], np.ndarray)
-                and grid_coords[0].ndim == 1
-                and isinstance(grid_coords[1], np.ndarray)
-                and grid_coords[1].ndim == 1
-            ):
-                raise TypeError("Input grid coordinates must be 1-d arrays.")
+            if (not isinstance(grid_coords, tuple) or
+               not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1) or
+               not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)):
+                raise TypeError("Input grid coordinates must be 1D arrays.")
 
             diff_x = np.diff(grid_coords[0])
             diff_y = np.diff(grid_coords[1])
@@ -4040,10 +4037,12 @@ class Raster:
             if not all(diff_x == diff_x[0]) and all(diff_y == diff_y[0]):
                 raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
 
+            # Build transform from min X, max Y and step in both
             out_transform = rio.transform.from_origin(
                 np.min(grid_coords[0]), np.max(grid_coords[1]), diff_x[0], diff_y[0]
             )
-            out_shape = (len(grid_coords[0]), len(grid_coords[1]))
+            # Y is first axis, X is second axis
+            out_shape = (len(grid_coords[1]), len(grid_coords[0]))
 
         elif transform is not None and shape is not None:
 

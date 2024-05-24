@@ -3391,9 +3391,14 @@ class TestRaster:
         transform = rio.transform.from_origin(0, 5, 1, 1)
         img1 = gu.Raster.from_array(img_arr, transform=transform, crs=4326, nodata=nodata)
 
-        # With subsampling
+        # Check both inputs work (grid coords or transform+shape) on a subsample
         pc1 = img1.to_pointcloud(subsample=10)
         img1_sub = gu.Raster.from_pointcloud_regular(pc1, transform=transform, shape=shape)
+
+        grid_coords1 = img1.coords(grid=False)
+        img1_sub2 = gu.Raster.from_pointcloud_regular(pc1, grid_coords=grid_coords1)
+
+        assert img1_sub.raster_equal(img1_sub2)
 
         # Check that number of valid values are equal to point cloud size
         assert np.count_nonzero(~img1_sub.data.mask) == 10
@@ -3409,9 +3414,14 @@ class TestRaster:
         transform = img2.transform
         shape = img2.shape
 
-        # With subsampling
+        # Check both inputs work (grid coords or transform+shape) on a subsample
         pc2 = img2.to_pointcloud(subsample=10000, random_state=42)
         img2_sub = gu.Raster.from_pointcloud_regular(pc2, transform=transform, shape=shape, nodata=nodata)
+
+        grid_coords2 = img2.coords(grid=False)
+        img2_sub2 = gu.Raster.from_pointcloud_regular(pc2, grid_coords=grid_coords2, nodata=nodata)
+
+        assert img2_sub.raster_equal(img2_sub2, warn_failure_reason=True)
 
         # Check that number of valid values are equal to point cloud size
         assert np.count_nonzero(~img2_sub.data.mask) == 10000
@@ -3420,6 +3430,15 @@ class TestRaster:
         pc2_full = img2.to_pointcloud()
         img2_full = gu.Raster.from_pointcloud_regular(pc2_full, transform=transform, shape=shape, nodata=nodata)
         assert img2.raster_equal(img2_full, warn_failure_reason=True, strict_masked=False)
+
+        # 3/ Error raising
+        with pytest.raises(TypeError, match="Input grid coordinates must be 1D arrays.*"):
+            gu.Raster.from_pointcloud_regular(pc1, grid_coords=(1, "lol"))  # type: ignore
+        with pytest.raises(ValueError, match="Grid coordinates must be regular*"):
+            grid_coords1[0][0] += 1
+            gu.Raster.from_pointcloud_regular(pc1, grid_coords=grid_coords1)  # type: ignore
+        with pytest.raises(ValueError, match="Either grid coordinates or both geotransform and shape must be provided."):
+            gu.Raster.from_pointcloud_regular(pc1)
 
 
 class TestMask:
