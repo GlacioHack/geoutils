@@ -409,8 +409,13 @@ def _cast_nodata(out_dtype: DTypeLike, nodata: int | float | None) -> int | floa
 
     return nodata
 
-def _shift_transform(transform: affine.Affine, xoff: float, yoff: float,
-                     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced"):
+
+def _shift_transform(
+    transform: affine.Affine,
+    xoff: float,
+    yoff: float,
+    distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
+) -> affine.Affine:
     """
     Shift geotransform horizontally, either in pixels or georeferenced units.
 
@@ -434,6 +439,7 @@ def _shift_transform(transform: affine.Affine, xoff: float, yoff: float,
         yoff *= abs(dy)  # dy is negative
 
     return rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
+
 
 def _cast_numeric_array_raster(
     raster: RasterType, other: RasterType | NDArrayNum | Number, operation_name: str
