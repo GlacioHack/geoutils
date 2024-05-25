@@ -410,6 +410,37 @@ def _cast_nodata(out_dtype: DTypeLike, nodata: int | float | None) -> int | floa
     return nodata
 
 
+def _shift_transform(
+    transform: affine.Affine,
+    xoff: float,
+    yoff: float,
+    distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
+) -> affine.Affine:
+    """
+    Shift geotransform horizontally, either in pixels or georeferenced units.
+
+    :param transform: Input geotransform.
+    :param xoff: Translation x offset.
+    :param yoff: Translation y offset.
+    :param distance_unit: Distance unit, either 'georeferenced' (default) or 'pixel'.
+
+    :return: Shifted transform.
+    """
+
+    if distance_unit not in ["georeferenced", "pixel"]:
+        raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
+
+    # Get transform
+    dx, b, xmin, d, dy, ymax = list(transform)[:6]
+
+    # Convert pixel offsets to georeferenced units
+    if distance_unit == "pixel":
+        xoff *= dx
+        yoff *= abs(dy)  # dy is negative
+
+    return rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
+
+
 def _cast_numeric_array_raster(
     raster: RasterType, other: RasterType | NDArrayNum | Number, operation_name: str
 ) -> tuple[MArrayNum, MArrayNum | NDArrayNum | Number, float | int | None, Literal["Area", "Point"] | None]:
@@ -2835,7 +2866,7 @@ class Raster:
         self: RasterType,
         xoff: float,
         yoff: float,
-        distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
+        distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
         inplace: bool = False,
     ) -> RasterType | None:
         """
@@ -2850,18 +2881,8 @@ class Raster:
 
         :returns: Shifted raster (or None if inplace).
         """
-        if distance_unit not in ["georeferenced", "pixel"]:
-            raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
 
-        # Get transform
-        dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
-
-        # Convert pixel offsets to georeferenced units
-        if distance_unit == "pixel":
-            xoff *= self.res[0]
-            yoff *= self.res[1]
-
-        shifted_transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
+        shifted_transform = _shift_transform(self.transform, xoff=xoff, yoff=yoff, distance_unit=distance_unit)
 
         if inplace:
             # Overwrite transform by shifted transform
