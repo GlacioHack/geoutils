@@ -3996,21 +3996,106 @@ class Raster:
             np.array(a) for a in self.ij2xy(indices[0], indices[1], force_offset=force_pixel_offset)
         )
 
-        # Merge the coordinates and pixel data into a point cloud.
-        points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T
-
         if not as_array:
             points = Vector(
                 gpd.GeoDataFrame(
-                    points_arr[:, 2:],
+                    pixel_data.T,
                     columns=all_column_names,
-                    geometry=gpd.points_from_xy(points_arr[:, 0], points_arr[:, 1]),
+                    geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
                     crs=self.crs,
                 )
             )
             return points
         else:
+            # Merge the coordinates and pixel data an array of N x K
+            # This has the downside of converting all the data to the same data type
+            points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T
             return points_arr
+
+    @classmethod
+    def from_pointcloud_regular(
+        cls: type[RasterType],
+        pointcloud: gpd.GeoDataFrame,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
+        transform: rio.transform.Affine = None,
+        shape: tuple[int, int] = None,
+        nodata: int | float | None = None,
+        data_column_name: str = "b1",
+        area_or_point: Literal["Area", "Point"] = "Point",
+    ) -> RasterType:
+        """
+        Create a raster from a point cloud with coordinates on a regular grid.
+
+        To inform on what grid to create the raster, either pass a tuple of X/Y grid coordinates, or the expected
+        transform and shape. All point cloud coordinates must fall exactly at one the coordinates of this grid.
+
+        :param pointcloud: Point cloud.
+        :param grid_coords: Regular coordinate vectors for the raster, from which the geotransform and shape are
+            deduced.
+        :param transform: Geotransform of the raster.
+        :param shape: Shape of the raster.
+        :param nodata: Nodata value of the raster.
+        :param data_column_name: Name to use for point cloud data column, defaults to "bX" where X is the data band
+            number.
+        :param area_or_point: Whether to set the pixel interpretation of the raster to "Area" or "Point".
+        """
+
+        # Get transform and shape from input
+        if grid_coords is not None:
+
+            # Input checks
+            if (
+                not isinstance(grid_coords, tuple)
+                or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
+                or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
+            ):
+                raise TypeError("Input grid coordinates must be 1D arrays.")
+
+            diff_x = np.diff(grid_coords[0])
+            diff_y = np.diff(grid_coords[1])
+
+            if not all(diff_x == diff_x[0]) and all(diff_y == diff_y[0]):
+                raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
+
+            # Build transform from min X, max Y and step in both
+            out_transform = rio.transform.from_origin(
+                np.min(grid_coords[0]), np.max(grid_coords[1]), diff_x[0], diff_y[0]
+            )
+            # Y is first axis, X is second axis
+            out_shape = (len(grid_coords[1]), len(grid_coords[0]))
+
+        elif transform is not None and shape is not None:
+
+            out_transform = transform
+            out_shape = shape
+
+        else:
+            raise ValueError("Either grid coordinates or both geotransform and shape must be provided.")
+
+        # Create raster from inputs, with placeholder data for now
+        dtype = pointcloud[data_column_name].dtype
+        out_nodata = nodata if not None else _default_nodata(dtype)
+        arr = np.ones(out_shape, dtype=dtype)
+        raster_arr = cls.from_array(
+            data=arr, transform=out_transform, crs=pointcloud.crs, nodata=out_nodata, area_or_point=area_or_point
+        )
+
+        # Get indexes of point cloud coordinates in the raster, forcing no shift
+        i, j = raster_arr.xy2ij(
+            x=pointcloud.geometry.x.values, y=pointcloud.geometry.y.values, shift_area_or_point=False
+        )
+
+        # If coordinates are not integer type (forced in xy2ij), then some points are not falling on exact coordinates
+        if not np.issubdtype(i.dtype, np.integer) or not np.issubdtype(i.dtype, np.integer):
+            raise ValueError("Some point cloud coordinates differ from the grid coordinates.")
+
+        # Set values
+        mask = np.ones(np.shape(arr), dtype=bool)
+        mask[i, j] = False
+        arr[i, j] = pointcloud[data_column_name].values
+        raster_arr.data = np.ma.masked_array(data=arr, mask=mask)
+
+        return raster_arr
 
     def polygonize(
         self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all"
