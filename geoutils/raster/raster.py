@@ -3981,7 +3981,7 @@ class Raster:
         if not as_array:
             points = Vector(
                 gpd.GeoDataFrame(
-                    pixel_data.squeeze(),
+                    pixel_data.T,
                     columns=all_column_names,
                     geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
                     crs=self.crs,
