@@ -2122,7 +2122,6 @@ class TestRaster:
         # give back the same values that fall right on the coordinates
         xrand = rng.integers(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
         yrand = ymax + rng.integers(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
-        pts = list(zip(xrand, yrand))
         # By default, i and j are returned as integers
         i, j = r.xy2ij(xrand, yrand, op=np.float32)
         list_z_ind = []
@@ -2198,7 +2197,9 @@ class TestRaster:
         points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in, shift_area_or_point=shift_aop)
 
         # Here again compare methods
-        raster_points_in = raster.interp_points((points_x_in, points_y_in), method="linear", shift_area_or_point=shift_aop)
+        raster_points_in = raster.interp_points(
+            (points_x_in, points_y_in), method="linear", shift_area_or_point=shift_aop
+        )
         raster_points_in_interpn = raster.interp_points(
             (points_x_in, points_y_in), method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop
         )
@@ -2240,10 +2241,16 @@ class TestRaster:
 
         for method in ["nearest", "linear", "cubic", "quintic"]:
             raster_points_mapcoords = raster.interp_points(
-                (points_x_rand, points_y_rand), method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand),
+                method=method,
+                force_scipy_function="map_coordinates",
+                shift_area_or_point=shift_aop,
             )
             raster_points_interpn = raster.interp_points(
-                (points_x_rand, points_y_rand), method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand),
+                method=method,
+                force_scipy_function="interpn",
+                shift_area_or_point=shift_aop,
             )
 
             # Not exactly equal in floating point precision since changes in Scipy 1.13.0,
@@ -2261,10 +2268,16 @@ class TestRaster:
         # Nearest doesn't apply, just linear and above
         for method in ["cubic", "quintic"]:
             raster_points_mapcoords_edge = raster.interp_points(
-                (points_x_rand, points_y_rand), method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand),
+                method=method,
+                force_scipy_function="map_coordinates",
+                shift_area_or_point=shift_aop,
             )
             raster_points_interpn_edge = raster.interp_points(
-                (points_x_rand, points_y_rand), method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand),
+                method=method,
+                force_scipy_function="interpn",
+                shift_area_or_point=shift_aop,
             )
 
             assert all(~np.isfinite(raster_points_mapcoords_edge))

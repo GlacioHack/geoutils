@@ -3657,7 +3657,7 @@ class Raster:
 
     def interp_points(
         self,
-        points: tuple[Number | Number] | tuple[NDArrayNum | NDArrayNum],
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
         method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
         band: int = 1,
         input_latlon: bool = False,
@@ -3690,7 +3690,6 @@ class Raster:
         """
 
         # Get coordinates
-        # x, y = list(zip(*points))
         x, y = points
 
         # If those are in latlon, convert to Raster CRS
