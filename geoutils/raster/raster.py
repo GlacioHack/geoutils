@@ -3657,7 +3657,7 @@ class Raster:
 
     def interp_points(
         self,
-        points: tuple[list[float], list[float]],
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
         method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
         band: int = 1,
         input_latlon: bool = False,
@@ -3675,8 +3675,8 @@ class Raster:
          to ensure that the interpolation of points is done at the right location. See parameter description
          of shift_area_or_point for more details.
 
-        :param points: Point(s) at which to interpolate raster value. If points fall outside of image, value
-            returned is nan. Shape should be (N,2).
+        :param points: Point(s) at which to interpolate raster value (tuple of X/Y array-likes). If points fall
+        outside of image, value returned is nan.
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', or 'quintic'. For more information,
             see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
         :param band: Band to use (from 1 to self.count).
@@ -3690,7 +3690,7 @@ class Raster:
         """
 
         # Get coordinates
-        x, y = list(zip(*points))
+        x, y = points
 
         # If those are in latlon, convert to Raster CRS
         if input_latlon:
@@ -3953,6 +3953,10 @@ class Raster:
             all_bands = [data_band]
             all_column_names = [data_column_name]
 
+        # If subsample is the entire array, load it to optimize speed
+        if subsample == 1 and not self.is_loaded:
+            self.load(bands=all_bands)
+
         # Band indexes in the array are band number minus one
         all_indexes = [b - 1 for b in all_bands]
 
@@ -4008,8 +4012,9 @@ class Raster:
         if np.ma.isMaskedArray(pixel_data):
             pixel_data = pixel_data.data
 
-        # If nodata values were not skipped, convert them to NaNs
+        # If nodata values were not skipped, convert them to NaNs and change data type
         if skip_nodata is False:
+            pixel_data = pixel_data.astype("float32")
             pixel_data[pixel_data == self.nodata] = np.nan
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation
@@ -4048,7 +4053,7 @@ class Raster:
         Create a raster from a point cloud with coordinates on a regular grid.
 
         To inform on what grid to create the raster, either pass a tuple of X/Y grid coordinates, or the expected
-        transform and shape. All point cloud coordinates must fall exactly at one the coordinates of this grid.
+        transform and shape. All point cloud coordinates must fall exactly at one of the coordinates of this grid.
 
         :param pointcloud: Point cloud.
         :param grid_coords: Regular coordinate vectors for the raster, from which the geotransform and shape are

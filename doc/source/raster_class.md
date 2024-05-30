@@ -317,7 +317,7 @@ rast_reproj.value_at_coords(x=0.5, y=0.5, window=3, reducer_function=np.ma.media
 
 ```{code-cell} ipython3
 # Interpolate coordinate value with quintic algorithm
-rast_reproj.interp_points([(0.5, 0.5)], method="quintic")
+rast_reproj.interp_points((0.5, 0.5), method="quintic")
 ```
 
 ```{note}
