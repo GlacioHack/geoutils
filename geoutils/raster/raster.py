@@ -3690,7 +3690,8 @@ class Raster:
         """
 
         # Get coordinates
-        x, y = list(zip(*points))
+        # x, y = list(zip(*points))
+        x, y = points
 
         # If those are in latlon, convert to Raster CRS
         if input_latlon:
@@ -4008,8 +4009,9 @@ class Raster:
         if np.ma.isMaskedArray(pixel_data):
             pixel_data = pixel_data.data
 
-        # If nodata values were not skipped, convert them to NaNs
+        # If nodata values were not skipped, convert them to NaNs and change data type
         if skip_nodata is False:
+            pixel_data = pixel_data.astype("float32")
             pixel_data[pixel_data == self.nodata] = np.nan
 
         # Now we force the coordinates we define for the point cloud, according to pixel interpretation
