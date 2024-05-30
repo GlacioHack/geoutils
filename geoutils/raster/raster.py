@@ -3954,6 +3954,10 @@ class Raster:
             all_bands = [data_band]
             all_column_names = [data_column_name]
 
+        # If subsample = 1, load the array
+        if subsample == 1:
+            self.load(bands=all_bands)
+
         # Band indexes in the array are band number minus one
         all_indexes = [b - 1 for b in all_bands]
 
