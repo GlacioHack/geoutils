@@ -2070,7 +2070,6 @@ class TestRaster:
         rng = np.random.default_rng(42)
         xrand = rng.integers(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
         yrand = ymax + rng.integers(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
-        pts = list(zip(xrand, yrand))
 
         # Get decimal indexes based on "Point", should refer to the corner still (shift False by default)
         i, j = r.xy2ij(xrand, yrand, shift_area_or_point=False)
@@ -2102,15 +2101,14 @@ class TestRaster:
             list_z_ind.append(z_ind)
 
         # First order interpolation
-        rpts = r.interp_points(pts, method="linear")
+        rpts = r.interp_points((xrand, yrand), method="linear")
         # The values interpolated should be equal
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
         # Test there is no failure with random coordinates (edge effects, etc)
         xrand = rng.uniform(low=xmin, high=xmax, size=(1000,))
         yrand = rng.uniform(low=ymin, high=ymax, size=(1000,))
-        pts = list(zip(xrand, yrand))
-        r.interp_points(pts)
+        r.interp_points((xrand, yrand))
 
         # Second, test after a crop: the Raster now has an Area interpretation, those should fall right on the integer
         # pixel indexes
@@ -2134,7 +2132,7 @@ class TestRaster:
             z_ind = img[int(i[k]), int(j[k])]
             list_z_ind.append(z_ind)
 
-        rpts = r.interp_points(pts, method="linear")
+        rpts = r.interp_points((xrand, yrand), method="linear")
 
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
@@ -2142,13 +2140,13 @@ class TestRaster:
         x = 493120.0
         y = 3101000.0
         i, j = r.xy2ij(x, y)
-        val = r.interp_points([(x, y)], method="linear")[0]
+        val = r.interp_points((x, y), method="linear")[0]
         val_img = img[int(i[0]), int(j[0])]
         assert val_img == val
 
         # Finally, check that interp convert to latlon
         lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
-        val_latlon = r.interp_points([(lat, lon)], method="linear", input_latlon=True)[0]
+        val_latlon = r.interp_points((lat, lon), method="linear", input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
@@ -2171,19 +2169,17 @@ class TestRaster:
         # The actual X/Y coords will be offset by one because Y axis is inverted and pixel coords is upper-left corner
         points_x, points_y = raster.ij2xy(i=index_x, j=index_y, shift_area_or_point=shift_aop)
 
-        points = np.array((points_x, points_y)).T
-
         # The following 4 methods should yield the same result because:
         # Nearest = Linear interpolation at the location of a data point
         # Regular grid = Equal grid interpolation at the location of a data point
 
-        raster_points = raster.interp_points(points, method="nearest", shift_area_or_point=shift_aop)
-        raster_points_lin = raster.interp_points(points, method="linear", shift_area_or_point=shift_aop)
+        raster_points = raster.interp_points((points_x, points_y), method="nearest", shift_area_or_point=shift_aop)
+        raster_points_lin = raster.interp_points((points_x, points_y), method="linear", shift_area_or_point=shift_aop)
         raster_points_interpn = raster.interp_points(
-            points, method="nearest", force_scipy_function="interpn", shift_area_or_point=shift_aop
+            (points_x, points_y), method="nearest", force_scipy_function="interpn", shift_area_or_point=shift_aop
         )
         raster_points_interpn_lin = raster.interp_points(
-            points, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop
+            (points_x, points_y), method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop
         )
 
         assert np.array_equal(raster_points, raster_points_lin)
@@ -2201,17 +2197,15 @@ class TestRaster:
 
         points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in, shift_area_or_point=shift_aop)
 
-        points_in = np.array((points_x_in, points_y_in)).T
-
         # Here again compare methods
-        raster_points_in = raster.interp_points(points_in, method="linear", shift_area_or_point=shift_aop)
+        raster_points_in = raster.interp_points((points_x_in, points_y_in), method="linear", shift_area_or_point=shift_aop)
         raster_points_in_interpn = raster.interp_points(
-            points_in, method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop
+            (points_x_in, points_y_in), method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop
         )
 
         assert np.array_equal(raster_points_in, raster_points_in_interpn)
 
-        for i in range(len(points_in)):
+        for i in range(len(points_x_in)):
 
             xlow = int(index_x_in[i] - 0.5)
             xupp = int(index_x_in[i] + 0.5)
@@ -2228,7 +2222,8 @@ class TestRaster:
             + [(4, i) for i in np.arange(1, 4)]
             + [(i, 4) for i in np.arange(4, 1)]
         )
-        raster_points_out = raster.interp_points(points_out)
+        points_out_xy = list(zip(*points_out))
+        raster_points_out = raster.interp_points(points_out_xy)
         assert all(~np.isfinite(raster_points_out))
 
         # To use cubic or quintic, we need a larger grid (minimum 6x6, but let's aim bigger with 50x50)
@@ -2242,14 +2237,13 @@ class TestRaster:
         index_x_in_rand = rng.integers(low=8, high=42, size=(10,)) + rng.normal(scale=0.3)
         index_y_in_rand = rng.integers(low=8, high=42, size=(10,)) + rng.normal(scale=0.3)
         points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand, shift_area_or_point=shift_aop)
-        points_in_rand = np.array((points_x_rand, points_y_rand)).T
 
         for method in ["nearest", "linear", "cubic", "quintic"]:
             raster_points_mapcoords = raster.interp_points(
-                points_in_rand, method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand), method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
             )
             raster_points_interpn = raster.interp_points(
-                points_in_rand, method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand), method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
             )
 
             # Not exactly equal in floating point precision since changes in Scipy 1.13.0,
@@ -2264,15 +2258,13 @@ class TestRaster:
             i=index_x_edge_rand, j=index_y_edge_rand, shift_area_or_point=shift_aop
         )
 
-        points_edge_rand = np.array((points_x_rand, points_y_rand)).T
-
         # Nearest doesn't apply, just linear and above
         for method in ["cubic", "quintic"]:
             raster_points_mapcoords_edge = raster.interp_points(
-                points_edge_rand, method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand), method=method, force_scipy_function="map_coordinates", shift_area_or_point=shift_aop
             )
             raster_points_interpn_edge = raster.interp_points(
-                points_edge_rand, method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
+                (points_x_rand, points_y_rand), method=method, force_scipy_function="interpn", shift_area_or_point=shift_aop
             )
 
             assert all(~np.isfinite(raster_points_mapcoords_edge))
