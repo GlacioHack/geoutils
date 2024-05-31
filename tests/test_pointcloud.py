@@ -1,16 +1,16 @@
 """Test module for point cloud functionalities."""
 
+import geopandas as gpd
 import numpy as np
 import rasterio as rio
-from geoutils import Raster
-import geopandas as gpd
 from shapely import geometry
 
+from geoutils import Raster
 from geoutils.pointcloud import _grid_pointcloud
 
-class TestPointCloud:
 
-    def test_grid_pc__chull(self):
+class TestPointCloud:
+    def test_grid_pc__chull(self) -> None:
         """Test point cloud gridding."""
 
         # 1/ Check gridding interpolation falls back exactly on original raster
@@ -62,13 +62,12 @@ class TestPointCloud:
         # Compute min distance to irregular point cloud for each grid point
         list_min_dist = []
         for p in rst_pc.geometry:
-            min_dist = np.min(np.sqrt((p.x - pc.geometry.x.values)**2 + (p.y - pc.geometry.y.values)**2))
+            min_dist = np.min(np.sqrt((p.x - pc.geometry.x.values) ** 2 + (p.y - pc.geometry.y.values) ** 2))
             list_min_dist.append(min_dist)
 
         ind_close = np.array(list_min_dist) <= 1
         # We get the indexes for these coordinates
-        iround, jround = rst.xy2ij(x=rst_pc.geometry.x.values[ind_close],
-                                   y=rst_pc.geometry.y.values[ind_close])
+        iround, jround = rst.xy2ij(x=rst_pc.geometry.x.values[ind_close], y=rst_pc.geometry.y.values[ind_close])
 
         # Keep only indexes in the convex hull
         indexes_close = [(iround[k], jround[k]) for k in range(len(iround))]
@@ -90,8 +89,7 @@ class TestPointCloud:
         ind_close = np.array(list_min_dist) <= 0.5
 
         # We get the indexes for these coordinates
-        iround, jround = rst.xy2ij(x=rst_pc.geometry.x.values[ind_close],
-                                   y=rst_pc.geometry.y.values[ind_close])
+        iround, jround = rst.xy2ij(x=rst_pc.geometry.x.values[ind_close], y=rst_pc.geometry.y.values[ind_close])
 
         # Keep only indexes in the convex hull
         indexes_close = [(iround[k], jround[k]) for k in range(len(iround))]
@@ -107,13 +105,3 @@ class TestPointCloud:
         ifarchull, jfarchull = list(zip(*far_in_chull))
 
         assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
-
-
-
-
-
-
-
-
-
-

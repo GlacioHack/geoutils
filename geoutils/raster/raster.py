@@ -3603,7 +3603,7 @@ class Raster:
 
     def coords(
         self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None
-    ) -> tuple[NDArrayNum, ...]:
+    ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of all pixels in the raster.
 
@@ -3631,7 +3631,7 @@ class Raster:
         # If grid is True, return coordinate grids
         if grid:
             meshgrid = tuple(np.meshgrid(xx, np.flip(yy)))
-            return meshgrid
+            return meshgrid  # type: ignore
         else:
             return np.asarray(xx), np.asarray(yy)
 
