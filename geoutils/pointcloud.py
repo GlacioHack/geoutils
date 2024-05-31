@@ -60,7 +60,6 @@ def _grid_pointcloud(
         # distance, so we keep the first index of closest point
         index_right = near.groupby(by=near.index)["index_right"].min()
 
-
     # Compute distance between points as a function of the pixel sizes in X and Y
     res_x = np.abs(grid_coords[0][1] - grid_coords[0][0])
     res_y = np.abs(grid_coords[1][1] - grid_coords[1][0])
