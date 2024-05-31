@@ -57,6 +57,7 @@ class TestPointCloud:
 
         # 2.2/ For the rest of the points, data should be valid only if a point exists within 1 pixel of their
         # coordinate, that is the closest rounded number
+        # TODO: Replace by check with distance, because some pixel not rounded can also be at less than 1 from a point
         rounded_points = np.round(points, 0)
         # We get the indexes for these coordinates
         iround, jround = rst.xy2ij(x=rounded_points[:, 0], y=rounded_points[:, 1])
@@ -70,11 +71,6 @@ class TestPointCloud:
         # All values close to a point by one pixel (rounded) in the convex hull should be valid
         assert all(np.isfinite(gridded_pc[iroundhull, jroundhull]))
 
-        # Other values in the convex hull should not be
-        not_rounded_in_chull = [tup for tup in indexes_chull if tup not in indexes_rounded]
-        iroundhull_not, jroundhull_not = list(zip(*not_rounded_in_chull))
-
-        assert all(~np.isfinite(gridded_pc[iroundhull_not, jroundhull_not]))
 
 
 
