@@ -56,13 +56,17 @@ def _grid_pointcloud(
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, message="Geometry is in a geographic CRS.*")
         near = gpd.sjoin_nearest(grid_pc, pc)
+        # In case there are several points at the same distance, it doesn't matter which one is used to compute the
+        # distance, so we keep the first index of closest point
+        index_right = near.groupby(by=near.index)["index_right"].min()
+
 
     # Compute distance between points as a function of the pixel sizes in X and Y
     res_x = np.abs(grid_coords[0][1] - grid_coords[0][0])
     res_y = np.abs(grid_coords[1][1] - grid_coords[1][0])
     dist = np.sqrt(
-        ((pc.geometry.x.values[near["index_right"]] - grid_pc.geometry.x.values) / res_x) ** 2
-        + ((pc.geometry.y.values[near["index_right"]] - grid_pc.geometry.y.values) / res_y) ** 2
+        ((pc.geometry.x.values[index_right] - grid_pc.geometry.x.values) / res_x) ** 2
+        + ((pc.geometry.y.values[index_right] - grid_pc.geometry.y.values) / res_y) ** 2
     )
 
     # Replace all points further away than the distance of nodata by NaNs
