@@ -10,7 +10,7 @@ from geoutils.pointcloud import _grid_pointcloud
 
 class TestPointCloud:
 
-    def test_grid_pc(self):
+    def test_grid_pc__chull(self):
         """Test point cloud gridding."""
 
         # 1/ Check gridding interpolation falls back exactly on original raster
@@ -24,7 +24,7 @@ class TestPointCloud:
 
         # Generate random coordinates to interpolate, to create an irregular point cloud
         points = rng.integers(low=1, high=shape[0] - 1, size=(100, 2)) + rng.normal(0, 0.15, size=(100, 2))
-        b1_value = rst.interp_points(list(zip(points[:, 0], points[:, 1])))
+        b1_value = rst.interp_points((points[:, 0], points[:, 1]))
         pc = gpd.GeoDataFrame(data={"b1": b1_value}, geometry=gpd.points_from_xy(x=points[:, 0], y=points[:, 1]))
         grid_coords = rst.coords(grid=False)
 
@@ -58,18 +58,57 @@ class TestPointCloud:
         # 2.2/ For the rest of the points, data should be valid only if a point exists within 1 pixel of their
         # coordinate, that is the closest rounded number
         # TODO: Replace by check with distance, because some pixel not rounded can also be at less than 1 from a point
-        rounded_points = np.round(points, 0)
+
+        # Compute min distance to irregular point cloud for each grid point
+        list_min_dist = []
+        for p in rst_pc.geometry:
+            min_dist = np.min(np.sqrt((p.x - pc.geometry.x.values)**2 + (p.y - pc.geometry.y.values)**2))
+            list_min_dist.append(min_dist)
+
+        ind_close = np.array(list_min_dist) <= 1
         # We get the indexes for these coordinates
-        iround, jround = rst.xy2ij(x=rounded_points[:, 0], y=rounded_points[:, 1])
+        iround, jround = rst.xy2ij(x=rst_pc.geometry.x.values[ind_close],
+                                   y=rst_pc.geometry.y.values[ind_close])
 
         # Keep only indexes in the convex hull
-        indexes_rounded = [(iround[k], jround[k]) for k in range(len(iround))]
+        indexes_close = [(iround[k], jround[k]) for k in range(len(iround))]
         indexes_chull = [(i[k], j[k]) for k in range(len(i)) if ind_inters_convhull[k]]
-        rounded_in_chull = [tup for tup in indexes_rounded if tup in indexes_chull]
-        iroundhull, jroundhull = list(zip(*rounded_in_chull))
+        close_in_chull = [tup for tup in indexes_close if tup in indexes_chull]
+        iclosechull, jclosehull = list(zip(*close_in_chull))
 
-        # All values close to a point by one pixel (rounded) in the convex hull should be valid
-        assert all(np.isfinite(gridded_pc[iroundhull, jroundhull]))
+        # All values close  pixel in the convex hull should be valid
+        assert all(np.isfinite(gridded_pc[iclosechull, jclosehull]))
+
+        # Other values in the convex hull should not be
+        far_in_chull = [tup for tup in indexes_chull if tup not in indexes_close]
+        ifarchull, jfarchull = list(zip(*far_in_chull))
+
+        assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
+
+        # Check for a different distance value
+        gridded_pc = _grid_pointcloud(pc, grid_coords=grid_coords, dist_nodata_pixel=0.5)
+        ind_close = np.array(list_min_dist) <= 0.5
+
+        # We get the indexes for these coordinates
+        iround, jround = rst.xy2ij(x=rst_pc.geometry.x.values[ind_close],
+                                   y=rst_pc.geometry.y.values[ind_close])
+
+        # Keep only indexes in the convex hull
+        indexes_close = [(iround[k], jround[k]) for k in range(len(iround))]
+        indexes_chull = [(i[k], j[k]) for k in range(len(i)) if ind_inters_convhull[k]]
+        close_in_chull = [tup for tup in indexes_close if tup in indexes_chull]
+        iclosechull, jclosehull = list(zip(*close_in_chull))
+
+        # All values close  pixel in the convex hull should be valid
+        assert all(np.isfinite(gridded_pc[iclosechull, jclosehull]))
+
+        # Other values in the convex hull should not be
+        far_in_chull = [tup for tup in indexes_chull if tup not in indexes_close]
+        ifarchull, jfarchull = list(zip(*far_in_chull))
+
+        assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
+
+
 
 
 
