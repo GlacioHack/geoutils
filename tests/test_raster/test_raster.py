@@ -2270,7 +2270,7 @@ class TestRaster:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
-    def test_interp_points__real(self):
+    def test_interp_points__real(self) -> None:
         """Test interp_points for real data."""
 
         r = gu.Raster(self.landsat_b4_path)
@@ -2292,8 +2292,6 @@ class TestRaster:
         lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
         val_latlon = r.interp_points((lat, lon), method="linear", input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
-
-
 
     def test_value_at_coords(self) -> None:
         """

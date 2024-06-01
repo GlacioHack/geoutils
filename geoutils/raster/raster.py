@@ -3738,7 +3738,9 @@ class Raster:
             if "fill_value" not in kwargs.keys():
                 kwargs.update({"fill_value": np.nan})
 
-            rpoints = interpn((np.flip(xycoords[1], axis=0), xycoords[0]), self.get_nanarray(), (y, x), method=method, **kwargs)
+            rpoints = interpn(
+                (np.flip(xycoords[1], axis=0), xycoords[0]), self.get_nanarray(), (y, x), method=method, **kwargs
+            )
 
         rpoints = np.array(rpoints, dtype=np.float32)
         rpoints[np.array(ind_invalid)] = np.nan
