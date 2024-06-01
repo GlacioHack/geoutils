@@ -3738,6 +3738,7 @@ class Raster:
             if "fill_value" not in kwargs.keys():
                 kwargs.update({"fill_value": np.nan})
 
+            # Using direct coordinates, Y is the first axis, and we need to flip it
             rpoints = interpn(
                 (np.flip(xycoords[1], axis=0), xycoords[0]), self.get_nanarray(), (y, x), method=method, **kwargs
             )
