@@ -2135,19 +2135,6 @@ class TestRaster:
 
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
-        # Test for an invidiual point (shape can be tricky at 1 dimension)
-        x = 493120.0
-        y = 3101000.0
-        i, j = r.xy2ij(x, y)
-        val = r.interp_points((x, y), method="linear")[0]
-        val_img = img[int(i[0]), int(j[0])]
-        assert val_img == val
-
-        # Finally, check that interp convert to latlon
-        lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
-        val_latlon = r.interp_points((lat, lon), method="linear", input_latlon=True)[0]
-        assert val == pytest.approx(val_latlon, abs=0.0001)
-
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
     @pytest.mark.parametrize("shift_aop", [True, False])  # type: ignore
     def test_interp_points__synthetic(self, tag_aop: str | None, shift_aop: bool) -> None:
@@ -2282,6 +2269,31 @@ class TestRaster:
 
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
+
+    def test_interp_points__real(self):
+        """Test interp_points for real data."""
+
+        r = gu.Raster(self.landsat_b4_path)
+        r.set_area_or_point("Area", shift_area_or_point=False)
+
+        # Test for an invidiual point (shape can be tricky at 1 dimension)
+        x = 493120.0
+        y = 3101000.0
+        i, j = r.xy2ij(x, y)
+        val = r.interp_points((x, y), method="linear")[0]
+        val_img = r.data[int(i[0]), int(j[0])]
+        assert val_img == val
+
+        # Check the result is exactly the same for both methods
+        val2 = r.interp_points((x, y), method="linear", force_scipy_function="interpn")[0]
+        assert val2 == pytest.approx(val)
+
+        # Finally, check that interp convert to latlon
+        lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
+        val_latlon = r.interp_points((lat, lon), method="linear", input_latlon=True)[0]
+        assert val == pytest.approx(val_latlon, abs=0.0001)
+
+
 
     def test_value_at_coords(self) -> None:
         """

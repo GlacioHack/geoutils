@@ -3729,7 +3729,7 @@ class Raster:
         # Otherwise, use scipy.interpolate.interpn
         else:
             # Get lower-left corner coordinates
-            xycoords = self.coords(grid=False, force_offset="ll")
+            xycoords = self.coords(grid=False, shift_area_or_point=shift_area_or_point)
 
             # Let interpolation outside the bounds not raise any error by default
             if "bounds_error" not in kwargs.keys():
@@ -3738,7 +3738,7 @@ class Raster:
             if "fill_value" not in kwargs.keys():
                 kwargs.update({"fill_value": np.nan})
 
-            rpoints = interpn(xycoords, self.get_nanarray(), np.array([i, j]).T, method=method, **kwargs)
+            rpoints = interpn((np.flip(xycoords[1], axis=0), xycoords[0]), self.get_nanarray(), (y, x), method=method, **kwargs)
 
         rpoints = np.array(rpoints, dtype=np.float32)
         rpoints[np.array(ind_invalid)] = np.nan
