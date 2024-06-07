@@ -46,7 +46,7 @@ class TestPointCloud:
         poly = geometry.MultiPoint([[p.x, p.y] for p in pc.geometry])
         chull = poly.convex_hull
 
-        # We compute the index of grid cells interesting the convex hull
+        # We compute the index of grid cells intersecting the convex hull
         ind_inters_convhull = rst_pc.intersects(chull)
 
         # We get corresponding 1D indexes for gridded output

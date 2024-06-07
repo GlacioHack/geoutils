@@ -25,7 +25,7 @@ def _grid_pointcloud(
     matter the distance).
 
     :param pc: Point cloud.
-    :param grid_coords: Grid coordinates for X and Y.
+    :param grid_coords: Regular raster grid coordinates in X and Y (i.e. equally spaced, independently for each axis).
     :param data_column_name: Name of data column for point cloud (only if passed as a geodataframe).
     :param resampling: Resampling method within delauney triangles (defaults to linear).
     :param dist_nodata_pixel: Distance from the point cloud after which grid cells are filled by nodata values,
