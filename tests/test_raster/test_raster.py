@@ -10,6 +10,7 @@ import tempfile
 import warnings
 from io import StringIO
 from tempfile import TemporaryFile
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -2226,7 +2227,7 @@ class TestRaster:
         index_y_in_rand = rng.integers(low=8, high=42, size=(10,)) + rng.normal(scale=0.3)
         points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand, shift_area_or_point=shift_aop)
 
-        for method in ["nearest", "linear", "cubic", "quintic"]:
+        for method in ["nearest", "linear"]:
             raster_points_mapcoords = raster.interp_points(
                 (points_x_rand, points_y_rand),
                 method=method,
@@ -2270,7 +2271,8 @@ class TestRaster:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
-    def test_interp_points__real(self) -> None:
+    @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"])
+    def test_interp_points__real(self, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]) -> None:
         """Test interp_points for real data."""
 
         r = gu.Raster(self.landsat_b4_path)
@@ -2280,17 +2282,18 @@ class TestRaster:
         x = 493120.0
         y = 3101000.0
         i, j = r.xy2ij(x, y)
-        val = r.interp_points((x, y), method="linear")[0]
+        val = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
         val_img = r.data[int(i[0]), int(j[0])]
-        assert val_img == val
+        if "nearest" in method or "linear" in method:
+            assert val_img == val
 
         # Check the result is exactly the same for both methods
-        val2 = r.interp_points((x, y), method="linear", force_scipy_function="interpn")[0]
+        val2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
         assert val2 == pytest.approx(val)
 
         # Finally, check that interp convert to latlon
         lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
-        val_latlon = r.interp_points((lat, lon), method="linear", input_latlon=True)[0]
+        val_latlon = r.interp_points((lat, lon), method=method, input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
     def test_value_at_coords(self) -> None:
