@@ -2271,8 +2271,12 @@ class TestRaster:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
-    @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"])
-    def test_interp_points__real(self, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]) -> None:
+    @pytest.mark.parametrize(
+        "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+    )  # type: ignore
+    def test_interp_points__real(
+        self, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+    ) -> None:
         """Test interp_points for real data."""
 
         r = gu.Raster(self.landsat_b4_path)

@@ -3,8 +3,9 @@ from typing import Iterable, Literal
 import numpy as np
 import rasterio as rio
 
-from geoutils._typing import ArrayLike, NDArrayNum
 from geoutils._config import config
+from geoutils._typing import ArrayLike, NDArrayNum
+
 
 def _ij2xy(
     i: ArrayLike,
@@ -12,7 +13,7 @@ def _ij2xy(
     transform: rio.transform.Affine,
     area_or_point: Literal["Area", "Point"] | None,
     shift_area_or_point: bool | None = None,
-    force_offset: str | None = None
+    force_offset: str | None = None,
 ) -> tuple[NDArrayNum, NDArrayNum]:
     """See description of Raster.ij2xy."""
 
@@ -33,6 +34,7 @@ def _ij2xy(
     x, y = rio.transform.xy(transform, i, j, offset=force_offset)
 
     return x, y
+
 
 def _xy2ij(
     x: ArrayLike,
@@ -86,9 +88,7 @@ def _xy2ij(
         # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
         if area_or_point is not None and area_or_point == "Point":
             if not isinstance(i.flat[0], (np.floating, float)):
-                raise ValueError(
-                    "Operator must return np.floating values to perform pixel interpretation shifting."
-                )
+                raise ValueError("Operator must return np.floating values to perform pixel interpretation shifting.")
 
             i += 0.5
             j += 0.5
@@ -107,7 +107,7 @@ def _coords(
     area_or_point: Literal["Area", "Point"] | None,
     grid: bool = True,
     shift_area_or_point: bool | None = None,
-    force_offset: str | None = None
+    force_offset: str | None = None,
 ) -> tuple[NDArrayNum, NDArrayNum]:
     """See description of Raster.coords."""
 
@@ -126,7 +126,7 @@ def _coords(
         transform=transform,
         area_or_point=area_or_point,
         shift_area_or_point=shift_area_or_point,
-        force_offset=force_offset
+        force_offset=force_offset,
     )
 
     # If grid is True, return coordinate grids
@@ -136,13 +136,15 @@ def _coords(
     else:
         return np.asarray(xx), np.asarray(yy)
 
+
 def _outside_image(
     xi: ArrayLike,
     yj: ArrayLike,
     transform: rio.transform.Affine,
     shape: tuple[int, int],
     area_or_point: Literal["Area", "Point"] | None,
-    index: bool = True) -> bool:
+    index: bool = True,
+) -> bool:
     """See description of Raster.outside_image."""
 
     if not index:
@@ -155,7 +157,8 @@ def _outside_image(
     else:
         return False
 
-def _res(transform: rio.transform.Affine):
+
+def _res(transform: rio.transform.Affine) -> tuple[float, float]:
     """See description of Raster.res"""
 
     return transform[0], abs(transform[4])

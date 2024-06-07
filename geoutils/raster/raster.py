@@ -47,11 +47,12 @@ from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
+    reproject_from_latlon,
 )
 from geoutils.raster.array import get_mask_from_array
-from geoutils.raster.sampling import subsample_array
+from geoutils.raster.georeferencing import _coords, _ij2xy, _outside_image, _res, _xy2ij
 from geoutils.raster.interpolate import _interp_points
-from geoutils.raster.georeferencing import _outside_image, _coords, _xy2ij, _ij2xy, _res
+from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -3505,8 +3506,15 @@ class Raster:
         :returns i, j: Indices of (x,y) in the image.
         """
 
-        return _xy2ij(x=x, y=y, transform=self.transform, area_or_point=self.area_or_point, op=op, precision=precision,
-                      shift_area_or_point=shift_area_or_point)
+        return _xy2ij(
+            x=x,
+            y=y,
+            transform=self.transform,
+            area_or_point=self.area_or_point,
+            op=op,
+            precision=precision,
+            shift_area_or_point=shift_area_or_point,
+        )
 
     def ij2xy(
         self, i: ArrayLike, j: ArrayLike, shift_area_or_point: bool | None = None, force_offset: str | None = None
@@ -3531,8 +3539,14 @@ class Raster:
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-        return _ij2xy(i=i, j=j, transform=self.transform, area_or_point=self.area_or_point,
-                      shift_area_or_point=shift_area_or_point, force_offset=force_offset)
+        return _ij2xy(
+            i=i,
+            j=j,
+            transform=self.transform,
+            area_or_point=self.area_or_point,
+            shift_area_or_point=shift_area_or_point,
+            force_offset=force_offset,
+        )
 
     def coords(
         self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None
@@ -3550,8 +3564,14 @@ class Raster:
         :returns x,y: Arrays of the (x,y) coordinates.
         """
 
-        return _coords(transform=self.transform, shape=self.shape, area_or_point=self.area_or_point, grid=grid,
-                       shift_area_or_point=shift_area_or_point, force_offset=force_offset)
+        return _coords(
+            transform=self.transform,
+            shape=self.shape,
+            area_or_point=self.area_or_point,
+            grid=grid,
+            shift_area_or_point=shift_area_or_point,
+            force_offset=force_offset,
+        )
 
     def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
@@ -3564,8 +3584,9 @@ class Raster:
         :returns is_outside: ``True`` if ij is outside the image.
         """
 
-        return _outside_image(xi=xi, yj=yj, transform=self.transform, shape=self.shape,
-                              area_or_point=self.area_or_point, index=index)
+        return _outside_image(
+            xi=xi, yj=yj, transform=self.transform, shape=self.shape, area_or_point=self.area_or_point, index=index
+        )
 
     def interp_points(
         self,
@@ -3606,11 +3627,20 @@ class Raster:
         if self.count != 1:
             array = array[band - 1, :, :]
 
-        return _interp_points(array, crs=self.crs, transform=self.transform, area_or_point=self.area_or_point,
-                              points=points, method=method, input_latlon=input_latlon,
-                              shift_area_or_point=shift_area_or_point, force_scipy_function=force_scipy_function,
-                              **kwargs)
+        # If those are in latlon, convert to Raster CRS
+        if input_latlon:
+            points = reproject_from_latlon(points, out_crs=self.crs)  # type: ignore
 
+        return _interp_points(
+            array,
+            transform=self.transform,
+            area_or_point=self.area_or_point,
+            points=points,
+            method=method,
+            shift_area_or_point=shift_area_or_point,
+            force_scipy_function=force_scipy_function,
+            **kwargs,
+        )
 
     def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """
