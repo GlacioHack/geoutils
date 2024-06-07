@@ -1,8 +1,8 @@
 """Test module for point cloud functionalities."""
 
-import pytest
 import geopandas as gpd
 import numpy as np
+import pytest
 import rasterio as rio
 from shapely import geometry
 
@@ -113,4 +113,3 @@ class TestPointCloud:
         with pytest.raises(ValueError, match="Grid coordinates must be regular*"):
             grid_coords[0][0] += 1
             Raster.from_pointcloud_regular(pc, grid_coords=grid_coords)  # type: ignore
-
