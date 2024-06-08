@@ -5,7 +5,7 @@ from typing import Any, Callable, Literal, overload
 import numpy as np
 import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
-from scipy.ndimage import binary_dilation, map_coordinates, distance_transform_edt
+from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
 from geoutils._typing import NDArrayNum, Number
 from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
@@ -36,7 +36,7 @@ def _interpn_interpolator(
     # Adding masking of NaNs for methods not supporting it
     method_support_nan = method in ["nearest", "linear"]
     order = method_to_order[method]
-    dist_nodata_spread = int(np.ceil(order/2))
+    dist_nodata_spread = int(np.ceil(order / 2))
 
     # If NaNs are not supported
     if not method_support_nan:

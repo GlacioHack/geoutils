@@ -1977,7 +1977,6 @@ class TestRaster:
             intersection = r.intersection(r_nonoverlap)
             assert intersection == (0.0, 0.0, 0.0, 0.0)
 
-
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:
         """

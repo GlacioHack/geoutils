@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import pytest
-
 import numpy as np
+import pytest
 
 import geoutils as gu
 from geoutils import examples
+
 
 class TestGeoreferencing:
 
@@ -209,5 +209,3 @@ class TestGeoreferencing:
         xxgrid, yygrid = img.coords(grid=True, force_offset="ll")
         assert np.array_equal(xxgrid, np.repeat(xx0[np.newaxis, :], img.height, axis=0))
         assert np.array_equal(yygrid, np.flipud(np.repeat(yy0[:, np.newaxis], img.width, axis=1)))
-
-

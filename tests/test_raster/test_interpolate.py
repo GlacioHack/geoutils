@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import re
 from typing import Literal
-import pytest
 
 import numpy as np
+import pytest
 import rasterio as rio
-import geoutils as gu
-from scipy.ndimage import distance_transform_edt, binary_dilation
+from scipy.ndimage import binary_dilation
 
-from geoutils.raster.interpolate import method_to_order
-from geoutils.projtools import reproject_to_latlon
+import geoutils as gu
 from geoutils import examples
+from geoutils.projtools import reproject_to_latlon
+from geoutils.raster.interpolate import method_to_order
+
 
 class TestInterpolate:
 
@@ -89,10 +90,10 @@ class TestInterpolate:
 
         # Check bilinear extrapolation for points at 1 spacing outside from the input grid
         points_out = (
-                [(-1, i) for i in np.arange(1, 4)]
-                + [(i, -1) for i in np.arange(1, 4)]
-                + [(4, i) for i in np.arange(1, 4)]
-                + [(i, 4) for i in np.arange(4, 1)]
+            [(-1, i) for i in np.arange(1, 4)]
+            + [(i, -1) for i in np.arange(1, 4)]
+            + [(4, i) for i in np.arange(1, 4)]
+            + [(i, 4) for i in np.arange(4, 1)]
         )
         points_out_xy = list(zip(*points_out))
         raster_points_out = raster.interp_points(points_out_xy)
@@ -159,8 +160,7 @@ class TestInterpolate:
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
     def test_interp_points__real(
-            self, example: str,
-            method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+        self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     ) -> None:
         """Test interp_points for real data."""
 
@@ -201,7 +201,7 @@ class TestInterpolate:
 
         # All surrounding pixels with distance half the method order rounded up should be NaNs
         order = method_to_order[method]
-        d = int(np.ceil(order/2))
+        d = int(np.ceil(order / 2))
         if method in ["nearest", "linear"]:
             return
         # Get indices of NaNs within the distance from NaNs
@@ -375,17 +375,17 @@ class TestInterpolate:
             xtest0, ytest0, band=1, window=3, masked=True, return_window=True
         )
         assert (
-                val_window
-                == np.ma.mean(r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
-                == np.ma.mean(z_window)
+            val_window
+            == np.ma.mean(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
+            == np.ma.mean(z_window)
         )
-        assert np.array_equal(z_window, r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
+        assert np.array_equal(z_window, r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
         # 5/ Reducer function argument
         val_window2 = r_multi.value_at_coords(
             xtest0, ytest0, band=1, window=3, masked=True, reducer_function=np.ma.median
         )
-        assert val_window2 == np.ma.median(r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
+        assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
         # -- Tests 3: check that errors are raised when supposed for non-boolean arguments --
 
