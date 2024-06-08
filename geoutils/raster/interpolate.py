@@ -5,7 +5,7 @@ from typing import Any, Callable, Literal, overload
 import numpy as np
 import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
-from scipy.ndimage import binary_dilation, map_coordinates
+from scipy.ndimage import binary_dilation, map_coordinates, distance_transform_edt
 
 from geoutils._typing import NDArrayNum, Number
 from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
@@ -34,15 +34,16 @@ def _interpn_interpolator(
     """
 
     # Adding masking of NaNs for methods not supporting it
-    method_support_nan = method in ["nearest"]
+    method_support_nan = method in ["nearest", "linear"]
     order = method_to_order[method]
-    dist_nodata_spread = int(np.ceil(order / 2))
+    dist_nodata_spread = int(np.ceil(order/2))
 
     # If NaNs are not supported
     if not method_support_nan:
         # We compute the mask and dilate it to the order of interpolation (propagating NaNs)
         mask_nan = ~np.isfinite(values)
         new_mask = binary_dilation(mask_nan, iterations=dist_nodata_spread).astype("uint8")
+        # new_mask = mask_nan
 
         # We create an interpolator for the mask too, using nearest
         interp_mask = RegularGridInterpolator(
@@ -50,7 +51,9 @@ def _interpn_interpolator(
         )
 
         # Replace NaN values by nearest neighbour to avoid biasing interpolation near NaNs with placeholder value
-        values[mask_nan] = 0
+        # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array
+        indices = distance_transform_edt(mask_nan, return_distances=False, return_indices=True)
+        values = values[tuple(indices)]
 
     # For the RegularGridInterpolator
     if method in RegularGridInterpolator._ALL_METHODS:
