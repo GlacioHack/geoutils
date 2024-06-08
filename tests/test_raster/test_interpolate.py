@@ -162,16 +162,16 @@ class TestInterpolate:
     def test_interp_points__real(
         self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     ) -> None:
-        """Test interp_points for real data."""
+        """Test interp_points for real data, checking in particular the propagation of nodata."""
 
-        # 1/ Check the accuracy of the interpolation at an exact point, and between methods
+        # Check the accuracy of the interpolation at an exact point, and between methods
 
         # Open and crop for speed
         r = gu.Raster(example)
         r = r.crop((r.bounds.left, r.bounds.bottom, r.bounds.left + r.res[0] * 50, r.bounds.bottom + r.res[1] * 50))
         r.set_area_or_point("Area", shift_area_or_point=False)
 
-        # Test for an individual point (shape can be tricky at 1 dimension)
+        # 1/ Test for an individual point (shape can be tricky in 1 dimension)
         itest = 10
         jtest = 10
         x, y = r.ij2xy(itest, jtest)
@@ -189,15 +189,39 @@ class TestInterpolate:
         val_latlon = r.interp_points((lat, lon), method=method, input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
-        # 2/ Check the propagation of NaNs
+        # 2/ Test for multiple points
+        i = np.random.default_rng(42).integers(0, 50, size=10)
+        j = np.random.default_rng(42).integers(0, 50, size=10)
+        x, y = r.ij2xy(itest, jtest)
+        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
+        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
 
-        # 2.1/ Manual check for a specific point
+        assert np.array_equal(vals, vals2, equal_nan=True)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize(
+        "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+    )  # type: ignore
+    def test_interp_point__nodata_propag(self,
+             example: str,
+             method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]) -> None:
+
+        # Open and crop for speed
+        r = gu.Raster(example)
+        r = r.crop((r.bounds.left, r.bounds.bottom, r.bounds.left + r.res[0] * 100, r.bounds.bottom + r.res[1] * 100))
+
+        # 1/ Check the propagation of NaNs
+
+        # 1.1/ Manual check for a specific point
         # Convert raster to float
         r = r.astype(np.float32)
 
         # Create a NaN at a given pixel (we know the landsat example has no NaNs to begin with)
         i0, j0 = (10, 10)
         r[i0, j0] = np.nan
+
+        # Create a big NaN area in the bottom right (for more complex NaN propagation below)
+        r[80:90, 80:90] = np.nan
 
         # All surrounding pixels with distance half the method order rounded up should be NaNs
         order = method_to_order[method]
@@ -224,7 +248,7 @@ class TestInterpolate:
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
-        # 2.2/ Check for all NaNs in the raster
+        # 1.2/ Check for all NaNs in the raster
 
         # We create the mask of dilated NaNs
         mask_nan = ~np.isfinite(r.get_nanarray())
@@ -238,14 +262,14 @@ class TestInterpolate:
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
-        # 3/ Check that valid interpolated values at the edge of NaNs have small errors caused by filling NaNs
+        # 2/ Check that interpolated values at the edge of NaNs are valid + have small errors due to filling NaNs
         # with the nearest value during interpolation (thanks to the spreading of the nodata mask)
 
         # We compare values interpolated right at the edge of valid values near a NaN between
-        # 1/ Implementation of interp_points (that replaces NaNs by the nearest neighbour during interpolation)
-        # 2/ Raster filled with placeholder value then running interp_points
+        # a/ Implementation of interp_points (that replaces NaNs by the nearest neighbour during interpolation)
+        # b/ Raster filled with placeholder value then running interp_points
 
-        # 3.1/ Manual check for a specific point
+        # 2.1/ Manual check for a specific point
 
         # We get the indexes of valid pixels just at the edge of NaNs
         indices_edge = [
@@ -272,9 +296,9 @@ class TestInterpolate:
         vals_near = r2.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
         vals2_near = r2.interp_points((x, y), method=method, force_scipy_function="interpn")
 
-        # Both sets of values should be exactly the same, without any NaNs
-        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-2)
-        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-2)
+        # Both sets of values should valid + within a relative tolerance of 0.1%
+        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
+        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
         # Same check for values within one pixel of the exact coordinates
         # Same check for values within one pixel of the exact coordinates
@@ -287,10 +311,10 @@ class TestInterpolate:
         vals2_near = r2.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="interpn")
 
         # Both sets of values should be exactly the same, without any NaNs
-        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-2)
-        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-2)
+        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
+        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
-        # 3.2/ Repeat the same for all NaNs
+        # 2.2/ Repeat the same for all edges of NaNs in the raster
         mask_dilated_plus_one = binary_dilation(mask_nan_dilated, iterations=1).astype(bool)
         mask_edge_dilated = np.logical_and(mask_dilated_plus_one, ~mask_nan_dilated.astype(bool))
 
@@ -304,8 +328,8 @@ class TestInterpolate:
         vals2_near = r2.interp_points((x, y), method=method, force_scipy_function="interpn")
 
         # Both sets of values should be exactly the same, without any NaNs
-        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-2)
-        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-2)
+        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
+        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
     def test_value_at_coords(self) -> None:
         """
