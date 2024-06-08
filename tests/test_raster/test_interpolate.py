@@ -192,7 +192,7 @@ class TestInterpolate:
         # 2/ Test for multiple points
         i = np.random.default_rng(42).integers(0, 50, size=10)
         j = np.random.default_rng(42).integers(0, 50, size=10)
-        x, y = r.ij2xy(itest, jtest)
+        x, y = r.ij2xy(i, j)
         vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
         vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
 
@@ -202,9 +202,9 @@ class TestInterpolate:
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
-    def test_interp_point__nodata_propag(self,
-             example: str,
-             method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]) -> None:
+    def test_interp_point__nodata_propag(
+        self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+    ) -> None:
 
         # Open and crop for speed
         r = gu.Raster(example)
