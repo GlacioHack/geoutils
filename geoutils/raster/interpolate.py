@@ -35,22 +35,22 @@ def _interpn_interpolator(
 
     # Adding masking of NaNs for methods not supporting it
     method_support_nan = method in ["nearest", "linear"]
+    # Derive distance to spread nodata to depending on method order
     order = method_to_order[method]
     dist_nodata_spread = int(np.ceil(order / 2))
 
     # If NaNs are not supported
     if not method_support_nan:
-        # We compute the mask and dilate it to the order of interpolation (propagating NaNs)
+        # We compute the mask and dilate it to the distance to spread nodatas
         mask_nan = ~np.isfinite(values)
         new_mask = binary_dilation(mask_nan, iterations=dist_nodata_spread).astype("uint8")
-        # new_mask = mask_nan
 
-        # We create an interpolator for the mask too, using nearest
+        # We create an interpolator for the mask using nearest
         interp_mask = RegularGridInterpolator(
             coords, new_mask, method="nearest", bounds_error=bounds_error, fill_value=1
         )
 
-        # Replace NaN values by nearest neighbour to avoid biasing interpolation near NaNs with placeholder value
+        # We replace NaN values by nearest neighbours to minimize interpolation errors near NaNs
         # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array
         indices = distance_transform_edt(mask_nan, return_distances=False, return_indices=True)
         values = values[tuple(indices)]
@@ -58,12 +58,12 @@ def _interpn_interpolator(
     # For the RegularGridInterpolator
     if method in RegularGridInterpolator._ALL_METHODS:
 
-        # We create the interpolator
+        # We create the classic interpolator
         interp = RegularGridInterpolator(
             coords, values, method=method, bounds_error=bounds_error, fill_value=fill_value
         )
 
-        # We create a new interpolator callable
+        # We create a new interpolator callable that propagates nodata as defined above
         def regulargrid_interpolator_with_nan(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
 
             results = interp(xi)
@@ -82,7 +82,7 @@ def _interpn_interpolator(
         # The coordinates must be in ascending order, which requires flipping the array too (more costly)
         interp = RectBivariateSpline(np.flip(coords[0]), coords[1], np.flip(values[:], axis=0))
 
-        # We create a new interpolator callable
+        # We create a new interpolator callable that propagates nodata as defined above, and supports fill_value
         def rectbivariate_interpolator_with_fillvalue(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
 
             # Get invalids
