@@ -3601,8 +3601,8 @@ class Raster:
         """
          Interpolate raster values at a set of points.
 
-         Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid, otherwise uses scipy.interpn
-         on a regular grid.
+         Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid using "nearest" or "linear" (for speed),
+         otherwise uses scipy.interpn on a regular grid.
 
          Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
          to ensure that the interpolation of points is done at the right location. See parameter description

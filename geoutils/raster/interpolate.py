@@ -5,11 +5,12 @@ from typing import Any, Callable, Literal, overload
 import numpy as np
 import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
-from scipy.ndimage import map_coordinates
+from scipy.ndimage import map_coordinates, binary_dilation
 
 from geoutils._typing import NDArrayNum, Number
 from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
 
+method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
 
 def _interpn_interpolator(
     coords: tuple[NDArrayNum, NDArrayNum],
@@ -19,45 +20,95 @@ def _interpn_interpolator(
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
-    Mirroring scipy.interpn function but returning interpolator directly: either a RegularGridInterpolator or
-    a RectBivariateSpline object. (required for speed when interpolating multiple times)
+    Create SciPy interpolator with nodata spreading at distance of half the method order rounded up (i.e., linear
+    spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
 
-    From: https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743
+    Gives the exact same result as scipy.interpolate.interpn, and allows interpolator to be re-used if required (
+    for speed).
+    In practice, returns either a NaN-modified RegularGridInterpolator or a NaN-modified RectBivariateSpline object,
+    both expecting a tuple of X/Y coordinates to be evaluated.
+
+    Adapted from:
+    https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743.
     """
 
-    # Easy for the RegularGridInterpolator
+    # Adding masking of NaNs for methods not supporting it
+    method_support_nan = method in ["nearest"]
+    order = method_to_order[method]
+    dist_nodata_spread = int(np.ceil(order/2))
+
+    # If NaNs are not supported
+    if not method_support_nan:
+        # We compute the mask and dilate it to the order of interpolation (propagating NaNs)
+        mask_nan = ~np.isfinite(values)
+        new_mask = binary_dilation(mask_nan, iterations=dist_nodata_spread).astype("uint8")
+
+        # We create an interpolator for the mask too, using nearest
+        interp_mask = RegularGridInterpolator(
+            coords, new_mask, method="nearest", bounds_error=bounds_error, fill_value=1
+        )
+
+        # Replace NaN values by nearest neighbour to avoid biasing interpolation near NaNs with placeholder value
+        values[mask_nan] = 0
+
+    # For the RegularGridInterpolator
     if method in RegularGridInterpolator._ALL_METHODS:
+
+        # We create the interpolator
         interp = RegularGridInterpolator(
             coords, values, method=method, bounds_error=bounds_error, fill_value=fill_value
         )
-        return interp
 
-    # Otherwise need to wrap the fill value around RectBivariateSpline
-    interp = RectBivariateSpline(np.flip(coords[0]), coords[1], np.flip(values[:], axis=0))
+        # We create a new interpolator callable
+        def regulargrid_interpolator_with_nan(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
 
-    def rectbivariate_interpolator_with_fillvalue(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
+            results = interp(xi)
 
-        # RectBivariateSpline doesn't support fill_value; we need to wrap here
-        xi_arr = np.array(xi)
-        xi_shape = xi_arr.shape
-        xi_arr = xi_arr.reshape(-1, xi_arr.shape[-1])
-        idx_valid = np.all(
-            (
-                coords[0][-1] <= xi_arr[:, 0],
-                xi_arr[:, 0] <= coords[0][0],
-                coords[1][0] <= xi_arr[:, 1],
-                xi_arr[:, 1] <= coords[1][-1],
-            ),
-            axis=0,
-        )
-        # Make a copy of values for RectBivariateSpline
-        result = np.empty_like(xi_arr[:, 0])
-        result[idx_valid] = interp.ev(xi_arr[idx_valid, 0], xi_arr[idx_valid, 1])
-        result[np.logical_not(idx_valid)] = fill_value
+            if not method_support_nan:
+                invalids = interp_mask(xi)
+                results[invalids.astype(bool)] = np.nan
 
-        return result.reshape(xi_shape[:-1])
+            return results
 
-    return rectbivariate_interpolator_with_fillvalue
+        return regulargrid_interpolator_with_nan
+
+    # For the RectBivariateSpline
+    else:
+
+        # The coordinates must be in ascending order, which requires flipping the array too (more costly)
+        interp = RectBivariateSpline(np.flip(coords[0]), coords[1], np.flip(values[:], axis=0))
+
+        # We create a new interpolator callable
+        def rectbivariate_interpolator_with_fillvalue(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
+
+            # Get invalids
+            invalids = interp_mask(xi)
+
+            # RectBivariateSpline doesn't support fill_value, so we need to wrap here to add them
+            xi_arr = np.array(xi).T
+            xi_shape = xi_arr.shape
+            xi_arr = xi_arr.reshape(-1, xi_arr.shape[-1])
+            idx_valid = np.all(
+                (
+                    coords[0][-1] <= xi_arr[:, 0],
+                    xi_arr[:, 0] <= coords[0][0],
+                    coords[1][0] <= xi_arr[:, 1],
+                    xi_arr[:, 1] <= coords[1][-1],
+                ),
+                axis=0,
+            )
+            # Make a copy of values for RectBivariateSpline
+            result = np.empty_like(xi_arr[:, 0])
+            result[idx_valid] = interp.ev(xi_arr[idx_valid, 0], xi_arr[idx_valid, 1])
+            result[np.logical_not(idx_valid)] = fill_value
+
+            # Add back NaNs from dilated mask
+            results = np.atleast_1d(result.reshape(xi_shape[:-1]))
+            results[invalids.astype(bool)] = np.nan
+
+            return results
+
+        return rectbivariate_interpolator_with_fillvalue
 
 
 @overload

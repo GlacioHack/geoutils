@@ -19,6 +19,7 @@ import rasterio as rio
 import xarray as xr
 from pylint.lint import Run
 from pylint.reporters.text import TextReporter
+from scipy.ndimage import distance_transform_edt
 
 import geoutils as gu
 import geoutils.projtools as pt
@@ -27,6 +28,7 @@ from geoutils._typing import MArrayNum, NDArrayNum
 from geoutils.misc import resampling_method_from_str
 from geoutils.projtools import reproject_to_latlon
 from geoutils.raster.raster import _default_nodata, _default_rio_attrs
+from geoutils.raster.interpolate import method_to_order
 
 DO_PLOT = False
 
@@ -2271,23 +2273,26 @@ class TestRaster:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
     def test_interp_points__real(
-        self, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+        self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     ) -> None:
         """Test interp_points for real data."""
 
-        r = gu.Raster(self.landsat_b4_path)
+        # 1/ Check the accuracy of the interpolation at an exact point, and between methods
+
+        r = gu.Raster(example)
         r.set_area_or_point("Area", shift_area_or_point=False)
 
-        # Test for an invidiual point (shape can be tricky at 1 dimension)
-        x = 493120.0
-        y = 3101000.0
-        i, j = r.xy2ij(x, y)
+        # Test for an individual point (shape can be tricky at 1 dimension)
+        itest = 100
+        jtest = 100
+        x, y = r.ij2xy(itest, jtest)
         val = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
-        val_img = r.data[int(i[0]), int(j[0])]
+        val_img = r.data[itest, jtest]
         if "nearest" in method or "linear" in method:
             assert val_img == val
 
@@ -2295,10 +2300,68 @@ class TestRaster:
         val2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
         assert val2 == pytest.approx(val)
 
-        # Finally, check that interp convert to latlon
+        # Check that interp convert to latlon
         lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
         val_latlon = r.interp_points((lat, lon), method=method, input_latlon=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001)
+
+        # 2/ Check the propagation of NaNs
+
+        # Convert raster to float
+        r = r.astype(np.float32)
+
+        # Create a NaN at a given pixel (we know the landsat example has no NaNs to begin with)
+        i0, j0 = (10, 10)
+        r[i0, j0] = np.nan
+
+        # All surrounding pixels with distance half the method order rounded up should be NaNs
+        order = method_to_order[method]
+        if method == "linear":
+            order = 1
+        d = int(np.ceil(order / 2))
+        # No NaN propagation for linear
+        indices_nan = [(i0 + i, j0 + j) for i in np.arange(-d, d+1) for j in np.arange(-d, d+1) if (np.abs(i) + np.abs(j)) <= d]
+        i,j = list(zip(*indices_nan))
+        x, y = r.ij2xy(i, j)
+        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
+        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
+
+        assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
+
+        # 3/ Check that valid interpolated values at the edge of NaNs are free of errors
+
+        # We compare values interpolated right at the edge of valid values near a NaN between
+        # 1/ Implementation of interp_points (that replaces NaNs by a placeholder value of 0 during interpolation)
+        # 2/ Raster filled with nearest neighbour at NaN coordinates, then running interp_points
+        # If the interpolated value are free of the influence of the placeholder value of 0, the interpolated value
+        # should be exactly the same
+
+        # We get the indexes of valid pixels just at the edge of NaNs
+        indices_edge = [(i0 + i, j0 + j) for i in np.arange(-d-1, d+2) for j in np.arange(-d-1, d+2) if (np.abs(i) + np.abs(j)) == d+1]
+        i, j = list(zip(*indices_edge))
+        x, y = r.ij2xy(i, j)
+        # And get their interpolated value
+        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
+        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
+
+        # Then we fill the NaNs in the raster with the nearest neighbour
+        r_arr = r.get_nanarray()
+        # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array
+        indices = distance_transform_edt(~np.isfinite(r_arr), return_distances=False, return_indices=True)
+        r_arr = r_arr[tuple(indices)]
+        r.data = r_arr
+
+        # All raster values should be valid now
+        assert np.all(np.isfinite(r_arr))
+
+        # And get the interpolated values
+        vals_near = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
+        vals2_near = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
+
+        # Both sets of values should be exactly the same, without any NaNs
+        assert np.allclose(vals, vals_near, equal_nan=False)
+        assert np.allclose(vals2, vals2_near, equal_nan=False)
+
 
     def test_value_at_coords(self) -> None:
         """
