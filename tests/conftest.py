@@ -2,8 +2,9 @@
 
 from pytest import DoctestItem
 
+
 # To order test modules logically during execution
-def pytest_collection_modifyitems(items):
+def pytest_collection_modifyitems(items):  # type: ignore
     """Modifies test items in place to ensure test modules run in a given order."""
 
     # Ensure test_delayed runs last to avoid TearDown errors:
@@ -19,8 +20,9 @@ def pytest_collection_modifyitems(items):
     module_names = list(module_mapping.values())
     module_items = list(module_mapping.keys())
 
-    module_items_reordered = [it for k, it in enumerate(module_items) if module_names[k] != "test_delayed"] + \
-                             [it for k, it in enumerate(module_items) if module_names[k] == "test_delayed"]
+    module_items_reordered = [it for k, it in enumerate(module_items) if module_names[k] != "test_delayed"] + [
+        it for k, it in enumerate(module_items) if module_names[k] == "test_delayed"
+    ]
 
     # And write back items in that order, with doctests first
     items[:] = nonmodule_items + module_items_reordered
