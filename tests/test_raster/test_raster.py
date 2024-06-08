@@ -27,8 +27,8 @@ from geoutils import examples
 from geoutils._typing import MArrayNum, NDArrayNum
 from geoutils.misc import resampling_method_from_str
 from geoutils.projtools import reproject_to_latlon
-from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 from geoutils.raster.interpolate import method_to_order
+from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 
 DO_PLOT = False
 
@@ -2273,7 +2273,7 @@ class TestRaster:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
@@ -2320,8 +2320,10 @@ class TestRaster:
             order = 1
         d = int(np.ceil(order / 2))
         # No NaN propagation for linear
-        indices_nan = [(i0 + i, j0 + j) for i in np.arange(-d, d+1) for j in np.arange(-d, d+1) if (np.abs(i) + np.abs(j)) <= d]
-        i,j = list(zip(*indices_nan))
+        indices_nan = [
+            (i0 + i, j0 + j) for i in np.arange(-d, d + 1) for j in np.arange(-d, d + 1) if (np.abs(i) + np.abs(j)) <= d
+        ]
+        i, j = list(zip(*indices_nan))
         x, y = r.ij2xy(i, j)
         vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
         vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
@@ -2337,7 +2339,12 @@ class TestRaster:
         # should be exactly the same
 
         # We get the indexes of valid pixels just at the edge of NaNs
-        indices_edge = [(i0 + i, j0 + j) for i in np.arange(-d-1, d+2) for j in np.arange(-d-1, d+2) if (np.abs(i) + np.abs(j)) == d+1]
+        indices_edge = [
+            (i0 + i, j0 + j)
+            for i in np.arange(-d - 1, d + 2)
+            for j in np.arange(-d - 1, d + 2)
+            if (np.abs(i) + np.abs(j)) == d + 1
+        ]
         i, j = list(zip(*indices_edge))
         x, y = r.ij2xy(i, j)
         # And get their interpolated value
@@ -2361,7 +2368,6 @@ class TestRaster:
         # Both sets of values should be exactly the same, without any NaNs
         assert np.allclose(vals, vals_near, equal_nan=False)
         assert np.allclose(vals2, vals2_near, equal_nan=False)
-
 
     def test_value_at_coords(self) -> None:
         """
