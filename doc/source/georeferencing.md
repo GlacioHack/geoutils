@@ -13,15 +13,20 @@ kernelspec:
 (georeferencing)=
 # Referencing
 
-Below, a summary of the **georeferencing attribute definition** of geospatial data objects and the **methods to manipulate 
-georeferencing attributes** in different projections, without any data transformation. For georeferenced transformation 
-(reprojection, cropping), see {ref}`geotransformations`.
+Below, a summary of the **georeferencing attributes** of geospatial data objects and the **methods to manipulate these 
+georeferencing attributes** in different projections, without any data transformation. For georeferenced transformations 
+(such as reprojection, cropping), see {ref}`geotransformations`.
 
 # Attributes
 
-In GeoUtils, the georeferencing syntax is consistent across all geospatial data objects. Additionally, data objects 
-load only their metadata by default, allowing quick operations on georeferencing without requiring the array data 
+In GeoUtils, the **georeferencing syntax is consistent across all geospatial data objects**. Additionally, **data objects 
+load only their metadata by default**, allowing quick operations on georeferencing without requiring the array data 
 (for a {class}`~geoutils.Raster`) or geometry data (for a {class}`~geoutils.Vector`) to be present in memory.
+
+## Metadata summary
+
+To summarize all the metadata of a geospatial data object, including its georeferencing, {func}`~geoutils.Raster.info` can be used:
+
 
 ```{code-cell} ipython3
 :tags: [hide-cell]
@@ -33,10 +38,6 @@ import geoutils as gu
 rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 vect = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
 ```
-
-## Metadata summary
-
-To summarize all the metadata of a geospatial data object, including its georeferencing, {func}`~geoutils.Raster.info` can be used:
 
 ```{code-cell} ipython3
 # Print raster and vector info
@@ -65,8 +66,8 @@ can help define a 3D CRS.
 
 ## Bounds
 
-Bounds define the spatial extent of geospatial data, and are often useful to calculate extent intersections, or to reproject or crop on a matching extent.
-The {attr}`~geoutils.Raster.bounds` of a raster of vector correspond to a {class}`rasterio.coords.BoundingBox` object, composed of the "left", "right", "bottom" and "top" coordinates making up the bounds.
+Bounds define the spatial extent of geospatial data, composed of the "left", "right", "bottom" and "top" coordinates.
+The {attr}`~geoutils.Raster.bounds` of a raster or a vector is a {class}`rasterio.coords.BoundingBox` object: 
 
 ```{code-cell} ipython3
 # Show bounds attribute of a raster and vector
@@ -75,18 +76,19 @@ print(vect.bounds)
 ```
 
 ```{note}
-To define {attr}`~geoutils.Raster.bounds` consistently between rasters and vectors, the {attr}`~geoutils.Vector.bounds` 
-attribute corresponds to the {attr}`geopandas.GeoDataFrame.total_bounds` attribute (bounds of all geometries).
+To define {attr}`~geoutils.Raster.bounds` consistently between rasters and vectors, {attr}`~geoutils.Vector.bounds`
+ corresponds to {attr}`geopandas.GeoSeries.total_bounds` (total bounds of all geometry features) converted to a {class}`rasterio.coords.BoundingBox`.
 
-To derive per-geometry bounds with a {class}`~geoutils.Vector` (matching {attr}`geopandas.GeoDataFrame.bounds`), use 
-{attr}`~geoutils.Vector.geom_bounds`.
+To reproduce the behaviour of {attr}`geopandas.GeoSeries.bounds` (per-feature bounds) with a 
+{class}`~geoutils.Vector`, use {attr}`~geoutils.Vector.geom_bounds`.
 ```
 
 ## Footprints
 
-Reprojections between CRSs deform shapes, including raster or vector extents, thus it is often better to consider a 
-vectorized footprint. The {class}`~geoutils.Raster.footprint` is a {class}`~geoutils.Vector` object with a single polygon 
-geometry for which points have been densified, allowing reliable computation of extents between CRSs.
+As reprojections between CRSs deform shapes, including extents, it is often better to consider a vectorized footprint 
+to calculate intersections in different projections. The {class}`~geoutils.Raster.footprint` is a 
+{class}`~geoutils.Vector` object with a single polygon geometry for which points have been densified, allowing 
+reliable computation of extents between CRSs.
 
 ```{code-cell} ipython3
 # Show bounds attribute of a raster and vector
@@ -180,7 +182,11 @@ rast_footprint.plot()
 
 ## Getting a metric CRS
 
-A metric CRS at the location of the geospatial data can be derived using {func}`geoutils.Raster.get_metric_crs`.
+A local metric coordinate system can be estimated for both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>` through the
+{func}`~geoutils.Raster.get_metric_crs` function.
+
+The metric system returned can be either "universal" (zone of the Universal Transverse Mercator or Universal Polar Stereographic system), or "custom"
+(Mercator or Polar projection centered on the {class}`Raster<geoutils.Raster>` or {class}`Vector<geoutils.Vector>`).
 
 ```{code-cell} ipython3
 # Get local metric CRS
@@ -189,6 +195,8 @@ print(rast.get_metric_crs())
 ```
 
 ## Re-set georeferencing metadata
+
+To add?
 
 {func}`geoutils.Vector.set_crs`
 {func}`geoutils.Raster.set_transform`

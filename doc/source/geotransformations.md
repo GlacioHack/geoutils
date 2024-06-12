@@ -8,3 +8,7 @@
 ## Crop
 
 {attr}`geoutils.Raster.crop` and {attr}`geoutils.Vector.crop`
+
+## Shift
+
+
