@@ -47,6 +47,7 @@ documentation.
     Raster.crs
     Raster.transform
     Raster.nodata
+    Raster.area_or_point
 ```
 
 ### Derived attributes
