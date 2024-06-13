@@ -109,8 +109,7 @@ data_object_index
 georeferencing
 geotransformations
 raster_vector_point
-distance
-stats
+distance_ops
 ```
 
 ```{toctree}

@@ -65,6 +65,7 @@ intersphinx_mapping = {
     "xdem": ("https://xdem.readthedocs.io/en/stable", None),
     "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
 }
 
 example_path = os.path.join("../", "../", "examples")
@@ -193,7 +194,8 @@ html_theme_options = {
         "⚠️ Our 0.1 release refactored several early-development functions for long-term stability, "
         'to update your code see <a href="https://github.com/GlacioHack/geoutils/releases/tag/v0.1.0">here</a>. ⚠️'
         "<br>Future changes will come with deprecation warnings! 🙂"
-    )
+    ),
+    "show_toc_level": 3
     # "logo_only": True,
     # "icon_links": [
     #         {

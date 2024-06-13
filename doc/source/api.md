@@ -121,6 +121,7 @@ documentation.
     Raster.load
     Raster.save
     Raster.to_pointcloud
+    Raster.from_regular_pointcloud
     Raster.to_rio_dataset
     Raster.to_xarray
 ```

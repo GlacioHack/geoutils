@@ -4161,7 +4161,8 @@ class Raster:
 
         # Mask all valid values
         elif target_values == "all":
-            bool_msk = (~self.data.mask).astype("uint8")
+            # Using getmaskarray is necessary in case .data.mask is nomask (False)
+            bool_msk = (~np.ma.getmaskarray(self.data)).astype("uint8")
 
         else:
             raise ValueError("in_value must be a number, a tuple or a sequence")
