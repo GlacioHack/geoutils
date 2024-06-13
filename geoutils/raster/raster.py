@@ -49,6 +49,7 @@ from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
+    reproject_from_latlon
 )
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.sampling import subsample_array
@@ -3296,31 +3297,32 @@ class Raster:
         else:
             return None
 
-    def value_at_coords(
+    def reduce_points(
         self,
-        x: Number | ArrayLike,
-        y: Number | ArrayLike,
-        latlon: bool = False,
+        points: tuple[ArrayLike, ArrayLike],
+        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
+        window: int | None = None,
+        input_latlon: bool = False,
         band: int | None = None,
         masked: bool = False,
-        window: int | None = None,
-        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
         return_window: bool = False,
         boundless: bool = True,
     ) -> Any:
         """
-        Extract raster values at the nearest pixels from the specified coordinates,
-        or reduced (e.g., mean of pixels) from a window around the specified coordinates.
+        Reduce raster values around point coordinates.
+
 
         By default, samples pixel value of each band. Can be passed a band index to sample from.
 
-        :param x: X (or longitude) coordinate(s).
-        :param y: Y (or latitude) coordinate(s).
-        :param latlon: Whether coordinates are provided as longitude-latitude.
+        Uses Rasterio's windowed reading to keep memory usage low (for a raster not loaded).
+
+        :param points: Point(s) at which to interpolate raster value (tuple of X/Y array-likes). If points fall
+            outside of image, value returned is nan.
+        :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
+        :param window: Window size to read around coordinates. Must be odd.
+        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
         :param band: Band number to extract from (from 1 to self.count).
         :param masked: Whether to return a masked array, or classic array.
-        :param window: Window size to read around coordinates. Must be odd.
-        :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
         :param return_window: Whether to return the windows (in addition to the reduced value).
         :param boundless: Whether to allow windows that extend beyond the extent.
 
@@ -3339,6 +3341,9 @@ class Raster:
             (c = provided coordinate, v= value of surrounding coordinate)
 
         """
+
+        x, y = points
+
         # Check for array-like inputs
         if (
             not isinstance(x, (float, np.floating, int, np.integer))
@@ -3386,10 +3391,8 @@ class Raster:
             list_windows = []
 
         # Convert to latlon if asked
-        if latlon:
-            from geoutils import projtools
-
-            x, y = projtools.reproject_from_latlon((y, x), self.crs)  # type: ignore
+        if input_latlon:
+            x, y = reproject_from_latlon((y, x), self.crs)  # type: ignore
 
         # Convert coordinates to pixel space
         rows, cols = rio.transform.rowcol(self.transform, x, y, op=floor)
@@ -3428,7 +3431,7 @@ class Raster:
                 else:
                     data = self.data[slice(None) if band is None else band - 1, row : row + height, col : col + width]
                 if not masked:
-                    data = data.filled()
+                    data = data.astype(np.float32).filled(np.nan)
                 value = format_value(data)
                 win: NDArrayNum | dict[int, NDArrayNum] = data
 
@@ -3680,7 +3683,7 @@ class Raster:
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', or 'quintic'. For more information,
             see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
         :param band: Band to use (from 1 to self.count).
-        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS
+        :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
