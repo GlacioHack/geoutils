@@ -85,7 +85,6 @@ class TestVector:
         list_prints = ["Filename", "Coordinate System", "Extent", "Number of features", "Attributes"]
         assert all(p in output2 for p in list_prints)
 
-
     def test_query(self) -> None:
         vector2 = self.glacier_outlines.query("NAME == 'Ayerbreen'")
 
