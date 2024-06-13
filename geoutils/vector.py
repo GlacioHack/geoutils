@@ -437,6 +437,11 @@ class Vector:
         """
         return rio.coords.BoundingBox(*self.ds.total_bounds)
 
+    @property
+    def footprint(self) -> gu.Vector:
+        """Footprint of the raster."""
+        return self.get_footprint_projected(self.crs)
+
     # --------------------------------------------
     # GeoPandasBase - Methods that return a Series
     # --------------------------------------------

@@ -795,6 +795,11 @@ class Raster:
         return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
 
     @property
+    def footprint(self) -> Vector:
+        """Footprint of the raster."""
+        return self.get_footprint_projected(self.crs)
+
+    @property
     def is_loaded(self) -> bool:
         """Whether the raster array is loaded."""
         return self._data is not None

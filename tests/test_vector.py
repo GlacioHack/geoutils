@@ -106,6 +106,13 @@ class TestVector:
         assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
 
+    def test_footprint(self) -> None:
+
+        footprint = self.glacier_outlines.footprint
+
+        assert isinstance(footprint, gu.Vector)
+        assert footprint.vector_equal(self.glacier_outlines.get_footprint_projected(self.glacier_outlines.crs))
+
     def test_reproject(self) -> None:
         """Test that the reproject function works as intended"""
 

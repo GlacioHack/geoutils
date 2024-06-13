@@ -241,6 +241,7 @@ class TestRaster:
         assert np.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
+        assert r.footprint.vector_equal(r.get_footprint_projected(r.crs))
 
         # And the second example with ASTER DEM
         r2 = gu.Raster(self.aster_dem_path)
@@ -259,6 +260,7 @@ class TestRaster:
         assert np.array_equal(r2.res, [30.0, 30.0])
         assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
         assert r2.crs == rio.crs.CRS.from_epsg(32718)
+        assert r2.footprint.vector_equal(r2.get_footprint_projected(r2.crs))
 
         # Test 2 - loading the data afterward
         r.load()
