@@ -3114,6 +3114,12 @@ class TestRaster:
         assert isinstance(polygonized, gu.Vector)
         assert polygonized.crs == img.crs
 
+        # Check default name of data column, and that defining a custom name works the same
+        assert "id" in polygonized.ds.columns
+        polygonized2 = img.polygonize(target_values=value, data_column_name="myname")
+        assert "myname" in polygonized2.ds.columns
+        assert np.array_equal(polygonized2.ds["myname"].values, polygonized.ds["id"].values)
+
         # -- Test 2: data types --
 
         # Check that polygonize works as expected for any input dtype (e.g. float64 being not supported by GeoPandas)
