@@ -1134,6 +1134,53 @@ class Vector:
             return Vector(new_ds)
 
     @overload
+    def shift(
+            self: VectorType,
+            xoff: float,
+            yoff: float,
+            inplace: Literal[False] = False,
+    ) -> VectorType:
+        ...
+
+    @overload
+    def shift(
+            self: VectorType,
+            xoff: float,
+            yoff: float,
+            inplace: Literal[True],
+    ) -> None:
+        ...
+
+    def shift(
+            self: VectorType,
+            xoff: float,
+            yoff: float,
+            inplace: bool = False,
+    ) -> VectorType | None:
+        """
+        Shift a vector by a (x,y) offset.
+
+        The shifting only updates the coordinates (data is untouched).
+
+        :param xoff: Translation x offset.
+        :param yoff: Translation y offset.
+        :param inplace: Whether to modify the raster in-place.
+
+        :returns: Shifted vector (or None if inplace).
+        """
+
+        translated_geoseries = self.geometry.translate(xoff=xoff, yoff=yoff)
+
+        if inplace:
+            # Overwrite transform by shifted transform
+            self.ds.geometry = translated_geoseries
+            return None
+        else:
+            vector_copy = self.copy()
+            vector_copy.ds.geometry = translated_geoseries
+            return vector_copy
+
+    @overload
     def create_mask(
         self,
         raster: str | gu.Raster | None = None,
