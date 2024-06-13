@@ -302,7 +302,7 @@ prox_lt_100_from_vect = rast.proximity(vector=vect_lt_100)
 prox_lt_100_from_vect
 ```
 
-## Interpolate or extract to point
+## Interpolate or reduce to point
 
 Interpolating or extracting {class}`~geoutils.Raster` values at specific points can be done through:
 - the {func}`~geoutils.Raster.reduce_points` function, that applies a reductor function ({func}`numpy.ma.mean` by default) to a surrounding window for each coordinate, or
