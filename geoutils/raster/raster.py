@@ -4132,15 +4132,19 @@ class Raster:
         return raster_arr
 
     def polygonize(
-        self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all"
+        self,
+        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
+        data_column_name: str = "id",
     ) -> Vector:
         """
         Polygonize the raster into a vector.
 
         :param target_values: Value or range of values of the raster from which to
-          create geometries (defaults to 'all', for which all unique pixel values of the raster are used).
+          create geometries (defaults to "all", for which all unique pixel values of the raster are used).
+        :param data_column_name: Data column name to be associated with target values in the output vector
+            (defaults to "id").
 
-        :returns: Vector containing the polygonized geometries.
+        :returns: Vector containing the polygonized geometries associated to target values.
         """
 
         # Mask a unique value set by a number
@@ -4191,7 +4195,7 @@ class Raster:
         )
 
         gdf = gpd.GeoDataFrame.from_features(list(results))
-        gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
+        gdf.insert(0, data_column_name, range(0, 0 + len(gdf)))
         gdf = gdf.set_geometry(col="geometry")
         gdf = gdf.set_crs(self.crs)
 
@@ -4562,7 +4566,9 @@ class Mask(Raster):
             return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
 
     def polygonize(
-        self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1
+        self,
+        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1,
+        data_column_name: str = "id",
     ) -> Vector:
         # If target values is passed but does not correspond to 0 or 1, raise a warning
         if not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
