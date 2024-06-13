@@ -241,18 +241,18 @@ class TestVector:
         with pytest.raises(TypeError, match="Crop geometry must be a Raster, Vector, or list of coordinates."):
             outlines.crop(1, inplace=True)  # type: ignore
 
-    def test_shift(self) -> None:
+    def test_translate(self) -> None:
 
         vector = gu.Vector(self.everest_outlines_path)
 
         # Check defaut behaviour is not inplace
-        vector_shifted = vector.shift(xoff=2.5, yoff=5.7)
+        vector_shifted = vector.translate(xoff=2.5, yoff=5.7)
         assert isinstance(vector_shifted, gu.Vector)
         assert_geoseries_equal(vector_shifted.geometry, vector.geometry.translate(xoff=2.5, yoff=5.7))
 
         # Check inplace behaviour works correctly
         vector2 = vector.copy()
-        output = vector2.shift(xoff=2.5, yoff=5.7, inplace=True)
+        output = vector2.translate(xoff=2.5, yoff=5.7, inplace=True)
         assert output is None
         assert_geoseries_equal(vector2.geometry, vector_shifted.geometry)
 

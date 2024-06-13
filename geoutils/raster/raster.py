@@ -2830,7 +2830,7 @@ class Raster:
             return self.from_array(data, transformed, crs, nodata, self.area_or_point)
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2841,7 +2841,7 @@ class Raster:
         ...
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2852,7 +2852,7 @@ class Raster:
         ...
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2862,7 +2862,7 @@ class Raster:
     ) -> RasterType | None:
         ...
 
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
