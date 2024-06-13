@@ -466,13 +466,13 @@ class GeoGrid:
         """Create a GeoGrid from a dictionary containing transform, shape and CRS."""
         return cls(**dict_meta)
 
-    def shift(
+    def translate(
         self: GeoGridType,
         xoff: float,
         yoff: float,
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "pixel",
     ) -> GeoGridType:
-        """Shift into a new geogrid (not inplace)."""
+        """Translate into a new geogrid (not inplace)."""
 
         if distance_unit not in ["georeferenced", "pixel"]:
             raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
@@ -559,7 +559,7 @@ class ChunkedGeoGrid:
             # Build a temporary geogrid with the same transform as the full grid, but with the chunk shape
             geogrid_tmp = GeoGrid(transform=self.grid.transform, crs=self.grid.crs, shape=block_shape)
             # And shift it to the right location (X is positive in index direction, Y is negative)
-            geogrid_block = geogrid_tmp.shift(xoff=bid["xs"], yoff=-bid["ys"])
+            geogrid_block = geogrid_tmp.translate(xoff=bid["xs"], yoff=-bid["ys"])
             list_geogrids.append(geogrid_block)
 
         return list_geogrids
@@ -608,7 +608,7 @@ def _combined_blocks_shape_transform(
     combined_shape = (minmaxs["max_ye"] - minmaxs["min_ys"], minmaxs["max_xe"] - minmaxs["min_xs"])
 
     # Shift source transform with start indexes to get the one for combined block location
-    combined_transform = src_geogrid.shift(xoff=minmaxs["min_xs"], yoff=-minmaxs["min_ys"]).transform
+    combined_transform = src_geogrid.translate(xoff=minmaxs["min_xs"], yoff=-minmaxs["min_ys"]).transform
 
     # Compute relative block indexes that will be needed to reconstruct a square array in the delayed function,
     # by subtracting the minimum starting indices in X/Y

@@ -795,6 +795,11 @@ class Raster:
         return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
 
     @property
+    def footprint(self) -> Vector:
+        """Footprint of the raster."""
+        return self.get_footprint_projected(self.crs)
+
+    @property
     def is_loaded(self) -> bool:
         """Whether the raster array is loaded."""
         return self._data is not None
@@ -911,7 +916,7 @@ class Raster:
                 xoff = -0.5
                 yoff = 0.5
             # We perform the shift in place
-            self.shift(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
+            self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
     @property
     def area_or_point(self) -> Literal["Area", "Point"] | None:
@@ -2070,7 +2075,7 @@ class Raster:
             not calculate statistics.
         :param verbose: If set to True (default) will directly print to screen and return None
 
-        :returns: summary string or None.
+        :returns: Summary string or None.
         """
         as_str = [
             f"Driver:               {self.driver} \n",
@@ -2078,7 +2083,7 @@ class Raster:
             f"Filename:             {self.name} \n",
             f"Loaded?               {self.is_loaded} \n",
             f"Modified since load?  {self.is_modified} \n",
-            f"Grid size:                 {self.width}, {self.height}\n",
+            f"Grid size:            {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtype}\n",
             f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}\n",
@@ -2830,7 +2835,7 @@ class Raster:
             return self.from_array(data, transformed, crs, nodata, self.area_or_point)
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2841,7 +2846,7 @@ class Raster:
         ...
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2852,7 +2857,7 @@ class Raster:
         ...
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2862,7 +2867,7 @@ class Raster:
     ) -> RasterType | None:
         ...
 
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -4127,15 +4132,19 @@ class Raster:
         return raster_arr
 
     def polygonize(
-        self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all"
+        self,
+        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
+        data_column_name: str = "id",
     ) -> Vector:
         """
         Polygonize the raster into a vector.
 
         :param target_values: Value or range of values of the raster from which to
-          create geometries (defaults to 'all', for which all unique pixel values of the raster are used).
+          create geometries (defaults to "all", for which all unique pixel values of the raster are used).
+        :param data_column_name: Data column name to be associated with target values in the output vector
+            (defaults to "id").
 
-        :returns: Vector containing the polygonized geometries.
+        :returns: Vector containing the polygonized geometries associated to target values.
         """
 
         # Mask a unique value set by a number
@@ -4187,7 +4196,7 @@ class Raster:
         )
 
         gdf = gpd.GeoDataFrame.from_features(list(results))
-        gdf.insert(0, "New_ID", range(0, 0 + len(gdf)))
+        gdf.insert(0, data_column_name, range(0, 0 + len(gdf)))
         gdf = gdf.set_geometry(col="geometry")
         gdf = gdf.set_crs(self.crs)
 
@@ -4558,7 +4567,9 @@ class Mask(Raster):
             return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
 
     def polygonize(
-        self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1
+        self,
+        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1,
+        data_column_name: str = "id",
     ) -> Vector:
         # If target values is passed but does not correspond to 0 or 1, raise a warning
         if not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
