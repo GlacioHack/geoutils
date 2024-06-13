@@ -147,9 +147,19 @@ class Vector:
 
         return str(self.ds.__str__())
 
-    def info(self) -> str:
+    @overload
+    def info(self, verbose: Literal[True] = ...) -> None:
+        ...
+
+    @overload
+    def info(self, verbose: Literal[False]) -> str:
+        ...
+
+    def info(self, verbose: bool = True) -> str | None:
         """
         Summarize information about the vector.
+
+        :param verbose: If set to True (default) will directly print to screen and return None
 
         :returns: Information about vector attributes.
         """
@@ -161,7 +171,11 @@ class Vector:
             f"Attributes:         {self.ds.columns.tolist()}",
         ]
 
-        return "".join(as_str)
+        if verbose:
+            print("".join(as_str))
+            return None
+        else:
+            return "".join(as_str)
 
     def plot(
         self,
