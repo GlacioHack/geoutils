@@ -1236,7 +1236,7 @@ class TestRaster:
             rst[arr[:-1, :-1]]
 
         # An error when the georeferencing of the Mask does not match
-        mask.shift(1, 1, inplace=True)
+        mask.translate(1, 1, inplace=True)
         with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_index))):
             rst[mask]
 
@@ -1468,8 +1468,8 @@ class TestRaster:
         assert r2_crop.area_or_point == "Point"
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_shift(self, example: str) -> None:
-        """Tests shift works as intended"""
+    def test_translate(self, example: str) -> None:
+        """Test translation works as intended"""
 
         r = gu.Raster(example)
 
@@ -1479,11 +1479,11 @@ class TestRaster:
 
         # Shift raster by georeferenced units (default)
         # Check the default behaviour is not inplace
-        r_notinplace = r.shift(xoff=1, yoff=1)
+        r_notinplace = r.translate(xoff=1, yoff=1)
         assert isinstance(r_notinplace, gu.Raster)
 
         # Check inplace
-        r.shift(xoff=1, yoff=1, inplace=True)
+        r.translate(xoff=1, yoff=1, inplace=True)
         # Both shifts should have yielded the same transform
         assert r.transform == r_notinplace.transform
 
@@ -1502,7 +1502,7 @@ class TestRaster:
         orig_transform = r.transform
         orig_bounds = r.bounds
         orig_res = r.res
-        r.shift(xoff=1, yoff=1, distance_unit="pixel", inplace=True)
+        r.translate(xoff=1, yoff=1, distance_unit="pixel", inplace=True)
 
         # Only bounds should change
         assert orig_transform.c + 1 * orig_res[0] == r.transform.c
@@ -1517,7 +1517,7 @@ class TestRaster:
 
         # Check that an error is raised for a wrong distance_unit
         with pytest.raises(ValueError, match="Argument 'distance_unit' should be either 'pixel' or 'georeferenced'."):
-            r.shift(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
+            r.translate(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:

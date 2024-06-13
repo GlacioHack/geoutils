@@ -578,10 +578,6 @@ class Vector:
         return self._override_gdf_output(self.ds.affine_transform(matrix=matrix))
 
     @copy_doc(gpd.GeoSeries, "Vector")
-    def translate(self, xoff: float = 0.0, yoff: float = 0.0, zoff: float = 0.0) -> Vector:
-        return self._override_gdf_output(self.ds.translate(xoff=xoff, yoff=yoff, zoff=zoff))
-
-    @copy_doc(gpd.GeoSeries, "Vector")
     def rotate(self, angle: float, origin: str = "center", use_radians: bool = False) -> Vector:
         return self._override_gdf_output(self.ds.rotate(angle=angle, origin=origin, use_radians=use_radians))
 
@@ -1151,6 +1147,70 @@ class Vector:
             return None
         else:
             return Vector(new_ds)
+
+    @overload
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: Literal[False] = False,
+    ) -> VectorType:
+        ...
+
+    @overload
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: Literal[True],
+    ) -> None:
+        ...
+
+    @overload
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: bool = False,
+    ) -> VectorType | None:
+        ...
+
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        inplace: bool = False,
+    ) -> VectorType | None:
+        """
+        Shift a vector by a (x,y) offset, and optionally a z offset.
+
+        The shifting only updates the coordinates (data is untouched).
+
+        :param xoff: Translation x offset.
+        :param yoff: Translation y offset.
+        :param zoff: Translation z offset.
+        :param inplace: Whether to modify the raster in-place.
+
+        :returns: Shifted vector (or None if inplace).
+        """
+
+        translated_geoseries = self.geometry.translate(xoff=xoff, yoff=yoff, zoff=zoff)
+
+        if inplace:
+            # Overwrite transform by shifted transform
+            self.ds.geometry = translated_geoseries
+            return None
+        else:
+            vector_copy = self.copy()
+            vector_copy.ds.geometry = translated_geoseries
+            return vector_copy
 
     @overload
     def create_mask(

@@ -916,7 +916,7 @@ class Raster:
                 xoff = -0.5
                 yoff = 0.5
             # We perform the shift in place
-            self.shift(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
+            self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
     @property
     def area_or_point(self) -> Literal["Area", "Point"] | None:
@@ -2835,7 +2835,7 @@ class Raster:
             return self.from_array(data, transformed, crs, nodata, self.area_or_point)
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2846,7 +2846,7 @@ class Raster:
         ...
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2857,7 +2857,7 @@ class Raster:
         ...
 
     @overload
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
@@ -2867,7 +2867,7 @@ class Raster:
     ) -> RasterType | None:
         ...
 
-    def shift(
+    def translate(
         self: RasterType,
         xoff: float,
         yoff: float,
