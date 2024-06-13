@@ -2070,7 +2070,7 @@ class Raster:
             not calculate statistics.
         :param verbose: If set to True (default) will directly print to screen and return None
 
-        :returns: summary string or None.
+        :returns: Summary string or None.
         """
         as_str = [
             f"Driver:               {self.driver} \n",

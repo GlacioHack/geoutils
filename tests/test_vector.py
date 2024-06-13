@@ -71,6 +71,21 @@ class TestVector:
 
         assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]
 
+    def test_info(self) -> None:
+
+        v = gu.Vector(GLACIER_OUTLINES_URL)
+
+        # Check default runs without error (prints to screen)
+        output = v.info()
+        assert output is None
+
+        # Otherwise returns info
+        output2 = v.info(verbose=False)
+        assert isinstance(output2, str)
+        list_prints = ["Filename", "Coordinate System", "Extent", "Number of features", "Attributes"]
+        assert all(p in output2 for p in list_prints)
+
+
     def test_query(self) -> None:
         vector2 = self.glacier_outlines.query("NAME == 'Ayerbreen'")
 
