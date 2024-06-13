@@ -2078,7 +2078,7 @@ class Raster:
             f"Filename:             {self.name} \n",
             f"Loaded?               {self.is_loaded} \n",
             f"Modified since load?  {self.is_modified} \n",
-            f"Grid size:                 {self.width}, {self.height}\n",
+            f"Grid size:            {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtype}\n",
             f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}\n",
