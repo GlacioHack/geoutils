@@ -134,7 +134,7 @@ _ = ax[2].set_yticklabels([])
 {func}`geoutils.Raster.crop` or {func}`geoutils.Vector.crop`.
 
 Cropping **modifies the spatial bounds of the geospatial data in a rectangular extent**, by removing or adding data 
-(in which case it corresponds to padding) without resampling. For this, we use {func}`~geoutils.Raster.crop`.
+(in which case it corresponds to padding) without resampling.
 
 For rasters, cropping removes or adds pixels to the sides of the raster grid.
 
@@ -163,17 +163,17 @@ rast.plot(ax=ax[1])
 vect_clipped.plot(ax=ax[1], ec="k", fc="none")
 ```
 
-## Shift
+## Translate
 
-{func}`geoutils.Raster.shift` or {func}`geoutils.Vector.shift`.
+{func}`geoutils.Raster.translate` or {func}`geoutils.Vector.translate`.
 
 Shifting **modifies the georeferencing of the data by a horizontal offset** without modifying the underlying data,
-which is especially useful to align the data due to positioning errors. For this, we use {func}`~geoutils.Raster.shift`.
+which is especially useful to align the data due to positioning errors.
 
 
 ```{code-cell} ipython3
 # Shift the raster by a certain offset
-rast_shift = rast.shift(1000, 1000)
+rast_shift = rast.translate(xoff=1000, yoff=1000)
 ```
 
 ```{code-cell} ipython3

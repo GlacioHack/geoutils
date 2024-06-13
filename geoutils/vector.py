@@ -185,7 +185,7 @@ class Vector:
         vmax: float | int | None = None,
         alpha: float | int | None = None,
         cbar_title: str | None = None,
-        add_cbar: bool = False,
+        add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         return_axes: bool = False,
         **kwargs: Any,
