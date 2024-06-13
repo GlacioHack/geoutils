@@ -245,7 +245,7 @@ class TestVector:
 
         vector = gu.Vector(self.everest_outlines_path)
 
-        # Check defaut behaviour is not inplace
+        # Check default behaviour is not inplace
         vector_shifted = vector.translate(xoff=2.5, yoff=5.7)
         assert isinstance(vector_shifted, gu.Vector)
         assert_geoseries_equal(vector_shifted.geometry, vector.geometry.translate(xoff=2.5, yoff=5.7))

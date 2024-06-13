@@ -1131,43 +1131,43 @@ class Vector:
 
     @overload
     def translate(
-            self: VectorType,
-            xoff: float = 0.0,
-            yoff: float = 0.0,
-            zoff: float = 0.0,
-            *,
-            inplace: Literal[False] = False,
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: Literal[False] = False,
     ) -> VectorType:
         ...
 
     @overload
     def translate(
-            self: VectorType,
-            xoff: float = 0.0,
-            yoff: float = 0.0,
-            zoff: float = 0.0,
-            *,
-            inplace: Literal[True],
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: Literal[True],
     ) -> None:
         ...
 
     @overload
     def translate(
-            self: VectorType,
-            xoff: float = 0.0,
-            yoff: float = 0.0,
-            zoff: float = 0.0,
-            *,
-            inplace: bool = False,
-    ) -> None:
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: bool = False,
+    ) -> VectorType | None:
         ...
 
     def translate(
-            self: VectorType,
-            xoff: float = 0.0,
-            yoff: float = 0.0,
-            zoff: float = 0.0,
-            inplace: bool = False,
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        inplace: bool = False,
     ) -> VectorType | None:
         """
         Shift a vector by a (x,y) offset, and optionally a z offset.
