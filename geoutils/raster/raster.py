@@ -4128,8 +4128,8 @@ class Raster:
 
     def polygonize(
         self,
-            target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
-            data_column_name: str = "id",
+        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
+        data_column_name: str = "id",
     ) -> Vector:
         """
         Polygonize the raster into a vector.
@@ -4561,7 +4561,9 @@ class Mask(Raster):
             return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
 
     def polygonize(
-        self, target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1
+        self,
+        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1,
+        data_column_name: str = "id",
     ) -> Vector:
         # If target values is passed but does not correspond to 0 or 1, raise a warning
         if not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
