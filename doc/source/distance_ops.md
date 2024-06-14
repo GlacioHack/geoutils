@@ -14,7 +14,7 @@ kernelspec:
 # Distance operations
 
 Computing distance between sets of geospatial data or manipulating their shape based on distance is often important 
-for later analysis. To facilitate this type of operations, GeoUtils, implements distance-specific functionalities 
+for later analysis. To facilitate this type of operations, GeoUtils implements distance-specific functionalities 
 for both vectors and rasters.
 
 ```{code-cell} ipython3
@@ -57,7 +57,7 @@ vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 ```{code-cell} ipython3
 # Compute proximity to vector outlines
 proximity = vect.proximity(rast)
-proximity.plot(cmap="viridis")
+proximity.plot(cmap="viridis", cbar_title="Proximity (m)")
 ```
 
 ## Buffering without overlap
@@ -71,6 +71,6 @@ between shapes, which is sometimes undesirable. Using Voronoi polygons, we provi
 # Compute buffer without overlap on glacier outlines
 vect_buff_nolap = vect.buffer_without_overlap(buffer_size=500)
 # Plot with color to see that the attributes are retained for every feature
-vect_buff_nolap.plot(ax="new", column="Area")
-vect.plot(ec="k", column="Area", alpha=0.5)
+vect.plot(ax="new", ec="k", column="Area", alpha=0.5, add_cbar=False)
+vect_buff_nolap.plot(column="Area", cbar_title="Glacier area (km)")
 ```

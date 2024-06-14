@@ -14,7 +14,8 @@ kernelspec:
 # Raster–vector–point interface
 
 GeoUtils provides functionalities at the interface of rasters, vectors and point clouds, allowing to consistently perform 
-operations such as mask creation or point interpolation **respecting both georeferencing and nodata values**.
+operations such as mask creation or point interpolation **respecting both georeferencing and nodata values, as well 
+as pixel interpretation for point interfacing**.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -34,7 +35,7 @@ pyplot.rcParams['font.size'] = 9
 
 Rasterization of a vector is **an operation that allows to translate some information of the vector data into a raster**, by 
 setting the values raster pixels intersecting a vector geometry feature to that of an attribute of the vector 
-associated to the geometry (e.g., feature ID, area or any other value), which is the feature index by default.
+associated to the geometry (e.g., feature ID, area or any other value), which is the geometry index by default.
 
 Rasterization generally implies some loss of information, as there is no exact way of representing a vector on a grid. 
 Rather, the choice of which pixels are attributed a value depends on the amount of intersection with the vector 
@@ -95,7 +96,7 @@ the targets are implicitly the valid values of the mask.
 rasterized_vect.set_mask(rasterized_vect == 0)
 # Polygonize all non-zero values
 vect_repolygonized = rasterized_vect.polygonize()
-vect_repolygonized.plot(ax="new", column="id", cbar_title="Feature index")
+vect_repolygonized.plot(ax="new", column="id", fc="none", cbar_title="Feature index")
 ```
 
 ## Raster–point operations
@@ -152,15 +153,10 @@ Point reduction of a raster is **the estimation of the values at point coordinat
 median) to pixels contained in a window centered on the point**. For a window smaller than the pixel size, the value of 
 the closest pixel is returned.
 
-{func}`geoutils.Raster.value_at_coords`
+{func}`geoutils.Raster.reduce_points`
 
 ```{code-cell} ipython3
-# Get 50 random points to sample within the raster extent
-rng = np.random.default_rng(42)
-x_coords = rng.uniform(rast.bounds.left, rast.bounds.right, 50)
-y_coords = rng.uniform(rast.bounds.bottom, rast.bounds.top, 50)
-
-vals = rast.value_at_coords(x_coords, y_coords, window=5, reducer_function=np.nanmedian)
+vals = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 ```
 
 ```{code-cell} ipython3
@@ -172,7 +168,7 @@ vals = rast.value_at_coords(x_coords, y_coords, window=5, reducer_function=np.na
 f, ax = plt.subplots(1, 2)
 ax[0].set_title("Raster")
 rast.plot(ax=ax[0], cmap="terrain", cbar_title="Elevation (m)")
-ax[1].set_title("Interpolated\npoint cloud")
+ax[1].set_title("Reduced\npoint cloud")
 # (Update with release of PointCloud class)
 import geopandas as gpd
 pc = gu.Vector(gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=x_coords, y=y_coords), data={"b1": vals}, crs=rast.crs))
@@ -181,6 +177,7 @@ _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
 
+
 ### Raster to points
 
 {func}`geoutils.Raster.to_pointcloud`
@@ -188,14 +185,54 @@ plt.tight_layout()
 **A raster can be converted exactly into a point cloud**, which each pixel in the raster is associated to its pixel 
 values to create a point cloud on a regular grid.
 
-### Regular point to raster
+```{code-cell} ipython3
+pc = rast.to_pointcloud(subsample=10000)
+```
 
-{func}`geoutils.Raster.from_regular_pointcloud`
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 2)
+ax[0].set_title("Raster")
+rast.plot(ax=ax[0], cmap="terrain", cbar_title="Elevation (m)")
+ax[1].set_title("Regular subsampled\npoint cloud")
+pc.plot(column="b1", ax=ax[1], cmap="terrain", legend=True, cbar_title="Elevation (m)", markersize=2)
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
+```
+
+
+### Regular points to raster
+
+{func}`geoutils.Raster.from_pointcloud_regular`
 
 **If a point cloud is regularly spaced in X and Y coordinates, it can be converted exactly into a raster**. Otherwise,
-it must be re-gridded using {ref}`point-gridding` described below. Every point of the point cloud is associated to a 
-pixel in the raster grid, and the values are set to the raster. The point cloud does not need to contain points for 
-all grid coordinates of the output raster, as missing pixels are set to nodata values.
+it must be re-gridded using {ref}`point-gridding` described below. For a regular point cloud, every point is associated to a 
+pixel in the raster grid, and the values are set to the raster. The point cloud does not necessarily need to contain 
+points for all grid coordinates, as pixels with no corresponding point are set to nodata values.
+
+```{code-cell} ipython3
+rast_from_pc = gu.Raster.from_pointcloud_regular(pc, transform=rast.transform, shape=rast.shape)
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 2)
+ax[0].set_title("Regular subsampled\npoint cloud")
+pc.plot(column="b1", ax=ax[0], cmap="terrain", legend=True, cbar_title="Elevation (m)", markersize=2)
+ax[1].set_title("Raster from\npoint cloud")
+rast_from_pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
+```
+
 
 (point-gridding)=
 ### Point gridding

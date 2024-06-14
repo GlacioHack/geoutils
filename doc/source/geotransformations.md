@@ -43,7 +43,7 @@ For rasters, it can be useful to use {func}`~geoutils.Raster.reproject` in the s
 for instance when downsampling to a new resolution {attr}`~geoutils.Raster.res`.
 
 ```{tip}
-Due to the loss information when re-gridding, it is important to **minimize the number of reprojections during the 
+Due to the loss of information when re-gridding, it is important to **minimize the number of reprojections during the 
 analysis of rasters** (performing only one, if possible). For the same reason, when comparing vectors and rasters in 
 different CRSs, it is usually **better to reproject the vector with no loss of information, which is the default 
 behaviour of GeoUtils in raster–vector–point interfacing**.
@@ -82,12 +82,13 @@ rast_reproj = rast.reproject(
 
 f, ax = plt.subplots(1, 2)
 ax[0].set_title("Before reprojection")
-rast.plot(ax=ax[0])
+rast.plot(ax=ax[0], cmap="gray", add_cbar=False)
 vect.plot(rast, ax=ax[0], ec="k", fc="none")
 ax[1].set_title("After reprojection")
-rast_reproj.plot(ax=ax[1])
+rast_reproj.plot(ax=ax[1], cmap="gray", add_cbar=False)
 vect_reproj.plot(ax=ax[1], ec="k", fc="none")
 _ = ax[1].set_yticklabels([])
+plt.tight_layout()
 ```
 
 ```{note}
@@ -101,13 +102,16 @@ We can also simply pass another raster as reference to reproject to match the sa
 and resolution:
 
 ```{code-cell} ipython3
+---
+mystnb:
+  output_stderr: warn
+---
 # Reproject vector to CRS of raster by simply passing the raster
 rast_reproj2 = rast.reproject(rast2)
 ```
 
-As shown above, if the rasters have different {ref}`Pixel interpretation<pixel-interpretation>`, GeoUtils 
-raises a warning to ensure this is intended. 
-This warning can be turned off at the package-level using [GeoUtils' global configuration]().
+GeoUtils raises a warning because the rasters have different {ref}`Pixel interpretation<pixel-interpretation>`, 
+to ensure this is intended. This warning can be turned off at the package-level using GeoUtils' {ref}`config`.
 
 ```{code-cell} ipython3
 :tags: [hide-input]
@@ -117,16 +121,17 @@ This warning can be turned off at the package-level using [GeoUtils' global conf
 
 f, ax = plt.subplots(1, 3)
 ax[0].set_title("Raster 1")
-rast.plot(ax=ax[0])
+rast.plot(ax=ax[0], cmap="gray", add_cbar=False)
 vect.plot(rast, ax=ax[0], ec="k", fc="none")
 ax[1].set_title("Raster 2")
-rast2.plot(ax=ax[1], cmap="Reds",)
+rast2.plot(ax=ax[1], cmap="Reds", add_cbar=False)
 vect.plot(rast, ax=ax[1], ec="k", fc="none")
 ax[2].set_title("Match-ref\nreprojection")
-rast_reproj2.plot(ax=ax[2])
+rast_reproj2.plot(ax=ax[2], cmap="gray", add_cbar=False)
 vect_reproj.plot(ax=ax[2], ec="k", fc="none")
 _ = ax[1].set_yticklabels([])
 _ = ax[2].set_yticklabels([])
+plt.tight_layout()
 ```
 
 ## Crop or pad
@@ -156,23 +161,25 @@ vect_clipped = vect_reproj.crop(rast, clip=True)
 
 f, ax = plt.subplots(1, 2)
 ax[0].set_title("Before clipping")
-rast.plot(ax=ax[0])
+rast.plot(ax=ax[0], cmap="gray", add_cbar=False)
 vect_reproj.plot(ax=ax[0], ec="k", fc="none")
 ax[1].set_title("After clipping")
-rast.plot(ax=ax[1])
+rast.plot(ax=ax[1], cmap="gray", add_cbar=False)
 vect_clipped.plot(ax=ax[1], ec="k", fc="none")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
 ```
 
 ## Translate
 
 {func}`geoutils.Raster.translate` or {func}`geoutils.Vector.translate`.
 
-Shifting **modifies the georeferencing of the data by a horizontal offset** without modifying the underlying data,
+Translations **modifies the georeferencing of the data by a horizontal offset** without modifying the underlying data,
 which is especially useful to align the data due to positioning errors.
 
 
 ```{code-cell} ipython3
-# Shift the raster by a certain offset
+# Translate the raster by a certain offset
 rast_shift = rast.translate(xoff=1000, yoff=1000)
 ```
 
@@ -183,12 +190,14 @@ rast_shift = rast.translate(xoff=1000, yoff=1000)
 :  code_prompt_hide: "Hide the code for plotting the figure"
 
 f, ax = plt.subplots(1, 2)
-ax[0].set_title("Before shifting")
-rast.plot(ax=ax[0])
+ax[0].set_title("Before translation")
+rast.plot(ax=ax[0], cmap="gray", add_cbar=False)
 vect_clipped.plot(ax=ax[0], ec="k", fc="none")
-ax[1].set_title("After shifting")
-rast_shift.plot(ax=ax[1])
+ax[1].set_title("After translation")
+rast_shift.plot(ax=ax[1], cmap="gray", add_cbar=False)
 vect_clipped.plot(ax=ax[1], ec="k", fc="none")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
 ```
 
 :::{admonition} See also

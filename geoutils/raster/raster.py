@@ -3286,7 +3286,7 @@ class Raster:
         # Add colorbar
         if add_cbar:
             divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cax = divider.append_axes("right", size="5%", pad="2%")
             norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
             cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
             cbar.solids.set_alpha(alpha)
@@ -3296,9 +3296,11 @@ class Raster:
         else:
             cbar = None
 
+        plt.sca(ax0)
+
         # If returning axes
         if return_axes:
-            return ax, cax
+            return ax0, cax
         else:
             return None
 
@@ -4243,7 +4245,9 @@ class Raster:
             distance_unit=distance_unit,
         )
 
-        return self.copy(new_array=proximity)
+        out_nodata = _default_nodata(proximity.dtype)
+        return self.from_array(data=proximity, transform=self.transform, crs=self.crs, nodata=out_nodata,
+                               area_or_point=self.area_or_point, tags=self.tags)
 
     @overload
     def subsample(

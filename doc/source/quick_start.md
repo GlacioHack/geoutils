@@ -18,6 +18,16 @@ A short code example using several end-user functionalities of GeoUtils. For a m
 have a look at the {ref}`feature-overview` page! Or, to find an example about
 a specific functionality, jump to {ref}`quick-gallery` right below.
 
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# To get a good resolution for displayed figures
+from matplotlib import pyplot
+pyplot.rcParams['figure.dpi'] = 600
+pyplot.rcParams['savefig.dpi'] = 600
+pyplot.rcParams['font.size'] = 9
+```
+
 ## Short example
 
 ```{note}

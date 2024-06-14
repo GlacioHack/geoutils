@@ -50,23 +50,31 @@ vect = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
 ```
 
 ```{code-cell} ipython3
-# Print raster and vector info
+# Print raster info
 rast.info()
+```
+
+```{code-cell} ipython3
+# Print vector info
 vect.info()
 ```
 
 ### Coordinate reference systems
 
-[Coordinate reference systems (CRSs)](https://en.wikipedia.org/wiki/Spatial_reference_system), sometimes also called a 
+[Coordinate reference systems (CRSs)](https://en.wikipedia.org/wiki/Spatial_reference_system), sometimes also called 
 spatial reference systems (SRSs), define the 2D projection of the geospatial data. They are stored as a 
-{class}`pyproj.crs.CRS` object in {attr}`~geoutils.Raster.crs`. More information on the manipulation 
-of {class}`pyproj.crs.CRS` objects can be found in [PyProj's documentation](https://pyproj4.github.io/pyproj/stable/).
+{class}`pyproj.crs.CRS` object in {attr}`~geoutils.Raster.crs`.
 
 ```{code-cell} ipython3
-# Show CRS attribute of a raster and vector
+# Show CRS attribute of raster
 print(rast.crs)
-print(vect.crs)
 ```
+```{code-cell} ipython3
+# Show CRS attribute of vector as a WKT
+print(vect.crs.to_wkt())
+```
+
+More information on the manipulation of {class}`pyproj.crs.CRS` objects can be found in [PyProj's documentation](https://pyproj4.github.io/pyproj/stable/).
 
 ```{note}
 3D CRSs for elevation data are only emerging, and not consistently defined in the metadata.
@@ -74,15 +82,19 @@ The [vertical referencing functionalities of xDEM](https://xdem.readthedocs.io/e
 can help define a 3D CRS.
 ```
 
+(bounds)=
 ### Bounds
 
 Bounds define the spatial extent of geospatial data, composed of the "left", "right", "bottom" and "top" coordinates.
 The {attr}`~geoutils.Raster.bounds` of a raster or a vector is a {class}`rasterio.coords.BoundingBox` object: 
 
 ```{code-cell} ipython3
-# Show bounds attribute of a raster and vector
-print(rast.bounds)
-print(vect.bounds)
+# Show bounds attribute of raster
+rast.bounds
+```
+```{code-cell} ipython3
+# Show bounds attribute of vector
+vect.bounds
 ```
 
 ```{note}
@@ -103,15 +115,20 @@ reliable computation of extents between CRSs.
 ```{code-cell} ipython3
 # Print raster footprint
 rast.get_footprint_projected(rast.crs)
+```
+```{code-cell} ipython3
 # Plot vector footprint
 vect.get_footprint_projected(vect.crs).plot()
 ```
 
 ### Grid (only for rasters)
 
-A raster's grid origin and resolution are defined by its geotransform attribute, {attr}`~geoutils.Raster.transform`, and its shape by the data array shape.
-From it are derived the resolution {attr}`~geoutils.Raster.res`, the 2D raster shape 
-{attr}`~geoutils.Raster.shape` made up of its {attr}`~geoutils.Raster.height` and {attr}`~geoutils.Raster.width`.
+A raster's grid origin and resolution are defined by its geotransform attribute, {attr}`~geoutils.Raster.transform`. 
+Comined with the 2D shape of the data array {attr}`~geoutils.Raster.shape` (and independently of the number of 
+bands {attr}`~geoutils.Raster.bands`), these two attributes define the georeferenced grid of a raster.
+
+From it are derived the resolution {attr}`~geoutils.Raster.res`, and {attr}`~geoutils.Raster.height` and 
+{attr}`~geoutils.Raster.width`, as well as the bounds detailed above in {ref}`bounds`.
 
 ```{code-cell} ipython3
 # Get raster transform and shape
@@ -126,7 +143,8 @@ A largely overlooked aspect of a raster's georeferencing is the pixel interpreta
 [AREA_OR_POINT metadata](https://gdal.org/user/raster_data_model.html#metadata). 
 Pixels can be interpreted either as **"Area"** (the most common) where **the value represents a sampling over the region 
 of the pixel (and typically refers to the upper-left corner coordinate)**, or as **"Point"**
-where **the value relates to a point sample (and typically refers to the center of the pixel)**, used often for DEMs. 
+where **the value relates to a point sample (and typically refers to the center of the pixel)**, the latter often used 
+for digital elevation models (DEMs). 
 
 Pixel interpretation is stored as a string in the {attr}`geoutils.Raster.area_or_point` attribute. 
 
@@ -140,11 +158,11 @@ interpretation during analysis**, especially for raster–vector–point interfa
 or re-gridding, and might also be a problem if defined differently when comparing two rasters.
 
 ```{important}
-By default, **pixel interpretation can induce a half-pixel shift during raster–point interfacing** 
+By default, **pixel interpretation induces a half-pixel shift during raster–point interfacing for a "Point" interpretation** 
 (mirroring [GDAL's default ground-control point behaviour](https://trac.osgeo.org/gdal/wiki/rfc33_gtiff_pixelispoint)), 
-but only **raises a warning for raster–raster operations**.
+but only **raises a warning for raster–raster operations** if interpretations differ.
 
-This behaviour can be modified at the package-level by using [GeoUtils' configuration parameters]() 
+This behaviour can be modified at the package-level by using GeoUtils' {ref}`config` 
 `shift_area_or_point` and `warns_area_or_point`.
 ```
 
@@ -172,7 +190,7 @@ The metric system returned can be either "universal" (zone of the Universal Tran
 
 ```{code-cell} ipython3
 # Get local metric CRS
-print(rast.get_metric_crs())
+rast.get_metric_crs()
 ```
 
 ### Re-set georeferencing metadata
@@ -182,7 +200,6 @@ To add?
 {func}`geoutils.Vector.set_crs`
 {func}`geoutils.Raster.set_transform`
 {func}`geoutils.Raster.set_area_or_point`
-
 
 ### Ccoordinates to indexes (only for rasters)
 

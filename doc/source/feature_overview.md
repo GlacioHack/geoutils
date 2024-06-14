@@ -25,6 +25,16 @@ All pages of this documentation containing code cells can be **run interactively
 Alternatively, start your own notebook to test GeoUtils at [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/GlacioHack/geoutils/main).
 ```
 
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# To get a good resolution for displayed figures
+from matplotlib import pyplot
+pyplot.rcParams['figure.dpi'] = 600
+pyplot.rcParams['savefig.dpi'] = 600
+pyplot.rcParams['font.size'] = 9
+```
+
 ## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes
 
 In GeoUtils, geospatial handling is object-based and revolves around {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.

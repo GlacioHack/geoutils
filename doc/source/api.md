@@ -84,8 +84,8 @@ documentation.
     Raster.reproject
     Raster.polygonize
     Raster.proximity
-    Raster.value_at_coords
     Raster.interp_points
+    Raster.reduce_points
 ```
 
 ### Plotting
@@ -121,7 +121,7 @@ documentation.
     Raster.load
     Raster.save
     Raster.to_pointcloud
-    Raster.from_regular_pointcloud
+    Raster.from_pointcloud_regular
     Raster.to_rio_dataset
     Raster.to_xarray
 ```
@@ -135,7 +135,7 @@ documentation.
     Raster.xy2ij
     Raster.ij2xy
     Raster.coords
-    Raster.shift
+    Raster.translate
     Raster.outside_image
 ```
 

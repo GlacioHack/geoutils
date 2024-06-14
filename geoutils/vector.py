@@ -165,7 +165,7 @@ class Vector:
         """
         as_str = [  # 'Driver:             {} \n'.format(self.driver),
             f"Filename:           {self.name} \n",
-            f"Coordinate System:  EPSG:{self.ds.crs.to_epsg()}\n",
+            f"Coordinate system:  EPSG:{self.ds.crs.to_epsg()}\n",
             f"Extent:             {self.ds.total_bounds.tolist()} \n",
             f"Number of features: {len(self.ds)} \n",
             f"Attributes:         {self.ds.columns.tolist()}",
@@ -202,7 +202,7 @@ class Vector:
         :param vmax: Colorbar maximum value. Default is data max.
         :param alpha: Transparency of raster and colorbar.
         :param cbar_title: Colorbar label. Default is None.
-        :param add_cbar: Set to True to display a colorbar. Default is True.
+        :param add_cbar: Set to True to display a colorbar. Default is True if a "column" argument is passed.
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
             will create a new axis.
         :param return_axes: Whether to return axes.
@@ -228,6 +228,12 @@ class Vector:
         else:
             raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
+        # Set add_cbar depending on column argument
+        if "column" in kwargs.keys() and add_cbar:
+            add_cbar = True
+        else:
+            add_cbar = False
+
         # Update with this function's arguments
         if add_cbar:
             legend = True
@@ -236,29 +242,27 @@ class Vector:
 
         if "legend" in list(kwargs.keys()):
             legend = kwargs.pop("legend")
-        else:
-            legend = False
 
         # Get colormap arguments that might have been passed in the keyword args
         if "legend_kwds" in list(kwargs.keys()) and legend:
             legend_kwds = kwargs.pop("legend_kwds")
-            if "label" in list(legend_kwds):
-                cbar_title = legend_kwds.pop("label")
+            if cbar_title is not None:
+                legend_kwds.update({"label": cbar_title})  # Pad updates depending on figsize during plot,
         else:
-            legend_kwds = None
+            if cbar_title is not None:
+                legend_kwds = {"label": cbar_title}
+            else:
+                legend_kwds = None
 
         # Add colorbar
         if add_cbar or cbar_title:
             divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cax = divider.append_axes("right", size="5%", pad="2%")
             norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
             cbar = matplotlib.colorbar.ColorbarBase(
                 cax, cmap=cmap, norm=norm
             )  # , orientation="horizontal", ticklocation="top")
             cbar.solids.set_alpha(alpha)
-
-            if cbar_title is not None:
-                cbar.set_label(cbar_title)
         else:
             cax = None
             cbar = None
@@ -276,9 +280,13 @@ class Vector:
             **kwargs,
         )
 
+        cax
+
+        plt.sca(ax0)
+
         # If returning axes
         if return_axes:
-            return ax, cax
+            return ax0, cax
         else:
             return None
 
@@ -1553,7 +1561,9 @@ class Vector:
             raster=raster, vector=self, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit
         )
 
-        return raster.copy(new_array=proximity)
+        out_nodata = gu.raster.raster._default_nodata(proximity.dtype)
+        return gu.Raster.from_array(data=proximity, transform=raster.transform, crs=raster.crs, nodata=out_nodata,
+                                    area_or_point=raster.area_or_point, tags=raster.tags)
 
     def buffer_metric(self, buffer_size: float) -> Vector:
         """
