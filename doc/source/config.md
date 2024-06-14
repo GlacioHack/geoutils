@@ -13,13 +13,13 @@ kernelspec:
 (config)=
 # Configuration
 
-You can configure the default behaviour of GeoUtils at the package level for operations that depend on user preference 
+You can configure the default behaviour of GeoUtils at the package level for operations that depend on user preference
 (such as resampling method, or pixel interpretation).
 
 ## Changing configuration during a session
 
-Using a global configuration setting ensures operations will always be performed consistently, even when used 
-under-the-hood by higher-level methods (such as [Coregistration](https://xdem.readthedocs.io/en/stable/coregistration.html)), 
+Using a global configuration setting ensures operations will always be performed consistently, even when used
+under-the-hood by higher-level methods (such as [Coregistration](https://xdem.readthedocs.io/en/stable/coregistration.html)),
 without having to rely on multiple keyword arguments to pass to subfunctions.
 
 ```{code-cell}

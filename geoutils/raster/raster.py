@@ -4246,8 +4246,14 @@ class Raster:
         )
 
         out_nodata = _default_nodata(proximity.dtype)
-        return self.from_array(data=proximity, transform=self.transform, crs=self.crs, nodata=out_nodata,
-                               area_or_point=self.area_or_point, tags=self.tags)
+        return self.from_array(
+            data=proximity,
+            transform=self.transform,
+            crs=self.crs,
+            nodata=out_nodata,
+            area_or_point=self.area_or_point,
+            tags=self.tags,
+        )
 
     @overload
     def subsample(

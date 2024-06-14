@@ -13,9 +13,9 @@ kernelspec:
 (geotransformations)=
 # Transformations
 
-In GeoUtils, **for all geospatial data objects, georeferenced transformations are exposed through the same functions** 
-{func}`~geoutils.Raster.reproject`, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.shift`. Additionally, 
-for convenience and consistency during analysis, most operations can be passed a {class}`~geoutils.Raster` or 
+In GeoUtils, **for all geospatial data objects, georeferenced transformations are exposed through the same functions**
+{func}`~geoutils.Raster.reproject`, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.shift`. Additionally,
+for convenience and consistency during analysis, most operations can be passed a {class}`~geoutils.Raster` or
 {class}`~geoutils.Vector` as a reference to match.
 In that case, no other argument is necessary. For more details, see {ref}`core-match-ref`.
 
@@ -35,17 +35,17 @@ pyplot.rcParams['font.size'] = 9
 
 Reprojections **transform geospatial data from one CRS to another**.
 
-For vectors, the transformation of geometry points is exact. However, in the case of rasters, the projected points 
-do not necessarily fall on a regular grid and require re-gridding by a 2D resampling algorithm, which results in a slight 
+For vectors, the transformation of geometry points is exact. However, in the case of rasters, the projected points
+do not necessarily fall on a regular grid and require re-gridding by a 2D resampling algorithm, which results in a slight
 loss of information (value interpolation, propagation of nodata).
 
-For rasters, it can be useful to use {func}`~geoutils.Raster.reproject` in the same CRS simply for re-gridding, 
+For rasters, it can be useful to use {func}`~geoutils.Raster.reproject` in the same CRS simply for re-gridding,
 for instance when downsampling to a new resolution {attr}`~geoutils.Raster.res`.
 
 ```{tip}
-Due to the loss of information when re-gridding, it is important to **minimize the number of reprojections during the 
-analysis of rasters** (performing only one, if possible). For the same reason, when comparing vectors and rasters in 
-different CRSs, it is usually **better to reproject the vector with no loss of information, which is the default 
+Due to the loss of information when re-gridding, it is important to **minimize the number of reprojections during the
+analysis of rasters** (performing only one, if possible). For the same reason, when comparing vectors and rasters in
+different CRSs, it is usually **better to reproject the vector with no loss of information, which is the default
 behaviour of GeoUtils in raster–vector–point interfacing**.
 ```
 
@@ -69,7 +69,7 @@ vect_reproj = vect.reproject(rast)
 # Reproject raster to smaller bounds and different X/Y resolution
 rast_reproj = rast.reproject(
     res=(rast.res[0] * 2, rast.res[1] / 2),
-    bounds={"left": rast.bounds.left, "bottom": rast.bounds.bottom, 
+    bounds={"left": rast.bounds.left, "bottom": rast.bounds.bottom,
             "right": rast.bounds.left + 10000, "top": rast.bounds.bottom + 10000},
     resampling="cubic")
 ```
@@ -98,7 +98,7 @@ passed.
 Resampling methods are listed in **[the dedicated section of Rasterio's API](https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling)**.
 ```
 
-We can also simply pass another raster as reference to reproject to match the same CRS, and re-grid to the same bounds 
+We can also simply pass another raster as reference to reproject to match the same CRS, and re-grid to the same bounds
 and resolution:
 
 ```{code-cell} ipython3
@@ -110,7 +110,7 @@ mystnb:
 rast_reproj2 = rast.reproject(rast2)
 ```
 
-GeoUtils raises a warning because the rasters have different {ref}`Pixel interpretation<pixel-interpretation>`, 
+GeoUtils raises a warning because the rasters have different {ref}`Pixel interpretation<pixel-interpretation>`,
 to ensure this is intended. This warning can be turned off at the package-level using GeoUtils' {ref}`config`.
 
 ```{code-cell} ipython3
@@ -138,7 +138,7 @@ plt.tight_layout()
 
 {func}`geoutils.Raster.crop` or {func}`geoutils.Vector.crop`.
 
-Cropping **modifies the spatial bounds of the geospatial data in a rectangular extent**, by removing or adding data 
+Cropping **modifies the spatial bounds of the geospatial data in a rectangular extent**, by removing or adding data
 (in which case it corresponds to padding) without resampling.
 
 For rasters, cropping removes or adds pixels to the sides of the raster grid.
@@ -209,5 +209,3 @@ For 3D coregistration tailored to georeferenced elevation data, see [xDEM's core
 ## Merge
 
 {func}`geoutils.Raster.merge` and {func}`geoutils.Vector.merge`
-
-

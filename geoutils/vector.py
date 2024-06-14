@@ -1562,8 +1562,14 @@ class Vector:
         )
 
         out_nodata = gu.raster.raster._default_nodata(proximity.dtype)
-        return gu.Raster.from_array(data=proximity, transform=raster.transform, crs=raster.crs, nodata=out_nodata,
-                                    area_or_point=raster.area_or_point, tags=raster.tags)
+        return gu.Raster.from_array(
+            data=proximity,
+            transform=raster.transform,
+            crs=raster.crs,
+            nodata=out_nodata,
+            area_or_point=raster.area_or_point,
+            tags=raster.tags,
+        )
 
     def buffer_metric(self, buffer_size: float) -> Vector:
         """

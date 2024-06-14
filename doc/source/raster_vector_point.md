@@ -13,8 +13,8 @@ kernelspec:
 (raster-vector-point)=
 # Raster–vector–point interface
 
-GeoUtils provides functionalities at the interface of rasters, vectors and point clouds, allowing to consistently perform 
-operations such as mask creation or point interpolation **respecting both georeferencing and nodata values, as well 
+GeoUtils provides functionalities at the interface of rasters, vectors and point clouds, allowing to consistently perform
+operations such as mask creation or point interpolation **respecting both georeferencing and nodata values, as well
 as pixel interpretation for point interfacing**.
 
 ```{code-cell} ipython3
@@ -33,12 +33,12 @@ pyplot.rcParams['font.size'] = 9
 
 {func}`geoutils.Vector.rasterize`
 
-Rasterization of a vector is **an operation that allows to translate some information of the vector data into a raster**, by 
-setting the values raster pixels intersecting a vector geometry feature to that of an attribute of the vector 
+Rasterization of a vector is **an operation that allows to translate some information of the vector data into a raster**, by
+setting the values raster pixels intersecting a vector geometry feature to that of an attribute of the vector
 associated to the geometry (e.g., feature ID, area or any other value), which is the geometry index by default.
 
-Rasterization generally implies some loss of information, as there is no exact way of representing a vector on a grid. 
-Rather, the choice of which pixels are attributed a value depends on the amount of intersection with the vector 
+Rasterization generally implies some loss of information, as there is no exact way of representing a vector on a grid.
+Rather, the choice of which pixels are attributed a value depends on the amount of intersection with the vector
 geometries and so includes several options (percent of area intersected, all touched, etc).
 
 ```{code-cell} ipython3
@@ -105,7 +105,7 @@ _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
 
-It returns a {class}`~geoutils.Mask`, a georeferenced boolean raster (or optionally, a boolean NumPy array), which 
+It returns a {class}`~geoutils.Mask`, a georeferenced boolean raster (or optionally, a boolean NumPy array), which
 can both be used for indexing or index assignment of a raster.
 
 ```{code-cell} ipython3
@@ -117,8 +117,8 @@ np.mean(rast[mask])
 
 {func}`geoutils.Raster.polygonize`
 
-Polygonization of a raster **consists of delimiting contiguous raster pixels with the same target values into vector polygon 
-geometries**. By default, all raster values are used as targets. When using polygonize on a {class}`~geoutils.Mask`, 
+Polygonization of a raster **consists of delimiting contiguous raster pixels with the same target values into vector polygon
+geometries**. By default, all raster values are used as targets. When using polygonize on a {class}`~geoutils.Mask`,
 the targets are implicitly the valid values of the mask.
 
 ```{code-cell} ipython3
@@ -151,16 +151,16 @@ plt.tight_layout()
 
 {func}`geoutils.Raster.interp_points`
 
-Point interpolation of a raster **consists in estimating the values at exact point coordinates by 2D regular-grid 
+Point interpolation of a raster **consists in estimating the values at exact point coordinates by 2D regular-grid
 interpolation** such as nearest neighbour, bilinear (default), cubic, etc.
 
 ```{note}
-In order to support all types of resampling methods with nodata values while maintaining the robustness of results, 
-GeoUtils implements **a modified version of {func}`scipy.interpolate.interpn` that propagates nodata 
+In order to support all types of resampling methods with nodata values while maintaining the robustness of results,
+GeoUtils implements **a modified version of {func}`scipy.interpolate.interpn` that propagates nodata
 values** in surrounding pixels of initial nodata values depending on the order of the resampling method:
 - Nearest or linear (order 0 or 1): up to 1 pixel,
 - Cubic (order 3): 2 pixels,
-- Quintic (order 5): 3 pixels. 
+- Quintic (order 5): 3 pixels.
 ```
 
 ```{code-cell} ipython3
@@ -195,8 +195,8 @@ plt.tight_layout()
 
 ### Reduction around point
 
-Point reduction of a raster is **the estimation of the values at point coordinates by applying a reductor function (e.g., mean, 
-median) to pixels contained in a window centered on the point**. For a window smaller than the pixel size, the value of 
+Point reduction of a raster is **the estimation of the values at point coordinates by applying a reductor function (e.g., mean,
+median) to pixels contained in a window centered on the point**. For a window smaller than the pixel size, the value of
 the closest pixel is returned.
 
 {func}`geoutils.Raster.reduce_points`
@@ -228,7 +228,7 @@ plt.tight_layout()
 
 {func}`geoutils.Raster.to_pointcloud`
 
-**A raster can be converted exactly into a point cloud**, which each pixel in the raster is associated to its pixel 
+**A raster can be converted exactly into a point cloud**, which each pixel in the raster is associated to its pixel
 values to create a point cloud on a regular grid.
 
 ```{code-cell} ipython3
@@ -256,8 +256,8 @@ plt.tight_layout()
 {func}`geoutils.Raster.from_pointcloud_regular`
 
 **If a point cloud is regularly spaced in X and Y coordinates, it can be converted exactly into a raster**. Otherwise,
-it must be re-gridded using {ref}`point-gridding` described below. For a regular point cloud, every point is associated to a 
-pixel in the raster grid, and the values are set to the raster. The point cloud does not necessarily need to contain 
+it must be re-gridded using {ref}`point-gridding` described below. For a regular point cloud, every point is associated to a
+pixel in the raster grid, and the values are set to the raster. The point cloud does not necessarily need to contain
 points for all grid coordinates, as pixels with no corresponding point are set to nodata values.
 
 ```{code-cell} ipython3

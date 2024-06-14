@@ -13,8 +13,8 @@ kernelspec:
 (distance-ops)=
 # Distance operations
 
-Computing distance between sets of geospatial data or manipulating their shape based on distance is often important 
-for later analysis. To facilitate this type of operations, GeoUtils implements distance-specific functionalities 
+Computing distance between sets of geospatial data or manipulating their shape based on distance is often important
+for later analysis. To facilitate this type of operations, GeoUtils implements distance-specific functionalities
 for both vectors and rasters.
 
 ```{code-cell} ipython3
@@ -28,13 +28,13 @@ pyplot.rcParams['font.size'] = 9
 ```
 
 ```{tip}
-It is often important to compute distances in a metric CRS. For this, reproject (with 
+It is often important to compute distances in a metric CRS. For this, reproject (with
 {func}`~geoutils.Raster.reproject`) to a local metric CRS (that can be estimated with {func}`~geoutils.Raster.get_metric_crs`).
 ```
 
 ## Proximity
 
-Proximity corresponds to **the distance to the closest target geospatial data**, computed on each pixel of a raster's grid. 
+Proximity corresponds to **the distance to the closest target geospatial data**, computed on each pixel of a raster's grid.
 The target geospatial data can be either a vector or a raster.
 
 {func}`geoutils.Raster.proximity` and {func}`geoutils.Vector.proximity`
@@ -77,7 +77,7 @@ plt.tight_layout()
 
 ## Buffering without overlap
 
-Buffering consists in **expanding or collapsing vector geometries equally in all directions**. However, this can often lead to overlap 
+Buffering consists in **expanding or collapsing vector geometries equally in all directions**. However, this can often lead to overlap
 between shapes, which is sometimes undesirable. Using Voronoi polygons, we provide a buffering method with overlap.
 
 {func}`geoutils.Vector.buffer_without_overlap`
