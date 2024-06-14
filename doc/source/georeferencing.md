@@ -196,7 +196,7 @@ rast.get_metric_crs()
 ### Re-set georeferencing metadata
 
 The georeferencing metadata of an object can be re-set (overwritten) by setting the corresponding attribute such as {func}`geoutils.Vector.crs` or
-{func}`geoutils.Raster.transform`. When specific options might be useful during setting, a set function exists, 
+{func}`geoutils.Raster.transform`. When specific options might be useful during setting, a set function exists,
 such as for {func}`geoutils.Raster.set_area_or_point`.
 
 ```{warning}

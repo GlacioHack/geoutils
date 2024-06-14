@@ -209,12 +209,12 @@ For 3D coregistration tailored to georeferenced elevation data, see [xDEM's core
 
 {func}`geoutils.raster.merge_rasters()`
 
-Merge operations **join multiple geospatial data spatially, possibly with different georeferencing, into a single geospatial 
+Merge operations **join multiple geospatial data spatially, possibly with different georeferencing, into a single geospatial
 data object**.
 
-For rasters, the merging operation consists in combining all rasters into a single, larger raster. Pixels that overlap 
-are combined by a reductor function (defaults to the mean). The output georeferenced grid (CRS, transform and shape) can 
-be set to that of any reference raster (defaults to the extent that contains exactly all rasters). 
+For rasters, the merging operation consists in combining all rasters into a single, larger raster. Pixels that overlap
+are combined by a reductor function (defaults to the mean). The output georeferenced grid (CRS, transform and shape) can
+be set to that of any reference raster (defaults to the extent that contains exactly all rasters).
 
 ```{code-cell} ipython3
 :tags: [hide-input]
@@ -223,13 +223,13 @@ be set to that of any reference raster (defaults to the extent that contains exa
 :  code_prompt_hide: "Show the code for creating multiple raster pieces"
 
 # Get 4 cropped bits from initial rasters
-rast1 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 1000, 
+rast1 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 1000,
                    rast.bounds.left + 3000, rast.bounds.bottom + 3000))
-rast2 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 1000, 
+rast2 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 1000,
                    rast.bounds.left + 5000, rast.bounds.bottom + 3000))
-rast3 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 3000, 
+rast3 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 3000,
                    rast.bounds.left + 3000, rast.bounds.bottom + 5000))
-rast4 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 3000, 
+rast4 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 3000,
                    rast.bounds.left + 5000, rast.bounds.bottom + 5000))
 # Reproject some in other CRS, with other resolution
 #rast3 = rast3.reproject(crs=4326, res=rast.res[0] * 3)
