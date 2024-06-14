@@ -16,8 +16,6 @@ kernelspec:
 
 The following presents a descriptive example show-casing all core features of GeoUtils.
 
-For more details, refer to the {ref}`core-index`, {ref}`rasters-index` or {ref}`vectors-index` pages.
-
 ```{tip}
 All pages of this documentation containing code cells can be **run interactively online without the need of setting up your own environment**. Simply click the top launch button!
 (MyBinder can be a bit capricious: you might have to be patient, or restart it after the build is done the first time 😅)
