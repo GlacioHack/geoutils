@@ -111,7 +111,7 @@ extlinks = {
 }
 
 # For matplotlib figures generate with sphinx plot: (suffix, dpi)
-plot_formats = [(".png", 400)]
+plot_formats = [(".png", 500)]
 
 # To avoid long path names in inheritance diagrams
 inheritance_alias = {

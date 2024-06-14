@@ -195,13 +195,30 @@ rast.get_metric_crs()
 
 ### Re-set georeferencing metadata
 
-To add?
+The georeferencing metadata of an object can be re-set (overwritten) by setting the corresponding attribute such as {func}`geoutils.Vector.crs` or
+{func}`geoutils.Raster.transform`. When specific options might be useful during setting, a set function exists, 
+such as for {func}`geoutils.Raster.set_area_or_point`.
 
-{func}`geoutils.Vector.set_crs`
-{func}`geoutils.Raster.set_transform`
-{func}`geoutils.Raster.set_area_or_point`
+```{warning}
+Re-setting should only be used if the **data was erroneously defined and needs to be corrected in-place**.
+To create geospatial data from its attributes, use the construction functions such as {func}`~geoutils.Raster.from_array`.
+```
 
-### Ccoordinates to indexes (only for rasters)
+```{code-cell} ipython3
+# Re-set CRS
+import pyproj
+rast.crs = pyproj.CRS(4326)
+rast.crs
+```
+
+```{code-cell} ipython3
+# Re-set pixel interpretation
+rast.set_area_or_point("Point")
+rast.area_or_point
+```
+
+
+### Coordinates to indexes (only for rasters)
 
 Raster grids are notoriously unintuitive to manipulate on their own due to the Y axis being inverted and stored as first axis.
 GeoUtils' features account for this under-the-hood when plotting, interpolating, gridding, or performing any other operation involving the raster coordinates.

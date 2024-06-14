@@ -177,7 +177,6 @@ plt.tight_layout()
 Translations **modifies the georeferencing of the data by a horizontal offset** without modifying the underlying data,
 which is especially useful to align the data due to positioning errors.
 
-
 ```{code-cell} ipython3
 # Translate the raster by a certain offset
 rast_shift = rast.translate(xoff=1000, yoff=1000)
@@ -208,4 +207,60 @@ For 3D coregistration tailored to georeferenced elevation data, see [xDEM's core
 
 ## Merge
 
-{func}`geoutils.Raster.merge` and {func}`geoutils.Vector.merge`
+{func}`geoutils.raster.merge_rasters()`
+
+Merge operations **join multiple geospatial data spatially, possibly with different georeferencing, into a single geospatial 
+data object**.
+
+For rasters, the merging operation consists in combining all rasters into a single, larger raster. Pixels that overlap 
+are combined by a reductor function (defaults to the mean). The output georeferenced grid (CRS, transform and shape) can 
+be set to that of any reference raster (defaults to the extent that contains exactly all rasters). 
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for creating multiple raster pieces"
+:  code_prompt_hide: "Show the code for creating multiple raster pieces"
+
+# Get 4 cropped bits from initial rasters
+rast1 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 1000, 
+                   rast.bounds.left + 3000, rast.bounds.bottom + 3000))
+rast2 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 1000, 
+                   rast.bounds.left + 5000, rast.bounds.bottom + 3000))
+rast3 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 3000, 
+                   rast.bounds.left + 3000, rast.bounds.bottom + 5000))
+rast4 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 3000, 
+                   rast.bounds.left + 5000, rast.bounds.bottom + 5000))
+# Reproject some in other CRS, with other resolution
+#rast3 = rast3.reproject(crs=4326, res=rast.res[0] * 3)
+#rast4 = rast4.reproject(crs=32610, res=rast.res[0] / 3)
+```
+
+```{code-cell} ipython3
+---
+mystnb:
+  output_stderr: remove
+---
+# Merging all rasters, uses first raster's CRS, res, and the extent of all by default
+merged_rast = gu.raster.merge_rasters([rast1, rast2, rast3, rast4])
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 4)
+ax[0].set_title("Raster 1")
+rast1.plot(ax=ax[0], cmap="gray", add_cbar=False)
+ax[1].set_title("Raster 2")
+rast2.plot(ax=ax[1], cmap="gray", add_cbar=False)
+ax[2].set_title("Raster 3")
+rast3.plot(ax=ax[2], cmap="gray", add_cbar=False)
+ax[3].set_title("Raster 4")
+rast4.plot(ax=ax[3], cmap="gray", add_cbar=False)
+plt.tight_layout()
+
+merged_rast.plot(ax="new", cmap="gray", add_cbar=False)
+```

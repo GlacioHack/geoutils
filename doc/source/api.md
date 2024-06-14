@@ -267,6 +267,7 @@ And reverse operations.
 .. autosummary::
     :toctree: gen_modules/
 
+    raster.load_multiple_rasters
     raster.stack_rasters
     raster.merge_rasters
 ```
