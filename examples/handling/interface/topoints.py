@@ -12,7 +12,7 @@ import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
 rast = gu.Raster(filename_rast)
-rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 500, rast.bounds.bottom + 500])
+rast = rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 500, rast.bounds.bottom + 500])
 
 # %%
 # Let's plot the raster.

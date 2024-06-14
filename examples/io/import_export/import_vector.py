@@ -20,7 +20,7 @@ vect
 # %%
 # We plot the vector.
 
-vect.plot(column="RGIId")
+vect.plot(column="RGIId", add_cbar=False)
 
 # %%
 # To export, the :class:`geopandas.GeoDataFrame` is always stored as an attribute as :class:`~geoutils.Vector` is composed from it. See :ref:`core-composition`.

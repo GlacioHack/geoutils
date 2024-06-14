@@ -12,7 +12,7 @@ import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
 rast = gu.Raster(filename_rast)
-rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000, rast.bounds.bottom + 2000])
+rast = rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000, rast.bounds.bottom + 2000])
 
 # Plot the raster
 rast.plot(cmap="terrain")
@@ -44,8 +44,8 @@ ds.plot(column="vals", cmap="terrain", legend=True, vmin=np.nanmin(rast), vmax=n
 # %%
 # Let's look and redefine our pixel interpretation into ``"Point"``. This will shift interpolation by half a pixel.
 
-print(rast.tags["AREA_OR_POINT"])
-rast.tags["AREA_OR_POINT"] = "Point"
+rast.area_or_point
+rast.area_or_point = "Point"
 
 # %%
 # We can interpolate again by shifting according to our interpretation, and changing the resampling algorithm (default to "linear").
