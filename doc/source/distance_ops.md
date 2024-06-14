@@ -83,8 +83,16 @@ between shapes, which is sometimes undesirable. Using Voronoi polygons, we provi
 {func}`geoutils.Vector.buffer_without_overlap`
 
 ```{code-cell} ipython3
-# Compute buffer without overlap on glacier outlines
+# Compute buffer without overlap from vector exterior
 vect_buff_nolap = vect.buffer_without_overlap(buffer_size=500)
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
 # Plot with color to see that the attributes are retained for every feature
 vect.plot(ax="new", ec="k", column="Area", alpha=0.5, add_cbar=False)
 vect_buff_nolap.plot(column="Area", cbar_title="Buffer around initial features\ncolored by glacier area (km)")
