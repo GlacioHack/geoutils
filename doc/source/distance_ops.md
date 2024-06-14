@@ -57,12 +57,27 @@ vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 ```{code-cell} ipython3
 # Compute proximity to vector outlines
 proximity = vect.proximity(rast)
-proximity.plot(cmap="viridis", cbar_title="Proximity (m)")
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 2)
+ax[0].set_title("Raster and vector")
+rast.plot(ax=ax[0], cmap="gray", add_cbar=False)
+vect.plot(ref_crs=rast, ax=ax[0], ec="k", fc="none")
+ax[1].set_title("Proximity")
+proximity.plot(ax=ax[1], cmap="viridis", cbar_title="Distance to outlines (m)")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
 ```
 
 ## Buffering without overlap
 
-Buffering consists in expanding vector geometries equally in all directions. However, this can often lead to overlap 
+Buffering consists in **expanding or collapsing vector geometries equally in all directions**. However, this can often lead to overlap 
 between shapes, which is sometimes undesirable. Using Voronoi polygons, we provide a buffering method with overlap.
 
 {func}`geoutils.Vector.buffer_without_overlap`
@@ -72,5 +87,5 @@ between shapes, which is sometimes undesirable. Using Voronoi polygons, we provi
 vect_buff_nolap = vect.buffer_without_overlap(buffer_size=500)
 # Plot with color to see that the attributes are retained for every feature
 vect.plot(ax="new", ec="k", column="Area", alpha=0.5, add_cbar=False)
-vect_buff_nolap.plot(column="Area", cbar_title="Glacier area (km)")
+vect_buff_nolap.plot(column="Area", cbar_title="Buffer around initial features\ncolored by glacier area (km)")
 ```

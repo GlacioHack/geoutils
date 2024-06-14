@@ -31,7 +31,7 @@ GeoUtils ``v0.1`` is released, with most features drafted 3 years ago now finali
 
 ----------------
 
-GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas) and numerical packages 
+GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages 
 (NumPy, Xarray, SciPy) to provide **consistent higher-level functionalities at the interface of raster, vector and point 
 cloud objects** (such as match-reference reprojection, point interpolation or gridding).
 

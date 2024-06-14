@@ -59,7 +59,22 @@ vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 ```{code-cell} ipython3
 # Rasterize the vector features based on their glacier ID number
 rasterized_vect = vect.rasterize(rast)
-rasterized_vect.plot(ax="new", cmap="viridis", cbar_title="Feature index")
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 2)
+ax[0].set_title("Raster and vector")
+rast.plot(ax=ax[0], cmap="gray", add_cbar=False)
+vect.plot(ref_crs=rast, ax=ax[0], ec="k", fc="none")
+ax[1].set_title("Rasterized vector")
+rasterized_vect.plot(ax=ax[1], cmap="viridis", cbar_title="Feature index")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
 ```
 
 ### Create mask
@@ -72,7 +87,22 @@ Mask creation from a vector **is a rasterization of all vector features that onl
 ```{code-cell} ipython3
 # Create a boolean mask from all vector features
 mask = vect.create_mask(rast)
-mask.plot(ax="new", cbar_title="Glacierized areas")
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 2)
+ax[0].set_title("Raster and vector")
+rast.plot(ax=ax[0], cmap="gray", add_cbar=False)
+vect.plot(ref_crs=rast, ax=ax[0], ec="k", fc="none")
+ax[1].set_title("Mask from vector")
+mask.plot(ax=ax[1], cbar_title="Intersects vector (1=yes, 0=no)")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
 ```
 
 It returns a {class}`~geoutils.Mask`, a georeferenced boolean raster (or optionally, a boolean NumPy array), which 
@@ -96,7 +126,23 @@ the targets are implicitly the valid values of the mask.
 rasterized_vect.set_mask(rasterized_vect == 0)
 # Polygonize all non-zero values
 vect_repolygonized = rasterized_vect.polygonize()
-vect_repolygonized.plot(ax="new", column="id", fc="none", cbar_title="Feature index")
+
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 2)
+ax[0].set_title("Raster (vector\n rasterized above)")
+rasterized_vect.plot(ax=ax[1], cmap="viridis", cbar_title="Feature index")
+vect.plot(ref_crs=rast, ax=ax[0], ec="k", fc="none")
+ax[1].set_title("Polgonized raster")
+vect_repolygonized.plot(ax=ax[1], column="id", fc="none", cbar_title="Feature index")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
 ```
 
 ## Raster–point operations
