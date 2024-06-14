@@ -1,5 +1,5 @@
-(rasters-index)=
-# Rasters
+(data-object-index)=
+# Geospatial data objects
 
 Prefer to learn by running examples? Explore our example galleries on {ref}`examples-io`, {ref}`examples-handling` and {ref}`examples-analysis`.
 
@@ -7,6 +7,8 @@ Prefer to learn by running examples? Explore our example galleries on {ref}`exam
 :maxdepth: 2
 
 raster_class
+vector_class
+pointcloud_class
 mask_class
 satimg_class
 ```

@@ -16,13 +16,21 @@ kernelspec:
 
 The following presents a descriptive example show-casing all core features of GeoUtils.
 
-For more details, refer to the {ref}`core-index`, {ref}`rasters-index` or {ref}`vectors-index` pages.
-
 ```{tip}
 All pages of this documentation containing code cells can be **run interactively online without the need of setting up your own environment**. Simply click the top launch button!
 (MyBinder can be a bit capricious: you might have to be patient, or restart it after the build is done the first time 😅)
 
 Alternatively, start your own notebook to test GeoUtils at [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/GlacioHack/geoutils/main).
+```
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# To get a good resolution for displayed figures
+from matplotlib import pyplot
+pyplot.rcParams['figure.dpi'] = 600
+pyplot.rcParams['savefig.dpi'] = 600
+pyplot.rcParams['font.size'] = 9
 ```
 
 ## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes

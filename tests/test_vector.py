@@ -82,7 +82,7 @@ class TestVector:
         # Otherwise returns info
         output2 = v.info(verbose=False)
         assert isinstance(output2, str)
-        list_prints = ["Filename", "Coordinate System", "Extent", "Number of features", "Attributes"]
+        list_prints = ["Filename", "Coordinate system", "Extent", "Number of features", "Attributes"]
         assert all(p in output2 for p in list_prints)
 
     def test_query(self) -> None:

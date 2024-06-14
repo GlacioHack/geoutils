@@ -47,6 +47,7 @@ documentation.
     Raster.crs
     Raster.transform
     Raster.nodata
+    Raster.area_or_point
 ```
 
 ### Derived attributes
@@ -83,8 +84,8 @@ documentation.
     Raster.reproject
     Raster.polygonize
     Raster.proximity
-    Raster.value_at_coords
     Raster.interp_points
+    Raster.reduce_points
 ```
 
 ### Plotting
@@ -120,6 +121,7 @@ documentation.
     Raster.load
     Raster.save
     Raster.to_pointcloud
+    Raster.from_pointcloud_regular
     Raster.to_rio_dataset
     Raster.to_xarray
 ```
@@ -133,7 +135,7 @@ documentation.
     Raster.xy2ij
     Raster.ij2xy
     Raster.coords
-    Raster.shift
+    Raster.translate
     Raster.outside_image
 ```
 
@@ -265,6 +267,7 @@ And reverse operations.
 .. autosummary::
     :toctree: gen_modules/
 
+    raster.load_multiple_rasters
     raster.stack_rasters
     raster.merge_rasters
 ```
