@@ -31,6 +31,16 @@ GeoUtils ``v0.1`` is released, with most features drafted 3 years ago now finali
 
 ----------------
 
+GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages
+(NumPy, Xarray, SciPy) to provide **consistent higher-level functionalities at the interface of raster, vector and point
+cloud objects** (such as match-reference reprojection, point interpolation or gridding).
+
+It is **tailored to perform quantitative analysis that implicitly understands the intricacies of geospatial data**
+(nodata values, projection, pixel interpretation), through **an intuitive object-based API to foster accessibility**,
+and strives **to be computationally scalable** through Dask.
+
+If you are looking to **port your GDAL or QGIS workflow in Python**, GeoUtils is made for you!
+
 # Where to start?
 
 ::::{grid} 1 2 2 3
@@ -95,9 +105,11 @@ feature_overview
 :maxdepth: 2
 
 core_index
-rasters_index
-vectors_index
-proj_tools
+data_object_index
+georeferencing
+geotransformations
+raster_vector_point
+distance_ops
 ```
 
 ```{toctree}
@@ -115,6 +127,7 @@ analysis_examples/index
 
 api
 cli
+config
 background
 ```
 

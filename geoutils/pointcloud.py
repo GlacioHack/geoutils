@@ -12,7 +12,7 @@ from geoutils._typing import NDArrayNum
 
 def _grid_pointcloud(
     pc: gpd.GeoDataFrame,
-    grid_coords: tuple[NDArrayNum, NDArrayNum],
+    grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
     data_column_name: str = "b1",
     resampling: Literal["nearest", "linear", "cubic"] = "linear",
     dist_nodata_pixel: float = 1.0,
@@ -25,12 +25,26 @@ def _grid_pointcloud(
     matter the distance).
 
     :param pc: Point cloud.
-    :param grid_coords: Grid coordinates for X and Y.
+    :param grid_coords: Regular raster grid coordinates in X and Y (i.e. equally spaced, independently for each axis).
     :param data_column_name: Name of data column for point cloud (only if passed as a geodataframe).
     :param resampling: Resampling method within delauney triangles (defaults to linear).
     :param dist_nodata_pixel: Distance from the point cloud after which grid cells are filled by nodata values,
         expressed in number of pixels.
     """
+
+    # Input checks
+    if (
+        not isinstance(grid_coords, tuple)
+        or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
+        or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
+    ):
+        raise TypeError("Input grid coordinates must be 1D arrays.")
+
+    diff_x = np.diff(grid_coords[0])
+    diff_y = np.diff(grid_coords[1])
+
+    if not all(diff_x == diff_x[0]) and all(diff_y == diff_y[0]):
+        raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
 
     # 1/ Interpolate irregular point cloud on a regular grid
 

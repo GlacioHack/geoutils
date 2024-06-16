@@ -12,7 +12,7 @@ import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
 rast = gu.Raster(filename_rast)
-rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000, rast.bounds.bottom + 2000])
+rast = rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000, rast.bounds.bottom + 2000])
 
 # Plot the raster
 rast.plot(cmap="terrain")
@@ -28,7 +28,7 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.bounds.left + 50, rast.bounds.right - 50, 50)
 y_coords = rng.uniform(rast.bounds.bottom + 50, rast.bounds.top - 50, 50)
 
-vals = rast.value_at_coords(x=x_coords, y=y_coords)
+vals = rast.reduce_points((x_coords, y_coords))
 
 # %%
 # Replace by Vector function once done
@@ -40,7 +40,7 @@ ds.plot(column="vals", cmap="terrain", legend=True, vmin=np.nanmin(rast), vmax=n
 # By default, :func:`~geoutils.Raster.value_at_coords` extracts the closest pixel value. But it can also be passed a window size and reductor function to
 # extract an average value or other statistic based on neighbouring pixels.
 
-vals_reduced = rast.value_at_coords(x=x_coords, y=y_coords, window=5, reducer_function=np.nanmedian)
+vals_reduced = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 
 np.nanmean(vals - vals_reduced)
 
@@ -50,8 +50,8 @@ np.nanmean(vals - vals_reduced)
 
 # Replace by Vector fonction once done
 coords = rast.coords(grid=True)
-x_closest = rast.copy(new_array=coords[0]).value_at_coords(x=x_coords, y=y_coords).squeeze()
-y_closest = rast.copy(new_array=coords[1]).value_at_coords(x=x_coords, y=y_coords).squeeze()
+x_closest = rast.copy(new_array=coords[0]).reduce_points((x_coords, y_coords)).squeeze()
+y_closest = rast.copy(new_array=coords[1]).reduce_points((x_coords, y_coords)).squeeze()
 from shapely.geometry import box
 
 geometry = [

@@ -71,6 +71,20 @@ class TestVector:
 
         assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]
 
+    def test_info(self) -> None:
+
+        v = gu.Vector(GLACIER_OUTLINES_URL)
+
+        # Check default runs without error (prints to screen)
+        output = v.info()
+        assert output is None
+
+        # Otherwise returns info
+        output2 = v.info(verbose=False)
+        assert isinstance(output2, str)
+        list_prints = ["Filename", "Coordinate system", "Extent", "Number of features", "Attributes"]
+        assert all(p in output2 for p in list_prints)
+
     def test_query(self) -> None:
         vector2 = self.glacier_outlines.query("NAME == 'Ayerbreen'")
 
@@ -105,6 +119,13 @@ class TestVector:
         assert bounds.bottom == self.glacier_outlines.ds.total_bounds[1]
         assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
         assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
+
+    def test_footprint(self) -> None:
+
+        footprint = self.glacier_outlines.footprint
+
+        assert isinstance(footprint, gu.Vector)
+        assert footprint.vector_equal(self.glacier_outlines.get_footprint_projected(self.glacier_outlines.crs))
 
     def test_reproject(self) -> None:
         """Test that the reproject function works as intended"""
@@ -240,6 +261,21 @@ class TestVector:
         # Check that error is raised when cropGeom argument is invalid
         with pytest.raises(TypeError, match="Crop geometry must be a Raster, Vector, or list of coordinates."):
             outlines.crop(1, inplace=True)  # type: ignore
+
+    def test_translate(self) -> None:
+
+        vector = gu.Vector(self.everest_outlines_path)
+
+        # Check default behaviour is not inplace
+        vector_shifted = vector.translate(xoff=2.5, yoff=5.7)
+        assert isinstance(vector_shifted, gu.Vector)
+        assert_geoseries_equal(vector_shifted.geometry, vector.geometry.translate(xoff=2.5, yoff=5.7))
+
+        # Check inplace behaviour works correctly
+        vector2 = vector.copy()
+        output = vector2.translate(xoff=2.5, yoff=5.7, inplace=True)
+        assert output is None
+        assert_geoseries_equal(vector2.geometry, vector_shifted.geometry)
 
     def test_proximity(self) -> None:
         """

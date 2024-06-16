@@ -15,7 +15,7 @@ filename_vect = gu.examples.get_path("everest_rgi_outlines")
 rast = gu.Raster(filename_rast)
 vect = gu.Vector(filename_vect)
 vect = vect[vect["RGIId"] == "RGI60-15.10055"]
-rast.crop(vect)
+rast = rast.crop(vect)
 
 # Plot the raster and vector
 rast.plot(cmap="Blues")

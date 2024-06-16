@@ -2,6 +2,7 @@
 
 import geopandas as gpd
 import numpy as np
+import pytest
 import rasterio as rio
 from shapely import geometry
 
@@ -10,7 +11,7 @@ from geoutils.pointcloud import _grid_pointcloud
 
 
 class TestPointCloud:
-    def test_grid_pc__chull(self) -> None:
+    def test_grid_pc(self) -> None:
         """Test point cloud gridding."""
 
         # 1/ Check gridding interpolation falls back exactly on original raster
@@ -46,7 +47,7 @@ class TestPointCloud:
         poly = geometry.MultiPoint([[p.x, p.y] for p in pc.geometry])
         chull = poly.convex_hull
 
-        # We compute the index of grid cells interesting the convex hull
+        # We compute the index of grid cells intersecting the convex hull
         ind_inters_convhull = rst_pc.intersects(chull)
 
         # We get corresponding 1D indexes for gridded output
@@ -105,3 +106,10 @@ class TestPointCloud:
         ifarchull, jfarchull = list(zip(*far_in_chull))
 
         assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
+
+        # 3/ Errors
+        with pytest.raises(TypeError, match="Input grid coordinates must be 1D arrays.*"):
+            Raster.from_pointcloud_regular(pc, grid_coords=(1, "lol"))  # type: ignore
+        with pytest.raises(ValueError, match="Grid coordinates must be regular*"):
+            grid_coords[0][0] += 1
+            Raster.from_pointcloud_regular(pc, grid_coords=grid_coords)  # type: ignore

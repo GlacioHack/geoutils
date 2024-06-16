@@ -24,7 +24,7 @@ vect.plot(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 # **First option:** using the raster as a reference to match, we crop the vector. We simply have to pass the :class:`~geoutils.Raster` as single argument to
 # :func:`~geoutils.Vector.crop`. See :ref:`core-match-ref` for more details.
 
-vect.crop(rast, inplace=True)
+vect = vect.crop(rast)
 
 # %%
 # .. note::
@@ -38,7 +38,7 @@ vect.plot(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 # The :func:`~geoutils.Vector.crop` keeps all features with geometries intersecting the extent to crop to. We can also force a clipping of the geometries
 # within the bounds using ``clip=True``.
 
-vect.crop(rast, clip=True)
+vect = vect.crop(rast, clip=True)
 rast.plot(ax="new", cmap="Greys_r", alpha=0.7)
 vect.plot(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 
@@ -47,9 +47,7 @@ vect.plot(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 # simple :class:`tuple` of bounds.
 
 bounds = rast.get_bounds_projected(out_crs=vect.crs)
-vect.crop(
-    crop_geom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top), inplace=True
-)
+vect = vect.crop(crop_geom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top))
 
 rast.plot(ax="new", cmap="Greys_r", alpha=0.7)
 vect.plot(ref_crs=rast, fc="none", ec="tab:purple", lw=3)

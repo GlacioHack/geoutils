@@ -239,6 +239,7 @@ class TestRaster:
         assert np.array_equal(r.res, [30.0, 30.0])
         assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
+        assert r.footprint.vector_equal(r.get_footprint_projected(r.crs))
 
         # And the second example with ASTER DEM
         r2 = gu.Raster(self.aster_dem_path)
@@ -257,6 +258,7 @@ class TestRaster:
         assert np.array_equal(r2.res, [30.0, 30.0])
         assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
         assert r2.crs == rio.crs.CRS.from_epsg(32718)
+        assert r2.footprint.vector_equal(r2.get_footprint_projected(r2.crs))
 
         # Test 2 - loading the data afterward
         r.load()
@@ -1232,7 +1234,7 @@ class TestRaster:
             rst[arr[:-1, :-1]]
 
         # An error when the georeferencing of the Mask does not match
-        mask.shift(1, 1, inplace=True)
+        mask.translate(1, 1, inplace=True)
         with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_index))):
             rst[mask]
 
@@ -1464,8 +1466,8 @@ class TestRaster:
         assert r2_crop.area_or_point == "Point"
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_shift(self, example: str) -> None:
-        """Tests shift works as intended"""
+    def test_translate(self, example: str) -> None:
+        """Test translation works as intended"""
 
         r = gu.Raster(example)
 
@@ -1475,11 +1477,11 @@ class TestRaster:
 
         # Shift raster by georeferenced units (default)
         # Check the default behaviour is not inplace
-        r_notinplace = r.shift(xoff=1, yoff=1)
+        r_notinplace = r.translate(xoff=1, yoff=1)
         assert isinstance(r_notinplace, gu.Raster)
 
         # Check inplace
-        r.shift(xoff=1, yoff=1, inplace=True)
+        r.translate(xoff=1, yoff=1, inplace=True)
         # Both shifts should have yielded the same transform
         assert r.transform == r_notinplace.transform
 
@@ -1498,7 +1500,7 @@ class TestRaster:
         orig_transform = r.transform
         orig_bounds = r.bounds
         orig_res = r.res
-        r.shift(xoff=1, yoff=1, distance_unit="pixel", inplace=True)
+        r.translate(xoff=1, yoff=1, distance_unit="pixel", inplace=True)
 
         # Only bounds should change
         assert orig_transform.c + 1 * orig_res[0] == r.transform.c
@@ -1513,7 +1515,7 @@ class TestRaster:
 
         # Check that an error is raised for a wrong distance_unit
         with pytest.raises(ValueError, match="Argument 'distance_unit' should be either 'pixel' or 'georeferenced'."):
-            r.shift(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
+            r.translate(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
@@ -1976,6 +1978,7 @@ class TestRaster:
         with pytest.warns(UserWarning, match="Intersection is void"):
             intersection = r.intersection(r_nonoverlap)
             assert intersection == (0.0, 0.0, 0.0, 0.0)
+
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_set_nodata(self, example: str) -> None:
@@ -2630,6 +2633,12 @@ class TestRaster:
         assert polygon_area == pytest.approx(pixel_area)
         assert isinstance(polygonized, gu.Vector)
         assert polygonized.crs == img.crs
+
+        # Check default name of data column, and that defining a custom name works the same
+        assert "id" in polygonized.ds.columns
+        polygonized2 = img.polygonize(target_values=value, data_column_name="myname")
+        assert "myname" in polygonized2.ds.columns
+        assert np.array_equal(polygonized2.ds["myname"].values, polygonized.ds["id"].values)
 
         # -- Test 2: data types --
 

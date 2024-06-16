@@ -331,12 +331,12 @@ class TestInterpolate:
         assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
         assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
-    def test_value_at_coords(self) -> None:
+    def test_reduce_points(self) -> None:
         """
-        Test that value at coords works as intended
+        Test reduce points.
         """
 
-        # -- Tests 1: check based on indexed values --
+        # -- Tests 1: Check based on indexed values --
 
         # Open raster
         r = gu.Raster(self.landsat_b4_crop_path)
@@ -357,21 +357,21 @@ class TestInterpolate:
         assert y_out == ytest0
 
         # Check that the value at this coordinate is the same as when indexing
-        z_val = r.value_at_coords(xtest0, ytest0)
+        z_val = r.reduce_points((xtest0, ytest0))
         z = r.data.data[itest0, jtest0]
         assert z == z_val
 
         # Check that the value is the same the other 4 corners of the pixel
-        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 - 0.49 * r.res[1])
-        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 + 0.49 * r.res[1])
-        assert z == r.value_at_coords(xtest0 - 0.49 * r.res[0], ytest0 - 0.49 * r.res[1])
-        assert z == r.value_at_coords(xtest0 + 0.49 * r.res[0], ytest0 + 0.49 * r.res[1])
+        assert z == r.reduce_points((xtest0 + 0.49 * r.res[0], ytest0 - 0.49 * r.res[1]))
+        assert z == r.reduce_points((xtest0 - 0.49 * r.res[0], ytest0 + 0.49 * r.res[1]))
+        assert z == r.reduce_points((xtest0 - 0.49 * r.res[0], ytest0 - 0.49 * r.res[1]))
+        assert z == r.reduce_points((xtest0 + 0.49 * r.res[0], ytest0 + 0.49 * r.res[1]))
 
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
         lat, lon = reproject_to_latlon(points=[xtest0, ytest0], in_crs=r.crs)
-        z_val_2 = r.value_at_coords(lon, lat, latlon=True)
+        z_val_2 = r.reduce_points((lon, lat), input_latlon=True)
         assert z_val == z_val_2
 
         # 2/ Band argument
@@ -381,62 +381,62 @@ class TestInterpolate:
         itest = int(itest[0])
         jtest = int(jtest[0])
         # Extract the values
-        z_band1 = r_multi.value_at_coords(xtest0, ytest0, band=1)
-        z_band2 = r_multi.value_at_coords(xtest0, ytest0, band=2)
-        z_band3 = r_multi.value_at_coords(xtest0, ytest0, band=3)
+        z_band1 = r_multi.reduce_points((xtest0, ytest0), band=1)
+        z_band2 = r_multi.reduce_points((xtest0, ytest0), band=2)
+        z_band3 = r_multi.reduce_points((xtest0, ytest0), band=3)
         # Compare to the Raster array slice
         assert list(r_multi.data[:, itest, jtest]) == [z_band1, z_band2, z_band3]
 
         # 3/ Masked argument
         r_multi.data[:, itest, jtest] = np.ma.masked
-        z_not_ma = r_multi.value_at_coords(xtest0, ytest0, band=1)
+        z_not_ma = r_multi.reduce_points((xtest0, ytest0), band=1)
         assert not np.ma.is_masked(z_not_ma)
-        z_ma = r_multi.value_at_coords(xtest0, ytest0, band=1, masked=True)
+        z_ma = r_multi.reduce_points((xtest0, ytest0), band=1, masked=True)
         assert np.ma.is_masked(z_ma)
 
         # 4/ Window argument
-        val_window, z_window = r_multi.value_at_coords(
-            xtest0, ytest0, band=1, window=3, masked=True, return_window=True
+        val_window, z_window = r_multi.reduce_points(
+            (xtest0, ytest0), band=1, window=3, masked=True, return_window=True
         )
         assert (
-            val_window
-            == np.ma.mean(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
-            == np.ma.mean(z_window)
+                val_window
+                == np.ma.mean(r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
+                == np.ma.mean(z_window)
         )
-        assert np.array_equal(z_window, r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
+        assert np.array_equal(z_window, r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
 
         # 5/ Reducer function argument
-        val_window2 = r_multi.value_at_coords(
-            xtest0, ytest0, band=1, window=3, masked=True, reducer_function=np.ma.median
+        val_window2 = r_multi.reduce_points(
+            (xtest0, ytest0), band=1, window=3, masked=True, reducer_function=np.ma.median
         )
-        assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
+        assert val_window2 == np.ma.median(r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
 
         # -- Tests 3: check that errors are raised when supposed for non-boolean arguments --
 
         # Verify that passing a window that is not a whole number fails
         with pytest.raises(ValueError, match=re.escape("Window must be a whole number.")):
-            r.value_at_coords(xtest0, ytest0, window=3.5)  # type: ignore
+            r.reduce_points((xtest0, ytest0), window=3.5)  # type: ignore
         # Same for an odd number
         with pytest.raises(ValueError, match=re.escape("Window must be an odd number.")):
-            r.value_at_coords(xtest0, ytest0, window=4)
+            r.reduce_points((xtest0, ytest0), window=4)
         # But a window that is a whole number as a float works
-        r.value_at_coords(xtest0, ytest0, window=3.0)  # type: ignore
+        r.reduce_points((xtest0, ytest0), window=3.0)  # type: ignore
 
         # -- Tests 4: check that passing an array-like object works
 
         # For simple coordinates
         x_coords = [xtest0, xtest0 + 100]
         y_coords = [ytest0, ytest0 - 100]
-        vals = r_multi.value_at_coords(x=x_coords, y=y_coords)
-        val0, win0 = r_multi.value_at_coords(x=x_coords[0], y=y_coords[0], return_window=True)
-        val1, win1 = r_multi.value_at_coords(x=x_coords[1], y=y_coords[1], return_window=True)
+        vals = r_multi.reduce_points((x_coords, y_coords))
+        val0, win0 = r_multi.reduce_points((x_coords[0], y_coords[0]), return_window=True)
+        val1, win1 = r_multi.reduce_points((x_coords[1], y_coords[1]), return_window=True)
 
         assert len(vals) == len(x_coords)
-        assert vals[0] == val0
-        assert vals[1] == val1
+        assert np.array_equal(vals[0], val0, equal_nan=True)
+        assert np.array_equal(vals[1], val1, equal_nan=True)
 
         # With a return window argument
-        vals, windows = r_multi.value_at_coords(x=x_coords, y=y_coords, return_window=True)
+        vals, windows = r_multi.reduce_points((x_coords, y_coords), return_window=True)
         assert len(windows) == len(x_coords)
         assert np.array_equal(windows[0], win0, equal_nan=True)
         assert np.array_equal(windows[1], win1, equal_nan=True)
@@ -446,14 +446,14 @@ class TestInterpolate:
         # Lower right pixel
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[-1, -1]
+        assert r.reduce_points((x, y)) == r.reduce_points((lon, lat), input_latlon=True) == r.data[-1, -1]
 
         # One pixel above
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[-2, -1]
+        assert r.reduce_points((x, y)) == r.reduce_points((lon, lat), input_latlon=True) == r.data[-2, -1]
 
         # One pixel left
         x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.value_at_coords(x, y) == r.value_at_coords(lon, lat, latlon=True) == r.data[-1, -2]
+        assert r.reduce_points((x, y)) == r.reduce_points((lon, lat), input_latlon=True) == r.data[-1, -2]
