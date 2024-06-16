@@ -399,17 +399,17 @@ class TestInterpolate:
             (xtest0, ytest0), band=1, window=3, masked=True, return_window=True
         )
         assert (
-                val_window
-                == np.ma.mean(r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
-                == np.ma.mean(z_window)
+            val_window
+            == np.ma.mean(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
+            == np.ma.mean(z_window)
         )
-        assert np.array_equal(z_window, r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
+        assert np.array_equal(z_window, r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
         # 5/ Reducer function argument
         val_window2 = r_multi.reduce_points(
             (xtest0, ytest0), band=1, window=3, masked=True, reducer_function=np.ma.median
         )
-        assert val_window2 == np.ma.median(r_multi.data[0, itest - 1: itest + 2, jtest - 1: jtest + 2])
+        assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
         # -- Tests 3: check that errors are raised when supposed for non-boolean arguments --
 
