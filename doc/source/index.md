@@ -29,8 +29,6 @@ GeoUtils is a Python package for **accessible**, **efficient** and **reliable** 
 GeoUtils ``v0.1`` is released, with most features drafted 3 years ago now finalized 🎉! We are working on an **Xarray accessor** and a few other features for 2024.
 ```
 
-----------------
-
 GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages
 (NumPy, Xarray, SciPy) to provide **consistent higher-level functionalities at the interface of raster, vector and point
 cloud objects** (such as match-reference reprojection, point interpolation or gridding).
@@ -40,6 +38,8 @@ It is **tailored to perform quantitative analysis that implicitly understands th
 and strives **to be computationally scalable** through Dask.
 
 If you are looking to **port your GDAL or QGIS workflow in Python**, GeoUtils is made for you!
+
+----------------
 
 # Where to start?
 
