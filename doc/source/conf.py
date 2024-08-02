@@ -52,6 +52,7 @@ nb_kernel_rgx_aliases = {".*geoutils.*": "python3"}
 # To raise a Sphinx build error on notebook failure
 nb_execution_raise_on_error = True  # To fail documentation build on notebook execution error
 nb_execution_show_tb = True  # To show full traceback on notebook execution error
+nb_output_stderr = "warn"  # To warn if an error is raised in a notebook cell (if intended, override to "show" in cell)
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/", None),

@@ -26,13 +26,13 @@ def load_multiple_rasters(
     Optionally, reproject all rasters to the grid of one raster set as reference (after optional crop).
     Otherwise, simply load the full rasters.
 
-    :param raster_paths: List of paths to the rasters to be loaded
-    :param crop: if set to True, will only load rasters in the area they intersect
+    :param raster_paths: List of paths to the rasters to be loaded.
+    :param crop: If set to True, will only load rasters in the area they intersect.
     :param ref_grid: If set to an integer value, the raster with that index will be considered as the reference
-    and all other rasters will be reprojected on the same grid (after optional crop)
-    :param kwargs: optional arguments to be passed to Raster.reproject, e.g. the resampling method
+        and all other rasters will be reprojected on the same grid (after optional crop).
+    :param kwargs: Optional arguments to be passed to Raster.reproject, e.g. the resampling method.
 
-    :returns: a list of loaded Raster instances
+    :returns: List of loaded Raster instances.
     """
     # If ref_grid is provided, need to reproject
     if isinstance(ref_grid, int):

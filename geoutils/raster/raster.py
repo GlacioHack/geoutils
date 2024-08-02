@@ -3686,7 +3686,7 @@ class Raster:
          of shift_area_or_point for more details.
 
         :param points: Point(s) at which to interpolate raster value (tuple of X/Y array-likes). If points fall
-        outside of image, value returned is nan.
+            outside of image, value returned is nan.
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', or 'quintic'. For more information,
             see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
         :param band: Band to use (from 1 to self.count).

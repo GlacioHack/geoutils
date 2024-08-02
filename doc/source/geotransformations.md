@@ -104,7 +104,7 @@ and resolution:
 ```{code-cell} ipython3
 ---
 mystnb:
-  output_stderr: warn
+  output_stderr: show
 ---
 # Reproject vector to CRS of raster by simply passing the raster
 rast_reproj2 = rast.reproject(rast2)
