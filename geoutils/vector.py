@@ -20,7 +20,6 @@ from typing import (
     overload,
 )
 
-import fiona
 import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
@@ -1137,7 +1136,7 @@ class Vector:
                 except rasterio.errors.RasterioIOError:
                     try:
                         ds_ref = Vector(ref)
-                    except fiona.errors.DriverError:
+                    except ValueError:
                         raise ValueError("Could not open raster or vector with rasterio or fiona.")
             else:
                 raise TypeError("Type of ref must be string path to file, Raster or Vector.")
