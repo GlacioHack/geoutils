@@ -54,10 +54,15 @@ a buffer of the vector, perform calculations on the modified raster, and finally
 :class: margin
 
 **We notice a ``Userwarning``:** No nodata value was defined in the GeoTIFF file, so GeoUtils automatically defined
-one compatible with the data type to use during operations.
+one compatible with the data type derived during operations.
 ```
 
 ```{code-cell} ipython3
+---
+mystnb:
+  output_stderr: show
+---
+
 import geoutils as gu
 
 # Examples files: paths to a GeoTIFF file and an ESRI shapefile

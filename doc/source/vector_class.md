@@ -106,6 +106,10 @@ vect.boundary
 
 ```{code-cell} ipython3
 :tags: [hide-output]
+---
+mystnb:
+  output_stderr: show
+---
 
 # Example of method with non-geometry output
 vect.area
