@@ -21,6 +21,7 @@ from typing import (
 )
 
 import geopandas as gpd
+import pyogrio
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1136,7 +1137,7 @@ class Vector:
                 except rasterio.errors.RasterioIOError:
                     try:
                         ds_ref = Vector(ref)
-                    except ValueError:
+                    except pyogrio.errors.DataSourceError:
                         raise ValueError("Could not open raster or vector with rasterio or fiona.")
             else:
                 raise TypeError("Type of ref must be string path to file, Raster or Vector.")
