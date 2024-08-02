@@ -21,11 +21,11 @@ from typing import (
 )
 
 import geopandas as gpd
-import pyogrio
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyogrio
 import rasterio as rio
 import rasterio.errors
 import shapely
