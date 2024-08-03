@@ -98,22 +98,21 @@ These behaviours aim to simplify the analysis of vectors, removing the need to o
 ({class}`geopandas.GeoDataFrame`, {class}`geopandas.GeoSeries`, {class}`shapely.Geometry`, {class}`pandas.Series`).
 
 ```{code-cell} ipython3
-:tags: [hide-output]
-
 # Example of method with geometric output
 vect.boundary
 ```
 
 ```{code-cell} ipython3
-:tags: [hide-output]
+---
+mystnb:
+  output_stderr: show
+---
 
 # Example of method with non-geometry output
 vect.area
 ```
 
 ```{code-cell} ipython3
-:tags: [hide-output]
-
 # Example of method with other output type
 vect.to_json()
 ```
