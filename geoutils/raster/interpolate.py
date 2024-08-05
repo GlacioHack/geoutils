@@ -13,16 +13,33 @@ from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
 
 
+def _dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int) -> int:
+    """
+    Derive distance of nodata spreading based on interpolation order.
+
+    :param order: Interpolation order.
+    :param dist_nodata_spread: Spreading distance of nodata, either half-order rounded up (default), rounded down, or
+        fixed integer.
+    """
+
+    if dist_nodata_spread == "half_order_up":
+        dist_nodata_spread = int(np.ceil(order / 2))
+    elif dist_nodata_spread == "half_order_down":
+        dist_nodata_spread = int(np.floor(order / 2))
+
+    return dist_nodata_spread
+
 def _interpn_interpolator(
     coords: tuple[NDArrayNum, NDArrayNum],
     values: NDArrayNum,
     fill_value: Number = np.nan,
     bounds_error: bool = False,
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
-    Create SciPy interpolator with nodata spreading at distance of half the method order rounded up (i.e., linear
-    spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
+    Create SciPy interpolator with nodata spreading. Default is spreading at distance of half the method order
+    rounded up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
 
     Gives the exact same result as scipy.interpolate.interpn, and allows interpolator to be re-used if required (
     for speed).
@@ -33,24 +50,27 @@ def _interpn_interpolator(
     https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743.
     """
 
+
+    # REMOVED (native NaN support not reliable)
     # Adding masking of NaNs for methods not supporting it
-    method_support_nan = method in ["nearest", "linear"]
+    # method_support_nan = method in ["nearest", "linear"]
+
     # Derive distance to spread nodata to depending on method order
     order = method_to_order[method]
-    dist_nodata_spread = int(np.ceil(order / 2))
+    d = _dist_nodata_spread(order=order, dist_nodata_spread=dist_nodata_spread)
 
     # If NaNs are not supported
-    if not method_support_nan:
+    if True:
         # We compute the mask and dilate it to the distance to spread nodatas
         mask_nan = ~np.isfinite(values)
-        new_mask = binary_dilation(mask_nan, iterations=dist_nodata_spread).astype("uint8")
+        new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
 
         # We create an interpolator for the mask using nearest
         interp_mask = RegularGridInterpolator(
             coords, new_mask, method="nearest", bounds_error=bounds_error, fill_value=1
         )
 
-        # We replace NaN values by nearest neighbours to minimize interpolation errors near NaNs
+        # We replace all NaN values by nearest neighbours to minimize interpolation errors near NaNs
         # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array
         indices = distance_transform_edt(mask_nan, return_distances=False, return_indices=True)
         values = values[tuple(indices)]
@@ -68,7 +88,7 @@ def _interpn_interpolator(
 
             results = interp(xi)
 
-            if not method_support_nan:
+            if True:
                 invalids = interp_mask(xi)
                 results[invalids.astype(bool)] = np.nan
 
@@ -114,6 +134,40 @@ def _interpn_interpolator(
 
         return rectbivariate_interpolator_with_fillvalue
 
+def _map_coordinates_nodata_propag(values: NDArrayNum, indices: tuple[NDArrayNum, NDArrayNum], order: int,
+                                   dist_nodata_spread: Literal[
+                                                           "half_order_up", "half_order_down"] | int = "half_order_up",
+                                   **kwargs: Any) \
+        -> NDArrayNum:
+    """
+    Perform map_coordinates with nodata spreading. Default is spreading at distance of half the method order rounded
+    up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
+
+    For map_coordinates, only nearest and linear are used.
+    """
+
+    # Derive distance of nodata spreading
+    d = _dist_nodata_spread(order=order, dist_nodata_spread=dist_nodata_spread)
+
+    # We compute the mask and dilate it to the distance to spread nodatas
+    mask_nan = ~np.isfinite(values)
+    new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
+
+    # We replace all NaN values by nearest neighbours to minimize interpolation errors near NaNs
+    # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array
+    ind = distance_transform_edt(mask_nan, return_distances=False, return_indices=True)
+    values = values[tuple(ind)]
+
+    # We interpolate the dilated array at the coordinates with nearest, and transform it back to a boolean to mask NaNs
+    rmask = map_coordinates(new_mask, indices, order=0, cval=1, prefilter=False)
+
+    # Interpolate at indices
+    rpoints = map_coordinates(values, indices, order=order, **kwargs)
+
+    # Set to NaNs based on spreading distance
+    rpoints[rmask.astype(bool)] = np.nan
+
+    return rpoints
 
 @overload
 def _interp_points(
@@ -122,6 +176,7 @@ def _interp_points(
     area_or_point: Literal["Area", "Point"] | None,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     *,
@@ -138,6 +193,7 @@ def _interp_points(
     area_or_point: Literal["Area", "Point"] | None,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     *,
@@ -154,6 +210,7 @@ def _interp_points(
     area_or_point: Literal["Area", "Point"] | None,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     *,
@@ -169,6 +226,7 @@ def _interp_points(
     area_or_point: Literal["Area", "Point"] | None,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
@@ -195,7 +253,7 @@ def _interp_points(
     mapcoords_supported = method in method_to_order_mapcoords.keys()
 
     res = _res(transform)
-    if (res[0] == res[1] or force_map_coords) and not force_interpn and mapcoords_supported:
+    if (res[0] == res[1] or force_map_coords) and not force_interpn and mapcoords_supported and not return_interpolator:
 
         # Convert method name into order
         order = method_to_order_mapcoords[method]
@@ -207,7 +265,9 @@ def _interp_points(
         if "cval" not in kwargs.keys():
             kwargs.update({"cval": np.nan})
 
-        rpoints = map_coordinates(array, [i, j], order=order, **kwargs)
+        # Use map coordinates with nodata propagation
+        rpoints = _map_coordinates_nodata_propag(values=array, indices=(i, j), order=order,
+                                                 dist_nodata_spread=dist_nodata_spread, **kwargs)
 
     # Otherwise, use scipy.interpolate.interpn
     else:
@@ -232,6 +292,7 @@ def _interp_points(
             coords=(np.flip(xycoords[1], axis=0), xycoords[0]),
             values=array,
             method=method,
+            dist_nodata_spread=dist_nodata_spread,
             bounds_error=kwargs["bounds_error"],
             fill_value=kwargs["fill_value"],
         )

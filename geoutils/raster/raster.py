@@ -3601,6 +3601,7 @@ class Raster:
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
         method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
         band: int = 1,
         input_latlon: bool = False,
         shift_area_or_point: bool | None = None,
@@ -3622,6 +3623,8 @@ class Raster:
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
             Default is linear.
+        :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
+            rounded up (default), or rounded down, or a fixed integer.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
@@ -3647,6 +3650,7 @@ class Raster:
             points=points,
             method=method,
             shift_area_or_point=shift_area_or_point,
+            dist_nodata_spread=dist_nodata_spread,
             force_scipy_function=force_scipy_function,
             **kwargs,
         )

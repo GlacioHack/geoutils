@@ -7,11 +7,12 @@ import numpy as np
 import pytest
 import rasterio as rio
 from scipy.ndimage import binary_dilation
+from scipy.interpolate import interpn
 
 import geoutils as gu
 from geoutils import examples
 from geoutils.projtools import reproject_to_latlon
-from geoutils.raster.interpolate import method_to_order
+from geoutils.raster.interpolate import method_to_order, _interp_points, _interpn_interpolator, _dist_nodata_spread
 
 
 class TestInterpolate:
@@ -20,6 +21,36 @@ class TestInterpolate:
     aster_dem_path = examples.get_path("exploradores_aster_dem")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+
+    @pytest.mark.parametrize(
+        "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+    )  # type: ignore
+    def test_interpn_interpolator_accuracy(self, method: str):
+        """Test that _interpn_interpolator (used by interp_points) returns exactly the same result as scipy.interpn."""
+
+        # Create synthetic 2D array with non-aligned coordinates in X/Y, and X in descending order to mirror a raster's
+        # coordinates
+        shape = (50, 20)
+        coords = (np.linspace(10, 0, shape[0]), np.linspace(20, 30, shape[1]))
+        values = np.random.default_rng(42).normal(size=shape)
+
+        # Get 10 random points in the array boundaries
+        i = np.random.default_rng(42).uniform(coords[0][-1], coords[0][0], size=10)
+        j = np.random.default_rng(42).uniform(coords[1][0], coords[1][-1], size=10)
+
+        # Compare interpn and interpolator
+
+        # Method splinef2d is expecting strictly ascending coordinates (while other methods support desc or asc)
+        if method != "splinef2d":
+            vals = interpn(points=coords, values=values, xi=(i, j), method=method)
+        else:
+            vals = interpn(points=(np.flip(coords[0]), coords[1]), values=np.flip(values[:], axis=0), xi=(i, j),
+                           method=method)
+        # With the interpolator (coordinates are re-ordered automatically, as it happens often for rasters)
+        interpolator = _interpn_interpolator(coords=coords, values=values, method=method)
+        vals2 = interpolator((i, j))
+
+        assert np.array_equal(vals, vals2, equal_nan=True)
 
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
     @pytest.mark.parametrize("shift_aop", [True, False])  # type: ignore
@@ -190,20 +221,30 @@ class TestInterpolate:
         assert val == pytest.approx(val_latlon, abs=0.0001)
 
         # 2/ Test for multiple points
-        i = np.random.default_rng(42).integers(0, 50, size=10)
-        j = np.random.default_rng(42).integers(0, 50, size=10)
+        i = np.random.default_rng(42).integers(1, 49, size=10)
+        j = np.random.default_rng(42).integers(1, 49, size=10)
         x, y = r.ij2xy(i, j)
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")[0]
+        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
+        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")
 
         assert np.array_equal(vals, vals2, equal_nan=True)
+
+        # 3/ Test return_interpolator is consistent with above
+        interp = _interp_points(r.get_nanarray(), transform=r.transform, area_or_point=r.area_or_point,
+                                points=(x, y), method=method, return_interpolator=True)
+        vals3 = interp((y, x))
+        vals3 = np.array(np.atleast_1d(vals3), dtype=np.float32)
+
+        assert np.array_equal(vals2, vals3, equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
+    @pytest.mark.parametrize("dist", ["half_order_up", "half_order_down", 0, 1, 5])
     def test_interp_point__nodata_propag(
-        self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+        self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"],
+            dist: str | int,
     ) -> None:
 
         # Open and crop for speed
@@ -225,17 +266,15 @@ class TestInterpolate:
 
         # All surrounding pixels with distance half the method order rounded up should be NaNs
         order = method_to_order[method]
-        d = int(np.ceil(order / 2))
-        if method in ["nearest", "linear"]:
-            return
+        d = _dist_nodata_spread(order=order, dist_nodata_spread=dist)
         # Get indices of NaNs within the distance from NaNs
         indices_nan = [
             (i0 + i, j0 + j) for i in np.arange(-d, d + 1) for j in np.arange(-d, d + 1) if (np.abs(i) + np.abs(j)) <= d
         ]
         i, j = list(zip(*indices_nan))
         x, y = r.ij2xy(i, j)
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")
+        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
@@ -243,8 +282,8 @@ class TestInterpolate:
         xoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
         yoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
 
-        vals = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="map_coordinates")
-        vals2 = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="interpn")
+        vals = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+        vals2 = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
@@ -257,8 +296,8 @@ class TestInterpolate:
         i, j = np.where(mask_nan_dilated)
         x, y = r.ij2xy(i, j)
         # And interpolate at those coordinates
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")
+        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
@@ -281,8 +320,8 @@ class TestInterpolate:
         i, j = list(zip(*indices_edge))
         x, y = r.ij2xy(i, j)
         # And get their interpolated value
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")
+        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
 
         # Then we fill the NaNs in the raster with a placeholder value of the DEM mean
         r_arr = r.get_nanarray()
@@ -292,44 +331,46 @@ class TestInterpolate:
         # All raster values should be valid now
         assert np.all(np.isfinite(r_arr))
 
-        # And get the interpolated values
-        vals_near = r2.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
-        vals2_near = r2.interp_points((x, y), method=method, force_scipy_function="interpn")
+        # Only check the accuracy with the default NaN spreading (half-order rounded up), otherwise anything can happen
+        if dist == "half_order_up":
 
-        # Both sets of values should valid + within a relative tolerance of 0.1%
-        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
-        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
+            # And get the interpolated values
+            vals_near = r2.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+            vals2_near = r2.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
 
-        # Same check for values within one pixel of the exact coordinates
-        # Same check for values within one pixel of the exact coordinates
-        xoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
-        yoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
+            # Both sets of values should be valid + within a relative tolerance of 0.1%
+            assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
+            assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
-        vals = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="map_coordinates")
-        vals2 = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="interpn")
-        vals_near = r2.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="map_coordinates")
-        vals2_near = r2.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="interpn")
+            # Same check for values within one pixel of the exact coordinates
+            xoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
+            yoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
 
-        # Both sets of values should be exactly the same, without any NaNs
-        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
-        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
+            vals = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+            vals2 = r.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
+            vals_near = r2.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+            vals2_near = r2.interp_points((x + xoffset, y + yoffset), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
 
-        # 2.2/ Repeat the same for all edges of NaNs in the raster
-        mask_dilated_plus_one = binary_dilation(mask_nan_dilated, iterations=1).astype(bool)
-        mask_edge_dilated = np.logical_and(mask_dilated_plus_one, ~mask_nan_dilated.astype(bool))
+            # Both sets of values should be exactly the same, without any NaNs
+            assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
+            assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
-        # Get indices of the related pixels, convert to coordinates
-        i, j = np.where(mask_edge_dilated)
-        x, y = r.ij2xy(i, j)
-        # And interpolate at those coordinates
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn")
-        vals_near = r2.interp_points((x, y), method=method, force_scipy_function="map_coordinates")
-        vals2_near = r2.interp_points((x, y), method=method, force_scipy_function="interpn")
+            # 2.2/ Repeat the same for all edges of NaNs in the raster
+            mask_dilated_plus_one = binary_dilation(mask_nan_dilated, iterations=1).astype(bool)
+            mask_edge_dilated = np.logical_and(mask_dilated_plus_one, ~mask_nan_dilated.astype(bool))
 
-        # Both sets of values should be exactly the same, without any NaNs
-        assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
-        assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
+            # Get indices of the related pixels, convert to coordinates
+            i, j = np.where(mask_edge_dilated)
+            x, y = r.ij2xy(i, j)
+            # And interpolate at those coordinates
+            vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+            vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
+            vals_near = r2.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
+            vals2_near = r2.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
+
+            # Both sets of values should be exactly the same, without any NaNs
+            assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
+            assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
     def test_reduce_points(self) -> None:
         """
