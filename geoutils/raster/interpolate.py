@@ -29,6 +29,7 @@ def _dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up",
 
     return dist_nodata_spread
 
+
 def _interpn_interpolator(
     coords: tuple[NDArrayNum, NDArrayNum],
     values: NDArrayNum,
@@ -49,7 +50,6 @@ def _interpn_interpolator(
     Adapted from:
     https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743.
     """
-
 
     # REMOVED (native NaN support not reliable)
     # Adding masking of NaNs for methods not supporting it
@@ -134,11 +134,14 @@ def _interpn_interpolator(
 
         return rectbivariate_interpolator_with_fillvalue
 
-def _map_coordinates_nodata_propag(values: NDArrayNum, indices: tuple[NDArrayNum, NDArrayNum], order: int,
-                                   dist_nodata_spread: Literal[
-                                                           "half_order_up", "half_order_down"] | int = "half_order_up",
-                                   **kwargs: Any) \
-        -> NDArrayNum:
+
+def _map_coordinates_nodata_propag(
+    values: NDArrayNum,
+    indices: tuple[NDArrayNum, NDArrayNum],
+    order: int,
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    **kwargs: Any,
+) -> NDArrayNum:
     """
     Perform map_coordinates with nodata spreading. Default is spreading at distance of half the method order rounded
     up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
@@ -168,6 +171,7 @@ def _map_coordinates_nodata_propag(values: NDArrayNum, indices: tuple[NDArrayNum
     rpoints[rmask.astype(bool)] = np.nan
 
     return rpoints
+
 
 @overload
 def _interp_points(
@@ -266,8 +270,9 @@ def _interp_points(
             kwargs.update({"cval": np.nan})
 
         # Use map coordinates with nodata propagation
-        rpoints = _map_coordinates_nodata_propag(values=array, indices=(i, j), order=order,
-                                                 dist_nodata_spread=dist_nodata_spread, **kwargs)
+        rpoints = _map_coordinates_nodata_propag(
+            values=array, indices=(i, j), order=order, dist_nodata_spread=dist_nodata_spread, **kwargs
+        )
 
     # Otherwise, use scipy.interpolate.interpn
     else:
