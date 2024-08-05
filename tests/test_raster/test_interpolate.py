@@ -27,7 +27,7 @@ class TestInterpolate:
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
 
-    def test_dist_nodata_spread(self):
+    def test_dist_nodata_spread(self) -> None:
         """Test distance of nodata spreading computation based on interpolation order."""
 
         assert _dist_nodata_spread(0, "half_order_up") == 0
