@@ -65,7 +65,7 @@ def _interpn_interpolator(
         mask_nan = ~np.isfinite(values)
         if d != 0:
             new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
-        # Zero iterations has a different behaviour in binary_dilation than doing nothing, here we want the original array
+        # Zero iterations has a different behaviour in binary_dilation than doing nothing, we want the original array
         else:
             new_mask = mask_nan.astype("uint8")
 
