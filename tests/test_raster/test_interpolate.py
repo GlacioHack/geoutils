@@ -27,6 +27,25 @@ class TestInterpolate:
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
 
+    def test_dist_nodata_spread(self):
+        """Test distance of nodata spreading computation based on interpolation order."""
+
+        assert _dist_nodata_spread(0, "half_order_up") == 0
+        assert _dist_nodata_spread(0, "half_order_down") == 0
+        assert _dist_nodata_spread(0, 5) == 5
+
+        assert _dist_nodata_spread(1, "half_order_up") == 1
+        assert _dist_nodata_spread(1, "half_order_down") == 0
+        assert _dist_nodata_spread(5, 5) == 5
+
+        assert _dist_nodata_spread(3, "half_order_up") == 2
+        assert _dist_nodata_spread(3, "half_order_down") == 1
+        assert _dist_nodata_spread(5, 5) == 5
+
+        assert _dist_nodata_spread(5, "half_order_up") == 3
+        assert _dist_nodata_spread(5, "half_order_down") == 2
+        assert _dist_nodata_spread(5, 5) == 5
+
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
