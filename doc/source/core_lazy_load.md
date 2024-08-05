@@ -57,6 +57,11 @@ For instance, using any {class}`~geoutils.Raster` or {class}`~geoutils.Vector` a
 always conserve the lazy loading of that match-reference object.
 
 ```{code-cell} ipython3
+---
+mystnb:
+  output_stderr: show
+---
+
 # Use a smaller Raster as reference to crop the initial one
 smaller_rast = gu.Raster(gu.examples.get_path("everest_landsat_b4_cropped"))
 rast.crop(smaller_rast)
