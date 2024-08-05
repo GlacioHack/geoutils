@@ -65,7 +65,7 @@ def _interpn_interpolator(
         mask_nan = ~np.isfinite(values)
         if d != 0:
             new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
-        # Zero iterations has a specific behaviour in binary_dilation, here we just want the origina array
+        # Zero iterations has a different behaviour in binary_dilation than doing nothing, here we want the original array
         else:
             new_mask = mask_nan.astype("uint8")
 
@@ -92,6 +92,7 @@ def _interpn_interpolator(
 
             results = interp(xi)
 
+            # If NaNs are not supported
             if True:
                 invalids = interp_mask(xi)
                 results[invalids.astype(bool)] = np.nan
@@ -160,7 +161,7 @@ def _map_coordinates_nodata_propag(
     mask_nan = ~np.isfinite(values)
     if d != 0:
         new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
-    # Zero iterations has a specific behaviour in binary_dilation, here we just want the origina array
+    # Zero iterations has a different behaviour in binary_dilation than doing nothing, here we want the original array
     else:
         new_mask = mask_nan.astype("uint8")
 
