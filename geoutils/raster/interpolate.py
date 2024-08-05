@@ -63,7 +63,11 @@ def _interpn_interpolator(
     if True:
         # We compute the mask and dilate it to the distance to spread nodatas
         mask_nan = ~np.isfinite(values)
-        new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
+        if d != 0:
+            new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
+        # Zero iterations has a specific behaviour in binary_dilation, here we just want the origina array
+        else:
+            new_mask = mask_nan.astype("uint8")
 
         # We create an interpolator for the mask using nearest
         interp_mask = RegularGridInterpolator(
@@ -154,7 +158,11 @@ def _map_coordinates_nodata_propag(
 
     # We compute the mask and dilate it to the distance to spread nodatas
     mask_nan = ~np.isfinite(values)
-    new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
+    if d != 0:
+        new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
+    # Zero iterations has a specific behaviour in binary_dilation, here we just want the origina array
+    else:
+        new_mask = mask_nan.astype("uint8")
 
     # We replace all NaN values by nearest neighbours to minimize interpolation errors near NaNs
     # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array

@@ -302,6 +302,7 @@ class TestInterpolate:
         # All surrounding pixels with distance half the method order rounded up should be NaNs
         order = method_to_order[method]
         d = _dist_nodata_spread(order=order, dist_nodata_spread=dist)
+
         # Get indices of NaNs within the distance from NaNs
         indices_nan = [
             (i0 + i, j0 + j) for i in np.arange(-d, d + 1) for j in np.arange(-d, d + 1) if (np.abs(i) + np.abs(j)) <= d
@@ -330,7 +331,11 @@ class TestInterpolate:
 
         # We create the mask of dilated NaNs
         mask_nan = ~np.isfinite(r.get_nanarray())
-        mask_nan_dilated = binary_dilation(mask_nan, iterations=d).astype("uint8")
+        if d != 0:
+            mask_nan_dilated = binary_dilation(mask_nan, iterations=d).astype("uint8")
+        # (Zero iteration triggers a different behaviour than just "doing nothing" in binary_dilation, we override here)
+        else:
+            mask_nan_dilated = mask_nan.astype("uint8")
         # Get indices of the related pixels, convert to coordinates
         i, j = np.where(mask_nan_dilated)
         x, y = r.ij2xy(i, j)
@@ -373,7 +378,7 @@ class TestInterpolate:
         # Only check the accuracy with the default NaN spreading (half-order rounded up), otherwise anything can happen
         if dist == "half_order_up":
 
-            # And get the interpolated values
+            # Get the interpolated values
             vals_near = r2.interp_points(
                 (x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist
             )
@@ -381,7 +386,7 @@ class TestInterpolate:
                 (x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist
             )
 
-            # Both sets of values should be valid + within a relative tolerance of 0.1%
+            # Both sets of values should be valid + within a relative tolerance of 0.01%
             assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
             assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
