@@ -3624,7 +3624,8 @@ class Raster:
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
             Default is linear.
         :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
-            rounded up (default), or rounded down, or a fixed integer.
+            rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
+            quintic method), or rounded down, or a fixed integer.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
