@@ -181,6 +181,7 @@ def stack_rasters(
             crs=reference_raster.crs,
             dtype=reference_raster.data.dtype,
             nodata=reference_raster.nodata,
+            resampling=resampling_method,
             silent=True,
         )
         reprojected_raster.set_nodata(nodata)
