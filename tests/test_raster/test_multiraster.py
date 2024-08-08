@@ -52,7 +52,7 @@ class StackMergeImages:
             inplace=True,
         )
         if different_crs:
-            self.img2 = self.img2.reproject(crs=different_crs)
+            self.img2 = self.img2.reproject(crs=different_crs, resampling="nearest")
 
         # To check that use_ref_bounds work - create a img that do not cover the whole extent
         self.img3 = img.copy()
@@ -159,6 +159,16 @@ class TestMultiRaster:
         # This case should preserve original extent
         stacked_img2 = gu.raster.stack_rasters([rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True)
         assert stacked_img2.bounds == rasters.img.bounds
+
+        # This case should preserve unique data values through "nearest" resampling
+        rasters.img1[:] = 5
+        rasters.img1[0:5, 0:5] = 1
+        rasters.img2 = rasters.img1.translate(0.5, 0.5, distance_unit="pixel")
+        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], resampling_method="nearest")
+        assert np.array_equal(np.unique(stacked_img.data.compressed()), np.array([1, 5]))
+        # But not this case with a shifted raster resampled with "bilinear"
+        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], resampling_method="bilinear")
+        assert not np.array_equal(np.unique(stacked_img.data.compressed()), np.array([1, 5]))
 
     @pytest.mark.parametrize(
         "rasters",
