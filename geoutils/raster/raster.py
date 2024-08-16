@@ -3636,6 +3636,7 @@ class Raster:
         :returns rpoints: Array of raster value(s) for the given points.
         """
 
+        # Extract array supporting NaNs
         array = self.get_nanarray()
         if self.count != 1:
             array = array[band - 1, :, :]

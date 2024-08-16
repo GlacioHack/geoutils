@@ -247,6 +247,10 @@ def _interp_points(
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """See description of Raster.interp_points."""
 
+    # If array is not a floating dtype (to support NaNs), convert dtype
+    if not np.issubdtype(array.dtype, np.floating):
+        array = array.astype(np.float32)
+
     # Get coordinates
     x, y = points
 
