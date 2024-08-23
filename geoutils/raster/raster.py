@@ -50,7 +50,7 @@ from geoutils.projtools import (
     reproject_from_latlon,
 )
 from geoutils.raster.array import get_mask_from_array
-from geoutils.raster.georeferencing import _coords, _ij2xy, _outside_image, _res, _xy2ij
+from geoutils.raster.georeferencing import _coords, _ij2xy, _outside_image, _res, _xy2ij, _bounds
 from geoutils.raster.interpolate import _interp_points
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
@@ -793,7 +793,7 @@ class Raster:
     @property
     def bounds(self) -> rio.coords.BoundingBox:
         """Bounding coordinates of the raster."""
-        return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
+        return _bounds(transform=self.transform, shape=self.shape)
 
     @property
     def footprint(self) -> Vector:

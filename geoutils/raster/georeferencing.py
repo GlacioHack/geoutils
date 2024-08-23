@@ -164,3 +164,9 @@ def _res(transform: rio.transform.Affine) -> tuple[float, float]:
     """See description of Raster.res"""
 
     return transform[0], abs(transform[4])
+
+
+def _bounds(transform: rio.transform.Affine, shape: tuple[int, int]):
+    """See description of Raster.bounds."""
+
+    return rio.coords.BoundingBox(*rio.transform.array_bounds(height=shape[0], width=shape[1], transform=transform))

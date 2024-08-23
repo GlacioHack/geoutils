@@ -237,7 +237,7 @@ def _interp_points(
     array: NDArrayNum,
     transform: rio.transform.Affine,
     area_or_point: Literal["Area", "Point"] | None,
-    points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
+    points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | None,
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
@@ -250,16 +250,18 @@ def _interp_points(
     # If array is not a floating dtype (to support NaNs), convert dtype
     if not np.issubdtype(array.dtype, np.floating):
         array = array.astype(np.float32)
-
-    # Get coordinates
-    x, y = points
-
-    i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
-
     shape: tuple[int, int] = array.shape[0:2]  # type: ignore
-    ind_invalid = np.vectorize(
-        lambda k1, k2: _outside_image(k1, k2, transform=transform, area_or_point=area_or_point, shape=shape, index=True)
-    )(j, i)
+
+    # TODO: Add check about None for "points" depending on "return_interpolator"
+    if not return_interpolator:
+        x, y = points
+        i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point,
+                      shift_area_or_point=shift_area_or_point)
+
+        ind_invalid = np.vectorize(
+            lambda k1, k2: _outside_image(k1, k2, transform=transform, area_or_point=area_or_point, shape=shape,
+                                          index=True)
+        )(j, i)
 
     # If the raster is on an equal grid, use scipy.ndimage.map_coordinates
     force_map_coords = force_scipy_function is not None and force_scipy_function == "map_coordinates"
