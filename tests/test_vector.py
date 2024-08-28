@@ -166,7 +166,9 @@ class TestVector:
         with pytest.raises(ValueError, match=re.escape("Reference raster or vector path does not exist.")):
             v0.reproject(ref="tmp.lol")
         # If it exists but cannot be opened by rasterio or fiona
-        with pytest.raises(ValueError, match=re.escape("Could not open raster or vector with rasterio or fiona.")):
+        with pytest.raises(
+            ValueError, match=re.escape("'geoutils/examples.py' not recognized as being in a supported file format.")
+        ):
             v0.reproject(ref="geoutils/examples.py")
         # If input of wrong type
         with pytest.raises(TypeError, match=re.escape("Type of ref must be string path to file, Raster or Vector.")):
