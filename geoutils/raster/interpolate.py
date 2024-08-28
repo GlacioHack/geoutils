@@ -254,13 +254,15 @@ def _interp_points(
 
     # TODO: Add check about None for "points" depending on "return_interpolator"
     if not return_interpolator:
+        if points is None:
+            raise ValueError("Input 'points' cannot be None if 'return_interpolator' is False.")
         x, y = points
-        i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point,
-                      shift_area_or_point=shift_area_or_point)
+        i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
 
         ind_invalid = np.vectorize(
-            lambda k1, k2: _outside_image(k1, k2, transform=transform, area_or_point=area_or_point, shape=shape,
-                                          index=True)
+            lambda k1, k2: _outside_image(
+                k1, k2, transform=transform, area_or_point=area_or_point, shape=shape, index=True
+            )
         )(j, i)
 
     # If the raster is on an equal grid, use scipy.ndimage.map_coordinates
