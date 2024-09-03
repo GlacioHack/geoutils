@@ -17,7 +17,6 @@ import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import pyproj
 import rasterio as rio
 import rasterio.warp
 import rasterio.windows
@@ -30,8 +29,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.plot import show as rshow
-from scipy.interpolate import interpn
-from scipy.ndimage import distance_transform_edt, map_coordinates
+from scipy.ndimage import distance_transform_edt
 
 import geoutils.vector as gv
 from geoutils._config import config
@@ -52,6 +50,15 @@ from geoutils.projtools import (
     reproject_from_latlon,
 )
 from geoutils.raster.array import get_mask_from_array
+from geoutils.raster.georeferencing import (
+    _bounds,
+    _coords,
+    _ij2xy,
+    _outside_image,
+    _res,
+    _xy2ij,
+)
+from geoutils.raster.interpolate import _interp_points
 from geoutils.raster.sampling import subsample_array
 from geoutils.vector import Vector
 
@@ -788,12 +795,12 @@ class Raster:
     @property
     def res(self) -> tuple[float | int, float | int]:
         """Resolution (X, Y) of the raster in georeferenced units."""
-        return self.transform[0], abs(self.transform[4])
+        return _res(self.transform)
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:
         """Bounding coordinates of the raster."""
-        return rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
+        return _bounds(transform=self.transform, shape=self.shape)
 
     @property
     def footprint(self) -> Vector:
@@ -3515,60 +3522,15 @@ class Raster:
         :returns i, j: Indices of (x,y) in the image.
         """
 
-        # If undefined, default to the global system config
-        if shift_area_or_point is None:
-            shift_area_or_point = config["shift_area_or_point"]
-
-        # Input checks
-        if op not in [np.float32, np.float64, float]:
-            raise UserWarning(
-                "Operator is not of type float: rio.Dataset.index might "
-                "return unreliable indexes due to rounding issues."
-            )
-
-        i, j = rio.transform.rowcol(self.transform, x, y, op=op, precision=precision)
-
-        # Necessary because rio.Dataset.index does not return abc.Iterable for a single point
-        if not isinstance(i, abc.Iterable):
-            i, j = (
-                np.asarray(
-                    [
-                        i,
-                    ]
-                ),
-                np.asarray(
-                    [
-                        j,
-                    ]
-                ),
-            )
-        else:
-            i, j = (np.asarray(i), np.asarray(j))
-
-        # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the upper left corner "Area" or
-        # the center of pixel "Point". This normally has no influence on georeferencing, it's only
-        # about the interpretation of the raster values, and thus can affect sub-pixel interpolation,
-        # for more details see: https://gdal.org/user/raster_data_model.html#metadata
-
-        # If the user wants to shift according to the interpretation
-        if shift_area_or_point:
-
-            # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
-            if self.area_or_point is not None and self.area_or_point == "Point":
-                if not isinstance(i.flat[0], (np.floating, float)):
-                    raise ValueError(
-                        "Operator must return np.floating values to perform pixel interpretation shifting."
-                    )
-
-                i += 0.5
-                j += 0.5
-
-        # Convert output indexes to integer if they are all whole numbers
-        if np.all(np.mod(i, 1) == 0) and np.all(np.mod(j, 1) == 0):
-            i = i.astype(int)
-            j = j.astype(int)
-
-        return i, j
+        return _xy2ij(
+            x=x,
+            y=y,
+            transform=self.transform,
+            area_or_point=self.area_or_point,
+            op=op,
+            precision=precision,
+            shift_area_or_point=shift_area_or_point,
+        )
 
     def ij2xy(
         self, i: ArrayLike, j: ArrayLike, shift_area_or_point: bool | None = None, force_offset: str | None = None
@@ -3593,23 +3555,14 @@ class Raster:
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
-        # If undefined, default to the global system config
-        if shift_area_or_point is None:
-            shift_area_or_point = config["shift_area_or_point"]
-
-        # Shift by half a pixel back for "Point" interpretation
-        if shift_area_or_point and force_offset is None:
-            if self.area_or_point is not None and self.area_or_point == "Point":
-                i = np.asarray(i) - 0.5
-                j = np.asarray(j) - 0.5
-
-        # Default offset is upper-left for raster coordinates
-        if force_offset is None:
-            force_offset = "ul"
-
-        x, y = rio.transform.xy(self.transform, i, j, offset=force_offset)
-
-        return x, y
+        return _ij2xy(
+            i=i,
+            j=j,
+            transform=self.transform,
+            area_or_point=self.area_or_point,
+            shift_area_or_point=shift_area_or_point,
+            force_offset=force_offset,
+        )
 
     def coords(
         self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None
@@ -3627,23 +3580,14 @@ class Raster:
         :returns x,y: Arrays of the (x,y) coordinates.
         """
 
-        # The coordinates are extracted from indexes 0 to shape
-        _, yy = self.ij2xy(
-            i=np.arange(self.height - 1, -1, -1),
-            j=0,
+        return _coords(
+            transform=self.transform,
+            shape=self.shape,
+            area_or_point=self.area_or_point,
+            grid=grid,
             shift_area_or_point=shift_area_or_point,
             force_offset=force_offset,
         )
-        xx, _ = self.ij2xy(
-            i=0, j=np.arange(self.width), shift_area_or_point=shift_area_or_point, force_offset=force_offset
-        )
-
-        # If grid is True, return coordinate grids
-        if grid:
-            meshgrid = tuple(np.meshgrid(xx, np.flip(yy)))
-            return meshgrid  # type: ignore
-        else:
-            return np.asarray(xx), np.asarray(yy)
 
     def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
@@ -3655,20 +3599,16 @@ class Raster:
 
         :returns is_outside: ``True`` if ij is outside the image.
         """
-        if not index:
-            xi, xj = self.xy2ij(xi, yj)
 
-        if np.any(np.array((xi, yj)) < 0):
-            return True
-        elif np.asanyarray(xi) > self.width or np.asanyarray(yj) > self.height:
-            return True
-        else:
-            return False
+        return _outside_image(
+            xi=xi, yj=yj, transform=self.transform, shape=self.shape, area_or_point=self.area_or_point, index=index
+        )
 
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
-        method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
         band: int = 1,
         input_latlon: bool = False,
         shift_area_or_point: bool | None = None,
@@ -3678,8 +3618,8 @@ class Raster:
         """
          Interpolate raster values at a set of points.
 
-         Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid, otherwise uses scipy.interpn
-         on a regular grid.
+         Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid using "nearest" or "linear" (for speed),
+         otherwise uses scipy.interpn on a regular grid.
 
          Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
          to ensure that the interpolation of points is done at the right location. See parameter description
@@ -3687,8 +3627,12 @@ class Raster:
 
         :param points: Point(s) at which to interpolate raster value (tuple of X/Y array-likes). If points fall
             outside of image, value returned is nan.
-        :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', or 'quintic'. For more information,
-            see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
+        :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
+            'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
+            Default is linear.
+        :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
+            rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
+            quintic method), or rounded down, or a fixed integer.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
@@ -3699,64 +3643,26 @@ class Raster:
         :returns rpoints: Array of raster value(s) for the given points.
         """
 
-        # Get coordinates
-        x, y = points
-
-        # If those are in latlon, convert to Raster CRS
-        if input_latlon:
-            init_crs = pyproj.CRS(4326)
-            dest_crs = pyproj.CRS(self.crs)
-            transformer = pyproj.Transformer.from_crs(init_crs, dest_crs)
-            x, y = transformer.transform(x, y)
-
-        i, j = self.xy2ij(x, y, shift_area_or_point=shift_area_or_point)
-
-        ind_invalid = np.vectorize(lambda k1, k2: self.outside_image(k1, k2, index=True))(j, i)
-
+        # Extract array supporting NaNs
         array = self.get_nanarray()
         if self.count != 1:
             array = array[band - 1, :, :]
 
-        # If the raster is on an equal grid, use scipy.ndimage.map_coordinates
-        force_map_coords = force_scipy_function is not None and force_scipy_function == "map_coordinates"
-        force_interpn = force_scipy_function is not None and force_scipy_function == "interpn"
+        # If those are in latlon, convert to Raster CRS
+        if input_latlon:
+            points = reproject_from_latlon(points, out_crs=self.crs)  # type: ignore
 
-        if (self.res[0] == self.res[1] or force_map_coords) and not force_interpn:
-
-            # Convert method name into order
-            method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5}
-            order = method_to_order[method]
-
-            # Remove default spline pre-filtering that is activated by default
-            if "prefilter" not in kwargs.keys():
-                kwargs.update({"prefilter": False})
-            # Change default constant value to NaN for interpolation outside the image bounds
-            if "cval" not in kwargs.keys():
-                kwargs.update({"cval": np.nan})
-
-            rpoints = map_coordinates(array, [i, j], order=order, **kwargs)
-
-        # Otherwise, use scipy.interpolate.interpn
-        else:
-            # Get lower-left corner coordinates
-            xycoords = self.coords(grid=False, shift_area_or_point=shift_area_or_point)
-
-            # Let interpolation outside the bounds not raise any error by default
-            if "bounds_error" not in kwargs.keys():
-                kwargs.update({"bounds_error": False})
-            # Return NaN outside image bounds
-            if "fill_value" not in kwargs.keys():
-                kwargs.update({"fill_value": np.nan})
-
-            # Using direct coordinates, Y is the first axis, and we need to flip it
-            rpoints = interpn(
-                (np.flip(xycoords[1], axis=0), xycoords[0]), self.get_nanarray(), (y, x), method=method, **kwargs
-            )
-
-        rpoints = np.array(rpoints, dtype=np.float32)
-        rpoints[np.array(ind_invalid)] = np.nan
-
-        return rpoints
+        return _interp_points(
+            array,
+            transform=self.transform,
+            area_or_point=self.area_or_point,
+            points=points,
+            method=method,
+            shift_area_or_point=shift_area_or_point,
+            dist_nodata_spread=dist_nodata_spread,
+            force_scipy_function=force_scipy_function,
+            **kwargs,
+        )
 
     def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """
