@@ -67,9 +67,7 @@ def _interpn_interpolator(
         new_mask = mask_nan.astype("uint8")
 
     # We create an interpolator for the nodata mask using nearest
-    interp_mask = RegularGridInterpolator(
-        points, new_mask, method="nearest", bounds_error=bounds_error, fill_value=1
-    )
+    interp_mask = RegularGridInterpolator(points, new_mask, method="nearest", bounds_error=bounds_error, fill_value=1)
 
     # Most methods (cubic, quintic, etc) do not support NaNs and require an array full of valid values
     # We replace thus replace all NaN values by nearest neighbours to give surrounding values of the same order of
