@@ -13,7 +13,7 @@ from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
 
 
-def _dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int) -> int:
+def _get_dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int) -> int:
     """
     Derive distance of nodata spreading based on interpolation order.
 
@@ -31,7 +31,7 @@ def _dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up",
 
 
 def _interpn_interpolator(
-    coords: tuple[NDArrayNum, NDArrayNum],
+    points: tuple[NDArrayNum, NDArrayNum],
     values: NDArrayNum,
     fill_value: Number = np.nan,
     bounds_error: bool = False,
@@ -47,55 +47,54 @@ def _interpn_interpolator(
     In practice, returns either a NaN-modified RegularGridInterpolator or a NaN-modified RectBivariateSpline object,
     both expecting a tuple of X/Y coordinates to be evaluated.
 
+    For input arguments, see scipy.interpolate.RegularGridInterpolator.
+    For additional argument "dist_nodata_spread", see description of Raster.interp_points.
+
     Adapted from:
     https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743.
     """
 
-    # REMOVED (native NaN support not reliable)
-    # Adding masking of NaNs for methods not supporting it
-    # method_support_nan = method in ["nearest", "linear"]
-
     # Derive distance to spread nodata to depending on method order
     order = method_to_order[method]
-    d = _dist_nodata_spread(order=order, dist_nodata_spread=dist_nodata_spread)
+    d = _get_dist_nodata_spread(order=order, dist_nodata_spread=dist_nodata_spread)
 
-    # If NaNs are not supported
-    if True:
-        # We compute the mask and dilate it to the distance to spread nodatas
-        mask_nan = ~np.isfinite(values)
-        if d != 0:
-            new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
-        # Zero iterations has a different behaviour in binary_dilation than doing nothing, we want the original array
-        else:
-            new_mask = mask_nan.astype("uint8")
+    # We compute the nodata mask and dilate it to the distance to spread nodatas
+    mask_nan = ~np.isfinite(values)
+    if d != 0:
+        new_mask = binary_dilation(mask_nan, iterations=d).astype("uint8")
+    # Zero iterations has a different behaviour in binary_dilation than doing nothing, we want the original array
+    else:
+        new_mask = mask_nan.astype("uint8")
 
-        # We create an interpolator for the mask using nearest
-        interp_mask = RegularGridInterpolator(
-            coords, new_mask, method="nearest", bounds_error=bounds_error, fill_value=1
-        )
+    # We create an interpolator for the nodata mask using nearest
+    interp_mask = RegularGridInterpolator(
+        points, new_mask, method="nearest", bounds_error=bounds_error, fill_value=1
+    )
 
-        # We replace all NaN values by nearest neighbours to minimize interpolation errors near NaNs
-        # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array
-        indices = distance_transform_edt(mask_nan, return_distances=False, return_indices=True)
-        values = values[tuple(indices)]
+    # Most methods (cubic, quintic, etc) do not support NaNs and require an array full of valid values
+    # We replace thus replace all NaN values by nearest neighbours to give surrounding values of the same order of
+    # magnitude and minimize interpolation errors near NaNs (errors of 10e-2/e-5 relative to the values)
+    # Elegant solution from: https://stackoverflow.com/questions/5551286/filling-gaps-in-a-numpy-array for a fast
+    # nearest neighbour fill
+    indices = distance_transform_edt(mask_nan, return_distances=False, return_indices=True)
+    values = values[tuple(indices)]
 
     # For the RegularGridInterpolator
     if method in RegularGridInterpolator._ALL_METHODS:
 
         # We create the classic interpolator
         interp = RegularGridInterpolator(
-            coords, values, method=method, bounds_error=bounds_error, fill_value=fill_value
+            points, values, method=method, bounds_error=bounds_error, fill_value=fill_value
         )
 
         # We create a new interpolator callable that propagates nodata as defined above
         def regulargrid_interpolator_with_nan(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
 
+            # Get results
             results = interp(xi)
-
-            # If NaNs are not supported
-            if True:
-                invalids = interp_mask(xi)
-                results[invalids.astype(bool)] = np.nan
+            # Get invalids
+            invalids = interp_mask(xi)
+            results[invalids.astype(bool)] = np.nan
 
             return results
 
@@ -105,7 +104,7 @@ def _interpn_interpolator(
     else:
 
         # The coordinates must be in ascending order, which requires flipping the array too (more costly)
-        interp = RectBivariateSpline(np.flip(coords[0]), coords[1], np.flip(values[:], axis=0))
+        interp = RectBivariateSpline(np.flip(points[0]), points[1], np.flip(values[:], axis=0))
 
         # We create a new interpolator callable that propagates nodata as defined above, and supports fill_value
         def rectbivariate_interpolator_with_fillvalue(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
@@ -119,10 +118,10 @@ def _interpn_interpolator(
             xi_arr = xi_arr.reshape(-1, xi_arr.shape[-1])
             idx_valid = np.all(
                 (
-                    coords[0][-1] <= xi_arr[:, 0],
-                    xi_arr[:, 0] <= coords[0][0],
-                    coords[1][0] <= xi_arr[:, 1],
-                    xi_arr[:, 1] <= coords[1][-1],
+                    points[0][-1] <= xi_arr[:, 0],
+                    xi_arr[:, 0] <= points[0][0],
+                    points[1][0] <= xi_arr[:, 1],
+                    xi_arr[:, 1] <= points[1][-1],
                 ),
                 axis=0,
             )
@@ -152,10 +151,13 @@ def _map_coordinates_nodata_propag(
     up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
 
     For map_coordinates, only nearest and linear are used.
+
+    For input arguments, see scipy.ndimage.map_coordinates.
+    For additional argument "dist_nodata_spread", see description of Raster.interp_points.
     """
 
     # Derive distance of nodata spreading
-    d = _dist_nodata_spread(order=order, dist_nodata_spread=dist_nodata_spread)
+    d = _get_dist_nodata_spread(order=order, dist_nodata_spread=dist_nodata_spread)
 
     # We compute the mask and dilate it to the distance to spread nodatas
     mask_nan = ~np.isfinite(values)
@@ -311,7 +313,7 @@ def _interp_points(
 
         # Using direct coordinates, Y is the first axis, and we need to flip it
         interpolator = _interpn_interpolator(
-            coords=(np.flip(xycoords[1], axis=0), xycoords[0]),
+            points=(np.flip(xycoords[1], axis=0), xycoords[0]),
             values=array,
             method=method,
             dist_nodata_spread=dist_nodata_spread,

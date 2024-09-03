@@ -13,7 +13,7 @@ import geoutils as gu
 from geoutils import examples
 from geoutils.projtools import reproject_to_latlon
 from geoutils.raster.interpolate import (
-    _dist_nodata_spread,
+    _get_dist_nodata_spread,
     _interp_points,
     _interpn_interpolator,
     method_to_order,
@@ -30,21 +30,21 @@ class TestInterpolate:
     def test_dist_nodata_spread(self) -> None:
         """Test distance of nodata spreading computation based on interpolation order."""
 
-        assert _dist_nodata_spread(0, "half_order_up") == 0
-        assert _dist_nodata_spread(0, "half_order_down") == 0
-        assert _dist_nodata_spread(0, 5) == 5
+        assert _get_dist_nodata_spread(0, "half_order_up") == 0
+        assert _get_dist_nodata_spread(0, "half_order_down") == 0
+        assert _get_dist_nodata_spread(0, 5) == 5
 
-        assert _dist_nodata_spread(1, "half_order_up") == 1
-        assert _dist_nodata_spread(1, "half_order_down") == 0
-        assert _dist_nodata_spread(5, 5) == 5
+        assert _get_dist_nodata_spread(1, "half_order_up") == 1
+        assert _get_dist_nodata_spread(1, "half_order_down") == 0
+        assert _get_dist_nodata_spread(1, 5) == 5
 
-        assert _dist_nodata_spread(3, "half_order_up") == 2
-        assert _dist_nodata_spread(3, "half_order_down") == 1
-        assert _dist_nodata_spread(5, 5) == 5
+        assert _get_dist_nodata_spread(3, "half_order_up") == 2
+        assert _get_dist_nodata_spread(3, "half_order_down") == 1
+        assert _get_dist_nodata_spread(3, 5) == 5
 
-        assert _dist_nodata_spread(5, "half_order_up") == 3
-        assert _dist_nodata_spread(5, "half_order_down") == 2
-        assert _dist_nodata_spread(5, 5) == 5
+        assert _get_dist_nodata_spread(5, "half_order_up") == 3
+        assert _get_dist_nodata_spread(5, "half_order_down") == 2
+        assert _get_dist_nodata_spread(5, 5) == 5
 
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
@@ -74,7 +74,7 @@ class TestInterpolate:
                 points=(np.flip(coords[0]), coords[1]), values=np.flip(values[:], axis=0), xi=(i, j), method=method
             )
         # With the interpolator (coordinates are re-ordered automatically, as it happens often for rasters)
-        interpolator = _interpn_interpolator(coords=coords, values=values, method=method)
+        interpolator = _interpn_interpolator(points=coords, values=values, method=method)
         vals2 = interpolator((i, j))
 
         assert np.array_equal(vals, vals2, equal_nan=True)
@@ -82,7 +82,21 @@ class TestInterpolate:
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
     @pytest.mark.parametrize("shift_aop", [True, False])  # type: ignore
     def test_interp_points__synthetic(self, tag_aop: str | None, shift_aop: bool) -> None:
-        """Test interp_points function with synthetic data."""
+        """
+        Test interp_points function with synthetic data:
+
+        We select known points and compare to the expected interpolation results across all methods, and all pixel
+        interpretations (area_or_point, with or without shift).
+
+        The synthetic data is a 3x3 array of values, which we interpolate at different synthetic points:
+        1/ Points falling right on grid coordinates are compared to their value in the grid,
+        2/ Points falling halfway between grid coordinates are compared to the mean of the surrounding values in the
+        grid (as it should equal the linear interpolation on an equal grid),
+        3/ Random points in the grid, compared between methods (forcing to use either scipy.ndimage.map_coordinates or
+        scipy.interpolate.interpn under-the-hood, to ensure results are consistent).
+
+        These tests also check the behaviour when returning interpolated for points outside of valid values.
+        """
 
         # We flip the array up/down to facilitate index comparison of Y axis
         arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
@@ -195,8 +209,8 @@ class TestInterpolate:
             i=index_x_edge_rand, j=index_y_edge_rand, shift_area_or_point=shift_aop
         )
 
-        # Nearest doesn't apply, just linear and above
-        for method in ["cubic", "quintic"]:
+        # Test across all methods
+        for method in ["nearest", "linear", "cubic", "quintic"]:
             raster_points_mapcoords_edge = raster.interp_points(
                 (points_x_rand, points_y_rand),
                 method=method,
@@ -220,7 +234,13 @@ class TestInterpolate:
     def test_interp_points__real(
         self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     ) -> None:
-        """Test interp_points for real data, checking in particular the propagation of nodata."""
+        """
+        Test interp_points for real data, checking in particular the propagation of nodata.
+
+        For a random point (dimension 0) and a group of random points (dimension 1) in a real raster, we check the
+        consistency of the output forcing to use either scipy.ndimage.map_coordinates or scipy.interpolate.interpn
+        under-the-hood, or returning a regular-grid interpolator.
+        """
 
         # Check the accuracy of the interpolation at an exact point, and between methods
 
@@ -235,7 +255,9 @@ class TestInterpolate:
         x, y = r.ij2xy(itest, jtest)
         val = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates")[0]
         val_img = r.data[itest, jtest]
-        if "nearest" in method or "linear" in method:
+        # For a point exactly at a grid coordinate, only nearest and linear will match
+        # (cubic modifies values at a grid coordinate)
+        if method in ["nearest", "linear"]:
             assert val_img == val
 
         # Check the result is exactly the same for both methods
@@ -281,7 +303,18 @@ class TestInterpolate:
         method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"],
         dist: Literal["half_order_up", "half_order_down"] | int,
     ) -> None:
+        """
+        Tests for nodata propagation of interp_points.
 
+        We create artificial NaNs at certain pixels of real rasters (one with integer type, one floating type), then
+        verify that interpolated values propagate these NaNs at the right distances for all methods, and across all
+        nodata propagation distances.
+
+        We also assess the precision of the interpolation under the default nodata propagation "half_order_up", by
+        comparing interpolated values near nodata edges with and without the gap-filling of a constant placeholder
+        value (= ensures the gap-filling of the array required for most methods that do not support NaN has little
+        effect of interpolation).
+        """
         # Open and crop for speed
         r = gu.Raster(example)
         r = r.crop((r.bounds.left, r.bounds.bottom, r.bounds.left + r.res[0] * 100, r.bounds.bottom + r.res[1] * 100))
@@ -301,9 +334,9 @@ class TestInterpolate:
 
         # All surrounding pixels with distance half the method order rounded up should be NaNs
         order = method_to_order[method]
-        d = _dist_nodata_spread(order=order, dist_nodata_spread=dist)
+        d = _get_dist_nodata_spread(order=order, dist_nodata_spread=dist)
 
-        # Get indices of NaNs within the distance from NaNs
+        # Get indices of raster pixels within the right distance from NaNs
         indices_nan = [
             (i0 + i, j0 + j) for i in np.arange(-d, d + 1) for j in np.arange(-d, d + 1) if (np.abs(i) + np.abs(j)) <= d
         ]
@@ -314,7 +347,7 @@ class TestInterpolate:
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
-        # Same check for values within one pixel of the exact coordinates
+        # Same check forrandom coordinates within half a pixel of the above coordinates (falling exactly on grid points)
         xoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
         yoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
 
@@ -367,7 +400,7 @@ class TestInterpolate:
         vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist)
         vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist)
 
-        # Then we fill the NaNs in the raster with a placeholder value of the DEM mean
+        # Then we fill the NaNs in the raster with a placeholder value of the raster mean
         r_arr = r.get_nanarray()
         r_arr[~np.isfinite(r_arr)] = np.nanmean(r_arr)
         r2 = r.copy(new_array=r_arr)
