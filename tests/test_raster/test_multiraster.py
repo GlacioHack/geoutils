@@ -67,16 +67,16 @@ class RealImageStack:
             inplace=True,
         )
 
+
 class SyntheticImageStack:
     """
     Synthetic image stack for tests
 
     Create a small synthetic example, where one can specify nodata value, values in second image (and potentially more
     in the future).
-   """
+    """
 
     def __init__(self, nodata: int | float, img2_value: int | float):
-
 
         shape = (10, 10)
         data_int = np.ones(shape).astype(np.uint16)
@@ -151,9 +151,11 @@ def sat_images():  # type: ignore
 def images_3d():  # type: ignore
     return RealImageStack("everest_landsat_rgb")
 
+
 @pytest.fixture
 def images_nodata_zero():  # type: ignore
     return SyntheticImageStack(nodata=0, img2_value=65534)
+
 
 class TestMultiRaster:
     @pytest.mark.parametrize(
@@ -163,7 +165,7 @@ class TestMultiRaster:
             pytest.lazy_fixture("sat_images"),
             pytest.lazy_fixture("images_different_crs"),
             pytest.lazy_fixture("images_3d"),
-            pytest.lazy_fixture("images_nodata_zero")
+            pytest.lazy_fixture("images_nodata_zero"),
         ],
     )  # type: ignore
     def test_stack_rasters(self, rasters) -> None:  # type: ignore
