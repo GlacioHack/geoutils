@@ -165,7 +165,7 @@ def stack_rasters(
             return_rio_bbox=True,
         )
 
-    # Make a data list and add all of the reprojected rasters into it.
+    # Make a data list and add all the reprojected rasters into it.
     data: list[NDArrayNum] = []
 
     for raster in tqdm(rasters, disable=not progress):
@@ -173,7 +173,7 @@ def stack_rasters(
         if not raster.is_loaded:
             raster.load()
 
-        nodata = reference_raster.nodata or gu.raster.raster._default_nodata(reference_raster.data.dtype)
+        nodata = reference_raster.nodata if not None else gu.raster.raster._default_nodata(reference_raster.data.dtype)
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
             bounds=dst_bounds,
