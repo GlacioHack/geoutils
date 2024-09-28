@@ -243,6 +243,10 @@ class TestMultiRaster:
         stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], resampling_method="bilinear")
         assert not np.array_equal(np.unique(stacked_img.data.compressed()), np.array([1, 5]))
 
+        # Check input nodata is not modified inplace (issue 609)
+        new_nodata_ref = rasters.img1.nodata
+        assert nodata_ref == new_nodata_ref
+
         # Check nodata value output is consistent with reference input
         if nodata_ref is not None:
             assert stacked_img.nodata == nodata_ref
