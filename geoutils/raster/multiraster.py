@@ -185,10 +185,10 @@ def stack_rasters(
             silent=True,
         )
         # If the georeferenced grid was the same, reproject() will have returned self with a warning (silenced here),
-        # and we want to copy the raster before modifying its nodata (or it will modify raster inputs of this function)
+        # and we want to copy the raster and just modify its nodata (or would modify raster inputs of this function)
         if reprojected_raster.georeferenced_grid_equal(raster):
             reprojected_raster = reprojected_raster.copy()
-        reprojected_raster.set_nodata(nodata)
+            reprojected_raster.set_nodata(nodata)
 
         # Optionally calculate difference
         if diff:
