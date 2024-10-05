@@ -22,7 +22,7 @@ dependencies:
   - scikit-image
 
   # Test dependencies
-  - osgeo  # To test functionalities against GDAL
+  - gdal  # To test functionalities against GDAL
   - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixture
