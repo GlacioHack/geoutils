@@ -26,7 +26,7 @@ GeoUtils is a Python package for **accessible**, **efficient** and **reliable** 
 
 ```{important}
 :class: margin
-GeoUtils ``v0.1`` is released, with most features drafted 3 years ago now finalized 🎉! We are working on an **Xarray accessor** and a few other features for 2024.
+GeoUtils ``v0.1`` is released, with most features drafted 3 years ago now finalized 🎉! We are working on an **Xarray accessor** and a few other features for 2025.
 ```
 
 GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages
