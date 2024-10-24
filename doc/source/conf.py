@@ -9,6 +9,7 @@ import sys
 sys.path.append(os.path.abspath("../.."))
 sys.path.append(os.path.abspath("../../geoutils/"))
 sys.path.append(os.path.abspath(".."))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
