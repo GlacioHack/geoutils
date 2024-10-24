@@ -5,4 +5,3 @@
  - [ ] Fully documented, including `api/*.md` for new API.
  - [ ] New optional dependencies or Python version support added to both `dev-environment.yml` and `setup.cfg`,
  - [ ] If contributor workflow (test, doc, linting) or Python version support changed, update `CONTRIBUTING.md`.
-
