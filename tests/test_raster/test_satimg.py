@@ -109,7 +109,7 @@ class TestSatelliteImage:
         """
         # Open dataset, update data and make a copy
         r = gu.SatelliteImage(example)
-        r.data += 5
+        r += 5
         r2 = r.copy()
 
         # Objects should be different (not pointing to the same memory)
