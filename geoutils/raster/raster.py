@@ -3304,6 +3304,7 @@ class Raster:
             cbar = None
 
         plt.sca(ax0)
+        plt.tight_layout()
 
         # If returning axes
         if return_axes:
