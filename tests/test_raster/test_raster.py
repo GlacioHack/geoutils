@@ -4278,8 +4278,6 @@ class TestArrayInterface:
 
             # Gradient is the only supported array function returning two arguments for now
             if "gradient" in arrfunc_str:
-                print(output_rst)
-                print(output_ma)
                 assert np.ma.allequal(output_rst[0], output_ma[0]) and np.ma.allequal(output_rst[1], output_ma[1])
             # This test is for when the NumPy function reduces the dimension of the array but not completely
             elif isinstance(output_ma, np.ndarray):
