@@ -31,7 +31,7 @@ pyplot.rcParams['font.size'] = 9
 
 In GeoUtils, the **georeferencing syntax is consistent across all geospatial data objects**. Additionally, **data objects
 load only their metadata by default**, allowing quick operations on georeferencing without requiring the array data
-(for a {class}`~geoutils.Raster`) or geometry data (for a {class}`~geoutils.Vector`) to be present in memory.
+(for a {class}`~geoutils.Raster`) to be present in memory.
 
 ### Metadata summary
 
