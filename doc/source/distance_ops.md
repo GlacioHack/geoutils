@@ -78,7 +78,7 @@ plt.tight_layout()
 ## Buffering without overlap
 
 Buffering consists in **expanding or collapsing vector geometries equally in all directions**. However, this can often lead to overlap
-between shapes, which is sometimes undesirable. Using Voronoi polygons, we provide a buffering method with overlap.
+between shapes, which is sometimes undesirable. Using Voronoi polygons, we provide a buffering method without overlap.
 
 {func}`geoutils.Vector.buffer_without_overlap`
 
