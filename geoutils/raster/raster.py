@@ -2379,14 +2379,14 @@ class Raster:
                 # If casting was not necessary, copy all attributes except array
                 # Otherwise update array, nodata and
                 if cast_required:
-                    return (
+                    return tuple(
                         self.from_array(
                             data=output, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
                         )
                         for output in outputs
                     )
                 else:
-                    return (self.copy(new_array=output) for output in outputs)
+                    return tuple(self.copy(new_array=output) for output in outputs)
             else:
                 return outputs
         # Second, if there is a single output which is an array

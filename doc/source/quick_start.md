@@ -85,7 +85,7 @@ mask_buff = vect_buff.create_mask(rast)
 
 # Re-assign values of pixels in the mask while performing a sum
 # (Now the raster loads implicitly)
-rast[mask_buff] += 50
+rast[mask_buff] = rast[mask_buff] + 50
 import numpy as np
 calc_rast = np.log(rast / 2) + 3.5
 

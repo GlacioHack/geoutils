@@ -9,6 +9,7 @@ geoutils.Raster(landsat_b4_crop_path).save("myraster2.tif")
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
+warnings.filterwarnings("ignore", category=UserWarning, message="No nodata set*")
 ####
 
 import geoutils as gu

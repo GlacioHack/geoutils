@@ -90,7 +90,7 @@ header-rows: 1
 * - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_raster_geoutils.py
         :language: python
-        :lines: 14-29
+        :lines: 15-30
     ```
 
   - ```{eval-rst}
@@ -120,5 +120,4 @@ header-rows: 1
         :language: python
         :lines: 11-34
     ```
-
 `````
