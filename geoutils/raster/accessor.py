@@ -2,19 +2,19 @@
 geoutils.accessor provides an Xarray accessor "rst" mirroring the API of the Raster class.
 """
 
-
 import numpy as np
-import xarray as xr
+import rasterio as rio
 import rioxarray as rioxr
+import xarray as xr
 from geocube.vector import vectorize
 from pyproj import CRS
-import rasterio as rio
 
-from geoutils.raster import RasterType, Raster
-from geoutils.vector import Vector
-from geoutils.projtools import _get_footprint_projected, _get_bounds_projected
-from geoutils.raster.sampling import subsample_array
 from geoutils._typing import NDArrayNum
+from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
+from geoutils.raster import Raster, RasterType
+from geoutils.raster.sampling import subsample_array
+from geoutils.vector import Vector
+
 
 def open_raster(filename: str, **kwargs):
 
@@ -29,6 +29,7 @@ def open_raster(filename: str, **kwargs):
     ds.rst._count_on_disk = 1
 
     return ds
+
 
 @xr.register_dataarray_accessor("rst")
 class RasterAccessor:
@@ -108,7 +109,6 @@ class RasterAccessor:
 
         return Vector(gdf_polygonize)
 
-
     def georeferenced_grid_equal(self: xr.DataArray, raster: RasterType | xr.DataArray) -> bool:
 
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
@@ -168,7 +168,6 @@ class RasterAccessor:
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
 
-
     def to_raster(self):
         """
         Convert to geoutils.Raster object.
@@ -203,4 +202,3 @@ class RasterAccessor:
 class SatelliteImageAccessor(RasterAccessor):
     def __init__(self, xarray_obj: xr.DataArray):
         self._obj = xarray_obj
-

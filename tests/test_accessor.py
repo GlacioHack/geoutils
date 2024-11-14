@@ -4,7 +4,8 @@ import warnings
 
 import rioxarray as rioxr
 
-from geoutils import examples, Raster, open_raster
+from geoutils import Raster, examples, open_raster
+
 
 class TestAccessor:
 
