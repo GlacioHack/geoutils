@@ -1,4 +1,5 @@
 """Test array tools."""
+
 from __future__ import annotations
 
 import warnings
@@ -8,7 +9,12 @@ import pytest
 import rasterio as rio
 
 import geoutils as gu
-from geoutils.raster.array import _get_valid_extent, _get_array_and_mask, _get_mask_from_array, _get_xy_rotated
+from geoutils.raster.array import (
+    _get_array_and_mask,
+    _get_valid_extent,
+    _get_xy_rotated,
+)
+
 
 class TestArray:
     @pytest.mark.parametrize("dtype", ["uint8", "uint16", "int32", "float32", "float16"])  # type: ignore

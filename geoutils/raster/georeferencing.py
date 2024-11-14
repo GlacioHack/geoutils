@@ -1,16 +1,17 @@
 """
 Functions for manipulating georeferencing of the raster objects.
 """
+
 from __future__ import annotations
 
-from typing import Iterable, Literal
 import warnings
+from typing import Iterable, Literal
 
 import numpy as np
 import rasterio as rio
 
 from geoutils._config import config
-from geoutils._typing import ArrayLike, NDArrayNum, DTypeLike
+from geoutils._typing import ArrayLike, DTypeLike, NDArrayNum
 
 
 def _ij2xy(
@@ -174,7 +175,6 @@ def _bounds(transform: rio.transform.Affine, shape: tuple[int, int]) -> rio.coor
     """See description of Raster.bounds."""
 
     return rio.coords.BoundingBox(*rio.transform.array_bounds(height=shape[0], width=shape[1], transform=transform))
-
 
 
 def _cast_pixel_interpretation(

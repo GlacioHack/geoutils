@@ -1,17 +1,21 @@
 """Functionalities at the interface of rasters and point clouds."""
+
 from __future__ import annotations
 
-from typing import Literal, Iterable
+from typing import Iterable, Literal
 
-import numpy as np
+import affine
 import geopandas as gpd
+import numpy as np
 import rasterio as rio
+from rasterio.crs import CRS
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
-from geoutils.raster.georeferencing import _default_nodata, _xy2ij
 from geoutils.raster.array import _get_mask_from_array
+from geoutils.raster.georeferencing import _default_nodata, _xy2ij
 from geoutils.raster.sampling import subsample_array
+
 
 def _regular_pointcloud_to_raster(
     pointcloud: gpd.GeoDataFrame,
@@ -21,7 +25,7 @@ def _regular_pointcloud_to_raster(
     nodata: int | float | None = None,
     data_column_name: str = "b1",
     area_or_point: Literal["Area", "Point"] = "Point",
-):
+) -> tuple[NDArrayNum, affine.Affine, CRS, int | float | None, Literal["Area", "Point"]]:
     """
     Convert a regular point cloud to a raster. See Raster.from_pointcloud_regular() for details.
     """
@@ -31,9 +35,9 @@ def _regular_pointcloud_to_raster(
 
         # Input checks
         if (
-                not isinstance(grid_coords, tuple)
-                or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
-                or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
+            not isinstance(grid_coords, tuple)
+            or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
+            or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
         ):
             raise TypeError("Input grid coordinates must be 1D arrays.")
 
@@ -44,9 +48,7 @@ def _regular_pointcloud_to_raster(
             raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
 
         # Build transform from min X, max Y and step in both
-        out_transform = rio.transform.from_origin(
-            np.min(grid_coords[0]), np.max(grid_coords[1]), diff_x[0], diff_y[0]
-        )
+        out_transform = rio.transform.from_origin(np.min(grid_coords[0]), np.max(grid_coords[1]), diff_x[0], diff_y[0])
         # Y is first axis, X is second axis
         out_shape = (len(grid_coords[1]), len(grid_coords[0]))
 
@@ -64,8 +66,13 @@ def _regular_pointcloud_to_raster(
     arr = np.ones(out_shape, dtype=dtype)
 
     # Get indexes of point cloud coordinates in the raster, forcing no shift
-    i, j = _xy2ij(x=pointcloud.geometry.x.values, y=pointcloud.geometry.y.values, shift_area_or_point=False,
-                  transform=out_transform, area_or_point=area_or_point)
+    i, j = _xy2ij(
+        x=pointcloud.geometry.x.values,
+        y=pointcloud.geometry.y.values,
+        shift_area_or_point=False,
+        transform=out_transform,
+        area_or_point=area_or_point,
+    )
 
     # If coordinates are not integer type (forced in xy2ij), then some points are not falling on exact coordinates
     if not np.issubdtype(i.dtype, np.integer) or not np.issubdtype(i.dtype, np.integer):
@@ -80,6 +87,7 @@ def _regular_pointcloud_to_raster(
     raster_arr = np.ma.masked_array(data=arr, mask=mask)
 
     return raster_arr, out_transform, pointcloud.crs, out_nodata, area_or_point
+
 
 def _raster_to_pointcloud(
     source_raster: gu.Raster,
@@ -115,9 +123,7 @@ def _raster_to_pointcloud(
     if auxiliary_column_names is not None and auxiliary_data_bands is None:
         raise ValueError("Passing auxiliary column names requires passing auxiliary data band numbers as well.")
     if auxiliary_data_bands is not None:
-        if not (
-                isinstance(auxiliary_data_bands, Iterable) and all(isinstance(b, int) for b in auxiliary_data_bands)
-        ):
+        if not (isinstance(auxiliary_data_bands, Iterable) and all(isinstance(b, int) for b in auxiliary_data_bands)):
             raise ValueError("Auxiliary data band number must be an iterable containing only integers.")
         if any((1 > b or source_raster.count < b) for b in auxiliary_data_bands):
             raise ValueError(
@@ -131,8 +137,7 @@ def _raster_to_pointcloud(
         # Ensure auxiliary column name is defined if auxiliary data bands is not None
         if auxiliary_column_names is not None:
             if not (
-                    isinstance(auxiliary_column_names, Iterable)
-                    and all(isinstance(b, str) for b in auxiliary_column_names)
+                isinstance(auxiliary_column_names, Iterable) and all(isinstance(b, str) for b in auxiliary_column_names)
             ):
                 raise ValueError("Auxiliary column names must be an iterable containing only strings.")
             if not len(auxiliary_column_names) == len(auxiliary_data_bands):

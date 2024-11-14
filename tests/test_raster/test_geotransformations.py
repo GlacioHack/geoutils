@@ -1,18 +1,19 @@
 """Test for geotransformations of raster objects."""
+
 from __future__ import annotations
 
 import re
-import pytest
 import warnings
 
-import numpy as np
-import rasterio as rio
 import matplotlib.pyplot as plt
+import numpy as np
+import pytest
+import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.raster.raster import _default_nodata
 from geoutils.raster.geotransformations import _resampling_method_from_str
+from geoutils.raster.raster import _default_nodata
 
 DO_PLOT = False
 
@@ -145,8 +146,8 @@ class TestRasterGeotransformations:
         crop_geom2 = [crop_geom[0] + rand_float * r.res[0], crop_geom[1], crop_geom[2], crop_geom[3]]
         r_cropped = r.crop(crop_geom2)
         assert r.shape[1] - (r_cropped.bounds.right - r_cropped.bounds.left) / r.res[0] == int(rand_float)
-        assert np.array_equal(r.data[:, int(rand_float):].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[:, int(rand_float):].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[:, int(rand_float) :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[:, int(rand_float) :].mask, r_cropped.data.mask)
 
         # right
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2] - rand_float * r.res[0], crop_geom[3]]
@@ -166,8 +167,8 @@ class TestRasterGeotransformations:
         crop_geom2 = [crop_geom[0], crop_geom[1], crop_geom[2], crop_geom[3] - rand_float * abs(r.res[1])]
         r_cropped = r.crop(crop_geom2)
         assert r.shape[0] - (r_cropped.bounds.top - r_cropped.bounds.bottom) / r.res[1] == int(rand_float)
-        assert np.array_equal(r.data[int(rand_float):, :].data, r_cropped.data.data, equal_nan=True)
-        assert np.array_equal(r.data[int(rand_float):, :].mask, r_cropped.data.mask)
+        assert np.array_equal(r.data[int(rand_float) :, :].data, r_cropped.data.data, equal_nan=True)
+        assert np.array_equal(r.data[int(rand_float) :, :].mask, r_cropped.data.mask)
 
         # -- Test with mode='match_extent' -- #
         # Test all sides at once, with rand_float less than half the smallest extent
@@ -341,22 +342,22 @@ class TestRasterGeotransformations:
 
         # 1 - if no force_source_nodata is set and masked values exist, raises an error
         with pytest.raises(
-                ValueError,
-                match=re.escape(
-                    "No nodata set, set one for the raster with self.set_nodata() or use a "
-                    "temporary one with `force_source_nodata`."
-                ),
+            ValueError,
+            match=re.escape(
+                "No nodata set, set one for the raster with self.set_nodata() or use a "
+                "temporary one with `force_source_nodata`."
+            ),
         ):
             _ = r_nodata.reproject(res=r_nodata.res[0] / 2, nodata=0)
 
         # 2 - if no nodata is set and default value conflicts with existing value, a warning is raised
         with pytest.warns(
-                UserWarning,
-                match=re.escape(
-                    f"For reprojection, nodata must be set. Default chosen value "
-                    f"{_default_nodata(r_nodata.dtype)} exists in self.data. This may have unexpected "
-                    f"consequences. Consider setting a different nodata with self.set_nodata()."
-                ),
+            UserWarning,
+            match=re.escape(
+                f"For reprojection, nodata must be set. Default chosen value "
+                f"{_default_nodata(r_nodata.dtype)} exists in self.data. This may have unexpected "
+                f"consequences. Consider setting a different nodata with self.set_nodata()."
+            ),
         ):
             r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, force_source_nodata=default_nodata)
         assert r_test.nodata == default_nodata
@@ -633,7 +634,7 @@ class TestRasterGeotransformations:
 
         # If wrong type for `ref`
         with pytest.raises(
-                TypeError, match=re.escape("Type of ref not understood, must be path to file (str), Raster.")
+            TypeError, match=re.escape("Type of ref not understood, must be path to file (str), Raster.")
         ):
             _ = r.reproject(ref=3)
 
@@ -769,8 +770,8 @@ class TestMaskGeotransformations:
         # Test 2: should raise a warning when the resampling differs from nearest
 
         with pytest.warns(
-                UserWarning,
-                match="Reprojecting a mask with a resampling method other than 'nearest', "
-                      "the boolean array will be converted to float during interpolation.",
+            UserWarning,
+            match="Reprojecting a mask with a resampling method other than 'nearest', "
+            "the boolean array will be converted to float during interpolation.",
         ):
             mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)

@@ -1,20 +1,22 @@
 """Functionalities for geotransformations of vectors."""
+
 from __future__ import annotations
 
 import os
 
 import geopandas as gpd
+import pyogrio
 import rasterio as rio
 from rasterio.crs import CRS
-import pyogrio
 
 import geoutils as gu
 
+
 def _reproject(
-        gdf: gpd.GeoDataFrame,
-        ref: gu.Raster | rio.io.DatasetReader | gu.Vector | gpd.GeoDataFrame | str | None = None,
-        crs: CRS | str | int | None = None,
-):
+    gdf: gpd.GeoDataFrame,
+    ref: gu.Raster | rio.io.DatasetReader | gu.Vector | gpd.GeoDataFrame | str | None = None,
+    crs: CRS | str | int | None = None,
+) -> gpd.GeoDataFrame:
     """Reproject a vector. See Vector.reproject() for more details."""
 
     # Check that either ref or crs is provided

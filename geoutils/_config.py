@@ -1,4 +1,5 @@
 """Setup of runtime-compile configuration of GeoUtils."""
+
 from __future__ import annotations
 
 import configparser

@@ -33,7 +33,7 @@ matching georeferencing or shape, respectively.
 These functions inherently support the casting of different {attr}`~geoutils.Raster.dtype` and values masked by {attr}`~geoutils.Raster.nodata` in the
 {class}`~numpy.ma.MaskedArray`.
 
-Below, we re-use the same example created in {ref}`core-py-ops`.
+Below, we reuse the same example created in {ref}`core-py-ops`.
 
 ```{code-cell} ipython3
 :tags: [hide-input, hide-output]

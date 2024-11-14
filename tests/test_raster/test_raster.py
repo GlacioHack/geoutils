@@ -1,6 +1,7 @@
 """
 Test functions for raster
 """
+
 from __future__ import annotations
 
 import os
@@ -1210,7 +1211,6 @@ class TestRaster:
 
         with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_assign))):
             rst[mask] = 1
-
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_intersection(self, example: list[str]) -> None:

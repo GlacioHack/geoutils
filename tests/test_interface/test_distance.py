@@ -1,16 +1,18 @@
 """Test distance functions at the interface of raster and vectors."""
+
 from __future__ import annotations
 
 import os
 import tempfile
 import warnings
 
-import pytest
 import numpy as np
+import pytest
 import rasterio as rio
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
+
 
 def run_gdal_proximity(
     input_raster: gu.Raster, target_values: list[float] | None, distunits: str = "GEO"
@@ -49,6 +51,7 @@ def run_gdal_proximity(
         ds_raster_in = None
 
     return proxy_array
+
 
 class TestDistance:
 
@@ -103,7 +106,9 @@ class TestDistance:
             ),
         ],
     )  # type: ignore
-    def test_proximity_raster_against_gdal(self, distunits: str, target_values: list[float] | None, raster: gu.Raster) -> None:
+    def test_proximity_raster_against_gdal(
+        self, distunits: str, target_values: list[float] | None, raster: gu.Raster
+    ) -> None:
         """Test that proximity matches the results of GDAL for any parameter."""
 
         # TODO: When adding new rasters for tests, specify warning only for Landsat
@@ -201,7 +206,6 @@ class TestDistance:
         raster1.proximity(vector=vector, in_or_out="in")
 
         # Paths to example data
-
 
     # Mask without nodata
     mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125

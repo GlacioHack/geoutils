@@ -1,15 +1,17 @@
 """Functionalities related to distance operations."""
+
 from __future__ import annotations
 
-from typing import Literal
 import warnings
+from typing import Literal
 
-import numpy as np
 import geopandas as gpd
+import numpy as np
 from scipy.ndimage import distance_transform_edt
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
+
 
 def _proximity_from_vector_or_raster(
     raster: gu.Raster,

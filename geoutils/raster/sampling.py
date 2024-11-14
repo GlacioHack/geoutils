@@ -17,8 +17,7 @@ def subsample_array(
     return_indices: Literal[False] = False,
     *,
     random_state: int | np.random.Generator | None = None,
-) -> NDArrayNum:
-    ...
+) -> NDArrayNum: ...
 
 
 @overload
@@ -28,8 +27,7 @@ def subsample_array(
     return_indices: Literal[True],
     *,
     random_state: int | np.random.Generator | None = None,
-) -> tuple[NDArrayNum, ...]:
-    ...
+) -> tuple[NDArrayNum, ...]: ...
 
 
 @overload
@@ -38,8 +36,7 @@ def subsample_array(
     subsample: float | int,
     return_indices: bool = False,
     random_state: int | np.random.Generator | None = None,
-) -> NDArrayNum | tuple[NDArrayNum, ...]:
-    ...
+) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
 
 def subsample_array(
@@ -184,7 +181,7 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
 
     # Generate a small grid of indices, with the same unique count as 'count'
     rect = _get_closest_rectangle(count)
-    small_indices = np.pad(np.arange(count), np.prod(rect) - count, mode="edge")[: np.prod(rect)].reshape(rect)
+    small_indices = np.pad(np.arange(count), np.prod(rect) - count, mode="edge")[: int(np.prod(rect))].reshape(rect)
 
     # Upscale the grid to fit the output shape using nearest neighbour scaling.
     indices = skimage.transform.resize(small_indices, shape, order=0, preserve_range=True).astype(int)

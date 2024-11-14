@@ -1,6 +1,7 @@
 """
 Module for Raster class.
 """
+
 from __future__ import annotations
 
 import math
@@ -37,6 +38,13 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.interface.distance import _proximity_from_vector_or_raster
+from geoutils.interface.interpolate import _interp_points
+from geoutils.interface.raster_point import (
+    _raster_to_pointcloud,
+    _regular_pointcloud_to_raster,
+)
+from geoutils.interface.raster_vector import _polygonize
 from geoutils.misc import deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
@@ -46,21 +54,17 @@ from geoutils.projtools import (
 )
 from geoutils.raster.georeferencing import (
     _bounds,
+    _cast_nodata,
+    _cast_pixel_interpretation,
     _coords,
+    _default_nodata,
     _ij2xy,
     _outside_image,
     _res,
     _xy2ij,
-    _default_nodata,
-    _cast_pixel_interpretation,
-    _cast_nodata
 )
-from geoutils.raster.geotransformations import _reproject, _translate, _crop
-from geoutils.interface.interpolate import _interp_points
+from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.raster.sampling import subsample_array
-from geoutils.interface.raster_point import _regular_pointcloud_to_raster, _raster_to_pointcloud
-from geoutils.interface.raster_vector import _polygonize
-from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -220,6 +224,7 @@ def _load_rio(
             data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
     return data
 
+
 def _cast_numeric_array_raster(
     raster: RasterType, other: RasterType | NDArrayNum | Number, operation_name: str
 ) -> tuple[MArrayNum, MArrayNum | NDArrayNum | Number, float | int | None, Literal["Area", "Point"] | None]:
@@ -338,12 +343,9 @@ class Raster:
 
     def __init__(
         self,
-        filename_or_dataset: str
-        | pathlib.Path
-        | RasterType
-        | rio.io.DatasetReader
-        | rio.io.MemoryFile
-        | dict[str, Any],
+        filename_or_dataset: (
+            str | pathlib.Path | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any]
+        ),
         bands: int | list[int] | None = None,
         load_data: bool = False,
         downsample: Number = 1,
@@ -1429,18 +1431,15 @@ class Raster:
     @overload
     def astype(
         self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
-    def astype(self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
-        ...
+    def astype(self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None: ...
 
     @overload
     def astype(
         self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def astype(
         self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, inplace: bool = False
@@ -1839,12 +1838,10 @@ class Raster:
             self.data[mask_arr > 0] = np.ma.masked
 
     @overload
-    def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None:
-        ...
+    def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
 
     @overload
-    def info(self, stats: bool = False, *, verbose: Literal[False]) -> str:
-        ...
+    def info(self, stats: bool = False, *, verbose: Literal[False]) -> str: ...
 
     def info(self, stats: bool = False, verbose: bool = True) -> None | str:
         """
@@ -1940,12 +1937,10 @@ class Raster:
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
 
     @overload
-    def get_nanarray(self, return_mask: Literal[False] = False) -> NDArrayNum:
-        ...
+    def get_nanarray(self, return_mask: Literal[False] = False) -> NDArrayNum: ...
 
     @overload
-    def get_nanarray(self, return_mask: Literal[True]) -> tuple[NDArrayNum, NDArrayBool]:
-        ...
+    def get_nanarray(self, return_mask: Literal[True]) -> tuple[NDArrayNum, NDArrayBool]: ...
 
     def get_nanarray(self, return_mask: bool = False) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
@@ -2188,8 +2183,7 @@ class Raster:
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def crop(
@@ -2198,8 +2192,7 @@ class Raster:
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def crop(
@@ -2208,8 +2201,7 @@ class Raster:
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def crop(
         self: RasterType,
@@ -2263,8 +2255,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def reproject(
@@ -2283,8 +2274,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def reproject(
@@ -2303,8 +2293,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def reproject(
         self: RasterType,
@@ -2356,10 +2345,21 @@ class Raster:
         """
 
         # Reproject
-        return_copy, data, transformed, crs, nodata = \
-            _reproject(source_raster=self, ref=ref, crs=crs, res=res, grid_size=grid_size, bounds=bounds, nodata=nodata,
-                       dtype=dtype, resampling=resampling, force_source_nodata=force_source_nodata, silent=silent,
-                       n_threads=n_threads, memory_limit=memory_limit)
+        return_copy, data, transformed, crs, nodata = _reproject(
+            source_raster=self,
+            ref=ref,
+            crs=crs,
+            res=res,
+            grid_size=grid_size,
+            bounds=bounds,
+            nodata=nodata,
+            dtype=dtype,
+            resampling=resampling,
+            force_source_nodata=force_source_nodata,
+            silent=silent,
+            n_threads=n_threads,
+            memory_limit=memory_limit,
+        )
 
         # If return copy is True (target georeferenced grid was the same as input)
         if return_copy:
@@ -2367,6 +2367,11 @@ class Raster:
                 return None
             else:
                 return self
+
+        # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
+        assert data is not None
+        assert transformed is not None
+        assert crs is not None
 
         # Write results to a new Raster.
         if inplace:
@@ -2389,8 +2394,7 @@ class Raster:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: Literal[False] = False,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def translate(
@@ -2400,8 +2404,7 @@ class Raster:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def translate(
@@ -2411,8 +2414,7 @@ class Raster:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: bool = False,
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def translate(
         self: RasterType,
@@ -2795,10 +2797,10 @@ class Raster:
 
         # Set colorbar min/max values (needed for ScalarMappable)
         if vmin is None:
-            vmin = np.nanmin(data)
+            vmin = float(np.nanmin(data))
 
         if vmax is None:
-            vmax = np.nanmax(data)
+            vmax = float(np.nanmax(data))
 
         # Make sure they are numbers, to avoid mpl error
         try:
@@ -3264,8 +3266,7 @@ class Raster:
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def to_pointcloud(
@@ -3280,8 +3281,7 @@ class Raster:
         as_array: Literal[True],
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> Vector:
-        ...
+    ) -> Vector: ...
 
     @overload
     def to_pointcloud(
@@ -3296,8 +3296,7 @@ class Raster:
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | Vector:
-        ...
+    ) -> NDArrayNum | Vector: ...
 
     def to_pointcloud(
         self,
@@ -3357,10 +3356,18 @@ class Raster:
         :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
-        return _raster_to_pointcloud(source_raster=self, data_column_name=data_column_name, data_band=data_band,
-                                     auxiliary_data_bands=auxiliary_data_bands, auxiliary_column_names=auxiliary_column_names,
-                                     subsample=subsample, skip_nodata=skip_nodata, as_array=as_array, random_state=random_state,
-                                     force_pixel_offset=force_pixel_offset)
+        return _raster_to_pointcloud(
+            source_raster=self,
+            data_column_name=data_column_name,
+            data_band=data_band,
+            auxiliary_data_bands=auxiliary_data_bands,
+            auxiliary_column_names=auxiliary_column_names,
+            subsample=subsample,
+            skip_nodata=skip_nodata,
+            as_array=as_array,
+            random_state=random_state,
+            force_pixel_offset=force_pixel_offset,
+        )
 
     @classmethod
     def from_pointcloud_regular(
@@ -3390,15 +3397,17 @@ class Raster:
         :param area_or_point: Whether to set the pixel interpretation of the raster to "Area" or "Point".
         """
 
-        arr, transform, crs, nodata, aop = \
-            _regular_pointcloud_to_raster(pointcloud=pointcloud, grid_coords=grid_coords, transform=transform,
-                                          shape=shape, nodata=nodata, data_column_name=data_column_name,
-                                          area_or_point=area_or_point)
-
-        return cls.from_array(
-            data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point
+        arr, transform, crs, nodata, aop = _regular_pointcloud_to_raster(
+            pointcloud=pointcloud,
+            grid_coords=grid_coords,
+            transform=transform,
+            shape=shape,
+            nodata=nodata,
+            data_column_name=data_column_name,
+            area_or_point=area_or_point,
         )
 
+        return cls.from_array(data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point)
 
     def polygonize(
         self,
@@ -3417,7 +3426,6 @@ class Raster:
         """
 
         return _polygonize(source_raster=self, target_values=target_values, data_column_name=data_column_name)
-
 
     def proximity(
         self,
@@ -3474,8 +3482,7 @@ class Raster:
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def subsample(
@@ -3484,8 +3491,7 @@ class Raster:
         return_indices: Literal[True],
         *,
         random_state: int | np.random.Generator | None = None,
-    ) -> tuple[NDArrayNum, ...]:
-        ...
+    ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
     def subsample(
@@ -3493,8 +3499,7 @@ class Raster:
         subsample: float | int,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
-        ...
+    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     def subsample(
         self,
@@ -3634,8 +3639,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> Mask:
-        ...
+    ) -> Mask: ...
 
     @overload
     def reproject(
@@ -3654,8 +3658,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def reproject(
@@ -3674,8 +3677,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> Mask | None:
-        ...
+    ) -> Mask | None: ...
 
     def reproject(
         self: Mask,
@@ -3745,8 +3747,7 @@ class Mask(Raster):
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
-    ) -> Mask:
-        ...
+    ) -> Mask: ...
 
     @overload
     def crop(
@@ -3755,8 +3756,7 @@ class Mask(Raster):
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def crop(
@@ -3765,8 +3765,7 @@ class Mask(Raster):
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
-    ) -> Mask | None:
-        ...
+    ) -> Mask | None: ...
 
     def crop(
         self: Mask,

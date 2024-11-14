@@ -1,16 +1,17 @@
 """Tests for geometry operations on vectors."""
+
 from __future__ import annotations
 
-import pytest
-
-import numpy as np
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
+import pytest
 from geopandas.testing import assert_geodataframe_equal
-from shapely import Polygon, MultiPolygon, LineString, MultiLineString
+from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils.vector.geometric import _extract_vertices, _generate_voronoi_polygons
+
 
 class TestGeometric:
 

@@ -1,21 +1,27 @@
 """
 Functionalities for geotransformations of raster objects.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Literal, Any, Iterable
 import warnings
+from typing import Any, Iterable, Literal
 
-import numpy as np
 import affine
+import numpy as np
 import rasterio as rio
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
-from geoutils._typing import DTypeLike, NDArrayNum
-from geoutils.raster.georeferencing import _cast_pixel_interpretation, _default_nodata, _res
+from geoutils._typing import DTypeLike, MArrayNum
+from geoutils.raster.georeferencing import (
+    _cast_pixel_interpretation,
+    _default_nodata,
+    _res,
+)
+
 
 def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
@@ -32,20 +38,24 @@ def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
         )
     return resampling_method
 
+
 ##############
 # 1/ REPROJECT
 ##############
 
+
 def _user_input_reproject(
-        source_raster: gu.Raster,
-        ref: gu.Raster,
-        crs: CRS | str | int | None,
-        res: float | Iterable[float] | None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None,
-        nodata: int | float | None,
-        dtype: DTypeLike | None,
-        force_source_nodata: int | float | None) -> tuple[CRS, DTypeLike, int | float | None, int | float | None,
-                                                          float | Iterable[float] | None, rio.coords.BoundingBox]:
+    source_raster: gu.Raster,
+    ref: gu.Raster,
+    crs: CRS | str | int | None,
+    res: float | Iterable[float] | None,
+    bounds: dict[str, float] | rio.coords.BoundingBox | None,
+    nodata: int | float | None,
+    dtype: DTypeLike | None,
+    force_source_nodata: int | float | None,
+) -> tuple[
+    CRS, DTypeLike, int | float | None, int | float | None, float | Iterable[float] | None, rio.coords.BoundingBox
+]:
     """Check all user inputs of reproject."""
 
     # --- Sanity checks on inputs and defaults -- #
@@ -132,6 +142,7 @@ def _user_input_reproject(
         res = res
 
     return crs, dtype, src_nodata, nodata, res, bounds
+
 
 def _get_target_georeferenced_grid(
     raster: gu.Raster,
@@ -240,6 +251,7 @@ def _get_target_georeferenced_grid(
 
     return dst_transform, dst_size
 
+
 def _get_reproj_params(
     source_raster: gu.Raster,
     crs: CRS,
@@ -263,7 +275,9 @@ def _get_reproj_params(
     }
 
     # Second, determine target transform and grid size
-    transform, grid_size = _get_target_georeferenced_grid(source_raster, crs=crs, grid_size=grid_size, res=res, bounds=bounds)
+    transform, grid_size = _get_target_georeferenced_grid(
+        source_raster, crs=crs, grid_size=grid_size, res=res, bounds=bounds
+    )
 
     # Finally, update reprojection options accordingly
     reproj_kwargs.update({"dst_transform": transform})
@@ -273,7 +287,8 @@ def _get_reproj_params(
 
     return reproj_kwargs
 
-def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any]):
+
+def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any]) -> bool:
     """Check if reprojection is actually needed based on transformation parameters."""
 
     src_transform = reproj_kwargs["src_transform"]
@@ -286,13 +301,14 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
 
     # Caution, grid_size is (width, height) while shape is (height, width)
     return all(
-            [
-                (transform == src_transform) or (transform is None),
-                (crs == src_crs) or (crs is None),
-                (grid_size == src_shape[::-1]) or (grid_size is None),
-                np.all(np.array(res) == src_res) or (res is None),
-            ]
+        [
+            (transform == src_transform) or (transform is None),
+            (crs == src_crs) or (crs is None),
+            (grid_size == src_shape[::-1]) or (grid_size is None),
+            np.all(np.array(res) == src_res) or (res is None),
+        ]
     )
+
 
 def _reproject(
     source_raster: gu.Raster,
@@ -307,29 +323,42 @@ def _reproject(
     force_source_nodata: int | float | None = None,
     silent: bool = False,
     n_threads: int = 0,
-    memory_limit: int = 64
-) -> tuple[bool, NDArrayNum | None, affine.Affine | None, CRS | None, int | float | None]:
+    memory_limit: int = 64,
+) -> tuple[bool, MArrayNum | None, affine.Affine | None, CRS | None, int | float | None]:
     """
     Reproject raster. See Raster.reproject() for details.
     """
 
     # 1/ Process user input
-    crs, dtype, src_nodata, nodata, res, bounds = \
-        _user_input_reproject(source_raster=source_raster, ref=ref, crs=crs, bounds=bounds, res=res, nodata=nodata,
-                              dtype=dtype, force_source_nodata=force_source_nodata)
+    crs, dtype, src_nodata, nodata, res, bounds = _user_input_reproject(
+        source_raster=source_raster,
+        ref=ref,
+        crs=crs,
+        bounds=bounds,
+        res=res,
+        nodata=nodata,
+        dtype=dtype,
+        force_source_nodata=force_source_nodata,
+    )
 
     # 2/ Derive georeferencing parameters for reprojection (transform, grid size)
-    reproj_kwargs = _get_reproj_params(source_raster=source_raster, crs=crs, res=res, grid_size=grid_size,
-                                       bounds=bounds, dtype=dtype, src_nodata=src_nodata, nodata=nodata,
-                                       resampling=resampling)
+    reproj_kwargs = _get_reproj_params(
+        source_raster=source_raster,
+        crs=crs,
+        res=res,
+        grid_size=grid_size,
+        bounds=bounds,
+        dtype=dtype,
+        src_nodata=src_nodata,
+        nodata=nodata,
+        resampling=resampling,
+    )
 
     # 3/ Check if reprojection is needed, otherwise return source raster with warning
     if _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
         if (nodata == src_nodata) or (nodata is None):
             if not silent:
-                warnings.warn(
-                    "Output projection, bounds and grid size are identical -> returning self (not a copy!)"
-                )
+                warnings.warn("Output projection, bounds and grid size are identical -> returning self (not a copy!)")
             return True, None, None, None, None
 
         elif nodata is not None:
@@ -388,14 +417,17 @@ def _reproject(
 
     return False, data, transformed, crs, nodata
 
+
 #########
 # 2/ CROP
 #########
 
+
 def _crop(
     source_raster: gu.Raster,
     crop_geom: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
-    mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel"):
+    mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+) -> tuple[MArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
 
     assert mode in [
@@ -417,7 +449,9 @@ def _crop(
     if mode == "match_pixel":
         # Finding the intersection of requested bounds and original bounds, cropped to image shape
         ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)
-        self_win = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster.transform).crop(*source_raster.shape)
+        self_win = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster.transform).crop(
+            *source_raster.shape
+        )
         final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
 
         # Update bounds and transform accordingly
@@ -441,9 +475,9 @@ def _crop(
             ref_win_disk = rio.windows.from_bounds(
                 new_xmin, new_ymin, new_xmax, new_ymax, transform=source_raster._disk_transform
             )
-            self_win_disk = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster._disk_transform).crop(
-                *source_raster._disk_shape[1:]
-            )
+            self_win_disk = rio.windows.from_bounds(
+                *source_raster.bounds, transform=source_raster._disk_transform
+            ).crop(*source_raster._disk_shape[1:])
             final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
 
             # Round up to downsampling size, to match __init__
@@ -480,6 +514,7 @@ def _crop(
 # 3/ TRANSLATE
 ##############
 
+
 def _translate(
     transform: affine.Affine,
     xoff: float,
@@ -509,4 +544,3 @@ def _translate(
         yoff *= abs(dy)  # dy is negative
 
     return rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
-

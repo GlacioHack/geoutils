@@ -1,6 +1,7 @@
 """
 Test functions for SatelliteImage class
 """
+
 import datetime
 import datetime as dt
 import sys

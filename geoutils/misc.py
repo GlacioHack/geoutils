@@ -1,4 +1,5 @@
 """Miscellaneous functions for maintenance, documentation and testing."""
+
 from __future__ import annotations
 
 import copy
@@ -135,6 +136,7 @@ def copy_doc(
         return decorated
 
     return decorator
+
 
 def diff_environment_yml(
     fn_env: str | dict[str, Any], fn_devenv: str | dict[str, Any], print_dep: str = "both", input_dict: bool = False

@@ -1,23 +1,27 @@
 """Functionalities at the interface of rasters and vectors."""
+
 from __future__ import annotations
 
-from typing import Literal, Iterable, Any
 import warnings
+from typing import Any, Iterable, Literal
 
-import numpy as np
+import affine
 import geopandas as gpd
+import numpy as np
 import rasterio as rio
-from rasterio.features import shapes
-from rasterio.crs import CRS
 from rasterio import features, warp
+from rasterio.crs import CRS
+from rasterio.features import shapes
 
 import geoutils as gu
-from geoutils._typing import Number, NDArrayNum
+from geoutils._typing import NDArrayBool, NDArrayNum, Number
+
 
 def _polygonize(
     source_raster: gu.Raster,
     target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"],
-    data_column_name: str):
+    data_column_name: str,
+) -> gu.Vector:
     """Polygonize a raster. See Raster.polygonize() for details."""
 
     # Mask a unique value set by a number
@@ -65,7 +69,9 @@ def _polygonize(
 
     results = (
         {"properties": {"raster_value": v}, "geometry": s}
-        for i, (s, v) in enumerate(shapes(source_raster.data.astype(final_dtype), mask=bool_msk, transform=source_raster.transform))
+        for i, (s, v) in enumerate(
+            shapes(source_raster.data.astype(final_dtype), mask=bool_msk, transform=source_raster.transform)
+        )
     )
 
     gdf = gpd.GeoDataFrame.from_features(list(results))
@@ -85,7 +91,7 @@ def _rasterize(
     bounds: tuple[float, float, float, float] | None = None,
     in_value: int | float | Iterable[int | float] | None = None,
     out_value: int | float = 0,
-):
+) -> gu.Raster:
     if (raster is not None) and (crs is not None):
         raise ValueError("Only one of raster or crs can be provided.")
 
@@ -148,7 +154,7 @@ def _rasterize(
 
         mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape, transform=transform)
 
-    elif isinstance(in_value, Number):
+    elif isinstance(in_value, int | float | np.floating | np.integer):
         mask = features.rasterize(
             shapes=vect.geometry, fill=out_value, out_shape=out_shape, transform=transform, default_value=in_value
         )
@@ -165,6 +171,7 @@ def _rasterize(
 
     return output
 
+
 def _create_mask(
     gdf: gpd.GeoDataFrame,
     raster: gu.Raster | None = None,
@@ -173,8 +180,8 @@ def _create_mask(
     yres: float | None = None,
     bounds: tuple[float, float, float, float] | None = None,
     buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
-    as_array: bool = False
-):
+    as_array: bool = False,
+) -> tuple[NDArrayBool, affine.Affine, CRS]:
 
     # If no raster given, use provided dimensions
     if raster is None:
@@ -247,8 +254,4 @@ def _create_mask(
     if raster is not None:
         mask = mask.reshape((raster.count, raster.height, raster.width))  # type: ignore
 
-    # Return output as mask or as array
-    if as_array:
-        return mask.squeeze()
-    else:
-        return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+    return mask, transform, crs

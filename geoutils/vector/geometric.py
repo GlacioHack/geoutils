@@ -1,19 +1,21 @@
 """Functionalities to manipulate vector geometries."""
+
 from __future__ import annotations
 
 import warnings
 
-import numpy as np
 import geopandas as gpd
 import matplotlib.pyplot as plt
-from scipy.spatial import Voronoi
+import numpy as np
 import shapely
+from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 from geoutils.projtools import _get_utm_ups_crs, bounds2poly
 
-def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float):
+
+def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float) -> gu.Vector:
     """
     Metric buffering. See Vector.buffer_metric() for details.
     """
@@ -37,12 +39,10 @@ def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float):
 
     return vector_buffered
 
+
 def _buffer_without_overlap(
-    gdf: gpd.GeoDataFrame,
-    buffer_size: int | float,
-    metric: bool = True,
-    plot: bool = False
-):
+    gdf: gpd.GeoDataFrame, buffer_size: int | float, metric: bool = True, plot: bool = False
+) -> gu.Vector:
     """See Vector.buffer_without_overlap() for details."""
 
     # Project in local UTM if metric is True

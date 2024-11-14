@@ -1,18 +1,20 @@
 """Tests for raster-vector interfacing."""
+
 from __future__ import annotations
 
-import pytest
 import warnings
 
-import numpy as np
 import geopandas as gpd
-from shapely import Polygon, MultiPolygon, LineString, MultiLineString
+import numpy as np
+import pytest
 from scipy.ndimage import binary_erosion
+from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils import examples
 
 GLACIER_OUTLINES_URL = "http://public.data.npolar.no/cryoclim/CryoClim_GAO_SJ_1990.zip"
+
 
 class TestRasterVectorInterface:
 

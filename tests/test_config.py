@@ -1,4 +1,5 @@
 """Test configuration file."""
+
 import geoutils as gu
 
 

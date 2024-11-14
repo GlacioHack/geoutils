@@ -1,6 +1,7 @@
 """
 geoutils.satimg provides a toolset for working with satellite data.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -101,7 +102,7 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
         else:
             attrs = (None,) * 6
 
-    # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplfied?))
+    # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplified?))
     elif os.path.splitext(os.path.basename(fname))[1] == ".hgt":
         attrs = (
             "SRTM",

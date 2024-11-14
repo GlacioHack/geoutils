@@ -1,6 +1,7 @@
 """
 Module for Vector class.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -32,19 +33,20 @@ from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
 from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils.interface.distance import _proximity_from_vector_or_raster
+from geoutils.interface.raster_vector import _create_mask, _rasterize
 from geoutils.misc import copy_doc
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
-from geoutils.interface.raster_vector import _rasterize, _create_mask
-from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.geotransformations import _reproject
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
+
 
 class Vector:
     """
@@ -142,12 +144,10 @@ class Vector:
         return str(self.ds.__str__())
 
     @overload
-    def info(self, verbose: Literal[True] = ...) -> None:
-        ...
+    def info(self, verbose: Literal[True] = ...) -> None: ...
 
     @overload
-    def info(self, verbose: Literal[False]) -> str:
-        ...
+    def info(self, verbose: Literal[False]) -> str: ...
 
     def info(self, verbose: bool = True) -> str | None:
         """
@@ -317,7 +317,7 @@ class Vector:
         """Parse outputs of GeoPandas functions to facilitate object manipulation."""
 
         # Raise error if output is not treated separately, should appear in tests
-        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoDataFrame, pd.Series, BaseGeometry)):
+        if not isinstance(other, (gpd.GeoDataFrame, pd.Series, BaseGeometry)):
             raise ValueError("Not implemented. This error should only be raised in tests.")
 
         # If a GeoDataFrame is the output, return it
@@ -646,7 +646,7 @@ class Vector:
         else:
             gdf = df
 
-        return self._override_gdf_output(self.ds.sjoin(df=gdf, *args, **kwargs))
+        return self._override_gdf_output(self.ds.sjoin(gdf, *args, **kwargs))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def sjoin_nearest(
@@ -988,8 +988,7 @@ class Vector:
         clip: bool,
         *,
         inplace: Literal[False] = False,
-    ) -> VectorType:
-        ...
+    ) -> VectorType: ...
 
     @overload
     def crop(
@@ -998,8 +997,7 @@ class Vector:
         clip: bool,
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def crop(
@@ -1008,8 +1006,7 @@ class Vector:
         clip: bool,
         *,
         inplace: bool = False,
-    ) -> VectorType | None:
-        ...
+    ) -> VectorType | None: ...
 
     def crop(
         self: VectorType,
@@ -1064,8 +1061,7 @@ class Vector:
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[False] = False,
-    ) -> Vector:
-        ...
+    ) -> Vector: ...
 
     @overload
     def reproject(
@@ -1074,8 +1070,7 @@ class Vector:
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def reproject(
@@ -1084,8 +1079,7 @@ class Vector:
         crs: CRS | str | int | None = None,
         *,
         inplace: bool = False,
-    ) -> Vector | None:
-        ...
+    ) -> Vector | None: ...
 
     def reproject(
         self: Vector,
@@ -1127,8 +1121,7 @@ class Vector:
         zoff: float = 0.0,
         *,
         inplace: Literal[False] = False,
-    ) -> VectorType:
-        ...
+    ) -> VectorType: ...
 
     @overload
     def translate(
@@ -1138,8 +1131,7 @@ class Vector:
         zoff: float = 0.0,
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def translate(
@@ -1149,8 +1141,7 @@ class Vector:
         zoff: float = 0.0,
         *,
         inplace: bool = False,
-    ) -> VectorType | None:
-        ...
+    ) -> VectorType | None: ...
 
     def translate(
         self: VectorType,
@@ -1194,8 +1185,7 @@ class Vector:
         buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
         as_array: Literal[False] = False,
-    ) -> gu.Mask:
-        ...
+    ) -> gu.Mask: ...
 
     @overload
     def create_mask(
@@ -1208,8 +1198,7 @@ class Vector:
         buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
         as_array: Literal[True],
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     def create_mask(
         self,
@@ -1243,8 +1232,15 @@ class Vector:
         :returns: A Mask object contain a boolean array
         """
 
-        return _create_mask(gdf=self.ds, raster=raster, crs=crs, xres=xres, yres=yres, bounds=bounds,
-                            buffer=buffer, as_array=as_array)
+        mask, transform, crs = _create_mask(
+            gdf=self.ds, raster=raster, crs=crs, xres=xres, yres=yres, bounds=bounds, buffer=buffer, as_array=as_array
+        )
+
+        # Return output as mask or as array
+        if as_array:
+            return mask.squeeze()
+        else:
+            return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     def rasterize(
         self,
@@ -1282,8 +1278,16 @@ class Vector:
         :returns: Raster or mask containing the burned geometries.
         """
 
-        return _rasterize(gdf=self.ds, raster=raster, crs=crs, xres=xres, yres=yres, bounds=bounds,
-                          in_value=in_value, out_value=out_value)
+        return _rasterize(
+            gdf=self.ds,
+            raster=raster,
+            crs=crs,
+            xres=xres,
+            yres=yres,
+            bounds=bounds,
+            in_value=in_value,
+            out_value=out_value,
+        )
 
     @classmethod
     def from_bounds_projected(
@@ -1481,5 +1485,3 @@ class Vector:
         """
 
         return _buffer_without_overlap(self.ds, buffer_size=buffer_size, metric=metric, plot=plot)
-
-

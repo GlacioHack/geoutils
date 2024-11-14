@@ -1,4 +1,5 @@
 """Functionalities for interpolating a regular grid at points (raster to point cloud)."""
+
 from __future__ import annotations
 
 from typing import Any, Callable, Literal, overload
@@ -196,8 +197,7 @@ def _interp_points(
     *,
     return_interpolator: Literal[False] = False,
     **kwargs: Any,
-) -> NDArrayNum:
-    ...
+) -> NDArrayNum: ...
 
 
 @overload
@@ -213,8 +213,7 @@ def _interp_points(
     *,
     return_interpolator: Literal[True],
     **kwargs: Any,
-) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
-    ...
+) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
 
 @overload
@@ -230,8 +229,7 @@ def _interp_points(
     *,
     return_interpolator: bool = False,
     **kwargs: Any,
-) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
-    ...
+) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
 
 def _interp_points(

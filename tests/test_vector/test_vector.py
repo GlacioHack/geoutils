@@ -1,4 +1,5 @@
 """Test functions specific to the Vector class."""
+
 from __future__ import annotations
 
 import inspect
@@ -9,7 +10,6 @@ import warnings
 
 import geopandas as gpd
 import geopandas.base
-import numpy as np
 import pyproj
 import pytest
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal

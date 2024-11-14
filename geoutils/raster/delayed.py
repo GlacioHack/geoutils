@@ -157,7 +157,7 @@ def delayed_subsample(
     flattened chunk). For this reason, a loaded array will also have a different subsample due to its direct 1D
     indexing (per valid value for the entire flattened array).
 
-    To ensure you re-use a similar subsample of valid values for several arrays, call this function with
+    To ensure you reuse a similar subsample of valid values for several arrays, call this function with
     return_indices=True, then sample your arrays out-of-memory with .vindex[indices[0], indices[1]]
     (this assumes that these arrays have valid values at the same locations).
 
@@ -736,7 +736,7 @@ def delayed_reproject(
     src_block_ids = np.array(src_geotiling.get_block_locations())
     meta_params = [
         (
-            _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)
+            _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)  # type: ignore
             if len(sbid) > 0
             else ({}, [])
         )
