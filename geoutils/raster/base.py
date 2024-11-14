@@ -11,6 +11,7 @@ import geopandas as gpd
 import numpy as np
 import rasterio as rio
 import xarray as xr
+import xarray.core.indexing
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -56,22 +57,35 @@ class RasterBase:
 
     It gathers all the functions shared by the Raster class and the 'rst' Xarray accessor.
     """
-
-    _obj: None | xr.DataArray
-
     def __init__(self):
+        """Initialize all raster metadata as None, for it to be overridden in sublasses."""
+
+        # Attribute for Xarray accessor: will stay None in Raster class
+        self._obj: None | xr.DataArray = None
+
         # Main attributes of a raster
-        self._data: MArrayNum | xr.DataArray
+        self._data: MArrayNum | xr.DataArray | None = None
         self._transform: affine.Affine | None = None
         self._crs: CRS | None = None
-        self._nodata: int | float | None
+        self._nodata: int | float | None = None
         self._area_or_point: Literal["Area", "Point"] | None = None
 
         # Other non-derivatives attributes
+        self._bands: int | list[int] | None = None
         self._driver: str | None = None
         self._name: str | None = None
         self.filename: str | None = None
         self.tags: dict[str, Any] = {}
+        self._bands_loaded: int | tuple[int, ...] | None = None
+        self._disk_shape: tuple[int, int, int] | None = None
+        self._disk_bands: tuple[int] | None = None
+        self._disk_dtype: str | None = None
+        self._disk_transform: affine.Affine | None = None
+        self._out_count: int | None = None
+        self._out_shape: tuple[int, int] | None = None
+        self._disk_hash: int | None = None
+        self._is_modified = True
+        self._downsample: int | float = 1
 
     @property
     def is_xr(self) -> bool:
@@ -80,7 +94,7 @@ class RasterBase:
     @property
     def data(self) -> MArrayNum | xr.DataArray:
         if self.is_xr:
-            return self._obj.rio.data
+            return self._obj.data
         else:
             return self._data
 
@@ -104,136 +118,6 @@ class RasterBase:
             return self._obj.rio.nodata
         else:
             return self._nodata
-
-    @property
-    def area_or_point(self):
-        return self._area_or_point
-
-    @property
-    def res(self) -> tuple[float | int, float | int]:
-        """Resolution (X, Y) of the raster in georeferenced units."""
-        return _res(self.transform)
-
-    @property
-    def bounds(self) -> rio.coords.BoundingBox:
-        """Bounding coordinates of the raster."""
-        return _bounds(transform=self.transform, shape=self.shape)
-
-    @property
-    def footprint(self) -> Vector:
-        """Footprint of the raster."""
-        return self.get_footprint_projected(self.crs)
-
-    @property
-    def count_on_disk(self) -> None | int:
-        """Count of bands on disk if it exists."""
-        if self._disk_shape is not None:
-            return self._disk_shape[0]
-        return None
-
-    @property
-    def count(self) -> int:
-        """Count of bands loaded in memory if they are, otherwise the one on disk."""
-        if self.is_loaded:
-            if self.data.ndim == 2:
-                return 1
-            else:
-                return int(self.data.shape[0])
-        #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
-        return self.count_on_disk  # type: ignore
-
-    @property
-    def height(self) -> int:
-        """Height of the raster in pixels."""
-        if not self.is_loaded:
-            if self._out_shape is not None:
-                return self._out_shape[0]
-            else:
-                return self._disk_shape[1]  # type: ignore
-        else:
-            # If the raster is single-band
-            if self.data.ndim == 2:
-                return int(self.data.shape[0])
-            # Or multi-band
-            else:
-                return int(self.data.shape[1])
-
-    @property
-    def width(self) -> int:
-        """Width of the raster in pixels."""
-        if not self.is_loaded:
-            if self._out_shape is not None:
-                return self._out_shape[1]
-            else:
-                return self._disk_shape[2]  # type: ignore
-        else:
-            # If the raster is single-band
-            if self.data.ndim == 2:
-                return int(self.data.shape[1])
-            # Or multi-band
-            else:
-                return int(self.data.shape[2])
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        """Shape (i.e., height, width) of the raster in pixels."""
-        # If a downsampling argument was defined but data not loaded yet
-        if self._out_shape is not None and not self.is_loaded:
-            return self._out_shape
-        # If data loaded or not, pass the disk/data shape through height and width
-        return self.height, self.width
-
-    @property
-    def is_loaded(self) -> bool:
-        """Whether the raster array is loaded."""
-        return self._data is not None
-
-    @property
-    def dtype(self) -> str:
-        """Data type of the raster (string representation)."""
-        if not self.is_loaded and self._disk_dtype is not None:
-            return self._disk_dtype
-        return str(self.data.dtype)
-
-    @property
-    def bands_on_disk(self) -> None | tuple[int, ...]:
-        """Band indexes on disk if a file exists."""
-        if self._disk_bands is not None:
-            return self._disk_bands
-        return None
-
-    @property
-    def bands(self) -> tuple[int, ...]:
-        """Band indexes loaded in memory if they are, otherwise on disk."""
-        if self._bands is not None and not self.is_loaded:
-            if isinstance(self._bands, int):
-                return (self._bands,)
-            return tuple(self._bands)
-        # if self._indexes_loaded is not None:
-        #     if isinstance(self._indexes_loaded, int):
-        #         return (self._indexes_loaded, )
-        #     return tuple(self._indexes_loaded)
-        if self.is_loaded:
-            return tuple(range(1, self.count + 1))
-        return self.bands_on_disk  # type: ignore
-
-    @property
-    def indexes(self) -> tuple[int, ...]:
-        """
-        Band indexes (duplicate of .bands attribute, mirroring Rasterio naming "indexes").
-        Loaded in memory if they are, otherwise on disk.
-        """
-        return self.bands
-
-    @property
-    def driver(self) -> str | None:
-        """Driver used to read a file on disk."""
-        return self._driver
-
-    @property
-    def name(self) -> str | None:
-        """Name of the file on disk, if it exists."""
-        return self._name
 
     def set_area_or_point(
         self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
@@ -335,6 +219,137 @@ class RasterBase:
         :return: None.
         """
         self.set_area_or_point(new_area_or_point=new_area_or_point)
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether the raster array is loaded."""
+        if self.is_xr:
+            # TODO: Activating this requires to have _disk_shape defined for RasterAccessor
+            return True
+            # return isinstance(self._obj.variable._data, np.ndarray)
+        else:
+            return self._data is not None
+
+    @property
+    def res(self) -> tuple[float | int, float | int]:
+        """Resolution (X, Y) of the raster in georeferenced units."""
+        return _res(self.transform)
+
+    @property
+    def bounds(self) -> rio.coords.BoundingBox:
+        """Bounding coordinates of the raster."""
+        return _bounds(transform=self.transform, shape=self.shape)
+
+    @property
+    def footprint(self) -> Vector:
+        """Footprint of the raster."""
+        return self.get_footprint_projected(self.crs)
+
+    @property
+    def count_on_disk(self) -> None | int:
+        """Count of bands on disk if it exists."""
+        if self._disk_shape is not None:
+            return self._disk_shape[0]
+        return None
+
+    @property
+    def count(self) -> int:
+        """Count of bands loaded in memory if they are, otherwise the one on disk."""
+        if self.is_loaded:
+            if self.data.ndim == 2:
+                return 1
+            else:
+                return int(self.data.shape[0])
+        #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
+        return self.count_on_disk  # type: ignore
+
+    @property
+    def height(self) -> int:
+        """Height of the raster in pixels."""
+        if not self.is_loaded:
+            if self._out_shape is not None:
+                return self._out_shape[0]
+            else:
+                return self._disk_shape[1]  # type: ignore
+        else:
+            # If the raster is single-band
+            if self.data.ndim == 2:
+                return int(self.data.shape[0])
+            # Or multi-band
+            else:
+                return int(self.data.shape[1])
+
+    @property
+    def width(self) -> int:
+        """Width of the raster in pixels."""
+        if not self.is_loaded:
+            if self._out_shape is not None:
+                return self._out_shape[1]
+            else:
+                return self._disk_shape[2]  # type: ignore
+        else:
+            # If the raster is single-band
+            if self.data.ndim == 2:
+                return int(self.data.shape[1])
+            # Or multi-band
+            else:
+                return int(self.data.shape[2])
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Shape (i.e., height, width) of the raster in pixels."""
+        # If a downsampling argument was defined but data not loaded yet
+        if self._out_shape is not None and not self.is_loaded:
+            return self._out_shape
+        # If data loaded or not, pass the disk/data shape through height and width
+        return self.height, self.width
+
+    @property
+    def dtype(self) -> str:
+        """Data type of the raster (string representation)."""
+        if not self.is_loaded and self._disk_dtype is not None:
+            return self._disk_dtype
+        return str(self.data.dtype)
+
+    @property
+    def bands_on_disk(self) -> None | tuple[int, ...]:
+        """Band indexes on disk if a file exists."""
+        if self._disk_bands is not None:
+            return self._disk_bands
+        return None
+
+    @property
+    def bands(self) -> tuple[int, ...]:
+        """Band indexes loaded in memory if they are, otherwise on disk."""
+        if self._bands is not None and not self.is_loaded:
+            if isinstance(self._bands, int):
+                return (self._bands,)
+            return tuple(self._bands)
+        # if self._indexes_loaded is not None:
+        #     if isinstance(self._indexes_loaded, int):
+        #         return (self._indexes_loaded, )
+        #     return tuple(self._indexes_loaded)
+        if self.is_loaded:
+            return tuple(range(1, self.count + 1))
+        return self.bands_on_disk  # type: ignore
+
+    @property
+    def indexes(self) -> tuple[int, ...]:
+        """
+        Band indexes (duplicate of .bands attribute, mirroring Rasterio naming "indexes").
+        Loaded in memory if they are, otherwise on disk.
+        """
+        return self.bands
+
+    @property
+    def driver(self) -> str | None:
+        """Driver used to read a file on disk."""
+        return self._driver
+
+    @property
+    def name(self) -> str | None:
+        """Name of the file on disk, if it exists."""
+        return self._name
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
@@ -1105,9 +1120,10 @@ class RasterBase:
 
         :param xi: Indices (or coordinates) of x direction to check.
         :param yj: Indices (or coordinates) of y direction to check.
-        :param index: Interpret ij as raster indices (default is ``True``). If False, assumes ij is coordinates.
+        :param index: Interpret xi and yj as raster indices (default is ``True``). If False, assumes xi and yj are
+            coordinates.
 
-        :returns is_outside: ``True`` if ij is outside the image.
+        :returns is_outside: ``True`` if xi/yj is outside the raster extent.
         """
 
         return _outside_image(

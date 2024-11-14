@@ -320,7 +320,7 @@ class Raster(RasterBase):
         bands: int | list[int] | None = None,
         load_data: bool = False,
         downsample: Number = 1,
-        nodata: int | float | None = None,
+        force_nodata: int | float | None = None,
     ) -> None:
         """
         Instantiate a raster from a filename or rasterio dataset.
@@ -333,21 +333,15 @@ class Raster(RasterBase):
 
         :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
 
-        :param nodata: Nodata value to be used (overwrites the metadata). Default reads from metadata.
+        :param force_nodata: Force nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
+
+        super().__init__()
+
         self._data: MArrayNum | None = None
+        self._nodata = force_nodata
         self._bands = bands
-        self._bands_loaded: int | tuple[int, ...] | None = None
         self._masked = True
-        self._out_count: int | None = None
-        self._out_shape: tuple[int, int] | None = None
-        self._disk_hash: int | None = None
-        self._is_modified = True
-        self._disk_shape: tuple[int, int, int] | None = None
-        self._disk_bands: tuple[int] | None = None
-        self._disk_dtype: str | None = None
-        self._disk_transform: affine.Affine | None = None
-        self._downsample: int | float = 1
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):

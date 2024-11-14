@@ -30,11 +30,19 @@ def open_raster(filename: str, **kwargs):
 @xr.register_dataarray_accessor("rst")
 class RasterAccessor(RasterBase):
     def __init__(self, xarray_obj: xr.DataArray):
+
+        super().__init__()
+
         self._obj = xarray_obj
+        self._area_or_point = self._obj.attrs.get("AREA_OR_POINT", None)
+
+    def copy(self, new_array: NDArrayNum | None = None) -> xr.DataArray:
+
+        return self._obj.copy(data=new_array)
 
     def to_raster(self) -> RasterBase:
         """
-        Convert to geoutils.Raster object.
+        Convert to Raster object.
 
         :return:
         """

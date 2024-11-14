@@ -444,7 +444,7 @@ def _crop(
     elif isinstance(crop_geom, (list, tuple)):
         xmin, ymin, xmax, ymax = crop_geom
     else:
-        raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+        raise ValueError("'crop_geom' must be a Raster, Vector, or list of coordinates.")
 
     if mode == "match_pixel":
         # Finding the intersection of requested bounds and original bounds, cropped to image shape
