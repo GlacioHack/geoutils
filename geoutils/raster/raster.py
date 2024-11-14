@@ -32,14 +32,13 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-
+from geoutils.raster.base import RasterBase, RasterType
 from geoutils.raster.georeferencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
     _default_nodata,
 )
 from geoutils.vector.vector import Vector
-from geoutils.raster.base import RasterType, RasterBase
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -1789,7 +1788,6 @@ class Raster(RasterBase):
         else:
             return outputs
 
-
     def save(
         self,
         filename: str | pathlib.Path | IO[bytes],
@@ -2138,7 +2136,6 @@ class Raster(RasterBase):
                 )
 
         return raster_bands
-
 
 
 class Mask(Raster):

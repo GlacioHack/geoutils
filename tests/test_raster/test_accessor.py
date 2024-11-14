@@ -9,18 +9,14 @@ from geoutils import Raster, examples, open_raster
 
 class TestAccessor:
 
-
     def test_open_raster(self):
-
-
+        pass
 
 
 class TestConsistencyRasterAccessor:
 
     # Test over many different rasters
     landsat_b4_path = examples.get_path("everest_landsat_b4")
-
-
 
     @pytest.mark.parametrize("path_raster", [landsat_b4_path])  # type: ignore
     @pytest.mark.parametrize("method", nongeo_properties)  # type: ignore

@@ -11,6 +11,7 @@ import geoutils as gu
 from geoutils._typing import NDArrayNum
 from geoutils.raster.base import RasterBase, RasterType
 
+
 def open_raster(filename: str, **kwargs):
 
     # Open with Rioxarray
