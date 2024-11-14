@@ -9,11 +9,7 @@ import pytest
 import rasterio as rio
 
 import geoutils as gu
-from geoutils.raster.array import (
-    get_array_and_mask,
-    get_valid_extent,
-    get_xy_rotated,
-)
+from geoutils.raster.array import get_array_and_mask, get_valid_extent, get_xy_rotated
 
 
 class TestArray:
