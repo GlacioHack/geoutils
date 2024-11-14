@@ -4,6 +4,7 @@ NumPy interfacing
 
 This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geoutils.Raster>`. See :ref:`core-array-funcs` for more details.
 """
+
 # %%
 # We open a raster.
 
@@ -14,7 +15,7 @@ filename_rast = gu.examples.get_path("exploradores_aster_dem")
 rast = gu.Raster(filename_rast)
 
 # %% We plot it.
-rast.show(cmap="terrain")
+rast.plot(cmap="terrain")
 
 # %%
 #
@@ -30,7 +31,7 @@ aspect = (aspect * 180 / np.pi) + np.pi
 # We copy the new array into a raster
 asp = rast.copy(new_array=aspect)
 
-asp.show(cmap="twilight", cbar_title="Aspect (degrees)")
+asp.plot(cmap="twilight", cbar_title="Aspect (degrees)")
 
 # %%
 #
@@ -46,4 +47,4 @@ mask
 # %%
 # We plot the mask.
 
-mask.show()
+mask.plot()

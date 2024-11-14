@@ -16,19 +16,19 @@ jobs:
 
     strategy:
       matrix:
-        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
-        python-version: ["3.9", "3.10", "3.11"]
+        os: ["ubuntu-latest", "macos-latest"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     defaults:
       run:
         shell: bash -l {0}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     # We initiate the environment empty, and check if a key for this environment doesn't already exist in the cache
     - name: Initiate empty environment
-      uses: conda-incubator/setup-miniconda@v2
+      uses: conda-incubator/setup-miniconda@v3
       with:
         miniforge-variant: Mambaforge
         miniforge-version: latest
@@ -36,6 +36,7 @@ jobs:
         use-mamba: true
         channel-priority: strict
         activate-environment: geoutils-dev
+        python-version:
 
     - name: Get month for resetting cache
       id: get-date
@@ -43,7 +44,7 @@ jobs:
       shell: bash
 
     - name: Cache conda env
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
@@ -51,20 +52,16 @@ jobs:
         CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
-    # The trick below is necessary because the generic environment file does not specify a Python version, and only
-    # "conda env update" can be used to update with an environment file, which upgrades the Python version
+    # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
+    # "conda env update" CAN BE USED WITH CACHING, which upgrades the Python version when using the base environment
     # (we add "graphviz" from dev-environment to solve all dependencies at once, at graphviz relies on image
     # processing packages very much like geo-packages; not a problem for docs, dev installs where all is done at once)
     - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
-        pkgs_conda_base=`python .github/scripts/get_yml_env_nopy.py "environment.yml" --p "conda"`
-        pkgs_pip_base=`python .github/scripts/get_yml_env_nopy.py "environment.yml" --p "pip"`
-        mamba install python=${{ matrix.python-version }} $pkgs_conda_base graphviz
-        if [[ "$pkgs_pip_base" != "None" ]]; then
-          pip install $pkgs_pip_base
-        fi
+        python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "graphviz" "environment.yml"
+        mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
     - name: Install project
       run: pip install -e . --no-dependencies
@@ -91,7 +88,12 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Setup pip dependencies
-      run: pip install pytest-cov coveralls coveragepy-lcov
+      run: pip install pytest-cov coveralls coveragepy-lcov 'coverage<7'
+
+    - name: Print conda environment (for debugging)
+      run: |
+        conda info
+        conda list
 
     - name: Test with pytest
       run: pytest -ra --cov=geoutils/

@@ -37,8 +37,8 @@ There is no {class}`~geoutils.Raster.nodata` value defined in a {class}`~geoutil
 method from {class}`~geoutils.Raster`.
 
 ```{important}
-Most raster file formats such a [GeoTIFFs](https://gdal.org/drivers/raster/gtiff.html) **do not support {class}`bool` array {class}`dtypes<numpy.dtype>`
-on-disk**, and **most of Rasterio functionalities also do not support {class}`bool` {class}`dtypes<numpy.dtype>`**.
+Most raster file formats such a [GeoTIFFs](https://gdal.org/drivers/raster/gtiff.html) **do not support {class}`bool` array {class}`dtype<numpy.dtype>`
+on-disk**, and **most of Rasterio functionalities also do not support {class}`bool` {class}`dtype<numpy.dtype>`**.
 
 To address this, during opening, saving and geospatial handling operations, {class}`Masks<geoutils.Mask>` are automatically converted to and from {class}`numpy.uint8`.
 The {class}`~geoutils.Raster.nodata` of a {class}`~geoutils.Mask` can now be defined to save to a file, and defaults to `255`.

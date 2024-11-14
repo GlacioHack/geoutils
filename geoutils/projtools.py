@@ -1,12 +1,12 @@
 """
-projtools provides a set of tools for dealing with different coordinate reference systems (CRS) and bounds.
+Functionalities to manipulate metadata in different coordinate reference systems (CRS).
 """
+
 from __future__ import annotations
 
 import warnings
-from collections import abc
 from math import ceil, floor
-from typing import Literal
+from typing import Iterable, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -154,7 +154,7 @@ def bounds2poly(
 
 
 def merge_bounds(
-    bounds_list: abc.Iterable[
+    bounds_list: Iterable[
         list[float] | tuple[float] | rio.coords.BoundingBox | rio.io.DatasetReader | gpd.GeoDataFrame
     ],
     resolution: float | None = None,
@@ -244,7 +244,7 @@ def align_bounds(
 
 
 def reproject_points(
-    points: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
+    points: list[list[float]] | list[float] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
 ) -> tuple[list[float], list[float]]:
     """
     Reproject a set of point from input_crs to output_crs.
@@ -269,8 +269,8 @@ crs_4326 = rio.crs.CRS.from_epsg(4326)
 
 
 def reproject_to_latlon(
-    points: list[list[float]] | NDArrayNum, in_crs: CRS, round_: int = 8
-) -> tuple[list[float], list[float]]:
+    points: list[list[float]] | list[float] | NDArrayNum, in_crs: CRS, round_: int = 8
+) -> NDArrayNum:
     """
     Reproject a set of point from in_crs to lat/lon.
 
@@ -281,13 +281,12 @@ def reproject_to_latlon(
     :returns: Reprojected points, of same shape as points.
     """
     proj_points = reproject_points(points, in_crs, crs_4326)
-    proj_points = np.round(proj_points, round_)
-    return proj_points
+    return np.round(proj_points, round_)
 
 
 def reproject_from_latlon(
     points: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, out_crs: CRS, round_: int = 2
-) -> tuple[list[float], list[float]]:
+) -> NDArrayNum:
     """
     Reproject a set of point from lat/lon to out_crs.
 
@@ -298,8 +297,7 @@ def reproject_from_latlon(
     :returns: Reprojected points, of same shape as points.
     """
     proj_points = reproject_points(points, crs_4326, out_crs)
-    proj_points = np.round(proj_points, round_)
-    return proj_points
+    return np.round(proj_points, round_)
 
 
 def reproject_shape(inshape: BaseGeometry, in_crs: CRS, out_crs: CRS) -> BaseGeometry:

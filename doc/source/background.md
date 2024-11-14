@@ -51,7 +51,7 @@ In details, those mean:
 
 - **Reproducibility:** all code is version-controlled and release-based, to ensure consistency of dependent packages and works;
 
-- **Open-source:** all code is accessible and re-usable to anyone in the community, for transparency and open governance.
+- **Open-source:** all code is accessible and reusable to anyone in the community, for transparency and open governance.
 
 ```{note}
 :class: margin

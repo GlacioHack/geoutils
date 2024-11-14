@@ -8,7 +8,7 @@
 mamba install -c conda-forge geoutils
 ```
 
-```{important}
+```{tip}
 Solving dependencies can take a long time with `conda`, `mamba` significantly speeds up the process. Install it with:
 
     conda install mamba -n base -c conda-forge

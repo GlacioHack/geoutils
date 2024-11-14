@@ -1,6 +1,7 @@
 """
 Test functions for SatelliteImage class
 """
+
 import datetime
 import datetime as dt
 import sys
@@ -79,13 +80,14 @@ class TestSatelliteImage:
         Test that overloading of addition, subtraction and negation works for child classes as well.
         """
         # Create fake rasters with random values in 0-255 and dtype uint8
+        rng = np.random.default_rng(42)
         width = height = 5
         transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
         satimg1 = gu.SatelliteImage.from_array(
-            np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
+            rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
         satimg2 = gu.SatelliteImage.from_array(
-            np.random.randint(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
+            rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
         )
 
         # Check that output type is same - other tests are in test_raster.py
@@ -117,22 +119,12 @@ class TestSatelliteImage:
         # Check the object is a SatelliteImage
         assert isinstance(r2, gu.SatelliteImage)
 
-        # check all immutable attributes are equal
+        # Check all immutable attributes are equal
         raster_attrs = [
-            "bounds",
-            "count",
-            "crs",
-            "dtypes",
-            "height",
-            "indexes",
-            "nodata",
-            "res",
-            "shape",
-            "transform",
-            "width",
+            attr for attr in gu.raster.raster._default_rio_attrs if attr not in ["driver", "filename", "name"]
         ]
         satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
-        # using list directly available in Class
+        # Using list directly available in class
         attrs = raster_attrs + satimg_attrs
         all_attrs = attrs + gu.raster.satimg.satimg_attrs
         for attr in all_attrs:

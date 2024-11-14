@@ -4,6 +4,7 @@ Rasterize a vector
 
 This example demonstrates the rasterizing of a vector using :func:`geoutils.Vector.rasterize`.
 """
+
 # %%
 # We open a raster and vector.
 
@@ -17,15 +18,15 @@ vect = gu.Vector(filename_vect)
 
 # %%
 # Let's plot the raster and vector.
-rast.show(cmap="Purples")
-vect.show(ref_crs=rast, fc="none", ec="k", lw=2)
+rast.plot(cmap="Purples")
+vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **First option:** using the raster as a reference to match, we rasterize the vector in any projection and georeferenced grid. We simply have to pass the
 # :class:`~geoutils.Raster` as single argument to :func:`~geoutils.Vector.rasterize`. See :ref:`core-match-ref` for more details.
 
 vect_rasterized = vect.rasterize(rast)
-vect_rasterized.show(ax="new", cmap="viridis")
+vect_rasterized.plot(ax="new", cmap="viridis")
 
 # %%
 # By default, :func:`~geoutils.Vector.rasterize` will burn the index of the :class:`~geoutils.Vector`'s features in their geometry. We can specify the ``in_value`` to burn a
@@ -34,7 +35,7 @@ vect_rasterized.show(ax="new", cmap="viridis")
 #
 
 vect_rasterized = vect.rasterize(rast, in_value=1)
-vect_rasterized.show(ax="new")
+vect_rasterized.plot(ax="new")
 
 # %%
 #
@@ -50,7 +51,7 @@ vect_rasterized
 
 
 # vect_rasterized = vect.rasterize(xres=500)
-# vect_rasterized.show()
+# vect_rasterized.plot()
 
 # %%
 # .. important::

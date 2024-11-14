@@ -1,4 +1,5 @@
 """Multiple rasters tools."""
+
 from __future__ import annotations
 
 import warnings
@@ -11,9 +12,9 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
-from geoutils.misc import resampling_method_from_str
-from geoutils.raster import Raster, RasterType, get_array_and_mask
-from geoutils.raster.raster import _default_nodata
+from geoutils.raster.array import _get_array_and_mask
+from geoutils.raster.geotransformations import _resampling_method_from_str
+from geoutils.raster.raster import RasterType, _default_nodata
 
 
 def load_multiple_rasters(
@@ -26,13 +27,13 @@ def load_multiple_rasters(
     Optionally, reproject all rasters to the grid of one raster set as reference (after optional crop).
     Otherwise, simply load the full rasters.
 
-    :param raster_paths: List of paths to the rasters to be loaded
-    :param crop: if set to True, will only load rasters in the area they intersect
+    :param raster_paths: List of paths to the rasters to be loaded.
+    :param crop: If set to True, will only load rasters in the area they intersect.
     :param ref_grid: If set to an integer value, the raster with that index will be considered as the reference
-    and all other rasters will be reprojected on the same grid (after optional crop)
-    :param kwargs: optional arguments to be passed to Raster.reproject, e.g. the resampling method
+        and all other rasters will be reprojected on the same grid (after optional crop).
+    :param kwargs: Optional arguments to be passed to Raster.reproject, e.g. the resampling method.
 
-    :returns: a list of loaded Raster instances
+    :returns: List of loaded Raster instances.
     """
     # If ref_grid is provided, need to reproject
     if isinstance(ref_grid, int):
@@ -141,7 +142,7 @@ def stack_rasters(
     """
     # Check resampling method
     if isinstance(resampling_method, str):
-        resampling_method = resampling_method_from_str(resampling_method)
+        resampling_method = _resampling_method_from_str(resampling_method)
 
     # Check raster has a single band
     if any(r.count > 1 for r in rasters):
@@ -165,7 +166,7 @@ def stack_rasters(
             return_rio_bbox=True,
         )
 
-    # Make a data list and add all of the reprojected rasters into it.
+    # Make a data list and add all the reprojected rasters into it.
     data: list[NDArrayNum] = []
 
     for raster in tqdm(rasters, disable=not progress):
@@ -173,22 +174,27 @@ def stack_rasters(
         if not raster.is_loaded:
             raster.load()
 
-        nodata = reference_raster.nodata or gu.raster.raster._default_nodata(reference_raster.data.dtype)
+        nodata = reference_raster.nodata if not None else gu.raster.raster._default_nodata(reference_raster.data.dtype)
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
             bounds=dst_bounds,
             res=reference_raster.res,
             crs=reference_raster.crs,
             dtype=reference_raster.data.dtype,
-            nodata=reference_raster.nodata,
+            nodata=nodata,
+            resampling=resampling_method,
             silent=True,
         )
-        reprojected_raster.set_nodata(nodata)
+        # If the georeferenced grid was the same, reproject() will have returned self with a warning (silenced here),
+        # and we want to copy the raster and just modify its nodata (or would modify raster inputs of this function)
+        if reprojected_raster.georeferenced_grid_equal(raster):
+            reprojected_raster = reprojected_raster.copy()
+            reprojected_raster.set_nodata(nodata)
 
         # Optionally calculate difference
         if diff:
             diff_to_ref = (reference_raster.data - reprojected_raster.data).squeeze()
-            diff_to_ref, _ = get_array_and_mask(diff_to_ref)
+            diff_to_ref, _ = _get_array_and_mask(diff_to_ref)
             data.append(diff_to_ref)
         else:
             # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
@@ -223,7 +229,7 @@ def stack_rasters(
 
 def merge_rasters(
     rasters: list[RasterType],
-    reference: int | Raster = 0,
+    reference: int | RasterType = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.enums.Resampling = "bilinear",
     use_ref_bounds: bool = False,

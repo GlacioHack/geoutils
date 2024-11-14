@@ -20,7 +20,7 @@ rast
 # %%
 # The data is unloaded, as when instantiated with a filename.
 # The data will be loaded explicitly by any function requiring its :attr:`~geoutils.Raster.data`, such as :func:`~geoutils.Raster.show`.
-rast.show(cmap="terrain")
+rast.plot(cmap="terrain")
 
 # %%
 # We can also pass a :class:`rasterio.io.MemoryFile` during instantiation.

@@ -47,9 +47,6 @@ or {class}`~geoutils.Vector`:
    * - {func}`~geoutils.Raster.crop`
      - {attr}`~geoutils.Vector.bounds`
      - {attr}`~geoutils.Raster.bounds`
-   * - {func}`~geoutils.Raster.resample`
-     - {attr}`~geoutils.Raster.res`
-     - N/A
 
 ```
 

@@ -7,10 +7,10 @@ import warnings
 import numpy as np
 
 import geoutils as gu
-from geoutils._typing import MArrayNum, NDArrayNum
+from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 
 
-def get_mask(array: NDArrayNum | MArrayNum) -> NDArrayNum:
+def _get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
     """
     Return the mask of invalid values, whether array is a ndarray with NaNs or a np.ma.masked_array.
 
@@ -22,9 +22,9 @@ def get_mask(array: NDArrayNum | MArrayNum) -> NDArrayNum:
     return mask.squeeze()
 
 
-def get_array_and_mask(
+def _get_array_and_mask(
     array: NDArrayNum | MArrayNum, check_shape: bool = True, copy: bool = True
-) -> tuple[NDArrayNum, NDArrayNum]:
+) -> tuple[NDArrayNum, NDArrayBool]:
     """
     Return array with masked values set to NaN and the associated mask.
     Works whether array is a ndarray with NaNs or a np.ma.masked_array.
@@ -41,7 +41,7 @@ def get_array_and_mask(
         array = array.data
 
     if check_shape:
-        if len(array.shape) > 2 and array.shape[0] > 1:
+        if array.ndim > 2 and array.shape[0] > 1:
             raise ValueError(
                 f"Invalid array shape given: {array.shape}." "Expected 2D array or 3D array where arr.shape[0] == 1"
             )
@@ -59,27 +59,28 @@ def get_array_and_mask(
     array_data = np.array(array).squeeze() if copy else np.asarray(array).squeeze()
 
     # Get the mask of invalid pixels and set nans if it is occupied.
-    invalid_mask = get_mask(array)
+    invalid_mask = _get_mask_from_array(array)
     if np.any(invalid_mask):
         array_data[invalid_mask] = np.nan
 
     return array_data, invalid_mask
 
 
-def get_valid_extent(array: NDArrayNum | MArrayNum) -> tuple[int, ...]:
+def _get_valid_extent(array: NDArrayNum | NDArrayBool | MArrayNum) -> tuple[int, ...]:
     """
     Return (rowmin, rowmax, colmin, colmax), the first/last row/column of array with valid pixels
     """
     if not array.dtype == "bool":
-        valid_mask = ~get_mask(array)
+        valid_mask = ~_get_mask_from_array(array)
     else:
-        valid_mask = array
+        # Not sure why Mypy is not recognizing that the type of the array can only be bool here
+        valid_mask = array  # type: ignore
     cols_nonzero = np.where(np.count_nonzero(valid_mask, axis=0) > 0)[0]
     rows_nonzero = np.where(np.count_nonzero(valid_mask, axis=1) > 0)[0]
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
 
 
-def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[NDArrayNum, NDArrayNum]:
+def _get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[NDArrayNum, NDArrayNum]:
     """
     Rotate x, y axes of image to get along- and cross-track distances.
     :param raster: Raster to get x,y positions from.
@@ -91,7 +92,9 @@ def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[NDArray
     myang = np.deg2rad(along_track_angle)
 
     # Get grid coordinates
-    xx, yy = raster.coords(grid=True)
+    # (only relative is important, we don't care about offsets, so let's fix lower-left to make the tests easier
+    # by starting nicely at 0,0)
+    xx, yy = raster.coords(grid=True, force_offset="ll")
     xx -= np.min(xx)
     yy -= np.min(yy)
 

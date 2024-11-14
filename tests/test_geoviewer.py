@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 
 import matplotlib.pyplot as plt
 import pytest
@@ -23,6 +24,7 @@ import geoviewer  # noqa
     (
         (),
         ("-cmap", "Reds"),
+        ("-cmap", "Reds_r"),
         ("-vmin", "-10", "-vmax", "10"),
         ("-vmin", "5%", "-vmax", "95%"),
         ("-band", "1"),
@@ -40,9 +42,16 @@ def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: 
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 
+    # The everest example will raise errors when setting a nodata value that exists
+    if "B4" in os.path.basename(filename) and len(option) > 0 and option[0] == "-nodata":
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*"
+        )
+
     # To not get exception when testing generic functions such as --help
     try:
         geoviewer.main([filename, *option])
+        plt.close()
     except SystemExit:
         pass
 
@@ -81,6 +90,12 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 
+    # The everest example will raise errors when setting a nodata value that exists
+    if "B4" in os.path.basename(filename) and len(args) > 0 and args[0] == "-nodata":
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*"
+        )
+
     # To not get exception when testing generic functions such as --help
     option, error = args
     with pytest.raises(error):
@@ -108,9 +123,16 @@ def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: 
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
 
+    # The everest RGB example will raise errors when setting a nodata value that exists
+    if "RGB" in os.path.basename(filename) and len(option) > 0 and option[0] == "-nodata":
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message="New nodata value cells already exist in the data array.*"
+        )
+
     # To not get exception when testing generic functions such as --help
     try:
         geoviewer.main([filename, *option])
+        plt.close()
     except SystemExit:
         pass
 

@@ -135,7 +135,7 @@ def main(test_args: Sequence[str] = None) -> None:
         dfact = 1
 
     # Read image
-    img = Raster(args.filename, downsample=dfact, indexes=args.band)
+    img = Raster(args.filename, downsample=dfact, bands=args.band)
 
     # Set no data value
     if args.nodata == "default":
@@ -181,12 +181,16 @@ def main(test_args: Sequence[str] = None) -> None:
         vmax = None
 
     # color map
+    # Get the list of existing color maps, including reversed maps
+    mpl_cmap_list = list(plt.cm.datad.keys())
+    mpl_cmap_list.extend([cmap + "_r" for cmap in mpl_cmap_list])
+
     if args.cmap == "default":
         cmap = plt.rcParams["image.cmap"]
-    elif args.cmap in plt.cm.datad.keys():
+    elif args.cmap in mpl_cmap_list:
         cmap = args.cmap
     else:
-        raise ValueError("Wrong cmap, must be in: {}".format(",".join(str(elem) for elem in plt.cm.datad.keys())))
+        raise ValueError("Wrong cmap, must be in: {}".format(",".join(str(elem) for elem in mpl_cmap_list)))
 
     # Figsize
     if args.figsize == "default":
@@ -212,7 +216,7 @@ def main(test_args: Sequence[str] = None) -> None:
     ax = fig.add_subplot(111)
 
     # plot
-    img.show(
+    img.plot(
         ax=ax,
         cmap=cmap,
         interpolation="nearest",

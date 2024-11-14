@@ -7,77 +7,76 @@ from typing import Literal, overload
 import numpy as np
 
 from geoutils._typing import MArrayNum, NDArrayNum
-from geoutils.raster.array import get_mask
+from geoutils.raster.array import _get_mask_from_array
 
 
 @overload
-def sample_array(
+def subsample_array(
     array: NDArrayNum | MArrayNum,
-    sample: float | int,
+    subsample: float | int,
     return_indices: Literal[False] = False,
     *,
-    random_state: np.random.RandomState | int | None = None,
-) -> NDArrayNum:
-    ...
+    random_state: int | np.random.Generator | None = None,
+) -> NDArrayNum: ...
 
 
 @overload
-def sample_array(
+def subsample_array(
     array: NDArrayNum | MArrayNum,
-    sample: float | int,
+    subsample: float | int,
     return_indices: Literal[True],
     *,
-    random_state: np.random.RandomState | int | None = None,
-) -> tuple[NDArrayNum, ...]:
-    ...
+    random_state: int | np.random.Generator | None = None,
+) -> tuple[NDArrayNum, ...]: ...
 
 
 @overload
-def sample_array(
+def subsample_array(
     array: NDArrayNum | MArrayNum,
-    sample: float | int,
+    subsample: float | int,
     return_indices: bool = False,
-    random_state: np.random.RandomState | int | None = None,
-) -> NDArrayNum | tuple[NDArrayNum, ...]:
-    ...
+    random_state: int | np.random.Generator | None = None,
+) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
 
-def sample_array(
+def subsample_array(
     array: NDArrayNum | MArrayNum,
-    sample: float | int,
+    subsample: float | int,
     return_indices: bool = False,
-    random_state: np.random.RandomState | int | None = None,
+    random_state: int | np.random.Generator | None = None,
 ) -> NDArrayNum | tuple[NDArrayNum, ...]:
     """
-    Randomly sample a 1D or 2D array by a sampling factor, taking only non NaN/masked values.
+    Randomly subsample a 1D or 2D array by a sampling factor, taking only non NaN/masked values.
 
     :param array: Input array.
-    :param sample: If <= 1, will be considered a fraction of valid pixels to extract.
-    If > 1 will be considered the number of pixels to extract.
+    :param subsample: Subsample size. If <= 1, will be considered a fraction of valid pixels to extract.
+        If > 1 will be considered the number of pixels to extract.
     :param return_indices: If set to True, will return the extracted indices only.
     :param random_state: Random state, or seed number to use for random calculations (for testing)
 
-    :returns: The sampled array (1D) or the indices to extract (same shape as input array)
+    :returns: The subsampled array (1D) or the indices to extract (same shape as input array)
     """
     # Define state for random sampling (to fix results during testing)
-    if random_state is None:
-        rnd: np.random.RandomState | np.random.Generator = np.random.default_rng()
-    elif isinstance(random_state, np.random.RandomState):
-        rnd = random_state
-    else:
-        rnd = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(random_state)))
+    rng = np.random.default_rng(random_state)
 
     # Remove invalid values and flatten array
-    mask = get_mask(array)  # -> need to remove .squeeze in get_mask
+    mask = _get_mask_from_array(array)  # -> need to remove .squeeze in get_mask
     valids = np.argwhere(~mask.flatten()).squeeze()
 
     # Get number of points to extract
-    if (sample <= 1) & (sample > 0):
-        npoints = int(sample * np.count_nonzero(~mask))
-    elif sample > 1:
-        npoints = int(sample)
+    # If subsample is one, we don't perform any subsampling operation, we return the valid array or indices directly
+    if subsample == 1:
+        unraveled_indices = np.unravel_index(valids, array.shape)
+        if return_indices:
+            return unraveled_indices
+        else:
+            return array[unraveled_indices]
+    if (subsample <= 1) & (subsample > 0):
+        npoints = int(subsample * np.count_nonzero(~mask))
+    elif subsample > 1:
+        npoints = int(subsample)
     else:
-        raise ValueError("`sample` must be > 0")
+        raise ValueError("`subsample` must be > 0")
 
     # Checks that array and npoints are correct
     assert np.ndim(valids) == 1, "Something is wrong with array dimension, check input data and shape"
@@ -85,12 +84,11 @@ def sample_array(
         npoints = np.size(valids)
 
     # Randomly extract npoints without replacement
-    indices = rnd.choice(valids, npoints, replace=False)
+    indices = rng.choice(valids, npoints, replace=False)
     unraveled_indices = np.unravel_index(indices, array.shape)
 
     if return_indices:
         return unraveled_indices
-
     else:
         return array[unraveled_indices]
 
@@ -183,7 +181,7 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
 
     # Generate a small grid of indices, with the same unique count as 'count'
     rect = _get_closest_rectangle(count)
-    small_indices = np.pad(np.arange(count), np.prod(rect) - count, mode="edge")[: np.prod(rect)].reshape(rect)
+    small_indices = np.pad(np.arange(count), np.prod(rect) - count, mode="edge")[: int(np.prod(rect))].reshape(rect)
 
     # Upscale the grid to fit the output shape using nearest neighbour scaling.
     indices = skimage.transform.resize(small_indices, shape, order=0, preserve_range=True).astype(int)

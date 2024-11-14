@@ -1,4 +1,5 @@
 """Utility functions to download and find example data."""
+
 import os
 import tarfile
 import tempfile

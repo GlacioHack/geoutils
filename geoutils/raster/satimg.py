@@ -1,6 +1,7 @@
 """
 geoutils.satimg provides a toolset for working with satellite data.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -101,7 +102,7 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
         else:
             attrs = (None,) * 6
 
-    # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplfied?))
+    # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplified?))
     elif os.path.splitext(os.path.basename(fname))[1] == ".hgt":
         attrs = (
             "SRTM",
@@ -254,7 +255,7 @@ class SatelliteImage(Raster):  # type: ignore
         self,
         filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
         load_data: bool = True,
-        indexes: int | list[int] | None = None,
+        bands: int | list[int] | None = None,
         read_from_fn: bool = True,
         datetime: dt.datetime | None = None,
         tile_name: str | None = None,
@@ -271,7 +272,7 @@ class SatelliteImage(Raster):  # type: ignore
 
         :param filename_or_dataset: The filename of the dataset.
         :param load_data: Load the raster data into the object. Default is True.
-        :param indexes: The band(s) to load into the object. Default is to load all bands.
+        :param bands: The band(s) to load into the object. Default is to load all bands.
         :param read_from_fn: Try to read metadata from the filename
         :param datetime: Provide datetime attribute
         :param tile_name: Provide tile name
@@ -293,7 +294,7 @@ class SatelliteImage(Raster):  # type: ignore
             return
         # Else rely on parent Raster class options (including raised errors)
         else:
-            super().__init__(filename_or_dataset, load_data=load_data, indexes=indexes)
+            super().__init__(filename_or_dataset, load_data=load_data, bands=bands)
 
         # priority to user input
         self._datetime = datetime
@@ -428,8 +429,8 @@ class SatelliteImage(Raster):  # type: ignore
 
         return None
 
-    def copy(self, new_array: NDArrayNum | None = None) -> SatelliteImage:
-        new_satimg = super().copy(new_array=new_array)  # type: ignore
+    def copy(self, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> SatelliteImage:
+        new_satimg = super().copy(new_array=new_array, cast_nodata=cast_nodata)  # type: ignore
         # all objects here are immutable so no need for a copy method (string and datetime)
         # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
         for attrs in satimg_attrs:

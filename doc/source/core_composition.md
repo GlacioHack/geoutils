@@ -51,7 +51,7 @@ By default, {attr}`~geoutils.Raster.data` is not loaded during instantiation. Se
 ```{code-cell} ipython3
 :tags: [hide-output]
 # Show summarized information
-print(rast.info())
+rast.info()
 ```
 
 ```{important}
@@ -93,7 +93,7 @@ vect
 ```{code-cell} ipython3
 :tags: [hide-output]
 # Show summarized information
-print(vect.info())
+vect.info()
 ```
 
 All geospatial methods of {class}`~geopandas.GeoDataFrame` are directly available into {class}`~geoutils.Vector`, and cast the output logically depending on

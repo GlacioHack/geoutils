@@ -4,6 +4,7 @@ Reproject a vector
 
 This example demonstrates the reprojection of a vector using :func:`geoutils.Vector.reproject`.
 """
+
 # %%
 # We open a raster and vector.
 
@@ -17,13 +18,13 @@ vect = gu.Vector(filename_vect)
 
 # %%
 # The two objects are in different projections.
-print(rast.info())
-print(vect.info())
+rast.info()
+vect.info()
 
 # %%
 # Let's plot the two in their original projection.
-rast.show(cmap="Greys_r")
-vect.show(ax="new", fc="none", ec="tab:purple", lw=3)
+rast.plot(cmap="Greys_r")
+vect.plot(ax="new", fc="none", ec="tab:purple", lw=3)
 
 # %%
 # **First option:** using the raster as a reference to match, we reproject the vector. We simply have to pass the :class:`~geoutils.Raster` as an argument
@@ -34,7 +35,7 @@ vect_reproj = vect.reproject(rast)
 # %%
 # We can plot the vector in its new projection.
 
-vect_reproj.show(ax="new", fc="none", ec="tab:purple", lw=3)
+vect_reproj.plot(ax="new", fc="none", ec="tab:purple", lw=3)
 
 # %%
 # **Second option:** we can pass the georeferencing argument ``dst_crs`` to :func:`~geoutils.Vector.reproject` (an EPSG code can be passed directly as

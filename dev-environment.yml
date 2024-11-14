@@ -2,17 +2,19 @@ name: geoutils-dev
 channels:
   - conda-forge
 dependencies:
-  - python>=3.9,<3.12
+  - python>=3.10,<3.13
   - geopandas>=0.12.0
-  - matplotlib
-  - pyproj
-  - rasterio>=1.3
-  - numpy
-  - scipy
+  - matplotlib=3.*
+  - pyproj=3.*
+  - rasterio>=1.3,<2
+  - pandas>=1,<3
+  - numpy=1.*
+  - scipy=1.*
   - tqdm
   - xarray
-  - rioxarray
+  - rioxarray=0.*
   - geocube
+  - dask
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
@@ -21,12 +23,15 @@ dependencies:
   - scikit-image
 
   # Test dependencies
-  - pytest
+  - gdal  # To test functionalities against GDAL
+  - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixture
   - pyyaml
   - flake8
   - pylint
+  - netcdf4  # To write synthetic data with chunksizes
+  - dask-memusage
 
   # Doc dependencies
   - sphinx
