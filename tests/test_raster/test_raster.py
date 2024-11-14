@@ -1009,7 +1009,7 @@ class TestRaster:
 
         # When passing the new array as a NaN ndarray, only the valid data is equal, because masked data is NaN in one
         # case, and -9999 in the other
-        r_arr = gu.raster.array._get_array_and_mask(r)[0]
+        r_arr = gu.raster.array.get_array_and_mask(r)[0]
         r2 = r.copy(new_array=r_arr)
         assert np.ma.allequal(r.data, r2.data)
         # If a nodata value exists, and we update the NaN pixels to be that nodata value, then the two Rasters should
