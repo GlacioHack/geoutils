@@ -12,7 +12,7 @@ from rasterio.crs import CRS
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
-from geoutils.raster.array import _get_mask_from_array
+from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.georeferencing import _default_nodata, _xy2ij
 from geoutils.raster.sampling import subsample_array
 
@@ -168,11 +168,11 @@ def _raster_to_pointcloud(
     if skip_nodata:
         if source_raster.is_loaded:
             if source_raster.count == 1:
-                self_mask = _get_mask_from_array(
+                self_mask = get_mask_from_array(
                     source_raster.data
                 )  # This is to avoid the case where the mask is just "False"
             else:
-                self_mask = _get_mask_from_array(
+                self_mask = get_mask_from_array(
                     source_raster.data[data_band - 1, :, :]
                 )  # This is to avoid the case where the mask is just "False"
             valid_mask = ~self_mask
