@@ -12,7 +12,7 @@ from scipy.ndimage import binary_dilation
 import geoutils as gu
 from geoutils import examples
 from geoutils.projtools import reproject_to_latlon
-from geoutils.raster.interpolate import (
+from geoutils.interface.interpolate import (
     _get_dist_nodata_spread,
     _interp_points,
     _interpn_interpolator,
