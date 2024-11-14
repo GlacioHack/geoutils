@@ -1,6 +1,7 @@
 """
 Test tools involving multiple rasters.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -203,7 +204,7 @@ class TestMultiRaster:
             assert rasters.img.width == pytest.approx(stacked_img.width, abs=1)
         else:
             assert rasters.img.shape == stacked_img.shape
-        assert type(stacked_img) == gu.Raster  # Check output object is always Raster, whatever input was given
+        assert isinstance(stacked_img, gu.Raster)  # Check output object is always Raster, whatever input was given
         assert np.count_nonzero(np.isnan(stacked_img.data)) == 0  # Check no NaNs introduced
 
         merged_bounds = gu.projtools.merge_bounds(

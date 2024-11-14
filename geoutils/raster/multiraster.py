@@ -1,4 +1,5 @@
 """Multiple rasters tools."""
+
 from __future__ import annotations
 
 import warnings
@@ -11,9 +12,9 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
-from geoutils.misc import resampling_method_from_str
-from geoutils.raster import Raster, RasterType, get_array_and_mask
-from geoutils.raster.raster import _default_nodata
+from geoutils.raster.array import _get_array_and_mask
+from geoutils.raster.geotransformations import _resampling_method_from_str
+from geoutils.raster.raster import RasterType, _default_nodata
 
 
 def load_multiple_rasters(
@@ -141,7 +142,7 @@ def stack_rasters(
     """
     # Check resampling method
     if isinstance(resampling_method, str):
-        resampling_method = resampling_method_from_str(resampling_method)
+        resampling_method = _resampling_method_from_str(resampling_method)
 
     # Check raster has a single band
     if any(r.count > 1 for r in rasters):
@@ -193,7 +194,7 @@ def stack_rasters(
         # Optionally calculate difference
         if diff:
             diff_to_ref = (reference_raster.data - reprojected_raster.data).squeeze()
-            diff_to_ref, _ = get_array_and_mask(diff_to_ref)
+            diff_to_ref, _ = _get_array_and_mask(diff_to_ref)
             data.append(diff_to_ref)
         else:
             # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
@@ -228,7 +229,7 @@ def stack_rasters(
 
 def merge_rasters(
     rasters: list[RasterType],
-    reference: int | Raster = 0,
+    reference: int | RasterType = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.enums.Resampling = "bilinear",
     use_ref_bounds: bool = False,

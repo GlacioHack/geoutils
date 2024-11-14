@@ -7,7 +7,7 @@ import rasterio as rio
 from shapely import geometry
 
 from geoutils import Raster
-from geoutils.pointcloud import _grid_pointcloud
+from geoutils.interface.gridding import _grid_pointcloud
 
 
 class TestPointCloud:

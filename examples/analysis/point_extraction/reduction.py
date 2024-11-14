@@ -4,6 +4,7 @@ Reduction from window
 
 This example demonstrates the reduction of windowed raster values around a point using :func:`~geoutils.Raster.value_at_coords`.
 """
+
 # %%
 # We open an example raster, a digital elevation model in South America.
 

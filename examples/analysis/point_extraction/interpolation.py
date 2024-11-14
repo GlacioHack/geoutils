@@ -4,6 +4,7 @@ Interpolation from grid
 
 This example demonstrates the 2D interpolation of raster values to points using :func:`~geoutils.Raster.interp_points`.
 """
+
 # %%
 # We open an example raster, a digital elevation model in South America.
 

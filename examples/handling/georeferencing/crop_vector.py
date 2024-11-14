@@ -4,6 +4,7 @@ Crop a vector
 
 This example demonstrates the cropping of a vector using :func:`geoutils.Vector.crop`.
 """
+
 # %%
 # We open a raster and vector.
 

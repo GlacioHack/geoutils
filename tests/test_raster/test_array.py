@@ -1,4 +1,5 @@
 """Test array tools."""
+
 from __future__ import annotations
 
 import warnings
@@ -8,6 +9,11 @@ import pytest
 import rasterio as rio
 
 import geoutils as gu
+from geoutils.raster.array import (
+    _get_array_and_mask,
+    _get_valid_extent,
+    _get_xy_rotated,
+)
 
 
 class TestArray:
@@ -15,7 +21,7 @@ class TestArray:
     @pytest.mark.parametrize(
         "mask_and_viewable",
         [
-            (None, True),  # An ndarray with no mask should support views
+            (None, True),  # A ndarray with no mask should support views
             (False, True),  # A masked array with an empty mask should support views
             ([True, False, False, False], False),  # A masked array with an occupied mask should not support views.
             ([False, False, False, False], True),  # A masked array with an empty occupied mask should support views.
@@ -53,13 +59,13 @@ class TestArray:
         # Validate that incorrect shapes raise the correct error.
         if not check_should_pass:
             with pytest.raises(ValueError, match="Invalid array shape given"):
-                gu.raster.get_array_and_mask(array, check_shape=True)
+                _get_array_and_mask(array, check_shape=True)
 
             # Stop the test here as the failure is now validated.
             return
 
         # Get a copy of the array and check its shape (it should always pass at this point)
-        arr, _ = gu.raster.get_array_and_mask(array, copy=True, check_shape=True)
+        arr, _ = _get_array_and_mask(array, copy=True, check_shape=True)
 
         # Validate that the array is a copy
         assert not np.shares_memory(arr, array)
@@ -76,7 +82,7 @@ class TestArray:
             warnings.simplefilter("always")
 
             # Try to create a view.
-            arr_view, mask = gu.raster.get_array_and_mask(array, copy=False)
+            arr_view, mask = _get_array_and_mask(array, copy=False)
 
             # If it should be possible, validate that there were no warnings.
             if view_should_be_possible:
@@ -102,21 +108,21 @@ class TestArray:
 
         # For no invalid values, the function should return the edges
         # For the array
-        assert (0, 4, 0, 4) == gu.raster.get_valid_extent(arr)
+        assert (0, 4, 0, 4) == _get_valid_extent(arr)
         # For the masked-array
-        assert (0, 4, 0, 4) == gu.raster.get_valid_extent(mask_ma)
+        assert (0, 4, 0, 4) == _get_valid_extent(mask_ma)
 
         # 1/ First column:
         # If we mask it in the masked array
         mask_ma[0, :] = np.ma.masked
-        assert (1, 4, 0, 4) == gu.raster.get_valid_extent(mask_ma)
+        assert (1, 4, 0, 4) == _get_valid_extent(mask_ma)
 
         # If we changed the array to NaNs
         arr[0, :] = np.nan
-        assert (1, 4, 0, 4) == gu.raster.get_valid_extent(arr)
+        assert (1, 4, 0, 4) == _get_valid_extent(arr)
         mask_ma.data[0, :] = np.nan
         mask_ma.mask = False
-        assert (1, 4, 0, 4) == gu.raster.get_valid_extent(mask_ma)
+        assert (1, 4, 0, 4) == _get_valid_extent(mask_ma)
 
         # 2/ First row:
         arr = np.ones(shape=(5, 5))
@@ -124,14 +130,14 @@ class TestArray:
         mask_ma = np.ma.masked_array(data=arr, mask=arr_mask)
         # If we mask it in the masked array
         mask_ma[:, 0] = np.ma.masked
-        assert (0, 4, 1, 4) == gu.raster.get_valid_extent(mask_ma)
+        assert (0, 4, 1, 4) == _get_valid_extent(mask_ma)
 
         # If we changed the array to NaNs
         arr[:, 0] = np.nan
-        assert (0, 4, 1, 4) == gu.raster.get_valid_extent(arr)
+        assert (0, 4, 1, 4) == _get_valid_extent(arr)
         mask_ma.data[:, 0] = np.nan
         mask_ma.mask = False
-        assert (0, 4, 1, 4) == gu.raster.get_valid_extent(mask_ma)
+        assert (0, 4, 1, 4) == _get_valid_extent(mask_ma)
 
         # 3/ Last column:
         arr = np.ones(shape=(5, 5))
@@ -140,14 +146,14 @@ class TestArray:
 
         # If we mask it in the masked array
         mask_ma[-1, :] = np.ma.masked
-        assert (0, 3, 0, 4) == gu.raster.get_valid_extent(mask_ma)
+        assert (0, 3, 0, 4) == _get_valid_extent(mask_ma)
 
         # If we changed the array to NaNs
         arr[-1, :] = np.nan
-        assert (0, 3, 0, 4) == gu.raster.get_valid_extent(arr)
+        assert (0, 3, 0, 4) == _get_valid_extent(arr)
         mask_ma.data[-1, :] = np.nan
         mask_ma.mask = False
-        assert (0, 3, 0, 4) == gu.raster.get_valid_extent(mask_ma)
+        assert (0, 3, 0, 4) == _get_valid_extent(mask_ma)
 
         # 4/ Last row:
         arr = np.ones(shape=(5, 5))
@@ -156,14 +162,14 @@ class TestArray:
 
         # If we mask it in the masked array
         mask_ma[:, -1] = np.ma.masked
-        assert (0, 4, 0, 3) == gu.raster.get_valid_extent(mask_ma)
+        assert (0, 4, 0, 3) == _get_valid_extent(mask_ma)
 
         # If we changed the array to NaNs
         arr[:, -1] = np.nan
-        assert (0, 4, 0, 3) == gu.raster.get_valid_extent(arr)
+        assert (0, 4, 0, 3) == _get_valid_extent(arr)
         mask_ma.data[:, -1] = np.nan
         mask_ma.mask = False
-        assert (0, 4, 0, 3) == gu.raster.get_valid_extent(mask_ma)
+        assert (0, 4, 0, 3) == _get_valid_extent(mask_ma)
 
     def test_get_xy_rotated(self) -> None:
         """Check the function to rotate array."""
@@ -178,27 +184,27 @@ class TestArray:
         xx, yy = r1.coords(grid=True, force_offset="ll")
 
         # Rotating the coordinates 90 degrees should be the same as rotating the array
-        xx90, yy90 = gu.raster.get_xy_rotated(r1, along_track_angle=90)
+        xx90, yy90 = _get_xy_rotated(r1, along_track_angle=90)
         assert np.allclose(np.rot90(xx90), xx)
         assert np.allclose(np.rot90(yy90), yy)
 
         # Same for 180 degrees
-        xx180, yy180 = gu.raster.get_xy_rotated(r1, along_track_angle=180)
+        xx180, yy180 = _get_xy_rotated(r1, along_track_angle=180)
         assert np.allclose(np.rot90(xx180, k=2), xx)
         assert np.allclose(np.rot90(yy180, k=2), yy)
 
         # Same for 270 degrees
-        xx270, yy270 = gu.raster.get_xy_rotated(r1, along_track_angle=270)
+        xx270, yy270 = _get_xy_rotated(r1, along_track_angle=270)
         assert np.allclose(np.rot90(xx270, k=3), xx)
         assert np.allclose(np.rot90(yy270, k=3), yy)
 
         # 360 degrees should get us back on our feet
-        xx360, yy360 = gu.raster.get_xy_rotated(r1, along_track_angle=360)
+        xx360, yy360 = _get_xy_rotated(r1, along_track_angle=360)
         assert np.allclose(xx360, xx)
         assert np.allclose(yy360, yy)
 
         # Test that the values make sense for 45 degrees
-        xx45, yy45 = gu.raster.get_xy_rotated(r1, along_track_angle=45)
+        xx45, yy45 = _get_xy_rotated(r1, along_track_angle=45)
         # Should have zero on the upper left corner for xx
         assert xx45[0, 0] == pytest.approx(0)
         # Then a multiple of sqrt2 along each dimension
@@ -209,4 +215,4 @@ class TestArray:
         # Finally, yy should be rotated by 90
         assert np.allclose(np.rot90(xx45), yy45)
 
-        xx, yy = gu.raster.get_xy_rotated(r1, along_track_angle=90)
+        xx, yy = _get_xy_rotated(r1, along_track_angle=90)

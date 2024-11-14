@@ -4,6 +4,7 @@ Polygonize a raster
 
 This example demonstrates the polygonizing of a raster using :func:`geoutils.Raster.polygonize` and :func:`geoutils.Mask.polygonize`.
 """
+
 # %%
 # We open a raster.
 

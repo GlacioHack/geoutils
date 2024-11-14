@@ -202,7 +202,7 @@ html_theme_options = {
         'to update your code see <a href="https://github.com/GlacioHack/geoutils/releases/tag/v0.1.0">here</a>. ⚠️'
         "<br>Future changes will come with deprecation warnings! 🙂"
     ),
-    "show_toc_level": 3
+    "show_toc_level": 3,
     # "logo_only": True,
     # "icon_links": [
     #         {

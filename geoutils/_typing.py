@@ -1,4 +1,5 @@
 """Typing aliases for internal use."""
+
 from __future__ import annotations
 
 import sys

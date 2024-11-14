@@ -4,6 +4,7 @@ Python arithmetic
 
 This example demonstrates arithmetic operations using raster arithmetic on :class:`Rasters<geoutils.Raster>`. See :ref:`core-py-ops` for more details.
 """
+
 # %%
 # We open a raster
 

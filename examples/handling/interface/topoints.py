@@ -4,6 +4,7 @@ Raster to points
 
 This example demonstrates the conversion of a raster to point vector using :func:`geoutils.Raster.to_points`.
 """
+
 # %%
 # We open a raster.
 

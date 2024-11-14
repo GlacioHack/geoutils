@@ -11,13 +11,13 @@ from scipy.ndimage import binary_dilation
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.projtools import reproject_to_latlon
-from geoutils.raster.interpolate import (
+from geoutils.interface.interpolate import (
     _get_dist_nodata_spread,
     _interp_points,
     _interpn_interpolator,
     method_to_order,
 )
+from geoutils.projtools import reproject_to_latlon
 
 
 class TestInterpolate:
@@ -81,7 +81,7 @@ class TestInterpolate:
 
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
     @pytest.mark.parametrize("shift_aop", [True, False])  # type: ignore
-    def test_interp_points__synthetic(self, tag_aop: str | None, shift_aop: bool) -> None:
+    def test_interp_points__synthetic(self, tag_aop: Literal["Area", "Point"] | None, shift_aop: bool) -> None:
         """
         Test interp_points function with synthetic data:
 

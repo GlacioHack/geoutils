@@ -1,4 +1,4 @@
-"""Module for point cloud manipulation."""
+"""Functionalities for gridding points (point cloud to raster)."""
 
 import warnings
 from typing import Literal
