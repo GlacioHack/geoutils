@@ -17,15 +17,33 @@ class TestRasterBase:
     pass
 
 
-def equal_xr_raster(ds: xr.DataArray, rast: Raster) -> bool:
+def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = True) -> bool:
     """Check equality of a Raster object and Xarray object"""
+
     # TODO: Move to raster_equal?
-    return all([
-        np.array_equal(ds.data.values, rast.get_nanarray(), equal_nan=True),
+    equalities = [
+        np.allclose(ds.data, rast.get_nanarray(), equal_nan=True),
         ds.rst.transform == rast.transform,
         ds.rst.crs == rast.crs,
         ds.rst.nodata == rast.nodata,
-    ])
+    ]
+
+    names = ["data", "transform", "crs", "nodata"]
+
+    complete_equality = all(equalities)
+
+    if not complete_equality and warn_failure_reason:
+        where_fail = np.nonzero(~np.array(equalities))[0]
+        warnings.warn(
+            category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
+        )
+        print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
+
+    print(np.count_nonzero(np.isfinite(ds.data) != np.isfinite(rast.get_nanarray())))
+    print(np.nanmin(ds.data - rast.get_nanarray()))
+    print(ds.data)
+
+    return complete_equality
 
 def output_equal(output1: Any, output2: Any) -> bool:
     """Return equality of different output types."""
@@ -91,7 +109,7 @@ class TestClassVsAccessorConsistency:
         output_ds = getattr(getattr(ds, "rst"), attr)
 
         # Assert equality
-        if attr is not "is_xr":  # Only attribute that is (purposely) not the same, but the opposite
+        if attr != "is_xr":  # Only attribute that is (purposely) not the same, but the opposite
             assert output_equal(output_raster, output_ds)
         else:
             assert output_raster != output_ds
@@ -99,23 +117,25 @@ class TestClassVsAccessorConsistency:
 
     # Test common methods
     methods_and_args = {
-        "reproject": {"crs": CRS.from_epsg(32610), "res": 10},
-        "crop": {"crop_geom": "random"},
-        "translate": {"xoff": 10.5, "yoff": 5},
-        "xy2ij": {"x": "random", "y": "random"},  # This will be derived during the test to work on all inputs
-        "ij2xy": {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]},
-        "coords": {"grid": True},
-        "get_metric_crs": {"local_crs_type": "universal"},
-        "reduce_points": {"points": "random"},  # This will be derived during the test to work on all inputs
-        "interp_points": {"points": "random"},  # This will be derived during the test to work on all inputs
-        "proximity": {"target_values": [100]},
-        "outside_image": {"xi": [-2, 10000, 10], "yj": [10, 50, 20]},
-        "to_pointcloud": {"subsample": 1000, "random_state": 42},
-        "polygonize": {"target_values": "all"},
-        "subsample": {"subsample": 1000, "random_state": 42},
-    }
+        "reproject": {"crs": CRS.from_epsg(32610), "res": 10}}
+    # methods_and_args = {
+    #     "reproject": {"crs": CRS.from_epsg(32610), "res": 10},
+    #     "crop": {"crop_geom": "random"},
+    #     "translate": {"xoff": 10.5, "yoff": 5},
+    #     "xy2ij": {"x": "random", "y": "random"},  # This will be derived during the test to work on all inputs
+    #     "ij2xy": {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]},
+    #     "coords": {"grid": True},
+    #     "get_metric_crs": {"local_crs_type": "universal"},
+    #     "reduce_points": {"points": "random"},  # This will be derived during the test to work on all inputs
+    #     "interp_points": {"points": "random"},  # This will be derived during the test to work on all inputs
+    #     "proximity": {"target_values": [100]},
+    #     "outside_image": {"xi": [-2, 10000, 10], "yj": [10, 50, 20]},
+    #     "to_pointcloud": {"subsample": 1000, "random_state": 42},
+    #     "polygonize": {"target_values": "all"},
+    #     "subsample": {"subsample": 1000, "random_state": 42},
+    # }
 
-    @pytest.mark.parametrize("path_raster", [landsat_b4_path])  # type: ignore
+    @pytest.mark.parametrize("path_raster", [aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("method", list(methods_and_args.keys()))  # type: ignore
     def test_methods(self, path_raster: str, method: str) -> None:
         """

@@ -309,7 +309,6 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
         ]
     )
 
-
 def _reproject(
     source_raster: gu.Raster,
     ref: gu.Raster,
@@ -381,39 +380,49 @@ def _reproject(
     reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
 
     # --- Run the reprojection of data --- #
-    # If data is loaded, reproject the numpy array directly
-    if source_raster.is_loaded:
-        # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
-        if src_nodata is None and np.sum(source_raster.data.mask) > 0:
-            raise ValueError(
-                "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-                "with `force_source_nodata`."
-            )
 
-        # Mask not taken into account by rasterio, need to fill with src_nodata
-        data, transformed = rio.warp.reproject(source_raster.data.filled(src_nodata), **reproj_kwargs)
+    if source_raster._is_xr:
 
-    # If not, uses the dataset instead
+        src_data = source_raster.data
+        src_data[np.isnan(src_data)] = src_nodata
+        data, transformed = rio.warp.reproject(source_raster.data, **reproj_kwargs)
+        data[data == nodata] = np.nan
+
     else:
-        data = []  # type: ignore
-        for k in range(source_raster.count):
-            with rio.open(source_raster.filename) as ds:
-                band = rio.band(ds, k + 1)
-                band, transformed = rio.warp.reproject(band, **reproj_kwargs)
-                data.append(band.squeeze())
+        # If data is loaded, reproject the numpy array directly
+        if source_raster.is_loaded:
+            # All masked values must be set to a nodata value for rasterio's reproject to work properly
+            # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
+            if src_nodata is None and np.sum(source_raster.data.mask) > 0:
+                raise ValueError(
+                    "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+                    "with `force_source_nodata`."
+                )
 
-        data = np.array(data)
+            # Mask not taken into account by rasterio, need to fill with src_nodata
+            data, transformed = rio.warp.reproject(source_raster.data.filled(src_nodata), **reproj_kwargs)
 
-    # Enforce output type
-    data = np.ma.masked_array(data.astype(dtype), fill_value=nodata)
+        # If not, uses the dataset instead
+        else:
+            data = []  # type: ignore
+            for k in range(source_raster.count):
+                with rio.open(source_raster.filename) as ds:
+                    band = rio.band(ds, k + 1)
+                    band, transformed = rio.warp.reproject(band, **reproj_kwargs)
+                    data.append(band.squeeze())
 
-    if nodata is not None:
-        data.mask = data == nodata
+            data = np.array(data)
+
+        # Enforce output type
+        data = np.ma.masked_array(data.astype(dtype), fill_value=nodata)
+
+        if nodata is not None:
+            data.mask = data == nodata
 
     # Check for funny business.
     if reproj_kwargs["dst_transform"] is not None:
         assert reproj_kwargs["dst_transform"] == transformed
+
 
     return False, data, transformed, crs, nodata
 
