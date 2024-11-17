@@ -41,6 +41,6 @@ If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.
 Many types of geospatial data can be viewed as a subclass of {class}`Rasters<geoutils.Raster>`, which have more attributes and require their own methods:
 **spectral images**, **velocity fields**, **phase difference maps**, etc...
 
-If you are interested to build your own subclass of {class}`~geoutils.Raster`, you can take example of the structure of {class}`xdem.DEM`. 
+If you are interested to build your own subclass of {class}`~geoutils.Raster`, you can take example of the structure of {class}`xdem.DEM`.
 Then, just add any of your own attributes and methods, and overload parent methods if necessary! Don't hesitate to reach out on our
 GitHub if you have a subclassing project.

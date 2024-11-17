@@ -508,7 +508,7 @@ class Raster:
             raise TypeError("The filename argument is not recognised, should be a path or a Rasterio dataset.")
 
         # Parse metadata and add to tags
-        if parse_sensor_metadata:
+        if parse_sensor_metadata and self.filename is not None:
             sensor_meta = parse_and_convert_metadata_from_filename(self.filename, silent=silent)
             self.tags.update(sensor_meta)
 

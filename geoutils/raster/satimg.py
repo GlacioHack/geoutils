@@ -4,18 +4,17 @@ This module provides functionalities for parsing sensor metadata, most often rel
 
 from __future__ import annotations
 
-from typing import TypedDict
-
 import datetime as dt
 import os
 import re
 from collections import abc
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 
 # Metadata tags used for all
 satimg_tags = ["platform", "sensor", "product", "version", "tile_name", "datetime"]
+
 
 class SatImgDict(TypedDict, total=False):
     """Keys and types of inputs associated with image metadata."""
@@ -33,6 +32,7 @@ class SatImgDict(TypedDict, total=False):
     ytile_min: float
     xtile_size: float
     ytile_size: float
+
 
 def parse_landsat(gname: str) -> list[Any]:
     """Parse Landsat metadata."""
@@ -71,7 +71,7 @@ def parse_metadata_from_fn(filename: str) -> SatImgDict:
     # Extract basename from full filename
     bname = os.path.splitext(os.path.basename(filename))[0]
 
-    # The attributes correspond in order to: satellite, sensor, product, version, tile_name, datetime
+    # The attributes correspond in order to: platform, sensor, product, version, tile_name, datetime
     tags = satimg_tags
 
     # First, we assume that the filename has a form XX_YY.ext
@@ -163,7 +163,7 @@ def parse_metadata_from_fn(filename: str) -> SatImgDict:
     else:
         attrs = (None,) * 6
 
-    dict_meta = {tags[i]: attrs[i] for i in range(len(tags))}
+    dict_meta: SatImgDict = {tags[i]: attrs[i] for i in range(len(tags))}  # type: ignore
 
     return dict_meta
 
@@ -293,9 +293,11 @@ def latlon_to_sw_naming(
 
     return tile_name
 
+
 ###################################################
 # MAIN FUNCTION THAT WILL BE CALLED BY RASTER CLASS
 ###################################################
+
 
 def parse_and_convert_metadata_from_filename(filename: str, silent: bool = False) -> SatImgDict:
     """
@@ -314,16 +316,16 @@ def parse_and_convert_metadata_from_filename(filename: str, silent: bool = False
         return {}
 
     # Else, if not silent, print what was read
-    for a in attrs.keys():
-        if attrs[a] is not None:
+    for k, v in attrs.items():
+        if v is not None:
             if not silent:
-                print("Setting " + a + " as " + str(attrs[a])+ " read from filename.")
+                print("Setting " + k + " as " + str(v) + " read from filename.")
 
     # And convert tile name to human-readable tile extent/size
-    supported_tile =  ["ASTGTM2", "SRTMGL1", "NASADEM", "TDM1"]
+    supported_tile = ["ASTGTM2", "SRTMGL1", "NASADEM", "TDM1"]
     if attrs["tile_name"] is not None and attrs["product"] is not None and attrs["product"] in supported_tile:
         ymin, xmin, yx_sizes, _ = parse_tile_attr_from_name(attrs["tile_name"], product=attrs["product"])
-        tile_attrs = {"xtile_min": xmin, "ytile_min": ymin, "xtile_size": yx_sizes[1], "ytile_size": yx_sizes[0]}
+        tile_attrs = SatImgDict(xtile_min=xmin, ytile_min=ymin, xtile_size=yx_sizes[1], ytile_size=yx_sizes[0])
         attrs.update(tile_attrs)
 
     return attrs
