@@ -1,5 +1,5 @@
 """
-Test functions for SatelliteImage class
+Test functions for metadata parsing from sensor, often satellite imagery.
 """
 
 import datetime
@@ -7,9 +7,7 @@ import datetime as dt
 import sys
 from io import StringIO
 
-import numpy as np
 import pytest
-import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
@@ -17,32 +15,10 @@ from geoutils import examples
 DO_PLOT = False
 
 
-class TestSatelliteImage:
+class TestSatImg:
+
     landsat_b4 = examples.get_path("everest_landsat_b4")
     aster_dem = examples.get_path("exploradores_aster_dem")
-
-    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
-    def test_init(self, example: str) -> None:
-        """
-        Test that inputs work properly in SatelliteImage class init
-        """
-
-        # from filename, checking option
-        img = gu.SatelliteImage(example, read_from_fn=False)
-        img = gu.SatelliteImage(example)
-        assert isinstance(img, gu.SatelliteImage)
-
-        # from SatelliteImage
-        img2 = gu.SatelliteImage(img)
-        assert isinstance(img2, gu.SatelliteImage)
-
-        # from Raster
-        r = gu.Raster(example)
-        img3 = gu.SatelliteImage(r)
-        assert isinstance(img3, gu.SatelliteImage)
-
-        assert img.raster_equal(img2)
-        assert img.raster_equal(img3)
 
     @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_silent(self, example: str) -> None:
@@ -50,8 +26,8 @@ class TestSatelliteImage:
         Test that the silent method does not return any output in console
         """
 
-        # let's capture stdout
-        # cf https://stackoverflow.com/questions/16571150/how-to-capture-stdout-output-from-a-python-function-call
+        # Let's capture stdout
+        # See https://stackoverflow.com/questions/16571150/how-to-capture-stdout-output-from-a-python-function-call
         class Capturing(list):  # type: ignore
             def __enter__(self):  # type: ignore
                 self._stdout = sys.stdout
@@ -64,81 +40,16 @@ class TestSatelliteImage:
                 sys.stdout = self._stdout
 
         with Capturing() as output1:
-            gu.SatelliteImage(example, silent=False)
+            gu.Raster(example, parse_sensor_metadata=True, silent=False)
 
-        # check the metadata reading outputs to console
+        # Check the metadata reading outputs to console
         assert len(output1) > 0
 
         with Capturing() as output2:
-            gu.SatelliteImage(example, silent=True)
+            gu.Raster(example, parse_sensor_metadata=True, silent=True)
 
-        # check nothing outputs to console
+        # Check nothing outputs to console
         assert len(output2) == 0
-
-    def test_add_sub(self) -> None:
-        """
-        Test that overloading of addition, subtraction and negation works for child classes as well.
-        """
-        # Create fake rasters with random values in 0-255 and dtype uint8
-        rng = np.random.default_rng(42)
-        width = height = 5
-        transform = rio.transform.from_bounds(0, 0, 1, 1, width, height)
-        satimg1 = gu.SatelliteImage.from_array(
-            rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
-        )
-        satimg2 = gu.SatelliteImage.from_array(
-            rng.integers(0, 255, (height, width), dtype="uint8"), transform=transform, crs=None
-        )
-
-        # Check that output type is same - other tests are in test_raster.py
-        sat_out = -satimg1
-        assert isinstance(sat_out, gu.SatelliteImage)
-
-        sat_out = satimg1 + satimg2
-        assert isinstance(sat_out, gu.SatelliteImage)
-
-        sat_out = satimg1 - satimg2  # type: ignore
-        assert isinstance(sat_out, gu.SatelliteImage)
-
-    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
-    def test_copy(self, example: str) -> None:
-        """
-        Test that the copy method works as expected for SatelliteImage. In particular
-        when copying r to r2:
-        - if r.data is modified and r copied, the updated data is copied
-        - if r is copied, r.data changed, r2.data should be unchanged
-        """
-        # Open dataset, update data and make a copy
-        r = gu.SatelliteImage(example)
-        r.data += 5
-        r2 = r.copy()
-
-        # Objects should be different (not pointing to the same memory)
-        assert r is not r2
-
-        # Check the object is a SatelliteImage
-        assert isinstance(r2, gu.SatelliteImage)
-
-        # Check all immutable attributes are equal
-        raster_attrs = [
-            attr for attr in gu.raster.raster._default_rio_attrs if attr not in ["driver", "filename", "name"]
-        ]
-        satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
-        # Using list directly available in class
-        attrs = raster_attrs + satimg_attrs
-        all_attrs = attrs + gu.raster.satimg.satimg_attrs
-        for attr in all_attrs:
-            assert r.__getattribute__(attr) == r2.__getattribute__(attr)
-
-        # Check data array
-        assert np.array_equal(r.data, r2.data, equal_nan=True)
-
-        # Check dataset_mask array
-        assert np.array_equal(r.data.mask, r2.data.mask)
-
-        # Check that if r.data is modified, it does not affect r2.data
-        r.data += 5
-        assert not np.array_equal(r.data, r2.data, equal_nan=True)
 
     def test_filename_parsing(self) -> None:
         """Test metadata parsing from filenames"""
@@ -155,7 +66,7 @@ class TestSatelliteImage:
             "NASADEM_HGT_n00e041.hgt",
         ]
         # Corresponding data, filled manually
-        satellites = ["TanDEM-X", "WorldView", "WorldView", "Terra", "IceBridge", "SRTM", "Terra", "SRTM", "SRTM"]
+        platform = ["TanDEM-X", "WorldView", "WorldView", "Terra", "IceBridge", "SRTM", "Terra", "SRTM", "SRTM"]
         sensors = ["TanDEM-X", "WV02", "WV02", "ASTER", "UAF-LS", "SRTM", "ASTER", "SRTM", "SRTM"]
         products = [
             "TDM1",
@@ -168,7 +79,7 @@ class TestSatelliteImage:
             "SRTMGL1",
             "NASADEM-HGT",
         ]
-        # we can skip the version, bit subjective...
+        # We can skip the version, bit subjective...
         tiles = ["N00E104", None, None, None, None, "06_01", "N00E108", "N00E015", "n00e041"]
         datetimes = [
             None,
@@ -185,11 +96,11 @@ class TestSatelliteImage:
         for names in copied_names:
             attrs = gu.raster.satimg.parse_metadata_from_fn(names)
             i = copied_names.index(names)
-            assert satellites[i] == attrs[0]
-            assert sensors[i] == attrs[1]
-            assert products[i] == attrs[2]
-            assert tiles[i] == attrs[4]
-            assert datetimes[i] == attrs[5]
+            assert platform[i] == attrs["platform"]
+            assert sensors[i] == attrs["sensor"]
+            assert products[i] == attrs["product"]
+            assert tiles[i] == attrs["tile_name"]
+            assert datetimes[i] == attrs["datetime"]
 
     def test_sw_tile_naming_parsing(self) -> None:
         # normal examples
@@ -203,12 +114,12 @@ class TestSatelliteImage:
         for latlon in test_latlon:
             assert gu.raster.satimg.latlon_to_sw_naming(latlon) == test_tiles[test_latlon.index(latlon)]
 
-        # check possible exceptions, rounded lat/lon belong to their southwest border
+        # Check possible exceptions, rounded lat/lon belong to their southwest border
         assert gu.raster.satimg.latlon_to_sw_naming((0, 0)) == "N00E000"
-        # those are the same point, should give same naming
+        # Those are the same point, should give same naming
         assert gu.raster.satimg.latlon_to_sw_naming((-90, 0)) == "S90E000"
         assert gu.raster.satimg.latlon_to_sw_naming((90, 0)) == "S90E000"
-        # same here
+        # Same here
         assert gu.raster.satimg.latlon_to_sw_naming((0, -180)) == "N00W180"
         assert gu.raster.satimg.latlon_to_sw_naming((0, 180)) == "N00W180"
 
@@ -248,7 +159,7 @@ class TestSatelliteImage:
     def test_parse_landsat(self) -> None:
         """Test the parsing of landsat metadata from name."""
 
-        # Landsat 1
+        # Landsat 1 example
         landsat1 = "LM10170391976031AAA01.tif"
         attrs1 = gu.raster.satimg.parse_landsat(landsat1)
 

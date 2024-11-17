@@ -65,6 +65,7 @@ from geoutils.raster.georeferencing import (
 )
 from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.raster.sampling import subsample_array
+from geoutils.raster.satimg import parse_and_convert_metadata_from_filename
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -348,6 +349,8 @@ class Raster:
         ),
         bands: int | list[int] | None = None,
         load_data: bool = False,
+        parse_sensor_metadata: bool = False,
+        silent: bool = True,
         downsample: Number = 1,
         nodata: int | float | None = None,
     ) -> None:
@@ -355,13 +358,11 @@ class Raster:
         Instantiate a raster from a filename or rasterio dataset.
 
         :param filename_or_dataset: Path to file or Rasterio dataset.
-
         :param bands: Band(s) to load into the object. Default loads all bands.
-
         :param load_data: Whether to load the array during instantiation. Default is False.
-
+        :param parse_sensor_metadata: Whether to parse sensor metadata from filename and similarly-named metadata files.
+        :param silent: Whether to parse metadata silently or with console output.
         :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
-
         :param nodata: Nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
         self._driver: str | None = None
@@ -505,6 +506,11 @@ class Raster:
         # Don't recognise the input, so stop here.
         else:
             raise TypeError("The filename argument is not recognised, should be a path or a Rasterio dataset.")
+
+        # Parse metadata and add to tags
+        if parse_sensor_metadata:
+            sensor_meta = parse_and_convert_metadata_from_filename(self.filename, silent=silent)
+            self.tags.update(sensor_meta)
 
     @property
     def count_on_disk(self) -> None | int:
@@ -1110,7 +1116,7 @@ class Raster:
         :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
         """
 
-        if not isinstance(other, Raster):  # TODO: Possibly add equals to SatelliteImage?
+        if not isinstance(other, Raster):
             raise NotImplementedError("Equality with other object than Raster not supported by raster_equal.")
 
         if strict_masked:

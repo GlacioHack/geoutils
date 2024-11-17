@@ -1,26 +1,44 @@
 """
-geoutils.satimg provides a toolset for working with satellite data.
+This module provides functionalities for parsing sensor metadata, most often related to satellite imagery.
 """
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 import datetime as dt
 import os
 import re
-import warnings
 from collections import abc
 from typing import Any
 
 import numpy as np
-import rasterio as rio
 
-from geoutils._typing import NDArrayNum
-from geoutils.raster import Raster, RasterType
+# Metadata tags used for all
+satimg_tags = ["platform", "sensor", "product", "version", "tile_name", "datetime"]
 
-lsat_sensor = {"C": "OLI/TIRS", "E": "ETM+", "T": "TM", "M": "MSS", "O": "OLI", "TI": "TIRS"}
+class SatImgDict(TypedDict, total=False):
+    """Keys and types of inputs associated with image metadata."""
 
+    # Metadata extract directly from filename
+    platform: str
+    sensor: str
+    product: str
+    version: str
+    tile_name: str
+    datetime: dt.datetime
+
+    # Derivative metadata
+    xtile_min: float
+    ytile_min: float
+    xtile_size: float
+    ytile_size: float
 
 def parse_landsat(gname: str) -> list[Any]:
+    """Parse Landsat metadata."""
+
+    lsat_sensor = {"C": "OLI/TIRS", "E": "ETM+", "T": "TM", "M": "MSS", "O": "OLI", "TI": "TIRS"}
+
     attrs: list[Any] = []
     if len(gname.split("_")[0]) > 15:
         attrs.append(f"Landsat {int(gname[2])}")
@@ -43,20 +61,34 @@ def parse_landsat(gname: str) -> list[Any]:
     return attrs
 
 
-def parse_metadata_from_fn(fname: str) -> list[Any]:
-    bname = os.path.splitext(os.path.basename(fname))[0]
+def parse_metadata_from_fn(filename: str) -> SatImgDict:
+    """
+    Parse metadata from filename: platform, sensor, product, version, tile name and datetime.
 
-    # assumes that the filename has a form XX_YY.ext
+    :param filename: Filename.
+    """
+
+    # Extract basename from full filename
+    bname = os.path.splitext(os.path.basename(filename))[0]
+
+    # The attributes correspond in order to: satellite, sensor, product, version, tile_name, datetime
+    tags = satimg_tags
+
+    # First, we assume that the filename has a form XX_YY.ext
     if "_" in bname:
         spl = bname.split("_")
 
-        # attrs corresponds to: satellite, sensor, product, version, tile_name, datetime
+        # Landsat
         if re.match("L[COTEM][0-9]{2}", spl[0]):
             attrs: tuple[Any, ...] | list[Any] = parse_landsat(bname)
         elif spl[0][0] == "L" and len(spl) == 1:
             attrs = parse_landsat(bname)
+
+        # Sentinel-2
         elif re.match("T[0-9]{2}[A-Z]{3}", spl[0]):
             attrs = ("Sentinel-2", "MSI", None, None, spl[0][1:], dt.datetime.strptime(spl[1], "%Y%m%dT%H%M%S"))
+
+        # ArcticDEM and REMA
         elif spl[0] == "SETSM":
             # For PGC DEMs: if the second part of the name starts with a "s", it is the new nomenclature
             # (starting at "s2s041") with the version first,
@@ -76,12 +108,18 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
                 None,
                 dt.datetime.strptime(spl[index + 2], "%Y%m%d"),
             )
+
+        # SPOT
         elif spl[0] == "SPOT":
             attrs = ("HFS", "SPOT5", None, None, None, dt.datetime.strptime(spl[2], "%Y%m%d"))
+
+        # IceBridge
         elif spl[0] == "IODEM3":
             attrs = ("IceBridge", "DMS", "IODEM3", None, None, dt.datetime.strptime(spl[1] + spl[2], "%Y%m%d%H%M%S"))
         elif spl[0] == "ILAKS1B":
             attrs = ("IceBridge", "UAF-LS", "ILAKS1B", None, None, dt.datetime.strptime(spl[1], "%Y%m%d"))
+
+        # ASTER L1A
         elif spl[0] == "AST" and spl[1] == "L1A":
             attrs = (
                 "Terra",
@@ -91,32 +129,43 @@ def parse_metadata_from_fn(fname: str) -> list[Any]:
                 None,
                 dt.datetime.strptime(bname.split("_")[2][3:], "%m%d%Y%H%M%S"),
             )
+
+        # ASTER GDEM
         elif spl[0] == "ASTGTM2":
             attrs = ("Terra", "ASTER", "ASTGTM2", "2", spl[1], None)
+
+        # NASADEM
         elif spl[0] == "NASADEM":
             attrs = ("SRTM", "SRTM", "NASADEM-" + spl[1], "1", spl[2], dt.datetime(year=2000, month=2, day=15))
+
+        # TanDEM-X
         elif spl[0] == "TDM1" and spl[1] == "DEM":
             attrs = ("TanDEM-X", "TanDEM-X", "TDM1", "1", spl[4], None)
+
+        # SRTM v4.1
         elif spl[0] == "srtm":
             attrs = ("SRTM", "SRTM", "SRTMv4.1", None, "_".join(spl[1:]), dt.datetime(year=2000, month=2, day=15))
         else:
             attrs = (None,) * 6
 
-    # if the form is only XX.ext (only the first versions of SRTM had a naming that... bad (simplified?))
-    elif os.path.splitext(os.path.basename(fname))[1] == ".hgt":
+    # Or, if the form is only XX.ext
+    # (Only the first versions of SRTM had a naming that... bad (simplified?))
+    elif os.path.splitext(os.path.basename(filename))[1] == ".hgt":
         attrs = (
             "SRTM",
             "SRTM",
             "SRTMGL1",
             "3",
-            os.path.splitext(os.path.basename(fname))[0],
+            os.path.splitext(os.path.basename(filename))[0],
             dt.datetime(year=2000, month=2, day=15),
         )
 
     else:
         attrs = (None,) * 6
 
-    return list(attrs)
+    dict_meta = {tags[i]: attrs[i] for i in range(len(tags))}
+
+    return dict_meta
 
 
 def parse_tile_attr_from_name(tile_name: str, product: str | None = None) -> tuple[float, float, tuple[int, int], int]:
@@ -207,11 +256,11 @@ def latlon_to_sw_naming(
     Convert latitude and longitude to widely used southwestern corner tile naming (originally for SRTMGL1)
     Can account for varying tile sizes, and a dependency with the latitude (e.g., TDX global DEM)
 
-    :param latlon: latitude and longitude
-    :param latlon_sizes: sizes of lat/lon tiles corresponding to latitude intervals
-    :param lat_lims: latitude intervals
+    :param latlon: Latitude and longitude.
+    :param latlon_sizes: Sizes of lat/lon tiles corresponding to latitude intervals.
+    :param lat_lims: Latitude intervals.
 
-    :returns: tile name
+    :returns: Tile name.
     """
 
     lon = latlon[1]
@@ -244,196 +293,37 @@ def latlon_to_sw_naming(
 
     return tile_name
 
+###################################################
+# MAIN FUNCTION THAT WILL BE CALLED BY RASTER CLASS
+###################################################
 
-satimg_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
+def parse_and_convert_metadata_from_filename(filename: str, silent: bool = False) -> SatImgDict:
+    """
+    Attempts to pull metadata (e.g., sensor, date information) from fname, and convert to human-usable format.
 
+    Sets platform, sensor, tile, datetime, and date attributes.
+    """
 
-class SatelliteImage(Raster):  # type: ignore
-    date: None | dt.datetime
+    # Get list of metadata
+    attrs = parse_metadata_from_fn(filename if filename is not None else "")
 
-    def __init__(
-        self,
-        filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile,
-        load_data: bool = True,
-        bands: int | list[int] | None = None,
-        read_from_fn: bool = True,
-        datetime: dt.datetime | None = None,
-        tile_name: str | None = None,
-        satellite: str | None = None,
-        sensor: str | None = None,
-        product: str | None = None,
-        version: str | None = None,
-        read_from_meta: bool = True,
-        fn_meta: str | None = None,
-        silent: bool = True,
-    ) -> None:
-        """
-        Load satellite data through the Raster class and parse additional attributes from filename or metadata.
+    # If no metadata was read, return empty dictionary here
+    if all(att is None for att in attrs.values()):
+        if not silent:
+            print("No metadata could be read from filename.")
+        return {}
 
-        :param filename_or_dataset: The filename of the dataset.
-        :param load_data: Load the raster data into the object. Default is True.
-        :param bands: The band(s) to load into the object. Default is to load all bands.
-        :param read_from_fn: Try to read metadata from the filename
-        :param datetime: Provide datetime attribute
-        :param tile_name: Provide tile name
-        :param satellite: Provide satellite name
-        :param sensor: Provide sensor name
-        :param product: Provide data product name
-        :param version: Provide data version
-        :param read_from_meta: Try to read metadata from known associated metadata files
-        :param fn_meta: Provide filename of associated metadata
-        :param silent: No informative output when trying to read metadata
-
-        :return: A SatelliteImage object (Raster subclass)
-        """
-
-        # If SatelliteImage is passed, simply point back to SatelliteImage
-        if isinstance(filename_or_dataset, SatelliteImage):
-            for key in filename_or_dataset.__dict__:
-                setattr(self, key, filename_or_dataset.__dict__[key])
-            return
-        # Else rely on parent Raster class options (including raised errors)
-        else:
-            super().__init__(filename_or_dataset, load_data=load_data, bands=bands)
-
-        # priority to user input
-        self._datetime = datetime
-        self._tile_name = tile_name
-        self._satellite = satellite
-        self._sensor = sensor
-        self._product = product
-        self._version = version
-
-        # trying to get metadata from separate metadata file
-        if read_from_meta and self.filename is not None and fn_meta is not None:
-            self.__parse_metadata_from_file(fn_meta)
-
-        # trying to get metadata from filename for the None attributes
-        if read_from_fn and self.filename is not None:
-            self.__parse_metadata_from_fn(silent=silent)
-
-        self.__get_date()
-
-    def __get_date(self) -> dt.datetime | None:  # type: ignore
-        """
-        Get date from datetime
-        :return:
-        """
-        if self.datetime is not None:
-            self.date = self.datetime.date()  # type: ignore
-        else:
-            self.date = None
-
-    def __parse_metadata_from_fn(self, silent: bool = False) -> None:
-        """
-        Attempts to pull metadata (e.g., sensor, date information) from fname, setting sensor, satellite,
-        tile, datetime, and date attributes.
-        """
-        fname = self.filename
-        name_attrs = ["satellite", "sensor", "product", "version", "tile_name", "datetime"]
-        attrs = parse_metadata_from_fn(fname if fname is not None else "")
-
-        if all(att is None for att in attrs):
+    # Else, if not silent, print what was read
+    for a in attrs.keys():
+        if attrs[a] is not None:
             if not silent:
-                print("No metadata could be read from filename.")
-            return
+                print("Setting " + a + " as " + str(attrs[a])+ " read from filename.")
 
-        for name in name_attrs:
-            attr = self.__getattribute__(name)
-            attr_fn = attrs[name_attrs.index(name)]
-            if attr is None and attr_fn is not None:
-                if not silent:
-                    print("From filename: setting " + name + " as " + str(attr_fn))
-                # Set hidden attribute first
-                setattr(self, name, attr_fn)
-            elif attr is not None and attrs[name_attrs.index(name)] is not None:
-                if not silent:
-                    print(
-                        "Leaving user input of "
-                        + str(attr)
-                        + " for attribute "
-                        + name
-                        + " despite reading "
-                        + str(attrs[name_attrs.index(name)])
-                        + "from filename"
-                    )
+    # And convert tile name to human-readable tile extent/size
+    supported_tile =  ["ASTGTM2", "SRTMGL1", "NASADEM", "TDM1"]
+    if attrs["tile_name"] is not None and attrs["product"] is not None and attrs["product"] in supported_tile:
+        ymin, xmin, yx_sizes, _ = parse_tile_attr_from_name(attrs["tile_name"], product=attrs["product"])
+        tile_attrs = {"xtile_min": xmin, "ytile_min": ymin, "xtile_size": yx_sizes[1], "ytile_size": yx_sizes[0]}
+        attrs.update(tile_attrs)
 
-    @property
-    def datetime(self) -> dt.datetime | None:
-        return self._datetime
-
-    @datetime.setter
-    def datetime(self, value: dt.datetime | None) -> None:
-        if isinstance(value, (dt.datetime, np.datetime64)) or value is None:
-            self._datetime = value
-        else:
-            raise ValueError("Datetime must be set with a python or NumPy datetime.")
-
-    @property
-    def satellite(self) -> str | None:
-        return self._satellite
-
-    @satellite.setter
-    def satellite(self, value: str | None) -> None:
-        if isinstance(value, str) or value is None:
-            self._satellite = value
-        else:
-            raise ValueError("Satellite must be set with a string.")
-
-    @property
-    def sensor(self) -> str | None:
-        return self._sensor
-
-    @sensor.setter
-    def sensor(self, value: str | None) -> None:
-        if isinstance(value, str) or value is None:
-            self._sensor = value
-        else:
-            raise ValueError("Sensor must be set with a string.")
-
-    @property
-    def product(self) -> str | None:
-        return self._product
-
-    @product.setter
-    def product(self, value: str | None) -> None:
-        if isinstance(value, str) or value is None:
-            self._product = value
-        else:
-            raise ValueError("Product must be set with a string.")
-
-    @property
-    def version(self) -> str | None:
-        return self._version
-
-    @version.setter
-    def version(self, value: str | None) -> None:
-        if isinstance(value, str) or value is None:
-            self._version = value
-        else:
-            raise ValueError("Version must be set with a string.")
-
-    @property
-    def tile_name(self) -> str | None:
-        return self._tile_name
-
-    @tile_name.setter
-    def tile_name(self, value: str | None) -> None:
-        if isinstance(value, str) or value is None:
-            self._tile_name = value
-        else:
-            raise ValueError("Tile name must be set with a string.")
-
-    def __parse_metadata_from_file(self, fn_meta: str | None) -> None:
-        warnings.warn(f"Parse metadata from file not implemented. {fn_meta}")
-
-        return None
-
-    def copy(self, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> SatelliteImage:
-        new_satimg = super().copy(new_array=new_array, cast_nodata=cast_nodata)  # type: ignore
-        # all objects here are immutable so no need for a copy method (string and datetime)
-        # satimg_attrs = ['satellite', 'sensor', 'product', 'version', 'tile_name', 'datetime'] #taken outside of class
-        for attrs in satimg_attrs:
-            setattr(new_satimg, attrs, getattr(self, attrs))
-
-        return new_satimg  # type: ignore
+    return attrs

@@ -1,4 +1,5 @@
 #
+#
 # Configuration file for the Sphinx documentation builder.
 #
 import glob
@@ -124,7 +125,6 @@ plot_formats = [(".png", 500)]
 inheritance_alias = {
     "geoutils.raster.raster.Raster": "geoutils.Raster",
     "geoutils.raster.raster.Mask": "geoutils.Mask",
-    "geoutils.raster.satimg.SatelliteImage": "geoutils.SatelliteImage",
     "geoutils.vector.Vector": "geoutils.Vector",
     "xdem.dem.DEM": "xdem.DEM",
 }

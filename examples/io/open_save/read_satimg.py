@@ -2,7 +2,7 @@
 Parsing image metadata
 ======================
 
-This example demonstrates the instantiation of an image through :class:`~geoutils.SatelliteImage`.
+This example demonstrates the instantiation of a raster while parsing image sensor metadata.
 """
 
 import geoutils as gu
@@ -15,9 +15,9 @@ import os
 print(os.path.basename(filename_geoimg))
 
 # %%
-# We open it as a geo-image, un-silencing the attribute retrieval to see the parsed data.
-img = gu.SatelliteImage(filename_geoimg, silent=False)
+# We open it as a raster with the option to parse metadata, un-silencing the attribute retrieval to see it printed.
+img = gu.Raster(filename_geoimg, parse_sensor_metadata=True, silent=False)
 
 # %%
-# We have now retrieved the metadata. For the rest, the :class:`~geoutils.SatelliteImage` is a subclass of :class:`~geoutils.Raster`, and behaves similarly.
-img
+# We have now retrieved the metadata, stored in the :attr:`geoutils.Raster.tags` attribute.
+img.tags

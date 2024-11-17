@@ -203,36 +203,6 @@ And reverse operations.
     Raster.__array_function__
 ```
 
-## SatelliteImage
-
-```{eval-rst}
-.. minigallery:: geoutils.SatelliteImage
-      :add-heading:
-```
-
-### Opening a file
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    SatelliteImage
-```
-
-### Satellite image metadata
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    SatelliteImage.datetime
-    SatelliteImage.tile_name
-    SatelliteImage.satellite
-    SatelliteImage.sensor
-    SatelliteImage.product
-    SatelliteImage.version
-```
-
 ## Mask
 
 ```{eval-rst}
