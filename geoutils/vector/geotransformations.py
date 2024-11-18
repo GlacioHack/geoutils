@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import os
-
 import geopandas as gpd
-import pyogrio
 import rasterio as rio
 from rasterio.crs import CRS
 
