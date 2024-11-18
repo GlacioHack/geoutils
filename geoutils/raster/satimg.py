@@ -331,9 +331,9 @@ def parse_and_convert_metadata_from_filename(filename: str, silent: bool = False
     return attrs
 
 
-def convert_sensor_tags_from_str(input_tags: dict[str, str]) -> SatImgDict:
+def decode_sensor_metadata(input_tags: dict[str, str]) -> SatImgDict:
     """
-    Update tag values from their string read on disk
+    Decode sensor metadata from their string values saved on disk in Raster.tags.
 
     :param input_tags:
     :return:

@@ -66,7 +66,7 @@ from geoutils.raster.georeferencing import (
 from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.raster.sampling import subsample_array
 from geoutils.raster.satimg import (
-    convert_sensor_tags_from_str,
+    decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.vector.vector import Vector
@@ -450,7 +450,7 @@ class Raster:
                 self.tags.update(ds.tags())
 
                 # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
-                converted_tags = convert_sensor_tags_from_str(self.tags)
+                converted_tags = decode_sensor_metadata(self.tags)
                 self.tags.update(converted_tags)
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
