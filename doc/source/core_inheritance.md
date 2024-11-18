@@ -21,10 +21,10 @@ implemented in GeoUtils.
 ## Overview of {class}`~geoutils.Raster` inheritance
 
 Below is a diagram showing current {class}`~geoutils.Raster` inheritance, which extends into other packages such as [xDEM](https://xdem.readthedocs.io/)
-for analyzing digital elevation models.
+for analyzing digital elevation models. The {class}`~geoutils.Mask` implements overloaded methods specific to binary raster masks.
 
 ```{eval-rst}
-.. inheritance-diagram:: geoutils.raster.raster geoutils.raster.satimg
+.. inheritance-diagram:: geoutils.raster.raster xdem.dem
     :top-classes: geoutils.raster.raster.Raster
 ```
 
