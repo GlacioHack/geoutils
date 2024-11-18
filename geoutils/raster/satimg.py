@@ -28,10 +28,10 @@ class SatImgDict(TypedDict, total=False):
     datetime: dt.datetime
 
     # Derivative metadata
-    xtile_min: float
-    ytile_min: float
-    xtile_size: float
-    ytile_size: float
+    tile_xmin: float
+    tile_ymin: float
+    tile_xsize: float
+    tile_ysize: float
 
 
 def parse_landsat(gname: str) -> list[Any]:
@@ -325,7 +325,30 @@ def parse_and_convert_metadata_from_filename(filename: str, silent: bool = False
     supported_tile = ["ASTGTM2", "SRTMGL1", "NASADEM", "TDM1"]
     if attrs["tile_name"] is not None and attrs["product"] is not None and attrs["product"] in supported_tile:
         ymin, xmin, yx_sizes, _ = parse_tile_attr_from_name(attrs["tile_name"], product=attrs["product"])
-        tile_attrs = SatImgDict(xtile_min=xmin, ytile_min=ymin, xtile_size=yx_sizes[1], ytile_size=yx_sizes[0])
+        tile_attrs = SatImgDict(tile_xmin=xmin, tile_ymin=ymin, tile_xsize=yx_sizes[1], tile_ysize=yx_sizes[0])
         attrs.update(tile_attrs)
 
     return attrs
+
+
+def convert_sensor_tags_from_str(input_tags: dict[str, str]) -> SatImgDict:
+    """
+    Update tag values from their string read on disk
+
+    :param input_tags:
+    :return:
+    """
+
+    converted_sensor_tags = SatImgDict()
+    for tag in satimg_tags:
+        if tag in input_tags:
+            if tag == "datetime":
+                as_dt = dt.datetime.strptime(input_tags[tag], "%Y-%m-%d %H:%M:%S")
+                converted_sensor_tags.update({tag: as_dt})  # type: ignore
+            elif tag in ["tile_xmin", "tile_ymin", "tile_xsize", "tile_ymin"]:
+                converted_sensor_tags.update({tag: float(input_tags[tag])})  # type: ignore
+            elif isinstance(input_tags[tag], str) and input_tags[tag] == "None":
+                converted_sensor_tags.update({tag: None})  # type: ignore
+                continue
+
+    return converted_sensor_tags

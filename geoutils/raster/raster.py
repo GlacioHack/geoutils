@@ -65,7 +65,10 @@ from geoutils.raster.georeferencing import (
 )
 from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.raster.sampling import subsample_array
-from geoutils.raster.satimg import parse_and_convert_metadata_from_filename
+from geoutils.raster.satimg import (
+    convert_sensor_tags_from_str,
+    parse_and_convert_metadata_from_filename,
+)
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -445,6 +448,10 @@ class Raster:
                 self._name = ds.name
                 self._driver = ds.driver
                 self.tags.update(ds.tags())
+
+                # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
+                converted_tags = convert_sensor_tags_from_str(self.tags)
+                self.tags.update(converted_tags)
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
@@ -2485,7 +2492,7 @@ class Raster:
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary,
             e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
-        :param metadata: Pairs of metadata key, value.
+        :param metadata: Pairs of metadata to save to disk, in addition to existing metadata in self.tags.
         :param gcps: List of gcps, each gcp being [row, col, x, y, (z)].
         :param gcps_crs: CRS of the GCPS.
 
@@ -2495,7 +2502,10 @@ class Raster:
         if co_opts is None:
             co_opts = {}
         if metadata is None:
-            metadata = {}
+            metadata = self.tags
+        else:
+            tags = self.tags.copy()
+            metadata = tags.update(metadata)
         if gcps is None:
             gcps = []
 

@@ -2,15 +2,20 @@
 Test functions for metadata parsing from sensor, often satellite imagery.
 """
 
+from __future__ import annotations
+
 import datetime
 import datetime as dt
+import os
 import sys
+import tempfile
 from io import StringIO
 
 import pytest
 
 import geoutils as gu
 from geoutils import examples
+from geoutils.raster.satimg import satimg_tags
 
 DO_PLOT = False
 
@@ -19,6 +24,20 @@ class TestSatImg:
 
     landsat_b4 = examples.get_path("everest_landsat_b4")
     aster_dem = examples.get_path("exploradores_aster_dem")
+
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    def test_init(self, example: str) -> None:
+        """Test that the sensor reading through Raster initialisation works."""
+
+        # Load with parse sensor metadata, it should write metadata in the tags
+        rast = gu.Raster(example, parse_sensor_metadata=True)
+        for tag in satimg_tags:
+            assert tag in rast.tags.keys()
+
+        # And that otherwise it does not
+        rast = gu.Raster(example, parse_sensor_metadata=False)
+        for tag in satimg_tags:
+            assert tag not in rast.tags.keys()
 
     @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_silent(self, example: str) -> None:
@@ -51,12 +70,28 @@ class TestSatImg:
         # Check nothing outputs to console
         assert len(output2) == 0
 
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    def test_save_tags(self, example: str) -> None:
+        """Check that the metadata read is saved in tags of raster metadata."""
+
+        rast = gu.Raster(example, parse_sensor_metadata=True)
+
+        # Temporary folder
+        temp_dir = tempfile.TemporaryDirectory()
+
+        # Save file to temporary file, with defaults opts
+        temp_file = os.path.join(temp_dir.name, "test.tif")
+        rast.save(temp_file)
+        saved = gu.Raster(temp_file)
+
+        assert saved.tags == rast.tags
+
     def test_filename_parsing(self) -> None:
         """Test metadata parsing from filenames"""
 
         copied_names = [
             "TDM1_DEM__30_N00E104_DEM.tif",
-            "SETSM_WV02_20141026_1030010037D17F00_10300100380B4000_mosaic5_2m_v3.0_dem.tif",
+            "SETSM_WV02_20141026_ex1030010037D17F00_10300100380B4000_mosaic5_2m_v3.0_dem.tif",
             "SETSM_s2s041_WV02_20150615_10300100443C2D00_1030010043373000_seg1_2m_dem.tif",
             "AST_L1A_00303132015224418_final.tif",
             "ILAKS1B_20190928_271_Gilkey-DEM.tif",
