@@ -2501,11 +2501,9 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
-        if metadata is None:
-            metadata = self.tags
-        else:
-            tags = self.tags.copy()
-            metadata = tags.update(metadata)
+        meta = self.tags if not None else {}
+        if metadata is not None:
+            meta.update(metadata)
         if gcps is None:
             gcps = []
 
@@ -2562,7 +2560,7 @@ class Raster:
             dst.write(save_data)
 
             # Add metadata (tags in rio)
-            dst.update_tags(**metadata)
+            dst.update_tags(**meta)
 
             # Save GCPs
             if not isinstance(gcps, list):
