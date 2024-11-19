@@ -1,5 +1,5 @@
 """
-Parsing image metadata
+Parsing sensor metadata
 ======================
 
 This example demonstrates the instantiation of a raster while parsing image sensor metadata.
