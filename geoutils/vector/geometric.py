@@ -41,16 +41,16 @@ def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float) -> gu.Vector:
 
 
 def _buffer_without_overlap(
-    gdf: gpd.GeoDataFrame, buffer_size: int | float, metric: bool = True, plot: bool = False
+    ds: gpd.GeoDataFrame, buffer_size: int | float, metric: bool = True, plot: bool = False
 ) -> gu.Vector:
     """See Vector.buffer_without_overlap() for details."""
 
     # Project in local UTM if metric is True
     if metric:
-        crs_utm_ups = _get_utm_ups_crs(df=gdf)
-        gdf = gdf.to_crs(crs=crs_utm_ups)
+        crs_utm_ups = _get_utm_ups_crs(df=ds)
+        gdf = ds.to_crs(crs=crs_utm_ups)
     else:
-        gdf = gdf
+        gdf = ds
 
     # Dissolve all geometries into one
     merged = gdf.dissolve()
