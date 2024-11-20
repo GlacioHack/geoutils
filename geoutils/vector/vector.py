@@ -1057,7 +1057,7 @@ class Vector:
     @overload
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[False] = False,
@@ -1066,7 +1066,7 @@ class Vector:
     @overload
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[True],
@@ -1075,7 +1075,7 @@ class Vector:
     @overload
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: bool = False,
@@ -1083,7 +1083,7 @@ class Vector:
 
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         inplace: bool = False,
     ) -> Vector | None:
@@ -1096,9 +1096,9 @@ class Vector:
 
         To reproject a Vector with different source bounds, first run Vector.crop().
 
-        :param ref: A reference raster or vector whose CRS to use as a reference for reprojection.
-            Can be provided as a raster, vector, Rasterio dataset, GeoPandas dataframe, or path to the file.
-        :param crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
+        :param ref: Reference raster or vector whose CRS to use as a reference for reprojection.
+            Can be provided as a raster, vector, Rasterio dataset, or GeoPandas dataframe.
+        :param crs: Specify the coordinate reference system or EPSG to reproject to. If dst_ref not set,
             defaults to self.crs.
         :param inplace: Whether to update the vector in-place.
 

@@ -10,5 +10,4 @@ raster_class
 vector_class
 pointcloud_class
 mask_class
-satimg_class
 ```
