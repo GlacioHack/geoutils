@@ -111,7 +111,7 @@ def _buffer_without_overlap(
 
     # Reverse-project to the original CRS if metric is True
     if metric:
-        merged_voronoi = merged_voronoi.to_crs(crs=gdf.crs)
+        merged_voronoi = merged_voronoi.to_crs(crs=ds.crs)
 
     return gu.Vector(merged_voronoi)
 
