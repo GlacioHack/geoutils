@@ -371,7 +371,7 @@ class Raster:
         self._driver: str | None = None
         self._name: str | None = None
         self.filename: str | None = None
-        self.tags: dict[str, Any] = {}
+        self._tags: dict[str, Any] = {}
 
         self._data: MArrayNum | None = None
         self._transform: affine.Affine | None = None
@@ -394,6 +394,7 @@ class Raster:
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
 
+            self.tags = filename_or_dataset["tags"]
             # To have "area_or_point" user input go through checks of the set() function without shifting the transform
             self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
 
@@ -411,7 +412,7 @@ class Raster:
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
 
             for key in filename_or_dataset:
-                if key in ["data", "transform", "crs", "nodata", "area_or_point"]:
+                if key in ["data", "transform", "crs", "nodata", "area_or_point", "tags"]:
                     continue
                 setattr(self, key, filename_or_dataset[key])
             return
@@ -447,11 +448,11 @@ class Raster:
                 self._nodata = ds.nodata
                 self._name = ds.name
                 self._driver = ds.driver
-                self.tags.update(ds.tags())
+                self._tags.update(ds.tags())
 
                 # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
                 converted_tags = decode_sensor_metadata(self.tags)
-                self.tags.update(converted_tags)
+                self._tags.update(converted_tags)
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
@@ -517,7 +518,7 @@ class Raster:
         # Parse metadata and add to tags
         if parse_sensor_metadata and self.filename is not None:
             sensor_meta = parse_and_convert_metadata_from_filename(self.filename, silent=silent)
-            self.tags.update(sensor_meta)
+            self._tags.update(sensor_meta)
 
     @property
     def count_on_disk(self) -> None | int:
@@ -1812,6 +1813,25 @@ class Raster:
 
         new_crs = CRS.from_user_input(value=new_crs)
         self._crs = new_crs
+
+    @property
+    def tags(self) -> dict[str, Any]:
+        """
+        Metadata tags of the raster.
+
+        :returns: Dictionary of raster metadata, potentially including sensor information.
+        """
+        return self._tags
+
+    @tags.setter
+    def tags(self, new_tags: dict[str, Any] | None) -> None:
+        """
+        Set the metadata tags of the raster.
+        """
+
+        if new_tags is None:
+            new_tags = {}
+        self._tags = new_tags
 
     def set_mask(self, mask: NDArrayBool | Mask) -> None:
         """
@@ -3853,6 +3873,7 @@ class Mask(Raster):
                 "crs": self.crs,
                 "nodata": self.nodata,
                 "area_or_point": self.area_or_point,
+                "tags": self.tags,
             }
         )
         return raster.proximity(

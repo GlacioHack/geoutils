@@ -37,7 +37,7 @@ documentation.
 
 (api-raster-attrs)=
 
-### Unique attributes
+### Main attributes
 
 ```{eval-rst}
 .. autosummary::
@@ -60,16 +60,25 @@ documentation.
     Raster.height
     Raster.width
     Raster.count
-    Raster.count_on_disk
     Raster.bands
-    Raster.bands_on_disk
     Raster.res
     Raster.bounds
     Raster.dtype
+```
+
+### Other attributes
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.count_on_disk
+    Raster.bands_on_disk
     Raster.is_loaded
     Raster.is_modified
     Raster.name
     Raster.driver
+    Raster.tags
 ```
 
 (api-geo-handle)=
@@ -259,7 +268,7 @@ And reverse operations.
     Vector.info
 ```
 
-### Unique attributes
+### Main attributes
 
 ```{eval-rst}
 .. autosummary::
