@@ -39,6 +39,13 @@ def open_raster(filename: str, **kwargs):
 
 @xr.register_dataarray_accessor("rst")
 class RasterAccessor(RasterBase):
+    """
+    This class defines the Xarray accessor 'rst' for rasters.
+
+    Most attributes and functionalities are inherited from the RasterBase class (also parent of the Raster class).
+    Only methods specific to the functioning of the Xarray accessor live in this class: mostly initialization, I/O or
+    copying.
+    """
     def __init__(self, xarray_obj: xr.DataArray):
 
         super().__init__()
@@ -85,18 +92,11 @@ class RasterAccessor(RasterBase):
 
         return out_ds
 
-
-
     def to_raster(self) -> RasterBase:
         """
         Convert to Raster object.
+        # TODO: Rioxarray uses "to_raster" to write to file... Change naming?
 
         :return:
         """
         return gu.Raster.from_array(data=self._obj.data, crs=self.crs, transform=self.transform, nodata=self.nodata)
-
-
-@xr.register_dataarray_accessor("sat")
-class SatelliteImageAccessor(RasterAccessor):
-    def __init__(self, xarray_obj: xr.DataArray):
-        self._obj = xarray_obj
