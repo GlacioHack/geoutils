@@ -241,10 +241,10 @@ import os
 os.remove("myaoi.gpkg")
 ```
 
-## Parsing metadata with {class}`~geoutils.SatelliteImage`
+## Parsing sensor metadata
 
-In our case, `rast` would be better opened using the {class}`~geoutils.Raster` object {class}`~geoutils.SatelliteImage` instead, which tentatively parses
-metadata recognized from the filename or auxiliary files.
+In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a `{class}`~geoutils.Raster`
+, which tentatively parses metadata recognized from the filename or auxiliary files.
 
 ```{code-cell} ipython3
 # Name of the image we used
@@ -254,7 +254,7 @@ print(os.path.basename(filename_rast))
 
 ```{code-cell} ipython3
 # Open while parsing metadata
-rast = gu.SatelliteImage(filename_rast, silent=False)
+rast = gu.Raster(filename_rast, parse_sensor_metadata=True, silent=False)
 ```
 
 ```{admonition} Wrap-up

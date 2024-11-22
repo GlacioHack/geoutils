@@ -38,6 +38,13 @@ from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
 )
+
+from geoutils.raster.geotransformations import _crop, _reproject, _translate
+from geoutils.raster.sampling import subsample_array
+from geoutils.raster.satimg import (
+    decode_sensor_metadata,
+    parse_and_convert_metadata_from_filename,
+)
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -319,6 +326,8 @@ class Raster(RasterBase):
         ),
         bands: int | list[int] | None = None,
         load_data: bool = False,
+        parse_sensor_metadata: bool = False,
+        silent: bool = True,
         downsample: Number = 1,
         force_nodata: int | float | None = None,
     ) -> None:
@@ -326,13 +335,11 @@ class Raster(RasterBase):
         Instantiate a raster from a filename or rasterio dataset.
 
         :param filename_or_dataset: Path to file or Rasterio dataset.
-
         :param bands: Band(s) to load into the object. Default loads all bands.
-
         :param load_data: Whether to load the array during instantiation. Default is False.
-
+        :param parse_sensor_metadata: Whether to parse sensor metadata from filename and similarly-named metadata files.
+        :param silent: Whether to parse metadata silently or with console output.
         :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
-
         :param force_nodata: Force nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
 
@@ -346,6 +353,7 @@ class Raster(RasterBase):
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
 
+            self.tags = filename_or_dataset["tags"]
             # To have "area_or_point" user input go through checks of the set() function without shifting the transform
             self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
 
@@ -363,7 +371,7 @@ class Raster(RasterBase):
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
 
             for key in filename_or_dataset:
-                if key in ["data", "transform", "crs", "nodata", "area_or_point"]:
+                if key in ["data", "transform", "crs", "nodata", "area_or_point", "tags"]:
                     continue
                 setattr(self, key, filename_or_dataset[key])
             return
@@ -399,7 +407,11 @@ class Raster(RasterBase):
                 self._nodata = ds.nodata
                 self._name = ds.name
                 self._driver = ds.driver
-                self.tags.update(ds.tags())
+                self._tags.update(ds.tags())
+
+                # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
+                converted_tags = decode_sensor_metadata(self.tags)
+                self._tags.update(converted_tags)
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
@@ -461,6 +473,11 @@ class Raster(RasterBase):
         # Don't recognise the input, so stop here.
         else:
             raise TypeError("The filename argument is not recognised, should be a path or a Rasterio dataset.")
+
+        # Parse metadata and add to tags
+        if parse_sensor_metadata and self.filename is not None:
+            sensor_meta = parse_and_convert_metadata_from_filename(self.filename, silent=silent)
+            self._tags.update(sensor_meta)
 
     def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
         """
@@ -1637,7 +1654,7 @@ class Raster(RasterBase):
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary,
             e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
-        :param metadata: Pairs of metadata key, value.
+        :param metadata: Pairs of metadata to save to disk, in addition to existing metadata in self.tags.
         :param gcps: List of gcps, each gcp being [row, col, x, y, (z)].
         :param gcps_crs: CRS of the GCPS.
 
@@ -1646,8 +1663,9 @@ class Raster(RasterBase):
 
         if co_opts is None:
             co_opts = {}
-        if metadata is None:
-            metadata = {}
+        meta = self.tags if not None else {}
+        if metadata is not None:
+            meta.update(metadata)
         if gcps is None:
             gcps = []
 
@@ -1704,7 +1722,7 @@ class Raster(RasterBase):
             dst.write(save_data)
 
             # Add metadata (tags in rio)
-            dst.update_tags(**metadata)
+            dst.update_tags(**meta)
 
             # Save GCPs
             if not isinstance(gcps, list):
@@ -2271,6 +2289,7 @@ class Mask(Raster):
                 "crs": self.crs,
                 "nodata": self.nodata,
                 "area_or_point": self.area_or_point,
+                "tags": self.tags,
             }
         )
         return raster.proximity(

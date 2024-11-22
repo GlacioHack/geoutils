@@ -74,7 +74,7 @@ class RasterBase:
         self._driver: str | None = None
         self._name: str | None = None
         self.filename: str | None = None
-        self.tags: dict[str, Any] = {}
+        self._tags: dict[str, Any] = {}
         self._bands_loaded: int | tuple[int, ...] | None = None
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_bands: tuple[int] | None = None
@@ -395,6 +395,28 @@ class RasterBase:
         :return: None.
         """
         self.set_area_or_point(new_area_or_point=new_area_or_point)
+
+    @property
+    def tags(self) -> dict[str, Any]:
+        """
+        Metadata tags of the raster.
+
+        :returns: Dictionary of raster metadata, potentially including sensor information.
+        """
+        if self._is_xr:
+            return self._obj.attrs
+        else:
+            return self._tags
+
+    @tags.setter
+    def tags(self, new_tags: dict[str, Any] | None) -> None:
+        """
+        Set the metadata tags of the raster.
+        """
+
+        if new_tags is None:
+            new_tags = {}
+        self._tags = new_tags
 
     @property
     def is_loaded(self) -> bool:

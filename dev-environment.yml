@@ -32,6 +32,7 @@ dependencies:
   - pylint
   - netcdf4  # To write synthetic data with chunksizes
   - dask-memusage
+  - pre-commit
 
   # Doc dependencies
   - sphinx

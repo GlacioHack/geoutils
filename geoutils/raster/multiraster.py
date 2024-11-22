@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
-from geoutils.raster.array import _get_array_and_mask
+from geoutils.raster.array import get_array_and_mask
 from geoutils.raster.geotransformations import _resampling_method_from_str
 from geoutils.raster.raster import RasterType, _default_nodata
 
@@ -194,7 +194,7 @@ def stack_rasters(
         # Optionally calculate difference
         if diff:
             diff_to_ref = (reference_raster.data - reprojected_raster.data).squeeze()
-            diff_to_ref, _ = _get_array_and_mask(diff_to_ref)
+            diff_to_ref, _ = get_array_and_mask(diff_to_ref)
             data.append(diff_to_ref)
         else:
             # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())

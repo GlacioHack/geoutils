@@ -89,7 +89,7 @@ class TestClassVsAccessorConsistency:
 
     # Test common attributes
     attributes = ["crs", "transform", "nodata", "area_or_point", "res", "count", "height", "width", "footprint",
-                  "shape", "bands", "indexes", "is_xr", "is_loaded"]
+                  "shape", "bands", "indexes", "_is_xr", "is_loaded"]
 
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("attr", attributes)  # type: ignore
@@ -109,7 +109,7 @@ class TestClassVsAccessorConsistency:
         output_ds = getattr(getattr(ds, "rst"), attr)
 
         # Assert equality
-        if attr != "is_xr":  # Only attribute that is (purposely) not the same, but the opposite
+        if attr != "_is_xr":  # Only attribute that is (purposely) not the same, but the opposite
             assert output_equal(output_raster, output_ds)
         else:
             assert output_raster != output_ds

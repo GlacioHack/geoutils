@@ -172,6 +172,7 @@ class TestGeometric:
         # Output should be of same size as input and same geometry type
         assert len(buffer.ds) == len(two_squares.ds)
         assert np.all(buffer.ds.geometry.geom_type == two_squares.ds.geometry.geom_type)
+        assert buffer.crs == two_squares.crs
 
         # Extract individual geometries
         polys = []

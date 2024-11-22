@@ -1009,7 +1009,7 @@ class TestRaster:
 
         # When passing the new array as a NaN ndarray, only the valid data is equal, because masked data is NaN in one
         # case, and -9999 in the other
-        r_arr = gu.raster.array._get_array_and_mask(r)[0]
+        r_arr = gu.raster.array.get_array_and_mask(r)[0]
         r2 = r.copy(new_array=r_arr)
         assert np.ma.allequal(r.data, r2.data)
         # If a nodata value exists, and we update the NaN pixels to be that nodata value, then the two Rasters should
@@ -2192,11 +2192,6 @@ class TestArithmetic:
         area_or_point="Point",
     )
 
-    # Tests with child class
-    satimg = gu.SatelliteImage.from_array(
-        rng.integers(1, 255, (height, width)).astype("float32"), transform=transform, crs=None
-    )
-
     def test_raster_equal(self) -> None:
         """
         Test that raster_equal() works as expected.
@@ -2335,7 +2330,6 @@ class TestArithmetic:
         r1_nodata = self.r1_nodata
         r2 = self.r2
         r2_zero = self.r2_zero
-        satimg = self.satimg
         rng = np.random.default_rng(42)
         array = rng.integers(1, 255, (self.height, self.width)).astype("float64")
         floatval = 3.14
@@ -2423,10 +2417,6 @@ class TestArithmetic:
             assert r3.nodata is None
         else:
             assert r3.nodata == _default_nodata(dtype)
-
-        # Test with child class
-        r3 = getattr(satimg, op)(intval)
-        assert isinstance(r3, gu.SatelliteImage)
 
     reflective_ops = [["__add__", "__radd__"], ["__mul__", "__rmul__"]]
 

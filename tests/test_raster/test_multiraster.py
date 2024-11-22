@@ -144,11 +144,6 @@ def images_different_crs():  # type: ignore
 
 
 @pytest.fixture
-def sat_images():  # type: ignore
-    return RealImageStack("everest_landsat_b4", cls=gu.SatelliteImage)
-
-
-@pytest.fixture
 def images_3d():  # type: ignore
     return RealImageStack("everest_landsat_rgb")
 
@@ -163,7 +158,6 @@ class TestMultiRaster:
         "rasters",
         [
             pytest.lazy_fixture("images_1d"),
-            pytest.lazy_fixture("sat_images"),
             pytest.lazy_fixture("images_different_crs"),
             pytest.lazy_fixture("images_3d"),
             pytest.lazy_fixture("images_nodata_zero"),

@@ -4,6 +4,6 @@ from geoutils.raster.georeferencing import *  # noqa
 from geoutils.raster.geotransformations import *  # noqa
 from geoutils.raster.multiraster import *  # noqa
 from geoutils.raster.sampling import *  # noqa
-from geoutils.raster.satimg import SatelliteImage  # noqa
+from geoutils.raster.satimg import *  # noqa
 
 __all__ = ["RasterType", "Raster"]

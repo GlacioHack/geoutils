@@ -53,14 +53,8 @@ class TestGeotransformations:
         with pytest.raises(ValueError, match=re.escape("Either of `ref` or `crs` must be set. Not both.")):
             v0.reproject()
             v0.reproject(ref=r0, crs=32617)
-        # If the path provided does not exist
-        with pytest.raises(ValueError, match=re.escape("Reference raster or vector path does not exist.")):
-            v0.reproject(ref="tmp.lol")
-        # If it exists but cannot be opened by rasterio or fiona
-        with pytest.raises(ValueError, match=re.escape("Could not open raster or vector with rasterio or pyogrio.")):
-            v0.reproject(ref="geoutils/examples.py")
         # If input of wrong type
-        with pytest.raises(TypeError, match=re.escape("Type of ref must be string path to file, Raster or Vector.")):
+        with pytest.raises(TypeError, match=re.escape("Type of ref must be a raster or vector.")):
             v0.reproject(ref=10)  # type: ignore
 
     test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
