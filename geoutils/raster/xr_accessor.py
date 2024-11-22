@@ -47,6 +47,9 @@ class RasterAccessor(RasterBase):
     copying.
     """
     def __init__(self, xarray_obj: xr.DataArray):
+        """
+        Instantiate the raster accessor.
+        """
 
         super().__init__()
 
