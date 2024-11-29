@@ -91,6 +91,6 @@ def _grid_pointcloud(
     aligned_dem = np.flip(aligned_dem, axis=0)
 
     # 3/ Derive output transform from input grid
-    transform_from_coords = rio.transform.from_origin(grid_coords[0][0], grid_coords[0][1], res_x, res_y)
+    transform_from_coords = rio.transform.from_origin(min(grid_coords[0]), max(grid_coords[1]), res_x, res_y)
 
     return aligned_dem, transform_from_coords

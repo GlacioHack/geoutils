@@ -1,14 +1,15 @@
 """Module for PointCloud class."""
 from __future__ import annotations
 
+import os.path
 import warnings
-from typing import Any, Iterable, Literal
+from typing import Iterable, Literal
 import pathlib
 
 from pyproj import CRS
 import numpy as np
-import pandas as pd
 import geopandas as gpd
+from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
@@ -22,39 +23,59 @@ except ImportError:
     has_laspy = False
 
 
-def _read_pdal(filename: str, **kwargs: Any) -> gpd.GeoDataFrame:
-    """Read a point cloud dataset with PDAL."""
+def _load_laspy_data(filename: str, main_data_column: str, auxiliary_data_columns: list[str] | None = None) -> gpd.GeoDataFrame:
+    """Load point cloud data from LAS/LAZ/COPC file."""
 
-    # Basic json command to read an entire file
-    json_string = f"""
-    [
-        "{filename}"
-    ]
-    """
+    las = laspy.read(filename)
 
-    # Run and extract array as dataframe
-    pipeline = pdal.Pipeline(json_string)
-    pipeline.execute()
-    df = pd.DataFrame(pipeline.arrays[0])
+    # Get data from requested columns
+    if auxiliary_data_columns is not None:
+        data = [las[n] for n in auxiliary_data_columns]
+    else:
+        data = []
+    data.insert(0, las[main_data_column])
+    data = np.vstack(data).transpose()
 
-    # Build geodataframe from 2D points and data table
-    crs = CRS.from_wkt(pipeline.srswkt2)
-    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=df["X"], y=df["Y"], crs=crs), data=df.iloc[:, 2:])
+    # Build geodataframe
+    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=las.x, y=las.y,
+                                                       crs=las.header.parse_crs(prefer_wkt=False)),
+                           data=data)
 
     return gdf
 
-def _write_pdal(filename: str, **kwargs):
-    """Write a point cloud dataset with PDAL."""
 
-    return
+
+def _load_laspy_metadata(filename: str, ) -> tuple[CRS, int, BoundingBox, list[str]]:
+    """Load point cloud metadata from LAS/LAZ/COPC file."""
+
+    with laspy.open(filename) as f:
+
+        crs = f.header.parse_crs(prefer_wkt=False)
+        nb_points = f.header.point_count
+        bounds = BoundingBox(left=f.header.x_min, right=f.header.x_max, bottom=f.header.y_min, top=f.header.y_max)
+        columns_names = list(f.header.point_format.dimension_names)
+
+    return crs, nb_points, bounds, columns_names
+
+
+# def _write_laspy(filename: str, pc: gpd.GeoDataFrame):
+#     """Write a point cloud dataset as LAS/LAZ/COPC."""
+#
+#     with laspy.open(filename) as f:
+#         new_hdr = laspy.LasHeader(version="1.4", point_format=6)
+#         # You can set the scales and offsets to values tha suits your data
+#         new_hdr.scales = np.array([1.0, 0.5, 0.1])
+#         new_las = laspy.LasData(header = new_hdr, points=)
+#
+#     return
 
 
 class PointCloud(gu.Vector):
     """
     The georeferenced point cloud.
 
-    A point cloud is a vector of 2D point geometries associated to values from a main data column, with access
-    to values from auxiliary data columns.
+    A point cloud is a vector of 2D point geometries associated to values from a main data column, optionally with
+    auxiliary data columns.
 
      Main attributes:
         ds: :class:`geopandas.GeoDataFrame`
@@ -71,36 +92,96 @@ class PointCloud(gu.Vector):
     See the API for more details.
     """
 
-    _data_column: str | None
-
     def __init__(self,
                  filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-                 data_column: str | None = None,):
+                 data_column: str | None = None):
         """
         Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
         or a Shapely geometry), or only with a point cloud file type.
 
-        :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
+        :param filename_or_dataset: Path to vector file, or GeoPandas dataframe or series, or Shapely geometry.
         :param data_column: Name of data column defining the point cloud.
         """
+
+        self._ds: gpd.GeoDataFrame | None = None
+        self._name: str | None = None
+        self._crs: CRS | None = None
+        self._bounds: BoundingBox | None = None
+        self._data_column: str | None = None
+        self._nb_points: int | None = None
+        self._columns: list[str] | None = None
 
         # If PointCloud is passed, simply point back to PointCloud
         if isinstance(filename_or_dataset, PointCloud):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
             return
-        # Else rely on parent Vector class options (including raised errors)
+        # For filename, rely on parent Vector class or LAS file reader
         else:
-            super().__init__(filename_or_dataset)
+            if isinstance(filename_or_dataset, (str, pathlib.Path)) and \
+                    os.path.splitext(filename_or_dataset)[-1] in [".las", ".laz"]:
+                # Load only metadata, and not the data
+                crs, nb_points, bounds, columns = _load_laspy_metadata(filename_or_dataset)
+                self._name = filename_or_dataset
+                self._crs = crs
+                self._nb_points = nb_points
+                self._columns = columns
+                self._bounds = bounds
+                self._ds = None
+            # Check on filename are done with Vector.__init__
+            else:
+                super().__init__(filename_or_dataset)
+                # Verify that the vector can be cast as a point cloud
+                if not all(p == "Point" for p in self.ds.geom_type):
+                    raise ValueError("This vector file contains non-point geometries, "
+                                     "cannot be instantiated as a point cloud.")
 
-        if data_column not in self.ds.columns():
-            raise ValueError(f"Data column {data_column} not found in vector file, available columns "
-                             f"are: {', '.join(self.ds.columns)}.")
+        if data_column not in self.columns:
+            raise ValueError(f"Data column {data_column} not found among columns, available columns "
+                             f"are: {', '.join(self.columns)}.")
         self._data_column = data_column
 
     @property
-    def data(self):
-        return self.ds[self.data_column].values
+    def ds(self) -> gpd.GeoDataFrame:
+        if not self.is_loaded:
+            self.load()
+        return self._ds  # type: ignore
+
+    @ds.setter
+    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
+        """Set a new geodataframe."""
+
+        if isinstance(new_ds, gpd.GeoDataFrame):
+            self._ds = new_ds
+        elif isinstance(new_ds, gpd.GeoSeries):
+            self._ds = gpd.GeoDataFrame(geometry=new_ds)
+        else:
+            raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
+
+    @property
+    def crs(self) -> CRS:
+        """Coordinate reference system of the vector."""
+        if self._ds is not None:
+            return self.ds.crs
+        else:
+            return self._crs
+
+    def bounds(self) -> BoundingBox:
+        if self._ds is not None:
+            return super().bounds
+        else:
+            return self._bounds
+
+    def load(self):
+        """Load point cloud from disk (only supported for LAS files)."""
+
+        ds = _load_laspy_data(filename=self.name, main_data_column=self.data_column)
+        self._ds = ds
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether the point cloud data is loaded"""
+        return self._ds is not None
 
     @property
     def data_column(self) -> str:
@@ -108,9 +189,12 @@ class PointCloud(gu.Vector):
         return self._data_column
 
     @property
-    def auxiliary_columns(self) -> list[str]:
+    def columns(self) -> list[str]:
         """Name of auxiliary data columns of the point cloud."""
-        return self._auxiliary_columns
+        if self.is_loaded:
+            return self.ds.columns
+        else:
+            return self._columns
 
     @classmethod
     def from_array(cls, array: np.ndarray, crs: CRS, data_column: str | None = "z") -> PointCloud:
@@ -134,10 +218,10 @@ class PointCloud(gu.Vector):
 
 
     @classmethod
-    def from_tuples(self, tuples: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = None):
+    def from_tuples(cls, tuples: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = None):
         """Create point cloud from a N-size list of tuples (X coordinate, Y coordinate, Z value)."""
 
-        self.from_array(np.array(zip(*tuples)), crs=crs, data_column=data_column)
+        cls.from_array(np.array(zip(*tuples)), crs=crs, data_column=data_column)
 
 
     def to_array(self):

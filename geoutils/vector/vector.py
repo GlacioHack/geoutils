@@ -28,7 +28,7 @@ import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas._typing import WriteBuffer
-from rasterio.crs import CRS
+from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
@@ -64,37 +64,103 @@ class Vector:
     See the API for more details.
     """
 
-    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry):
+    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]):
         """
         Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
         """
 
-        # If filename is passed
-        if isinstance(filename_or_dataset, (str, pathlib.Path)):
-            with warnings.catch_warnings():
-                # This warning shows up in numpy 1.21 (2021-07-09)
-                warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
-                ds = gpd.read_file(filename_or_dataset)
-            self._ds = ds
-            self._name: str | gpd.GeoDataFrame | None = filename_or_dataset
-        # If GeoPandas or Shapely object is passed
-        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
-            self._name = None
-            if isinstance(filename_or_dataset, gpd.GeoDataFrame):
-                self._ds = filename_or_dataset
-            elif isinstance(filename_or_dataset, gpd.GeoSeries):
-                self._ds = gpd.GeoDataFrame(geometry=filename_or_dataset)
-            else:
-                self._ds = gpd.GeoDataFrame({"geometry": [filename_or_dataset]}, crs=None)
+        self._name: str | None
+        self._ds: gpd.GeoDataFrame | None = None
+
         # If Vector is passed, simply point back to Vector
-        elif isinstance(filename_or_dataset, Vector):
+        if isinstance(filename_or_dataset, Vector):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
             return
+        # If filename is passed
+        elif isinstance(filename_or_dataset, (str, pathlib.Path)):
+            ds = gpd.read_file(filename_or_dataset)
+        # If GeoPandas or Shapely object is passed
+        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
+            if isinstance(filename_or_dataset, gpd.GeoDataFrame):
+                ds = filename_or_dataset
+            elif isinstance(filename_or_dataset, gpd.GeoSeries):
+                ds = gpd.GeoDataFrame(geometry=filename_or_dataset)
+            else:
+                ds = gpd.GeoDataFrame({"geometry": [filename_or_dataset]}, crs=None)
         else:
-            raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
+            raise TypeError("Filename argument should be a string, path or geodataframe.")
+
+        # Set geodataframe
+        self.ds = ds
+
+        # Write name attribute
+        if isinstance(filename_or_dataset, str):
+            self._name = filename_or_dataset
+        if isinstance(filename_or_dataset, pathlib.Path):
+            self._name = filename_or_dataset.name
+
+    @property
+    def crs(self) -> CRS:
+        """Coordinate reference system of the vector."""
+        return self.ds.crs
+
+    @property
+    def ds(self) -> gpd.GeoDataFrame:
+        """Geodataframe of the vector."""
+        return self._ds
+
+    @ds.setter
+    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
+        """Set a new geodataframe."""
+
+        if isinstance(new_ds, gpd.GeoDataFrame):
+            self._ds = new_ds
+        elif isinstance(new_ds, gpd.GeoSeries):
+            self._ds = gpd.GeoDataFrame(geometry=new_ds)
+        else:
+            raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
+
+    def vector_equal(self, other: gu.Vector, **kwargs: Any) -> bool:
+        """
+        Check if two vectors are equal.
+
+        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
+        """
+
+        try:
+            assert_geodataframe_equal(self.ds, other.ds, **kwargs)
+            vector_eq = True
+        except AssertionError:
+            vector_eq = False
+
+        return vector_eq
+
+    @property
+    def name(self) -> str | None:
+        """Name on disk, if it exists."""
+        return self._name
+
+    @property
+    def geometry(self) -> gpd.GeoSeries:
+        return self.ds.geometry
+
+    @property
+    def columns(self) -> pd.Index:
+        return self.ds.columns
+
+    @property
+    def index(self) -> pd.Index:
+        return self.ds.index
+
+    def copy(self: VectorType) -> VectorType:
+        """Return a copy of the vector."""
+        # Utilise the copy method of GeoPandas
+        new_vector = self.__new__(type(self))
+        new_vector.__init__(self.ds.copy())  # type: ignore
+        return new_vector  # type: ignore
 
     def __repr__(self) -> str:
         """Convert vector to string representation."""
@@ -924,62 +990,6 @@ class Vector:
     # --------------------------------
     # End of GeoPandas functionalities
     # --------------------------------
-
-    @property
-    def crs(self) -> rio.crs.CRS:
-        """Coordinate reference system of the vector."""
-        return self.ds.crs
-
-    @property
-    def ds(self) -> gpd.GeoDataFrame:
-        """Geodataframe of the vector."""
-        return self._ds
-
-    @ds.setter
-    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
-        """Set a new geodataframe."""
-
-        if isinstance(new_ds, gpd.GeoDataFrame):
-            self._ds = new_ds
-        elif isinstance(new_ds, gpd.GeoSeries):
-            self._ds = gpd.GeoDataFrame(geometry=new_ds)
-        else:
-            raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
-
-    def vector_equal(self, other: gu.Vector, **kwargs: Any) -> bool:
-        """
-        Check if two vectors are equal.
-
-        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
-        """
-
-        try:
-            assert_geodataframe_equal(self.ds, other.ds, **kwargs)
-            vector_eq = True
-        except AssertionError:
-            vector_eq = False
-
-        return vector_eq
-
-    @property
-    def name(self) -> str | None:
-        """Name on disk, if it exists."""
-        return self._name
-
-    @property
-    def geometry(self) -> gpd.GeoSeries:
-        return self.ds.geometry
-
-    @property
-    def index(self) -> pd.Index:
-        return self.ds.index
-
-    def copy(self: VectorType) -> VectorType:
-        """Return a copy of the vector."""
-        # Utilise the copy method of GeoPandas
-        new_vector = self.__new__(type(self))
-        new_vector.__init__(self.ds.copy())  # type: ignore
-        return new_vector  # type: ignore
 
     @overload
     def crop(

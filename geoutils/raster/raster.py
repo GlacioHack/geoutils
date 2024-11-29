@@ -638,7 +638,7 @@ class Raster:
 
     @property
     def name(self) -> str | None:
-        """Name of the file on disk, if it exists."""
+        """Name of the raster file on disk, if it exists."""
         return self._name
 
     def set_area_or_point(
