@@ -39,10 +39,6 @@ def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = 
         )
         print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
 
-    print(np.count_nonzero(np.isfinite(ds.data) != np.isfinite(rast.get_nanarray())))
-    print(np.nanmin(ds.data - rast.get_nanarray()))
-    print(ds.data)
-
     return complete_equality
 
 def output_equal(output1: Any, output2: Any) -> bool:
