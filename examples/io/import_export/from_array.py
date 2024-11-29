@@ -14,8 +14,8 @@ import rasterio as rio
 import geoutils as gu
 
 # A random 3 x 3 masked array
-np.random.seed(42)
-arr = np.random.normal(size=(5, 5))
+rng = np.random.default_rng(42)
+arr = rng.normal(size=(5, 5))
 # Introduce a NaN value
 arr[2, 2] = np.nan
 # A transform with 3 x 3 pixels in a [0-1, 0-1] bound square
@@ -39,7 +39,7 @@ rast.data
 # We could also have created directly from a :class:`~numpy.ma.MaskedArray`.
 
 # A random mask, that will mask one out of two values on average
-mask = np.random.randint(0, 2, size=(5, 5), dtype="bool")
+mask = rng.integers(0, 2, size=(5, 5), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
 # This time, we pass directly the masked array

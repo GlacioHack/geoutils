@@ -1,13 +1,12 @@
 """
-geoutils.vectortools provides a toolset for working with vector data.
+Module for Vector class.
 """
+
 from __future__ import annotations
 
-import os
 import pathlib
 import warnings
 from collections import abc
-from numbers import Number
 from os import PathLike
 from typing import (
     Any,
@@ -20,34 +19,30 @@ from typing import (
     overload,
 )
 
-import fiona
 import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pdal
 import rasterio as rio
-import rasterio.errors
-import shapely
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas._typing import WriteBuffer
-from rasterio import features, warp
 from rasterio.crs import CRS
-from scipy.spatial import Voronoi
 from shapely.geometry.base import BaseGeometry
-from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils.interface.distance import _proximity_from_vector_or_raster
+from geoutils.interface.raster_vector import _create_mask, _rasterize
 from geoutils.misc import copy_doc
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
-    bounds2poly,
 )
+from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
+from geoutils.vector.geotransformations import _reproject
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -148,21 +143,33 @@ class Vector:
 
         return str(self.ds.__str__())
 
-    def info(self) -> str:
+    @overload
+    def info(self, verbose: Literal[True] = ...) -> None: ...
+
+    @overload
+    def info(self, verbose: Literal[False]) -> str: ...
+
+    def info(self, verbose: bool = True) -> str | None:
         """
         Summarize information about the vector.
+
+        :param verbose: If set to True (default) will directly print to screen and return None
 
         :returns: Information about vector attributes.
         """
         as_str = [  # 'Driver:             {} \n'.format(self.driver),
             f"Filename:           {self.name} \n",
-            f"Coordinate System:  EPSG:{self.ds.crs.to_epsg()}\n",
+            f"Coordinate system:  EPSG:{self.ds.crs.to_epsg()}\n",
             f"Extent:             {self.ds.total_bounds.tolist()} \n",
             f"Number of features: {len(self.ds)} \n",
             f"Attributes:         {self.ds.columns.tolist()}",
         ]
 
-        return "".join(as_str)
+        if verbose:
+            print("".join(as_str))
+            return None
+        else:
+            return "".join(as_str)
 
     def plot(
         self,
@@ -172,7 +179,7 @@ class Vector:
         vmax: float | int | None = None,
         alpha: float | int | None = None,
         cbar_title: str | None = None,
-        add_cbar: bool = False,
+        add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         return_axes: bool = False,
         **kwargs: Any,
@@ -189,7 +196,7 @@ class Vector:
         :param vmax: Colorbar maximum value. Default is data max.
         :param alpha: Transparency of raster and colorbar.
         :param cbar_title: Colorbar label. Default is None.
-        :param add_cbar: Set to True to display a colorbar. Default is True.
+        :param add_cbar: Set to True to display a colorbar. Default is True if a "column" argument is passed.
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
             will create a new axis.
         :param return_axes: Whether to return axes.
@@ -207,18 +214,19 @@ class Vector:
 
         # Create axes, or get current ones by default (like in matplotlib)
         if ax is None:
-            # If no figure exists, get a new axis
-            if len(plt.get_fignums()) == 0:
-                ax0 = plt.gca()
-            # Otherwise, get first axis
-            else:
-                ax0 = plt.gcf().axes[0]
+            ax0 = plt.gca()
         elif isinstance(ax, str) and ax.lower() == "new":
             _, ax0 = plt.subplots()
         elif isinstance(ax, matplotlib.axes.Axes):
             ax0 = ax
         else:
             raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
+
+        # Set add_cbar depending on column argument
+        if "column" in kwargs.keys() and add_cbar:
+            add_cbar = True
+        else:
+            add_cbar = False
 
         # Update with this function's arguments
         if add_cbar:
@@ -228,29 +236,27 @@ class Vector:
 
         if "legend" in list(kwargs.keys()):
             legend = kwargs.pop("legend")
-        else:
-            legend = False
 
         # Get colormap arguments that might have been passed in the keyword args
         if "legend_kwds" in list(kwargs.keys()) and legend:
             legend_kwds = kwargs.pop("legend_kwds")
-            if "label" in list(legend_kwds):
-                cbar_title = legend_kwds.pop("label")
+            if cbar_title is not None:
+                legend_kwds.update({"label": cbar_title})  # Pad updates depending on figsize during plot,
         else:
-            legend_kwds = None
+            if cbar_title is not None:
+                legend_kwds = {"label": cbar_title}
+            else:
+                legend_kwds = None
 
         # Add colorbar
         if add_cbar or cbar_title:
             divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad=0.05)
+            cax = divider.append_axes("right", size="5%", pad="2%")
             norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
             cbar = matplotlib.colorbar.ColorbarBase(
                 cax, cmap=cmap, norm=norm
             )  # , orientation="horizontal", ticklocation="top")
             cbar.solids.set_alpha(alpha)
-
-            if cbar_title is not None:
-                cbar.set_label(cbar_title)
         else:
             cax = None
             cbar = None
@@ -268,9 +274,13 @@ class Vector:
             **kwargs,
         )
 
+        cax
+
+        plt.sca(ax0)
+
         # If returning axes
         if return_axes:
-            return ax, cax
+            return ax0, cax
         else:
             return None
 
@@ -307,7 +317,7 @@ class Vector:
         """Parse outputs of GeoPandas functions to facilitate object manipulation."""
 
         # Raise error if output is not treated separately, should appear in tests
-        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoDataFrame, pd.Series, BaseGeometry)):
+        if not isinstance(other, (gpd.GeoDataFrame, pd.Series, BaseGeometry)):
             raise ValueError("Not implemented. This error should only be raised in tests.")
 
         # If a GeoDataFrame is the output, return it
@@ -443,6 +453,11 @@ class Vector:
         """
         return rio.coords.BoundingBox(*self.ds.total_bounds)
 
+    @property
+    def footprint(self) -> gu.Vector:
+        """Footprint of the raster."""
+        return self.get_footprint_projected(self.crs)
+
     # --------------------------------------------
     # GeoPandasBase - Methods that return a Series
     # --------------------------------------------
@@ -565,10 +580,6 @@ class Vector:
         return self._override_gdf_output(self.ds.affine_transform(matrix=matrix))
 
     @copy_doc(gpd.GeoSeries, "Vector")
-    def translate(self, xoff: float = 0.0, yoff: float = 0.0, zoff: float = 0.0) -> Vector:
-        return self._override_gdf_output(self.ds.translate(xoff=xoff, yoff=yoff, zoff=zoff))
-
-    @copy_doc(gpd.GeoSeries, "Vector")
     def rotate(self, angle: float, origin: str = "center", use_radians: bool = False) -> Vector:
         return self._override_gdf_output(self.ds.rotate(angle=angle, origin=origin, use_radians=use_radians))
 
@@ -635,7 +646,7 @@ class Vector:
         else:
             gdf = df
 
-        return self._override_gdf_output(self.ds.sjoin(df=gdf, *args, **kwargs))
+        return self._override_gdf_output(self.ds.sjoin(gdf, *args, **kwargs))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def sjoin_nearest(
@@ -977,8 +988,7 @@ class Vector:
         clip: bool,
         *,
         inplace: Literal[False] = False,
-    ) -> VectorType:
-        ...
+    ) -> VectorType: ...
 
     @overload
     def crop(
@@ -987,8 +997,7 @@ class Vector:
         clip: bool,
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def crop(
@@ -997,8 +1006,7 @@ class Vector:
         clip: bool,
         *,
         inplace: bool = False,
-    ) -> VectorType | None:
-        ...
+    ) -> VectorType | None: ...
 
     def crop(
         self: VectorType,
@@ -1049,36 +1057,33 @@ class Vector:
     @overload
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[False] = False,
-    ) -> Vector:
-        ...
+    ) -> Vector: ...
 
     @overload
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: bool = False,
-    ) -> Vector | None:
-        ...
+    ) -> Vector | None: ...
 
     def reproject(
         self: Vector,
-        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | None = None,
+        ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
         crs: CRS | str | int | None = None,
         inplace: bool = False,
     ) -> Vector | None:
@@ -1091,53 +1096,83 @@ class Vector:
 
         To reproject a Vector with different source bounds, first run Vector.crop().
 
-        :param ref: A reference raster or vector whose CRS to use as a reference for reprojection.
-            Can be provided as a raster, vector, Rasterio dataset, GeoPandas dataframe, or path to the file.
-        :param crs: Specify the Coordinate Reference System or EPSG to reproject to. If dst_ref not set,
+        :param ref: Reference raster or vector whose CRS to use as a reference for reprojection.
+            Can be provided as a raster, vector, Rasterio dataset, or GeoPandas dataframe.
+        :param crs: Specify the coordinate reference system or EPSG to reproject to. If dst_ref not set,
             defaults to self.crs.
         :param inplace: Whether to update the vector in-place.
 
         :returns: Reprojected vector (or None if inplace).
         """
 
-        # Check that either ref or crs is provided
-        if (ref is not None and crs is not None) or (ref is None and crs is None):
-            raise ValueError("Either of `ref` or `crs` must be set. Not both.")
-
-        # Case a raster or vector is provided as reference
-        if ref is not None:
-            # Check that ref type is either str, Raster or rasterio data set
-            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
-            if isinstance(ref, (gu.Raster, gu.Vector)):
-                ds_ref = ref
-            elif isinstance(ref, (rio.io.DatasetReader, gpd.GeoDataFrame)):
-                ds_ref = ref
-            elif isinstance(ref, str):
-                if not os.path.exists(ref):
-                    raise ValueError("Reference raster or vector path does not exist.")
-                try:
-                    ds_ref = gu.Raster(ref, load_data=False)
-                except rasterio.errors.RasterioIOError:
-                    try:
-                        ds_ref = Vector(ref)
-                    except fiona.errors.DriverError:
-                        raise ValueError("Could not open raster or vector with rasterio or fiona.")
-            else:
-                raise TypeError("Type of ref must be string path to file, Raster or Vector.")
-
-            # Read reprojecting params from ref raster
-            crs = ds_ref.crs
-        else:
-            # Determine user-input target CRS
-            crs = CRS.from_user_input(crs)
-
-        new_ds = self.ds.to_crs(crs=crs)
+        new_ds = _reproject(gdf=self.ds, ref=ref, crs=crs)
 
         if inplace:
             self.ds = new_ds
             return None
         else:
             return Vector(new_ds)
+
+    @overload
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: Literal[False] = False,
+    ) -> VectorType: ...
+
+    @overload
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: Literal[True],
+    ) -> None: ...
+
+    @overload
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        *,
+        inplace: bool = False,
+    ) -> VectorType | None: ...
+
+    def translate(
+        self: VectorType,
+        xoff: float = 0.0,
+        yoff: float = 0.0,
+        zoff: float = 0.0,
+        inplace: bool = False,
+    ) -> VectorType | None:
+        """
+        Shift a vector by a (x,y) offset, and optionally a z offset.
+
+        The shifting only updates the coordinates (data is untouched).
+
+        :param xoff: Translation x offset.
+        :param yoff: Translation y offset.
+        :param zoff: Translation z offset.
+        :param inplace: Whether to modify the raster in-place.
+
+        :returns: Shifted vector (or None if inplace).
+        """
+
+        translated_geoseries = self.geometry.translate(xoff=xoff, yoff=yoff, zoff=zoff)
+
+        if inplace:
+            # Overwrite transform by shifted transform
+            self.ds.geometry = translated_geoseries
+            return None
+        else:
+            vector_copy = self.copy()
+            vector_copy.ds.geometry = translated_geoseries
+            return vector_copy
 
     @overload
     def create_mask(
@@ -1150,8 +1185,7 @@ class Vector:
         buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
         as_array: Literal[False] = False,
-    ) -> gu.Mask:
-        ...
+    ) -> gu.Mask: ...
 
     @overload
     def create_mask(
@@ -1164,8 +1198,7 @@ class Vector:
         buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
         as_array: Literal[True],
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     def create_mask(
         self,
@@ -1199,76 +1232,9 @@ class Vector:
         :returns: A Mask object contain a boolean array
         """
 
-        # If no raster given, use provided dimensions
-        if raster is None:
-            # At minimum, xres must be set
-            if xres is None:
-                raise ValueError("At least raster or xres must be set.")
-            if yres is None:
-                yres = xres
-
-            # By default, use self's CRS and bounds
-            if crs is None:
-                crs = self.ds.crs
-            if bounds is None:
-                bounds_shp = True
-                bounds = self.ds.total_bounds
-            else:
-                bounds_shp = False
-
-            # Calculate raster shape
-            left, bottom, right, top = bounds
-            height = abs((right - left) / xres)
-            width = abs((top - bottom) / yres)
-
-            if width % 1 != 0 or height % 1 != 0:
-                # Only warn if the bounds were provided, and not derived from the vector
-                if not bounds_shp:
-                    warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds.")
-
-            width = int(np.round(width))
-            height = int(np.round(height))
-            out_shape = (height, width)
-
-            # Calculate raster transform
-            transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
-
-        # otherwise use directly raster's dimensions
-        elif isinstance(raster, gu.Raster):
-            out_shape = raster.shape
-            transform = raster.transform
-            crs = raster.crs
-            bounds = raster.bounds
-        else:
-            raise TypeError("Raster must be a geoutils.Raster or None.")
-
-        # Copying GeoPandas dataframe before applying changes
-        gdf = self.ds.copy()
-
-        # Crop vector geometries to avoid issues when reprojecting
-        left, bottom, right, top = bounds  # type: ignore
-        x1, y1, x2, y2 = warp.transform_bounds(crs, gdf.crs, left, bottom, right, top)
-        gdf = gdf.cx[x1:x2, y1:y2]
-
-        # Reproject vector into raster CRS
-        gdf = gdf.to_crs(crs)
-
-        # Create a buffer around the features
-        if not isinstance(buffer, (int, float, np.number)):
-            raise TypeError(f"Buffer must be a number, currently set to {type(buffer).__name__}.")
-        if buffer != 0:
-            gdf.geometry = [geom.buffer(buffer) for geom in gdf.geometry]
-        elif buffer == 0:
-            pass
-
-        # Rasterize geometry
-        mask = features.rasterize(
-            shapes=gdf.geometry, fill=0, out_shape=out_shape, transform=transform, default_value=1, dtype="uint8"
-        ).astype("bool")
-
-        # Force output mask to be of same dimension as input raster
-        if raster is not None:
-            mask = mask.reshape((raster.count, raster.height, raster.width))  # type: ignore
+        mask, transform, crs = _create_mask(
+            gdf=self.ds, raster=raster, crs=crs, xres=xres, yres=yres, bounds=bounds, buffer=buffer, as_array=as_array
+        )
 
         # Return output as mask or as array
         if as_array:
@@ -1312,84 +1278,16 @@ class Vector:
         :returns: Raster or mask containing the burned geometries.
         """
 
-        if (raster is not None) and (crs is not None):
-            raise ValueError("Only one of raster or crs can be provided.")
-
-        # Reproject vector into requested CRS or rst CRS first, if needed
-        # This has to be done first so that width/height calculated below are correct!
-        if crs is None:
-            crs = self.ds.crs
-
-        if raster is not None:
-            crs = raster.crs  # type: ignore
-
-        vect = self.ds.to_crs(crs)
-
-        # If no raster given, now use provided dimensions
-        if raster is None:
-            # At minimum, xres must be set
-            if xres is None:
-                raise ValueError("At least raster or xres must be set.")
-            if yres is None:
-                yres = xres
-
-            # By default, use self's bounds
-            if bounds is None:
-                bounds = vect.total_bounds
-
-            # Calculate raster shape
-            left, bottom, right, top = bounds
-            width = abs((right - left) / xres)
-            height = abs((top - bottom) / yres)
-
-            if width % 1 != 0 or height % 1 != 0:
-                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds.")
-
-            width = int(np.round(width))
-            height = int(np.round(height))
-            out_shape = (height, width)
-
-            # Calculate raster transform
-            transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
-
-        # otherwise use directly raster's dimensions
-        else:
-            out_shape = raster.shape  # type: ignore
-            transform = raster.transform  # type: ignore
-
-        # Set default burn value, index from 1 to len(self.ds)
-        if in_value is None:
-            in_value = self.ds.index + 1
-
-        # Rasterize geometry
-        if isinstance(in_value, abc.Iterable):
-            if len(in_value) != len(vect.geometry):  # type: ignore
-                raise ValueError(
-                    "in_value must have same length as self.ds.geometry, currently {} != {}".format(
-                        len(in_value), len(vect.geometry)  # type: ignore
-                    )
-                )
-
-            out_geom = ((geom, value) for geom, value in zip(vect.geometry, in_value))
-
-            mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape, transform=transform)
-
-        elif isinstance(in_value, Number):
-            mask = features.rasterize(
-                shapes=vect.geometry, fill=out_value, out_shape=out_shape, transform=transform, default_value=in_value
-            )
-        else:
-            raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
-
-        # We return a mask if there is a single value to burn and this value is 1
-        if isinstance(in_value, (int, np.integer, float, np.floating)) and in_value == 1:
-            output = gu.Mask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
-
-        # Otherwise we return a Raster if there are several values to burn
-        else:
-            output = gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
-
-        return output
+        return _rasterize(
+            gdf=self.ds,
+            raster=raster,
+            crs=crs,
+            xres=xres,
+            yres=yres,
+            bounds=bounds,
+            in_value=in_value,
+            out_value=out_value,
+        )
 
     @classmethod
     def from_bounds_projected(
@@ -1476,11 +1374,19 @@ class Vector:
 
             raster = gu.Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 
-        proximity = gu.raster.raster.proximity_from_vector_or_raster(
+        proximity = _proximity_from_vector_or_raster(
             raster=raster, vector=self, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit
         )
 
-        return raster.copy(new_array=proximity)
+        out_nodata = gu.raster.raster._default_nodata(proximity.dtype)
+        return gu.Raster.from_array(
+            data=proximity,
+            transform=raster.transform,
+            crs=raster.crs,
+            nodata=out_nodata,
+            area_or_point=raster.area_or_point,
+            tags=raster.tags,
+        )
 
     def buffer_metric(self, buffer_size: float) -> Vector:
         """
@@ -1493,24 +1399,7 @@ class Vector:
         :return: Buffered shapefile.
         """
 
-        crs_utm_ups = _get_utm_ups_crs(df=self.ds)
-
-        # Reproject the shapefile in the local UTM
-        ds_utm = self.ds.to_crs(crs=crs_utm_ups)
-
-        # Buffer the shapefile
-        ds_buffered = ds_utm.buffer(distance=buffer_size)
-        del ds_utm
-
-        # Revert-project the shapefile in the original CRS
-        ds_buffered_origproj = ds_buffered.to_crs(crs=self.ds.crs)
-        del ds_buffered
-
-        # Return a Vector object of the buffered GeoDataFrame
-        # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
-        vector_buffered = Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=self.ds.crs))
-
-        return vector_buffered
+        return _buffer_metric(gdf=self.ds, buffer_size=buffer_size)
 
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
@@ -1595,296 +1484,4 @@ class Vector:
             >>> plt.plot()  # doctest: +SKIP
         """
 
-        # Project in local UTM if metric is True
-        if metric:
-            crs_utm_ups = _get_utm_ups_crs(df=self.ds)
-            gdf = self.ds.to_crs(crs=crs_utm_ups)
-        else:
-            gdf = self.ds
-
-        # Dissolve all geometries into one
-        merged = gdf.dissolve()
-
-        # Add buffer around geometries
-        merged_buffer = merged.buffer(buffer_size)
-
-        # Extract only the buffered area
-        buffer = merged_buffer.difference(merged)
-
-        # Crop Voronoi polygons to bound geometry and add missing polygons
-        bound_poly = bounds2poly(gdf)
-        bound_poly = bound_poly.buffer(buffer_size)
-        voronoi_all = generate_voronoi_with_bounds(gdf, bound_poly)
-        if plot:
-            plt.figure(figsize=(16, 4))
-            ax1 = plt.subplot(141)
-            voronoi_all.plot(ax=ax1)
-            gdf.plot(fc="none", ec="k", ax=ax1)
-            ax1.set_title("Voronoi polygons, cropped")
-
-        # Extract Voronoi polygons only within the buffer area
-        voronoi_diff = voronoi_all.intersection(buffer.geometry[0])
-
-        # Split all polygons, and join attributes of original geometries into the Voronoi polygons
-        # Splitting, i.e. explode, is needed when Voronoi generate MultiPolygons that may extend over several features.
-        voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode(index_parts=True))  # requires geopandas>=0.10
-        joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how="right")
-
-        # Plot results -> some polygons are duplicated
-        if plot:
-            ax2 = plt.subplot(142, sharex=ax1, sharey=ax1)
-            joined_voronoi.plot(ax=ax2, column="index_left", alpha=0.5, ec="k")
-            gdf.plot(ax=ax2, column=gdf.index.values)
-            ax2.set_title("Buffer with duplicated polygons")
-
-        # Find non unique Voronoi polygons, and retain only first one
-        _, indexes = np.unique(joined_voronoi.index, return_index=True)
-        unique_voronoi = joined_voronoi.iloc[indexes]
-
-        # Plot results -> unique polygons only
-        if plot:
-            ax3 = plt.subplot(143, sharex=ax1, sharey=ax1)
-            unique_voronoi.plot(ax=ax3, column="index_left", alpha=0.5, ec="k")
-            gdf.plot(ax=ax3, column=gdf.index.values)
-            ax3.set_title("Buffer with unique polygons")
-
-        # Dissolve all polygons by original index
-        merged_voronoi = unique_voronoi.dissolve(by="index_left")
-
-        # Plot
-        if plot:
-            ax4 = plt.subplot(144, sharex=ax1, sharey=ax1)
-            gdf.plot(ax=ax4, column=gdf.index.values)
-            merged_voronoi.plot(column=merged_voronoi.index.values, ax=ax4, alpha=0.5)
-            ax4.set_title("Final buffer")
-            plt.show()
-
-        # Reverse-project to the original CRS if metric is True
-        if metric:
-            merged_voronoi = merged_voronoi.to_crs(crs=self.crs)
-
-        return Vector(merged_voronoi)
-
-
-######################
-# Point cloud subclass
-######################
-
-def _read_pdal(filename: str, **kwargs: Any) -> gpd.GeoDataFrame:
-    """Read a point cloud dataset with PDAL."""
-
-    # Basic json command to read an entire file
-    json_string = f"""
-    [
-        "{filename}"
-    ]
-    """
-
-    # Run and extract array as dataframe
-    pipeline = pdal.Pipeline(json_string)
-    pipeline.execute()
-    df = pd.DataFrame(pipeline.arrays[0])
-
-    # Build geodataframe from 2D points and data table
-    crs = CRS.from_wkt(pipeline.srswkt2)
-    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=df["X"], y=df["Y"], crs=crs), data=df.iloc[:, 2:])
-
-    return gdf
-
-def _write_pdal(filename: str, **kwargs):
-    """Write a point cloud dataset with PDAL."""
-
-    return
-
-
-class PointCloud(Vector):
-    """
-    The georeferenced point cloud.
-
-    A point cloud is a vector of 2D point geometries associated to values from a specific data column.
-
-     Main attributes:
-        ds: :class:`geopandas.GeoDataFrame`
-            Geodataframe of the point cloud.
-        data_column: str
-            Name of point cloud data column.
-        crs: :class:`pyproj.crs.CRS`
-            Coordinate reference system of the point cloud.
-        bounds: :class:`rio.coords.BoundingBox`
-            Coordinate bounds of the point cloud.
-
-
-    All other attributes are derivatives of those attributes, or read from the file on disk.
-    See the API for more details.
-    """
-
-    data_column: str | None
-
-    def __init__(self,
-                 filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-                 data_column: str | None = None,):
-        """
-        Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
-        or a Shapely geometry), or only with a point cloud file type.
-
-        :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
-        :param data_column: Name of data column defining the point cloud.
-        """
-
-        # If PointCloud is passed, simply point back to PointCloud
-        if isinstance(filename_or_dataset, PointCloud):
-            for key in filename_or_dataset.__dict__:
-                setattr(self, key, filename_or_dataset.__dict__[key])
-            return
-        # Else rely on parent Raster class options (including raised errors)
-        else:
-            super().__init__(filename_or_dataset)
-
-        if data_column not in self.ds.columns():
-            raise ValueError(f"Data column {data_column} not found in vector file, available columns "
-                             f"are: {', '.join(self.ds.columns)}.")
-        self.data_column = data_column
-
-    @classmethod
-    def from_array(cls, array: np.ndarray, crs: CRS, data_column: str | None = None) -> PointCloud:
-        """Create point cloud from a 3 x N or N x 3 array of X coordinate, Y coordinates and Z values."""
-
-        # Check shape
-        if array.shape[0] != 3 and array.shape[1] != 3:
-            raise ValueError("Array must be of shape 3xN or Nx3.")
-
-        # Make the first axis the one with size 3
-        if array.shape[0] != 3:
-            array_in = array.T
-        else:
-            array_in = array
-
-        # Build geodataframe
-        gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=array_in[0, :], y=array_in[1, : ], crs=crs),
-                               data={"z": array[2, :]})
-
-        return cls(filename_or_dataset=gdf, data_column=data_column)
-
-
-    @classmethod
-    def from_tuples(self, tuples: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = None):
-        """Create point cloud from a N-size list of tuples (X coordinate, Y coordinate, Z value)."""
-
-        array_in = np.array(zip(*tuples))
-
-
-    def to_array(self):
-        """Convert point cloud to a 3 x N array of X coordinates, Y coordinates and Z values."""
-
-
-        return
-
-    def to_tuples(self):
-        """Convert point cloud to a N-size list of tuples (X coordinate, Y coordinate, Z value)."""
-
-        return
-
-    def interp_raster(self, raster: gu.Raster):
-        """Interpolate raster at point cloud coordinates."""
-
-        return
-
-# -----------------------------------------
-# Additional stand-alone utility functions
-# -----------------------------------------
-
-
-def extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:
-    r"""
-    Function to extract the exterior vertices of all shapes within a gpd.GeoDataFrame.
-
-    :param gdf: The GeoDataFrame from which the vertices need to be extracted.
-
-    :returns: A list containing a list of (x, y) positions of the vertices. The length of the primary list is equal
-        to the number of geometries inside gdf, and length of each sublist is the number of vertices in the geometry.
-    """
-    vertices = []
-    # Loop on all geometries within gdf
-    for geom in gdf.geometry:
-        # Extract geometry exterior(s)
-        if geom.geom_type == "MultiPolygon":
-            exteriors = [p.exterior for p in geom.geoms]
-        elif geom.geom_type == "Polygon":
-            exteriors = [geom.exterior]
-        elif geom.geom_type == "LineString":
-            exteriors = [geom]
-        elif geom.geom_type == "MultiLineString":
-            exteriors = list(geom.geoms)
-        else:
-            raise NotImplementedError(f"Geometry type {geom.geom_type} not implemented.")
-
-        vertices.extend([list(ext.coords) for ext in exteriors])
-
-    return vertices
-
-
-def generate_voronoi_polygons(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """
-    Generate Voronoi polygons (tessellation) from the vertices of all geometries in a GeoDataFrame.
-
-    Uses scipy.spatial.voronoi.
-
-    :param: The GeoDataFrame from whose vertices are used for the Voronoi polygons.
-
-    :returns: A GeoDataFrame containing the Voronoi polygons.
-    """
-    # Extract the coordinates of the vertices of all geometries in gdf
-    vertices = extract_vertices(gdf)
-    coords = np.concatenate(vertices)
-
-    # Create the Voronoi diagram and extract ridges
-    vor = Voronoi(coords)
-    lines = [shapely.geometry.LineString(vor.vertices[line]) for line in vor.ridge_vertices if -1 not in line]
-    polys = list(shapely.ops.polygonize(lines))
-    if len(polys) == 0:
-        raise ValueError("Invalid geometry, cannot generate finite Voronoi polygons")
-
-    # Convert into GeoDataFrame
-    voronoi = gpd.GeoDataFrame(geometry=gpd.GeoSeries(polys))
-    voronoi.crs = gdf.crs
-
-    return voronoi
-
-
-def generate_voronoi_with_bounds(gdf: gpd.GeoDataFrame, bound_poly: Polygon) -> gpd.GeoDataFrame:
-    """
-    Generate Voronoi polygons that are bounded by the polygon bound_poly, to avoid Voronoi polygons that extend \
-far beyond the original geometry.
-
-    Voronoi polygons are created using generate_voronoi_polygons, cropped to the extent of bound_poly and gaps \
-are filled with new polygons.
-
-    :param: The GeoDataFrame from whose vertices are used for the Voronoi polygons.
-    :param: A shapely Polygon to be used for bounding the Voronoi diagrams.
-
-    :returns: A GeoDataFrame containing the Voronoi polygons.
-    """
-    # Create Voronoi polygons
-    voronoi = generate_voronoi_polygons(gdf)
-
-    # Crop Voronoi polygons to input bound_poly extent
-    voronoi_crop = voronoi.intersection(bound_poly)
-    voronoi_crop = gpd.GeoDataFrame(geometry=voronoi_crop)  # convert to DataFrame
-
-    # Dissolve all Voronoi polygons and subtract from bounds to get gaps
-    voronoi_merged = voronoi_crop.dissolve()
-    bound_gdf = gpd.GeoDataFrame(geometry=gpd.GeoSeries(bound_poly))
-    bound_gdf.crs = gdf.crs
-    gaps = bound_gdf.difference(voronoi_merged)
-
-    # Merge cropped Voronoi with gaps, if not empty, otherwise return cropped Voronoi
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "Geometry is in a geographic CRS. Results from 'area' are likely incorrect.")
-        tot_area = np.sum(gaps.area.values)
-
-    if not tot_area == 0:
-        voronoi_all = gpd.GeoDataFrame(geometry=list(voronoi_crop.geometry) + list(gaps.geometry))
-        voronoi_all.crs = gdf.crs
-        return voronoi_all
-    else:
-        return voronoi_crop
+        return _buffer_without_overlap(self.ds, buffer_size=buffer_size, metric=metric, plot=plot)

@@ -1,4 +1,5 @@
-"""Miscellaneous functions, mainly for testing."""
+"""Miscellaneous functions for maintenance, documentation and testing."""
+
 from __future__ import annotations
 
 import copy
@@ -13,7 +14,6 @@ try:
 except ImportError:
     _has_yaml = False
 
-import rasterio as rio
 from packaging.version import Version
 
 import geoutils
@@ -136,22 +136,6 @@ def copy_doc(
         return decorated
 
     return decorator
-
-
-def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
-    """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
-    # Try to match the string version of the resampling method with a rio Resampling enum name
-    for method in rio.enums.Resampling:
-        if method.name == method_str:
-            resampling_method = method
-            break
-    # If no match was found, raise an error.
-    else:
-        raise ValueError(
-            f"'{method_str}' is not a valid rasterio.enums.Resampling method. "
-            f"Valid methods: {[method.name for method in rio.enums.Resampling]}"
-        )
-    return resampling_method
 
 
 def diff_environment_yml(

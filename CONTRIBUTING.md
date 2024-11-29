@@ -14,7 +14,7 @@ For more details, see the rest of this document.
 
 ## Development environment
 
-GeoUtils currently supports only Python versions of 3.9 and higher, see `environment.yml` for detailed dependencies.
+GeoUtils currently supports only Python versions of 3.10 to 3.12, see `environment.yml` for detailed dependencies.
 
 ### Setup
 

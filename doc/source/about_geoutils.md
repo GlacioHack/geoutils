@@ -38,7 +38,7 @@ In particular, GeoUtils:
 - Strives to rely on **lazy operations** under-the-hood to avoid unnecessary data loading,
 - Allows for **match-reference operations** to facilitate geospatial handling,
 - Re-implements **several of [GDAL](https://gdal.org/)'s features** missing in other packages (e.g., proximity, gdalDEM),
-- Naturally handles **different `dtypes` and `nodata`** values through its NumPy masked-array interface.
+- Naturally handles **different `dtype` and `nodata`** values through its NumPy masked-array interface.
 
 
 ```{note}
@@ -90,13 +90,13 @@ header-rows: 1
 * - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_raster_geoutils.py
         :language: python
-        :lines: 12-29
+        :lines: 15-30
     ```
 
   - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_raster_rasterio.py
         :language: python
-        :lines: 10-62
+        :lines: 11-57
     ```
 `````
 
@@ -112,13 +112,13 @@ header-rows: 1
 * - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_vector_geoutils.py
         :language: python
-        :lines: 10-25
+        :lines: 11-26
     ```
 
   - ```{eval-rst}
     .. literalinclude:: code/about_geoutils_sidebyside_vector_geopandas.py
         :language: python
-        :lines: 10-40
+        :lines: 11-34
     ```
 
 `````

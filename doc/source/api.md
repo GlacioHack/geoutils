@@ -37,7 +37,7 @@ documentation.
 
 (api-raster-attrs)=
 
-### Unique attributes
+### Main attributes
 
 ```{eval-rst}
 .. autosummary::
@@ -47,6 +47,7 @@ documentation.
     Raster.crs
     Raster.transform
     Raster.nodata
+    Raster.area_or_point
 ```
 
 ### Derived attributes
@@ -59,16 +60,25 @@ documentation.
     Raster.height
     Raster.width
     Raster.count
-    Raster.count_on_disk
     Raster.bands
-    Raster.bands_on_disk
     Raster.res
     Raster.bounds
-    Raster.dtypes
+    Raster.dtype
+```
+
+### Other attributes
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.count_on_disk
+    Raster.bands_on_disk
     Raster.is_loaded
     Raster.is_modified
     Raster.name
     Raster.driver
+    Raster.tags
 ```
 
 (api-geo-handle)=
@@ -83,8 +93,8 @@ documentation.
     Raster.reproject
     Raster.polygonize
     Raster.proximity
-    Raster.value_at_coords
     Raster.interp_points
+    Raster.reduce_points
 ```
 
 ### Plotting
@@ -107,6 +117,7 @@ documentation.
     Raster.set_mask
     Raster.set_nodata
     Raster.get_nanarray
+    Raster.get_mask
     Raster.subsample
 ```
 
@@ -118,7 +129,8 @@ documentation.
 
     Raster.load
     Raster.save
-    Raster.to_points
+    Raster.to_pointcloud
+    Raster.from_pointcloud_regular
     Raster.to_rio_dataset
     Raster.to_xarray
 ```
@@ -132,7 +144,7 @@ documentation.
     Raster.xy2ij
     Raster.ij2xy
     Raster.coords
-    Raster.shift
+    Raster.translate
     Raster.outside_image
 ```
 
@@ -200,36 +212,6 @@ And reverse operations.
     Raster.__array_function__
 ```
 
-## SatelliteImage
-
-```{eval-rst}
-.. minigallery:: geoutils.SatelliteImage
-      :add-heading:
-```
-
-### Opening a file
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    SatelliteImage
-```
-
-### Satellite image metadata
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    SatelliteImage.datetime
-    SatelliteImage.tile_name
-    SatelliteImage.satellite
-    SatelliteImage.sensor
-    SatelliteImage.product
-    SatelliteImage.version
-```
-
 ## Mask
 
 ```{eval-rst}
@@ -264,6 +246,7 @@ And reverse operations.
 .. autosummary::
     :toctree: gen_modules/
 
+    raster.load_multiple_rasters
     raster.stack_rasters
     raster.merge_rasters
 ```
@@ -285,7 +268,7 @@ And reverse operations.
     Vector.info
 ```
 
-### Unique attributes
+### Main attributes
 
 ```{eval-rst}
 .. autosummary::

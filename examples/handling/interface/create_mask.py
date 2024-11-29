@@ -4,6 +4,7 @@ Mask from a vector
 
 This example demonstrates the creation of a mask from a vector using :func:`geoutils.Vector.create_mask`.
 """
+
 # %%
 # We open a raster and vector.
 

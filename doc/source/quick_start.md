@@ -18,6 +18,16 @@ A short code example using several end-user functionalities of GeoUtils. For a m
 have a look at the {ref}`feature-overview` page! Or, to find an example about
 a specific functionality, jump to {ref}`quick-gallery` right below.
 
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# To get a good resolution for displayed figures
+from matplotlib import pyplot
+pyplot.rcParams['figure.dpi'] = 600
+pyplot.rcParams['savefig.dpi'] = 600
+pyplot.rcParams['font.size'] = 9
+```
+
 ## Short example
 
 ```{note}
@@ -44,10 +54,15 @@ a buffer of the vector, perform calculations on the modified raster, and finally
 :class: margin
 
 **We notice a ``Userwarning``:** No nodata value was defined in the GeoTIFF file, so GeoUtils automatically defined
-one compatible with the data type to use during operations.
+one compatible with the data type derived during operations.
 ```
 
 ```{code-cell} ipython3
+---
+mystnb:
+  output_stderr: show
+---
+
 import geoutils as gu
 
 # Examples files: paths to a GeoTIFF file and an ESRI shapefile

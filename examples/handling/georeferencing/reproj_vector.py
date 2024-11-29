@@ -4,6 +4,7 @@ Reproject a vector
 
 This example demonstrates the reprojection of a vector using :func:`geoutils.Vector.reproject`.
 """
+
 # %%
 # We open a raster and vector.
 

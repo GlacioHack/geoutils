@@ -4,6 +4,7 @@ Reproject a raster
 
 This example demonstrates the reprojection of a raster using :func:`geoutils.Raster.reproject`.
 """
+
 # %%
 # We open two example rasters.
 

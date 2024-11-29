@@ -4,6 +4,7 @@ Polygonize a raster
 
 This example demonstrates the polygonizing of a raster using :func:`geoutils.Raster.polygonize` and :func:`geoutils.Mask.polygonize`.
 """
+
 # %%
 # We open a raster.
 
@@ -12,7 +13,7 @@ import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
 rast = gu.Raster(filename_rast)
-rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 5000, rast.bounds.bottom + 5000])
+rast = rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 5000, rast.bounds.bottom + 5000])
 # %%
 # Let's plot the raster.
 rast.plot(cmap="terrain")

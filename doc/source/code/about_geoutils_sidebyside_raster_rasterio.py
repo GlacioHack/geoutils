@@ -35,6 +35,7 @@ ma1_reproj = np.ma.MaskedArray(data=arr1_reproj, mask=(arr1_reproj == rast2.noda
 ma2 = rast2.read(masked=True)
 ma_result = (1 + ma2) / (ma1_reproj)
 
+
 # Equivalent of saving
 # (requires to define a logical
 # nodata for the data type)

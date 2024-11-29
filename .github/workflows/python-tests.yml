@@ -16,8 +16,8 @@ jobs:
 
     strategy:
       matrix:
-        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
-        python-version: ["3.9", "3.10", "3.11"]
+        os: ["ubuntu-latest", "macos-latest"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     defaults:
       run:
@@ -30,7 +30,6 @@ jobs:
     - name: Initiate empty environment
       uses: conda-incubator/setup-miniconda@v3
       with:
-        miniforge-variant: Mambaforge
         miniforge-version: latest
         auto-update-conda: true
         use-mamba: true
@@ -88,7 +87,12 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Setup pip dependencies
-      run: pip install pytest-cov coveralls coveragepy-lcov
+      run: pip install pytest-cov coveralls coveragepy-lcov 'coverage<7'
+
+    - name: Print conda environment (for debugging)
+      run: |
+        conda info
+        conda list
 
     - name: Test with pytest
       run: pytest -ra --cov=geoutils/

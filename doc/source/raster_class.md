@@ -34,24 +34,24 @@ A {class}`~geoutils.Raster` also contains many derivative attributes, with namin
 A first category includes georeferencing attributes directly derived from {attr}`~geoutils.Raster.transform`, namely: {attr}`~geoutils.Raster.shape`,
 {attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds`.
 
-A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.indexes` and
-{attr}`~geoutils.Raster.dtypes`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and their indexes.
+A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.bands` and
+{attr}`~geoutils.Raster.dtype`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and the band indexes.
 
 ```{important}
-The {attr}`~geoutils.Raster.indexes` of {class}`rasterio.io.DatasetReader` start from 1 and not 0, be careful when instantiating or loading from a
+The {attr}`~geoutils.Raster.bands` of {class}`rasterio.io.DatasetReader` start from 1 and not 0, be careful when instantiating or loading from a
 multi-band raster!
 ```
 
 Finally, the remaining attributes are only relevant when instantiating from a **on-disk** file: {attr}`~geoutils.Raster.name`, {attr}`~geoutils.Raster.driver`,
-{attr}`~geoutils.Raster.count_on_disk`, {attr}`~geoutils.Raster.indexes_on_disk`, {attr}`~geoutils.Raster.is_loaded` and {attr}`~geoutils.Raster.is_modified`.
+{attr}`~geoutils.Raster.count_on_disk`, {attr}`~geoutils.Raster.bands_on_disk`, {attr}`~geoutils.Raster.is_loaded` and {attr}`~geoutils.Raster.is_modified`.
 
 
 ```{note}
-The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.indexes` attributes always exist, while {attr}`~geoutils.Raster.count_on_disk` and
-{attr}`~geoutils.Raster.indexes_on_disk` only refers to the number of bands on the **on-disk** dataset, if it exists.
+The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.bands` attributes always exist, while {attr}`~geoutils.Raster.count_on_disk` and
+{attr}`~geoutils.Raster.bands_on_disk` only refers to the number of bands on the **on-disk** dataset, if it exists.
 
 For example, {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.count_on_disk` will differ when a single band is loaded from a
-3-band **on-disk** file, by passing a single index to the `indexes` argument in {class}`~geoutils.Raster` or {func}`~geoutils.Raster.load`.
+3-band **on-disk** file, by passing a single index to the `bands` argument in {class}`~geoutils.Raster` or {func}`~geoutils.Raster.load`.
 ```
 
 The complete list of {class}`~geoutils.Raster` attributes with description is available in {ref}`dedicated sections of the API<api-raster-attrs>`.
@@ -150,14 +150,14 @@ might result in larger memory usage than in the original {class}`~geoutils.Raste
 Thanks to the {ref}`core-array-funcs`, **NumPy functions applied directly to a {class}`~geoutils.Raster` will respect {class}`~geoutils.Raster.nodata`
 values** as well as if computing with the {class}`~numpy.ma.MaskedArray` or an unmasked {class}`~numpy.ndarray` filled with {class}`~numpy.nan`.
 
-Additionally, the {class}`~geoutils.Raster` will automatically cast between different {class}`dtypes<numpy.dtype>`, and possibly re-define missing
+Additionally, the {class}`~geoutils.Raster` will automatically cast between different {class}`dtype<numpy.dtype>`, and possibly re-define missing
 {class}`nodatas<geoutils.Raster.nodata>`.
 ```
 
 ## Arithmetic
 
 A {class}`~geoutils.Raster` can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
-{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will output one or two {class}`Rasters<geoutils.Raster>`. NumPy coercion rules apply for {class}`dtypes<numpy.dtype>`.
+{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will output one or two {class}`Rasters<geoutils.Raster>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
 
 ```{code-cell} ipython3
 # Add 1 and divide raster by 2
@@ -302,26 +302,24 @@ prox_lt_100_from_vect = rast.proximity(vector=vect_lt_100)
 prox_lt_100_from_vect
 ```
 
-## Interpolate or extract to point
+## Interpolate or reduce to point
 
 Interpolating or extracting {class}`~geoutils.Raster` values at specific points can be done through:
-- the {func}`~geoutils.Raster.value_at_coords` function, that extracts the single closest pixel or a surrounding window for each coordinate, on which
-  can be applied reducing any function ({func}`numpy.ma.mean` by default), or
-- the {func}`~geoutils.Raster.interp_points` function, that interpolates the {class}`~geoutils.Raster`'s regular grid to each coordinate using a
-  resampling algorithm.
+- the {func}`~geoutils.Raster.reduce_points` function, that applies a reductor function ({func}`numpy.ma.mean` by default) to a surrounding window for each coordinate, or
+- the {func}`~geoutils.Raster.interp_points` function, that interpolates the {class}`~geoutils.Raster`'s regular grid to each coordinate using a resampling algorithm.
 
 ```{code-cell} ipython3
 # Extract median value in a 3 x 3 pixel window
-rast_reproj.value_at_coords(x=0.5, y=0.5, window=3, reducer_function=np.ma.median)
+rast_reproj.reduce_points((0.5, 0.5), window=3, reducer_function=np.ma.median)
 ```
 
 ```{code-cell} ipython3
 # Interpolate coordinate value with quintic algorithm
-rast_reproj.interp_points([(0.5, 0.5)], mode="quintic")
+rast_reproj.interp_points((0.5, 0.5), method="quintic")
 ```
 
 ```{note}
-Both {func}`~geoutils.Raster.value_at_coords` and {func}`~geoutils.Raster.interp_points` can be passed a single coordinate as {class}`floats<float>`, or a
+Both {func}`~geoutils.Raster.reduce_points` and {func}`~geoutils.Raster.interp_points` can be passed a single coordinate as {class}`floats<float>`, or a
 {class}`list` of coordinates.
 ```
 
@@ -332,7 +330,7 @@ A {class}`~geoutils.Raster` can be exported to different formats, to facilitate 
 Those include exporting to:
 - a {class}`xarray.Dataset` with {class}`~geoutils.Raster.to_xarray`,
 - a {class}`rasterio.io.DatasetReader` with {class}`~geoutils.Raster.to_rio_dataset`,
-- a {class}`numpy.ndarray` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_points`.
+- a {class}`numpy.ndarray` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_pointcloud`.
 
 ```{code-cell} ipython3
 # Export to rasterio dataset-reader through a memoryfile
@@ -341,7 +339,7 @@ rast_reproj.to_rio_dataset()
 
 ```{code-cell} ipython3
 # Export to geopandas dataframe
-rast_reproj.to_points()
+rast_reproj.to_pointcloud()
 ```
 
 ```{code-cell} ipython3

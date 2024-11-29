@@ -4,6 +4,7 @@ NumPy interfacing
 
 This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geoutils.Raster>`. See :ref:`core-array-funcs` for more details.
 """
+
 # %%
 # We open a raster.
 

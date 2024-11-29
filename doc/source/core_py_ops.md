@@ -66,7 +66,7 @@ rast - (rast**0.5)
 ```
 
 If an unmasked {class}`~numpy.ndarray` is passed, it will internally be cast into a {class}`~numpy.ma.MaskedArray` to respect the propagation of
-{class}`~geoutils.Raster.nodata` values. Additionally, the {attr}`~geoutils.Raster.dtypes` are also reconciled as they would for {class}`~numpy.ndarray`,
+{class}`~geoutils.Raster.nodata` values. Additionally, the {attr}`~geoutils.Raster.dtype` are also reconciled as they would for {class}`~numpy.ndarray`,
 following [standard NumPy coercion rules](https://numpy.org/doc/stable/reference/generated/numpy.find_common_type.html).
 
 ## Logical comparisons cast to {class}`~geoutils.Mask`

@@ -1,4 +1,5 @@
 #
+#
 # Configuration file for the Sphinx documentation builder.
 #
 import glob
@@ -9,6 +10,7 @@ import sys
 sys.path.append(os.path.abspath("../.."))
 sys.path.append(os.path.abspath("../../geoutils/"))
 sys.path.append(os.path.abspath(".."))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
@@ -50,7 +52,9 @@ myst_enable_extensions = ["colon_fence"]
 # For myst-nb to find the Jupyter kernel (=environment) to run from
 nb_kernel_rgx_aliases = {".*geoutils.*": "python3"}
 # To raise a Sphinx build error on notebook failure
-nb_execution_raise_on_error = True
+nb_execution_raise_on_error = True  # To fail documentation build on notebook execution error
+nb_execution_show_tb = True  # To show full traceback on notebook execution error
+nb_output_stderr = "warn"  # To warn if an error is raised in a notebook cell (if intended, override to "show" in cell)
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/", None),
@@ -64,6 +68,7 @@ intersphinx_mapping = {
     "xdem": ("https://xdem.readthedocs.io/en/stable", None),
     "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
 }
 
 example_path = os.path.join("../", "../", "examples")
@@ -101,6 +106,11 @@ sphinx_gallery_conf = {
     "backreferences_dir": "gen_modules/backreferences",
     "doc_module": ("geoutils"),  # Which function/class levels are used to create galleries
     "remove_config_comments": True,  # To remove comments such as sphinx-gallery-thumbnail-number (only works in code, not in text)
+    "reset_modules": (
+        "matplotlib",
+        "sphinxext.reset_mpl",
+    ),
+    # To reset matplotlib for each gallery (and run custom function that fixes the default DPI)
 }
 
 extlinks = {
@@ -109,13 +119,12 @@ extlinks = {
 }
 
 # For matplotlib figures generate with sphinx plot: (suffix, dpi)
-plot_formats = [(".png", 400)]
+plot_formats = [(".png", 500)]
 
 # To avoid long path names in inheritance diagrams
 inheritance_alias = {
     "geoutils.raster.raster.Raster": "geoutils.Raster",
     "geoutils.raster.raster.Mask": "geoutils.Mask",
-    "geoutils.raster.satimg.SatelliteImage": "geoutils.SatelliteImage",
     "geoutils.vector.Vector": "geoutils.Vector",
     "xdem.dem.DEM": "xdem.DEM",
 }
@@ -192,7 +201,8 @@ html_theme_options = {
         "⚠️ Our 0.1 release refactored several early-development functions for long-term stability, "
         'to update your code see <a href="https://github.com/GlacioHack/geoutils/releases/tag/v0.1.0">here</a>. ⚠️'
         "<br>Future changes will come with deprecation warnings! 🙂"
-    )
+    ),
+    "show_toc_level": 3,
     # "logo_only": True,
     # "icon_links": [
     #         {

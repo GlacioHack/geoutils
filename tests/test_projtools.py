@@ -1,6 +1,7 @@
 """
 Test projtools
 """
+
 import os.path
 
 import geopandas as gpd
@@ -127,8 +128,9 @@ class TestProjTools:
 
         # Test on random points
         nsample = 100
-        randx = np.random.randint(low=img.bounds.left, high=img.bounds.right, size=(nsample,))
-        randy = np.random.randint(low=img.bounds.bottom, high=img.bounds.top, size=(nsample,))
+        rng = np.random.default_rng(42)
+        randx = rng.integers(low=img.bounds.left, high=img.bounds.right, size=(nsample,))
+        randy = rng.integers(low=img.bounds.bottom, high=img.bounds.top, size=(nsample,))
 
         lat, lon = pt.reproject_to_latlon([list(randx), list(randy)], img.crs)
         x, y = pt.reproject_from_latlon([lat, lon], img.crs)

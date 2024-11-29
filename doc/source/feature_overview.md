@@ -16,13 +16,21 @@ kernelspec:
 
 The following presents a descriptive example show-casing all core features of GeoUtils.
 
-For more details, refer to the {ref}`core-index`, {ref}`rasters-index` or {ref}`vectors-index` pages.
-
 ```{tip}
 All pages of this documentation containing code cells can be **run interactively online without the need of setting up your own environment**. Simply click the top launch button!
 (MyBinder can be a bit capricious: you might have to be patient, or restart it after the build is done the first time 😅)
 
 Alternatively, start your own notebook to test GeoUtils at [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/GlacioHack/geoutils/main).
+```
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# To get a good resolution for displayed figures
+from matplotlib import pyplot
+pyplot.rcParams['figure.dpi'] = 600
+pyplot.rcParams['savefig.dpi'] = 600
+pyplot.rcParams['font.size'] = 9
 ```
 
 ## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes
@@ -179,7 +187,7 @@ rast += 1
 ```
 
 Additionally, the {class}`~geoutils.Raster` object possesses a NumPy masked-array interface that allows to apply to it any [NumPy universal function](https://numpy.org/doc/stable/reference/ufuncs.html) and
-most other NumPy array functions, while logically casting {class}`dtypes<numpy.dtype>` and respecting {attr}`~geoutils.Raster.nodata` values.
+most other NumPy array functions, while logically casting {class}`dtype<numpy.dtype>` and respecting {attr}`~geoutils.Raster.nodata` values.
 
 ```{code-cell} ipython3
 # Apply a normalization to the raster
@@ -204,7 +212,7 @@ Masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a
 values_aoi = rast[mask_aoi]
 ```
 
-Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtypes<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
+Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
 {class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{code-cell} ipython3
@@ -233,10 +241,10 @@ import os
 os.remove("myaoi.gpkg")
 ```
 
-## Parsing metadata with {class}`~geoutils.SatelliteImage`
+## Parsing sensor metadata
 
-In our case, `rast` would be better opened using the {class}`~geoutils.Raster` object {class}`~geoutils.SatelliteImage` instead, which tentatively parses
-metadata recognized from the filename or auxiliary files.
+In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a `{class}`~geoutils.Raster`
+, which tentatively parses metadata recognized from the filename or auxiliary files.
 
 ```{code-cell} ipython3
 # Name of the image we used
@@ -246,7 +254,7 @@ print(os.path.basename(filename_rast))
 
 ```{code-cell} ipython3
 # Open while parsing metadata
-rast = gu.SatelliteImage(filename_rast, silent=False)
+rast = gu.Raster(filename_rast, parse_sensor_metadata=True, silent=False)
 ```
 
 ```{admonition} Wrap-up
