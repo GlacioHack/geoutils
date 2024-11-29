@@ -14,4 +14,3 @@ dependencies:
   - xarray
   - dask
   - rioxarray=0.*
-  - python-pdal

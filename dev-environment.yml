@@ -14,12 +14,12 @@ dependencies:
   - xarray
   - dask
   - rioxarray=0.*
-  - python-pdal
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
 
   # Optional dependencies
+  - laspy
   - scikit-image
 
   # Test dependencies
@@ -50,4 +50,4 @@ dependencies:
   - typing-extensions
 
   - pip:
-    - -e ./
+      - -e ./

@@ -3,8 +3,10 @@
 import warnings
 from typing import Literal
 
+import affine
 import geopandas as gpd
 import numpy as np
+import rasterio as rio
 from scipy.interpolate import griddata
 
 from geoutils._typing import NDArrayNum
@@ -16,7 +18,7 @@ def _grid_pointcloud(
     data_column_name: str = "b1",
     resampling: Literal["nearest", "linear", "cubic"] = "linear",
     dist_nodata_pixel: float = 1.0,
-) -> NDArrayNum:
+) -> tuple[NDArrayNum, affine.Affine]:
     """
     Grid point cloud (possibly irregular coordinates) to raster (regular grid) using delaunay triangles interpolation.
 
@@ -88,4 +90,7 @@ def _grid_pointcloud(
     # Flip Y axis of grid
     aligned_dem = np.flip(aligned_dem, axis=0)
 
-    return aligned_dem
+    # 3/ Derive output transform from input grid
+    transform_from_coords = rio.transform.from_origin(grid_coords[0][0], grid_coords[0][1], res_x, res_y)
+
+    return aligned_dem, transform_from_coords
