@@ -6,8 +6,6 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
-from pyproj import CRS
-from rasterio.coords import BoundingBox
 from shapely import Polygon
 
 from geoutils import PointCloud
@@ -169,7 +167,7 @@ class TestPointCloud:
         pc_from_arr = PointCloud.from_array(array=self.arr_points.T, crs=4326, data_column="b1")
         assert pc_from_arr.pointcloud_equal(pc1)
 
-    def test_from_array__errors(self):
+    def test_from_array__errors(self) -> None:
         """Test errors raised during creation with array."""
 
         array = np.ones((4, 5))

@@ -5,7 +5,6 @@ Module for Vector class.
 from __future__ import annotations
 
 import pathlib
-import warnings
 from collections import abc
 from os import PathLike
 from typing import (

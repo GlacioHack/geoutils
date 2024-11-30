@@ -17,7 +17,6 @@ from shapely.geometry.base import BaseGeometry
 import geoutils as gu
 from geoutils._typing import ArrayLike, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
-from geoutils.interface.raster_point import _raster_to_pointcloud
 from geoutils.raster.sampling import subsample_array
 
 try:
@@ -74,7 +73,7 @@ def _load_laspy_metadata(
 #     return
 
 
-class PointCloud(gu.Vector):
+class PointCloud(gu.Vector):  # type: ignore[misc]
     """
     The georeferenced point cloud.
 
@@ -99,7 +98,7 @@ class PointCloud(gu.Vector):
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-        data_column: str | None = "z",
+        data_column: str = "z",
     ):
         """
         Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
@@ -112,10 +111,10 @@ class PointCloud(gu.Vector):
         self._ds: gpd.GeoDataFrame | None = None
         self._name: str | None = None
         self._crs: CRS | None = None
-        self._bounds: BoundingBox | None = None
-        self._data_column: str | None = None
-        self._nb_points: int | None = None
-        self._columns: pd.Index | None = None
+        self._bounds: BoundingBox
+        self._data_column: str
+        self._nb_points: int
+        self._columns: pd.Index
 
         # If PointCloud is passed, simply point back to PointCloud
         if isinstance(filename_or_dataset, PointCloud):
@@ -129,8 +128,9 @@ class PointCloud(gu.Vector):
                 ".laz",
             ]:
                 # Load only metadata, and not the data
-                crs, nb_points, bounds, columns = _load_laspy_metadata(filename_or_dataset)
-                self._name = filename_or_dataset
+                fn = filename_or_dataset if isinstance(filename_or_dataset, str) else filename_or_dataset.name
+                crs, nb_points, bounds, columns = _load_laspy_metadata(fn)
+                self._name = fn
                 self._crs = crs
                 self._nb_points = nb_points
                 self._columns = columns
@@ -238,7 +238,7 @@ class PointCloud(gu.Vector):
         else:
             return self._nb_points
 
-    def load(self, columns: Literal["all", "main"] | list[str] = "main"):
+    def load(self, columns: Literal["all", "main"] | list[str] = "main") -> None:
         """
         Load point cloud from disk (only supported for LAS files).
 
@@ -254,15 +254,17 @@ class PointCloud(gu.Vector):
             )
 
         if columns == "all":
-            columns = self.all_columns
+            columns_to_load = self.all_columns
         elif columns == "main":
-            columns = [self.data_column]
+            columns_to_load = [self.data_column]
+        else:
+            columns_to_load = columns
 
-        ds = _load_laspy_data(filename=self.name, columns=columns)
+        ds = _load_laspy_data(filename=self.name, columns=columns_to_load)
         self._ds = ds
 
     @classmethod
-    def from_array(cls, array: NDArrayNum, crs: CRS, data_column: str | None = "z") -> PointCloud:
+    def from_array(cls, array: NDArrayNum, crs: CRS, data_column: str = "z") -> PointCloud:
         """Create point cloud from a 3 x N or N x 3 array of X coordinate, Y coordinates and Z values."""
 
         # Check shape
@@ -284,14 +286,14 @@ class PointCloud(gu.Vector):
 
     @classmethod
     def from_tuples(
-        cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = "z"
+        cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str = "z"
     ) -> PointCloud:
         """Create point cloud from an iterable of 3-tuples (X coordinate, Y coordinate, Z value)."""
 
         return cls.from_array(np.array(tuples_xyz), crs=crs, data_column=data_column)
 
     @classmethod
-    def from_xyz(cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str | None = "z") -> PointCloud:
+    def from_xyz(cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str = "z") -> PointCloud:
         """Create point cloud from three 1D array-like coordinates for X/Y/Z."""
 
         return cls.from_array(np.stack((x, y, z)), crs=crs, data_column=data_column)
@@ -311,7 +313,7 @@ class PointCloud(gu.Vector):
 
         return self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values
 
-    def pointcloud_equal(self, other: PointCloud, **kwargs: Any):
+    def pointcloud_equal(self, other: PointCloud, **kwargs: Any) -> bool:
         """
         Check if two point clouds are equal.
 
@@ -332,7 +334,7 @@ class PointCloud(gu.Vector):
     def grid(
         self,
         ref: gu.Raster | None,
-        grid_coords: tuple[np.ndarray, np.ndarray] | None,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] | None,
         resampling: Literal["nearest", "linear", "cubic"],
         dist_nodata_pixel: float = 1.0,
     ) -> gu.Raster:
@@ -360,11 +362,11 @@ class PointCloud(gu.Vector):
 
     def subsample(self, subsample: float | int, random_state: int | np.random.Generator | None = None) -> PointCloud:
 
-        subsample = subsample_array(
+        indices = subsample_array(
             array=self.ds[self.data_column].values, subsample=subsample, return_indices=True, random_state=random_state
         )
 
-        return PointCloud(self.ds[subsample])
+        return PointCloud(self.ds[indices])
 
     # @classmethod
     # def from_raster(cls, raster: gu.Raster) -> PointCloud:
