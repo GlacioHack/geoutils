@@ -228,11 +228,11 @@ def _raster_to_pointcloud(
 
     if not as_array:
         pc = gpd.GeoDataFrame(
-                pixel_data.T,
-                columns=all_column_names,
-                geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
-                crs=source_raster.crs,
-            )
+            pixel_data.T,
+            columns=all_column_names,
+            geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
+            crs=source_raster.crs,
+        )
         return pc
     else:
         # Merge the coordinates and pixel data an array of N x K

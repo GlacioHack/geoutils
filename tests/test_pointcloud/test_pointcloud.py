@@ -1,13 +1,14 @@
 """Test for PointCloud class."""
+
 from __future__ import annotations
 
+import geopandas as gpd
+import numpy as np
 import pytest
+from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
 from rasterio.coords import BoundingBox
-import numpy as np
-import geopandas as gpd
 from shapely import Polygon
-from geopandas.testing import assert_geodataframe_equal
 
 from geoutils import PointCloud
 
@@ -17,13 +18,18 @@ class TestPointCloud:
     # 1/ Synthetic point cloud with no auxiliary column
     rng = np.random.default_rng(42)
     arr_points = rng.integers(low=1, high=1000, size=(100, 3)) + rng.normal(0, 0.15, size=(100, 3))
-    gdf1 = gpd.GeoDataFrame(data={"b1": arr_points[:, 2]},
-                            geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1]), crs=4326)
+    gdf1 = gpd.GeoDataFrame(
+        data={"b1": arr_points[:, 2]}, geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1]), crs=4326
+    )
 
     # 2/ Synthetic point cloud with auxiliary column
     arr_points2 = rng.integers(low=1, high=1000, size=(100, 4)) + rng.normal(0, 0.15, size=(100, 4))
-    gdf2 = gpd.GeoDataFrame(data=arr_points2[:, 2:], columns=["b1", "b2"],
-                            geometry=gpd.points_from_xy(x=arr_points2[:, 0], y=arr_points2[:, 1]), crs=4326)
+    gdf2 = gpd.GeoDataFrame(
+        data=arr_points2[:, 2:],
+        columns=["b1", "b2"],
+        geometry=gpd.points_from_xy(x=arr_points2[:, 0], y=arr_points2[:, 1]),
+        crs=4326,
+    )
     # 2/ LAS file
     fn_las = "/home/atom/ongoing/own/geoutils/test.laz"
 
@@ -151,8 +157,6 @@ class TestPointCloud:
     def test_pointcloud_equal(self) -> None:
         """Test pointcloud equality."""
 
-
-
     def test_from_array(self) -> None:
         """Test building point cloud from array."""
 
@@ -161,7 +165,7 @@ class TestPointCloud:
         pc_from_arr = PointCloud.from_array(array=self.arr_points, crs=4326, data_column="b1")
         assert pc_from_arr.pointcloud_equal(pc1)
 
-        # Should be the same witht transposed array
+        # Should be the same with transposed array
         pc_from_arr = PointCloud.from_array(array=self.arr_points.T, crs=4326, data_column="b1")
         assert pc_from_arr.pointcloud_equal(pc1)
 
@@ -185,24 +189,29 @@ class TestPointCloud:
 
         # Build from array and compare
         pc1 = PointCloud(self.gdf1, data_column="b1")
-        pc_from_xyz = PointCloud.from_xyz(x=self.arr_points[:, 0], y=self.arr_points[:, 1], z=self.arr_points[:, 2],
-                                              crs=4326, data_column="b1")
+        pc_from_xyz = PointCloud.from_xyz(
+            x=self.arr_points[:, 0], y=self.arr_points[:, 1], z=self.arr_points[:, 2], crs=4326, data_column="b1"
+        )
         assert pc_from_xyz.pointcloud_equal(pc1)
 
         # Test with lists
-        pc_from_xyz = PointCloud.from_xyz(x=list(self.arr_points[:, 0]),
-                                          y=list(self.arr_points[:, 1]),
-                                          z=list(self.arr_points[:, 2]),
-                                        crs=4326,
-                                        data_column="b1")
+        pc_from_xyz = PointCloud.from_xyz(
+            x=list(self.arr_points[:, 0]),
+            y=list(self.arr_points[:, 1]),
+            z=list(self.arr_points[:, 2]),
+            crs=4326,
+            data_column="b1",
+        )
         assert pc_from_xyz.pointcloud_equal(pc1)
 
         # Test with tuples
-        pc_from_xyz = PointCloud.from_xyz(x=tuple(self.arr_points[:, 0]),
-                                            y=tuple(self.arr_points[:, 1]),
-                                            z=tuple(self.arr_points[:, 2]),
-                                            crs=4326,
-                                            data_column="b1")
+        pc_from_xyz = PointCloud.from_xyz(
+            x=tuple(self.arr_points[:, 0]),
+            y=tuple(self.arr_points[:, 1]),
+            z=tuple(self.arr_points[:, 2]),
+            crs=4326,
+            data_column="b1",
+        )
         assert pc_from_xyz.pointcloud_equal(pc1)
 
     def test_to_array(self) -> None:

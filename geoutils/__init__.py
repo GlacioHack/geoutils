@@ -4,9 +4,9 @@ GeoUtils is a Python package for the analysis of geospatial data.
 
 from geoutils import examples, projtools  # noqa
 from geoutils._config import config  # noqa
+from geoutils.pointcloud import PointCloud  # noqa
 from geoutils.raster import Mask, Raster  # noqa
 from geoutils.vector import Vector  # noqa
-from geoutils.pointcloud import PointCloud  # noqa
 
 try:
     from geoutils._version import __version__ as __version__  # noqa

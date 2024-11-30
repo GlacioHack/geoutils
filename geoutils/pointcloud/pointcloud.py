@@ -1,26 +1,28 @@
 """Module for PointCloud class."""
+
 from __future__ import annotations
 
 import os.path
-import warnings
-from typing import Iterable, Literal, Any
 import pathlib
+import warnings
+from typing import Any, Iterable, Literal
 
+import geopandas as gpd
+import numpy as np
 import pandas as pd
 from pyproj import CRS
-import numpy as np
-import geopandas as gpd
 from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
+from geoutils._typing import ArrayLike, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
-from geoutils.raster.sampling import subsample_array
 from geoutils.interface.raster_point import _raster_to_pointcloud
-from geoutils._typing import Number, NDArrayNum, ArrayLike
+from geoutils.raster.sampling import subsample_array
 
 try:
     import laspy
+
     has_laspy = True
 except ImportError:
     has_laspy = False
@@ -36,15 +38,18 @@ def _load_laspy_data(filename: str, columns: list[str]) -> gpd.GeoDataFrame:
     data = np.vstack([las[n] for n in columns]).T
 
     # Build geodataframe
-    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=las.x, y=las.y,
-                                                       crs=las.header.parse_crs(prefer_wkt=False)),
-                           data=data,
-                           columns=columns)
+    gdf = gpd.GeoDataFrame(
+        geometry=gpd.points_from_xy(x=las.x, y=las.y, crs=las.header.parse_crs(prefer_wkt=False)),
+        data=data,
+        columns=columns,
+    )
 
     return gdf
 
 
-def _load_laspy_metadata(filename: str, ) -> tuple[CRS, int, BoundingBox, pd.Index]:
+def _load_laspy_metadata(
+    filename: str,
+) -> tuple[CRS, int, BoundingBox, pd.Index]:
     """Load point cloud metadata from LAS/LAZ/COPC file."""
 
     with laspy.open(filename) as f:
@@ -62,7 +67,7 @@ def _load_laspy_metadata(filename: str, ) -> tuple[CRS, int, BoundingBox, pd.Ind
 #
 #     with laspy.open(filename) as f:
 #         new_hdr = laspy.LasHeader(version="1.4", point_format=6)
-#         # You can set the scales and offsets to values tha suits your data
+#         # You can set the scales and offsets to values that suits your data
 #         new_hdr.scales = np.array([1.0, 0.5, 0.1])
 #         new_las = laspy.LasData(header = new_hdr, points=)
 #
@@ -91,9 +96,11 @@ class PointCloud(gu.Vector):
     See the API for more details.
     """
 
-    def __init__(self,
-                 filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-                 data_column: str | None = "z"):
+    def __init__(
+        self,
+        filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
+        data_column: str | None = "z",
+    ):
         """
         Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
         or a Shapely geometry), or only with a point cloud file type.
@@ -117,8 +124,10 @@ class PointCloud(gu.Vector):
             return
         # For filename, rely on parent Vector class or LAS file reader
         else:
-            if isinstance(filename_or_dataset, (str, pathlib.Path)) and \
-                    os.path.splitext(filename_or_dataset)[-1] in [".las", ".laz"]:
+            if isinstance(filename_or_dataset, (str, pathlib.Path)) and os.path.splitext(filename_or_dataset)[-1] in [
+                ".las",
+                ".laz",
+            ]:
                 # Load only metadata, and not the data
                 crs, nb_points, bounds, columns = _load_laspy_metadata(filename_or_dataset)
                 self._name = filename_or_dataset
@@ -132,18 +141,17 @@ class PointCloud(gu.Vector):
                 super().__init__(filename_or_dataset)
                 # Verify that the vector can be cast as a point cloud
                 if not all(p == "Point" for p in self.ds.geom_type):
-                    raise ValueError("This vector file contains non-point geometries, "
-                                     "cannot be instantiated as a point cloud.")
+                    raise ValueError(
+                        "This vector file contains non-point geometries, " "cannot be instantiated as a point cloud."
+                    )
 
         # Set data column following user input
         self.set_data_column(new_data_column=data_column)
-
 
     # TODO: Could also move to Vector directly?
     ##############################################
     # OVERRIDDEN VECTOR METHODS TO SUPPORT LOADING
     ##############################################
-
 
     @property
     def ds(self) -> gpd.GeoDataFrame:
@@ -168,7 +176,7 @@ class PointCloud(gu.Vector):
     @property
     def crs(self) -> CRS:
         """Coordinate reference system of the vector."""
-        # Overridding method in Vector
+        # Overriding method in Vector
         if self.is_loaded:
             return super().crs
         else:
@@ -176,7 +184,7 @@ class PointCloud(gu.Vector):
 
     @property
     def bounds(self) -> BoundingBox:
-        # Overridding method in Vector
+        # Overriding method in Vector
         if self.is_loaded:
             return super().bounds
         else:
@@ -185,7 +193,7 @@ class PointCloud(gu.Vector):
     @property
     def all_columns(self) -> pd.Index:
         """Index of all columns of the point cloud, excluding the column of 2D point geometries."""
-        # Overridding method in Vector
+        # Overriding method in Vector
         if self.is_loaded:
             all_columns = super().columns
             all_columns_nongeom = all_columns[all_columns != "geometry"]
@@ -210,8 +218,10 @@ class PointCloud(gu.Vector):
         """Set new column as point cloud data column."""
 
         if new_data_column not in self.all_columns:
-            raise ValueError(f"Data column {new_data_column} not found among columns, available columns "
-                             f"are: {', '.join(self.all_columns)}.")
+            raise ValueError(
+                f"Data column {new_data_column} not found among columns, available columns "
+                f"are: {', '.join(self.all_columns)}."
+            )
         self._data_column = new_data_column
 
     @property
@@ -266,13 +276,16 @@ class PointCloud(gu.Vector):
             array_in = array
 
         # Build geodataframe
-        gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=array_in[0, :], y=array_in[1, :], crs=crs),
-                               data={data_column: array_in[2, :]})
+        gdf = gpd.GeoDataFrame(
+            geometry=gpd.points_from_xy(x=array_in[0, :], y=array_in[1, :], crs=crs), data={data_column: array_in[2, :]}
+        )
 
         return cls(filename_or_dataset=gdf, data_column=data_column)
 
     @classmethod
-    def from_tuples(cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = "z") -> PointCloud:
+    def from_tuples(
+        cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = "z"
+    ) -> PointCloud:
         """Create point cloud from an iterable of 3-tuples (X coordinate, Y coordinate, Z value)."""
 
         return cls.from_array(np.array(tuples_xyz), crs=crs, data_column=data_column)
@@ -316,30 +329,40 @@ class PointCloud(gu.Vector):
 
         return all([vector_eq, data_column_eq])
 
-    def grid(self,
-             ref: gu.Raster | None,
-             grid_coords: tuple[np.ndarray, np.ndarray] | None,
-             resampling: Literal["nearest", "linear", "cubic"],
-             dist_nodata_pixel: float = 1.) -> gu.Raster:
+    def grid(
+        self,
+        ref: gu.Raster | None,
+        grid_coords: tuple[np.ndarray, np.ndarray] | None,
+        resampling: Literal["nearest", "linear", "cubic"],
+        dist_nodata_pixel: float = 1.0,
+    ) -> gu.Raster:
         """Grid point cloud into a raster."""
 
         if isinstance(ref, gu.Raster):
             if grid_coords is None:
-                warnings.warn("Both reference raster and grid coordinates were passed for gridding, "
-                              "using only the reference raster.")
+                warnings.warn(
+                    "Both reference raster and grid coordinates were passed for gridding, "
+                    "using only the reference raster."
+                )
             grid_coords = ref.coords(grid=False)
         else:
             grid_coords = grid_coords
 
-        array, transform = _grid_pointcloud(self.ds, grid_coords=grid_coords, data_column_name=self.data_column,
-                                 resampling=resampling, dist_nodata_pixel=dist_nodata_pixel)
+        array, transform = _grid_pointcloud(
+            self.ds,
+            grid_coords=grid_coords,
+            data_column_name=self.data_column,
+            resampling=resampling,
+            dist_nodata_pixel=dist_nodata_pixel,
+        )
 
         return gu.Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=None)
 
     def subsample(self, subsample: float | int, random_state: int | np.random.Generator | None = None) -> PointCloud:
 
-        subsample = subsample_array(array=self.ds[self.data_column].values, subsample=subsample,
-                                    return_indices=True, random_state=random_state)
+        subsample = subsample_array(
+            array=self.ds[self.data_column].values, subsample=subsample, return_indices=True, random_state=random_state
+        )
 
         return PointCloud(self.ds[subsample])
 
