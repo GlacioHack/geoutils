@@ -22,10 +22,10 @@ class TestPointCloud:
 
     # 2/ Synthetic point cloud with auxiliary column
     arr_points2 = rng.integers(low=1, high=1000, size=(100, 4)) + rng.normal(0, 0.15, size=(100, 4))
-    gdf2 = gpd.GeoDataFrame(data=arr_points[:, 2:], columns=["b1", "b2"],
-                            geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1]), crs=4326)
+    gdf2 = gpd.GeoDataFrame(data=arr_points2[:, 2:], columns=["b1", "b2"],
+                            geometry=gpd.points_from_xy(x=arr_points2[:, 0], y=arr_points2[:, 1]), crs=4326)
     # 2/ LAS file
-    fn_las = "/home/atom/ongoing/own/geoutils/points.laz"
+    fn_las = "/home/atom/ongoing/own/geoutils/test.laz"
 
     # 3/ Non-point vector (for error raising)
     poly = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
@@ -102,7 +102,7 @@ class TestPointCloud:
         pc = PointCloud(self.fn_las, data_column="Z")
         assert not pc.is_loaded
 
-        pc2 = pc.buffer(distance=0.1)
+        pc.buffer(distance=0.1)
         assert pc.is_loaded
 
     def test_load__errors(self) -> None:
