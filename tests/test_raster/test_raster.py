@@ -11,6 +11,7 @@ import tempfile
 import warnings
 from io import StringIO
 from tempfile import TemporaryFile
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1943,6 +1944,42 @@ class TestRaster:
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_stats(self, example: str) -> None:
+        raster = gu.Raster(example)
+
+        # Full stats
+        stats = raster.get_stats()
+        expected_stats = [
+            "Mean",
+            "Median",
+            "Max",
+            "Min",
+            "Sum",
+            "Sum of squares",
+            "90th percentile",
+            "NMAD",
+            "RMSE",
+            "Standard deviation",
+        ]
+        for name in expected_stats:
+            assert name in stats
+            assert stats.get(name) is not None
+
+        # Single stat
+        stat = raster.get_stats(stats_name="Average")
+        assert isinstance(stat, np.floating)
+
+        # Selected stats and callable
+        def percentile_95(data: NDArrayNum) -> np.floating[Any]:
+            return np.nanpercentile(data, 95)
+
+        stats_name = ["mean", "maximum", "std", "percentile_95"]
+        stats = raster.get_stats(stats_name=["mean", "maximum", "std", percentile_95])
+        for name in stats_name:
+            assert name in stats
+            assert stats.get(name) is not None
 
 
 class TestMask:
