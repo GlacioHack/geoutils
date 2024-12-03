@@ -1971,10 +1971,15 @@ class TestRaster:
         stat = raster.get_stats(stats_name="Average")
         assert isinstance(stat, np.floating)
 
-        # Selected stats and callable
         def percentile_95(data: NDArrayNum) -> np.floating[Any]:
+            if isinstance(data, np.ma.MaskedArray):
+                data = data.compressed()
             return np.nanpercentile(data, 95)
 
+        stat = raster.get_stats(stats_name=percentile_95)
+        assert isinstance(stat, np.floating)
+
+        # Selected stats and callable
         stats_name = ["mean", "maximum", "std", "percentile_95"]
         stats = raster.get_stats(stats_name=["mean", "maximum", "std", percentile_95])
         for name in stats_name:

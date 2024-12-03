@@ -1871,7 +1871,7 @@ class Raster:
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    def _statistics(self, band: int = 1) -> dict[str, float]:
+    def _statistics(self, band: int = 1) -> dict[str, np.floating[Any]]:
         """
         Calculate common statistics for a specified band in the raster.
 
@@ -1884,6 +1884,10 @@ class Raster:
             data = self.data
         else:
             data = self.data[band - 1]
+
+        # If data is a MaskedArray, use the compressed version (without masked values)
+        if isinstance(data, np.ma.MaskedArray):
+            data = data.compressed()
 
         # Compute the statistics
         stats_dict = {
@@ -1901,8 +1905,12 @@ class Raster:
         return stats_dict
 
     def get_stats(
-        self, stats_name: str | list[str | Callable[[NDArrayNum], float]] | None = None, band: int = 1
-    ) -> float | dict[str, float]:
+        self,
+        stats_name: (
+            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
+        ) = None,
+        band: int = 1,
+    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
@@ -1944,10 +1952,15 @@ class Raster:
                     result[name] = self._get_single_stat(stats_dict, stats_aliases, name)
             return result
         else:
-            return self._get_single_stat(stats_dict, stats_aliases, stats_name)
+            if callable(stats_name):
+                return stats_name(self.data[band] if self.count > 1 else self.data)
+            else:
+                return self._get_single_stat(stats_dict, stats_aliases, stats_name)
 
     @staticmethod
-    def _get_single_stat(stats_dict: dict[str, float], stats_aliases: dict[str, str], stat_name: str) -> float:
+    def _get_single_stat(
+        stats_dict: dict[str, np.floating[Any]], stats_aliases: dict[str, str], stat_name: str
+    ) -> np.floating[Any]:
         """
         Retrieve a single statistic based on a flexible name or alias.
 
@@ -1964,7 +1977,7 @@ class Raster:
             return stats_dict[actual_name]
         else:
             logging.warning("Statistic name '%s' is not recognized", stat_name)
-            return np.nan
+            return np.floating(np.nan)
 
     def _nmad(self, nfact: float = 1.4826, band: int = 0) -> np.floating[Any]:
         """
@@ -1977,6 +1990,8 @@ class Raster:
             data = self.data
         else:
             data = self.data[band]
+        if isinstance(data, np.ma.MaskedArray):
+            data = data.compressed()
         return nfact * np.nanmedian(np.abs(data - np.nanmedian(data)))
 
     @overload
