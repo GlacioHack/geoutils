@@ -1936,12 +1936,18 @@ class Raster:
             "min": "Min",
             "minimum": "Min",
             "sum": "Sum",
-            "sum_of_squares": "Sum of squares",
-            "90th_percentile": "90th percentile",
+            "sumofsquares": "Sum of squares",
+            "sum2": "Sum of squares",
+            "percentile": "90th percentile",
+            "90thpercentile": "90th percentile",
+            "90percentile": "90th percentile",
+            "percentile90": "90th percentile",
             "nmad": "NMAD",
             "rmse": "RMSE",
             "std": "Standard deviation",
-            "std_dev": "Standard deviation",
+            "stddev": "Standard deviation",
+            "standarddev": "Standard deviation",
+            "standarddeviation": "Standard deviation",
         }
         if isinstance(stats_name, list):
             result = {}
@@ -1971,13 +1977,13 @@ class Raster:
         :returns: The requested statistic value, or None if the stat name is not recognized.
         """
 
-        normalized_name = stat_name.lower().replace(" ", "_")
+        normalized_name = stat_name.lower().replace(" ", "").replace("_", "").replace("-", "")
         if normalized_name in stats_aliases:
             actual_name = stats_aliases[normalized_name]
             return stats_dict[actual_name]
         else:
             logging.warning("Statistic name '%s' is not recognized", stat_name)
-            return np.floating(np.nan)
+            return np.float32(np.nan)
 
     def _nmad(self, nfact: float = 1.4826, band: int = 0) -> np.floating[Any]:
         """

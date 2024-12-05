@@ -4,11 +4,13 @@ Test functions for raster
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
 import re
 import tempfile
 import warnings
+from cmath import isnan
 from io import StringIO
 from tempfile import TemporaryFile
 from typing import Any
@@ -1946,7 +1948,7 @@ class TestRaster:
         )
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_stats(self, example: str) -> None:
+    def test_stats(self, example: str, caplog) -> None:
         raster = gu.Raster(example)
 
         # Full stats
@@ -1985,6 +1987,12 @@ class TestRaster:
         for name in stats_name:
             assert name in stats
             assert stats.get(name) is not None
+
+        # non-existing stat
+        with caplog.at_level(logging.WARNING):
+            stat = raster.get_stats(stats_name="80 percentile")
+            assert isnan(stat)
+        assert "Statistic name '80 percentile' is not recognized" in caplog.text
 
 
 class TestMask:
