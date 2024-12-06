@@ -17,7 +17,8 @@ from shapely.geometry.base import BaseGeometry
 import geoutils as gu
 from geoutils._typing import ArrayLike, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
-from geoutils.raster.sampling import subsample_array
+
+# from geoutils.raster.sampling import subsample_array
 
 try:
     import laspy
@@ -113,7 +114,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         self._crs: CRS | None = None
         self._bounds: BoundingBox
         self._data_column: str
-        self._data: np.ndarray
+        self._data: NDArrayNum
         self._nb_points: int
         self._all_columns: pd.Index
 
@@ -377,13 +378,13 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         return gu.Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=None)
 
-    def subsample(self, subsample: float | int, random_state: int | np.random.Generator | None = None) -> PointCloud:
-
-        indices = subsample_array(
-            array=self.ds[self.data_column].values, subsample=subsample, return_indices=True, random_state=random_state
-        )
-
-        return PointCloud(self.ds[indices])
+    # def subsample(self, subsample: float | int, random_state: int | np.random.Generator | None = None) -> PointCloud:
+    #
+    #     indices = subsample_array(
+    #         array=self.data, subsample=subsample, return_indices=True, random_state=random_state
+    #     )
+    #
+    #     return PointCloud(self.ds[indices])
 
     # @classmethod
     # def from_raster(cls, raster: gu.Raster) -> PointCloud:
