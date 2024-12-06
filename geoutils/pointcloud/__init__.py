@@ -1,1 +1,1 @@
-from geoutils.pointcloud.pointcloud import *  # noqa
+from geoutils.pointcloud.pointcloud import PointCloud  # noqa
