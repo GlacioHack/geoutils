@@ -98,7 +98,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-        data_column: str = "z",
+        data_column: str,
     ):
         """
         Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
@@ -113,8 +113,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         self._crs: CRS | None = None
         self._bounds: BoundingBox
         self._data_column: str
+        self._data: np.ndarray
         self._nb_points: int
-        self._columns: pd.Index
+        self._all_columns: pd.Index
 
         # If PointCloud is passed, simply point back to PointCloud
         if isinstance(filename_or_dataset, PointCloud):
@@ -133,7 +134,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                 self._name = fn
                 self._crs = crs
                 self._nb_points = nb_points
-                self._columns = columns
+                self._all_columns = columns
                 self._bounds = bounds
                 self._ds = None
             # Check on filename are done with Vector.__init__
@@ -190,6 +191,26 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         else:
             return self._bounds
 
+    #####################################
+    # NEW METHODS SPECIFIC TO POINT CLOUD
+    #####################################
+
+    @property
+    def data(self) -> NDArrayNum:
+        """
+        Data of the point cloud.
+
+        Points to the data column of the geodataframe, equivalent to calling self.ds[self.data_column].
+        """
+        # Triggers the loading mechanism through self.ds
+        return self.ds[self.data_column]
+
+    @data.setter
+    def data(self, new_data: NDArrayNum) -> None:
+        """Set new data for the point cloud."""
+
+        self.ds[self.data_column] = new_data
+
     @property
     def all_columns(self) -> pd.Index:
         """Index of all columns of the point cloud, excluding the column of 2D point geometries."""
@@ -199,11 +220,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             all_columns_nongeom = all_columns[all_columns != "geometry"]
             return all_columns_nongeom
         else:
-            return self._columns
-
-    #####################################
-    # NEW METHODS SPECIFIC TO POINT CLOUD
-    #####################################
+            return self._all_columns
 
     @property
     def data_column(self) -> str:

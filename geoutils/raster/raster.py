@@ -3390,8 +3390,7 @@ class Raster:
         :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
-        return gu.PointCloud(
-            _raster_to_pointcloud(
+        return _raster_to_pointcloud(
                 source_raster=self,
                 data_column_name=data_column_name,
                 data_band=data_band,
@@ -3401,9 +3400,7 @@ class Raster:
                 skip_nodata=skip_nodata,
                 as_array=as_array,
                 random_state=random_state,
-                force_pixel_offset=force_pixel_offset,
-            )
-        )
+                force_pixel_offset=force_pixel_offset)
 
     @classmethod
     def from_pointcloud_regular(

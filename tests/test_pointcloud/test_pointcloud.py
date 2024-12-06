@@ -28,10 +28,10 @@ class TestPointCloud:
         geometry=gpd.points_from_xy(x=arr_points2[:, 0], y=arr_points2[:, 1]),
         crs=4326,
     )
-    # 2/ LAS file
+    # 3/ LAS file
     fn_las = "/home/atom/ongoing/own/geoutils/test.laz"
 
-    # 3/ Non-point vector (for error raising)
+    # 4/ Non-point vector (for error raising)
     poly = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
     gdf3 = gpd.GeoDataFrame({"geometry": [poly]}, crs="EPSG:4326")
 
@@ -60,7 +60,7 @@ class TestPointCloud:
 
         # If vector is not only comprised of points
         with pytest.raises(ValueError, match="This vector file contains non-point geometries*"):
-            PointCloud(self.gdf3)
+            PointCloud(self.gdf3, data_column="z")
 
     def test_load(self) -> None:
         """

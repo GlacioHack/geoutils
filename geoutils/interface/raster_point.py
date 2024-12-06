@@ -100,7 +100,7 @@ def _raster_to_pointcloud(
     as_array: bool,
     random_state: int | np.random.Generator | None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
-) -> NDArrayNum | gpd.GeoDataFrame:
+) -> NDArrayNum | gu.PointCloud:
     """
     Convert a raster to a point cloud. See Raster.to_pointcloud() for details.
     """
@@ -233,7 +233,7 @@ def _raster_to_pointcloud(
             geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
             crs=source_raster.crs,
         )
-        return pc
+        return gu.PointCloud(pc, data_column=data_column_name)
     else:
         # Merge the coordinates and pixel data an array of N x K
         # This has the downside of converting all the data to the same data type
