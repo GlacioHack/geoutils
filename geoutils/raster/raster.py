@@ -70,6 +70,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
+from geoutils.stats import nmad
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -1898,16 +1899,49 @@ class Raster:
             "Sum": np.nansum(data),
             "Sum of squares": np.nansum(np.square(data)),
             "90th percentile": np.nanpercentile(data, 90),
-            "NMAD": self._nmad(),
+            "NMAD": nmad(data),
             "RMSE": np.sqrt(np.nanmean(np.square(data - np.nanmean(data)))),
             "Standard deviation": np.nanstd(data),
         }
         return stats_dict
 
+    @overload
     def get_stats(
         self,
         stats_name: (
-            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
+            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
+            | Callable[[NDArrayNum], np.floating[Any]]
+        ),
+        band: int = 1,
+    ) -> np.floating[Any]: ...
+
+    @overload
+    def get_stats(
+        self,
+        stats_name: (
+            list[
+                Literal[
+                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                ]
+                | Callable[[NDArrayNum], np.floating[Any]]
+            ]
+            | None
+        ) = None,
+        band: int = 1,
+    ) -> dict[str, np.floating[Any]]: ...
+
+    def get_stats(
+        self,
+        stats_name: (
+            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
+            | Callable[[NDArrayNum], np.floating[Any]]
+            | list[
+                Literal[
+                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                ]
+                | Callable[[NDArrayNum], np.floating[Any]]
+            ]
+            | None
         ) = None,
         band: int = 1,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
@@ -1916,6 +1950,10 @@ class Raster:
         to calculate custom stats.
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+                   Accepted names include:
+                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                   You can also use common aliases for these names (e.g., "average", "maximum", "minimum", etc.).
+                   Custom callables can also be provided.
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
@@ -1985,21 +2023,6 @@ class Raster:
             logging.warning("Statistic name '%s' is not recognized", stat_name)
             return np.float32(np.nan)
 
-    def _nmad(self, nfact: float = 1.4826, band: int = 0) -> np.floating[Any]:
-        """
-        Calculate the normalized median absolute deviation (NMAD) of an array.
-        Default scaling factor is 1.4826 to scale the median absolute deviation (MAD) to the dispersion of a normal
-        distribution (see https://en.wikipedia.org/wiki/Median_absolute_deviation#Relation_to_standard_deviation, and
-        e.g. Höhle and Höhle (2009), http://dx.doi.org/10.1016/j.isprsjprs.2009.02.003)
-        """
-        if self.count == 1:
-            data = self.data
-        else:
-            data = self.data[band]
-        if isinstance(data, np.ma.MaskedArray):
-            data = data.compressed()
-        return nfact * np.nanmedian(np.abs(data - np.nanmedian(data)))
-
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
 
@@ -2040,14 +2063,13 @@ class Raster:
 
             if self.count == 1:
                 statistics = self.get_stats()
-                if isinstance(statistics, dict):
 
-                    # Determine the maximum length of the stat names for alignment
-                    max_len = max(len(name) for name in statistics.keys())
+                # Determine the maximum length of the stat names for alignment
+                max_len = max(len(name) for name in statistics.keys())
 
-                    # Format the stats with aligned names
-                    for name, value in statistics.items():
-                        as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
+                # Format the stats with aligned names
+                for name, value in statistics.items():
+                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
