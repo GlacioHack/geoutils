@@ -12,11 +12,13 @@ import numpy as np
 import pandas as pd
 from pyproj import CRS
 from rasterio.coords import BoundingBox
+from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
 from geoutils._typing import ArrayLike, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
+from geoutils.raster.georeferencing import _coords
 
 # from geoutils.raster.sampling import subsample_array
 
@@ -351,9 +353,10 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
     def grid(
         self,
-        ref: gu.Raster | None,
-        grid_coords: tuple[NDArrayNum, NDArrayNum] | None,
-        resampling: Literal["nearest", "linear", "cubic"],
+        ref: gu.Raster | None = None,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+        res: float | tuple[float, float] | None = None,
+        resampling: Literal["nearest", "linear", "cubic"] = "linear",
         dist_nodata_pixel: float = 1.0,
     ) -> gu.Raster:
         """Grid point cloud into a raster."""
@@ -366,7 +369,13 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                 )
             grid_coords = ref.coords(grid=False)
         else:
-            grid_coords = grid_coords
+            if res is not None:
+                xsize = (self.bounds.right - self.bounds.left) / res
+                ysize = (self.bounds.top - self.bounds.bottom) / res
+                transform = from_origin(west=self.bounds.left, north=self.bounds.top, xsize=xsize, ysize=ysize)
+                grid_coords = _coords(transform=transform, shape=(ysize, xsize), grid=False, area_or_point=None)
+            else:
+                grid_coords = grid_coords
 
         array, transform = _grid_pointcloud(
             self.ds,
