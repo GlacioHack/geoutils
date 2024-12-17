@@ -39,6 +39,8 @@ class TestRaster:
     aster_dem_path = examples.get_path("exploradores_aster_dem")
     aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
 
+    roi = {"left": 100, "bottom": 100, "right": 400, "top": 400}
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
         """Test that all possible inputs work properly in Raster class init"""
@@ -71,6 +73,11 @@ class TestRaster:
         assert all(
             [r0.raster_equal(r1), r0.raster_equal(r1), r0.raster_equal(r2), r0.raster_equal(r3), r0.raster_equal(r4)]
         )
+
+        # Passing a raster with a roi
+        r2_roi = gu.Raster(r0, roi=self.roi)
+        r0_roi = gu.Raster(example, roi=self.roi)
+        assert r2_roi.raster_equal(r0_roi)
 
         # For re-instantiation via Raster (r2 above), we check the behaviour:
         # By default, raster were unloaded, and were loaded during raster_equal() independently
@@ -302,6 +309,43 @@ class TestRaster:
             r = gu.Raster(self.landsat_b4_path)
             r.filename = None
             r.load()
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_raster_with_roi(self, example: str) -> None:
+        """
+        Test loading raster data with a region of interest.
+        """
+
+        # load a raster (r1) and the same with a roi (r2)
+        r1 = gu.Raster(example, load_data=True)
+        data_test = r1.data[
+            ..., r1.height - self.roi["top"] : r1.height - self.roi["bottom"], self.roi["left"] : self.roi["right"]
+        ]
+        r2 = gu.Raster(example, load_data=True, roi=self.roi)
+
+        # Check the height and the width of the raster with roi
+        expected_height = self.roi["top"] - self.roi["bottom"]
+        expected_width = self.roi["right"] - self.roi["left"]
+
+        assert r2.height == expected_height
+        assert r2.width == expected_width
+
+        assert r2.data.shape[1] == expected_height
+        assert r2.data.shape[2] == expected_width if r2.data.ndim == 3 else r2.data.shape[0] == expected_height
+
+        # Check that the roi has been applied as expected
+        assert np.array_equal(r2.data, data_test)
+
+        # Check that the transform has been correctly modified
+        pixel_size_x = r1.transform.a
+        pixel_size_y = r1.transform.e
+
+        new_origin_x = r1.transform.c + self.roi["left"] * pixel_size_x
+        new_origin_y = r1.transform.f + (r1.height - self.roi["top"]) * pixel_size_y
+
+        expected_transform = rio.transform.Affine(pixel_size_x, 0, new_origin_x, 0, pixel_size_y, new_origin_y)
+
+        assert r2.transform == expected_transform
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_load_only_mask(self, example: str) -> None:
@@ -1837,6 +1881,12 @@ class TestRaster:
         img.data.mask[0, 0] = True
         out_img = gu.Raster.from_array(img.data, img.transform, img.crs, nodata=0)
         assert out_img.data.mask[0, 0]
+
+        # Test with roi
+        img = gu.Raster(example)
+        out_img = gu.Raster.from_array(img.data, img.transform, img.crs, nodata=img.nodata, roi=self.roi)
+        roi_img = gu.Raster(example, roi=self.roi)
+        assert roi_img.raster_equal(out_img)
 
         # Check that error is raised if the transform is not affine
         with pytest.raises(TypeError, match="The transform argument needs to be Affine or tuple."):
