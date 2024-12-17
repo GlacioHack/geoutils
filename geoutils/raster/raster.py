@@ -2795,7 +2795,7 @@ class Raster:
 
         # Set matplotlib interpolation to None by default, to avoid spreading gaps in plots
         if "interpolation" not in kwargs.keys():
-            kwargs.update({"interpolation": "None"})
+            kwargs.update({"interpolation": None})
 
         # Check if specific band selected, or take all
         # rshow takes care of image dimensions
