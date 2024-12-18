@@ -12,5 +12,6 @@ dependencies:
   - scipy=1.*
   - tqdm
   - xarray
-  - dask
   - rioxarray=0.*
+  - geocube
+  - dask
