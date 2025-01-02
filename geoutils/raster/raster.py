@@ -4,6 +4,7 @@ Module for Raster class.
 
 from __future__ import annotations
 
+import logging
 import math
 import pathlib
 import warnings
@@ -69,6 +70,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
+from geoutils.stats import nmad
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -1870,6 +1872,157 @@ class Raster:
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
+    def _statistics(self, band: int = 1) -> dict[str, np.floating[Any]]:
+        """
+        Calculate common statistics for a specified band in the raster.
+
+        :param band: The index of the band for which to compute statistics. Default is 1.
+
+        :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
+        min, sum, sum of squares, 90th percentile, NMAD, RMSE, and standard deviation.
+        """
+        if self.count == 1:
+            data = self.data
+        else:
+            data = self.data[band - 1]
+
+        # If data is a MaskedArray, use the compressed version (without masked values)
+        if isinstance(data, np.ma.MaskedArray):
+            data = data.compressed()
+
+        # Compute the statistics
+        stats_dict = {
+            "Mean": np.nanmean(data),
+            "Median": np.nanmedian(data),
+            "Max": np.nanmax(data),
+            "Min": np.nanmin(data),
+            "Sum": np.nansum(data),
+            "Sum of squares": np.nansum(np.square(data)),
+            "90th percentile": np.nanpercentile(data, 90),
+            "NMAD": nmad(data),
+            "RMSE": np.sqrt(np.nanmean(np.square(data - np.nanmean(data)))),
+            "Standard deviation": np.nanstd(data),
+        }
+        return stats_dict
+
+    @overload
+    def get_stats(
+        self,
+        stats_name: (
+            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
+            | Callable[[NDArrayNum], np.floating[Any]]
+        ),
+        band: int = 1,
+    ) -> np.floating[Any]: ...
+
+    @overload
+    def get_stats(
+        self,
+        stats_name: (
+            list[
+                Literal[
+                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                ]
+                | Callable[[NDArrayNum], np.floating[Any]]
+            ]
+            | None
+        ) = None,
+        band: int = 1,
+    ) -> dict[str, np.floating[Any]]: ...
+
+    def get_stats(
+        self,
+        stats_name: (
+            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
+            | Callable[[NDArrayNum], np.floating[Any]]
+            | list[
+                Literal[
+                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                ]
+                | Callable[[NDArrayNum], np.floating[Any]]
+            ]
+            | None
+        ) = None,
+        band: int = 1,
+    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
+        """
+        Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
+        to calculate custom stats.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+                   Accepted names include:
+                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                   You can also use common aliases for these names (e.g., "average", "maximum", "minimum", etc.).
+                   Custom callables can also be provided.
+        :param band: The index of the band for which to compute statistics. Default is 1.
+
+        :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
+        """
+        if not self.is_loaded:
+            self.load()
+        stats_dict = self._statistics(band=band)
+        if stats_name is None:
+            return stats_dict
+
+        # Define the metric aliases and their actual names
+        stats_aliases = {
+            "mean": "Mean",
+            "average": "Mean",
+            "median": "Median",
+            "max": "Max",
+            "maximum": "Max",
+            "min": "Min",
+            "minimum": "Min",
+            "sum": "Sum",
+            "sumofsquares": "Sum of squares",
+            "sum2": "Sum of squares",
+            "percentile": "90th percentile",
+            "90thpercentile": "90th percentile",
+            "90percentile": "90th percentile",
+            "percentile90": "90th percentile",
+            "nmad": "NMAD",
+            "rmse": "RMSE",
+            "std": "Standard deviation",
+            "stddev": "Standard deviation",
+            "standarddev": "Standard deviation",
+            "standarddeviation": "Standard deviation",
+        }
+        if isinstance(stats_name, list):
+            result = {}
+            for name in stats_name:
+                if callable(name):
+                    result[name.__name__] = name(self.data[band] if self.count > 1 else self.data)
+                else:
+                    result[name] = self._get_single_stat(stats_dict, stats_aliases, name)
+            return result
+        else:
+            if callable(stats_name):
+                return stats_name(self.data[band] if self.count > 1 else self.data)
+            else:
+                return self._get_single_stat(stats_dict, stats_aliases, stats_name)
+
+    @staticmethod
+    def _get_single_stat(
+        stats_dict: dict[str, np.floating[Any]], stats_aliases: dict[str, str], stat_name: str
+    ) -> np.floating[Any]:
+        """
+        Retrieve a single statistic based on a flexible name or alias.
+
+        :param stats_dict: The dictionary of available statistics.
+        :param stats_aliases: The dictionary of alias mappings to the actual stat names.
+        :param stat_name: The name or alias of the statistic to retrieve.
+
+        :returns: The requested statistic value, or None if the stat name is not recognized.
+        """
+
+        normalized_name = stat_name.lower().replace(" ", "").replace("_", "").replace("-", "")
+        if normalized_name in stats_aliases:
+            actual_name = stats_aliases[normalized_name]
+            return stats_dict[actual_name]
+        else:
+            logging.warning("Statistic name '%s' is not recognized", stat_name)
+            return np.float32(np.nan)
+
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
 
@@ -1904,24 +2057,28 @@ class Raster:
         ]
 
         if stats:
+            as_str.append("\nStatistics:\n")
             if not self.is_loaded:
                 self.load()
 
             if self.count == 1:
-                as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
-                as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
-                as_str.append(f"[MEDIAN]:           {np.ma.median(self.data):.2f}\n")
-                as_str.append(f"[MEAN]:             {np.nanmean(self.data):.2f}\n")
-                as_str.append(f"[STD DEV]:          {np.nanstd(self.data):.2f}\n")
+                statistics = self.get_stats()
+
+                # Determine the maximum length of the stat names for alignment
+                max_len = max(len(name) for name in statistics.keys())
+
+                # Format the stats with aligned names
+                for name, value in statistics.items():
+                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
                     as_str.append(f"Band {b + 1}:\n")
-                    as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MINIMUM]:          {np.nanmin(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MEDIAN]:           {np.ma.median(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MEAN]:             {np.nanmean(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[STD DEV]:          {np.nanstd(self.data[b, :, :]):.2f}\n")
+                    statistics = self.get_stats(band=b)
+                    if isinstance(statistics, dict):
+                        max_len = max(len(name) for name in statistics.keys())
+                        for name, value in statistics.items():
+                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
 
         if verbose:
             print("".join(as_str))

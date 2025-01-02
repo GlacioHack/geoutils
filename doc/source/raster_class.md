@@ -346,3 +346,31 @@ rast_reproj.to_pointcloud()
 # Export to xarray data array
 rast_reproj.to_xarray()
 ```
+
+## Obtain Statistics
+The `get_stats()` method allows to extract key statistical information from a raster in a dictionary.
+Supported statistics are : mean, median, max, mean, sum, sum of squares, 90th percentile, nmad, rmse, std.
+Callable functions are supported as well.
+
+### Usage Examples:
+- Get all statistics in a dict:
+```{code-cell} ipython3
+rast.get_stats()
+```
+
+- Get a single statistic (e.g., 'mean') as a float:
+```{code-cell} ipython3
+rast.get_stats("mean")
+```
+
+- Get multiple statistics in a dict:
+```{code-cell} ipython3
+rast.get_stats(["mean", "max", "rmse"])
+```
+
+- Using a custom callable statistic:
+```{code-cell} ipython3
+def custom_stat(data):
+    return np.nansum(data > 100)  # Count the number of pixels above 100
+rast.get_stats(custom_stat)
+```
