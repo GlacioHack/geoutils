@@ -262,6 +262,19 @@ rast_crop = rast.crop(crop_geom=(0.3, 0.3, 1, 1))
 print(rast_crop.bounds)
 ```
 
+A crop can also be done during its initialization by passing a Region of Interest (ROI) to the Raster class via the `roi` parameter.
+The `roi` can be specified in two formats:
+- **Pixel-based ROI:** Defined by the pixel coordinates with the following keys: `x`, `y`, `w`, and `h`, where (`x`, `y`) top-left corner coordinates and (`w`, `h`) the dimensions (width, height) in pixels.
+- **Georeferenced ROI:** Defined by geographical coordinates with the following keys: `left`, `bottom`, `right`, `top` and optional `crs` (Coordinate Reference System, defaults to EPSG:4326 if not provided).
+
+```{code-cell} ipython3
+# Initialize a raster with a pixel-based ROI
+rast_roi = gu.Raster(filename_rast, load_data=True, roi={'x': 50, 'y': 100, 'w': 400, 'h': 300})
+
+# Initialize a raster with a georeferenced ROI
+rast_roi = gu.Raster(filename_rast, load_data=True, roi={'left': 628675, 'bottom': 4840085, 'top': 4849085, 'right': 640675, 'crs': 'EPSG:32718'})
+```
+
 ## Polygonize
 
 Polygonizing a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.polygonize` function, which converts target pixels into a multi-polygon
