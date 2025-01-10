@@ -4,13 +4,16 @@ Test functions for raster
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
 import re
 import tempfile
 import warnings
+from cmath import isnan
 from io import StringIO
 from tempfile import TemporaryFile
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1943,6 +1946,53 @@ class TestRaster:
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_stats(self, example: str, caplog) -> None:
+        raster = gu.Raster(example)
+
+        # Full stats
+        stats = raster.get_stats()
+        expected_stats = [
+            "Mean",
+            "Median",
+            "Max",
+            "Min",
+            "Sum",
+            "Sum of squares",
+            "90th percentile",
+            "NMAD",
+            "RMSE",
+            "Standard deviation",
+        ]
+        for name in expected_stats:
+            assert name in stats
+            assert stats.get(name) is not None
+
+        # Single stat
+        stat = raster.get_stats(stats_name="Average")
+        assert isinstance(stat, np.floating)
+
+        def percentile_95(data: NDArrayNum) -> np.floating[Any]:
+            if isinstance(data, np.ma.MaskedArray):
+                data = data.compressed()
+            return np.nanpercentile(data, 95)
+
+        stat = raster.get_stats(stats_name=percentile_95)
+        assert isinstance(stat, np.floating)
+
+        # Selected stats and callable
+        stats_name = ["mean", "maximum", "std", "percentile_95"]
+        stats = raster.get_stats(stats_name=["mean", "maximum", "std", percentile_95])
+        for name in stats_name:
+            assert name in stats
+            assert stats.get(name) is not None
+
+        # non-existing stat
+        with caplog.at_level(logging.WARNING):
+            stat = raster.get_stats(stats_name="80 percentile")
+            assert isnan(stat)
+        assert "Statistic name '80 percentile' is not recognized" in caplog.text
 
 
 class TestMask:
