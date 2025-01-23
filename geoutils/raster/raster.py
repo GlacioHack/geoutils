@@ -192,7 +192,6 @@ def _load_rio(
     transform: Affine | None = None,
     shape: tuple[int, int] | None = None,
     out_count: int | None = None,
-    roi: dict[str, float | int] | None = None,
     **kwargs: Any,
 ) -> MArrayNum:
     r"""
@@ -207,8 +206,6 @@ def _load_rio(
     :param transform: Create a window from the given transform (to read only parts of the raster)
     :param shape: Expected shape of the read ndarray. Must be given together with the `transform` argument.
     :param out_count: Specify the count for a downsampled version (to be used with kwargs out_shape).
-    :param roi: Optional region of interest. Can be pixel-based (dict with keys: 'x', 'y', 'w', 'h')
-        or georeferenced (dict with keys: 'left', 'bottom', 'right', 'top', optional 'crs').
 
     :raises ValueError: If only one of ``transform`` and ``shape`` are given.
 
@@ -221,20 +218,9 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
-    window = None
-
-    # If a roi is passed, set up the corresponding window
-    if roi is not None:
-        # Define the window
-        window = rio.windows.Window(
-            col_off=roi["x"],
-            row_off=roi["y"],
-            width=roi["w"],
-            height=roi["h"],
-        )
-
     # If out_shape is passed, no need to account for transform and shape
-    elif kwargs.get("out_shape") is not None:
+    if kwargs.get("out_shape") is not None:
+        window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
             kwargs["out_shape"] = (out_count, *kwargs["out_shape"])
@@ -524,18 +510,26 @@ class Raster:
                 self.convert_roi(
                     roi=self._roi, transform=self.transform, height=self.height, width=self.width, crs=self.crs
                 )
-                new_transform = rio.transform.from_origin(
-                    self._roi["left"],
-                    self._roi["top"],
-                    self.transform.a,
-                    -self.transform.e,
-                )
-                self.transform = new_transform
-                out_shape = (
-                    int(self._roi["h"]),
-                    int(self._roi["w"]),
-                )
-            elif downsample == 1:
+                crop_extent = [
+                    self._roi["left"],  # xmin
+                    self._roi["bottom"],  # ymin
+                    self._roi["right"],  # xmax
+                    self._roi["top"],  # ymax
+                ]
+                self.crop(crop_extent, inplace=True)
+                load_data = False
+                # new_transform = rio.transform.from_origin(
+                #     self._roi["left"],
+                #     self._roi["top"],
+                #     self.transform.a,
+                #     -self.transform.e,
+                # )
+                # self.transform = new_transform
+                # out_shape = (
+                #     int(self._roi["h"]),
+                #     int(self._roi["w"]),
+                # )
+            if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
                 down_width = int(np.ceil(self.width / downsample))
@@ -558,7 +552,6 @@ class Raster:
                     masked=self._masked,
                     out_shape=out_shape,
                     out_count=count,
-                    roi=self._roi,
                 )  # type: ignore
 
             # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
@@ -855,7 +848,6 @@ class Raster:
                 shape=self.shape,
                 out_shape=self._out_shape,
                 out_count=out_count,
-                roi=self._roi,
                 **kwargs,
             )
 
@@ -912,7 +904,6 @@ class Raster:
                 shape=self.shape,
                 out_shape=self._out_shape,
                 out_count=self._out_count,
-                roi=self._roi,
                 **kwargs,
             )
 

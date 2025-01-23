@@ -479,11 +479,8 @@ def _crop(
         if source_raster.is_loaded:
             # In case data is loaded on disk, can extract directly from np array
             (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+            crop_img = source_raster.data[..., rowmin:rowmax, colmin:colmax]
 
-            if source_raster.count == 1:
-                crop_img = source_raster.data[rowmin:rowmax, colmin:colmax]
-            else:
-                crop_img = source_raster.data[:, rowmin:rowmax, colmin:colmax]
         else:
 
             assert source_raster._disk_shape is not None  # This should not be the case, sanity check to make mypy happy
