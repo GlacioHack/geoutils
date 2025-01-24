@@ -1920,6 +1920,7 @@ class Raster:
             "NMAD": nmad(data),
             "RMSE": np.sqrt(np.nanmean(np.square(data - np.nanmean(data)))),
             "Standard deviation": np.nanstd(data),
+            "Percentile valid points": (np.count_nonzero(~np.isnan(data)) / data.size) * 100,
         }
         return stats_dict
 
@@ -2004,6 +2005,8 @@ class Raster:
             "stddev": "Standard deviation",
             "standarddev": "Standard deviation",
             "standarddeviation": "Standard deviation",
+            "percentvalidpoint": "Percentile valid point",
+            "validpoint": "Percentile valid point",
         }
         if isinstance(stats_name, list):
             result = {}
