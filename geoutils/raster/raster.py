@@ -1897,7 +1897,7 @@ class Raster:
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, RMSE, and standard deviation.
+        min, sum, sum of squares, 90th percentile, NMAD, standard deviation, and percentile valid points.
         """
         if self.count == 1:
             data = self.data
@@ -1918,7 +1918,6 @@ class Raster:
             "Sum of squares": np.nansum(np.square(data)),
             "90th percentile": np.nanpercentile(data, 90),
             "NMAD": nmad(data),
-            "RMSE": np.sqrt(np.nanmean(np.square(data - np.nanmean(data)))),
             "Standard deviation": np.nanstd(data),
             "Percentile valid points": (np.count_nonzero(~np.isnan(data)) / data.size) * 100,
         }
@@ -1928,7 +1927,18 @@ class Raster:
     def get_stats(
         self,
         stats_name: (
-            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
+            Literal[
+                "mean",
+                "median",
+                "max",
+                "min",
+                "sum",
+                "sum of squares",
+                "90th percentile",
+                "nmad",
+                "std",
+                "percentile valid points",
+            ]
             | Callable[[NDArrayNum], np.floating[Any]]
         ),
         band: int = 1,
@@ -1940,7 +1950,16 @@ class Raster:
         stats_name: (
             list[
                 Literal[
-                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                    "mean",
+                    "median",
+                    "max",
+                    "min",
+                    "sum",
+                    "sum of squares",
+                    "90th percentile",
+                    "nmad",
+                    "std",
+                    "percentile valid points",
                 ]
                 | Callable[[NDArrayNum], np.floating[Any]]
             ]
@@ -1952,11 +1971,31 @@ class Raster:
     def get_stats(
         self,
         stats_name: (
-            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
+            Literal[
+                "mean",
+                "median",
+                "max",
+                "min",
+                "sum",
+                "sum of squares",
+                "90th percentile",
+                "nmad",
+                "std",
+                "percentile valid points",
+            ]
             | Callable[[NDArrayNum], np.floating[Any]]
             | list[
                 Literal[
-                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                    "mean",
+                    "median",
+                    "max",
+                    "min",
+                    "sum",
+                    "sum of squares",
+                    "90th percentile",
+                    "nmad",
+                    "std",
+                    "percentile valid points",
                 ]
                 | Callable[[NDArrayNum], np.floating[Any]]
             ]
@@ -1970,7 +2009,8 @@ class Raster:
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
                    Accepted names include:
-                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
+                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "std",
+                   "percentile valid points".
                    You can also use common aliases for these names (e.g., "average", "maximum", "minimum", etc.).
                    Custom callables can also be provided.
         :param band: The index of the band for which to compute statistics. Default is 1.
@@ -2000,7 +2040,6 @@ class Raster:
             "90percentile": "90th percentile",
             "percentile90": "90th percentile",
             "nmad": "NMAD",
-            "rmse": "RMSE",
             "std": "Standard deviation",
             "stddev": "Standard deviation",
             "standarddev": "Standard deviation",

@@ -1996,7 +1996,6 @@ class TestRaster:
             "Sum of squares",
             "90th percentile",
             "NMAD",
-            "RMSE",
             "Standard deviation",
             "Percentile valid points",
         ]
