@@ -1897,7 +1897,7 @@ class Raster:
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, standard deviation, and percentile valid points.
+        min, sum, sum of squares, 90th percentile, NMAD, standard deviation, count, and percentage valid points.
         """
         if self.count == 1:
             data = self.data
@@ -1909,6 +1909,7 @@ class Raster:
             data = data.compressed()
 
         # Compute the statistics
+        count = np.count_nonzero(np.isfinite(data))
         stats_dict = {
             "Mean": np.nanmean(data),
             "Median": np.nanmedian(data),
@@ -1919,7 +1920,8 @@ class Raster:
             "90th percentile": np.nanpercentile(data, 90),
             "NMAD": nmad(data),
             "Standard deviation": np.nanstd(data),
-            "Percentile valid points": (np.count_nonzero(~np.isnan(data)) / data.size) * 100,
+            "Valid count": count,
+            "Percentage valid points": (count / data.size) * 100,
         }
         return stats_dict
 
@@ -1937,7 +1939,8 @@ class Raster:
                 "90th percentile",
                 "nmad",
                 "std",
-                "percentile valid points",
+                "count",
+                "percentage valid points",
             ]
             | Callable[[NDArrayNum], np.floating[Any]]
         ),
@@ -1959,7 +1962,8 @@ class Raster:
                     "90th percentile",
                     "nmad",
                     "std",
-                    "percentile valid points",
+                    "count",
+                    "percentage valid points",
                 ]
                 | Callable[[NDArrayNum], np.floating[Any]]
             ]
@@ -1981,7 +1985,8 @@ class Raster:
                 "90th percentile",
                 "nmad",
                 "std",
-                "percentile valid points",
+                "count",
+                "percentage valid points",
             ]
             | Callable[[NDArrayNum], np.floating[Any]]
             | list[
@@ -1995,7 +2000,8 @@ class Raster:
                     "90th percentile",
                     "nmad",
                     "std",
-                    "percentile valid points",
+                    "count",
+                    "percentage valid points",
                 ]
                 | Callable[[NDArrayNum], np.floating[Any]]
             ]
@@ -2009,8 +2015,8 @@ class Raster:
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
                    Accepted names include:
-                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "std",
-                   "percentile valid points".
+                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "std", "count",
+                   "percentage valid points".
                    You can also use common aliases for these names (e.g., "average", "maximum", "minimum", etc.).
                    Custom callables can also be provided.
         :param band: The index of the band for which to compute statistics. Default is 1.
@@ -2026,7 +2032,6 @@ class Raster:
         # Define the metric aliases and their actual names
         stats_aliases = {
             "mean": "Mean",
-            "average": "Mean",
             "median": "Median",
             "max": "Max",
             "maximum": "Max",
@@ -2035,17 +2040,13 @@ class Raster:
             "sum": "Sum",
             "sumofsquares": "Sum of squares",
             "sum2": "Sum of squares",
-            "percentile": "90th percentile",
             "90thpercentile": "90th percentile",
             "90percentile": "90th percentile",
-            "percentile90": "90th percentile",
             "nmad": "NMAD",
             "std": "Standard deviation",
-            "stddev": "Standard deviation",
-            "standarddev": "Standard deviation",
-            "standarddeviation": "Standard deviation",
-            "percentvalidpoint": "Percentile valid point",
-            "validpoint": "Percentile valid point",
+            "count": "Valid count",
+            "percentagevalidpoint": "Percentage valid point",
+            "validpoint": "Percentage valid point",
         }
         if isinstance(stats_name, list):
             result = {}

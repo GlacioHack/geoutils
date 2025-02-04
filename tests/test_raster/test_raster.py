@@ -1997,14 +1997,15 @@ class TestRaster:
             "90th percentile",
             "NMAD",
             "Standard deviation",
-            "Percentile valid points",
+            "Count",
+            "Percentage valid points",
         ]
         for name in expected_stats:
             assert name in stats
             assert stats.get(name) is not None
 
         # Single stat
-        stat = raster.get_stats(stats_name="average")
+        stat = raster.get_stats(stats_name="mean")
         assert isinstance(stat, np.floating)
 
         def percentile_95(data: NDArrayNum) -> np.floating[Any]:
@@ -2016,8 +2017,8 @@ class TestRaster:
         assert isinstance(stat, np.floating)
 
         # Selected stats and callable
-        stats_name = ["mean", "maximum", "std", "percentile_95"]
-        stats = raster.get_stats(stats_name=["mean", "maximum", "std", percentile_95])
+        stats_name = ["mean", "max", "std", "percentile_95"]
+        stats = raster.get_stats(stats_name=["mean", "max", "std", percentile_95])
         for name in stats_name:
             assert name in stats
             assert stats.get(name) is not None
