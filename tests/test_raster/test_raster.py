@@ -1997,8 +1997,10 @@ class TestRaster:
             "90th percentile",
             "NMAD",
             "Standard deviation",
-            "Count",
+            "Valid points",
             "Percentage valid points",
+            "Valid points no mask",
+            "Percentage valid points no mask",
         ]
         for name in expected_stats:
             assert name in stats
