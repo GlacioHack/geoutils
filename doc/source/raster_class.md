@@ -349,7 +349,8 @@ rast_reproj.to_xarray()
 
 ## Obtain Statistics
 The `get_stats()` method allows to extract key statistical information from a raster in a dictionary.
-Supported statistics are : mean, median, max, mean, sum, sum of squares, 90th percentile, nmad, rmse, std.
+Supported statistics are : mean, median, max, mean, sum, sum of squares, 90th percentile, nmad, std, count and
+percentage valid points.
 Callable functions are supported as well.
 
 ### Usage Examples:
@@ -365,7 +366,7 @@ rast.get_stats("mean")
 
 - Get multiple statistics in a dict:
 ```{code-cell} ipython3
-rast.get_stats(["mean", "max", "rmse"])
+rast.get_stats(["mean", "max", "std"])
 ```
 
 - Using a custom callable statistic:
