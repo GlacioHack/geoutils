@@ -1,0 +1,97 @@
+Copyright (c) 2025 GeoUtils developers.
+
+This file is part of GeoUtils (see https://github.com/GlacioHack/geoutils).
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+GeoUtils software is distributed under the Apache Software License (ASL) v2.0, see
+LICENSE file or http://www.apache.org/licenses/LICENSE-2.0 for details.
+
+Python: programming language that lets you work quickly and integrate systems more effectively.
+Copyright (c) 2001-2023 Python Software Foundation. All Rights reserved.
+Website: http://python.org/
+License: Python Software License.
+
+NumPy: The fundamental package for scientific computing with Python.
+Copyright (c) 2005-2024, NumPy Developers.
+Website: https://numpy.org/
+License: BSD 3-Clause.
+
+Matplotlib: Comprehensive library for creating static, animated, and interactive visualizations in Python.
+Copyright (C) 2001-2023 Matplotlib Development Team.
+Website: https://matplotlib.org/
+License: Matplotlib only uses BSD compatible code, and its license is based on the PSF license.
+
+SciPy: Open-source software for mathematics, science, and engineering.
+Copyright (c) 2001-2002 Enthought, Inc. All rights reserved.
+Copyright (c) 2003-2019 SciPy Developers. All rights reserved.
+Website: https://www.scipy.org/scipylib/
+License: BSD 3-Clause.
+
+Rasterio: Access to geospatial raster data
+Copyright (c) 2016, MapBox All rights reserved.
+Website: https://github.com/mapbox/rasterio
+License: BSD 3-Clause.
+
+GeoPandas: Python tools for geographic data.
+Copyright (c) 2013-2022, GeoPandas developers.
+Website: https://geopandas.org/
+License: BSD 3-Clause.
+
+pandas: Data analysis and manipulation library for Python.
+Copyright (c) 2008-2011, AQR Capital Management, LLC, Lambda Foundry, Inc. and PyData Development Team.
+Copyright (c) 2011-2024, Open source contributors.
+Website: https://pandas.pydata.org/
+License: BSD 3-Clause.
+
+Xarray: N-D labeled arrays and datasets in Python.
+Copyright 2014-2025, xarray Developers.
+Website: http://xarray.pydata.org
+License: Apache License 2.0.
+
+rioxarray: Geospatial xarray extension powered by rasterio.
+Copyright 2019-2023, Corteva Agriscience.
+Website: https://corteva.github.io/rioxarray
+License: Apache License 2.0.
+
+scikit-image: Image processing in Python.
+Copyright (c) 2009-2022 the scikit-image team.
+Website: https://scikit-image.org/
+License: BSD 3-Clause.
+
+affine: Matrix transformations for geospatial coordinates.
+Copyright (c) 2014-2023, Sean Gillies.
+Website: https://github.com/sgillies/affine
+License: BDS 3-Clause.
+
+Shapely: Manipulation and analysis of geometric objects.
+Copyright (c) 2007, Sean C. Gillies. 2019, Casper van der Wel. 2007-2022, Shapely Contributors.
+Website: https://shapely.readthedocs.io/
+License: BSD 3-Clause.
+
+pyproj: Python interface to PROJ (cartographic projections and transformations library).
+Copyright (c) 2006-2018, Jeffrey Whitaker.
+Copyright (c) 2019-2024, Open source contributors.
+Website: https://pyproj4.github.io/pyproj/stable/
+License: MIT License.
+
+tqdm: A fast, extensible progress bar for Python an CLI applications.
+Copyright (c) MIT 2013 Noam Yorav-Raphael, original author.
+Copyright (c) MPL-2.0 2015-2024 Casper da Costa-Luis.
+Website: https://github.com/tqdm/tqdm
+License: MPL-2.0 and MIT License.
+
+dask: Parallel computing with task scheduling.
+Copyright (c) 2025 Dask core developers.
+Website: https://www.dask.org/
+License: New BSD License.
