@@ -1,4 +1,6 @@
-# Credits
+(authors)=
+
+# Authors
 
 ---
 © 2025 **GeoUtils developers**.
