@@ -12,3 +12,5 @@ tqdm
 xarray
 dask
 rioxarray==0.*
+affine
+shapely

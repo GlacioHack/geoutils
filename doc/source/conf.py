@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
 project = "GeoUtils"
-copyright = "2021, GeoUtils Developers"
+copyright = "2025, GeoUtils Developers"
 author = "GeoUtils Developers"
 
 
