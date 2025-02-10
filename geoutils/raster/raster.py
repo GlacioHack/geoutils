@@ -1897,7 +1897,8 @@ class Raster:
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, standard deviation, valid points, and percentage valid points.
+        min, sum, sum of squares, 90th percentile, NMAD, RMSE, standard deviation, valid points, and percentage
+        valid points.
         """
 
         if self.count == 1:
@@ -1921,6 +1922,7 @@ class Raster:
             "Sum of squares": np.nansum(np.square(data)),
             "90th percentile": np.nanpercentile(data, 90),
             "NMAD": nmad(data),
+            "RMSE": np.sqrt(np.nanmean(np.square(data))),
             "Standard deviation": np.nanstd(data),
             "Valid points": valid_points,
             "Percentage valid points": (valid_points / data.size) * 100,
@@ -1942,6 +1944,7 @@ class Raster:
                 "sum of squares",
                 "90th percentile",
                 "nmad",
+                "rmse",
                 "std",
                 "valid points",
                 "percentage valid points",
@@ -1965,6 +1968,7 @@ class Raster:
                     "sum of squares",
                     "90th percentile",
                     "nmad",
+                    "rmse",
                     "std",
                     "valid points",
                     "percentage valid points",
@@ -1988,6 +1992,7 @@ class Raster:
                 "sum of squares",
                 "90th percentile",
                 "nmad",
+                "rmse",
                 "std",
                 "valid points",
                 "percentage valid points",
@@ -2003,6 +2008,7 @@ class Raster:
                     "sum of squares",
                     "90th percentile",
                     "nmad",
+                    "rmse",
                     "std",
                     "valid points",
                     "percentage valid points",
@@ -2019,9 +2025,8 @@ class Raster:
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
                    Accepted names include:
-                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "std",
+                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std",
                    "valid points", "percentage valid points".
-                   You can also use common aliases for these names (e.g., "average", "maximum", "minimum", etc.).
                    Custom callables can also be provided.
         :param band: The index of the band for which to compute statistics. Default is 1.
 
@@ -2047,6 +2052,8 @@ class Raster:
             "90thpercentile": "90th percentile",
             "90percentile": "90th percentile",
             "nmad": "NMAD",
+            "rmse": "RMSE",
+            "rms": "RMSE",
             "std": "Standard deviation",
             "validpoints": "Valid points",
             "percentagevalidpoints": "Percentage valid point",
