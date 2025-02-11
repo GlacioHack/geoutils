@@ -361,8 +361,8 @@ rast_reproj.to_xarray()
 
 ## Obtain Statistics
 The `get_stats()` method allows to extract key statistical information from a raster in a dictionary.
-Supported statistics are : mean, median, max, mean, sum, sum of squares, 90th percentile, nmad, rmse, std, valid points
-and percentage valid points.
+Supported statistics are : mean, median, max, mean, sum, sum of squares, 90th percentile, nmad, rmse, std, valid points,
+percentage valid points, valid points all data, percentage valid points all data.
 The RMSE is only relevant when the raster represents a difference of two objects.
 Callable functions are supported as well.
 

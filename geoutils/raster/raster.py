@@ -1897,8 +1897,8 @@ class Raster:
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, RMSE, standard deviation, valid points, and percentage
-        valid points.
+        min, sum, sum of squares, 90th percentile, NMAD, RMSE, standard deviation, valid points, percentage
+        valid points, valid points all data, percentage valid points all data.
         """
 
         if self.count == 1:
@@ -1906,116 +1906,46 @@ class Raster:
         else:
             data = self.data[band - 1]
 
-        # Use the compressed version (without masked values)
-        valid_points_no_mask = np.count_nonzero(np.isfinite(data))
-        percentage_valid_points_no_mask = valid_points_no_mask / data.size * 100
-        data = data.compressed()
-
         # Compute the statistics
-        valid_points = np.count_nonzero(np.isfinite(data))
+        compressed_data = data.compressed()
+        valid_points = np.count_nonzero(np.isfinite(compressed_data))
+        valid_points_all_data = np.count_nonzero(np.isfinite(data))
         stats_dict = {
-            "Mean": np.nanmean(data),
-            "Median": np.nanmedian(data),
-            "Max": np.nanmax(data),
-            "Min": np.nanmin(data),
-            "Sum": np.nansum(data),
-            "Sum of squares": np.nansum(np.square(data)),
-            "90th percentile": np.nanpercentile(data, 90),
-            "NMAD": nmad(data),
-            "RMSE": np.sqrt(np.nanmean(np.square(data))),
-            "Standard deviation": np.nanstd(data),
-            "Valid points": valid_points,
+            "Mean": np.nanmean(compressed_data),
+            "Median": np.nanmedian(compressed_data),
+            "Max": np.nanmax(compressed_data),
+            "Min": np.nanmin(compressed_data),
+            "Sum": np.nansum(compressed_data),
+            "Sum of squares": np.nansum(np.square(compressed_data)),
+            "90th percentile": np.nanpercentile(compressed_data, 90),
+            "NMAD": nmad(compressed_data),
+            "RMSE": np.sqrt(np.nanmean(np.square(compressed_data))),
+            "Standard deviation": np.nanstd(compressed_data),
+            "Valid points": np.count_nonzero(np.isfinite(compressed_data)),
             "Percentage valid points": (valid_points / data.size) * 100,
-            "Valid points no mask": valid_points_no_mask,
-            "Percentage valid points no mask": percentage_valid_points_no_mask,
+            "Valid points all data": valid_points_all_data,
+            "Percentage valid points all data": (valid_points_all_data / data.size) * 100,
         }
         return stats_dict
 
     @overload
     def get_stats(
         self,
-        stats_name: (
-            Literal[
-                "mean",
-                "median",
-                "max",
-                "min",
-                "sum",
-                "sum of squares",
-                "90th percentile",
-                "nmad",
-                "rmse",
-                "std",
-                "valid points",
-                "percentage valid points",
-            ]
-            | Callable[[NDArrayNum], np.floating[Any]]
-        ),
+        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
         band: int = 1,
     ) -> np.floating[Any]: ...
 
     @overload
     def get_stats(
         self,
-        stats_name: (
-            list[
-                Literal[
-                    "mean",
-                    "median",
-                    "max",
-                    "min",
-                    "sum",
-                    "sum of squares",
-                    "90th percentile",
-                    "nmad",
-                    "rmse",
-                    "std",
-                    "valid points",
-                    "percentage valid points",
-                ]
-                | Callable[[NDArrayNum], np.floating[Any]]
-            ]
-            | None
-        ) = None,
+        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
         band: int = 1,
     ) -> dict[str, np.floating[Any]]: ...
 
     def get_stats(
         self,
         stats_name: (
-            Literal[
-                "mean",
-                "median",
-                "max",
-                "min",
-                "sum",
-                "sum of squares",
-                "90th percentile",
-                "nmad",
-                "rmse",
-                "std",
-                "valid points",
-                "percentage valid points",
-            ]
-            | Callable[[NDArrayNum], np.floating[Any]]
-            | list[
-                Literal[
-                    "mean",
-                    "median",
-                    "max",
-                    "min",
-                    "sum",
-                    "sum of squares",
-                    "90th percentile",
-                    "nmad",
-                    "rmse",
-                    "std",
-                    "valid points",
-                    "percentage valid points",
-                ]
-                | Callable[[NDArrayNum], np.floating[Any]]
-            ]
-            | None
+            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
         band: int = 1,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
@@ -2055,8 +1985,11 @@ class Raster:
             "rmse": "RMSE",
             "rms": "RMSE",
             "std": "Standard deviation",
+            "standarddeviation": "Standard deviation",
             "validpoints": "Valid points",
-            "percentagevalidpoints": "Percentage valid point",
+            "percentagevalidpoints": "Percentage valid points",
+            "validpointsalldata": "Valid points all data",
+            "percentagevalidpointsalldata": "Percentage valid points all data",
         }
         if isinstance(stats_name, list):
             result = {}

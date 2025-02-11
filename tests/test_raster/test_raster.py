@@ -1985,8 +1985,6 @@ class TestRaster:
     def test_stats(self, example: str, caplog) -> None:
         raster = gu.Raster(example)
 
-        # Full stats
-        stats = raster.get_stats()
         expected_stats = [
             "Mean",
             "Median",
@@ -2000,17 +1998,22 @@ class TestRaster:
             "Standard deviation",
             "Valid points",
             "Percentage valid points",
-            "Valid points no mask",
-            "Percentage valid points no mask",
+            "Valid points all data",
+            "Percentage valid points all data",
         ]
+
+        # Full stats
+        stats = raster.get_stats()
         for name in expected_stats:
             assert name in stats
             assert stats.get(name) is not None
 
         # Single stat
-        stat = raster.get_stats(stats_name="mean")
-        assert isinstance(stat, np.floating)
+        for name in expected_stats:
+            stat = raster.get_stats(stats_name=name)
+            assert np.isfinite(stat)
 
+        # Callable
         def percentile_95(data: NDArrayNum) -> np.floating[Any]:
             if isinstance(data, np.ma.MaskedArray):
                 data = data.compressed()
