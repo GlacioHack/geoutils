@@ -43,7 +43,6 @@ import xarray as xr
 from affine import Affine
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from packaging.version import Version
-from pyproj import Transformer
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
@@ -375,7 +374,6 @@ class Raster:
         silent: bool = True,
         downsample: Number = 1,
         nodata: int | float | None = None,
-        roi: dict[str, float | int] | None = None,
     ) -> None:
         """
         Instantiate a raster from a filename or rasterio dataset.
@@ -387,8 +385,6 @@ class Raster:
         :param silent: Whether to parse metadata silently or with console output.
         :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
         :param nodata: Nodata value to be used (overwrites the metadata). Default reads from metadata.
-        :param roi: Optional region of interest. Can be pixel-based (dict with keys: 'x', 'y', 'w', 'h')
-            or georeferenced (dict with keys: left', 'bottom', 'right', 'top', optional 'crs').
         """
         self._driver: str | None = None
         self._name: str | None = None
@@ -399,7 +395,6 @@ class Raster:
         self._transform: affine.Affine | None = None
         self._crs: CRS | None = None
         self._nodata: int | float | None = nodata
-        self._roi: dict[str, float | int] | None = roi
         self._bands = bands
         self._bands_loaded: int | tuple[int, ...] | None = None
         self._masked = True
@@ -435,7 +430,7 @@ class Raster:
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
 
             for key in filename_or_dataset:
-                if key in ["data", "transform", "crs", "nodata", "area_or_point", "tags", "roi"]:
+                if key in ["data", "transform", "crs", "nodata", "area_or_point", "tags"]:
                     continue
                 setattr(self, key, filename_or_dataset[key])
             return
@@ -444,17 +439,6 @@ class Raster:
         if isinstance(filename_or_dataset, Raster):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
-
-            # if a roi is passed, crop the raster
-            if roi is not None:
-                self.convert_roi(roi=roi, transform=self.transform, height=self.height, width=self.width, crs=self.crs)
-                crop_extent = [
-                    roi["left"],  # xmin
-                    roi["bottom"],  # ymin
-                    roi["right"],  # xmax
-                    roi["top"],  # ymax
-                ]
-                self.crop(crop_extent, inplace=True)
 
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
@@ -506,29 +490,7 @@ class Raster:
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
-            if self._roi is not None:
-                self.convert_roi(
-                    roi=self._roi, transform=self.transform, height=self.height, width=self.width, crs=self.crs
-                )
-                crop_extent = [
-                    self._roi["left"],  # xmin
-                    self._roi["bottom"],  # ymin
-                    self._roi["right"],  # xmax
-                    self._roi["top"],  # ymax
-                ]
-                self.crop(crop_extent, inplace=True)
-                load_data = False
-                # new_transform = rio.transform.from_origin(
-                #     self._roi["left"],
-                #     self._roi["top"],
-                #     self.transform.a,
-                #     -self.transform.e,
-                # )
-                # self.transform = new_transform
-                # out_shape = (
-                #     int(self._roi["h"]),
-                #     int(self._roi["w"]),
-                # )
+
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
@@ -926,7 +888,6 @@ class Raster:
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
         cast_nodata: bool = True,
-        roi: dict[str, float | int] = None,
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
@@ -941,8 +902,6 @@ class Raster:
         :param tags: Metadata stored in a dictionary.
         :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
             compatible. If False, will raise an error when incompatible.
-        :param roi: Optional region of interest. Can be pixel-based (dict with keys: 'x', 'y', 'w', 'h')
-            or georeferenced (dict with keys: left', 'bottom', 'right', 'top', optional 'crs').
 
         :returns: Raster created from the provided array and georeferencing.
 
@@ -962,18 +921,6 @@ class Raster:
         # Cast nodata if the new array has incompatible type with the old nodata value
         if cast_nodata:
             nodata = _cast_nodata(data.dtype, nodata)
-
-        if roi is not None:
-            cls.convert_roi(roi=roi, transform=transform, crs=crs, height=data.shape[-2], width=data.shape[-1])
-            new_transform = rio.transform.from_origin(
-                roi["left"],
-                roi["top"],
-                transform[0],
-                -transform[4],
-            )
-
-            transform = new_transform
-            data = data[..., int(roi["y"]) : int(roi["y"] + roi["h"]), int(roi["x"]) : int(roi["x"] + roi["w"])]
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
@@ -1027,68 +974,6 @@ class Raster:
 
         # Then open as a DatasetReader
         return mfh.open()
-
-    @classmethod
-    def convert_roi(
-        cls: type[RasterType],
-        roi: dict[str, float | int],
-        transform: tuple[float, ...] | Affine,
-        height: int,
-        width: int,
-        crs: CRS | int,
-    ) -> None:
-        """
-        Convert ROI into the same CRS as the raster and convert the ROI to pixel-based coordinates.
-
-        :param roi: Optional region of interest. Can be pixel-based (dict with keys: 'x', 'y', 'w', 'h')
-            or georeferenced (dict with keys: left', 'bottom', 'right', 'top', optional 'crs').
-        :param transform: Affine 2D transform. Either a tuple(x_res, 0.0, top_left_x,
-            0.0, y_res, top_left_y) or an affine.Affine object.
-        :param height: height in pixels.
-        :param width: width in pixels.
-        :param crs: Coordinate reference system. Any CRS supported by Pyproj (e.g., CRS object, EPSG integer).
-        """
-        if not isinstance(transform, Affine):
-            transform = Affine(*transform)
-
-        roi_pix = {"x", "y", "w", "h"}
-        roi_georef = {"left", "bottom", "right", "top"}
-
-        # Check if ROI is georeferenced or pixel_based and convert to crs
-        if roi_georef.issubset(roi.keys()):
-            crs_roi = roi.get("crs", "EPSG:4326")
-            transformer = Transformer.from_crs(crs_roi, crs, always_xy=True)
-            roi["left"], roi["bottom"] = transformer.transform(roi["left"], roi["bottom"])
-            roi["right"], roi["top"] = transformer.transform(roi["right"], roi["top"])
-            roi["x"], roi["y"] = ~transform * (roi["left"], roi["top"])
-            roi["w"], roi["h"] = tuple(
-                a - b for a, b in zip(~transform * (roi["right"], roi["bottom"]), (roi["x"], roi["y"]))
-            )
-            roi["crs"] = crs
-        elif roi_pix.issubset(roi.keys()):
-            pass
-        else:
-            raise ValueError(
-                "The roi parameter must contain the following keys: 'x', 'y', 'w', and 'h' for pixel "
-                "coordinates, or left', 'right', 'top', and 'bottom' for georeferenced coordinates."
-            )
-
-        # Adjust bounds if needed
-        roi["x"] = max(roi["x"], 0)
-        roi["y"] = max(roi["y"], 0)
-        roi["w"] = min(roi["w"], width - roi["x"])
-        roi["h"] = min(roi["h"], height - roi["y"])
-
-        # Check for invalid ROI dimensions (inverted or zero-sized)
-        if roi["w"] <= 0 or roi["h"] <= 0:
-            raise ValueError(
-                f"Invalid ROI after conversion. Ensure the ROI bounds are correct and within the raster dimensions. "
-                f"Resulting bounds: x={roi['x']}, y={roi['y']}, w={roi['w']}, h={roi['h']}"
-            )
-
-        # Reconvert to crs after adjusting bounds
-        roi["left"], roi["top"] = transform * (roi["x"], roi["y"])
-        roi["right"], roi["bottom"] = transform * (roi["x"] + roi["w"], roi["y"] + roi["h"])
 
     def __repr__(self) -> str:
         """Convert raster to string representation."""
@@ -2501,7 +2386,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -2510,7 +2395,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -2519,7 +2404,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2527,7 +2412,7 @@ class Raster:
 
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2539,8 +2424,8 @@ class Raster:
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param crop_geom: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
-            coordinates. If ``crop_geom`` is a raster or vector, will crop to the bounds. If ``crop_geom`` is a
+        :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
+            coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param mode: Whether to match within pixels or exact extent. ``'match_pixel'`` will preserve the original pixel
             resolution, cropping to the extent that most closely aligns with the current coordinates. ``'match_extent'``
@@ -2550,7 +2435,7 @@ class Raster:
         :returns: A new raster (or None if inplace).
         """
 
-        crop_img, tfm = _crop(source_raster=self, crop_geom=crop_geom, mode=mode)
+        crop_img, tfm = _crop(source_raster=self, bbox=bbox, mode=mode)
 
         if inplace:
             self._data = crop_img
@@ -2559,6 +2444,34 @@ class Raster:
         else:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
+
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: bool = False,
+    ) -> RasterType | None:
+        """
+        Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
+
+        :param bbox: Pixel-based bounding box as (xmin, ymin, xmax, ymax) in pixel coordinates.
+        :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
+
+        :returns: Cropped raster or None (if inplace=True).
+        """
+        # Ensure bbox contains four elements (xmin, ymin, xmax, ymax)
+        if len(bbox) != 4:
+            raise ValueError("bbox must be a list or tuple of four integers: (xmin, ymin, xmax, ymax).")
+
+        # Convert pixel coordinates to georeferenced coordinates using the transform
+        bottom_left = self.transform * (bbox[0], self.height - bbox[1])
+        top_right = self.transform * (bbox[2], self.height - bbox[3])
+
+        # Create new georeferenced crop geometry (xmin, ymin, xmax, ymax)
+        new_bbox = (bottom_left[0], bottom_left[1], top_right[0], top_right[1])
+
+        # Call the existing crop() method with the new georeferenced crop geometry
+        return self.crop(bbox=new_bbox, inplace=inplace)
 
     @overload
     def reproject(
@@ -4066,7 +3979,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -4075,7 +3988,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -4084,7 +3997,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -4092,7 +4005,7 @@ class Mask(Raster):
 
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -4102,16 +4015,16 @@ class Mask(Raster):
             raise ValueError(NotImplementedError)
             # self._data = self.data.astype("float32")
             # if inplace:
-            #     super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     self._data = self.data.astype(bool)
             #     return None
             # else:
-            #     output = super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     output = super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     output._data = output.data.astype(bool)
             #     return output
         # Otherwise, run a classic crop
         else:
-            return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            return super().crop(bbox=bbox, mode=mode, inplace=inplace)
 
     def polygonize(
         self,
