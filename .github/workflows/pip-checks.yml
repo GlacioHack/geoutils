@@ -33,6 +33,7 @@ jobs:
           miniforge-version: latest
           auto-update-conda: true
           use-mamba: true
+          mamba-version: "2.0.5"
           channel-priority: strict
           activate-environment: geoutils-pip
           python-version: ${{ matrix.python-version }}

@@ -34,6 +34,7 @@ jobs:
         auto-update-conda: true
         use-mamba: true
         channel-priority: strict
+        mamba-version: "2.0.5"
         activate-environment: geoutils-dev
         python-version:
 
