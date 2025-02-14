@@ -78,7 +78,6 @@ from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _coords,
     _default_nodata,
-    _generate_tiling_grid,
     _ij2xy,
     _outside_image,
     _res,
@@ -90,6 +89,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
+from geoutils.raster.tiling import _generate_tiling_grid
 from geoutils.stats import nmad
 from geoutils.vector.vector import Vector
 

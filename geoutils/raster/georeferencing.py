@@ -22,7 +22,6 @@ Functions for manipulating georeferencing of the raster objects.
 
 from __future__ import annotations
 
-import math
 import warnings
 from typing import Iterable, Literal
 
@@ -285,49 +284,3 @@ def _cast_nodata(out_dtype: DTypeLike, nodata: int | float | None) -> int | floa
         nodata = nodata
 
     return nodata
-
-
-def _generate_tiling_grid(
-    row_min: int,
-    col_min: int,
-    row_max: int,
-    col_max: int,
-    row_split: int,
-    col_split: int,
-    overlap: int = 0,
-) -> NDArrayNum:
-    """
-    Generate a grid of positions by splitting [row_min, row_max] x
-    [col_min, col_max] into tiles of size row_split x col_split with optional overlap.
-
-    :param row_min: Minimum row index of the bounding box to split.
-    :param col_min: Minimum column index of the bounding box to split.
-    :param row_max: Maximum row index of the bounding box to split.
-    :param col_max: Maximum column index of the bounding box to split.
-    :param row_split: Height of each tile.
-    :param col_split: Width of each tile.
-    :param overlap: size of overlapping between tiles (both vertically and horizontally).
-    :return: A numpy array grid with splits in two dimensions (0: row, 1: column),
-             where each cell contains [row_min, row_max, col_min, col_max].
-    """
-    # Calculate the number of splits considering overlap
-    nb_col_split = math.ceil((col_max - col_min) / (col_split - overlap))
-    nb_row_split = math.ceil((row_max - row_min) / (row_split - overlap))
-
-    # Initialize the output grid
-    tiling_grid = np.zeros(shape=(nb_row_split, nb_col_split, 4), dtype=int)
-
-    for row in range(nb_row_split):
-        for col in range(nb_col_split):
-            # Calculate the start of the tile
-            row_start = row_min + row * (row_split - overlap)
-            col_start = col_min + col * (col_split - overlap)
-
-            # Calculate the end of the tile ensuring it doesn't exceed the bounds
-            row_end = min(row_max, row_start + row_split)
-            col_end = min(col_max, col_start + col_split)
-
-            # Populate the grid with the tile boundaries
-            tiling_grid[row, col] = [row_start, row_end, col_start, col_end]
-
-    return tiling_grid
