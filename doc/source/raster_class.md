@@ -270,7 +270,7 @@ print(rast_crop.bounds)
 ### Example for `icrop`
 ```{code-cell} ipython3
 # Crop raster using pixel coordinates
-rast_icrop = rast.icrop(bbox=(100, 100, 500, 500))
+rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
 print(rast_icrop.bounds)
 ```
 
