@@ -90,6 +90,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.crop
+    Raster.icrop
     Raster.reproject
     Raster.polygonize
     Raster.proximity

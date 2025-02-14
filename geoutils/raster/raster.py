@@ -1,4 +1,5 @@
 # Copyright (c) 2025 GeoUtils developers
+# Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
 #
 # This file is part of the GeoUtils project:
 # https://github.com/glaciohack/geoutils
@@ -218,7 +219,7 @@ def _load_rio(
     * resampling : to set the resampling algorithm
     """
     # If out_shape is passed, no need to account for transform and shape
-    if kwargs["out_shape"] is not None:
+    if kwargs.get("out_shape") is not None:
         window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
@@ -233,8 +234,6 @@ def _load_rio(
             window = rio.windows.Window(col_off, row_off, *shape[::-1])
         elif sum(param is None for param in [shape, transform]) == 1:
             raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
-        else:
-            window = None
 
     if indexes is None:
         if only_mask:
@@ -441,7 +440,7 @@ class Raster:
         if isinstance(filename_or_dataset, Raster):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
-            return
+
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
@@ -492,6 +491,7 @@ class Raster:
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
+
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
@@ -2387,7 +2387,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -2396,7 +2396,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -2405,7 +2405,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2413,7 +2413,7 @@ class Raster:
 
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2425,8 +2425,8 @@ class Raster:
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param crop_geom: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
-            coordinates. If ``crop_geom`` is a raster or vector, will crop to the bounds. If ``crop_geom`` is a
+        :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
+            coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param mode: Whether to match within pixels or exact extent. ``'match_pixel'`` will preserve the original pixel
             resolution, cropping to the extent that most closely aligns with the current coordinates. ``'match_extent'``
@@ -2436,7 +2436,7 @@ class Raster:
         :returns: A new raster (or None if inplace).
         """
 
-        crop_img, tfm = _crop(source_raster=self, crop_geom=crop_geom, mode=mode)
+        crop_img, tfm = _crop(source_raster=self, bbox=bbox, mode=mode)
 
         if inplace:
             self._data = crop_img
@@ -2445,6 +2445,34 @@ class Raster:
         else:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
+
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: bool = False,
+    ) -> RasterType | None:
+        """
+        Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
+
+        :param bbox: Pixel-based bounding box as (xmin, ymin, xmax, ymax) in pixel coordinates.
+        :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
+
+        :returns: Cropped raster or None (if inplace=True).
+        """
+        # Ensure bbox contains four elements (xmin, ymin, xmax, ymax)
+        if len(bbox) != 4:
+            raise ValueError("bbox must be a list or tuple of four integers: (xmin, ymin, xmax, ymax).")
+
+        # Convert pixel coordinates to georeferenced coordinates using the transform
+        bottom_left = self.transform * (bbox[0], self.height - bbox[1])
+        top_right = self.transform * (bbox[2], self.height - bbox[3])
+
+        # Create new georeferenced crop geometry (xmin, ymin, xmax, ymax)
+        new_bbox = (bottom_left[0], bottom_left[1], top_right[0], top_right[1])
+
+        # Call the existing crop() method with the new georeferenced crop geometry
+        return self.crop(bbox=new_bbox, inplace=inplace)
 
     @overload
     def reproject(
@@ -3952,7 +3980,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -3961,7 +3989,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -3970,7 +3998,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -3978,7 +4006,7 @@ class Mask(Raster):
 
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -3988,16 +4016,16 @@ class Mask(Raster):
             raise ValueError(NotImplementedError)
             # self._data = self.data.astype("float32")
             # if inplace:
-            #     super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     self._data = self.data.astype(bool)
             #     return None
             # else:
-            #     output = super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     output = super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     output._data = output.data.astype(bool)
             #     return output
         # Otherwise, run a classic crop
         else:
-            return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            return super().crop(bbox=bbox, mode=mode, inplace=inplace)
 
     def polygonize(
         self,

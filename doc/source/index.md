@@ -135,7 +135,6 @@ config
 :maxdepth: 2
 
 background
-authors
 license
 ```
 
