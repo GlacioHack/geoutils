@@ -19,7 +19,7 @@ from pluggy import PluggyTeardownRaisedWarning
 from pyproj import CRS
 
 from geoutils.examples import _EXAMPLES_DIRECTORY
-from geoutils.raster.delayed import (
+from geoutils.raster.distributed_computing.delayed_dask import (
     delayed_interp_points,
     delayed_reproject,
     delayed_subsample,
@@ -234,9 +234,9 @@ def _build_dst_transform_shifted_newres(
     return dst_transform
 
 
-class TestDelayed:
+class TestDelayedDask:
     """
-    Testing class for delayed functions.
+    Testing class for delayed-dask functions.
 
     We test on a first set of rasters big enough to clearly monitor the memory usage, and a second set small enough
     to run fast to check a wide range of input parameters.
