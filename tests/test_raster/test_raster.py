@@ -1996,10 +1996,10 @@ class TestRaster:
             "NMAD",
             "RMSE",
             "Standard deviation",
-            "Valid points",
+            "Valid count",
+            "Total count",
             "Percentage valid points",
-            "Valid points all data",
-            "Percentage valid points all data",
+            "Size",
         ]
 
         # Full stats
