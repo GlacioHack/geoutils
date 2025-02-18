@@ -38,7 +38,5 @@ def nmad(data: NDArrayNum, nfact: float = 1.4826) -> np.floating[Any]:
     :returns nmad: (normalized) median absolute deviation of data.
     """
     if isinstance(data, np.ma.masked_array):
-        data_arr = data.compressed()
-    else:
-        data_arr = np.asarray(data)
-    return nfact * np.nanmedian(np.abs(data_arr - np.nanmedian(data_arr)))
+        return nfact * np.ma.median(np.abs(data - np.ma.median(data)))
+    return nfact * np.nanmedian(np.abs(data - np.nanmedian(data)))

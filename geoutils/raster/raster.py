@@ -1897,8 +1897,8 @@ class Raster:
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, RMSE, standard deviation, valid points, percentage
-        valid points, valid points all data, percentage valid points all data.
+        min, sum, sum of squares, 90th percentile, NMAD, RMSE, standard deviation, valid count, total count,
+        percentage valid points, size.
         """
 
         if self.count == 1:
@@ -1907,24 +1907,24 @@ class Raster:
             data = self.data[band - 1]
 
         # Compute the statistics
-        compressed_data = data.compressed()
-        valid_points = np.count_nonzero(np.isfinite(compressed_data))
-        valid_points_all_data = np.count_nonzero(np.isfinite(data))
+        mdata = np.ma.filled(data.astype(float), np.nan)
+        valid_count = np.count_nonzero(~data.mask)
+        total_count = np.count_nonzero(np.isfinite(data))
         stats_dict = {
-            "Mean": np.nanmean(compressed_data),
-            "Median": np.nanmedian(compressed_data),
-            "Max": np.nanmax(compressed_data),
-            "Min": np.nanmin(compressed_data),
-            "Sum": np.nansum(compressed_data),
-            "Sum of squares": np.nansum(np.square(compressed_data)),
-            "90th percentile": np.nanpercentile(compressed_data, 90),
-            "NMAD": nmad(compressed_data),
-            "RMSE": np.sqrt(np.nanmean(np.square(compressed_data))),
-            "Standard deviation": np.nanstd(compressed_data),
-            "Valid points": np.count_nonzero(np.isfinite(compressed_data)),
-            "Percentage valid points": (valid_points / data.size) * 100,
-            "Valid points all data": valid_points_all_data,
-            "Percentage valid points all data": (valid_points_all_data / data.size) * 100,
+            "Mean": np.ma.mean(data),
+            "Median": np.ma.median(data),
+            "Max": np.ma.max(data),
+            "Min": np.ma.min(data),
+            "Sum": np.ma.sum(data),
+            "Sum of squares": np.ma.sum(np.square(data)),
+            "90th percentile": np.nanpercentile(mdata, 90),
+            "NMAD": nmad(data),
+            "RMSE": np.sqrt(np.ma.mean(np.square(data))),
+            "Standard deviation": np.ma.std(data),
+            "Valid count": valid_count,
+            "Total count": total_count,
+            "Percentage valid points": (valid_count / total_count) * 100,
+            "Size": data.size,
         }
         return stats_dict
 
@@ -1956,7 +1956,7 @@ class Raster:
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
                    Accepted names include:
                    - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std",
-                   "valid points", "percentage valid points".
+                   "valid count", "total count", "percentage valid points", "size".
                    Custom callables can also be provided.
         :param band: The index of the band for which to compute statistics. Default is 1.
 
@@ -1986,10 +1986,10 @@ class Raster:
             "rms": "RMSE",
             "std": "Standard deviation",
             "standarddeviation": "Standard deviation",
-            "validpoints": "Valid points",
+            "validcount": "Valid count",
+            "totalcount": "Total count",
             "percentagevalidpoints": "Percentage valid points",
-            "validpointsalldata": "Valid points all data",
-            "percentagevalidpointsalldata": "Percentage valid points all data",
+            "size": "Size",
         }
         if isinstance(stats_name, list):
             result = {}
