@@ -1897,69 +1897,55 @@ class Raster:
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, RMSE, and standard deviation.
+        min, sum, sum of squares, 90th percentile, NMAD, RMSE, standard deviation, valid count, total count,
+        percentage valid points, size.
         """
+
         if self.count == 1:
             data = self.data
         else:
             data = self.data[band - 1]
 
-        # If data is a MaskedArray, use the compressed version (without masked values)
-        if isinstance(data, np.ma.MaskedArray):
-            data = data.compressed()
-
         # Compute the statistics
+        mdata = np.ma.filled(data.astype(float), np.nan)
+        valid_count = np.count_nonzero(~data.mask)
+        total_count = np.count_nonzero(np.isfinite(data))
         stats_dict = {
-            "Mean": np.nanmean(data),
-            "Median": np.nanmedian(data),
-            "Max": np.nanmax(data),
-            "Min": np.nanmin(data),
-            "Sum": np.nansum(data),
-            "Sum of squares": np.nansum(np.square(data)),
-            "90th percentile": np.nanpercentile(data, 90),
+            "Mean": np.ma.mean(data),
+            "Median": np.ma.median(data),
+            "Max": np.ma.max(data),
+            "Min": np.ma.min(data),
+            "Sum": np.ma.sum(data),
+            "Sum of squares": np.ma.sum(np.square(data)),
+            "90th percentile": np.nanpercentile(mdata, 90),
             "NMAD": nmad(data),
-            "RMSE": np.sqrt(np.nanmean(np.square(data - np.nanmean(data)))),
-            "Standard deviation": np.nanstd(data),
+            "RMSE": np.sqrt(np.ma.mean(np.square(data))),
+            "Standard deviation": np.ma.std(data),
+            "Valid count": valid_count,
+            "Total count": total_count,
+            "Percentage valid points": (valid_count / total_count) * 100,
+            "Size": data.size,
         }
         return stats_dict
 
     @overload
     def get_stats(
         self,
-        stats_name: (
-            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
-            | Callable[[NDArrayNum], np.floating[Any]]
-        ),
+        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
         band: int = 1,
     ) -> np.floating[Any]: ...
 
     @overload
     def get_stats(
         self,
-        stats_name: (
-            list[
-                Literal[
-                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
-                ]
-                | Callable[[NDArrayNum], np.floating[Any]]
-            ]
-            | None
-        ) = None,
+        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
         band: int = 1,
     ) -> dict[str, np.floating[Any]]: ...
 
     def get_stats(
         self,
         stats_name: (
-            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
-            | Callable[[NDArrayNum], np.floating[Any]]
-            | list[
-                Literal[
-                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
-                ]
-                | Callable[[NDArrayNum], np.floating[Any]]
-            ]
-            | None
+            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
         band: int = 1,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
@@ -1969,8 +1955,8 @@ class Raster:
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
                    Accepted names include:
-                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
-                   You can also use common aliases for these names (e.g., "average", "maximum", "minimum", etc.).
+                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std",
+                   "valid count", "total count", "percentage valid points", "size".
                    Custom callables can also be provided.
         :param band: The index of the band for which to compute statistics. Default is 1.
 
@@ -1985,7 +1971,6 @@ class Raster:
         # Define the metric aliases and their actual names
         stats_aliases = {
             "mean": "Mean",
-            "average": "Mean",
             "median": "Median",
             "max": "Max",
             "maximum": "Max",
@@ -1994,16 +1979,17 @@ class Raster:
             "sum": "Sum",
             "sumofsquares": "Sum of squares",
             "sum2": "Sum of squares",
-            "percentile": "90th percentile",
             "90thpercentile": "90th percentile",
             "90percentile": "90th percentile",
-            "percentile90": "90th percentile",
             "nmad": "NMAD",
             "rmse": "RMSE",
+            "rms": "RMSE",
             "std": "Standard deviation",
-            "stddev": "Standard deviation",
-            "standarddev": "Standard deviation",
             "standarddeviation": "Standard deviation",
+            "validcount": "Valid count",
+            "totalcount": "Total count",
+            "percentagevalidpoints": "Percentage valid points",
+            "size": "Size",
         }
         if isinstance(stats_name, list):
             result = {}

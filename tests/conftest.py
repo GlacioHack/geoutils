@@ -1,6 +1,6 @@
 """Configuration of pytest."""
 
-from pytest import DoctestItem
+from _pytest.doctest import DoctestItem
 
 
 # To order test modules logically during execution

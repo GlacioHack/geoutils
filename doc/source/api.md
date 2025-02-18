@@ -106,6 +106,15 @@ documentation.
     Raster.plot
 ```
 
+### Get statistics
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.get_stats
+```
+
 ### Get or update data methods
 
 ```{eval-rst}
