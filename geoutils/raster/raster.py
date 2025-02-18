@@ -41,7 +41,6 @@ import rasterio.windows
 import rioxarray
 import xarray as xr
 from affine import Affine
-from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from packaging.version import Version
 from rasterio.crs import CRS
@@ -89,7 +88,6 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.raster.tiling import _generate_tiling_grid
 from geoutils.stats import nmad
 from geoutils.vector.vector import Vector
 
@@ -2656,44 +2654,6 @@ class Raster:
             raster_copy = self.copy()
             raster_copy.transform = translated_transform
             return raster_copy
-
-    def compute_tiling(
-        self,
-        tile_size: int,
-        raster_ref: RasterType,
-        overlap: int = 0,
-    ) -> NDArrayNum:
-        """
-        Compute the raster tiling grid to coregister raster by block.
-
-        :param tile_size: Size of each tile (square tiles)
-        :param raster_ref: The other raster to coregister, use to validate the shape
-        :param overlap: Size of overlap between tiles (optional)
-        :return: tiling_grid (array of tile boundaries), new_shape (shape of the tiled grid)
-        """
-        if self.shape != raster_ref.shape:
-            raise Exception("Reference and secondary rasters do not have the same shape")
-        row_max, col_max = self.shape
-
-        # Generate tiling
-        tiling_grid = _generate_tiling_grid(0, 0, row_max, col_max, tile_size, tile_size, overlap=overlap)
-        return tiling_grid
-
-    def plot_tiling(self, tiling_grid: NDArrayNum) -> None:
-        """
-        Plot raster with its tiling.
-
-        :param tiling_grid: tiling given by Raster.compute_tiling.
-        """
-        ax, caxes = self.plot(return_axes=True)
-        for tile in tiling_grid.reshape(-1, 4):
-            row_min, row_max, col_min, col_max = tile
-            x_min, y_min = self.transform * (col_min, row_min)  # Bottom-left corner
-            x_max, y_max = self.transform * (col_max, row_max)  # Top-right corne
-            rect = Rectangle(
-                (x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5
-            )
-            ax.add_patch(rect)
 
     def save(
         self,

@@ -21,8 +21,10 @@
 import math
 
 import numpy as np
+from matplotlib.patches import Rectangle
 
 from geoutils._typing import NDArrayNum
+from geoutils.raster import RasterType
 
 
 def _get_closest_rectangle(size: int) -> tuple[int, int]:
@@ -166,3 +168,43 @@ def _generate_tiling_grid(
             tiling_grid[row, col] = [row_start, row_end, col_start, col_end]
 
     return tiling_grid
+
+
+def compute_tiling(
+    tile_size: int,
+    raster_shape: tuple[int, int],
+    ref_shape: tuple[int, int],
+    overlap: int = 0,
+) -> NDArrayNum:
+    """
+    Compute the raster tiling grid to coregister raster by block.
+
+    :param tile_size: Size of each tile (square tiles).
+    :param raster_shape: Shape of the raster to determine tiling parameters.
+    :param ref_shape: The shape of another raster to coregister, use to validate the shape.
+    :param overlap: Size of overlap between tiles (optional).
+    :return: tiling_grid (array of tile boundaries).
+    """
+    if raster_shape != ref_shape:
+        raise Exception("Reference and secondary rasters do not have the same shape")
+    row_max, col_max = raster_shape
+
+    # Generate tiling
+    tiling_grid = _generate_tiling_grid(0, 0, row_max, col_max, tile_size, tile_size, overlap=overlap)
+    return tiling_grid
+
+
+def plot_tiling(raster: RasterType, tiling_grid: NDArrayNum) -> None:
+    """
+    Plot raster with its tiling.
+
+    :param raster: The raster to plot with its tiling.
+    :param tiling_grid: tiling given by compute_tiling.
+    """
+    ax, caxes = raster.plot(return_axes=True)
+    for tile in tiling_grid.reshape(-1, 4):
+        row_min, row_max, col_min, col_max = tile
+        x_min, y_min = raster.transform * (col_min, row_min)  # Bottom-left corner
+        x_max, y_max = raster.transform * (col_max, row_max)  # Top-right corne
+        rect = Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5)
+        ax.add_patch(rect)
