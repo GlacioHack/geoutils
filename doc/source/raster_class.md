@@ -348,8 +348,24 @@ rast_reproj.to_xarray()
 ```
 
 ## Obtain Statistics
-The `get_stats()` method allows to extract key statistical information from a raster in a dictionary.
-Supported statistics are : mean, median, max, mean, sum, sum of squares, 90th percentile, nmad, rmse, std.
+The {func}`~geoutils.Raster.get_stats` method allows to extract key statistical information from a raster in a dictionary.
+Supported statistics are :
+- **Mean:** arithmetic mean of the data, ignoring masked values.
+- **Median:** middle value when the valid data points are sorted in increasing order, ignoring masked values.
+- **Max:** maximum value among the data, ignoring masked values.
+- **Min:** minimum value among the data, ignoring masked values.
+- **Sum:** sum of all data, ignoring masked values.
+- **Sum of squares:** sum of the squares of all data, ignoring masked values.
+- **90th percentile:** point below which 90% of the data falls, ignoring masked values.
+- **LE90 (Linear Error with 90% confidence):** Difference between the 95th and 5th percentiles of a dataset, representing the range within which 90% of the data points lie. Ignore masked values.
+- **NMAD (Normalized Median Absolute Deviation):** robust measure of variability in the data, less sensitive to outliers compared to standard deviation. Ignore masked values.
+- **RMSE (Root Mean Square Error):** commonly used to express the magnitude of errors or variability and can give insight into the spread of the data. Only relevant when the raster represents a difference of two objects. Ignore masked values.
+- **Std (Standard deviation):** Measures the spread or dispersion of the data around the mean, ignoring masked values.
+- **Valid count:** The number of valid (unmasked) data points in the array. It counts the non-masked elements.
+- **Total count:** The total number of finite data points in the array, including masked elements.
+- **Percentage valid points:** The percentage of unmasked data points out of the total number of finite points. Useful for classification statistics.
+- **Size:** Total size of the raster.
+
 Callable functions are supported as well.
 
 ### Usage Examples:
@@ -365,7 +381,7 @@ rast.get_stats("mean")
 
 - Get multiple statistics in a dict:
 ```{code-cell} ipython3
-rast.get_stats(["mean", "max", "rmse"])
+rast.get_stats(["mean", "max", "std"])
 ```
 
 - Using a custom callable statistic:
