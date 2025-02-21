@@ -89,7 +89,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.stats import nmad
+from geoutils.stats import linear_error, nmad
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -1897,7 +1897,7 @@ class Raster:
         :param band: The index of the band for which to compute statistics. Default is 1.
 
         :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, RMSE, standard deviation, valid count, total count,
+        min, sum, sum of squares, 90th percentile, LE90, NMAD, RMSE, standard deviation, valid count, total count,
         percentage valid points, size.
         """
 
@@ -1918,6 +1918,7 @@ class Raster:
             "Sum": np.ma.sum(data),
             "Sum of squares": np.ma.sum(np.square(data)),
             "90th percentile": np.nanpercentile(mdata, 90),
+            "LE90": linear_error(mdata, interval=90),
             "NMAD": nmad(data),
             "RMSE": np.sqrt(np.ma.mean(np.square(data))),
             "Standard deviation": np.ma.std(data),
@@ -1955,8 +1956,8 @@ class Raster:
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
                    Accepted names include:
-                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std",
-                   "valid count", "total count", "percentage valid points", "size".
+                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "LE90", "nmad", "rmse",
+                    "std", "valid count", "total count", "percentage valid points", "size".
                    Custom callables can also be provided.
         :param band: The index of the band for which to compute statistics. Default is 1.
 
@@ -1981,6 +1982,7 @@ class Raster:
             "sum2": "Sum of squares",
             "90thpercentile": "90th percentile",
             "90percentile": "90th percentile",
+            "le90": "LE90",
             "nmad": "NMAD",
             "rmse": "RMSE",
             "rms": "RMSE",
