@@ -2950,6 +2950,38 @@ class Raster:
         # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
         return intersection  # type: ignore
 
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        return_axes: Literal[False] = False,
+        **kwargs: Any,
+    ) -> None: ...
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        return_axes: Literal[True],
+        **kwargs: Any,
+    ) -> tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]: ...
+
     def plot(
         self,
         bands: int | tuple[int, ...] | None = None,
@@ -3087,8 +3119,7 @@ class Raster:
         # If returning axes
         if return_axes:
             return ax0, cax
-        else:
-            return None
+        return None
 
     def reduce_points(
         self,
