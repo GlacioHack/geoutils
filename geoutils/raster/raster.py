@@ -1890,7 +1890,7 @@ class Raster:
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    def _statistics(self, band: int = 1) -> dict[str, np.floating[Any]]:
+    def _statistics(self, band: int = 1, total_count: int | None = None) -> dict[str, np.floating[Any]]:
         """
         Calculate common statistics for a specified band in the raster.
 
@@ -1908,8 +1908,9 @@ class Raster:
 
         # Compute the statistics
         mdata = np.ma.filled(data.astype(float), np.nan)
-        valid_count = np.count_nonzero(~data.mask)
-        total_count = np.count_nonzero(np.isfinite(data))
+        valid_count = np.count_nonzero(~self.get_mask())
+        if total_count is None:
+            total_count = valid_count
         stats_dict = {
             "Mean": np.ma.mean(data),
             "Median": np.ma.median(data),
@@ -1933,14 +1934,18 @@ class Raster:
     def get_stats(
         self,
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
+        inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
+        total_count: int | None = None,
     ) -> np.floating[Any]: ...
 
     @overload
     def get_stats(
         self,
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
+        total_count: int | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
     def get_stats(
@@ -1948,7 +1953,9 @@ class Raster:
         stats_name: (
             str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
+        total_count: int | None = None,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
@@ -1959,13 +1966,19 @@ class Raster:
                    - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "LE90", "nmad", "rmse",
                     "std", "valid count", "total count", "percentage valid points", "size".
                    Custom callables can also be provided.
+        :param inlier_mask: A boolean mask to filter values for statistical calculations.
         :param band: The index of the band for which to compute statistics. Default is 1.
-
+        :param total_count: The total number of finite data points in the array.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         if not self.is_loaded:
             self.load()
-        stats_dict = self._statistics(band=band)
+        if inlier_mask is not None:
+            total_count = np.count_nonzero(~self.get_mask())
+            dem_masked = self.copy()
+            dem_masked.set_mask(inlier_mask)
+            return dem_masked.get_stats(stats_name=stats_name, band=band, total_count=total_count)
+        stats_dict = self._statistics(band=band, total_count=total_count)
         if stats_name is None:
             return stats_dict
 

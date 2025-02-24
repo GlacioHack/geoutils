@@ -1993,6 +1993,7 @@ class TestRaster:
             "Sum",
             "Sum of squares",
             "90th percentile",
+            "LE90",
             "NMAD",
             "RMSE",
             "Standard deviation",
@@ -2007,6 +2008,11 @@ class TestRaster:
         for name in expected_stats:
             assert name in stats
             assert stats.get(name) is not None
+
+        # With mask
+        inlier_mask = raster.get_mask()
+        stats_masked = raster.get_stats(inlier_mask=inlier_mask)
+        assert stats_masked == stats
 
         # Single stat
         for name in expected_stats:
