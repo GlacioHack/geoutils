@@ -260,14 +260,14 @@ The {func}`~geoutils.Raster.icrop` function accepts only a bounding box in pixel
 By default, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.icrop` return a new Raster unless the inplace parameter is set to True, in which case the cropping operation is performed directly on the original raster object.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
-### Example for `crop`
+### Example for {func}`~geoutils.Raster.crop`
 ```{code-cell} ipython3
 # Crop raster to smaller bounds
 rast_crop = rast.crop(bbox=(0.3, 0.3, 1, 1))
 print(rast_crop.bounds)
 ```
 
-### Example for `icrop`
+### Example for {func}`~geoutils.Raster.icrop`
 ```{code-cell} ipython3
 # Crop raster using pixel coordinates
 rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
