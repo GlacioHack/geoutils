@@ -443,7 +443,7 @@ def _reproject(
 
 def _crop(
     source_raster: gu.Raster,
-    crop_geom: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
+    bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
     mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
 ) -> tuple[MArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
@@ -453,14 +453,14 @@ def _crop(
         "match_pixel",
     ], "mode must be one of 'match_pixel', 'match_extent'"
 
-    if isinstance(crop_geom, (gu.Raster, gu.Vector)):
+    if isinstance(bbox, (gu.Raster, gu.Vector)):
         # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-        xmin, ymin, xmax, ymax = crop_geom.get_bounds_projected(out_crs=source_raster.crs)
-        if isinstance(crop_geom, gu.Raster):
+        xmin, ymin, xmax, ymax = bbox.get_bounds_projected(out_crs=source_raster.crs)
+        if isinstance(bbox, gu.Raster):
             # Raise a warning if the reference is a raster that has a different pixel interpretation
-            _cast_pixel_interpretation(source_raster.area_or_point, crop_geom.area_or_point)
-    elif isinstance(crop_geom, (list, tuple)):
-        xmin, ymin, xmax, ymax = crop_geom
+            _cast_pixel_interpretation(source_raster.area_or_point, bbox.area_or_point)
+    elif isinstance(bbox, (list, tuple)):
+        xmin, ymin, xmax, ymax = bbox
     else:
         raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
@@ -479,11 +479,8 @@ def _crop(
         if source_raster.is_loaded:
             # In case data is loaded on disk, can extract directly from np array
             (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+            crop_img = source_raster.data[..., rowmin:rowmax, colmin:colmax]
 
-            if source_raster.count == 1:
-                crop_img = source_raster.data[rowmin:rowmax, colmin:colmax]
-            else:
-                crop_img = source_raster.data[:, rowmin:rowmax, colmin:colmax]
         else:
 
             assert source_raster._disk_shape is not None  # This should not be the case, sanity check to make mypy happy

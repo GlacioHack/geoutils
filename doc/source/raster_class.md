@@ -244,6 +244,8 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 ## Crop
 
 Cropping a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`.
+Additionally, you can use the {func}`~geoutils.Raster.icrop` method to crop the raster using pixel coordinates instead of geographic bounds.
+Both cropping methods can be used before loading the raster's data into memory. This optimization can prevent loading unnecessary parts of the data, which is particularly useful when working with large rasters.
 
 ```{important}
 As with all geospatial handling methods, the {func}`~geoutils.Raster.crop` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector`
@@ -254,12 +256,22 @@ See {ref}`core-match-ref` for more details.
 
 The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default,
 {func}`~geoutils.Raster.crop` returns a new Raster.
+The {func}`~geoutils.Raster.icrop` function accepts only a bounding box in pixel coordinates (xmin, ymin, xmax, ymax) and crop the raster accordingly.
+By default, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.icrop` return a new Raster unless the inplace parameter is set to True, in which case the cropping operation is performed directly on the original raster object.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
+### Example for `crop`
 ```{code-cell} ipython3
 # Crop raster to smaller bounds
-rast_crop = rast.crop(crop_geom=(0.3, 0.3, 1, 1))
+rast_crop = rast.crop(bbox=(0.3, 0.3, 1, 1))
 print(rast_crop.bounds)
+```
+
+### Example for `icrop`
+```{code-cell} ipython3
+# Crop raster using pixel coordinates
+rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
+print(rast_icrop.bounds)
 ```
 
 ## Polygonize
