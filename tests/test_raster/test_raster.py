@@ -1998,8 +1998,6 @@ class TestRaster:
             "RMSE",
             "Standard deviation",
             "Valid count",
-            "Total count",
-            "Percentage valid points",
             "Size",
         ]
 
@@ -2012,6 +2010,10 @@ class TestRaster:
         # With mask
         inlier_mask = raster.get_mask()
         stats_masked = raster.get_stats(inlier_mask=inlier_mask)
+        for name in ["Total count", "Percentage valid points"]:
+            assert name in stats_masked
+            assert stats_masked.get(name) is not None
+            stats_masked.pop(name)
         assert stats_masked == stats
 
         # Single stat

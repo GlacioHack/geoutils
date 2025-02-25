@@ -374,9 +374,12 @@ Supported statistics are :
 - **RMSE (Root Mean Square Error):** commonly used to express the magnitude of errors or variability and can give insight into the spread of the data. Only relevant when the raster represents a difference of two objects. Ignore masked values.
 - **Std (Standard deviation):** Measures the spread or dispersion of the data around the mean, ignoring masked values.
 - **Valid count:** The number of valid (unmasked) data points in the array. It counts the non-masked elements.
-- **Total count:** The total number of finite data points in the array, including masked elements.
-- **Percentage valid points:** The percentage of unmasked data points out of the total number of finite points. Useful for classification statistics.
 - **Size:** Total size of the raster.
+
+If an inlier mask is passed:
+- **Total count:** The number of unmasked data points in the array before applying the inlier mask.
+- **Percentage valid points:** The ration between `valid_count` and `total_count` Useful for classification statistics.
+
 
 Callable functions are supported as well.
 
@@ -401,4 +404,12 @@ rast.get_stats(["mean", "max", "std"])
 def custom_stat(data):
     return np.nansum(data > 100)  # Count the number of pixels above 100
 rast.get_stats(custom_stat)
+```
+
+- Passing an inlier mask:
+```{code-cell} ipython3
+inlier_mask = np.array([[False, False , True],
+                        [False, True , False],
+                        [True, False , True]])
+rast.get_stats(inlier_mask=inlier_mask)
 ```

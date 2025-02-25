@@ -1896,9 +1896,7 @@ class Raster:
 
         :param band: The index of the band for which to compute statistics. Default is 1.
 
-        :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, LE90, NMAD, RMSE, standard deviation, valid count, total count,
-        percentage valid points, size.
+        :returns: A dictionary containing the calculated statistics for the selected band.
         """
 
         if self.count == 1:
@@ -1909,8 +1907,6 @@ class Raster:
         # Compute the statistics
         mdata = np.ma.filled(data.astype(float), np.nan)
         valid_count = np.count_nonzero(~self.get_mask())
-        if total_count is None:
-            total_count = valid_count
         stats_dict = {
             "Mean": np.ma.mean(data),
             "Median": np.ma.median(data),
@@ -1924,10 +1920,17 @@ class Raster:
             "RMSE": np.sqrt(np.ma.mean(np.square(data))),
             "Standard deviation": np.ma.std(data),
             "Valid count": valid_count,
-            "Total count": total_count,
-            "Percentage valid points": (valid_count / total_count) * 100,
             "Size": data.size,
         }
+
+        if total_count is not None:
+            stats_dict.update(
+                {
+                    "Total count": total_count,
+                    "Percentage valid points": (valid_count / total_count) * 100,
+                }
+            )
+
         return stats_dict
 
     @overload
@@ -1962,10 +1965,11 @@ class Raster:
         to calculate custom stats.
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
-                   Accepted names include:
-                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "LE90", "nmad", "rmse",
-                    "std", "valid count", "total count", "percentage valid points", "size".
-                   Custom callables can also be provided.
+            Accepted names include:
+            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
+            `std`, `valid count`, `size`, and if an inlier mask is passed : `total count`,
+            `percentage valid points`.
+            Custom callables can also be provided.
         :param inlier_mask: A boolean mask to filter values for statistical calculations.
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param total_count: The total number of finite data points in the array.
@@ -2002,10 +2006,16 @@ class Raster:
             "std": "Standard deviation",
             "standarddeviation": "Standard deviation",
             "validcount": "Valid count",
-            "totalcount": "Total count",
-            "percentagevalidpoints": "Percentage valid points",
             "size": "Size",
         }
+        if total_count is not None:
+            stats_aliases.update(
+                {
+                    "totalcount": "Total count",
+                    "percentagevalidpoints": "Percentage valid points",
+                }
+            )
+
         if isinstance(stats_name, list):
             result = {}
             for name in stats_name:
