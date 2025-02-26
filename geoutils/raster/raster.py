@@ -1890,11 +1890,12 @@ class Raster:
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    def _statistics(self, band: int = 1, total_count: int | None = None) -> dict[str, np.floating[Any]]:
+    def _statistics(self, band: int = 1, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
         """
         Calculate common statistics for a specified band in the raster.
 
         :param band: The index of the band for which to compute statistics. Default is 1.
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask).
 
         :returns: A dictionary containing the calculated statistics for the selected band.
         """
@@ -1906,7 +1907,7 @@ class Raster:
 
         # Compute the statistics
         mdata = np.ma.filled(data.astype(float), np.nan)
-        valid_count = np.count_nonzero(~self.get_mask())
+        valid_count = np.count_nonzero(~self.get_mask()) if counts is None else counts[0]
         stats_dict = {
             "Mean": np.ma.mean(data),
             "Median": np.ma.median(data),
@@ -1920,14 +1921,18 @@ class Raster:
             "RMSE": np.sqrt(np.ma.mean(np.square(data))),
             "Standard deviation": np.ma.std(data),
             "Valid count": valid_count,
-            "Size": data.size,
+            "Total count": data.size,
+            "Percentage valid points": (valid_count / data.size) * 100,
         }
 
-        if total_count is not None:
+        if counts is not None:
+            valid_inlier_count = np.count_nonzero(~self.get_mask())
             stats_dict.update(
                 {
-                    "Total count": total_count,
-                    "Percentage valid points": (valid_count / total_count) * 100,
+                    "Valid inlier count": valid_inlier_count,
+                    "Total inlier count": counts[1],
+                    "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
+                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100,
                 }
             )
 
@@ -1939,7 +1944,7 @@ class Raster:
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
         inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
-        total_count: int | None = None,
+        counts: tuple[int, int] | None = None,
     ) -> np.floating[Any]: ...
 
     @overload
@@ -1948,7 +1953,7 @@ class Raster:
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
         inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
-        total_count: int | None = None,
+        counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
     def get_stats(
@@ -1958,7 +1963,7 @@ class Raster:
         ) = None,
         inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
-        total_count: int | None = None,
+        counts: tuple[int, int] | None = None,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
@@ -1967,22 +1972,26 @@ class Raster:
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
-            `std`, `valid count`, `size`, and if an inlier mask is passed : `total count`,
-            `percentage valid points`.
+            `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
+            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
         :param inlier_mask: A boolean mask to filter values for statistical calculations.
         :param band: The index of the band for which to compute statistics. Default is 1.
-        :param total_count: The total number of finite data points in the array.
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask). DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         if not self.is_loaded:
             self.load()
         if inlier_mask is not None:
-            total_count = np.count_nonzero(~self.get_mask())
+            valid_points = np.count_nonzero(~self.get_mask())
+            if isinstance(inlier_mask, Mask):
+                inlier_points = np.count_nonzero(~inlier_mask.data)
+            else:
+                inlier_points = np.count_nonzero(~inlier_mask)
             dem_masked = self.copy()
             dem_masked.set_mask(inlier_mask)
-            return dem_masked.get_stats(stats_name=stats_name, band=band, total_count=total_count)
-        stats_dict = self._statistics(band=band, total_count=total_count)
+            return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+        stats_dict = self._statistics(band=band, counts=counts)
         if stats_name is None:
             return stats_dict
 
@@ -2006,13 +2015,16 @@ class Raster:
             "std": "Standard deviation",
             "standarddeviation": "Standard deviation",
             "validcount": "Valid count",
-            "size": "Size",
+            "totalcount": "Total count",
+            "percentagevalidpoints": "Percentage valid points",
         }
-        if total_count is not None:
+        if counts is not None:
             stats_aliases.update(
                 {
-                    "totalcount": "Total count",
-                    "percentagevalidpoints": "Percentage valid points",
+                    "validinliercount": "Valid inlier count",
+                    "totalinliercount": "Total inlier count",
+                    "percentagevalidinlierpoints": "Percentage valid inlier points",
+                    "percentageinlierpoints": "Percentage inlier points",
                 }
             )
 

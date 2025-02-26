@@ -372,13 +372,17 @@ Supported statistics are :
 - **LE90 (Linear Error with 90% confidence):** Difference between the 95th and 5th percentiles of a dataset, representing the range within which 90% of the data points lie. Ignore masked values.
 - **NMAD (Normalized Median Absolute Deviation):** robust measure of variability in the data, less sensitive to outliers compared to standard deviation. Ignore masked values.
 - **RMSE (Root Mean Square Error):** commonly used to express the magnitude of errors or variability and can give insight into the spread of the data. Only relevant when the raster represents a difference of two objects. Ignore masked values.
-- **Std (Standard deviation):** Measures the spread or dispersion of the data around the mean, ignoring masked values.
-- **Valid count:** The number of valid (unmasked) data points in the array. It counts the non-masked elements.
-- **Size:** Total size of the raster.
+- **Std (Standard deviation):** measures the spread or dispersion of the data around the mean, ignoring masked values.
+- **Valid count:** number of finite data points in the array. It counts the non-masked elements.
+- **Total count:** total size of the raster.
+- **Percentage valid points:** ratio between **Valid count** and **Total count**.
+
 
 If an inlier mask is passed:
-- **Total count:** The number of unmasked data points in the array before applying the inlier mask.
-- **Percentage valid points:** The ration between `valid_count` and `total_count` Useful for classification statistics.
+- **Total inlier count:** number of data points in the inlier mask.
+- **Valid inlier count:** number of unmasked data points in the array after applying the inlier mask.
+- **Percentage inlier points:** ratio between **Valid inlier count** and **Valid count**. Useful for classification statistics.
+- **Percentage valid inlier points:** ratio between **Valid inlier count** and **Total inlier count**.
 
 
 Callable functions are supported as well.
