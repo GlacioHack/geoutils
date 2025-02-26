@@ -89,7 +89,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.stats import nmad
+from geoutils.stats import linear_error, nmad
 from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -1890,102 +1890,114 @@ class Raster:
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    def _statistics(self, band: int = 1) -> dict[str, np.floating[Any]]:
+    def _statistics(self, band: int = 1, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
         """
         Calculate common statistics for a specified band in the raster.
 
         :param band: The index of the band for which to compute statistics. Default is 1.
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask).
 
-        :returns: A dictionary containing the calculated statistics for the selected band, including mean, median, max,
-        min, sum, sum of squares, 90th percentile, NMAD, RMSE, and standard deviation.
+        :returns: A dictionary containing the calculated statistics for the selected band.
         """
+
         if self.count == 1:
             data = self.data
         else:
             data = self.data[band - 1]
 
-        # If data is a MaskedArray, use the compressed version (without masked values)
-        if isinstance(data, np.ma.MaskedArray):
-            data = data.compressed()
-
         # Compute the statistics
+        mdata = np.ma.filled(data.astype(float), np.nan)
+        valid_count = np.count_nonzero(~self.get_mask()) if counts is None else counts[0]
         stats_dict = {
-            "Mean": np.nanmean(data),
-            "Median": np.nanmedian(data),
-            "Max": np.nanmax(data),
-            "Min": np.nanmin(data),
-            "Sum": np.nansum(data),
-            "Sum of squares": np.nansum(np.square(data)),
-            "90th percentile": np.nanpercentile(data, 90),
+            "Mean": np.ma.mean(data),
+            "Median": np.ma.median(data),
+            "Max": np.ma.max(data),
+            "Min": np.ma.min(data),
+            "Sum": np.ma.sum(data),
+            "Sum of squares": np.ma.sum(np.square(data)),
+            "90th percentile": np.nanpercentile(mdata, 90),
+            "LE90": linear_error(mdata, interval=90),
             "NMAD": nmad(data),
-            "RMSE": np.sqrt(np.nanmean(np.square(data - np.nanmean(data)))),
-            "Standard deviation": np.nanstd(data),
+            "RMSE": np.sqrt(np.ma.mean(np.square(data))),
+            "Standard deviation": np.ma.std(data),
+            "Valid count": valid_count,
+            "Total count": data.size,
+            "Percentage valid points": (valid_count / data.size) * 100,
         }
+
+        if counts is not None:
+            valid_inlier_count = np.count_nonzero(~self.get_mask())
+            stats_dict.update(
+                {
+                    "Valid inlier count": valid_inlier_count,
+                    "Total inlier count": counts[1],
+                    "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
+                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100,
+                }
+            )
+
         return stats_dict
 
     @overload
     def get_stats(
         self,
-        stats_name: (
-            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
-            | Callable[[NDArrayNum], np.floating[Any]]
-        ),
+        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
+        inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
+        counts: tuple[int, int] | None = None,
     ) -> np.floating[Any]: ...
 
     @overload
     def get_stats(
         self,
-        stats_name: (
-            list[
-                Literal[
-                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
-                ]
-                | Callable[[NDArrayNum], np.floating[Any]]
-            ]
-            | None
-        ) = None,
+        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
+        counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
     def get_stats(
         self,
         stats_name: (
-            Literal["mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"]
-            | Callable[[NDArrayNum], np.floating[Any]]
-            | list[
-                Literal[
-                    "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
-                ]
-                | Callable[[NDArrayNum], np.floating[Any]]
-            ]
-            | None
+            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
         band: int = 1,
+        counts: tuple[int, int] | None = None,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
-                   Accepted names include:
-                   - "mean", "median", "max", "min", "sum", "sum of squares", "90th percentile", "nmad", "rmse", "std"
-                   You can also use common aliases for these names (e.g., "average", "maximum", "minimum", etc.).
-                   Custom callables can also be provided.
+            Accepted names include:
+            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
+            `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
+            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
+            Custom callables can also be provided.
+        :param inlier_mask: A boolean mask to filter values for statistical calculations.
         :param band: The index of the band for which to compute statistics. Default is 1.
-
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask). DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         if not self.is_loaded:
             self.load()
-        stats_dict = self._statistics(band=band)
+        if inlier_mask is not None:
+            valid_points = np.count_nonzero(~self.get_mask())
+            if isinstance(inlier_mask, Mask):
+                inlier_points = np.count_nonzero(~inlier_mask.data)
+            else:
+                inlier_points = np.count_nonzero(~inlier_mask)
+            dem_masked = self.copy()
+            dem_masked.set_mask(inlier_mask)
+            return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+        stats_dict = self._statistics(band=band, counts=counts)
         if stats_name is None:
             return stats_dict
 
         # Define the metric aliases and their actual names
         stats_aliases = {
             "mean": "Mean",
-            "average": "Mean",
             "median": "Median",
             "max": "Max",
             "maximum": "Max",
@@ -1994,17 +2006,28 @@ class Raster:
             "sum": "Sum",
             "sumofsquares": "Sum of squares",
             "sum2": "Sum of squares",
-            "percentile": "90th percentile",
             "90thpercentile": "90th percentile",
             "90percentile": "90th percentile",
-            "percentile90": "90th percentile",
+            "le90": "LE90",
             "nmad": "NMAD",
             "rmse": "RMSE",
+            "rms": "RMSE",
             "std": "Standard deviation",
-            "stddev": "Standard deviation",
-            "standarddev": "Standard deviation",
             "standarddeviation": "Standard deviation",
+            "validcount": "Valid count",
+            "totalcount": "Total count",
+            "percentagevalidpoints": "Percentage valid points",
         }
+        if counts is not None:
+            stats_aliases.update(
+                {
+                    "validinliercount": "Valid inlier count",
+                    "totalinliercount": "Total inlier count",
+                    "percentagevalidinlierpoints": "Percentage valid inlier points",
+                    "percentageinlierpoints": "Percentage inlier points",
+                }
+            )
+
         if isinstance(stats_name, list):
             result = {}
             for name in stats_name:

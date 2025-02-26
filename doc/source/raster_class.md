@@ -260,14 +260,14 @@ The {func}`~geoutils.Raster.icrop` function accepts only a bounding box in pixel
 By default, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.icrop` return a new Raster unless the inplace parameter is set to True, in which case the cropping operation is performed directly on the original raster object.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
-### Example for `crop`
+### Example for {func}`~geoutils.Raster.crop`
 ```{code-cell} ipython3
 # Crop raster to smaller bounds
 rast_crop = rast.crop(bbox=(0.3, 0.3, 1, 1))
 print(rast_crop.bounds)
 ```
 
-### Example for `icrop`
+### Example for {func}`~geoutils.Raster.icrop`
 ```{code-cell} ipython3
 # Crop raster using pixel coordinates
 rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
@@ -360,8 +360,31 @@ rast_reproj.to_xarray()
 ```
 
 ## Obtain Statistics
-The `get_stats()` method allows to extract key statistical information from a raster in a dictionary.
-Supported statistics are : mean, median, max, mean, sum, sum of squares, 90th percentile, nmad, rmse, std.
+The {func}`~geoutils.Raster.get_stats` method allows to extract key statistical information from a raster in a dictionary.
+Supported statistics are :
+- **Mean:** arithmetic mean of the data, ignoring masked values.
+- **Median:** middle value when the valid data points are sorted in increasing order, ignoring masked values.
+- **Max:** maximum value among the data, ignoring masked values.
+- **Min:** minimum value among the data, ignoring masked values.
+- **Sum:** sum of all data, ignoring masked values.
+- **Sum of squares:** sum of the squares of all data, ignoring masked values.
+- **90th percentile:** point below which 90% of the data falls, ignoring masked values.
+- **LE90 (Linear Error with 90% confidence):** Difference between the 95th and 5th percentiles of a dataset, representing the range within which 90% of the data points lie. Ignore masked values.
+- **NMAD (Normalized Median Absolute Deviation):** robust measure of variability in the data, less sensitive to outliers compared to standard deviation. Ignore masked values.
+- **RMSE (Root Mean Square Error):** commonly used to express the magnitude of errors or variability and can give insight into the spread of the data. Only relevant when the raster represents a difference of two objects. Ignore masked values.
+- **Std (Standard deviation):** measures the spread or dispersion of the data around the mean, ignoring masked values.
+- **Valid count:** number of finite data points in the array. It counts the non-masked elements.
+- **Total count:** total size of the raster.
+- **Percentage valid points:** ratio between **Valid count** and **Total count**.
+
+
+If an inlier mask is passed:
+- **Total inlier count:** number of data points in the inlier mask.
+- **Valid inlier count:** number of unmasked data points in the array after applying the inlier mask.
+- **Percentage inlier points:** ratio between **Valid inlier count** and **Valid count**. Useful for classification statistics.
+- **Percentage valid inlier points:** ratio between **Valid inlier count** and **Total inlier count**.
+
+
 Callable functions are supported as well.
 
 ### Usage Examples:
@@ -377,7 +400,7 @@ rast.get_stats("mean")
 
 - Get multiple statistics in a dict:
 ```{code-cell} ipython3
-rast.get_stats(["mean", "max", "rmse"])
+rast.get_stats(["mean", "max", "std"])
 ```
 
 - Using a custom callable statistic:
@@ -385,4 +408,12 @@ rast.get_stats(["mean", "max", "rmse"])
 def custom_stat(data):
     return np.nansum(data > 100)  # Count the number of pixels above 100
 rast.get_stats(custom_stat)
+```
+
+- Passing an inlier mask:
+```{code-cell} ipython3
+inlier_mask = np.array([[False, False , True],
+                        [False, True , False],
+                        [True, False , True]])
+rast.get_stats(inlier_mask=inlier_mask)
 ```
