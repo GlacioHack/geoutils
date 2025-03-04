@@ -2503,15 +2503,29 @@ class Raster:
         if len(bbox) != 4:
             raise ValueError("bbox must be a list or tuple of four integers: (xmin, ymin, xmax, ymax).")
 
-        # Convert pixel coordinates to georeferenced coordinates using the transform
-        bottom_left = self.transform * (bbox[0], self.height - bbox[1])
-        top_right = self.transform * (bbox[2], self.height - bbox[3])
+        # Crop the raster data based on the given bounding box (bbox), limit the range to the borders of the raster
+        crop_img = self.data[..., bbox[0] : min(self.height, bbox[2]), bbox[1] : min(bbox[3], self.width)]
 
-        # Create new georeferenced crop geometry (xmin, ymin, xmax, ymax)
-        new_bbox = (bottom_left[0], bottom_left[1], top_right[0], top_right[1])
+        # Create a new affine transform that corresponds to the cropped area
+        tfm = rio.transform.Affine(
+            self.transform.a,
+            self.transform.b,
+            self.transform.c + bbox[1] * self.transform.a,
+            self.transform.d,
+            self.transform.e,
+            self.transform.f + bbox[0] * self.transform.e,
+        )
 
-        # Call the existing crop() method with the new georeferenced crop geometry
-        return self.crop(bbox=new_bbox, inplace=inplace)
+        # If inplace is True, modify the original raster object directly
+        if inplace:
+            self._data = crop_img
+            self.transform = tfm
+            return None
+
+        # If inplace is False, create and return a new raster object with the cropped data
+        else:
+            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
+            return newraster
 
     @overload
     def reproject(
@@ -2958,7 +2972,7 @@ class Raster:
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
-        :param rst : path to the second image (or another Raster instance)
+        :param raster : path to the second image (or another Raster instance)
         :param match_ref: if set to True, returns the smallest intersection that aligns with that of self, i.e. same \
         resolution and offset with self's origin is a multiple of the resolution
         :returns: extent of the intersection between the 2 images \
