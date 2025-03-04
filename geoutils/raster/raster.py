@@ -2485,6 +2485,22 @@ class Raster:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
 
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[True],
+    ) -> RasterType: ...
+
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[False] = False,
+    ) -> None: ...
+
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
