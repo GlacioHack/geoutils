@@ -29,6 +29,7 @@ from rasterio._io import Resampling
 
 from geoutils import Raster
 from geoutils._typing import DTypeLike, NDArrayNum
+from geoutils.projtools import reproject_from_latlon
 from geoutils.raster import RasterType
 from geoutils.raster.distributed_computing.cluster import (
     AbstractCluster,
@@ -46,224 +47,91 @@ def get_raster_tile(raster_unload: Raster, tile: NDArrayNum) -> Raster:
     return raster_tile
 
 
-# # 1/ SUBSAMPLING
-# def multiproc_nb_valids(
-#         raster_unload: Raster,
-#         tile: NDArrayNum,
-# ) -> NDArrayNum:
-#     raster_tile = get_raster_tile(raster_unload, tile)
-#     return _nb_valids(raster_tile.data)
-#
-# def multiproc_subsample_block(
-#         raster_unload: Raster,
-#         tile: NDArrayNum,
-#         subsample_indices: NDArrayNum,
-# ) -> NDArrayNum:
-#     raster_tile = get_raster_tile(raster_unload, tile)
-#     return _subsample_block(raster_tile.data, subsample_indices)
-#
-# def multiproc_subsample_indices_block(
-#         raster_unload: Raster,
-#         tile: NDArrayNum,
-#         subsample_indices: NDArrayNum,
-#         block_id: dict[str, Any],
-# ) -> NDArrayNum:
-#     raster_tile = get_raster_tile(raster_unload, tile)
-#     return _subsample_indices_block(raster_tile.data, subsample_indices, block_id)
-#
-#
-# def multiproc_subsample(
-#         raster_unload: Raster,
-#         tiling_grid: NDArrayNum,
-#         subsample: int | float = 1,
-#         return_indices: bool = False,
-#         random_state: int | np.random.Generator | None = None,
-#         silence_max_subsample: bool = False,
-#         cluster: AbstractCluster | None = None,
-# ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
-#     if cluster is None:
-#         cluster = ClusterGenerator("basic")
-#
-#     # Get random state
-#     rng = np.random.default_rng(random_state)
-#
-#     # Step 1: Compute number of valid points per block
-#     nb_valid_per_tile = []
-#     for row in range(tiling_grid.shape[0]):
-#         for col in range(tiling_grid.shape[1]):
-#             tile = tiling_grid[row, col]
-#             nb_valid_per_tile.append(cluster.launch_task(fun=multiproc_nb_valids, args=[raster_unload, tile]))
-#
-#     # Retrieve results
-#     try:
-#         nb_valid_per_tile = [cluster.get_res(nb_valid) for nb_valid in nb_valid_per_tile]
-#     except Exception as e:
-#         raise RuntimeError(f"Error retrieving valid point counts from multiprocessing tasks: {e}")
-#
-#     total_nb_valid = np.sum(np.array(nb_valid_per_tile))
-#
-#     # Step 2: Calculate subsample size
-#     subsample_size = _get_subsample_size_from_user_input(
-#         subsample=subsample, total_nb_valids=total_nb_valid, silence_max_subsample=silence_max_subsample
-#     )
-#
-#     # Step 3: Generate random 1D indices for subsampling
-#     indices_1d = rng.choice(total_nb_valid, subsample_size, replace=False)
-#
-#     # Step 4: Distribute subsample indices across tiles
-#     ind_per_block = _get_indices_block_per_subsample(
-#         indices_1d, num_chunks=tiling_grid.shape[:2], nb_valids_per_block=nb_valid_per_tile
-#     )
-#
-#     if return_indices:
-#         # Step 5A: Return indices (2D)
-#         list_subsample_indices = []
-#         for row in range(tiling_grid.shape[0]):
-#             for col in range(tiling_grid.shape[1]):
-#                 tile = tiling_grid[row, col]
-#                 block_indices = ind_per_block[row * tiling_grid.shape[1] + col]
-#                 block_id = {"xstart": tile[0], "ystart": tile[2]}
-#                 list_subsample_indices.append(
-#                     cluster.launch_task(fun=multiproc_subsample_indices_block,
-#                                         args=[raster_unload, tile, block_indices, block_id]))
-#         # Retrieve results
-#         try:
-#             list_subsample_indices = [cluster.get_res(subsample) for subsample in list_subsample_indices]
-#         except Exception as e:
-#             raise RuntimeError(f"Error retrieving subsampled data from multiprocessing tasks: {e}")
-#
-#         return list_subsample_indices
-#
-#     else:
-#         # Step 5B: Return subsamples
-#         list_subsamples = []
-#         for row in range(tiling_grid.shape[0]):
-#             for col in range(tiling_grid.shape[1]):
-#                 tile = tiling_grid[row, col]
-#                 block_indices = ind_per_block[row * tiling_grid.shape[1] + col]
-#                 list_subsamples.append(cluster.launch_task(fun=multiproc_subsample_block,
-#                                                            args=[raster_unload, tile, block_indices]))
-#         # Retrieve results
-#         try:
-#             list_subsamples = [cluster.get_res(subsample) for subsample in list_subsamples]
-#         except Exception as e:
-#             raise RuntimeError(f"Error retrieving subsampled data from multiprocessing tasks: {e}")
-#
-#         return list_subsamples
-#
-#
-# def subsample_tile(
-#         raster_unload: Raster,
-#         tile: NDArrayNum,
-#         subsample: int | float = 1,
-#         return_indices: bool = False,
-#         random_state: int | np.random.Generator | None = None,
-# ):
-#     raster_tile = get_raster_tile(raster_unload, tile)
-#     return raster_tile.subsample(subsample, return_indices, random_state)
-#
-#
-# def multiproc_subsample2(
-#         raster_unload: Raster,
-#         tiling_grid: NDArrayNum,
-#         subsample: int | float = 1,
-#         return_indices: bool = False,
-#         random_state: int | np.random.Generator | None = None,
-#         cluster: AbstractCluster | None = None,
-# ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
-#     if cluster is None:
-#         cluster = ClusterGenerator("basic")
-#
-#     list_subsamples = []
-#     for row in range(tiling_grid.shape[0]):
-#         for col in range(tiling_grid.shape[1]):
-#             tile = tiling_grid[row, col]
-#             list_subsamples.append(cluster.launch_task(
-#                   fun=subsample_tile,
-#                   args=[raster_unload, tile, subsample, return_indices, random_state]
-#                   ))
-#
-#     try:
-#         list_subsamples = [cluster.get_res(subsample) for subsample in list_subsamples]
-#     except Exception as e:
-#         raise RuntimeError(f"Error retrieving subsampled data from multiprocessing tasks: {e}")
-#
-#     return list_subsamples
-
-
 # 2/ POINT INTERPOLATION ON REGULAR OR EQUAL GRID
 def multiproc_interp_points_block(
     raster_unload: Raster,
-    tile: NDArrayNum,
-    interp_coords: NDArrayNum,
+    interp_coords: tuple[float, float],
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
     input_latlon: bool = False,
-) -> tuple[NDArrayNum, NDArrayNum]:
+) -> float:
     """
-    Interpolates raster values for a block of points within a given tile in parallel.
-
-    This function is designed to process a block of interpolation coordinates and compute the corresponding
-    raster values for points that fall within the image bounds of the specified tile. It operates on an out-of-memory
-    tile, which is a subset of a larger raster, and applies the specified interpolation method. Only points
-    that fall within the tile are processed, and their original indices are returned for re-ordering after
-    multiprocessing.
+    Interpolates the value of a point from a raster dataset using a specified interpolation method.
+    The function optimizes memory usage by only opening the smallest possible raster window
+    based on the interpolation method and point's coordinates.
 
     :param raster_unload: raster data source to be interpolated.
-    :param tile: specific tile ([row_start, row_end, col_start, col_end]) of the raster being processed. This is a
-            subset of the raster data from which interpolation values are calculated.
-    :param interp_coords: A 2D numpy array of shape (2, N), where N is the number of points to interpolate.
-            The first row contains the x-coordinates and the second row contains the y-coordinates of the points at
-            which raster values will be interpolated.
+    :param interp_coords: Tuple of floats representing the coordinates (x, y) of the point to interpolate. If the
+        coordinates are in latitude/longitude, set `input_latlon` to `True` to reproject them into the raster's CRS.
     :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
             Default is linear.
-    :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS.
+    :param input_latlon: Whether the input is in latlon, unregarding of Raster CRS. Default is False.
 
-    :return: A tuple containing:
-        - `interp_points`: interpolated raster values for the valid points in the tile.
-        - `valid_indices`: indices corresponding to the original points that fall within
-          the bounds of the tile.
+    :return: A float representing the interpolated value at the given point. If the point is outside the raster's
+        bounds, the function returns `np.nan`.
+
+    :raises ValueError:
+    If the interpolation method is not valid (i.e., not in the allowed methods).
     """
 
-    raster_tile = get_raster_tile(raster_unload, tile)
+    # Convert coordinates if input in latlon
+    if input_latlon:
+        interp_coords = reproject_from_latlon(interp_coords, out_crs=raster_unload.crs)  # type: ignore
 
-    # Filter points that are within the image bounds
-    interp_block_x, interp_block_y, valid_indices = [], [], []
-    for i, (x, y) in enumerate(interp_coords):
-        if not raster_tile.outside_image([x], [y], index=False):
-            interp_block_x.append(x)
-            interp_block_y.append(y)
-            valid_indices.append(i)  # Track valid point's original index
+    # Check if the point is outside the raster bounds
+    if raster_unload.outside_image([interp_coords[0]], [interp_coords[1]], index=False):
+        return np.nan
 
-    if not valid_indices:  # No points in the tile
-        return np.array([]), np.array([])
+    # Define the interpolation radius based on method
+    margin = {
+        "nearest": 1,
+        "linear": 1,  # Linear interpolation needs immediate neighbors
+        "cubic": 2,  # Cubic interpolation needs more neighbors
+        "quintic": 3,  # Quintic would need even more neighbors
+        "slinear": 1,
+        "pchip": 1,
+        "splinef2d": 2,
+    }
 
-    interp_coords_block = (np.array(interp_block_x), np.array(interp_block_y))
+    # Validate the interpolation method
+    if method not in margin:
+        raise ValueError(
+            f"Invalid interpolation method '{method}'. "
+            "Supported methods are: 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip', 'splinef2d'."
+        )
+    interp_margin = margin[method] + 1  # Add margin to handle the crop
 
-    # interpolate points
-    interp_points = raster_tile.interp_points(
-        points=interp_coords_block,
-        method=method,
-        input_latlon=input_latlon,
+    # Calculate bounding box around the point based on the interpolation margin
+    x, y = interp_coords
+    pixel_size_y, pixel_size_x = raster_unload.res  # Get the raster pixel size
+    xmin = x - (interp_margin * pixel_size_x)
+    xmax = x + (interp_margin * pixel_size_x)
+    ymin = y - (interp_margin * pixel_size_y)
+    ymax = y + (interp_margin * pixel_size_y)
+    bbox = [xmin, ymin, xmax, ymax]
+
+    # Crop the raster to the bounding box (open a window of the raster)
+    raster_window = raster_unload.crop(bbox)
+
+    # Perform interpolation on the window
+    interp_value = raster_window.interp_points(
+        points=interp_coords, method=method, input_latlon=False  # Already converted the coords to CRS if necessary
     )
-    return interp_points, np.array(valid_indices)
+
+    return interp_value[0]
 
 
 def multiproc_interp_points(
     raster_unload: Raster,
-    tiling_grid: NDArrayNum,
     points: list[tuple[float, float]],
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
     input_latlon: bool = False,
     cluster: AbstractCluster | None = None,
-) -> NDArrayNum:
+) -> list[float]:
     """
     Interpolate raster at point coordinates on out-of-memory chunks.
 
     :param raster_unload: raster data source to be interpolated.
-    :param tiling_grid: A 2D numpy array representing the tiling grid that divides the raster into smaller chunks.
-            Each element of the grid represents a tile ([row_start, row_end, col_start, col_end]) that will be processed
-            independently.
     :param points: Point(s) at which to interpolate raster value. If points fall outside of image, value
             returned is nan. Shape should be (N,2).
     :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
@@ -274,7 +142,7 @@ def multiproc_interp_points(
             distributing the tasks across multiple processes and retrieving the results. If `None`, the function will
             execute without parallelism.
 
-    :return: A 1D numpy array of interpolated raster values corresponding to the input points. If a point falls outside
+    :return: A list of interpolated raster values corresponding to the input points. If a point falls outside
             the raster bounds, the corresponding value in the output array will be `NaN`. The output array will have
             the same length as the number of input points.
     """
@@ -282,47 +150,19 @@ def multiproc_interp_points(
         cluster = ClusterGenerator("basic")  # type: ignore
     assert cluster is not None  # for mypy
 
-    points_arr = np.array(points)
-
-    # Submit interpolation by block as tasks in parallel
-    task = []
-    for row in range(tiling_grid.shape[0]):
-        for col in range(tiling_grid.shape[1]):
-            tile = tiling_grid[row, col]
-            task.append(
-                cluster.launch_task(
-                    fun=multiproc_interp_points_block, args=[raster_unload, tile, points_arr, method, input_latlon]
-                )
-            )
+    tasks = []
+    for point in points:
+        tasks.append(
+            cluster.launch_task(fun=multiproc_interp_points_block, args=[raster_unload, point, method, input_latlon])
+        )
 
     # Collect results
     try:
-        results = [cluster.get_res(chunk) for chunk in task]
+        results = [cluster.get_res(chunk) for chunk in tasks]
     except Exception as e:
         raise RuntimeError(f"Error retrieving subsampled data from multiprocessing tasks: {e}")
 
-    # Initialize arrays for gathering results
-    interp_points = []
-    indices = []
-
-    # Collect valid results
-    for interp_points_block, indices_block in results:
-        if len(indices_block) > 0:
-            interp_points.append(interp_points_block)
-            indices.append(indices_block)
-
-    if len(interp_points) == 0:  # No valid interpolated points
-        return np.full(len(points), np.nan)
-
-    # Concatenate points and indices
-    interp_points = np.concatenate(interp_points)
-    indices = np.concatenate(indices)
-
-    # Sort the output array, fill NaN for missing indices
-    sorted_interp_points = np.full(len(points), np.nan)
-    sorted_interp_points[indices] = interp_points
-
-    return sorted_interp_points
+    return results
 
 
 # 3/ REPROJECT
@@ -467,6 +307,9 @@ def multiproc_reproject(
     if cluster is None:
         cluster = ClusterGenerator("basic")  # type: ignore
     assert cluster is not None  # for mypy
+
+    if isinstance(raster_unload, str):
+        raster_unload = Raster(raster_unload)
 
     # Process user inputs
     crs, dtype, src_nodata, nodata, res, bounds = _user_input_reproject(
