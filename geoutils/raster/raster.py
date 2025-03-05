@@ -2491,7 +2491,7 @@ class Raster:
         bbox: list[int] | tuple[int, ...],
         *,
         inplace: Literal[True],
-    ) -> RasterType: ...
+    ) -> None: ...
 
     @overload
     def icrop(
@@ -2499,7 +2499,7 @@ class Raster:
         bbox: list[int] | tuple[int, ...],
         *,
         inplace: Literal[False] = False,
-    ) -> None: ...
+    ) -> RasterType: ...
 
     def icrop(
         self: RasterType,
