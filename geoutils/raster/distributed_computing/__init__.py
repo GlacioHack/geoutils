@@ -17,7 +17,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# from geoutils.raster.distributed_computing.delayed_dask import *  # noqa
+from geoutils.raster.distributed_computing.cluster import *  # noqa
+from geoutils.raster.distributed_computing.delayed_dask import *  # noqa
 from geoutils.raster.distributed_computing.delayed_multiproc import *  # noqa
-
-# from geoutils.raster.distributed_computing.delayed_utils import *  # noqa
