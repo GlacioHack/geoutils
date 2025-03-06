@@ -343,7 +343,7 @@ def multiproc_reproject(
         res = (abs(transform.a), abs(transform.e))
 
     # Create an empty task array for multiprocessing
-    task = []
+    task = np.empty(shape=(tiling_grid.shape[:2]), dtype=object)
 
     # Open file on disk to write tile by tile
     with rio.open(
@@ -363,55 +363,66 @@ def multiproc_reproject(
         for row in range(tiling_grid.shape[0]):
             for col in range(tiling_grid.shape[1]):
                 tile = tiling_grid[row, col]
-                task.append(
-                    cluster.launch_task(
-                        fun=reproject_block,
-                        args=[
-                            raster_unload,
-                            tile,
-                            transform,
-                            crs,
-                            res,
-                            bounds,
-                            nodata,
-                            dtype,
-                            resampling,
-                            src_nodata,
-                            silent,
-                        ],
-                    )
+                task[row, col] = cluster.launch_task(
+                    fun=reproject_block,
+                    args=[
+                        raster_unload,
+                        tile,
+                        transform,
+                        crs,
+                        res,
+                        bounds,
+                        nodata,
+                        dtype,
+                        resampling,
+                        src_nodata,
+                        silent,
+                    ],
                 )
 
         try:
             # Retrieve reprojection results
-            for chunk in task:
-                reprojected_tile = cluster.get_res(chunk)
+            for row in range(tiling_grid.shape[0]):
+                for col in range(tiling_grid.shape[1]):
+                    reprojected_tile = cluster.get_res(task[row, col])
 
-                # if tile reprojection is None, nothing to write on disk
-                if reprojected_tile is None:
-                    continue
+                    # Remove border pixels to avoid artifacts. Border pixels of a tile that is surrounded by other tiles
+                    # may not align properly due to resampling or reprojection, causing inconsistencies.
+                    reprojected_tile.icrop(
+                        (
+                            min(row, 1),
+                            min(col, 1),
+                            reprojected_tile.height - min(task.shape[0] - 1 - row, 1),
+                            reprojected_tile.width - min(task.shape[1] - 1 - col, 1),
+                        ),
+                        inplace=True,
+                    )
 
-                # Calculate the position (row_offset, col_offset) of the top-left corner of this tile in the full raster
-                col_offset, row_offset = map(
-                    int, ~transform * (reprojected_tile.bounds.left, reprojected_tile.bounds.top)
-                )
+                    # if tile reprojection is None, nothing to write on disk
+                    if reprojected_tile is None:
+                        continue
 
-                # Compute writing window
-                dst_window = rio.windows.Window(
-                    col_offset, row_offset, width=reprojected_tile.width, height=reprojected_tile.height
-                )
+                    # Calculate the position (row_offset, col_offset) of the top-left corner of this tile in the raster
+                    col_offset, row_offset = map(
+                        int, ~transform * (reprojected_tile.bounds.left, reprojected_tile.bounds.top)
+                    )
 
-                # Cast to 3D before saving if single band
-                if reprojected_tile.count == 1:
-                    data = reprojected_tile[np.newaxis, :, :]
-                else:
-                    data = reprojected_tile.data
+                    # Compute writing window
+                    dst_window = rio.windows.Window(
+                        col_offset, row_offset, width=reprojected_tile.width, height=reprojected_tile.height
+                    )
 
-                # Avoid overwriting already existing data in the window
-                dst_data = dst.read(window=dst_window)
-                data = np.where(dst_data != nodata, dst_data, data.data)
+                    # Cast to 3D before saving if single band
+                    if reprojected_tile.count == 1:
+                        data = reprojected_tile[np.newaxis, :, :]
+                    else:
+                        data = reprojected_tile.data
 
-                # Write the reprojected tile to the correct location in the full raster
-                dst.write(data, window=dst_window)
+                    # Avoid overwriting already existing data in the window
+                    dst_data = dst.read(window=dst_window)
+                    data = np.where(dst_data != nodata, dst_data, data.data)
+
+                    # Write the reprojected tile to the correct location in the full raster
+                    dst.write(data, window=dst_window)
         except Exception as e:
             raise RuntimeError(f"Error retrieving reprojected data from multiprocessing tasks: {e}")
