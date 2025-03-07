@@ -2002,11 +2002,13 @@ class TestRaster:
             "Percentage valid points",
         ]
 
+        stat_types = (int, float, np.integer, np.floating)
+
         # Full stats
         stats = raster.get_stats()
         for name in expected_stats:
             assert name in stats
-            assert stats.get(name) is not None
+            assert isinstance(stats.get(name), stat_types)
 
         # With mask
         inlier_mask = raster.get_mask()
@@ -2018,9 +2020,20 @@ class TestRaster:
             "Percentage valid inlier points",
         ]:
             assert name in stats_masked
-            assert stats_masked.get(name) is not None
+            assert isinstance(stats_masked.get(name), stat_types)
             stats_masked.pop(name)
         assert stats_masked == stats
+
+        # Empty mask
+        empty_mask = np.ones_like(inlier_mask)
+        stats_masked = raster.get_stats(inlier_mask=empty_mask)
+        for name in [
+            "Valid inlier count",
+            "Total inlier count",
+            "Percentage inlier points",
+            "Percentage valid inlier points",
+        ]:
+            assert stats_masked.get(name) == 0
 
         # Single stat
         for name in expected_stats:

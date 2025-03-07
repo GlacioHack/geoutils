@@ -1918,7 +1918,7 @@ class Raster:
             "90th percentile": np.nanpercentile(mdata, 90),
             "LE90": linear_error(mdata, interval=90),
             "NMAD": nmad(data),
-            "RMSE": np.sqrt(np.ma.mean(np.square(data))),
+            "RMSE": np.sum(np.sqrt(np.ma.mean(np.square(data)))),
             "Standard deviation": np.ma.std(data),
             "Valid count": valid_count,
             "Total count": data.size,
@@ -1932,7 +1932,7 @@ class Raster:
                     "Valid inlier count": valid_inlier_count,
                     "Total inlier count": counts[1],
                     "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
-                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100,
+                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0,
                 }
             )
 
