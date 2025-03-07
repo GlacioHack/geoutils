@@ -30,7 +30,7 @@ from rasterio._io import Resampling
 from geoutils import Raster
 from geoutils._typing import DTypeLike, NDArrayNum
 from geoutils.projtools import reproject_from_latlon
-from geoutils.raster import RasterType
+from geoutils.raster import RasterType, compute_tiling
 from geoutils.raster.distributed_computing.cluster import (
     AbstractCluster,
     ClusterGenerator,
@@ -190,12 +190,35 @@ def bbox_intersection(bbox1: rio.coords.BoundingBox, bbox2: rio.coords.BoundingB
 def snap_bounds_to_grid(bounds: rio.coords.BoundingBox, transform: rio.transform.Affine) -> rio.coords.BoundingBox:
     """
     Snap bounding box coordinates to the nearest pixel grid based on the transform.
-    """
-    left, bottom, right, top = bounds
 
-    # Snap the bounds to the nearest pixel edges
-    left, bottom = transform * map(round, ~transform * (left, bottom))
-    right, top = transform * map(round, ~transform * (right, top))
+    :param bounds: Bounds of the tile.
+    :param transform: transform of the full reprojected raster.
+    :return: The snapped bounds
+    """
+    left, top = transform * (map(round, ~transform * (bounds.left, bounds.top)))
+    right, bottom = transform * map(round, ~transform * (bounds.right, bounds.bottom))
+
+    return rio.coords.BoundingBox(left, bottom, right, top)
+
+
+def bounds_no_overlap(
+    bounds: rio.coords.BoundingBox, res: tuple[float, float], overlap: int, border: tuple[bool, bool, bool, bool]
+) -> rio.coords.BoundingBox:
+    """
+    Adjusts the given bounding box to remove overlap from neighboring tiles based on the specified overlap size.
+    The overlap is only removed from the sides of the tile that are not on the edge of the raster.
+
+    :param bounds: Bounds of the tile.
+    :param res: Resolution of the pixels in the tile (width pixel res, height pixel res).
+    :param overlap: Size of overlap between tiles (in pixels).
+    :param border: Whether the tile is on an edge of the raster (four booleans for the four edges, same order as
+        rasterio bounding box : left, bottom, right, top).
+    :return: A new BoundingBox with the adjusted bounds after removing overlaps on non-border sides.
+    """
+    left = bounds.left + overlap * res[0] * (not border[0])
+    bottom = bounds.bottom + overlap * res[1] * (not border[1])
+    right = bounds.right - overlap * res[0] * (not border[2])
+    top = bounds.top - overlap * res[1] * (not border[3])
 
     return rio.coords.BoundingBox(left, bottom, right, top)
 
@@ -203,6 +226,8 @@ def snap_bounds_to_grid(bounds: rio.coords.BoundingBox, transform: rio.transform
 def reproject_block(
     raster_unload: Raster,
     tile: NDArrayNum,
+    overlap: int,
+    border: tuple[bool, bool, bool, bool],
     transform: rio.transform.Affine,
     crs: CRS | str | int | None = None,
     res: float | abc.Iterable[float] | None = None,
@@ -219,7 +244,10 @@ def reproject_block(
     :param raster_unload: raster data source to be interpolated.
     :param tile: specific tile ([row_start, row_end, col_start, col_end]) of the raster being processed. This is a
             subset of the raster data from which interpolation values are calculated.
-    :param transform: transform of the reprojection.
+    :param overlap: Size of overlap between tiles (in pixels).
+    :param border: Whether the tile is on an edge of the raster (four booleans for the four edges, same order as
+        rasterio bounding box : left, bottom, right, top).
+    :param transform: transform of the full reprojected raster.
     :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
         defaults to this raster's CRS.
     :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
@@ -233,27 +261,36 @@ def reproject_block(
         for the full list.
     :param force_source_nodata: Force a source nodata value (read from the metadata by default).
     :param silent: Whether to print warning statements.
+
+    :return: The reprojected tile, or None if the tile is outside the reprojection window
     """
+    # load tile
     raster_tile = get_raster_tile(raster_unload, tile)
 
-    if crs == raster_tile.crs:
-        tile_bounds = raster_tile.bounds
-    else:
-        tile_bounds = rio.warp.transform_bounds(raster_tile.crs, crs, *raster_tile.bounds)
-        tile_bounds = rio.coords.BoundingBox(*tile_bounds)
-    intersect_bounds = bbox_intersection(bounds, tile_bounds)
+    # Remove overlap from the repojected tile bounds
+    reprojected_tile_bounds = bounds_no_overlap(raster_tile.bounds, raster_tile.res, overlap, border)
 
-    # If intersection is empty, the tile is out of reprojection window.
-    if intersect_bounds is None:
+    if crs != raster_tile.crs:
+        # Transform the bounds to the target CRS
+        reprojected_tile_bounds = rio.warp.transform_bounds(raster_tile.crs, crs, *reprojected_tile_bounds)
+        reprojected_tile_bounds = rio.coords.BoundingBox(*reprojected_tile_bounds)
+
+    # Ensure that the reprojected tile bounds fit within the overall raster bounds
+    reprojected_tile_bounds = bbox_intersection(bounds, reprojected_tile_bounds)
+
+    # If intersection is empty, the tile is outside the reprojection window.
+    if reprojected_tile_bounds is None:
         return None
 
-    intersect_bounds = snap_bounds_to_grid(intersect_bounds, transform)
+    # Snap the bounds to the grid to make sure they align correctly with the raster's grid
+    reprojected_tile_bounds = snap_bounds_to_grid(reprojected_tile_bounds, transform)
 
+    # Reproject the raster tile
     return raster_tile.reproject(
         ref=None,
         crs=crs,
         res=res,
-        bounds=intersect_bounds,
+        bounds=reprojected_tile_bounds,
         nodata=nodata,
         dtype=dtype,
         resampling=resampling,
@@ -264,8 +301,9 @@ def reproject_block(
 
 def multiproc_reproject(
     raster_unload: Raster | str,
-    tiling_grid: NDArrayNum,
     output_file: str,
+    tile_size: int,
+    overlap: int,
     ref: RasterType | str | None = None,
     crs: CRS | str | int | None = None,
     res: float | abc.Iterable[float] | None = None,
@@ -283,8 +321,9 @@ def multiproc_reproject(
     Compute tiling and use multiprocessing to reproject each tile.
 
     :param raster_unload: raster data source to be reprojected.
-    :param tiling_grid: A 2D numpy array representing the tiling grid that divides the raster into smaller chunks.
     :param output_file: Path to the full output raster file.
+    :param tile_size: Size of each tile in pixels (square tiles).
+    :param overlap: Size of overlap between tiles (in pixels).
     :param ref: Reference raster to match resolution, bounds and CRS.
     :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
         defaults to this raster's CRS.
@@ -342,8 +381,11 @@ def multiproc_reproject(
     if res is None:
         res = (abs(transform.a), abs(transform.e))
 
+    # Compute tiling grid
+    tiling_grid = compute_tiling(tile_size, raster_unload.shape, raster_unload.shape, overlap)
+
     # Create an empty task array for multiprocessing
-    task = np.empty(shape=(tiling_grid.shape[:2]), dtype=object)
+    task = []
 
     # Open file on disk to write tile by tile
     with rio.open(
@@ -363,66 +405,58 @@ def multiproc_reproject(
         for row in range(tiling_grid.shape[0]):
             for col in range(tiling_grid.shape[1]):
                 tile = tiling_grid[row, col]
-                task[row, col] = cluster.launch_task(
-                    fun=reproject_block,
-                    args=[
-                        raster_unload,
-                        tile,
-                        transform,
-                        crs,
-                        res,
-                        bounds,
-                        nodata,
-                        dtype,
-                        resampling,
-                        src_nodata,
-                        silent,
-                    ],
+                border = (col == 0, row == tiling_grid.shape[0] - 1, col == tiling_grid.shape[1] - 1, row == 0)
+                task.append(
+                    cluster.launch_task(
+                        fun=reproject_block,
+                        args=[
+                            raster_unload,
+                            tile,
+                            overlap,
+                            border,
+                            transform,
+                            crs,
+                            res,
+                            bounds,
+                            nodata,
+                            dtype,
+                            resampling,
+                            force_source_nodata,
+                            silent,
+                        ],
+                    )
                 )
 
         try:
             # Retrieve reprojection results
-            for row in range(tiling_grid.shape[0]):
-                for col in range(tiling_grid.shape[1]):
-                    reprojected_tile = cluster.get_res(task[row, col])
+            for result in task:
+                reprojected_tile = cluster.get_res(result)
 
-                    # Remove border pixels to avoid artifacts. Border pixels of a tile that is surrounded by other tiles
-                    # may not align properly due to resampling or reprojection, causing inconsistencies.
-                    reprojected_tile.icrop(
-                        (
-                            min(row, 1),
-                            min(col, 1),
-                            reprojected_tile.height - min(task.shape[0] - 1 - row, 1),
-                            reprojected_tile.width - min(task.shape[1] - 1 - col, 1),
-                        ),
-                        inplace=True,
-                    )
+                # if tile reprojection is None, nothing to write on disk
+                if reprojected_tile is None:
+                    continue
 
-                    # if tile reprojection is None, nothing to write on disk
-                    if reprojected_tile is None:
-                        continue
+                # Calculate the position (row_offset, col_offset) of the top-left corner of this tile in the raster
+                col_offset, row_offset = map(
+                    round, ~transform * (reprojected_tile.bounds.left, reprojected_tile.bounds.top)
+                )
 
-                    # Calculate the position (row_offset, col_offset) of the top-left corner of this tile in the raster
-                    col_offset, row_offset = map(
-                        int, ~transform * (reprojected_tile.bounds.left, reprojected_tile.bounds.top)
-                    )
+                # Compute writing window
+                dst_window = rio.windows.Window(
+                    col_offset, row_offset, width=reprojected_tile.width, height=reprojected_tile.height
+                )
 
-                    # Compute writing window
-                    dst_window = rio.windows.Window(
-                        col_offset, row_offset, width=reprojected_tile.width, height=reprojected_tile.height
-                    )
+                # Cast to 3D before saving if single band
+                if reprojected_tile.count == 1:
+                    data = reprojected_tile[np.newaxis, :, :]
+                else:
+                    data = reprojected_tile.data
 
-                    # Cast to 3D before saving if single band
-                    if reprojected_tile.count == 1:
-                        data = reprojected_tile[np.newaxis, :, :]
-                    else:
-                        data = reprojected_tile.data
+                # Avoid overwriting already existing data in the window
+                dst_data = dst.read(window=dst_window)
+                data = np.where(dst_data != nodata, dst_data, data.data)
 
-                    # Avoid overwriting already existing data in the window
-                    dst_data = dst.read(window=dst_window)
-                    data = np.where(dst_data != nodata, dst_data, data.data)
-
-                    # Write the reprojected tile to the correct location in the full raster
-                    dst.write(data, window=dst_window)
+                # Write the reprojected tile to the correct location in the full raster
+                dst.write(data, window=dst_window)
         except Exception as e:
             raise RuntimeError(f"Error retrieving reprojected data from multiprocessing tasks: {e}")
