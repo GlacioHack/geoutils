@@ -1918,7 +1918,7 @@ class Raster:
             "90th percentile": np.nanpercentile(mdata, 90),
             "LE90": linear_error(mdata, interval=90),
             "NMAD": nmad(data),
-            "RMSE": np.sum(np.sqrt(np.ma.mean(np.square(data)))),
+            "RMSE": np.sqrt(np.ma.mean(np.square(data))),
             "Standard deviation": np.ma.std(data),
             "Valid count": valid_count,
             "Total count": data.size,
