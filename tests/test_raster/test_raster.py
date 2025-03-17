@@ -26,6 +26,7 @@ from pylint.reporters.text import TextReporter
 import geoutils as gu
 from geoutils import examples
 from geoutils._typing import MArrayNum, NDArrayNum
+from geoutils.raster.geotransformations import _translate
 from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 
 DO_PLOT = False
@@ -1820,22 +1821,27 @@ class TestRaster:
         # Call the icrop method with the given bounding box, returning a cropped raster
         raster_icropped = raster.icrop(bbox=bbox)
 
+        # Same with raster already loaded
+        raster.load()
+        raster_icropped_loaded = raster.icrop(bbox=bbox)
+
+        assert raster_icropped.raster_equal(raster_icropped_loaded)
+
+        # Compute expected window
+        row_off = max(bbox[0], 0)
+        col_off = max(bbox[1], 0)
+        height = min(raster.height, bbox[2]) - row_off
+        width = min(raster.width, bbox[3]) - col_off
+
         # Compute the expected affine transform for the cropped raster
-        transformed_cropped = rio.transform.Affine(
-            raster.transform.a,
-            raster.transform.b,
-            raster.transform.c + bbox[1] * raster.transform.a,
-            raster.transform.d,
-            raster.transform.e,
-            raster.transform.f + bbox[0] * raster.transform.e,
-        )
+        transformed_cropped = _translate(raster.transform, xoff=col_off, yoff=row_off, distance_unit="pixel")
 
         # Calculate the expected cropped data from the raster's data array
-        data_cropped = raster.data[..., bbox[0] : min(raster.height, bbox[2]), bbox[1] : min(bbox[3], raster.width)]
+        data_cropped = raster.data[..., row_off : height + row_off, col_off : width + col_off]
 
         # assert that the resulting cropped raster's dimensions, transform, and data are accurate.
-        assert raster_icropped.width == min(raster.width, bbox[3]) - bbox[1]
-        assert raster_icropped.height == min(raster.height, bbox[2]) - bbox[0]
+        assert raster_icropped.width == width
+        assert raster_icropped.height == height
         assert raster_icropped.transform == transformed_cropped
         assert np.array_equal(raster_icropped.data, data_cropped)
 
@@ -1845,6 +1851,10 @@ class TestRaster:
         bbox_crop = [xmin, ymin, xmax, ymax]
         raster_cropped = raster.crop(bbox_crop)
         assert raster_cropped.raster_equal(raster_icropped)
+
+        # Test with inplace = True
+        raster.icrop(bbox=bbox, inplace=True)
+        assert raster.raster_equal(raster_icropped)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_from_array(self, example: str) -> None:

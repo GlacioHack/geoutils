@@ -219,8 +219,12 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
+    # If window is passed, no need to account for transform and shape
+    if kwargs.get("window") is not None:
+        window = kwargs.get("window")
+        kwargs.pop("window")
     # If out_shape is passed, no need to account for transform and shape
-    if kwargs.get("out_shape") is not None:
+    elif kwargs.get("out_shape") is not None:
         window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
@@ -2509,7 +2513,7 @@ class Raster:
         """
         Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
-        :param bbox: Pixel-based bounding box as (xmin, ymin, xmax, ymax) in pixel coordinates.
+        :param bbox: Bounding box based on indices of the raster array (xmin, ymin, xmax, ymax).
         :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
 
         :returns: Cropped raster or None (if inplace=True).
@@ -2518,29 +2522,43 @@ class Raster:
         if len(bbox) != 4:
             raise ValueError("bbox must be a list or tuple of four integers: (xmin, ymin, xmax, ymax).")
 
-        # Crop the raster data based on the given bounding box (bbox), limit the range to the borders of the raster
-        crop_img = self.data[..., bbox[0] : min(self.height, bbox[2]), bbox[1] : min(bbox[3], self.width)]
+        # Ensure bounds are consistent with the raster
+        if bbox[0] > self.height or bbox[1] > self.width:
+            raise ValueError("The bounding box is out of raster bounds")
+        if bbox[0] > bbox[2] or bbox[1] > bbox[3]:
+            raise ValueError("The order of values in the bbox is wrong, it should be (xmin, ymin, xmax, ymax)")
 
-        # Create a new affine transform that corresponds to the cropped area
-        tfm = rio.transform.Affine(
-            self.transform.a,
-            self.transform.b,
-            self.transform.c + bbox[1] * self.transform.a,
-            self.transform.d,
-            self.transform.e,
-            self.transform.f + bbox[0] * self.transform.e,
-        )
-
-        # If inplace is True, modify the original raster object directly
         if inplace:
-            self._data = crop_img
-            self.transform = tfm
-            return None
-
-        # If inplace is False, create and return a new raster object with the cropped data
+            newraster = self
         else:
-            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
+            # Create new raster if not inplace without loading it (Raster.copy load data)
+            newraster = Raster(self)  # type: ignore
+
+        # Retrieve window parameters
+        row_off = max(bbox[0], 0)
+        col_off = max(bbox[1], 0)
+        height = min(newraster.height, bbox[2]) - row_off
+        width = min(newraster.width, bbox[3]) - col_off
+        newraster._out_shape = (height, width)
+
+        # Translate the transform to match with the crop window
+        newraster.translate(xoff=col_off, yoff=row_off, distance_unit="pixel", inplace=True)
+
+        if newraster.is_loaded:
+            # If raster is already loaded, just reduce the data to the window
+            newraster._data = newraster.data[..., row_off : height + row_off, col_off : width + col_off]
+        else:
+            # If raster is not loaded, use _load_rio with the crop window
+            with rio.open(newraster.filename) as dataset:
+                newraster.data = _load_rio(
+                    dataset,
+                    masked=newraster._masked,
+                    window=rio.windows.Window(col_off, row_off, width, height),
+                )
+
+        if not inplace:
             return newraster
+        return None
 
     @overload
     def reproject(
