@@ -1936,6 +1936,12 @@ class Raster:
                 }
             )
 
+        # If there are no valid data points, set all statistics to NaN
+        if np.count_nonzero(~self.get_mask()) == 0:
+            logging.warning("Empty raster, returns Nan for all stats")
+            for key in stats_dict:
+                stats_dict[key] = np.nan
+
         return stats_dict
 
     @overload

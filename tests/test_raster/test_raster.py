@@ -2002,6 +2002,13 @@ class TestRaster:
             "Percentage valid points",
         ]
 
+        expected_stats_mask = [
+            "Valid inlier count",
+            "Total inlier count",
+            "Percentage inlier points",
+            "Percentage valid inlier points",
+        ]
+
         stat_types = (int, float, np.integer, np.floating)
 
         # Full stats
@@ -2013,12 +2020,7 @@ class TestRaster:
         # With mask
         inlier_mask = raster.get_mask()
         stats_masked = raster.get_stats(inlier_mask=inlier_mask)
-        for name in [
-            "Valid inlier count",
-            "Total inlier count",
-            "Percentage inlier points",
-            "Percentage valid inlier points",
-        ]:
+        for name in expected_stats_mask:
             assert name in stats_masked
             assert isinstance(stats_masked.get(name), stat_types)
             stats_masked.pop(name)
@@ -2026,14 +2028,11 @@ class TestRaster:
 
         # Empty mask
         empty_mask = np.ones_like(inlier_mask)
-        stats_masked = raster.get_stats(inlier_mask=empty_mask)
-        for name in [
-            "Valid inlier count",
-            "Total inlier count",
-            "Percentage inlier points",
-            "Percentage valid inlier points",
-        ]:
-            assert stats_masked.get(name) == 0
+        with caplog.at_level(logging.WARNING):
+            stats_masked = raster.get_stats(inlier_mask=empty_mask)
+        assert "Empty raster, returns Nan for all stats" in caplog.text
+        for name in expected_stats + expected_stats_mask:
+            assert np.isnan(stats_masked.get(name))
 
         # Single stat
         for name in expected_stats:
