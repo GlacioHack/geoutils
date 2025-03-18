@@ -1932,9 +1932,15 @@ class Raster:
                     "Valid inlier count": valid_inlier_count,
                     "Total inlier count": counts[1],
                     "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
-                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100,
+                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0,
                 }
             )
+
+        # If there are no valid data points, set all statistics to NaN
+        if np.count_nonzero(~self.get_mask()) == 0:
+            logging.warning("Empty raster, returns Nan for all stats")
+            for key in stats_dict:
+                stats_dict[key] = np.nan
 
         return stats_dict
 
