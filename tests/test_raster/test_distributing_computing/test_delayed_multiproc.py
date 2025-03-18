@@ -97,7 +97,7 @@ class TestDelayedMultiproc:
         # r_single = r.reproject(bounds=dst_bounds, res=res_tuple)
         #
         # # Multiprocessing reprojection
-        # multiproc_reproject(r, outfile, tile_size, overlap, bounds=dst_bounds, res=res_tuple)
+        # multiproc_reproject(r, outfile, tile_size, bounds=dst_bounds, res=res_tuple)
         # r_multi = Raster(outfile)
         #
         # # Assert the results are the same
@@ -110,7 +110,7 @@ class TestDelayedMultiproc:
         # r_single = r.reproject(crs=out_crs)
         #
         # # Multiprocessing reprojection
-        # multiproc_reproject(r, outfile, tile_size, overlap, crs=out_crs)
+        # multiproc_reproject(r, outfile, tile_size, crs=out_crs)
         # r_multi = Raster(outfile)
         #
         # plt.figure()
@@ -133,7 +133,7 @@ class TestDelayedMultiproc:
         #     )
         #
         #     out_img_single = img2.reproject(img1)
-        #     multiproc_reproject(img2, outfile, tile_size, overlap, ref=img1)
+        #     multiproc_reproject(img2, outfile, tile_size, ref=img1)
         #     out_img_multi = Raster(outfile)
         #
         #     assert out_img_multi.count == n
@@ -192,7 +192,7 @@ class TestDelayedMultiproc:
 
         # - Test size - this should modify the shape, and hence resolution, but not the bounds -
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
-        multiproc_reproject(r, outfile, tile_size, overlap, grid_size=out_size)
+        multiproc_reproject(r, outfile, tile_size, grid_size=out_size)
         r_test = Raster(outfile)
         assert r_test.shape == (out_size[1], out_size[0])
         assert r_test.res != r.res
@@ -204,7 +204,7 @@ class TestDelayedMultiproc:
         dst_bounds = rio.coords.BoundingBox(
             left=bounds[0], bottom=bounds[1] + r.res[0], right=bounds[2] - 2 * r.res[1], top=bounds[3]
         )
-        multiproc_reproject(r, outfile, tile_size, overlap, bounds=dst_bounds)
+        multiproc_reproject(r, outfile, tile_size, bounds=dst_bounds)
         r_test = Raster(outfile)
         assert r_test.bounds == dst_bounds
         assert r_test.res == r.res
@@ -216,13 +216,13 @@ class TestDelayedMultiproc:
         )
 
         # If bounds are not a multiple of res, the latter will be updated accordingly
-        multiproc_reproject(r, outfile, tile_size, overlap, bounds=dst_bounds)
+        multiproc_reproject(r, outfile, tile_size, bounds=dst_bounds)
         r_test = Raster(outfile)
         assert r_test.bounds == dst_bounds
         assert r_test.res != r.res
 
         # - Test size and bounds -
-        multiproc_reproject(r, outfile, tile_size, overlap, grid_size=out_size, bounds=dst_bounds)
+        multiproc_reproject(r, outfile, tile_size, grid_size=out_size, bounds=dst_bounds)
         r_test = Raster(outfile)
         assert r_test.shape == (out_size[1], out_size[0])
         assert r_test.bounds == dst_bounds
@@ -230,14 +230,14 @@ class TestDelayedMultiproc:
         # - Test res -
         # Using a single value, output res will be enforced, resolution will be different
         res_single = r.res[0] * 2
-        multiproc_reproject(r, outfile, tile_size, overlap, res=res_single)
+        multiproc_reproject(r, outfile, tile_size, res=res_single)
         r_test = Raster(outfile)
         assert r_test.res == (res_single, res_single)
         assert r_test.shape != r.shape
 
         # Using a tuple
         res_tuple = (r.res[0] * 0.5, r.res[1] * 4)
-        multiproc_reproject(r, outfile, tile_size, overlap, res=res_tuple)
+        multiproc_reproject(r, outfile, tile_size, res=res_tuple)
         r_test = Raster(outfile)
         assert r_test.res == res_tuple
         assert r_test.shape != r.shape
@@ -245,7 +245,7 @@ class TestDelayedMultiproc:
         # - Test res and bounds -
         # Bounds will be enforced for upper-left pixel, but adjusted by up to one pixel for the lower right bound.
         # for single res value
-        multiproc_reproject(r, outfile, tile_size, overlap, bounds=dst_bounds, res=res_single)
+        multiproc_reproject(r, outfile, tile_size, bounds=dst_bounds, res=res_single)
         r_test = Raster(outfile)
         assert r_test.res == (res_single, res_single)
         assert r_test.bounds.left == dst_bounds.left
@@ -254,7 +254,7 @@ class TestDelayedMultiproc:
         assert np.abs(r_test.bounds.bottom - dst_bounds.bottom) < res_single
 
         # For tuple
-        multiproc_reproject(r, outfile, tile_size, overlap, bounds=dst_bounds, res=res_tuple)
+        multiproc_reproject(r, outfile, tile_size, bounds=dst_bounds, res=res_tuple)
         r_test = Raster(outfile)
         assert r_test.res == res_tuple
         assert r_test.bounds.left == dst_bounds.left
@@ -264,7 +264,7 @@ class TestDelayedMultiproc:
 
         # - Test crs -
         out_crs = rio.crs.CRS.from_epsg(4326)
-        multiproc_reproject(r, outfile, tile_size, overlap, crs=out_crs)
+        multiproc_reproject(r, outfile, tile_size, crs=out_crs)
         r_test = Raster(outfile)
         assert r_test.crs.to_epsg() == 4326
 
@@ -273,7 +273,7 @@ class TestDelayedMultiproc:
         dst_bounds = rio.coords.BoundingBox(
             left=bounds[0], bottom=bounds[1] - r.res[0], right=bounds[2] + 2 * r.res[1], top=bounds[3]
         )
-        multiproc_reproject(r, outfile, tile_size, overlap, bounds=dst_bounds)
+        multiproc_reproject(r, outfile, tile_size, bounds=dst_bounds)
         r_test = Raster(outfile)
         assert np.count_nonzero(r_test.data.mask) > 0
 
@@ -281,7 +281,7 @@ class TestDelayedMultiproc:
         r_float = r.astype("float32")  # type: ignore
         if r_float.nodata is not None:
             if (r_float.nodata < np.min(r_float.data)) or (r_float.nodata > np.max(r_float.data)):
-                multiproc_reproject(r_float, outfile, tile_size, overlap, bounds=dst_bounds, resampling="nearest")
+                multiproc_reproject(r_float, outfile, tile_size, bounds=dst_bounds, resampling="nearest")
                 r_test = Raster(outfile)
                 assert r_test.nodata == r_float.nodata
                 assert np.count_nonzero(r_test.data.data == r_test.nodata) > 0  # Some values should be set to nodata
@@ -289,7 +289,7 @@ class TestDelayedMultiproc:
                 assert np.max(r_test.data) == np.max(r_float.data)
 
         # Check that nodata works as expected
-        multiproc_reproject(r_float, outfile, tile_size, overlap, bounds=dst_bounds, nodata=9999)
+        multiproc_reproject(r_float, outfile, tile_size, bounds=dst_bounds, nodata=9999)
         r_test = Raster(outfile)
         assert r_test.nodata == 9999
         assert np.count_nonzero(r_test.data.data == r_test.nodata) > 0
@@ -304,7 +304,7 @@ class TestDelayedMultiproc:
                 np.ones((n, 500, 500), dtype="uint8"), transform=rio.transform.from_origin(50, 500, 1, 1), crs=4326
             )
 
-            multiproc_reproject(img2, outfile, tile_size, overlap, ref=img1)
+            multiproc_reproject(img2, outfile, tile_size, ref=img1)
             out_img = Raster(outfile)
             assert (out_img.count, *out_img.shape) == (n, 500, 500)
 
@@ -326,7 +326,7 @@ class TestDelayedMultiproc:
 
         # Create a raster with different resolution
         dst_res = r.res[0] * 2 / 3
-        multiproc_reproject(r2b, outfile, tile_size, overlap, res=dst_res)
+        multiproc_reproject(r2b, outfile, tile_size, res=dst_res)
         r2 = Raster(outfile)
         assert r2.res == (dst_res, dst_res)
 
@@ -339,7 +339,7 @@ class TestDelayedMultiproc:
 
         # Test reprojecting with ref=r2b (i.e. crop) -> output should have same shape, bounds and data, i.e. be the
         # same object
-        multiproc_reproject(r, outfile, tile_size, overlap, ref=r2b)
+        multiproc_reproject(r, outfile, tile_size, ref=r2b)
         r3 = Raster(outfile)
 
         assert r3.raster_equal(r2b)
@@ -358,7 +358,7 @@ class TestDelayedMultiproc:
 
         # Test reprojecting with ref=r2 -> output should have same shape, bounds and transform
         # Data should be slightly different due to difference in input resolution
-        multiproc_reproject(r, outfile, tile_size, overlap, ref=r2)
+        multiproc_reproject(r, outfile, tile_size, ref=r2)
         r3 = Raster(outfile)
 
         assert r3.bounds == r2.bounds
@@ -389,12 +389,12 @@ class TestDelayedMultiproc:
 
         # reproject raster, and reproject mask. Check that both have same number of masked pixels
         # TODO: should test other resampling algo
-        multiproc_reproject(r, outfile, tile_size, overlap, res=dst_res, resampling="nearest")
+        multiproc_reproject(r, outfile, tile_size, res=dst_res, resampling="nearest")
         r_gaps_reproj = Raster(outfile)
         mask = gu.Raster.from_array(
             r_gaps.data.mask.astype("uint8"), crs=r_gaps.crs, transform=r_gaps.transform, nodata=None
         )
-        multiproc_reproject(mask, outfile, tile_size, overlap, res=dst_res, nodata=255, resampling="nearest")
+        multiproc_reproject(mask, outfile, tile_size, res=dst_res, nodata=255, resampling="nearest")
         mask_reproj = Raster(outfile)
         # Final masked pixels are those originally masked (=1) and the values masked during reproject, e.g. edges
         tot_masked_true = np.count_nonzero(mask_reproj.data.mask) + np.count_nonzero(mask_reproj.data == 1)
