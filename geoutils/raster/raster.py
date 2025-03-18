@@ -335,7 +335,7 @@ def _cast_numeric_array_raster(
     # In some cases the promoted output type does not match any inputs
     # (e.g. for inputs "uint8" and "int8", output is "int16")
     elif (nodata1 is not None) or (nodata2 is not None):
-        out_nodata = nodata1 if not None else nodata2
+        out_nodata = nodata1 if nodata1 is not None else nodata2
 
     # 2/ Output pixel interpretation
     if isinstance(other, Raster):
@@ -2753,7 +2753,7 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
-        meta = self.tags if not None else {}
+        meta = self.tags if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
         if gcps is None:

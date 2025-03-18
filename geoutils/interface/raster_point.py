@@ -80,7 +80,7 @@ def _regular_pointcloud_to_raster(
 
     # Create raster from inputs, with placeholder data for now
     dtype = pointcloud[data_column_name].dtype
-    out_nodata = nodata if not None else _default_nodata(dtype)
+    out_nodata = nodata if nodata is not None else _default_nodata(dtype)
     arr = np.ones(out_shape, dtype=dtype)
 
     # Get indexes of point cloud coordinates in the raster, forcing no shift
