@@ -316,7 +316,10 @@ def merge_rasters(
             merged_data.append(algo(raster_stack.data, axis=0))
         # If that doesn't work, use the slower np.apply_along_axis approach.
         except TypeError as exception:
-            if "'axis' is an invalid keyword" not in str(exception):
+            if not (
+                "'axis' is an invalid keyword" in str(exception)
+                or "got an unexpected keyword argument 'axis'" in str(exception)
+            ):
                 raise exception
             merged_data.append(np.apply_along_axis(algo, axis=0, arr=raster_stack.data))
 
