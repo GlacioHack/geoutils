@@ -301,6 +301,29 @@ class TestMultiRaster:
         if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
             assert merged_img2 == merged_img
 
+        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
+        custom_func = lambda x: np.logical_and(*x)
+        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
+
+    @pytest.mark.parametrize(
+        "rasters",
+        [
+            pytest.lazy_fixture("images_1d"),
+            pytest.lazy_fixture("images_3d"),
+        ],
+    )  # type: ignore
+    def test_merge_rasters__errors(self, rasters) -> None:
+        """Test errors of merge raster are properly raised."""
+
+        # For merge algo: function that raises another type error than the expect axis error
+        msg = "not the right axis message"
+
+        def custom_func(x):
+            raise TypeError(msg)
+
+        with pytest.raises(TypeError, match=msg):
+            gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
+
     # Group rasters for for testing `load_multiple_rasters`
     # two overlapping, single band rasters
     # two overlapping, 1 and 3 band rasters
