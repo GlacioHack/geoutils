@@ -14,6 +14,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
+from geoutils._typing import NDArrayNum
 from geoutils.raster import RasterType
 from geoutils.raster.raster import _default_nodata
 
@@ -302,7 +303,9 @@ class TestMultiRaster:
             assert merged_img2 == merged_img
 
         # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
-        custom_func = lambda x: np.logical_and(*x)
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and(*x)
+
         gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
 
     @pytest.mark.parametrize(
@@ -318,7 +321,7 @@ class TestMultiRaster:
         # For merge algo: function that raises another type error than the expect axis error
         msg = "not the right axis message"
 
-        def custom_func(x):
+        def custom_func(x: NDArrayNum) -> None:
             raise TypeError(msg)
 
         with pytest.raises(TypeError, match=msg):
