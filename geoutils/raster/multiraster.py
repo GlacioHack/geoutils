@@ -192,7 +192,11 @@ def stack_rasters(
         if not raster.is_loaded:
             raster.load()
 
-        nodata = reference_raster.nodata if reference_raster.nodata is not None else gu.raster.raster._default_nodata(reference_raster.data.dtype)
+        nodata = (
+            reference_raster.nodata
+            if reference_raster.nodata is not None
+            else gu.raster.raster._default_nodata(reference_raster.data.dtype)
+        )
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
             bounds=dst_bounds,
