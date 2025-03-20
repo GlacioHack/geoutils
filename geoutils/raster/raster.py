@@ -335,7 +335,7 @@ def _cast_numeric_array_raster(
     # In some cases the promoted output type does not match any inputs
     # (e.g. for inputs "uint8" and "int8", output is "int16")
     elif (nodata1 is not None) or (nodata2 is not None):
-        out_nodata = nodata1 if not None else nodata2
+        out_nodata = nodata1 if nodata1 is not None else nodata2
 
     # 2/ Output pixel interpretation
     if isinstance(other, Raster):
@@ -1934,9 +1934,15 @@ class Raster:
                     "Valid inlier count": valid_inlier_count,
                     "Total inlier count": counts[1],
                     "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
-                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100,
+                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0,
                 }
             )
+
+        # If there are no valid data points, set all statistics to NaN
+        if np.count_nonzero(~self.get_mask()) == 0:
+            logging.warning("Empty raster, returns Nan for all stats")
+            for key in stats_dict:
+                stats_dict[key] = np.nan
 
         return stats_dict
 
@@ -2749,7 +2755,7 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
-        meta = self.tags if not None else {}
+        meta = self.tags if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
         if gcps is None:
