@@ -556,6 +556,6 @@ def _translate(
     # Convert pixel offsets to georeferenced units
     if distance_unit == "pixel":
         xoff *= dx
-        yoff *= abs(dy)  # dy is negative
+        yoff *= dy
 
     return rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
