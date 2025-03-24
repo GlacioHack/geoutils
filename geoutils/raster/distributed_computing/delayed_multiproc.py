@@ -469,6 +469,19 @@ def reproject_block(
     resampling: Resampling | str = Resampling.bilinear,
     silent: bool = False,
 ) -> tuple[Raster, NDArrayNum] | tuple[None, None]:
+    """
+    Reproject raster_unload to dst_tile.
+
+    :param raster_unload: raster data source to be reprojected.
+    :param dst_raster: destination raster
+    :param dst_tile: destination tile bounds (xmin, xmax, ymin, ymax)
+    :param resampling: A Rasterio resampling method, can be passed as a string.
+    :param silent: Whether to print warning statements.
+
+    :return: A tuple containing:
+    - the reprojected tile
+    - dst_tile
+    """
 
     dst_raster_tile = get_raster_tile(dst_raster, dst_tile)
 
