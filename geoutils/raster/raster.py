@@ -3884,12 +3884,12 @@ class Mask(Raster):
             super().__init__(filename_or_dataset, **kwargs)
 
             # If nbands larger than one, use only first band and raise a warning
-            if self.count > 1:
-                warnings.warn(
-                    category=UserWarning,
-                    message="Multi-band raster provided to create a Mask, only the first band will be used.",
-                )
-                self._data = self.data[0, :, :]
+            # if self.count > 1:
+            #     warnings.warn(
+            #         category=UserWarning,
+            #         message="Multi-band raster provided to create a Mask, only the first band will be used.",
+            #     )
+            #     self._data = self.data[0, :, :]
 
             # Force dtypes
             self._dtypes = (bool,)
