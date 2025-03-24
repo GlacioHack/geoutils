@@ -109,7 +109,7 @@ class MpCluster(AbstractCluster):
         if conf is not None:
             nb_workers = conf.get("nb_workers", 1)
         # Using the 'forkserver' context for more controlled process handling
-        ctx_in_main = multiprocessing.get_context("forkserver")
+        ctx_in_main = multiprocessing.get_context("fork")
         # Create a pool of workers with max 10 tasks per child process
         self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=10)
 
