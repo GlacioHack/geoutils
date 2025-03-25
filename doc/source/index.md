@@ -110,6 +110,7 @@ georeferencing
 geotransformations
 raster_vector_point
 distance_ops
+classification
 ```
 
 ```{toctree}
