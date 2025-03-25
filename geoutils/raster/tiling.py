@@ -19,6 +19,7 @@
 """Tiling tools for arrays and rasters."""
 
 import math
+import sys
 
 import numpy as np
 from matplotlib.patches import Rectangle
@@ -108,8 +109,14 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     except ImportError:
         raise ImportError("Missing optional dependency, skimage.transform, required by this function.")
 
-    if count > np.prod(shape):
-        raise ValueError(f"Shape '{shape}' size ({np.prod(shape)}) is smaller than 'count' ({count}).")
+    # Check if system is 64bit or 32bit and catch potential numpy overflow because MSVC `long` is int32_t
+    if sys.maxsize > 2**32:
+        size = np.prod(shape, dtype=np.int64)
+    else:
+        size = np.prod(shape)
+
+    if count > size:
+        raise ValueError(f"Shape '{shape}' size ({size}) is smaller than 'count' ({count}).")
 
     if len(shape) != 2:
         raise ValueError(f"Expected a 2D shape, got {len(shape)}D shape: {shape}")
