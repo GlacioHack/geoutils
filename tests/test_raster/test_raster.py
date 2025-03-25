@@ -351,7 +351,7 @@ class TestRaster:
         assert isinstance(rio_ds, rio.io.DatasetReader)
 
         # Check that all attributes are equal
-        rio_attrs_conserved = [attr for attr in _default_rio_attrs if attr not in ["name", "driver"]]
+        rio_attrs_conserved = [attr for attr in _default_rio_attrs if attr not in ["name", "driver", "profile"]]
         for attr in rio_attrs_conserved:
             assert rst.__getattribute__(attr) == rio_ds.__getattribute__(attr)
 
@@ -986,9 +986,9 @@ class TestRaster:
         # Check a temporary memory file different than original disk file was created
         assert r2.name != r.name
 
-        # Check all attributes except name and driver
+        # Check all attributes except name, driver and profile
         default_attrs = _default_rio_attrs.copy()
-        for attr in ["name", "driver"]:
+        for attr in ["name", "driver", "profile"]:
             default_attrs.remove(attr)
         attrs = default_attrs
         for attr in attrs:

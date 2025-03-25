@@ -181,6 +181,7 @@ _default_rio_attrs = [
     "shape",
     "transform",
     "width",
+    "profile",
 ]
 
 
@@ -409,6 +410,7 @@ class Raster:
         self._disk_transform: affine.Affine | None = None
         self._downsample: int | float = 1
         self._area_or_point: Literal["Area", "Point"] | None = None
+        self._profile: dict[str, Any] | None = None
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
@@ -468,6 +470,7 @@ class Raster:
                 self._name = ds.name
                 self._driver = ds.driver
                 self._tags.update(ds.tags())
+                self._profile = ds.profile
 
                 # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
                 converted_tags = decode_sensor_metadata(self.tags)
@@ -660,6 +663,13 @@ class Raster:
     def name(self) -> str | None:
         """Name of the file on disk, if it exists."""
         return self._name
+
+    @property
+    def profile(self) -> dict[str, Any] | None:
+        """Basic metadata and creation options of this dataset.
+        May be passed as keyword arguments to rasterio.open()
+        to create a clone of this dataset."""
+        return self._profile
 
     def set_area_or_point(
         self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
