@@ -45,11 +45,11 @@ def load_raster_tile(raster_unload: RasterType, tile: NDArrayNum) -> RasterType:
     return raster_tile
 
 
-def remove_tile_padding(raster: RasterType, raster_tile: RasterType, tile: NDArrayNum, padding: int) -> None:
+def remove_tile_padding(raster_shape: tuple[int, int], raster_tile: RasterType, tile: NDArrayNum, padding: int) -> None:
     """
     Removes the padding added around tiles during terrain attribute computation to prevent edge effects.
 
-    :param raster: The full DEM object from which tiles are extracted.
+    :param raster_shape: The shape (height, width) of the raster from which tiles are extracted.
     :param raster_tile: The raster tile with possible padding that needs removal.
     :param tile: The bounding box of the tile as [xmin, xmax, ymin, ymax].
     :param padding: The padding size to be removed from each side of the tile.
@@ -61,13 +61,13 @@ def remove_tile_padding(raster: RasterType, raster_tile: RasterType, tile: NDArr
     if tile[0] != 0:
         tile[0] += padding
         xmin += padding
-    if tile[1] != raster.height:
+    if tile[1] != raster_shape[0]:
         tile[1] -= padding
         xmax -= padding
     if tile[2] != 0:
         tile[2] += padding
         ymin += padding
-    if tile[3] != raster.width:
+    if tile[3] != raster_shape[1]:
         tile[3] -= padding
         ymax -= padding
 
@@ -75,12 +75,12 @@ def remove_tile_padding(raster: RasterType, raster_tile: RasterType, tile: NDArr
     raster_tile.icrop(bbox=(xmin, ymin, xmax, ymax), inplace=True)
 
 
-def map_block(
+def apply_func_block(
     func: Callable[..., Any],
     raster: RasterType,
     tile: NDArrayNum,
     depth: int,
-    *args: tuple[Any, ...],
+    *args: Any,
     **kwargs: dict[str, Any],
 ) -> tuple[Any, NDArrayNum]:
     """
@@ -101,17 +101,18 @@ def map_block(
     result_tile = func(raster_tile, *args, **kwargs)
 
     # Remove padding
-    remove_tile_padding(raster, result_tile, tile, depth)
+    if isinstance(result_tile, Raster):
+        remove_tile_padding((raster.height, raster.width), result_tile, tile, depth)
 
     return result_tile, tile
 
 
-def map_multiproc(
+def map_overlap_multiproc(
     func: Callable[..., Any],
     raster_path: str | RasterType,
-    tile_size: int,
+    chunk_size: int,
     outfile: str,
-    *args: tuple[Any, ...],
+    *args: Any,
     depth: int = 0,
     cluster: AbstractCluster | None = None,
     **kwargs: dict[str, Any],
@@ -124,7 +125,7 @@ def map_multiproc(
 
     :param func: The function to apply to each tile.
     :param raster_path: Path to the input raster or the Raster object itself.
-    :param tile_size: The size of each tile to divide the raster into.
+    :param chunk_size: The size of each tile to divide the raster into.
     :param outfile: The path where the resulting output raster will be saved.
     :param args: Additional arguments to pass to the function being applied.
     :param depth: The padding size for overlapping tiles (default is 0).
@@ -142,7 +143,7 @@ def map_multiproc(
         raster = raster_path
 
     # Generate tiling grid
-    tiling_grid = compute_tiling(tile_size, raster.shape, raster.shape, overlap=depth)
+    tiling_grid = compute_tiling(chunk_size, raster.shape, raster.shape, overlap=depth)
 
     # Create tasks for multiprocessing
     tasks = []
@@ -150,7 +151,7 @@ def map_multiproc(
         for col in range(tiling_grid.shape[1]):
             tile = tiling_grid[row, col]
             # Launch the task on the cluster to process each tile
-            tasks.append(cluster.launch_task(fun=map_block, args=[func, raster, tile, depth, *args], **kwargs))
+            tasks.append(cluster.launch_task(fun=apply_func_block, args=[func, raster, tile, depth, *args], **kwargs))
 
     # get first tile to retrieve dtype and nodata
     attr_tile0, _ = cluster.get_res(tasks[0])

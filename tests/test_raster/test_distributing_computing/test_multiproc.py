@@ -6,21 +6,31 @@ import os
 
 import numpy as np
 import pytest
+import scipy
 
 from geoutils import Raster, examples
 from geoutils.raster import RasterType
 from geoutils.raster.distributed_computing import (
     ClusterGenerator,
+    apply_func_block,
     load_raster_tile,
-    map_block,
-    map_multiproc,
+    map_overlap_multiproc,
     remove_tile_padding,
 )
 
 
-# Define a simple function (copy the raster)
-def _copy_func(r: RasterType, cast_nodata: bool) -> RasterType:
-    return r.copy(cast_nodata=cast_nodata)
+# Define a simple function where overlap is needed
+def _custom_func_overlap(raster: RasterType, size: int) -> RasterType:
+    new_data = scipy.ndimage.maximum_filter(raster.data, size)
+    if raster.nodata is not None:
+        new_data = np.ma.masked_equal(new_data, raster.nodata)
+    raster.data = new_data
+    return raster
+
+
+# Define a simple function with some args
+def _custom_func(raster: RasterType, addition: float, factor: float) -> RasterType:
+    return (raster + addition) * factor
 
 
 class TestMultiproc:
@@ -55,25 +65,29 @@ class TestMultiproc:
         raster_tile_with_padding = load_raster_tile(raster, tile_pad)
 
         # Remove padding and ensure it's back to the original size
-        remove_tile_padding(raster, raster_tile_with_padding, tile, padding)
+        remove_tile_padding((raster.height, raster.width), raster_tile_with_padding, tile, padding)
         assert raster_tile_with_padding.raster_equal(raster_tile)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_map_block(self, example):
+    @pytest.mark.parametrize("padding", [0, 1, 10])  # type: ignore
+    def test_map_block(self, example, padding):
         """
         Test applying a function to a raster tile and handling padding removal.
         """
         raster = Raster(example)
         tile = np.array([100, 200, 100, 200])  # [xmin, xmax, ymin, ymax]
-        padding = 10
+        size = 2
 
-        cast_nodata = True
         # Apply map_block
-        result_tile, _ = map_block(_copy_func, raster, tile, padding, (cast_nodata,))
+        result_tile, _ = apply_func_block(_custom_func_overlap, raster, tile, padding, size)
 
-        # Check if the result is the same as the original tile
-        original_tile = load_raster_tile(raster, tile)
-        assert result_tile.raster_equal(original_tile)
+        raster = _custom_func_overlap(raster, size)
+        # If padding >=1, The result should be the equal to the original tile filtered
+        original_tile_filtered = load_raster_tile(raster, tile)
+        if padding >= size - 1:
+            assert result_tile.raster_equal(original_tile_filtered)
+        else:
+            assert not result_tile.raster_equal(original_tile_filtered)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
@@ -85,9 +99,10 @@ class TestMultiproc:
         raster = Raster(example)
         output_file = "output.tif"
 
-        cast_nodata = True
+        addition = 5
+        factor = 0.5
         # Apply the multiproc map function
-        map_multiproc(_copy_func, raster, tile_size, output_file, (cast_nodata,), depth=10, cluster=cluster)
+        map_overlap_multiproc(_custom_func, raster, tile_size, output_file, addition, factor, depth=10, cluster=cluster)
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded
@@ -95,9 +110,10 @@ class TestMultiproc:
         # Ensure the output file is created and valid
         assert os.path.exists(output_file)
 
-        # Open the output file and compare with the original raster
+        # Open the output file and compare with the operation on full raster
         output_raster = Raster(output_file)
-        assert output_raster.raster_equal(raster)
+        new_raster = _custom_func(raster, addition, factor)
+        assert output_raster.raster_equal(new_raster)
 
         # Remove output file
         os.remove(output_file)
