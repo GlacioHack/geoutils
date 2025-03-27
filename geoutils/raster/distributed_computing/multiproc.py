@@ -31,6 +31,34 @@ from geoutils.raster.distributed_computing.cluster import (
 )
 
 
+class MultiprocConfig:
+    """
+    Configuration class for handling multiprocessing parameters in raster processing.
+
+    This class encapsulates settings related to multiprocessing, allowing users to specify
+    chunk size, depth, output file, and an optional cluster for parallel processing.
+    It is designed to be passed into functions that require multiprocessing capabilities.
+    """
+
+    def __init__(self, chunk_size: int, outfile: str, depth: int = 0, cluster: AbstractCluster | None = None):
+        """
+        Initialize the MultiprocConfig instance with multiprocessing settings.
+
+        :param chunk_size: The size of the chunks for splitting raster data.
+        :param outfile: The file path where the output will be written.
+        :param depth: The overlap size between chunks to prevent edge effects (default is 0).
+        :param cluster: A cluster object for distributed computing, or None for sequential processing.
+        """
+        self.chunk_size = chunk_size
+        self.outfile = outfile
+        self.depth = depth
+        if cluster is None:
+            # Initialize a basic multiprocessing cluster if none is provided
+            cluster = ClusterGenerator("basic")  # type: ignore
+        assert isinstance(cluster, AbstractCluster)  # for mypy
+        self.cluster = cluster
+
+
 def load_raster_tile(raster_unload: RasterType, tile: NDArrayNum) -> RasterType:
     """
     Extracts a specific tile (spatial subset) from the raster based on the provided tile coordinates.
@@ -110,11 +138,8 @@ def apply_func_block(
 def map_overlap_multiproc(
     func: Callable[..., Any],
     raster_path: str | RasterType,
-    chunk_size: int,
-    outfile: str,
+    config: MultiprocConfig,
     *args: Any,
-    depth: int = 0,
-    cluster: AbstractCluster | None = None,
     **kwargs: dict[str, Any],
 ) -> None:
     """
@@ -125,17 +150,9 @@ def map_overlap_multiproc(
 
     :param func: The function to apply to each tile.
     :param raster_path: Path to the input raster or the Raster object itself.
-    :param chunk_size: The size of each tile to divide the raster into.
-    :param outfile: The path where the resulting output raster will be saved.
+    :param config: Configuration object containing chunk size, output file, depth, and optional cluster.
     :param args: Additional arguments to pass to the function being applied.
-    :param depth: The padding size for overlapping tiles (default is 0).
-    :param cluster: An optional multiprocessing cluster to use for task distribution.
     """
-    if cluster is None:
-        # Initialize a basic multiprocessing cluster if none is provided
-        cluster = ClusterGenerator("basic")  # type: ignore
-    assert cluster is not None  # for mypy
-
     # Load DEM metadata if raster_path is a filepath, otherwise use the Raster object
     if not isinstance(raster_path, Raster):
         raster = Raster(raster_path)
@@ -143,7 +160,7 @@ def map_overlap_multiproc(
         raster = raster_path
 
     # Generate tiling grid
-    tiling_grid = compute_tiling(chunk_size, raster.shape, raster.shape, overlap=depth)
+    tiling_grid = compute_tiling(config.chunk_size, raster.shape, raster.shape, overlap=config.depth)
 
     # Create tasks for multiprocessing
     tasks = []
@@ -151,15 +168,19 @@ def map_overlap_multiproc(
         for col in range(tiling_grid.shape[1]):
             tile = tiling_grid[row, col]
             # Launch the task on the cluster to process each tile
-            tasks.append(cluster.launch_task(fun=apply_func_block, args=[func, raster, tile, depth, *args], **kwargs))
+            tasks.append(
+                config.cluster.launch_task(
+                    fun=apply_func_block, args=[func, raster, tile, config.depth, *args], **kwargs
+                )
+            )
 
     # get first tile to retrieve dtype and nodata
-    attr_tile0, _ = cluster.get_res(tasks[0])
+    attr_tile0, _ = config.cluster.get_res(tasks[0])
 
     if isinstance(attr_tile0, Raster):
         # Create a new raster file to save the processed results
         with rio.open(
-            outfile,
+            config.outfile,
             "w",
             driver="GTiff",
             height=raster.height,
@@ -173,7 +194,7 @@ def map_overlap_multiproc(
             try:
                 # Iterate over the tasks and retrieve the processed tiles
                 for results in tasks:
-                    attr_tile, dst_tile = cluster.get_res(results)
+                    attr_tile, dst_tile = config.cluster.get_res(results)
 
                     # Define the window in the output file where the tile should be written
                     dst_window = rio.windows.Window(

@@ -12,6 +12,7 @@ from geoutils import Raster, examples
 from geoutils.raster import RasterType
 from geoutils.raster.distributed_computing import (
     ClusterGenerator,
+    MultiprocConfig,
     apply_func_block,
     load_raster_tile,
     map_overlap_multiproc,
@@ -98,11 +99,13 @@ class TestMultiproc:
         """
         raster = Raster(example)
         output_file = "output.tif"
+        depth = 10
+        config = MultiprocConfig(tile_size, output_file, depth, cluster)
 
         addition = 5
         factor = 0.5
         # Apply the multiproc map function
-        map_overlap_multiproc(_custom_func, raster, tile_size, output_file, addition, factor, depth=10, cluster=cluster)
+        map_overlap_multiproc(_custom_func, raster, config, addition, factor)
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded
