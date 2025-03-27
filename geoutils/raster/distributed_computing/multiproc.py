@@ -17,7 +17,7 @@
 # limitations under the License.
 
 """Process out-of-memory calculations"""
-from typing import Any, Callable
+from typing import Any, Callable, overload
 
 import numpy as np
 import rasterio as rio
@@ -40,7 +40,9 @@ class MultiprocConfig:
     It is designed to be passed into functions that require multiprocessing capabilities.
     """
 
-    def __init__(self, chunk_size: int, outfile: str, depth: int = 0, cluster: AbstractCluster | None = None):
+    def __init__(
+        self, chunk_size: int, outfile: str | None = None, depth: int = 0, cluster: AbstractCluster | None = None
+    ):
         """
         Initialize the MultiprocConfig instance with multiprocessing settings.
 
@@ -57,6 +59,9 @@ class MultiprocConfig:
             cluster = ClusterGenerator("basic")  # type: ignore
         assert isinstance(cluster, AbstractCluster)  # for mypy
         self.cluster = cluster
+
+    def copy(self) -> "MultiprocConfig":
+        return MultiprocConfig(chunk_size=self.chunk_size, outfile=self.outfile, depth=self.depth, cluster=self.cluster)
 
 
 def load_raster_tile(raster_unload: RasterType, tile: NDArrayNum) -> RasterType:
@@ -131,8 +136,30 @@ def apply_func_block(
     # Remove padding
     if isinstance(result_tile, Raster):
         remove_tile_padding((raster.height, raster.width), result_tile, tile, depth)
+    elif isinstance(result_tile, tuple) and isinstance(result_tile[0], Raster):
+        remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
 
     return result_tile, tile
+
+
+@overload
+def map_overlap_multiproc(  # type: ignore
+    func: Callable[..., RasterType],
+    raster_path: str | RasterType,
+    config: MultiprocConfig,
+    *args: Any,
+    **kwargs: dict[str, Any],
+) -> None: ...
+
+
+@overload
+def map_overlap_multiproc(
+    func: Callable[..., Any],
+    raster_path: str | RasterType,
+    config: MultiprocConfig,
+    *args: Any,
+    **kwargs: dict[str, Any],
+) -> list[Any]: ...
 
 
 def map_overlap_multiproc(
@@ -141,16 +168,19 @@ def map_overlap_multiproc(
     config: MultiprocConfig,
     *args: Any,
     **kwargs: dict[str, Any],
-) -> None:
+) -> None | list[Any]:
     """
     Multiprocessing function for applying out_of_memory operations on raster.
 
     This function divides the input raster into tiles, processes them in parallel using multiprocessing, and
     writes the output to a new raster file. It handles the overlap between tiles (depth) to avoid edge effects.
+    The function can return either a :class:`~geoutils.Raster`, a tuple with a :class:`~geoutils.Raster`in the first
+    position and other data, or any other type. Non-raster results are collected into a list.
 
     :param func: The function to apply to each tile.
     :param raster_path: Path to the input raster or the Raster object itself.
-    :param config: Configuration object containing chunk size, output file, depth, and optional cluster.
+    :param config: Configuration object containing chunk size, output file, depth, and optional cluster. Output file is
+        needed if func returns a Raster or a tuple with a Raster.
     :param args: Additional arguments to pass to the function being applied.
     """
     # Load DEM metadata if raster_path is a filepath, otherwise use the Raster object
@@ -174,10 +204,20 @@ def map_overlap_multiproc(
                 )
             )
 
+    result_list = []
     # get first tile to retrieve dtype and nodata
-    attr_tile0, _ = config.cluster.get_res(tasks[0])
+    result_tile0, _ = config.cluster.get_res(tasks[0])
 
-    if isinstance(attr_tile0, Raster):
+    # Check if result_tile0 is a Raster or tuple containing a Raster
+    if isinstance(result_tile0, Raster) or (isinstance(result_tile0, tuple) and isinstance(result_tile0[0], Raster)):
+        # Handle the case where the output is a raster and save it
+        dtype = result_tile0.dtype if isinstance(result_tile0, Raster) else result_tile0[0].dtype
+        nodata = result_tile0.nodata if isinstance(result_tile0, Raster) else result_tile0[0].nodata
+
+        # Ensure that an output file is provided
+        if config.outfile is None:
+            raise ValueError("Output file must be provided when the function returns a Raster.")
+
         # Create a new raster file to save the processed results
         with rio.open(
             config.outfile,
@@ -186,15 +226,20 @@ def map_overlap_multiproc(
             height=raster.height,
             width=raster.width,
             count=raster.count,
-            dtype=attr_tile0.dtype,
+            dtype=dtype,
             crs=raster.crs,
             transform=raster.transform,
-            nodata=attr_tile0.nodata,
+            nodata=nodata,
         ) as dst:
             try:
                 # Iterate over the tasks and retrieve the processed tiles
                 for results in tasks:
-                    attr_tile, dst_tile = config.cluster.get_res(results)
+                    result_tile, dst_tile = config.cluster.get_res(results)
+
+                    # If result_tile is a tuple, append the non-raster part to result_list
+                    if isinstance(result_tile, tuple):
+                        result_list.append(result_tile[1:])  # Add non-raster parts to result_list
+                        result_tile = result_tile[0]  # Extract the raster part
 
                     # Define the window in the output file where the tile should be written
                     dst_window = rio.windows.Window(
@@ -205,12 +250,23 @@ def map_overlap_multiproc(
                     )
 
                     # Cast to 3D before saving if single band
-                    if attr_tile.count == 1:
-                        data = attr_tile[np.newaxis, :, :]
+                    if result_tile.count == 1:
+                        data = result_tile[np.newaxis, :, :]
                     else:
-                        data = attr_tile.data
+                        data = result_tile.data
 
                     # Write the processed tile to the appropriate location in the output file
                     dst.write(data, window=dst_window)
             except Exception as e:
                 raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
+
+    else:
+        # Handle non-raster results
+        for results in tasks:
+            result_tile, _ = config.cluster.get_res(results)
+            result_list.append(result_tile)
+
+    # Return the result list if there are non-raster results
+    if result_list:
+        return result_list
+    return None
