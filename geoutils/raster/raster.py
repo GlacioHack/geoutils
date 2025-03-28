@@ -219,8 +219,12 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
+    # If window is passed, no need to account for transform and shape
+    if kwargs.get("window") is not None:
+        window = kwargs.get("window")
+        kwargs.pop("window")
     # If out_shape is passed, no need to account for transform and shape
-    if kwargs.get("out_shape") is not None:
+    elif kwargs.get("out_shape") is not None:
         window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
@@ -729,17 +733,16 @@ class Raster:
             and isinstance(new_area_or_point, str)
             and old_area_or_point != new_area_or_point
         ):
-            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij), but because
-            # the Y axis is inverted, a minus signs is added to shift the coordinate (even if the unit is in pixel)
+            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij)
 
             # If the new one is Point, we shift back by half a pixel
             if new_area_or_point == "Point":
                 xoff = 0.5
-                yoff = -0.5
+                yoff = 0.5
             # Otherwise we shift forward half a pixel
             else:
                 xoff = -0.5
-                yoff = 0.5
+                yoff = -0.5
             # We perform the shift in place
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
@@ -2485,6 +2488,22 @@ class Raster:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
 
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[True],
+    ) -> None: ...
+
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[False] = False,
+    ) -> RasterType: ...
+
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -2494,7 +2513,7 @@ class Raster:
         """
         Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
-        :param bbox: Pixel-based bounding box as (xmin, ymin, xmax, ymax) in pixel coordinates.
+        :param bbox: Bounding box based on indices of the raster array (xmin, ymin, xmax, ymax).
         :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
 
         :returns: Cropped raster or None (if inplace=True).
@@ -2503,15 +2522,43 @@ class Raster:
         if len(bbox) != 4:
             raise ValueError("bbox must be a list or tuple of four integers: (xmin, ymin, xmax, ymax).")
 
-        # Convert pixel coordinates to georeferenced coordinates using the transform
-        bottom_left = self.transform * (bbox[0], self.height - bbox[1])
-        top_right = self.transform * (bbox[2], self.height - bbox[3])
+        # Ensure bounds are consistent with the raster
+        if bbox[0] > self.height or bbox[1] > self.width:
+            raise ValueError("The bounding box is out of raster bounds")
+        if bbox[0] > bbox[2] or bbox[1] > bbox[3]:
+            raise ValueError("The order of values in the bbox is wrong, it should be (xmin, ymin, xmax, ymax)")
 
-        # Create new georeferenced crop geometry (xmin, ymin, xmax, ymax)
-        new_bbox = (bottom_left[0], bottom_left[1], top_right[0], top_right[1])
+        if inplace:
+            newraster = self
+        else:
+            # Create new raster if not inplace without loading it (Raster.copy load data)
+            newraster = Raster(self)  # type: ignore
 
-        # Call the existing crop() method with the new georeferenced crop geometry
-        return self.crop(bbox=new_bbox, inplace=inplace)
+        # Retrieve window parameters
+        row_off = max(bbox[0], 0)
+        col_off = max(bbox[1], 0)
+        height = min(newraster.height, bbox[2]) - row_off
+        width = min(newraster.width, bbox[3]) - col_off
+        newraster._out_shape = (height, width)
+
+        # Translate the transform to match with the crop window
+        newraster.translate(xoff=col_off, yoff=row_off, distance_unit="pixel", inplace=True)
+
+        if newraster.is_loaded:
+            # If raster is already loaded, just reduce the data to the window
+            newraster._data = newraster.data[..., row_off : height + row_off, col_off : width + col_off]
+        else:
+            # If raster is not loaded, use _load_rio with the crop window
+            with rio.open(newraster.filename) as dataset:
+                newraster.data = _load_rio(
+                    dataset,
+                    masked=newraster._masked,
+                    window=rio.windows.Window(col_off, row_off, width, height),
+                )
+
+        if not inplace:
+            return newraster
+        return None
 
     @overload
     def reproject(
@@ -2958,7 +3005,7 @@ class Raster:
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
-        :param rst : path to the second image (or another Raster instance)
+        :param raster : path to the second image (or another Raster instance)
         :param match_ref: if set to True, returns the smallest intersection that aligns with that of self, i.e. same \
         resolution and offset with self's origin is a multiple of the resolution
         :returns: extent of the intersection between the 2 images \
