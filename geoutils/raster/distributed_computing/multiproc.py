@@ -148,6 +148,7 @@ def map_overlap_multiproc(  # type: ignore
     raster_path: str | RasterType,
     config: MultiprocConfig,
     *args: Any,
+    return_tiles: bool = False,
     **kwargs: dict[str, Any],
 ) -> None: ...
 
@@ -158,6 +159,7 @@ def map_overlap_multiproc(
     raster_path: str | RasterType,
     config: MultiprocConfig,
     *args: Any,
+    return_tiles: bool = False,
     **kwargs: dict[str, Any],
 ) -> list[Any]: ...
 
@@ -167,6 +169,7 @@ def map_overlap_multiproc(
     raster_path: str | RasterType,
     config: MultiprocConfig,
     *args: Any,
+    return_tiles: bool = False,
     **kwargs: dict[str, Any],
 ) -> None | list[Any]:
     """
@@ -182,6 +185,7 @@ def map_overlap_multiproc(
     :param config: Configuration object containing chunk size, output file, depth, and optional cluster. Output file is
         needed if func returns a Raster or a tuple with a Raster.
     :param args: Additional arguments to pass to the function being applied.
+    :param return_tiles: True to return the tiles coordinates for each tile in the list
     """
     # Load DEM metadata if raster_path is a filepath, otherwise use the Raster object
     if not isinstance(raster_path, Raster):
@@ -263,8 +267,11 @@ def map_overlap_multiproc(
     else:
         # Handle non-raster results
         for results in tasks:
-            result_tile, _ = config.cluster.get_res(results)
-            result_list.append(result_tile)
+            result_tile, dst_tile = config.cluster.get_res(results)
+            if return_tiles:
+                result_list.append((result_tile, dst_tile))
+            else:
+                result_list.append(result_tile)
 
     # Return the result list if there are non-raster results
     if result_list:
