@@ -161,8 +161,9 @@ class TestMultiproc:
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
-    @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])
-    def test_map_overlap_multiproc3(self, example, tile_size, cluster):
+    @pytest.mark.parametrize("cluster", [ClusterGenerator("multi", 4)])  # type: ignore
+    @pytest.mark.parametrize("return_tiles", [False, True])  # type: ignore
+    def test_map_overlap_multiproc3(self, example, tile_size, cluster, return_tiles):
         """
         Test the multiprocessing map function with a simple operation returning a tuple with a raster.
         """
@@ -173,8 +174,16 @@ class TestMultiproc:
         addition = 5
         factor = 0.5
         # Apply the multiproc map function
-        result_list = map_overlap_multiproc(_custom_func_fusion, raster, config, addition, factor)
-        list_stats = [result[0] for result in result_list]
+        result_list = map_overlap_multiproc(
+            _custom_func_fusion, raster, config, addition, factor, return_tiles=return_tiles
+        )
+
+        if return_tiles:
+            list_stats = [result[0] for result in result_list]
+            list_tiles = [result[1] for result in result_list]
+            assert np.array_equal(list_tiles[0], np.array([0, tile_size, 0, tile_size]))
+        else:
+            list_stats = result_list
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded

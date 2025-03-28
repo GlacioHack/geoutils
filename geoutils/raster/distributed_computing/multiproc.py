@@ -242,7 +242,11 @@ def map_overlap_multiproc(
 
                     # If result_tile is a tuple, append the non-raster part to result_list
                     if isinstance(result_tile, tuple):
-                        result_list.append(result_tile[1:])  # Add non-raster parts to result_list
+                        # Add non-raster parts to result_list
+                        if return_tiles:
+                            result_list.append((*result_tile[1:], dst_tile))
+                        else:
+                            result_list.append(*result_tile[1:])
                         result_tile = result_tile[0]  # Extract the raster part
 
                     # Define the window in the output file where the tile should be written
@@ -269,7 +273,10 @@ def map_overlap_multiproc(
         for results in tasks:
             result_tile, dst_tile = config.cluster.get_res(results)
             if return_tiles:
-                result_list.append((result_tile, dst_tile))
+                if isinstance(result_tile, tuple):
+                    result_list.append((*result_tile, dst_tile))
+                else:
+                    result_list.append((result_tile, dst_tile))
             else:
                 result_list.append(result_tile)
 
