@@ -90,6 +90,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.crop
+    Raster.icrop
     Raster.reproject
     Raster.polygonize
     Raster.proximity
@@ -104,6 +105,15 @@ documentation.
     :toctree: gen_modules/
 
     Raster.plot
+```
+
+### Get statistics
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.get_stats
 ```
 
 ### Get or update data methods

@@ -128,7 +128,14 @@ analysis_examples/index
 api
 cli
 config
+```
+
+```{toctree}
+:caption: Project information
+:maxdepth: 2
+
 background
+license
 ```
 
 # Indices and tables

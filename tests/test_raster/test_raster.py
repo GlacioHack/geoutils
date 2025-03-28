@@ -4,13 +4,16 @@ Test functions for raster
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
 import re
 import tempfile
 import warnings
+from cmath import isnan
 from io import StringIO
 from tempfile import TemporaryFile
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -348,7 +351,7 @@ class TestRaster:
         assert isinstance(rio_ds, rio.io.DatasetReader)
 
         # Check that all attributes are equal
-        rio_attrs_conserved = [attr for attr in _default_rio_attrs if attr not in ["name", "driver"]]
+        rio_attrs_conserved = [attr for attr in _default_rio_attrs if attr not in ["name", "driver", "profile"]]
         for attr in rio_attrs_conserved:
             assert rst.__getattribute__(attr) == rio_ds.__getattribute__(attr)
 
@@ -983,9 +986,9 @@ class TestRaster:
         # Check a temporary memory file different than original disk file was created
         assert r2.name != r.name
 
-        # Check all attributes except name and driver
+        # Check all attributes except name, driver and profile
         default_attrs = _default_rio_attrs.copy()
-        for attr in ["name", "driver"]:
+        for attr in ["name", "driver", "profile"]:
             default_attrs.remove(attr)
         attrs = default_attrs
         for attr in attrs:
@@ -1805,6 +1808,40 @@ class TestRaster:
             pass
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("bbox", [[0, 20, 300, 400], (50, 100, 1000, 2000)])  # type: ignore
+    def test_icrop(self, example: str, bbox: list[int] | tuple[int, ...]) -> None:
+        """Test for the icrop method in the Raster class.
+
+        This test checks if the icrop method correctly crops a raster based on the given bounding box (bbox).
+        The assertions validate that the resulting cropped raster's dimensions, transform, and data are accurate.
+        """
+        raster = gu.Raster(example)
+
+        # Call the icrop method with the given bounding box, returning a cropped raster
+        raster_cropped = raster.icrop(bbox=bbox)
+
+        # Compute the expected affine transform for the cropped raster
+        transformed_cropped = rio.transform.Affine(
+            raster.transform.a,
+            raster.transform.b,
+            raster.transform.c + bbox[0] * raster.transform.a,
+            raster.transform.d,
+            raster.transform.e,
+            raster.transform.f + max(raster.height - bbox[3], 0) * raster.transform.e,
+        )
+
+        # Calculate the expected cropped data from the raster's data array
+        data_cropped = raster.data[
+            ..., max(raster.height - bbox[3], 0) : raster.height - bbox[1], bbox[0] : min(bbox[2], raster.width)
+        ]
+
+        # assert that the resulting cropped raster's dimensions, transform, and data are accurate.
+        assert raster_cropped.width == min(raster.width, bbox[2]) - bbox[0]
+        assert raster_cropped.height == min(raster.height, bbox[3]) - bbox[1]
+        assert raster_cropped.transform == transformed_cropped
+        assert np.array_equal(raster_cropped.data, data_cropped)
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_from_array(self, example: str) -> None:
 
         if "LE71" in os.path.basename(example):
@@ -1943,6 +1980,86 @@ class TestRaster:
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
+
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    def test_stats(self, example: str, caplog) -> None:
+        raster = gu.Raster(example)
+
+        expected_stats = [
+            "Mean",
+            "Median",
+            "Max",
+            "Min",
+            "Sum",
+            "Sum of squares",
+            "90th percentile",
+            "LE90",
+            "NMAD",
+            "RMSE",
+            "Standard deviation",
+            "Valid count",
+            "Total count",
+            "Percentage valid points",
+        ]
+
+        expected_stats_mask = [
+            "Valid inlier count",
+            "Total inlier count",
+            "Percentage inlier points",
+            "Percentage valid inlier points",
+        ]
+
+        stat_types = (int, float, np.integer, np.floating)
+
+        # Full stats
+        stats = raster.get_stats()
+        for name in expected_stats:
+            assert name in stats
+            assert isinstance(stats.get(name), stat_types)
+
+        # With mask
+        inlier_mask = raster.get_mask()
+        stats_masked = raster.get_stats(inlier_mask=inlier_mask)
+        for name in expected_stats_mask:
+            assert name in stats_masked
+            assert isinstance(stats_masked.get(name), stat_types)
+            stats_masked.pop(name)
+        assert stats_masked == stats
+
+        # Empty mask
+        empty_mask = np.ones_like(inlier_mask)
+        with caplog.at_level(logging.WARNING):
+            stats_masked = raster.get_stats(inlier_mask=empty_mask)
+        assert "Empty raster, returns Nan for all stats" in caplog.text
+        for name in expected_stats + expected_stats_mask:
+            assert np.isnan(stats_masked.get(name))
+
+        # Single stat
+        for name in expected_stats:
+            stat = raster.get_stats(stats_name=name)
+            assert np.isfinite(stat)
+
+        # Callable
+        def percentile_95(data: NDArrayNum) -> np.floating[Any]:
+            if isinstance(data, np.ma.MaskedArray):
+                data = data.compressed()
+            return np.nanpercentile(data, 95)
+
+        stat = raster.get_stats(stats_name=percentile_95)
+        assert isinstance(stat, np.floating)
+
+        # Selected stats and callable
+        stats_name = ["mean", "max", "std", "percentile_95"]
+        stats = raster.get_stats(stats_name=["mean", "max", "std", percentile_95])
+        for name in stats_name:
+            assert name in stats
+            assert stats.get(name) is not None
+
+        # non-existing stat
+        with caplog.at_level(logging.WARNING):
+            stat = raster.get_stats(stats_name="80 percentile")
+            assert isnan(stat)
+        assert "Statistic name '80 percentile' is not recognized" in caplog.text
 
 
 class TestMask:

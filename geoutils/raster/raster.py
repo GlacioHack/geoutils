@@ -1,9 +1,29 @@
+# Copyright (c) 2025 GeoUtils developers
+# Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
+#
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Module for Raster class.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import pathlib
 import warnings
@@ -70,6 +90,8 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
+from geoutils.stats import linear_error, nmad
+from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -160,6 +182,7 @@ _default_rio_attrs = [
     "shape",
     "transform",
     "width",
+    "profile",
 ]
 
 
@@ -198,7 +221,7 @@ def _load_rio(
     * resampling : to set the resampling algorithm
     """
     # If out_shape is passed, no need to account for transform and shape
-    if kwargs["out_shape"] is not None:
+    if kwargs.get("out_shape") is not None:
         window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
@@ -213,8 +236,6 @@ def _load_rio(
             window = rio.windows.Window(col_off, row_off, *shape[::-1])
         elif sum(param is None for param in [shape, transform]) == 1:
             raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
-        else:
-            window = None
 
     if indexes is None:
         if only_mask:
@@ -316,7 +337,7 @@ def _cast_numeric_array_raster(
     # In some cases the promoted output type does not match any inputs
     # (e.g. for inputs "uint8" and "int8", output is "int16")
     elif (nodata1 is not None) or (nodata2 is not None):
-        out_nodata = nodata1 if not None else nodata2
+        out_nodata = nodata1 if nodata1 is not None else nodata2
 
     # 2/ Output pixel interpretation
     if isinstance(other, Raster):
@@ -390,6 +411,7 @@ class Raster:
         self._disk_transform: affine.Affine | None = None
         self._downsample: int | float = 1
         self._area_or_point: Literal["Area", "Point"] | None = None
+        self._profile: dict[str, Any] | None = None
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
@@ -421,7 +443,7 @@ class Raster:
         if isinstance(filename_or_dataset, Raster):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
-            return
+
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
@@ -449,6 +471,7 @@ class Raster:
                 self._name = ds.name
                 self._driver = ds.driver
                 self._tags.update(ds.tags())
+                self._profile = ds.profile
 
                 # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
                 converted_tags = decode_sensor_metadata(self.tags)
@@ -472,6 +495,7 @@ class Raster:
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
+
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
@@ -640,6 +664,13 @@ class Raster:
     def name(self) -> str | None:
         """Name of the raster file on disk, if it exists."""
         return self._name
+
+    @property
+    def profile(self) -> dict[str, Any] | None:
+        """Basic metadata and creation options of this dataset.
+        May be passed as keyword arguments to rasterio.open()
+        to create a clone of this dataset."""
+        return self._profile
 
     def set_area_or_point(
         self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
@@ -1870,6 +1901,186 @@ class Raster:
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
+    def _statistics(self, band: int = 1, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
+        """
+        Calculate common statistics for a specified band in the raster.
+
+        :param band: The index of the band for which to compute statistics. Default is 1.
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask).
+
+        :returns: A dictionary containing the calculated statistics for the selected band.
+        """
+
+        if self.count == 1:
+            data = self.data
+        else:
+            data = self.data[band - 1]
+
+        # Compute the statistics
+        mdata = np.ma.filled(data.astype(float), np.nan)
+        valid_count = np.count_nonzero(~self.get_mask()) if counts is None else counts[0]
+        stats_dict = {
+            "Mean": np.ma.mean(data),
+            "Median": np.ma.median(data),
+            "Max": np.ma.max(data),
+            "Min": np.ma.min(data),
+            "Sum": np.ma.sum(data),
+            "Sum of squares": np.ma.sum(np.square(data)),
+            "90th percentile": np.nanpercentile(mdata, 90),
+            "LE90": linear_error(mdata, interval=90),
+            "NMAD": nmad(data),
+            "RMSE": np.sqrt(np.ma.mean(np.square(data))),
+            "Standard deviation": np.ma.std(data),
+            "Valid count": valid_count,
+            "Total count": data.size,
+            "Percentage valid points": (valid_count / data.size) * 100,
+        }
+
+        if counts is not None:
+            valid_inlier_count = np.count_nonzero(~self.get_mask())
+            stats_dict.update(
+                {
+                    "Valid inlier count": valid_inlier_count,
+                    "Total inlier count": counts[1],
+                    "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
+                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0,
+                }
+            )
+
+        # If there are no valid data points, set all statistics to NaN
+        if np.count_nonzero(~self.get_mask()) == 0:
+            logging.warning("Empty raster, returns Nan for all stats")
+            for key in stats_dict:
+                stats_dict[key] = np.nan
+
+        return stats_dict
+
+    @overload
+    def get_stats(
+        self,
+        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
+        inlier_mask: Mask | NDArrayBool | None = None,
+        band: int = 1,
+        counts: tuple[int, int] | None = None,
+    ) -> np.floating[Any]: ...
+
+    @overload
+    def get_stats(
+        self,
+        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
+        band: int = 1,
+        counts: tuple[int, int] | None = None,
+    ) -> dict[str, np.floating[Any]]: ...
+
+    def get_stats(
+        self,
+        stats_name: (
+            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
+        ) = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
+        band: int = 1,
+        counts: tuple[int, int] | None = None,
+    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
+        """
+        Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
+        to calculate custom stats.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+            Accepted names include:
+            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
+            `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
+            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
+            Custom callables can also be provided.
+        :param inlier_mask: A boolean mask to filter values for statistical calculations.
+        :param band: The index of the band for which to compute statistics. Default is 1.
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask). DO NOT USE.
+        :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
+        """
+        if not self.is_loaded:
+            self.load()
+        if inlier_mask is not None:
+            valid_points = np.count_nonzero(~self.get_mask())
+            if isinstance(inlier_mask, Mask):
+                inlier_points = np.count_nonzero(~inlier_mask.data)
+            else:
+                inlier_points = np.count_nonzero(~inlier_mask)
+            dem_masked = self.copy()
+            dem_masked.set_mask(inlier_mask)
+            return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+        stats_dict = self._statistics(band=band, counts=counts)
+        if stats_name is None:
+            return stats_dict
+
+        # Define the metric aliases and their actual names
+        stats_aliases = {
+            "mean": "Mean",
+            "median": "Median",
+            "max": "Max",
+            "maximum": "Max",
+            "min": "Min",
+            "minimum": "Min",
+            "sum": "Sum",
+            "sumofsquares": "Sum of squares",
+            "sum2": "Sum of squares",
+            "90thpercentile": "90th percentile",
+            "90percentile": "90th percentile",
+            "le90": "LE90",
+            "nmad": "NMAD",
+            "rmse": "RMSE",
+            "rms": "RMSE",
+            "std": "Standard deviation",
+            "standarddeviation": "Standard deviation",
+            "validcount": "Valid count",
+            "totalcount": "Total count",
+            "percentagevalidpoints": "Percentage valid points",
+        }
+        if counts is not None:
+            stats_aliases.update(
+                {
+                    "validinliercount": "Valid inlier count",
+                    "totalinliercount": "Total inlier count",
+                    "percentagevalidinlierpoints": "Percentage valid inlier points",
+                    "percentageinlierpoints": "Percentage inlier points",
+                }
+            )
+
+        if isinstance(stats_name, list):
+            result = {}
+            for name in stats_name:
+                if callable(name):
+                    result[name.__name__] = name(self.data[band] if self.count > 1 else self.data)
+                else:
+                    result[name] = self._get_single_stat(stats_dict, stats_aliases, name)
+            return result
+        else:
+            if callable(stats_name):
+                return stats_name(self.data[band] if self.count > 1 else self.data)
+            else:
+                return self._get_single_stat(stats_dict, stats_aliases, stats_name)
+
+    @staticmethod
+    def _get_single_stat(
+        stats_dict: dict[str, np.floating[Any]], stats_aliases: dict[str, str], stat_name: str
+    ) -> np.floating[Any]:
+        """
+        Retrieve a single statistic based on a flexible name or alias.
+
+        :param stats_dict: The dictionary of available statistics.
+        :param stats_aliases: The dictionary of alias mappings to the actual stat names.
+        :param stat_name: The name or alias of the statistic to retrieve.
+
+        :returns: The requested statistic value, or None if the stat name is not recognized.
+        """
+
+        normalized_name = stat_name.lower().replace(" ", "").replace("_", "").replace("-", "")
+        if normalized_name in stats_aliases:
+            actual_name = stats_aliases[normalized_name]
+            return stats_dict[actual_name]
+        else:
+            logging.warning("Statistic name '%s' is not recognized", stat_name)
+            return np.float32(np.nan)
+
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
 
@@ -1904,24 +2115,28 @@ class Raster:
         ]
 
         if stats:
+            as_str.append("\nStatistics:\n")
             if not self.is_loaded:
                 self.load()
 
             if self.count == 1:
-                as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
-                as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
-                as_str.append(f"[MEDIAN]:           {np.ma.median(self.data):.2f}\n")
-                as_str.append(f"[MEAN]:             {np.nanmean(self.data):.2f}\n")
-                as_str.append(f"[STD DEV]:          {np.nanstd(self.data):.2f}\n")
+                statistics = self.get_stats()
+
+                # Determine the maximum length of the stat names for alignment
+                max_len = max(len(name) for name in statistics.keys())
+
+                # Format the stats with aligned names
+                for name, value in statistics.items():
+                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
                     as_str.append(f"Band {b + 1}:\n")
-                    as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MINIMUM]:          {np.nanmin(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MEDIAN]:           {np.ma.median(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MEAN]:             {np.nanmean(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[STD DEV]:          {np.nanstd(self.data[b, :, :]):.2f}\n")
+                    statistics = self.get_stats(band=b)
+                    if isinstance(statistics, dict):
+                        max_len = max(len(name) for name in statistics.keys())
+                        for name, value in statistics.items():
+                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
 
         if verbose:
             print("".join(as_str))
@@ -2212,7 +2427,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | gu.Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -2221,7 +2436,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | gu.Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -2230,7 +2445,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | gu.Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2238,7 +2453,7 @@ class Raster:
 
     def crop(
         self: RasterType,
-        crop_geom: RasterType | gu.Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2250,8 +2465,8 @@ class Raster:
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param crop_geom: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
-            coordinates. If ``crop_geom`` is a raster or vector, will crop to the bounds. If ``crop_geom`` is a
+        :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
+            coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param mode: Whether to match within pixels or exact extent. ``'match_pixel'`` will preserve the original pixel
             resolution, cropping to the extent that most closely aligns with the current coordinates. ``'match_extent'``
@@ -2261,7 +2476,7 @@ class Raster:
         :returns: A new raster (or None if inplace).
         """
 
-        crop_img, tfm = _crop(source_raster=self, crop_geom=crop_geom, mode=mode)
+        crop_img, tfm = _crop(source_raster=self, bbox=bbox, mode=mode)
 
         if inplace:
             self._data = crop_img
@@ -2270,6 +2485,34 @@ class Raster:
         else:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
+
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: bool = False,
+    ) -> RasterType | None:
+        """
+        Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
+
+        :param bbox: Pixel-based bounding box as (xmin, ymin, xmax, ymax) in pixel coordinates.
+        :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
+
+        :returns: Cropped raster or None (if inplace=True).
+        """
+        # Ensure bbox contains four elements (xmin, ymin, xmax, ymax)
+        if len(bbox) != 4:
+            raise ValueError("bbox must be a list or tuple of four integers: (xmin, ymin, xmax, ymax).")
+
+        # Convert pixel coordinates to georeferenced coordinates using the transform
+        bottom_left = self.transform * (bbox[0], self.height - bbox[1])
+        top_right = self.transform * (bbox[2], self.height - bbox[3])
+
+        # Create new georeferenced crop geometry (xmin, ymin, xmax, ymax)
+        new_bbox = (bottom_left[0], bottom_left[1], top_right[0], top_right[1])
+
+        # Call the existing crop() method with the new georeferenced crop geometry
+        return self.crop(bbox=new_bbox, inplace=inplace)
 
     @overload
     def reproject(
@@ -2521,7 +2764,7 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
-        meta = self.tags if not None else {}
+        meta = self.tags if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
         if gcps is None:
@@ -2747,6 +2990,38 @@ class Raster:
         # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
         return intersection  # type: ignore
 
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        return_axes: Literal[False] = False,
+        **kwargs: Any,
+    ) -> None: ...
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        return_axes: Literal[True],
+        **kwargs: Any,
+    ) -> tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]: ...
+
     def plot(
         self,
         bands: int | tuple[int, ...] | None = None,
@@ -2795,7 +3070,7 @@ class Raster:
 
         # Set matplotlib interpolation to None by default, to avoid spreading gaps in plots
         if "interpolation" not in kwargs.keys():
-            kwargs.update({"interpolation": "None"})
+            kwargs.update({"interpolation": None})
 
         # Check if specific band selected, or take all
         # rshow takes care of image dimensions
@@ -2884,8 +3159,7 @@ class Raster:
         # If returning axes
         if return_axes:
             return ax0, cax
-        else:
-            return None
+        return None
 
     def reduce_points(
         self,
@@ -3777,7 +4051,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | gu.Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -3786,7 +4060,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | gu.Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -3795,7 +4069,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | gu.Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -3803,7 +4077,7 @@ class Mask(Raster):
 
     def crop(
         self: Mask,
-        crop_geom: Mask | gu.Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -3813,16 +4087,16 @@ class Mask(Raster):
             raise ValueError(NotImplementedError)
             # self._data = self.data.astype("float32")
             # if inplace:
-            #     super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     self._data = self.data.astype(bool)
             #     return None
             # else:
-            #     output = super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     output = super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     output._data = output.data.astype(bool)
             #     return output
         # Otherwise, run a classic crop
         else:
-            return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            return super().crop(bbox=bbox, mode=mode, inplace=inplace)
 
     def polygonize(
         self,
