@@ -17,7 +17,7 @@
 # limitations under the License.
 
 """Process out-of-memory calculations"""
-from typing import Any, Callable
+from typing import Any, Callable, Literal, overload
 
 import numpy as np
 import rasterio as rio
@@ -147,18 +147,24 @@ def map_overlap_multiproc_save(
     **kwargs: dict[str, Any],
 ) -> None:
     """
-    Multiprocessing function for applying out_of_memory operations on raster.
+    Applies a function to raster tiles in parallel and saves the result to a file.
 
-    This function divides the input raster into tiles, processes them in parallel using multiprocessing, and
-    writes the output to a new raster file. It handles the overlap between tiles (depth) to avoid edge effects.
-    The function can return either a :class:`~geoutils.Raster`, a tuple with a :class:`~geoutils.Raster`in the first
-    position and other data, or any other type. Non-raster results are collected into a list.
+    This function divides the input raster into overlapping tiles, processes them in parallel using
+    multiprocessing, and writes the processed results to an output raster file.
 
-    :param func: The function to apply to each tile.
-    :param raster_path: Path to the input raster or the Raster object itself.
-    :param config: Configuration object containing chunk size, output file, and optional cluster. Output file is
-        needed if func returns a Raster or a tuple with a Raster.
-    :param args: Additional arguments to pass to the function being applied.
+    Use this function when `func` returns a :class:`geoutils.Raster`,
+    as it ensures the processed data is written to `config.outfile`.
+
+    :param func: A function to apply to each raster tile. It must return a :class:`geoutils.Raster` object.
+    :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
+    :param config: Configuration object containing chunk size, output file, and an optional cluster.
+        The `outfile` parameter in `config` must be provided.
+    :param args: Additional positional arguments to pass to `func`.
+    :param depth: The overlap size between tiles to avoid edge effects, default is 0.
+    :param kwargs: Additional keyword arguments to pass to `func`.
+
+    :raises ValueError: If `config.outfile` is not provided.
+    :raises RuntimeError: If an error occurs while processing the raster tiles.
     """
     # Load DEM metadata if raster_path is a filepath, otherwise use the Raster object
     if not isinstance(raster_path, Raster):
@@ -224,14 +230,65 @@ def map_overlap_multiproc_save(
             raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
 
 
+@overload
 def map_multiproc_collect(
     func: Callable[..., Any],
     raster_path: str | RasterType,
     config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
+    return_tile: Literal[True],
     **kwargs: dict[str, Any],
-) -> list[Any]:
+) -> list[tuple[Any, NDArrayNum]]: ...
+
+
+@overload
+def map_multiproc_collect(
+    func: Callable[..., Any],
+    raster_path: str | RasterType,
+    config: MultiprocConfig,
+    *args: Any,
+    depth: int = 0,
+    return_tile: Literal[False] = False,
+    **kwargs: dict[str, Any],
+) -> list[Any]: ...
+
+
+def map_multiproc_collect(
+    func: Callable[..., Any],
+    raster_path: str | RasterType,
+    config: MultiprocConfig,
+    *args: Any,
+    depth: int = 0,
+    return_tile: bool = False,
+    **kwargs: dict[str, Any],
+) -> list[Any] | list[tuple[Any, NDArrayNum]]:
+    """
+    Applies a function to raster tiles in parallel and collects the results into a list.
+
+    This function splits an input raster into overlapping tiles, processes them in parallel,
+    and returns the results as a list. It is intended for cases where `func` does *not* return
+    a :class:`geoutils.Raster`, but instead returns arbitrary values (e.g., numerical statistics, feature
+    extractions, etc.).
+
+    If `return_tile=True`, the function returns a list of tuples, where each tuple contains
+    the computed result and the corresponding tile indices.
+
+    :param func: A function to apply to each raster tile. It should return any type *except* :class:`geoutils.Raster`.
+    :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
+    :param config: Configuration object containing chunk size, depth, and an optional cluster.
+    :param args: Additional positional arguments to pass to `func`.
+    :param depth: The overlap size between tiles to avoid edge effects.
+    :param return_tile: If `True`, the output includes the tile indices in addition to the results.
+    :param kwargs: Additional keyword arguments to pass to `func`.
+
+    :returns:
+        - `list[Any]` if `return_tile=False` (default).
+        - `list[tuple[Any, NDArrayNum]]` if `return_tile=True`.
+
+    :raises RuntimeError: If an error occurs while processing the raster tiles.
+    """
+
     # Load DEM metadata if raster_path is a filepath, otherwise use the Raster object
     if not isinstance(raster_path, Raster):
         raster = Raster(raster_path)
@@ -256,7 +313,10 @@ def map_multiproc_collect(
         # Iterate over the tasks and retrieve the processed tiles
         for results in tasks:
             result, dst_tile = config.cluster.get_res(results)
-            list_results.append(result)
+            if return_tile:
+                list_results.append((result, return_tile))
+            else:
+                list_results.append(result)
         return list_results
 
     except Exception as e:

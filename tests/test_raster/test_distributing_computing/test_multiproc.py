@@ -132,7 +132,8 @@ class TestMultiproc:
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
     @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])
-    def test_map_multiproc_collect(self, example, tile_size, cluster):
+    @pytest.mark.parametrize("return_tile", [False, True])
+    def test_map_multiproc_collect(self, example, tile_size, cluster, return_tile):
         """
         Test the multiprocessing map function with a simple operation returning not a raster.
         """
@@ -140,7 +141,11 @@ class TestMultiproc:
         config = MultiprocConfig(tile_size, cluster=cluster)
 
         # Apply the multiproc map function
-        list_stats = map_multiproc_collect(_custom_func_stats, raster, config)
+        results = map_multiproc_collect(_custom_func_stats, raster, config, return_tile=return_tile)
+        if return_tile:
+            list_stats = [result[0] for result in results]
+        else:
+            list_stats = results
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded
