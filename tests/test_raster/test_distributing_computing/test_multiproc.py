@@ -59,7 +59,7 @@ class TestMultiproc:
         """
         raster = Raster(example)
         # Define a tile (bounding box) to load
-        tile = np.array([50, 125, 100, 200])  # [xmin, xmax, ymin, ymax]
+        tile = np.array([50, 125, 100, 200])  # [rowmin, rowmax, colmin, colmax]
 
         # Load the tile and verify dimensions
         raster_tile = load_raster_tile(raster, tile)
@@ -90,7 +90,7 @@ class TestMultiproc:
         Test applying a function to a raster tile and handling padding removal.
         """
         raster = Raster(example)
-        tile = np.array([100, 200, 100, 200])  # [xmin, xmax, ymin, ymax]
+        tile = np.array([100, 200, 100, 200])  # [rowmin, rowmax, colmin, colmax]
         size = 2
 
         # Apply map_block

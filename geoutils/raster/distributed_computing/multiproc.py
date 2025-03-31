@@ -72,9 +72,9 @@ def load_raster_tile(raster_unload: RasterType, tile: NDArrayNum) -> RasterType:
     :param tile: The bounding box of the tile as [xmin, xmax, ymin, ymax].
     :return: The extracted raster tile.
     """
-    xmin, xmax, ymin, ymax = tile
+    rowmin, rowmax, colmin, colmax = tile
     # Crop the raster to extract the tile based on the bounding box coordinates
-    raster_tile = raster_unload.icrop(bbox=(xmin, ymin, xmax, ymax))
+    raster_tile = raster_unload.icrop(bbox=(colmin, rowmin, colmax, rowmax))
     return raster_tile
 
 
@@ -84,28 +84,28 @@ def remove_tile_padding(raster_shape: tuple[int, int], raster_tile: RasterType, 
 
     :param raster_shape: The shape (height, width) of the raster from which tiles are extracted.
     :param raster_tile: The raster tile with possible padding that needs removal.
-    :param tile: The bounding box of the tile as [xmin, xmax, ymin, ymax].
+    :param tile: The bounding box of the tile as [rowmin, rowmax, colmin, colmax].
     :param padding: The padding size to be removed from each side of the tile.
     """
     # New bounding box dimensions after removing padding
-    xmin, xmax, ymin, ymax = 0, raster_tile.height, 0, raster_tile.width
+    colmin, rowmin, colmax, rowmax = 0, 0, raster_tile.width, raster_tile.height
 
     # Remove padding only if the tile is not at the DEM's edges
     if tile[0] != 0:
         tile[0] += padding
-        xmin += padding
+        rowmin += padding
     if tile[1] != raster_shape[0]:
         tile[1] -= padding
-        xmax -= padding
+        rowmax -= padding
     if tile[2] != 0:
         tile[2] += padding
-        ymin += padding
+        colmin += padding
     if tile[3] != raster_shape[1]:
         tile[3] -= padding
-        ymax -= padding
+        colmax -= padding
 
     # Apply the new bounding box to crop the tile and remove the padding
-    raster_tile.icrop(bbox=(xmin, ymin, xmax, ymax), inplace=True)
+    raster_tile.icrop(bbox=(colmin, rowmin, colmax, rowmax), inplace=True)
 
 
 def apply_func_block(
