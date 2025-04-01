@@ -226,6 +226,7 @@ def map_overlap_multiproc_save(
 
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
+            print(f"Raster saved under {config.outfile}")
         except Exception as e:
             raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
 
