@@ -15,11 +15,13 @@ from geoutils.raster import RasterType
 from geoutils.raster.distributed_computing import (
     ClusterGenerator,
     MultiprocConfig,
-    apply_func_block,
-    load_raster_tile,
     map_multiproc_collect,
     map_overlap_multiproc_save,
-    remove_tile_padding,
+)
+from geoutils.raster.distributed_computing.multiproc import (
+    _apply_func_block,
+    _remove_tile_padding,
+    load_raster_tile,
 )
 
 
@@ -74,7 +76,7 @@ class TestMultiproc:
         raster_tile_with_padding = load_raster_tile(raster, tile_pad)
 
         # Remove padding and ensure it's back to the original size
-        remove_tile_padding((raster.height, raster.width), raster_tile_with_padding, tile, padding)
+        _remove_tile_padding((raster.height, raster.width), raster_tile_with_padding, tile, padding)
         assert raster_tile_with_padding.raster_equal(raster_tile)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
@@ -88,7 +90,7 @@ class TestMultiproc:
         size = 2
 
         # Apply map_block
-        result_tile, _ = apply_func_block(_custom_func_overlap, raster, tile, padding, size)
+        result_tile, _ = _apply_func_block(_custom_func_overlap, raster, tile, padding, size)
 
         raster = _custom_func_overlap(raster, size)
         # If padding >=1, The result should be the equal to the original tile filtered

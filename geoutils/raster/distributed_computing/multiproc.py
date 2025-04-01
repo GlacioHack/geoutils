@@ -74,7 +74,9 @@ def load_raster_tile(raster_unload: RasterType, tile: NDArrayNum) -> RasterType:
     return raster_tile
 
 
-def remove_tile_padding(raster_shape: tuple[int, int], raster_tile: RasterType, tile: NDArrayNum, padding: int) -> None:
+def _remove_tile_padding(
+    raster_shape: tuple[int, int], raster_tile: RasterType, tile: NDArrayNum, padding: int
+) -> None:
     """
     Removes the padding added around tiles during terrain attribute computation to prevent edge effects.
 
@@ -104,7 +106,7 @@ def remove_tile_padding(raster_shape: tuple[int, int], raster_tile: RasterType, 
     raster_tile.icrop(bbox=(colmin, rowmin, colmax, rowmax), inplace=True)
 
 
-def apply_func_block(
+def _apply_func_block(
     func: Callable[..., Any],
     raster: RasterType,
     tile: NDArrayNum,
@@ -131,9 +133,9 @@ def apply_func_block(
 
     # Remove padding
     if isinstance(result_tile, Raster):
-        remove_tile_padding((raster.height, raster.width), result_tile, tile, depth)
+        _remove_tile_padding((raster.height, raster.width), result_tile, tile, depth)
     elif isinstance(result_tile, tuple) and isinstance(result_tile[0], Raster):
-        remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
+        _remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
 
     return result_tile, tile
 
@@ -182,7 +184,7 @@ def map_overlap_multiproc_save(
             tile = tiling_grid[row, col]
             # Launch the task on the cluster to process each tile
             tasks.append(
-                config.cluster.launch_task(fun=apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
+                config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
             )
 
     # get first tile to retrieve dtype and nodata
@@ -306,7 +308,7 @@ def map_multiproc_collect(
             tile = tiling_grid[row, col]
             # Launch the task on the cluster to process each tile
             tasks.append(
-                config.cluster.launch_task(fun=apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
+                config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
             )
 
     try:
