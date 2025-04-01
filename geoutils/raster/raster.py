@@ -729,17 +729,16 @@ class Raster:
             and isinstance(new_area_or_point, str)
             and old_area_or_point != new_area_or_point
         ):
-            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij), but because
-            # the Y axis is inverted, a minus signs is added to shift the coordinate (even if the unit is in pixel)
+            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij)
 
             # If the new one is Point, we shift back by half a pixel
             if new_area_or_point == "Point":
                 xoff = 0.5
-                yoff = -0.5
+                yoff = 0.5
             # Otherwise we shift forward half a pixel
             else:
                 xoff = -0.5
-                yoff = 0.5
+                yoff = -0.5
             # We perform the shift in place
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
@@ -2485,6 +2484,22 @@ class Raster:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
             return newraster
 
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[True],
+    ) -> None: ...
+
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[False] = False,
+    ) -> RasterType: ...
+
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -2494,24 +2509,20 @@ class Raster:
         """
         Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
-        :param bbox: Pixel-based bounding box as (xmin, ymin, xmax, ymax) in pixel coordinates.
+        :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowax).
         :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
 
         :returns: Cropped raster or None (if inplace=True).
         """
-        # Ensure bbox contains four elements (xmin, ymin, xmax, ymax)
-        if len(bbox) != 4:
-            raise ValueError("bbox must be a list or tuple of four integers: (xmin, ymin, xmax, ymax).")
+        crop_img, tfm = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
 
-        # Convert pixel coordinates to georeferenced coordinates using the transform
-        bottom_left = self.transform * (bbox[0], self.height - bbox[1])
-        top_right = self.transform * (bbox[2], self.height - bbox[3])
-
-        # Create new georeferenced crop geometry (xmin, ymin, xmax, ymax)
-        new_bbox = (bottom_left[0], bottom_left[1], top_right[0], top_right[1])
-
-        # Call the existing crop() method with the new georeferenced crop geometry
-        return self.crop(bbox=new_bbox, inplace=inplace)
+        if inplace:
+            self._data = crop_img
+            self.transform = tfm
+            return None
+        else:
+            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
+            return newraster
 
     @overload
     def reproject(
@@ -2958,7 +2969,7 @@ class Raster:
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
-        :param rst : path to the second image (or another Raster instance)
+        :param raster : path to the second image (or another Raster instance)
         :param match_ref: if set to True, returns the smallest intersection that aligns with that of self, i.e. same \
         resolution and offset with self's origin is a multiple of the resolution
         :returns: extent of the intersection between the 2 images \

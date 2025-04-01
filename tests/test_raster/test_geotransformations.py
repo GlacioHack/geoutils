@@ -305,14 +305,14 @@ class TestRasterGeotransformations:
 
         # Only bounds should change
         assert orig_transform.c + 1 * orig_res[0] == r.transform.c
-        assert orig_transform.f + 1 * orig_res[1] == r.transform.f
+        assert orig_transform.f - 1 * orig_res[1] == r.transform.f
         for attr in ["a", "b", "d", "e"]:
             assert getattr(orig_transform, attr) == getattr(r.transform, attr)
 
         assert orig_bounds.left + 1 * orig_res[0] == r.bounds.left
         assert orig_bounds.right + 1 * orig_res[0] == r.bounds.right
-        assert orig_bounds.bottom + 1 * orig_res[1] == r.bounds.bottom
-        assert orig_bounds.top + 1 * orig_res[1] == r.bounds.top
+        assert orig_bounds.bottom - 1 * orig_res[1] == r.bounds.bottom
+        assert orig_bounds.top - 1 * orig_res[1] == r.bounds.top
 
         # Check that an error is raised for a wrong distance_unit
         with pytest.raises(ValueError, match="Argument 'distance_unit' should be either 'pixel' or 'georeferenced'."):
@@ -703,12 +703,22 @@ class TestMaskGeotransformations:
         assert np.array_equal(mask.data[:, rand_int:].data, mask_cropped.data.data, equal_nan=True)
         assert np.array_equal(mask.data[:, rand_int:].mask, mask_cropped.data.mask)
 
+        #  With icrop
+        bbox2_pixel = [rand_int, 0, mask.width, mask.height]
+        mask_cropped_pix = mask.icrop(bbox2_pixel)
+        assert mask_cropped.raster_equal(mask_cropped_pix)
+
         # Right
         bbox2 = [bbox[0], bbox[1], bbox[2] - rand_int * mask.res[0], bbox[3]]
         mask_cropped = mask.crop(bbox2)
         assert list(mask_cropped.bounds) == bbox2
         assert np.array_equal(mask.data[:, :-rand_int].data, mask_cropped.data.data, equal_nan=True)
         assert np.array_equal(mask.data[:, :-rand_int].mask, mask_cropped.data.mask)
+
+        #  With icrop
+        bbox2_pixel = [0, 0, mask.width - rand_int, mask.height]
+        mask_cropped_pix = mask.icrop(bbox2_pixel)
+        assert mask_cropped.raster_equal(mask_cropped_pix)
 
         # Bottom
         bbox2 = [bbox[0], bbox[1] + rand_int * abs(mask.res[1]), bbox[2], bbox[3]]
@@ -717,6 +727,11 @@ class TestMaskGeotransformations:
         assert np.array_equal(mask.data[:-rand_int, :].data, mask_cropped.data.data, equal_nan=True)
         assert np.array_equal(mask.data[:-rand_int, :].mask, mask_cropped.data.mask)
 
+        #  With icrop
+        bbox2_pixel = [0, 0, mask.width, mask.height - rand_int]
+        mask_cropped_pix = mask.icrop(bbox2_pixel)
+        assert mask_cropped.raster_equal(mask_cropped_pix)
+
         # Top
         bbox2 = [bbox[0], bbox[1], bbox[2], bbox[3] - rand_int * abs(mask.res[1])]
         mask_cropped = mask.crop(bbox2)
@@ -724,12 +739,22 @@ class TestMaskGeotransformations:
         assert np.array_equal(mask.data[rand_int:, :].data, mask_cropped.data, equal_nan=True)
         assert np.array_equal(mask.data[rand_int:, :].mask, mask_cropped.data.mask)
 
+        #  With icrop
+        bbox2_pixel = [0, rand_int, mask.width, mask.height]
+        mask_cropped_pix = mask.icrop(bbox2_pixel)
+        assert mask_cropped.raster_equal(mask_cropped_pix)
+
         # Test inplace
         mask_orig = mask.copy()
         mask_orig.crop(bbox2, inplace=True)
         assert list(mask_orig.bounds) == bbox2
         assert np.array_equal(mask.data[rand_int:, :].data, mask_orig.data, equal_nan=True)
         assert np.array_equal(mask.data[rand_int:, :].mask, mask_orig.data.mask)
+
+        # With icrop
+        mask_orig_pix = mask.copy()
+        mask_orig_pix.icrop(bbox2_pixel, inplace=True)
+        assert mask_orig.raster_equal(mask_orig_pix)
 
         # Run with match_extent, check that inplace or not yields the same result
 

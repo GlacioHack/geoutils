@@ -1808,40 +1808,6 @@ class TestRaster:
             pass
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    @pytest.mark.parametrize("bbox", [[0, 20, 300, 400], (50, 100, 1000, 2000)])  # type: ignore
-    def test_icrop(self, example: str, bbox: list[int] | tuple[int, ...]) -> None:
-        """Test for the icrop method in the Raster class.
-
-        This test checks if the icrop method correctly crops a raster based on the given bounding box (bbox).
-        The assertions validate that the resulting cropped raster's dimensions, transform, and data are accurate.
-        """
-        raster = gu.Raster(example)
-
-        # Call the icrop method with the given bounding box, returning a cropped raster
-        raster_cropped = raster.icrop(bbox=bbox)
-
-        # Compute the expected affine transform for the cropped raster
-        transformed_cropped = rio.transform.Affine(
-            raster.transform.a,
-            raster.transform.b,
-            raster.transform.c + bbox[0] * raster.transform.a,
-            raster.transform.d,
-            raster.transform.e,
-            raster.transform.f + max(raster.height - bbox[3], 0) * raster.transform.e,
-        )
-
-        # Calculate the expected cropped data from the raster's data array
-        data_cropped = raster.data[
-            ..., max(raster.height - bbox[3], 0) : raster.height - bbox[1], bbox[0] : min(bbox[2], raster.width)
-        ]
-
-        # assert that the resulting cropped raster's dimensions, transform, and data are accurate.
-        assert raster_cropped.width == min(raster.width, bbox[2]) - bbox[0]
-        assert raster_cropped.height == min(raster.height, bbox[3]) - bbox[1]
-        assert raster_cropped.transform == transformed_cropped
-        assert np.array_equal(raster_cropped.data, data_cropped)
-
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_from_array(self, example: str) -> None:
 
         if "LE71" in os.path.basename(example):

@@ -256,7 +256,7 @@ See {ref}`core-match-ref` for more details.
 
 The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default,
 {func}`~geoutils.Raster.crop` returns a new Raster.
-The {func}`~geoutils.Raster.icrop` function accepts only a bounding box in pixel coordinates (xmin, ymin, xmax, ymax) and crop the raster accordingly.
+The {func}`~geoutils.Raster.icrop` function accepts only a bounding box in pixel coordinates (colmin, rowmin, colmax, rowmax) and crop the raster accordingly.
 By default, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.icrop` return a new Raster unless the inplace parameter is set to True, in which case the cropping operation is performed directly on the original raster object.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
