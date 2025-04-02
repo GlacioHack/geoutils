@@ -445,13 +445,12 @@ def _crop(
     source_raster: gu.Raster,
     bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
     mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
+    distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
 ) -> tuple[MArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
 
-    assert mode in [
-        "match_extent",
-        "match_pixel",
-    ], "mode must be one of 'match_pixel', 'match_extent'"
+    assert mode in ["match_extent", "match_pixel"], "mode must be one of 'match_pixel', 'match_extent'"
+    assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
 
     if isinstance(bbox, (gu.Raster, gu.Vector)):
         # For another Vector or Raster, we reproject the bounding box in the same CRS as self
@@ -460,7 +459,12 @@ def _crop(
             # Raise a warning if the reference is a raster that has a different pixel interpretation
             _cast_pixel_interpretation(source_raster.area_or_point, bbox.area_or_point)
     elif isinstance(bbox, (list, tuple)):
-        xmin, ymin, xmax, ymax = bbox
+        if distance_unit == "georeferenced":
+            xmin, ymin, xmax, ymax = bbox
+        else:
+            colmin, rowmin, colmax, rowmax = bbox
+            xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
+            xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
     else:
         raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
 
@@ -556,6 +560,6 @@ def _translate(
     # Convert pixel offsets to georeferenced units
     if distance_unit == "pixel":
         xoff *= dx
-        yoff *= abs(dy)  # dy is negative
+        yoff *= dy
 
     return rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
