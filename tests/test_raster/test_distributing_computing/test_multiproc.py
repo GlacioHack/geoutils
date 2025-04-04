@@ -20,8 +20,8 @@ from geoutils.raster.distributed_computing import (
 )
 from geoutils.raster.distributed_computing.multiproc import (
     _apply_func_block,
+    _load_raster_tile,
     _remove_tile_padding,
-    load_raster_tile,
 )
 
 
@@ -58,7 +58,7 @@ class TestMultiproc:
         tile = np.array([50, 125, 100, 200])  # [rowmin, rowmax, colmin, colmax]
 
         # Load the tile and verify dimensions
-        raster_tile = load_raster_tile(raster, tile)
+        raster_tile = _load_raster_tile(raster, tile)
         assert np.array_equal(raster_tile.data, raster.data[..., tile[0] : tile[1], tile[2] : tile[3]])
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
@@ -72,8 +72,8 @@ class TestMultiproc:
         tile = np.array([0, 100, 50, 150])
         tile_pad = tile + np.array([-1, 1, -1, 1]) * padding
 
-        raster_tile = load_raster_tile(raster, tile)
-        raster_tile_with_padding = load_raster_tile(raster, tile_pad)
+        raster_tile = _load_raster_tile(raster, tile)
+        raster_tile_with_padding = _load_raster_tile(raster, tile_pad)
 
         # Remove padding and ensure it's back to the original size
         _remove_tile_padding((raster.height, raster.width), raster_tile_with_padding, tile, padding)
@@ -94,7 +94,7 @@ class TestMultiproc:
 
         raster = _custom_func_overlap(raster, size)
         # If padding >=1, The result should be the equal to the original tile filtered
-        original_tile_filtered = load_raster_tile(raster, tile)
+        original_tile_filtered = _load_raster_tile(raster, tile)
         if padding >= size - 1:
             assert result_tile.raster_equal(original_tile_filtered)
         else:
@@ -146,6 +146,8 @@ class TestMultiproc:
         results = map_multiproc_collect(_custom_func_stats, raster, config, return_tile=return_tile)
         if return_tile:
             list_stats = [result[0] for result in results]
+            list_tiles = [result[1] for result in results]
+            assert np.array_equal(list_tiles[0], np.array([0, tile_size, 0, tile_size]))
         else:
             list_stats = results
 
