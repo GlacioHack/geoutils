@@ -33,9 +33,15 @@ from geoutils.raster.distributed_computing.cluster import (
     AbstractCluster,
     ClusterGenerator,
 )
+from geoutils.raster.distributed_computing.delayed_dask import (
+    ChunkedGeoGrid,
+    GeoGrid,
+    _chunks2d_from_chunksizes_shape,
+    _combined_blocks_shape_transform,
+    _reproject_per_block,
+)
 from geoutils.raster.geotransformations import (
     _get_target_georeferenced_grid,
-    _reproject,
     _user_input_reproject,
 )
 from geoutils.raster.tiling import compute_tiling
@@ -120,7 +126,7 @@ def _apply_func_block(
     tile: NDArrayNum,
     depth: int,
     *args: Any,
-    **kwargs: dict[str, Any],
+    **kwargs: Any,
 ) -> tuple[Any, NDArrayNum]:
     """
     Apply a function to a specific tile of a raster, handling loading and padding.
@@ -154,7 +160,7 @@ def map_overlap_multiproc_save(
     config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
-    **kwargs: dict[str, Any],
+    **kwargs: Any,
 ) -> None:
     """
     Applies a function to raster tiles in parallel and saves the result to a file.
@@ -215,7 +221,6 @@ def _write_multiproc_result(
     tasks: list[Any],
     config: MultiprocConfig,
     file_metadata: dict[str, Any] | None = None,
-    mode: Literal["r+", "w", "w+"] = "w",
 ) -> None:
 
     # Ensure that an output file is provided
@@ -225,7 +230,7 @@ def _write_multiproc_result(
     # Create a new raster file to save the processed results
     if file_metadata is None:
         file_metadata = {}
-    with rio.open(config.outfile, mode, **file_metadata) as dst:
+    with rio.open(config.outfile, "w", **file_metadata) as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
@@ -240,10 +245,10 @@ def _write_multiproc_result(
                 )
 
                 # Cast to 3D before saving if single band
-                if result_tile.count == 1:
-                    data = result_tile[np.newaxis, :, :]
+                if isinstance(result_tile, gu.Raster):
+                    data = result_tile.data if result_tile.count > 1 else result_tile[np.newaxis, :, :]
                 else:
-                    data = result_tile.data
+                    data = result_tile if len(result_tile.shape) > 2 else result_tile[np.newaxis, :, :]
 
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
@@ -260,7 +265,7 @@ def map_multiproc_collect(
     *args: Any,
     depth: int = 0,
     return_tile: Literal[True],
-    **kwargs: dict[str, Any],
+    **kwargs: Any,
 ) -> list[tuple[Any, NDArrayNum]]: ...
 
 
@@ -272,7 +277,7 @@ def map_multiproc_collect(
     *args: Any,
     depth: int = 0,
     return_tile: Literal[False] = False,
-    **kwargs: dict[str, Any],
+    **kwargs: Any,
 ) -> list[Any]: ...
 
 
@@ -283,7 +288,7 @@ def map_multiproc_collect(
     *args: Any,
     depth: int = 0,
     return_tile: bool = False,
-    **kwargs: dict[str, Any],
+    **kwargs: Any,
 ) -> list[Any] | list[tuple[Any, NDArrayNum]]:
     """
     Applies a function to raster tiles in parallel and collects the results into a list.
@@ -345,33 +350,40 @@ def map_multiproc_collect(
         raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
 
 
-def _reproject_block(
-    dst_raster_tile: gu.Raster,
-    raster_unload: gu.Raster,
-    resampling: Resampling | str = Resampling.bilinear,
-    silent: bool = False,
-) -> gu.Raster | None:
+def _multiproc_reproject_per_block(
+    *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
+) -> NDArrayNum:
+    """
+    Delayed reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
+    """
+    return _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
 
-    try:
-        footprint_projected = dst_raster_tile.get_footprint_projected(raster_unload.crs)
-        raster_tile = raster_unload.crop(bbox=footprint_projected)
-    except rio.errors.WindowError:
-        return None
 
-    _, data, transformed, crs, nodata = _reproject(
-        source_raster=raster_tile, ref=dst_raster_tile, resampling=resampling, silent=silent
+def _wrapper_multiproc_reproject_per_block(
+    rst: gu.Raster,
+    src_block_ids: list[dict[str, int]],
+    dst_block_id: dict[str, int],
+    idx_d2s: list[int],
+    block_ids: list[dict[str, int]],
+    combined_meta: dict[str, Any],
+    **kwargs: Any,
+) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
+    """Wrapper to use reproject_per_block for multiprocessing."""
+
+    # Get source array block for each destination block
+    s = src_block_ids
+    src_arrs = (rst.icrop(bbox=(s[idx]["xs"], s[idx]["ys"], s[idx]["xe"], s[idx]["ye"])).data for idx in idx_d2s)
+
+    # Call reproject per block
+    dst_block_arr = _multiproc_reproject_per_block(
+        *src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs
     )
-    raster_tile._crs = crs
-    raster_tile._nodata = nodata
-    raster_tile._transform = transformed
-    assert data is not None  # for mypy
-    raster_tile._data = data.squeeze()
-    raster_tile.data = data
-    return raster_tile
+
+    return dst_block_arr, (dst_block_id["ys"], dst_block_id["ye"], dst_block_id["xs"], dst_block_id["xe"])
 
 
 def _multiproc_reproject(
-    raster_unload: gu.Raster | str,
+    rst: gu.Raster,
     config: MultiprocConfig,
     ref: gu.Raster | str | None = None,
     crs: CRS | str | int | None = None,
@@ -382,13 +394,12 @@ def _multiproc_reproject(
     dtype: DTypeLike | None = None,
     resampling: Resampling | str = Resampling.bilinear,
     force_source_nodata: int | float | None = None,
-    silent: bool = True,
+    **kwargs: Any,
 ) -> None:
     """
-    Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
-    Compute tiling and use multiprocessing to reproject each tile.
+    Reproject georeferenced raster on out-of-memory chunks with multiprocessing.
 
-    :param raster_unload: raster data source to be reprojected.
+    :param rst: raster data source to be reprojected.
     :param config: Configuration object containing chunk size, output file path, and an optional cluster.
     :param ref: Reference raster to match resolution, bounds and CRS.
     :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
@@ -404,14 +415,10 @@ def _multiproc_reproject(
         See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
         for the full list.
     :param force_source_nodata: Force a source nodata value (read from the metadata by default).
-    :param silent: Whether to print warning statements.
     """
-    if isinstance(raster_unload, str):
-        raster_unload = gu.Raster(raster_unload)
-
     # Process user inputs
-    crs, dtype, src_nodata, nodata, res, bounds = _user_input_reproject(
-        source_raster=raster_unload,
+    dst_crs, dst_dtype, src_nodata, dst_nodata, dst_res, dst_bounds = _user_input_reproject(
+        source_raster=rst,
         ref=ref,
         crs=crs,
         bounds=bounds,
@@ -422,44 +429,104 @@ def _multiproc_reproject(
     )
 
     # Retrieve transform and grid_size
-    transform, grid_size = _get_target_georeferenced_grid(
-        raster_unload, crs=crs, grid_size=grid_size, res=res, bounds=bounds
+    dst_transform, dst_grid_size = _get_target_georeferenced_grid(
+        rst, crs=dst_crs, grid_size=grid_size, res=dst_res, bounds=dst_bounds
     )
-    width, height = grid_size
+    dst_width, dst_height = dst_grid_size
+    dst_shape = (dst_height, dst_width)
 
-    # Create file on disk for the reprojected raster
-    with rio.open(
-        config.outfile,
-        "w",
-        driver="GTiff",
-        height=height,
-        width=width,
-        count=raster_unload.count,
-        dtype=dtype,
-        crs=crs,
-        transform=transform,
-        nodata=nodata,
-    ):
-        pass
-    dst_raster = gu.Raster(config.outfile)
+    # 1/ Define source and destination chunked georeferenced grid through simple classes storing CRS/transform/shape,
+    # which allow to consistently derive shape/transform for each block and their CRS-projected footprints
 
-    # Create tiling grid
-    depth = 0
-    dst_grid = compute_tiling(config.chunk_size, dst_raster.shape, dst_raster.shape, overlap=depth)
+    # Define georeferenced grids for source/destination array
+    src_geogrid = GeoGrid(transform=rst.transform, shape=rst.shape, crs=rst.crs)
+    dst_geogrid = GeoGrid(transform=dst_transform, shape=dst_shape, crs=dst_crs)
 
-    # Create an empty task array for multiprocessing
+    # Add the chunking
+    chunks_x = tuple(
+        (config.chunk_size if i <= rst.shape[0] else rst.shape[0] % config.chunk_size)
+        for i in np.arange(config.chunk_size, rst.shape[0] + config.chunk_size, config.chunk_size)
+    )
+    chunks_y = tuple(
+        (config.chunk_size if i <= rst.shape[1] else rst.shape[1] % config.chunk_size)
+        for i in np.arange(config.chunk_size, rst.shape[1] + config.chunk_size, config.chunk_size)
+    )
+    src_chunks = (chunks_x, chunks_y)
+
+    src_geotiling = ChunkedGeoGrid(grid=src_geogrid, chunks=src_chunks)
+
+    # For destination, we need to create the chunks based on destination chunksizes
+    dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=(config.chunk_size, config.chunk_size), shape=dst_shape)
+    dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
+
+    # 2/ Get footprints of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
+    # overlap, then map indexes of source blocks that intersect a given destination block
+    src_footprints = src_geotiling.get_block_footprints(crs=dst_crs)
+    dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
+    dest2source = [np.where(dst.intersects(src_footprints).values)[0] for dst in dst_footprints]
+
+    # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
+    # transform of each tuples of source blocks
+    src_block_ids = np.array(src_geotiling.get_block_locations())
+    meta_params = [
+        (
+            _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)  # type: ignore
+            if len(sbid) > 0
+            else ({}, [])
+        )
+        for sbid in dest2source
+    ]
+    # We also add the output transform/shape for this destination chunk in the combined meta
+    # (those are the only two that are chunk-specific)
+    dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
+    for i, (c, _) in enumerate(meta_params):
+        c.update({"dst_shape": dst_block_geogrids[i].shape, "dst_transform": tuple(dst_block_geogrids[i].transform)})
+
+    # 4/ Call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
+
+    # Add fixed arguments to keywords
+    kwargs.update(
+        {
+            "src_nodata": src_nodata,
+            "dst_nodata": dst_nodata,
+            "resampling": resampling,
+            "src_crs": rst.crs,
+            "dst_crs": dst_crs,
+        }
+    )
+
+    # Get location of destination blocks to write file
+    dst_block_ids = np.array(dst_geotiling.get_block_locations())
+
+    # Create tasks for multiprocessing
     tasks = []
-
-    # loop on tiles
-    for row in range(dst_grid.shape[0]):
-        for col in range(dst_grid.shape[1]):
-            dst_tile = dst_grid[row, col]
-            # Launch the task on the cluster to process each tile
-            tasks.append(
-                config.cluster.launch_task(
-                    fun=_apply_func_block,
-                    args=[_reproject_block, dst_raster, dst_tile, depth, raster_unload, resampling, silent],
-                )
+    for i in range(len(dest2source)):
+        tasks.append(
+            config.cluster.launch_task(
+                fun=_wrapper_multiproc_reproject_per_block,
+                args=[
+                    rst,
+                    src_block_ids,
+                    dst_block_ids[i],
+                    dest2source[i],
+                    meta_params[i][1],
+                    meta_params[i][0],
+                ],
+                kwargs=kwargs,
             )
+        )
 
-    _write_multiproc_result(tasks, config, mode="r+")
+    # Retrieve metadata for saving file
+    file_metadata = {
+        "driver": "GTIFF",
+        "width": dst_width,
+        "height": dst_height,
+        "count": rst.count,
+        "crs": dst_crs,
+        "transform": dst_transform,
+        "dtype": rst.dtype,
+        "nodata": dst_nodata,
+    }
+
+    # Create a new raster file to save the processed results
+    _write_multiproc_result(tasks, config, file_metadata)
