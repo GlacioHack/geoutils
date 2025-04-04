@@ -17,18 +17,28 @@
 # limitations under the License.
 
 """Process out-of-memory calculations"""
+from __future__ import annotations
+
+from collections import abc
 from typing import Any, Callable, Literal, overload
 
 import numpy as np
 import rasterio as rio
+from rasterio import CRS
+from rasterio._io import Resampling
 
-from geoutils import Raster
-from geoutils._typing import NDArrayNum
-from geoutils.raster import RasterType, compute_tiling
+import geoutils as gu
+from geoutils._typing import DTypeLike, NDArrayNum
 from geoutils.raster.distributed_computing.cluster import (
     AbstractCluster,
     ClusterGenerator,
 )
+from geoutils.raster.geotransformations import (
+    _get_target_georeferenced_grid,
+    _reproject,
+    _user_input_reproject,
+)
+from geoutils.raster.tiling import compute_tiling
 
 
 class MultiprocConfig:
@@ -56,11 +66,11 @@ class MultiprocConfig:
         assert isinstance(cluster, AbstractCluster)  # for mypy
         self.cluster = cluster
 
-    def copy(self) -> "MultiprocConfig":
+    def copy(self) -> MultiprocConfig:
         return MultiprocConfig(chunk_size=self.chunk_size, outfile=self.outfile, cluster=self.cluster)
 
 
-def load_raster_tile(raster_unload: RasterType, tile: NDArrayNum) -> RasterType:
+def _load_raster_tile(raster_unload: gu.Raster, tile: NDArrayNum) -> gu.Raster:
     """
     Extracts a specific tile (spatial subset) from the raster based on the provided tile coordinates.
 
@@ -74,9 +84,7 @@ def load_raster_tile(raster_unload: RasterType, tile: NDArrayNum) -> RasterType:
     return raster_tile
 
 
-def _remove_tile_padding(
-    raster_shape: tuple[int, int], raster_tile: RasterType, tile: NDArrayNum, padding: int
-) -> None:
+def _remove_tile_padding(raster_shape: tuple[int, int], raster_tile: gu.Raster, tile: NDArrayNum, padding: int) -> None:
     """
     Removes the padding added around tiles during terrain attribute computation to prevent edge effects.
 
@@ -108,7 +116,7 @@ def _remove_tile_padding(
 
 def _apply_func_block(
     func: Callable[..., Any],
-    raster: RasterType,
+    raster: Any,
     tile: NDArrayNum,
     depth: int,
     *args: Any,
@@ -126,23 +134,23 @@ def _apply_func_block(
     :return: The processed tile and its bounding box.
     """
     # Load raster tile
-    raster_tile = load_raster_tile(raster, tile)
+    raster_tile = _load_raster_tile(raster, tile)
 
     # Apply user-defined function to the tile
     result_tile = func(raster_tile, *args, **kwargs)
 
     # Remove padding
-    if isinstance(result_tile, Raster):
+    if isinstance(result_tile, gu.Raster):
         _remove_tile_padding((raster.height, raster.width), result_tile, tile, depth)
-    elif isinstance(result_tile, tuple) and isinstance(result_tile[0], Raster):
+    elif isinstance(result_tile, tuple) and isinstance(result_tile[0], gu.Raster):
         _remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
 
     return result_tile, tile
 
 
 def map_overlap_multiproc_save(
-    func: Callable[..., RasterType],
-    raster_path: str | RasterType,
+    func: Callable[..., gu.Raster],
+    raster_path: str | gu.Raster,
     config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -159,7 +167,7 @@ def map_overlap_multiproc_save(
 
     :param func: A function to apply to each raster tile. It must return a :class:`geoutils.Raster` object.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
-    :param config: Configuration object containing chunk size, output file, and an optional cluster.
+    :param config: Configuration object containing chunk size, output file path, and an optional cluster.
         The `outfile` parameter in `config` must be provided.
     :param args: Additional positional arguments to pass to `func`.
     :param depth: The overlap size between tiles to avoid edge effects, default is 0.
@@ -169,8 +177,8 @@ def map_overlap_multiproc_save(
     :raises RuntimeError: If an error occurs while processing the raster tiles.
     """
     # Load DEM metadata if raster_path is a filepath, otherwise use the Raster object
-    if not isinstance(raster_path, Raster):
-        raster = Raster(raster_path)
+    if not isinstance(raster_path, gu.Raster):
+        raster = gu.Raster(raster_path)
     else:
         raster = raster_path
 
@@ -189,24 +197,35 @@ def map_overlap_multiproc_save(
 
     # get first tile to retrieve dtype and nodata
     result_tile0, _ = config.cluster.get_res(tasks[0])
+    file_metadata = {
+        "driver": "GTIFF",
+        "width": raster.width,
+        "height": raster.height,
+        "count": raster.count,
+        "crs": raster.crs,
+        "transform": raster.transform,
+        "dtype": result_tile0.dtype,
+        "nodata": result_tile0.nodata,
+    }
+
+    _write_multiproc_result(tasks, config, file_metadata)
+
+
+def _write_multiproc_result(
+    tasks: list[Any],
+    config: MultiprocConfig,
+    file_metadata: dict[str, Any] | None = None,
+    mode: Literal["r+", "w", "w+"] = "w",
+) -> None:
 
     # Ensure that an output file is provided
     if config.outfile is None:
         raise ValueError("Output file must be provided when the function returns a Raster.")
 
     # Create a new raster file to save the processed results
-    with rio.open(
-        config.outfile,
-        "w",
-        driver="GTiff",
-        height=raster.height,
-        width=raster.width,
-        count=raster.count,
-        dtype=result_tile0.dtype,
-        crs=raster.crs,
-        transform=raster.transform,
-        nodata=result_tile0.nodata,
-    ) as dst:
+    if file_metadata is None:
+        file_metadata = {}
+    with rio.open(config.outfile, mode, **file_metadata) as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
@@ -236,7 +255,7 @@ def map_overlap_multiproc_save(
 @overload
 def map_multiproc_collect(
     func: Callable[..., Any],
-    raster_path: str | RasterType,
+    raster_path: str | Any,
     config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -248,7 +267,7 @@ def map_multiproc_collect(
 @overload
 def map_multiproc_collect(
     func: Callable[..., Any],
-    raster_path: str | RasterType,
+    raster_path: str | Any,
     config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -259,7 +278,7 @@ def map_multiproc_collect(
 
 def map_multiproc_collect(
     func: Callable[..., Any],
-    raster_path: str | RasterType,
+    raster_path: str | gu.Raster,
     config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -279,7 +298,7 @@ def map_multiproc_collect(
 
     :param func: A function to apply to each raster tile. It should return any type *except* :class:`geoutils.Raster`.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
-    :param config: Configuration object containing chunk size, depth, and an optional cluster.
+    :param config: Configuration object containing chunk size, output file path, and an optional cluster.
     :param args: Additional positional arguments to pass to `func`.
     :param depth: The overlap size between tiles to avoid edge effects.
     :param return_tile: If `True`, the output includes the tile indices in addition to the results.
@@ -293,8 +312,8 @@ def map_multiproc_collect(
     """
 
     # Load DEM metadata if raster_path is a filepath, otherwise use the Raster object
-    if not isinstance(raster_path, Raster):
-        raster = Raster(raster_path)
+    if not isinstance(raster_path, gu.Raster):
+        raster = gu.Raster(raster_path)
     else:
         raster = raster_path
 
@@ -317,10 +336,130 @@ def map_multiproc_collect(
         for results in tasks:
             result, dst_tile = config.cluster.get_res(results)
             if return_tile:
-                list_results.append((result, return_tile))
+                list_results.append((result, dst_tile))
             else:
                 list_results.append(result)
         return list_results
 
     except Exception as e:
         raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
+
+
+def _reproject_block(
+    dst_raster_tile: gu.Raster,
+    raster_unload: gu.Raster,
+    resampling: Resampling | str = Resampling.bilinear,
+    silent: bool = False,
+) -> gu.Raster | None:
+
+    try:
+        footprint_projected = dst_raster_tile.get_footprint_projected(raster_unload.crs)
+        raster_tile = raster_unload.crop(bbox=footprint_projected)
+    except rio.errors.WindowError:
+        return None
+
+    _, data, transformed, crs, nodata = _reproject(
+        source_raster=raster_tile, ref=dst_raster_tile, resampling=resampling, silent=silent
+    )
+    raster_tile._crs = crs
+    raster_tile._nodata = nodata
+    raster_tile._transform = transformed
+    assert data is not None  # for mypy
+    raster_tile._data = data.squeeze()
+    raster_tile.data = data
+    return raster_tile
+
+
+def _multiproc_reproject(
+    raster_unload: gu.Raster | str,
+    config: MultiprocConfig,
+    ref: gu.Raster | str | None = None,
+    crs: CRS | str | int | None = None,
+    res: float | abc.Iterable[float] | None = None,
+    grid_size: tuple[int, int] | None = None,
+    bounds: rio.coords.BoundingBox | None = None,
+    nodata: int | float | None = None,
+    dtype: DTypeLike | None = None,
+    resampling: Resampling | str = Resampling.bilinear,
+    force_source_nodata: int | float | None = None,
+    silent: bool = True,
+) -> None:
+    """
+    Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
+    Compute tiling and use multiprocessing to reproject each tile.
+
+    :param raster_unload: raster data source to be reprojected.
+    :param config: Configuration object containing chunk size, output file path, and an optional cluster.
+    :param ref: Reference raster to match resolution, bounds and CRS.
+    :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
+        defaults to this raster's CRS.
+    :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
+            Do not use with ``grid_size``.
+    :param grid_size: Destination grid size as (x, y). Do not use with ``res``.
+    :param bounds: Destination bounds as a Rasterio bounding box.
+    :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
+        not exist, will use GDAL's default.
+    :param dtype: Destination data type of array.
+    :param resampling: A Rasterio resampling method, can be passed as a string.
+        See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
+        for the full list.
+    :param force_source_nodata: Force a source nodata value (read from the metadata by default).
+    :param silent: Whether to print warning statements.
+    """
+    if isinstance(raster_unload, str):
+        raster_unload = gu.Raster(raster_unload)
+
+    # Process user inputs
+    crs, dtype, src_nodata, nodata, res, bounds = _user_input_reproject(
+        source_raster=raster_unload,
+        ref=ref,
+        crs=crs,
+        bounds=bounds,
+        res=res,
+        nodata=nodata,
+        dtype=dtype,
+        force_source_nodata=force_source_nodata,
+    )
+
+    # Retrieve transform and grid_size
+    transform, grid_size = _get_target_georeferenced_grid(
+        raster_unload, crs=crs, grid_size=grid_size, res=res, bounds=bounds
+    )
+    width, height = grid_size
+
+    # Create file on disk for the reprojected raster
+    with rio.open(
+        config.outfile,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=raster_unload.count,
+        dtype=dtype,
+        crs=crs,
+        transform=transform,
+        nodata=nodata,
+    ):
+        pass
+    dst_raster = gu.Raster(config.outfile)
+
+    # Create tiling grid
+    depth = 0
+    dst_grid = compute_tiling(config.chunk_size, dst_raster.shape, dst_raster.shape, overlap=depth)
+
+    # Create an empty task array for multiprocessing
+    tasks = []
+
+    # loop on tiles
+    for row in range(dst_grid.shape[0]):
+        for col in range(dst_grid.shape[1]):
+            dst_tile = dst_grid[row, col]
+            # Launch the task on the cluster to process each tile
+            tasks.append(
+                config.cluster.launch_task(
+                    fun=_apply_func_block,
+                    args=[_reproject_block, dst_raster, dst_tile, depth, raster_unload, resampling, silent],
+                )
+            )
+
+    _write_multiproc_result(tasks, config, mode="r+")
