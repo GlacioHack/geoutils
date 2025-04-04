@@ -396,7 +396,9 @@ def _reproject(
         num_threads = cpu_count - 1
     else:
         num_threads = n_threads
-    reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
+    reproj_kwargs.update(
+        {"num_threads": num_threads, "warp_mem_limit": memory_limit, "XSCALE": 1, "YSCALE": 1, "tolerance": 0}
+    )
 
     # --- Run the reprojection of data --- #
     # If data is loaded, reproject the numpy array directly
