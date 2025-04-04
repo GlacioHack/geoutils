@@ -72,6 +72,10 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     reproject_from_latlon,
 )
+from geoutils.raster.distributed_computing.multiproc import (
+    MultiprocConfig,
+    _multiproc_reproject,
+)
 from geoutils.raster.georeferencing import (
     _bounds,
     _cast_nodata,
@@ -2541,6 +2545,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> RasterType: ...
 
     @overload
@@ -2560,6 +2565,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
     @overload
@@ -2579,6 +2585,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> RasterType | None: ...
 
     def reproject(
@@ -2596,6 +2603,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -2605,6 +2613,10 @@ class Raster:
         Alternatively, the destination resolution, bounds and CRS can be passed individually.
 
         Any resampling algorithm implemented in Rasterio can be passed as a string.
+
+        The reprojection can be computed out-of-memory in multiprocessing by passing a
+        :class:`~geoutils.raster.MultiprocConfig` object.
+        The reprojected raster is written to disk under the path specified in the configuration
 
         :param ref: Reference raster to match resolution, bounds and CRS.
         :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
@@ -2625,10 +2637,27 @@ class Raster:
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
+        :param multiproc_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
-        :returns: Reprojected raster (or None if inplace).
+        :returns: Reprojected raster (or None if inplace or computed out-of-memory).
 
         """
+        if multiproc_config is not None:
+            _multiproc_reproject(
+                self,
+                multiproc_config,
+                ref,
+                crs,
+                res,
+                grid_size,
+                bounds,
+                nodata,
+                dtype,
+                resampling,
+                force_source_nodata,
+                silent,
+            )
+            return None
 
         # Reproject
         return_copy, data, transformed, crs, nodata = _reproject(
@@ -3957,6 +3986,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask: ...
 
     @overload
@@ -3976,6 +4006,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
     @overload
@@ -3995,6 +4026,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask | None: ...
 
     def reproject(
@@ -4012,6 +4044,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask | None:
         # Depending on resampling, adjust to rasterio supported types
         if resampling in [Resampling.nearest, "nearest"]:
