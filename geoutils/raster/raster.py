@@ -2655,7 +2655,6 @@ class Raster:
                 dtype,
                 resampling,
                 force_source_nodata,
-                silent,
             )
             return None
 

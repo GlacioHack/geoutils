@@ -647,6 +647,15 @@ def _delayed_reproject_per_block(
     """
     Delayed reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
     """
+    return _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
+
+
+def _reproject_per_block(
+    *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
+) -> NDArrayNum:
+    """
+    Reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
+    """
 
     # If no source chunk intersects, we return a chunk of destination nodata values
     if len(src_arrs) == 0:
@@ -656,13 +665,14 @@ def _delayed_reproject_per_block(
         return dst_arr
 
     # First, we build an empty array with the combined shape, only with nodata values
-    comb_src_arr = np.ones((combined_meta["src_shape"]), dtype=src_arrs[0].dtype)
-    comb_src_arr[:] = kwargs["src_nodata"]
+    is_multiband = len(src_arrs[0].shape) > 2
+    shape = (src_arrs[0].shape[0], *combined_meta["src_shape"]) if is_multiband else combined_meta["src_shape"]
+
+    comb_src_arr = np.full(shape, kwargs["src_nodata"], dtype=src_arrs[0].dtype)
 
     # Then fill it with the source chunks values
-    for i, arr in enumerate(src_arrs):
-        bid = block_ids[i]
-        comb_src_arr[bid["rys"] : bid["rye"], bid["rxs"] : bid["rxe"]] = arr
+    for arr, bid in zip(src_arrs, block_ids):
+        comb_src_arr[..., bid["rys"] : bid["rye"], bid["rxs"] : bid["rxe"]] = arr
 
     # Now, we can simply call Rasterio!
 
@@ -671,7 +681,8 @@ def _delayed_reproject_per_block(
     dst_transform = rio.transform.Affine(*combined_meta["dst_transform"])
 
     # Reproject
-    dst_arr = np.zeros(combined_meta["dst_shape"], dtype=comb_src_arr.dtype)
+    shape = (src_arrs[0].shape[0], *combined_meta["dst_shape"]) if is_multiband else combined_meta["dst_shape"]
+    dst_arr = np.zeros(shape, dtype=comb_src_arr.dtype)
 
     _ = rio.warp.reproject(
         comb_src_arr,
@@ -684,6 +695,9 @@ def _delayed_reproject_per_block(
         src_nodata=kwargs["src_nodata"],
         dst_nodata=kwargs["dst_nodata"],
         num_threads=1,  # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
+        XSCALE=1,
+        YSCALE=1,
+        tolerance=0,
     )
 
     return dst_arr
