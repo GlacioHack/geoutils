@@ -17,6 +17,7 @@
 # limitations under the License.
 
 """Tiling tools for arrays and rasters."""
+from __future__ import annotations
 
 import math
 import sys
@@ -24,8 +25,8 @@ import sys
 import numpy as np
 from matplotlib.patches import Rectangle
 
+import geoutils as gu
 from geoutils._typing import NDArrayNum
-from geoutils.raster import RasterType
 
 
 def _get_closest_rectangle(size: int) -> tuple[int, int]:
@@ -212,7 +213,7 @@ def compute_tiling(
     return tiling_grid
 
 
-def plot_tiling(raster: RasterType, tiling_grid: NDArrayNum) -> None:
+def plot_tiling(raster: gu.Raster, tiling_grid: NDArrayNum) -> None:
     """
     Plot raster with its tiling.
 
