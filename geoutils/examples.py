@@ -19,10 +19,10 @@
 """Utility functions to download and find example data."""
 
 import os
+import shutil
 import tarfile
 import tempfile
 import urllib.request
-import shutil
 
 # Define the location of the data in the example directory
 _EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
