@@ -26,23 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # We initiate the environment empty
-      - name: Initiate empty environment
-        uses: conda-incubator/setup-miniconda@v3
+      - uses: actions/setup-python@v5
         with:
-          miniforge-version: latest
-          auto-update-conda: true
-          use-mamba: true
-          mamba-version: "2.0.5"
-          channel-priority: strict
-          activate-environment: geoutils-pip
           python-version: ${{ matrix.python-version }}
 
       # Use pip install
       - name: Install project
-        run: |
-          mamba install pip
-          pip install -e .
+        run: pip install -e .
 
       # Check import works
       - name: Check import works with base environment
