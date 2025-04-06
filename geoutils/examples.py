@@ -19,10 +19,10 @@
 """Utility functions to download and find example data."""
 
 import os
-import shutil
 import tarfile
 import tempfile
 import urllib.request
+from distutils.dir_util import copy_tree
 
 # Define the location of the data in the example directory
 _EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
@@ -87,7 +87,7 @@ def download_examples(overwrite: bool = False) -> None:
             )
 
             # Copy the temporary extracted data to the example directory.
-            shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name))
+            copy_tree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name))
 
 
 def get_path(name: str) -> str:
