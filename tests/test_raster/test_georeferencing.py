@@ -173,7 +173,7 @@ class TestGeoreferencing:
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_coords(self, example: str) -> None:
 
-        img = gu.Raster(self.landsat_b4_path)
+        img = gu.Raster(example)
 
         # With lower left argument
         xx0, yy0 = img.coords(grid=False, force_offset="ll")

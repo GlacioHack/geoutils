@@ -31,7 +31,7 @@ pyplot.rcParams['font.size'] = 9
 
 In GeoUtils, the **georeferencing syntax is consistent across all geospatial data objects**. Additionally, **data objects
 load only their metadata by default**, allowing quick operations on georeferencing without requiring the array data
-(for a {class}`~geoutils.Raster`) or geometry data (for a {class}`~geoutils.Vector`) to be present in memory.
+(for a {class}`~geoutils.Raster`) to be present in memory.
 
 ### Metadata summary
 
@@ -124,7 +124,7 @@ vect.get_footprint_projected(vect.crs).plot()
 ### Grid (only for rasters)
 
 A raster's grid origin and resolution are defined by its geotransform attribute, {attr}`~geoutils.Raster.transform`.
-Comined with the 2D shape of the data array {attr}`~geoutils.Raster.shape` (and independently of the number of
+Combined with the 2D shape of the data array {attr}`~geoutils.Raster.shape` (and independently of the number of
 bands {attr}`~geoutils.Raster.bands`), these two attributes define the georeferenced grid of a raster.
 
 From it are derived the resolution {attr}`~geoutils.Raster.res`, and {attr}`~geoutils.Raster.height` and

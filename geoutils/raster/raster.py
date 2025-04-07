@@ -1,16 +1,36 @@
+# Copyright (c) 2025 GeoUtils developers
+# Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
+#
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
-geoutils.raster provides a toolset for working with raster data.
+Module for Raster class.
 """
+
 from __future__ import annotations
 
+import logging
 import math
-import os
 import pathlib
 import warnings
 from collections import abc
 from contextlib import ExitStack
 from math import floor
-from typing import IO, Any, Callable, Iterable, TypeVar, overload
+from typing import IO, Any, Callable, TypeVar, overload
 
 import affine
 import geopandas as gpd
@@ -18,7 +38,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio as rio
-import rasterio.warp
 import rasterio.windows
 import rioxarray
 import xarray as xr
@@ -27,11 +46,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.features import shapes
 from rasterio.plot import show as rshow
-from scipy.ndimage import distance_transform_edt
 
-import geoutils.vector as gv
 from geoutils._config import config
 from geoutils._typing import (
     ArrayLike,
@@ -42,6 +58,13 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.interface.distance import _proximity_from_vector_or_raster
+from geoutils.interface.interpolate import _interp_points
+from geoutils.interface.raster_point import (
+    _raster_to_pointcloud,
+    _regular_pointcloud_to_raster,
+)
+from geoutils.interface.raster_vector import _polygonize
 from geoutils.misc import deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
@@ -49,18 +72,25 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     reproject_from_latlon,
 )
-from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.georeferencing import (
     _bounds,
+    _cast_nodata,
+    _cast_pixel_interpretation,
     _coords,
+    _default_nodata,
     _ij2xy,
     _outside_image,
     _res,
     _xy2ij,
 )
-from geoutils.raster.interpolate import _interp_points
+from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.raster.sampling import subsample_array
-from geoutils.vector import Vector
+from geoutils.raster.satimg import (
+    decode_sensor_metadata,
+    parse_and_convert_metadata_from_filename,
+)
+from geoutils.stats import linear_error, nmad
+from geoutils.vector.vector import Vector
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -137,46 +167,6 @@ _HANDLED_FUNCTIONS_2NIN = [
 ]
 handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
 
-
-# Function to set the default nodata values for any given dtype
-# Similar to GDAL for int types, but without absurdly long nodata values for floats.
-# For unsigned types, the maximum value is chosen (with a max of 99999).
-# For signed types, the minimum value is chosen (with a min of -99999).
-def _default_nodata(dtype: DTypeLike) -> int:
-    """
-    Set the default nodata value for any given dtype, when this is not provided.
-    """
-    default_nodata_lookup = {
-        "uint8": 255,
-        "int8": -128,
-        "uint16": 65535,
-        "int16": -32768,
-        "uint32": 99999,
-        "int32": -99999,
-        "float16": -99999,
-        "float32": -99999,
-        "float64": -99999,
-        "float128": -99999,
-        "longdouble": -99999,  # This is float64 on Windows, float128 on other systems, for compatibility
-    }
-    # Check argument dtype is as expected
-    if not isinstance(dtype, (str, np.dtype, type)):
-        raise TypeError(f"dtype {dtype} not understood.")
-
-    # Convert numpy types to string
-    if isinstance(dtype, type):
-        dtype = np.dtype(dtype).name
-
-    # Convert np.dtype to string
-    if isinstance(dtype, np.dtype):
-        dtype = dtype.name
-
-    if dtype in default_nodata_lookup.keys():
-        return default_nodata_lookup[dtype]
-    else:
-        raise NotImplementedError(f"No default nodata value set for dtype {dtype}.")
-
-
 # Set default attributes to be kept from rasterio's DatasetReader
 _default_rio_attrs = [
     "bounds",
@@ -191,6 +181,7 @@ _default_rio_attrs = [
     "shape",
     "transform",
     "width",
+    "profile",
 ]
 
 
@@ -229,7 +220,7 @@ def _load_rio(
     * resampling : to set the resampling algorithm
     """
     # If out_shape is passed, no need to account for transform and shape
-    if kwargs["out_shape"] is not None:
+    if kwargs.get("out_shape") is not None:
         window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
@@ -244,8 +235,6 @@ def _load_rio(
             window = rio.windows.Window(col_off, row_off, *shape[::-1])
         elif sum(param is None for param in [shape, transform]) == 1:
             raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
-        else:
-            window = None
 
     if indexes is None:
         if only_mask:
@@ -258,195 +247,6 @@ def _load_rio(
         else:
             data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
     return data
-
-
-def _get_reproject_params(
-    raster: RasterType,
-    crs: CRS | str | int | None = None,
-    grid_size: tuple[int, int] | None = None,
-    res: int | float | abc.Iterable[float] | None = None,
-    bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-) -> tuple[Affine, tuple[int, int]]:
-    """
-    Returns the parameters (transform, size) needed to reproject a raster to a different grid (resolution or
-    size, bounds) and/or coordinate reference system (CRS).
-
-    If requested bounds are incompatible with output resolution (would result in non integer number of pixels),
-    the bounds are rounded up to the nearest compatible value.
-
-    :param crs: Destination coordinate reference system as a string or EPSG. Defaults to this raster's CRS.
-    :param grid_size: Destination size as (ncol, nrow). Mutually exclusive with ``res``.
-    :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
-        Mutually exclusive with ``size``.
-    :param bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
-        right, top bounds in the destination CRS.
-
-    :returns: Calculated transform and size.
-    """
-    # --- Input sanity checks --- #
-    # check size and res are not both set
-    if (grid_size is not None) and (res is not None):
-        raise ValueError("size and res both specified. Specify only one.")
-
-    # Set CRS to input CRS by default
-    if crs is None:
-        crs = raster.crs
-
-    if grid_size is None:
-        width, height = None, None
-    else:
-        width, height = grid_size
-
-    # Convert bounds to BoundingBox
-    if bounds is not None:
-        if not isinstance(bounds, rio.coords.BoundingBox):
-            bounds = rio.coords.BoundingBox(
-                bounds["left"],
-                bounds["bottom"],
-                bounds["right"],
-                bounds["top"],
-            )
-
-    # If all georeferences are the same as input, skip calculating because of issue in
-    # rio.warp.calculate_default_transform (https://github.com/rasterio/rasterio/issues/3010)
-    if (
-        (crs == raster.crs)
-        & ((grid_size is None) | ((height == raster.shape[0]) & (width == raster.shape[1])))
-        & ((res is None) | np.all(np.array(res) == raster.res))
-        & ((bounds is None) | (bounds == raster.bounds))
-    ):
-        return raster.transform, raster.shape[::-1]
-
-    # --- First, calculate default transform ignoring any change in bounds --- #
-    tmp_transform, tmp_width, tmp_height = rio.warp.calculate_default_transform(
-        raster.crs,
-        crs,
-        raster.width,
-        raster.height,
-        left=raster.bounds.left,
-        right=raster.bounds.right,
-        top=raster.bounds.top,
-        bottom=raster.bounds.bottom,
-        resolution=res,
-        dst_width=width,
-        dst_height=height,
-    )
-
-    # If no bounds specified, can directly use output of rio.warp.calculate_default_transform
-    if bounds is None:
-        dst_size = (tmp_width, tmp_height)
-        dst_transform = tmp_transform
-
-    # --- Second, crop to requested bounds --- #
-    else:
-        # If output size and bounds are known, can use rio.transform.from_bounds to get dst_transform
-        if grid_size is not None:
-            dst_transform = rio.transform.from_bounds(
-                bounds.left, bounds.bottom, bounds.right, bounds.top, grid_size[0], grid_size[1]
-            )
-            dst_size = grid_size
-
-        else:
-            # Otherwise, need to calculate the new output size, rounded to nearest integer
-            ref_win = rio.windows.from_bounds(*list(bounds), tmp_transform).round_lengths()
-            dst_size = (int(ref_win.width), int(ref_win.height))
-
-            if res is not None:
-                # In this case, we force output resolution
-                if isinstance(res, tuple):
-                    dst_transform = rio.transform.from_origin(bounds.left, bounds.top, res[0], res[1])
-                else:
-                    dst_transform = rio.transform.from_origin(bounds.left, bounds.top, res, res)
-            else:
-                # In this case, we force output bounds
-                dst_transform = rio.transform.from_bounds(
-                    bounds.left, bounds.bottom, bounds.right, bounds.top, dst_size[0], dst_size[1]
-                )
-
-    return dst_transform, dst_size
-
-
-def _cast_pixel_interpretation(
-    area_or_point1: Literal["Area", "Point"] | None, area_or_point2: Literal["Area", "Point"] | None
-) -> Literal["Area", "Point"] | None:
-    """
-    Cast two pixel interpretations and warn if not castable.
-
-    Casts to:
-     - "Area" if both are "Area",
-     - "Point" if both are "Point",
-     - None if any of the interpretation is None, or
-     - None if one is "Area" and the other "Point" (and raises a warning).
-    """
-
-    # If one is None, cast to None
-    if area_or_point1 is None or area_or_point2 is None:
-        area_or_point_out = None
-    # If both are equal and not None
-    elif area_or_point1 == area_or_point2:
-        area_or_point_out = area_or_point1
-    else:
-        area_or_point_out = None
-        msg = (
-            'One raster has a pixel interpretation "Area" and the other "Point". To silence this warning, '
-            "either correct the pixel interpretation of one raster, or deactivate "
-            'warnings of pixel interpretation with geoutils.config["warn_area_or_point"]=False.'
-        )
-        if config["warn_area_or_point"]:
-            warnings.warn(message=msg, category=UserWarning)
-
-    return area_or_point_out
-
-
-def _cast_nodata(out_dtype: DTypeLike, nodata: int | float | None) -> int | float | None:
-    """
-    Cast nodata value for output data type to default nodata if incompatible.
-
-    :param out_dtype: Dtype of output array.
-    :param nodata: Nodata value.
-
-    :return: Cast nodata value.
-    """
-
-    if out_dtype == bool:
-        nodata = None
-    if nodata is not None and not rio.dtypes.can_cast_dtype(nodata, out_dtype):
-        nodata = _default_nodata(out_dtype)
-    else:
-        nodata = nodata
-
-    return nodata
-
-
-def _shift_transform(
-    transform: affine.Affine,
-    xoff: float,
-    yoff: float,
-    distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
-) -> affine.Affine:
-    """
-    Shift geotransform horizontally, either in pixels or georeferenced units.
-
-    :param transform: Input geotransform.
-    :param xoff: Translation x offset.
-    :param yoff: Translation y offset.
-    :param distance_unit: Distance unit, either 'georeferenced' (default) or 'pixel'.
-
-    :return: Shifted transform.
-    """
-
-    if distance_unit not in ["georeferenced", "pixel"]:
-        raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
-
-    # Get transform
-    dx, b, xmin, d, dy, ymax = list(transform)[:6]
-
-    # Convert pixel offsets to georeferenced units
-    if distance_unit == "pixel":
-        xoff *= dx
-        yoff *= abs(dy)  # dy is negative
-
-    return rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
 
 
 def _cast_numeric_array_raster(
@@ -536,7 +336,7 @@ def _cast_numeric_array_raster(
     # In some cases the promoted output type does not match any inputs
     # (e.g. for inputs "uint8" and "int8", output is "int16")
     elif (nodata1 is not None) or (nodata2 is not None):
-        out_nodata = nodata1 if not None else nodata2
+        out_nodata = nodata1 if nodata1 is not None else nodata2
 
     # 2/ Output pixel interpretation
     if isinstance(other, Raster):
@@ -567,14 +367,13 @@ class Raster:
 
     def __init__(
         self,
-        filename_or_dataset: str
-        | pathlib.Path
-        | RasterType
-        | rio.io.DatasetReader
-        | rio.io.MemoryFile
-        | dict[str, Any],
+        filename_or_dataset: (
+            str | pathlib.Path | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any]
+        ),
         bands: int | list[int] | None = None,
         load_data: bool = False,
+        parse_sensor_metadata: bool = False,
+        silent: bool = True,
         downsample: Number = 1,
         nodata: int | float | None = None,
     ) -> None:
@@ -582,19 +381,17 @@ class Raster:
         Instantiate a raster from a filename or rasterio dataset.
 
         :param filename_or_dataset: Path to file or Rasterio dataset.
-
         :param bands: Band(s) to load into the object. Default loads all bands.
-
         :param load_data: Whether to load the array during instantiation. Default is False.
-
+        :param parse_sensor_metadata: Whether to parse sensor metadata from filename and similarly-named metadata files.
+        :param silent: Whether to parse metadata silently or with console output.
         :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
-
         :param nodata: Nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
         self._driver: str | None = None
         self._name: str | None = None
         self.filename: str | None = None
-        self.tags: dict[str, Any] = {}
+        self._tags: dict[str, Any] = {}
 
         self._data: MArrayNum | None = None
         self._transform: affine.Affine | None = None
@@ -613,10 +410,12 @@ class Raster:
         self._disk_transform: affine.Affine | None = None
         self._downsample: int | float = 1
         self._area_or_point: Literal["Area", "Point"] | None = None
+        self._profile: dict[str, Any] | None = None
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
 
+            self.tags = filename_or_dataset["tags"]
             # To have "area_or_point" user input go through checks of the set() function without shifting the transform
             self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
 
@@ -634,7 +433,7 @@ class Raster:
             self.crs: rio.crs.CRS = filename_or_dataset["crs"]
 
             for key in filename_or_dataset:
-                if key in ["data", "transform", "crs", "nodata", "area_or_point"]:
+                if key in ["data", "transform", "crs", "nodata", "area_or_point", "tags"]:
                     continue
                 setattr(self, key, filename_or_dataset[key])
             return
@@ -643,7 +442,7 @@ class Raster:
         if isinstance(filename_or_dataset, Raster):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
-            return
+
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
@@ -670,7 +469,12 @@ class Raster:
                 self._nodata = ds.nodata
                 self._name = ds.name
                 self._driver = ds.driver
-                self.tags.update(ds.tags())
+                self._tags.update(ds.tags())
+                self._profile = ds.profile
+
+                # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
+                converted_tags = decode_sensor_metadata(self.tags)
+                self._tags.update(converted_tags)
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
@@ -690,6 +494,7 @@ class Raster:
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
+
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
@@ -732,6 +537,11 @@ class Raster:
         # Don't recognise the input, so stop here.
         else:
             raise TypeError("The filename argument is not recognised, should be a path or a Rasterio dataset.")
+
+        # Parse metadata and add to tags
+        if parse_sensor_metadata and self.filename is not None:
+            sensor_meta = parse_and_convert_metadata_from_filename(self.filename, silent=silent)
+            self._tags.update(sensor_meta)
 
     @property
     def count_on_disk(self) -> None | int:
@@ -854,6 +664,13 @@ class Raster:
         """Name of the file on disk, if it exists."""
         return self._name
 
+    @property
+    def profile(self) -> dict[str, Any] | None:
+        """Basic metadata and creation options of this dataset.
+        May be passed as keyword arguments to rasterio.open()
+        to create a clone of this dataset."""
+        return self._profile
+
     def set_area_or_point(
         self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
     ) -> None:
@@ -912,17 +729,16 @@ class Raster:
             and isinstance(new_area_or_point, str)
             and old_area_or_point != new_area_or_point
         ):
-            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij), but because
-            # the Y axis is inverted, a minus signs is added to shift the coordinate (even if the unit is in pixel)
+            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij)
 
             # If the new one is Point, we shift back by half a pixel
             if new_area_or_point == "Point":
                 xoff = 0.5
-                yoff = -0.5
+                yoff = 0.5
             # Otherwise we shift forward half a pixel
             else:
                 xoff = -0.5
-                yoff = 0.5
+                yoff = -0.5
             # We perform the shift in place
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
@@ -1337,7 +1153,7 @@ class Raster:
         :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
         """
 
-        if not isinstance(other, Raster):  # TODO: Possibly add equals to SatelliteImage?
+        if not isinstance(other, Raster):
             raise NotImplementedError("Equality with other object than Raster not supported by raster_equal.")
 
         if strict_masked:
@@ -1658,18 +1474,15 @@ class Raster:
     @overload
     def astype(
         self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
-    def astype(self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
-        ...
+    def astype(self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None: ...
 
     @overload
     def astype(
         self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def astype(
         self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, inplace: bool = False
@@ -2030,6 +1843,25 @@ class Raster:
         new_crs = CRS.from_user_input(value=new_crs)
         self._crs = new_crs
 
+    @property
+    def tags(self) -> dict[str, Any]:
+        """
+        Metadata tags of the raster.
+
+        :returns: Dictionary of raster metadata, potentially including sensor information.
+        """
+        return self._tags
+
+    @tags.setter
+    def tags(self, new_tags: dict[str, Any] | None) -> None:
+        """
+        Set the metadata tags of the raster.
+        """
+
+        if new_tags is None:
+            new_tags = {}
+        self._tags = new_tags
+
     def set_mask(self, mask: NDArrayBool | Mask) -> None:
         """
         Set a mask on the raster array.
@@ -2067,13 +1899,191 @@ class Raster:
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    @overload
-    def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None:
-        ...
+    def _statistics(self, band: int = 1, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
+        """
+        Calculate common statistics for a specified band in the raster.
+
+        :param band: The index of the band for which to compute statistics. Default is 1.
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask).
+
+        :returns: A dictionary containing the calculated statistics for the selected band.
+        """
+
+        if self.count == 1:
+            data = self.data
+        else:
+            data = self.data[band - 1]
+
+        # Compute the statistics
+        mdata = np.ma.filled(data.astype(float), np.nan)
+        valid_count = np.count_nonzero(~self.get_mask()) if counts is None else counts[0]
+        stats_dict = {
+            "Mean": np.ma.mean(data),
+            "Median": np.ma.median(data),
+            "Max": np.ma.max(data),
+            "Min": np.ma.min(data),
+            "Sum": np.ma.sum(data),
+            "Sum of squares": np.ma.sum(np.square(data)),
+            "90th percentile": np.nanpercentile(mdata, 90),
+            "LE90": linear_error(mdata, interval=90),
+            "NMAD": nmad(data),
+            "RMSE": np.sqrt(np.ma.mean(np.square(data))),
+            "Standard deviation": np.ma.std(data),
+            "Valid count": valid_count,
+            "Total count": data.size,
+            "Percentage valid points": (valid_count / data.size) * 100,
+        }
+
+        if counts is not None:
+            valid_inlier_count = np.count_nonzero(~self.get_mask())
+            stats_dict.update(
+                {
+                    "Valid inlier count": valid_inlier_count,
+                    "Total inlier count": counts[1],
+                    "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
+                    "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0,
+                }
+            )
+
+        # If there are no valid data points, set all statistics to NaN
+        if np.count_nonzero(~self.get_mask()) == 0:
+            logging.warning("Empty raster, returns Nan for all stats")
+            for key in stats_dict:
+                stats_dict[key] = np.nan
+
+        return stats_dict
 
     @overload
-    def info(self, stats: bool = False, *, verbose: Literal[False]) -> str:
-        ...
+    def get_stats(
+        self,
+        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
+        inlier_mask: Mask | NDArrayBool | None = None,
+        band: int = 1,
+        counts: tuple[int, int] | None = None,
+    ) -> np.floating[Any]: ...
+
+    @overload
+    def get_stats(
+        self,
+        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
+        band: int = 1,
+        counts: tuple[int, int] | None = None,
+    ) -> dict[str, np.floating[Any]]: ...
+
+    def get_stats(
+        self,
+        stats_name: (
+            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
+        ) = None,
+        inlier_mask: Mask | NDArrayBool | None = None,
+        band: int = 1,
+        counts: tuple[int, int] | None = None,
+    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
+        """
+        Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
+        to calculate custom stats.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+            Accepted names include:
+            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
+            `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
+            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
+            Custom callables can also be provided.
+        :param inlier_mask: A boolean mask to filter values for statistical calculations.
+        :param band: The index of the band for which to compute statistics. Default is 1.
+        :param counts: (number of finite data points in the array, number of valid points in inlier_mask). DO NOT USE.
+        :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
+        """
+        if not self.is_loaded:
+            self.load()
+        if inlier_mask is not None:
+            valid_points = np.count_nonzero(~self.get_mask())
+            if isinstance(inlier_mask, Mask):
+                inlier_points = np.count_nonzero(~inlier_mask.data)
+            else:
+                inlier_points = np.count_nonzero(~inlier_mask)
+            dem_masked = self.copy()
+            dem_masked.set_mask(inlier_mask)
+            return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+        stats_dict = self._statistics(band=band, counts=counts)
+        if stats_name is None:
+            return stats_dict
+
+        # Define the metric aliases and their actual names
+        stats_aliases = {
+            "mean": "Mean",
+            "median": "Median",
+            "max": "Max",
+            "maximum": "Max",
+            "min": "Min",
+            "minimum": "Min",
+            "sum": "Sum",
+            "sumofsquares": "Sum of squares",
+            "sum2": "Sum of squares",
+            "90thpercentile": "90th percentile",
+            "90percentile": "90th percentile",
+            "le90": "LE90",
+            "nmad": "NMAD",
+            "rmse": "RMSE",
+            "rms": "RMSE",
+            "std": "Standard deviation",
+            "standarddeviation": "Standard deviation",
+            "validcount": "Valid count",
+            "totalcount": "Total count",
+            "percentagevalidpoints": "Percentage valid points",
+        }
+        if counts is not None:
+            stats_aliases.update(
+                {
+                    "validinliercount": "Valid inlier count",
+                    "totalinliercount": "Total inlier count",
+                    "percentagevalidinlierpoints": "Percentage valid inlier points",
+                    "percentageinlierpoints": "Percentage inlier points",
+                }
+            )
+
+        if isinstance(stats_name, list):
+            result = {}
+            for name in stats_name:
+                if callable(name):
+                    result[name.__name__] = name(self.data[band] if self.count > 1 else self.data)
+                else:
+                    result[name] = self._get_single_stat(stats_dict, stats_aliases, name)
+            return result
+        else:
+            if callable(stats_name):
+                return stats_name(self.data[band] if self.count > 1 else self.data)
+            else:
+                return self._get_single_stat(stats_dict, stats_aliases, stats_name)
+
+    @staticmethod
+    def _get_single_stat(
+        stats_dict: dict[str, np.floating[Any]], stats_aliases: dict[str, str], stat_name: str
+    ) -> np.floating[Any]:
+        """
+        Retrieve a single statistic based on a flexible name or alias.
+
+        :param stats_dict: The dictionary of available statistics.
+        :param stats_aliases: The dictionary of alias mappings to the actual stat names.
+        :param stat_name: The name or alias of the statistic to retrieve.
+
+        :returns: The requested statistic value, or None if the stat name is not recognized.
+        """
+
+        normalized_name = stat_name.lower().replace(" ", "").replace("_", "").replace("-", "")
+        if normalized_name in stats_aliases:
+            actual_name = stats_aliases[normalized_name]
+            return stats_dict[actual_name]
+        else:
+            logging.warning("Statistic name '%s' is not recognized", stat_name)
+            return np.float32(np.nan)
+
+    @overload
+    def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
+
+    @overload
+    def info(self, stats: bool = False, *, verbose: Literal[False]) -> str: ...
 
     def info(self, stats: bool = False, verbose: bool = True) -> None | str:
         """
@@ -2103,24 +2113,28 @@ class Raster:
         ]
 
         if stats:
+            as_str.append("\nStatistics:\n")
             if not self.is_loaded:
                 self.load()
 
             if self.count == 1:
-                as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data):.2f}\n")
-                as_str.append(f"[MINIMUM]:          {np.nanmin(self.data):.2f}\n")
-                as_str.append(f"[MEDIAN]:           {np.ma.median(self.data):.2f}\n")
-                as_str.append(f"[MEAN]:             {np.nanmean(self.data):.2f}\n")
-                as_str.append(f"[STD DEV]:          {np.nanstd(self.data):.2f}\n")
+                statistics = self.get_stats()
+
+                # Determine the maximum length of the stat names for alignment
+                max_len = max(len(name) for name in statistics.keys())
+
+                # Format the stats with aligned names
+                for name, value in statistics.items():
+                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
                     as_str.append(f"Band {b + 1}:\n")
-                    as_str.append(f"[MAXIMUM]:          {np.nanmax(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MINIMUM]:          {np.nanmin(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MEDIAN]:           {np.ma.median(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[MEAN]:             {np.nanmean(self.data[b, :, :]):.2f}\n")
-                    as_str.append(f"[STD DEV]:          {np.nanstd(self.data[b, :, :]):.2f}\n")
+                    statistics = self.get_stats(band=b)
+                    if isinstance(statistics, dict):
+                        max_len = max(len(name) for name in statistics.keys())
+                        for name, value in statistics.items():
+                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
 
         if verbose:
             print("".join(as_str))
@@ -2169,12 +2183,10 @@ class Raster:
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
 
     @overload
-    def get_nanarray(self, return_mask: Literal[False] = False) -> NDArrayNum:
-        ...
+    def get_nanarray(self, return_mask: Literal[False] = False) -> NDArrayNum: ...
 
     @overload
-    def get_nanarray(self, return_mask: Literal[True]) -> tuple[NDArrayNum, NDArrayBool]:
-        ...
+    def get_nanarray(self, return_mask: Literal[True]) -> tuple[NDArrayNum, NDArrayBool]: ...
 
     def get_nanarray(self, return_mask: bool = False) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
@@ -2413,36 +2425,33 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def crop(
         self: RasterType,
-        crop_geom: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2454,8 +2463,8 @@ class Raster:
 
         Reprojection is done on the fly if georeferenced objects have different projections.
 
-        :param crop_geom: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
-            coordinates. If ``crop_geom`` is a raster or vector, will crop to the bounds. If ``crop_geom`` is a
+        :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
+            coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param mode: Whether to match within pixels or exact extent. ``'match_pixel'`` will preserve the original pixel
             resolution, cropping to the extent that most closely aligns with the current coordinates. ``'match_extent'``
@@ -2464,80 +2473,48 @@ class Raster:
 
         :returns: A new raster (or None if inplace).
         """
-        assert mode in [
-            "match_extent",
-            "match_pixel",
-        ], "mode must be one of 'match_pixel', 'match_extent'"
 
-        if isinstance(crop_geom, (Raster, Vector)):
-            # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-            xmin, ymin, xmax, ymax = crop_geom.get_bounds_projected(out_crs=self.crs)
-            if isinstance(crop_geom, Raster):
-                # Raise a warning if the reference is a raster that has a different pixel interpretation
-                _cast_pixel_interpretation(self.area_or_point, crop_geom.area_or_point)
-        elif isinstance(crop_geom, (list, tuple)):
-            xmin, ymin, xmax, ymax = crop_geom
+        crop_img, tfm = _crop(source_raster=self, bbox=bbox, mode=mode)
+
+        if inplace:
+            self._data = crop_img
+            self.transform = tfm
+            return None
         else:
-            raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
+            return newraster
 
-        if mode == "match_pixel":
-            # Finding the intersection of requested bounds and original bounds, cropped to image shape
-            ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=self.transform)
-            self_win = rio.windows.from_bounds(*self.bounds, transform=self.transform).crop(*self.shape)
-            final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[True],
+    ) -> None: ...
 
-            # Update bounds and transform accordingly
-            new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=self.transform)
-            tfm = rio.transform.from_origin(new_xmin, new_ymax, *self.res)
+    @overload
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: Literal[False] = False,
+    ) -> RasterType: ...
 
-            if self.is_loaded:
-                # In case data is loaded on disk, can extract directly from np array
-                (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+    def icrop(
+        self: RasterType,
+        bbox: list[int] | tuple[int, ...],
+        *,
+        inplace: bool = False,
+    ) -> RasterType | None:
+        """
+        Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
-                if self.count == 1:
-                    crop_img = self.data[rowmin:rowmax, colmin:colmax]
-                else:
-                    crop_img = self.data[:, rowmin:rowmax, colmin:colmax]
-            else:
+        :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowax).
+        :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
 
-                assert self._disk_shape is not None  # This should not be the case, sanity check to make mypy happy
-
-                # If data was not loaded, and self's transform was updated (e.g. due to downsampling) need to
-                # get the Window corresponding to on disk data
-                ref_win_disk = rio.windows.from_bounds(
-                    new_xmin, new_ymin, new_xmax, new_ymax, transform=self._disk_transform
-                )
-                self_win_disk = rio.windows.from_bounds(*self.bounds, transform=self._disk_transform).crop(
-                    *self._disk_shape[1:]
-                )
-                final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
-
-                # Round up to downsampling size, to match __init__
-                final_window_disk = rio.windows.round_window_to_full_blocks(
-                    final_window_disk, ((self._downsample, self._downsample),)
-                )
-
-                # Load data for "on_disk" window but out_shape matching in-memory transform -> enforce downsampling
-                # AD (24/04/24): Note that the same issue as #447 occurs here when final_window_disk extends beyond
-                # self's bounds. Using option `boundless=True` solves the issue but causes other tests to fail
-                # This should be fixed with #447 and previous line would be obsolete.
-                with rio.open(self.filename) as raster:
-                    crop_img = raster.read(
-                        indexes=self._bands,
-                        masked=self._masked,
-                        window=final_window_disk,
-                        out_shape=(final_window.height, final_window.width),
-                    )
-
-                # Squeeze first axis for single-band
-                if crop_img.ndim == 3 and crop_img.shape[0] == 1:
-                    crop_img = crop_img.squeeze(axis=0)
-
-        else:
-            bbox = rio.coords.BoundingBox(left=xmin, bottom=ymin, right=xmax, top=ymax)
-            out_rst = self.reproject(bounds=bbox)  # should we instead raise an issue and point to reproject?
-            crop_img = out_rst.data
-            tfm = out_rst.transform
+        :returns: Cropped raster or None (if inplace=True).
+        """
+        crop_img, tfm = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
 
         if inplace:
             self._data = crop_img
@@ -2564,8 +2541,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def reproject(
@@ -2584,8 +2560,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def reproject(
@@ -2604,8 +2579,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def reproject(
         self: RasterType,
@@ -2632,7 +2606,6 @@ class Raster:
 
         Any resampling algorithm implemented in Rasterio can be passed as a string.
 
-
         :param ref: Reference raster to match resolution, bounds and CRS.
         :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
             defaults to this raster's CRS.
@@ -2656,185 +2629,42 @@ class Raster:
         :returns: Reprojected raster (or None if inplace).
 
         """
-        # --- Sanity checks on inputs and defaults -- #
-        # Check that either ref or crs is provided
-        if ref is not None and crs is not None:
-            raise ValueError("Either of `ref` or `crs` must be set. Not both.")
-        # If none are provided, simply preserve the CRS
-        elif ref is None and crs is None:
-            crs = self.crs
 
-        # Set output dtype
-        if dtype is None:
-            # Warning: this will not work for multiple bands with different dtypes
-            dtype = self.dtype
+        # Reproject
+        return_copy, data, transformed, crs, nodata = _reproject(
+            source_raster=self,
+            ref=ref,
+            crs=crs,
+            res=res,
+            grid_size=grid_size,
+            bounds=bounds,
+            nodata=nodata,
+            dtype=dtype,
+            resampling=resampling,
+            force_source_nodata=force_source_nodata,
+            silent=silent,
+            n_threads=n_threads,
+            memory_limit=memory_limit,
+        )
 
-        # --- Set source nodata if provided -- #
-        if force_source_nodata is None:
-            src_nodata = self.nodata
-        else:
-            src_nodata = force_source_nodata
-            # Raise warning if a different nodata value exists for this raster than the forced one (not None)
-            if self.nodata is not None:
-                warnings.warn(
-                    "Forcing source nodata value of {} despite an existing nodata value of {} in the raster. "
-                    "To silence this warning, use self.set_nodata() before reprojection instead of forcing.".format(
-                        force_source_nodata, self.nodata
-                    )
-                )
-
-        # --- Set destination nodata if provided -- #
-        # This is needed in areas not covered by the input data.
-        # If None, will use GeoUtils' default, as rasterio's default is unknown, hence cannot be handled properly.
-        if nodata is None:
-            nodata = self.nodata
-            if nodata is None:
-                nodata = _default_nodata(dtype)
-                # If nodata is already being used, raise a warning.
-                # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
-                if not self.is_loaded:
-                    warnings.warn(
-                        f"For reprojection, nodata must be set. Setting default nodata to {nodata}. You may "
-                        f"set a different nodata with `nodata`."
-                    )
-
-                elif nodata in self.data:
-                    warnings.warn(
-                        f"For reprojection, nodata must be set. Default chosen value {nodata} exists in "
-                        f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
-                        f"self.set_nodata()."
-                    )
-
-        # Create a BoundingBox if required
-        if bounds is not None:
-            if not isinstance(bounds, rio.coords.BoundingBox):
-                bounds = rio.coords.BoundingBox(
-                    bounds["left"],
-                    bounds["bottom"],
-                    bounds["right"],
-                    bounds["top"],
-                )
-
-        from geoutils.misc import resampling_method_from_str
-
-        # --- Basic reprojection options, needed in all cases. --- #
-        reproj_kwargs = {
-            "src_transform": self.transform,
-            "src_crs": self.crs,
-            "resampling": resampling if isinstance(resampling, Resampling) else resampling_method_from_str(resampling),
-            "src_nodata": src_nodata,
-            "dst_nodata": nodata,
-        }
-
-        # --- Calculate output georeferences (transform, grid size)
-
-        # Case a raster is provided as reference
-        if ref is not None:
-            # Check that ref type is either str, Raster or rasterio data set
-            # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
-            if isinstance(ref, Raster):
-                # Raise a warning if the reference is a raster that has a different pixel interpretation
-                _cast_pixel_interpretation(self.area_or_point, ref.area_or_point)
-                ds_ref = ref
-            elif isinstance(ref, str):
-                if not os.path.exists(ref):
-                    raise ValueError("Reference raster does not exist.")
-                ds_ref = Raster(ref, load_data=False)
+        # If return copy is True (target georeferenced grid was the same as input)
+        if return_copy:
+            if inplace:
+                return None
             else:
-                raise TypeError("Type of ref not understood, must be path to file (str), Raster.")
-
-            # Read reprojecting params from ref raster
-            crs = ds_ref.crs
-            res = ds_ref.res
-            bounds = ds_ref.bounds
-        else:
-            # Determine target CRS
-            crs = CRS.from_user_input(crs)
-
-        # Determine target transform and grid size
-        transform, grid_size = _get_reproject_params(self, crs=crs, grid_size=grid_size, res=res, bounds=bounds)
-
-        # Update reprojection options accordingly
-        reproj_kwargs.update({"dst_transform": transform})
-        data = np.ones((self.count, grid_size[1], grid_size[0]), dtype=dtype)
-        reproj_kwargs.update({"destination": data})
-        reproj_kwargs.update({"dst_crs": crs})
-
-        # --- Check that reprojection is actually needed --- #
-        # Caution, grid_size is (width, height) while shape is (height, width)
-        if all(
-            [
-                (transform == self.transform) or (transform is None),
-                (crs == self.crs) or (crs is None),
-                (grid_size == self.shape[::-1]) or (grid_size is None),
-                np.all(np.array(res) == self.res) or (res is None),
-            ]
-        ):
-            if (nodata == self.nodata) or (nodata is None):
-                if not silent:
-                    warnings.warn(
-                        "Output projection, bounds and grid size are identical -> returning self (not a copy!)"
-                    )
                 return self
 
-            elif nodata is not None:
-                if not silent:
-                    warnings.warn(
-                        "Only nodata is different, consider using the 'set_nodata()' method instead'\
-                    ' -> returning self (not a copy!)"
-                    )
-                return self
-
-        # --- Set the performance keywords --- #
-        if n_threads == 0:
-            # Default to cpu count minus one. If the cpu count is undefined, num_threads will be 1
-            cpu_count = os.cpu_count() or 2
-            num_threads = cpu_count - 1
-        else:
-            num_threads = n_threads
-        reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
-
-        # --- Run the reprojection of data --- #
-        # If data is loaded, reproject the numpy array directly
-        if self.is_loaded:
-            # All masked values must be set to a nodata value for rasterio's reproject to work properly
-            # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
-            if src_nodata is None and np.sum(self.data.mask) > 0:
-                raise ValueError(
-                    "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-                    "with `force_source_nodata`."
-                )
-
-            # Mask not taken into account by rasterio, need to fill with src_nodata
-            data, transformed = rio.warp.reproject(self.data.filled(src_nodata), **reproj_kwargs)
-
-        # If not, uses the dataset instead
-        else:
-            data = []  # type: ignore
-            for k in range(self.count):
-                with rio.open(self.filename) as ds:
-                    band = rio.band(ds, k + 1)
-                    band, transformed = rio.warp.reproject(band, **reproj_kwargs)
-                    data.append(band.squeeze())
-
-            data = np.array(data)
-
-        # Enforce output type
-        data = np.ma.masked_array(data.astype(dtype), fill_value=nodata)
-
-        if nodata is not None:
-            data.mask = data == nodata
-
-        # Check for funny business.
-        if transform is not None:
-            assert transform == transformed
+        # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
+        assert data is not None
+        assert transformed is not None
+        assert crs is not None
 
         # Write results to a new Raster.
         if inplace:
             # Order is important here, because calling self.data will use nodata to mask the array properly
             self._crs = crs
             self._nodata = nodata
-            self._transform = transform
+            self._transform = transformed
             # A little trick to force the right shape of data in, then update the mask properly through the data setter
             self._data = data.squeeze()
             self.data = data
@@ -2850,8 +2680,7 @@ class Raster:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: Literal[False] = False,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def translate(
@@ -2861,8 +2690,7 @@ class Raster:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def translate(
@@ -2872,8 +2700,7 @@ class Raster:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: bool = False,
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def translate(
         self: RasterType,
@@ -2883,27 +2710,27 @@ class Raster:
         inplace: bool = False,
     ) -> RasterType | None:
         """
-        Shift a raster by a (x,y) offset.
+        Translate a raster by a (x,y) offset.
 
-        The shifting only updates the geotransform (no resampling is performed).
+        The translation only updates the geotransform (no resampling is performed).
 
         :param xoff: Translation x offset.
         :param yoff: Translation y offset.
         :param distance_unit: Distance unit, either 'georeferenced' (default) or 'pixel'.
         :param inplace: Whether to modify the raster in-place.
 
-        :returns: Shifted raster (or None if inplace).
+        :returns: Translated raster (or None if inplace).
         """
 
-        shifted_transform = _shift_transform(self.transform, xoff=xoff, yoff=yoff, distance_unit=distance_unit)
+        translated_transform = _translate(self.transform, xoff=xoff, yoff=yoff, distance_unit=distance_unit)
 
         if inplace:
-            # Overwrite transform by shifted transform
-            self.transform = shifted_transform
+            # Overwrite transform by translated transform
+            self.transform = translated_transform
             return None
         else:
             raster_copy = self.copy()
-            raster_copy.transform = shifted_transform
+            raster_copy.transform = translated_transform
             return raster_copy
 
     def save(
@@ -2938,7 +2765,7 @@ class Raster:
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary,
             e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
-        :param metadata: Pairs of metadata key, value.
+        :param metadata: Pairs of metadata to save to disk, in addition to existing metadata in self.tags.
         :param gcps: List of gcps, each gcp being [row, col, x, y, (z)].
         :param gcps_crs: CRS of the GCPS.
 
@@ -2947,8 +2774,9 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
-        if metadata is None:
-            metadata = {}
+        meta = self.tags if self.tags is not None else {}
+        if metadata is not None:
+            meta.update(metadata)
         if gcps is None:
             gcps = []
 
@@ -3005,7 +2833,7 @@ class Raster:
             dst.write(save_data)
 
             # Add metadata (tags in rio)
-            dst.update_tags(**metadata)
+            dst.update_tags(**meta)
 
             # Save GCPs
             if not isinstance(gcps, list):
@@ -3141,7 +2969,7 @@ class Raster:
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
-        :param rst : path to the second image (or another Raster instance)
+        :param raster : path to the second image (or another Raster instance)
         :param match_ref: if set to True, returns the smallest intersection that aligns with that of self, i.e. same \
         resolution and offset with self's origin is a multiple of the resolution
         :returns: extent of the intersection between the 2 images \
@@ -3171,6 +2999,38 @@ class Raster:
 
         # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
         return intersection  # type: ignore
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        return_axes: Literal[False] = False,
+        **kwargs: Any,
+    ) -> None: ...
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        return_axes: Literal[True],
+        **kwargs: Any,
+    ) -> tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]: ...
 
     def plot(
         self,
@@ -3220,7 +3080,7 @@ class Raster:
 
         # Set matplotlib interpolation to None by default, to avoid spreading gaps in plots
         if "interpolation" not in kwargs.keys():
-            kwargs.update({"interpolation": "None"})
+            kwargs.update({"interpolation": None})
 
         # Check if specific band selected, or take all
         # rshow takes care of image dimensions
@@ -3256,10 +3116,10 @@ class Raster:
 
         # Set colorbar min/max values (needed for ScalarMappable)
         if vmin is None:
-            vmin = np.nanmin(data)
+            vmin = float(np.nanmin(data))
 
         if vmax is None:
-            vmax = np.nanmax(data)
+            vmax = float(np.nanmax(data))
 
         # Make sure they are numbers, to avoid mpl error
         try:
@@ -3309,8 +3169,7 @@ class Raster:
         # If returning axes
         if return_axes:
             return ax0, cax
-        else:
-            return None
+        return None
 
     def reduce_points(
         self,
@@ -3725,8 +3584,7 @@ class Raster:
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def to_pointcloud(
@@ -3741,8 +3599,7 @@ class Raster:
         as_array: Literal[True],
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> Vector:
-        ...
+    ) -> Vector: ...
 
     @overload
     def to_pointcloud(
@@ -3757,8 +3614,7 @@ class Raster:
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | Vector:
-        ...
+    ) -> NDArrayNum | Vector: ...
 
     def to_pointcloud(
         self,
@@ -3818,145 +3674,18 @@ class Raster:
         :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
-        # Input checks
-
-        # Main data column checks
-        if not isinstance(data_column_name, str):
-            raise ValueError("Data column name must be a string.")
-        if not (isinstance(data_band, int) and data_band >= 1 and data_band <= self.count):
-            raise ValueError(
-                f"Data band number must be an integer between 1 and the total number of bands ({self.count})."
-            )
-
-        # Rename data column if a different band is selected but the name is still default
-        if data_band != 1 and data_column_name == "b1":
-            data_column_name = "b" + str(data_band)
-
-        # Auxiliary data columns checks
-        if auxiliary_column_names is not None and auxiliary_data_bands is None:
-            raise ValueError("Passing auxiliary column names requires passing auxiliary data band numbers as well.")
-        if auxiliary_data_bands is not None:
-            if not (
-                isinstance(auxiliary_data_bands, Iterable) and all(isinstance(b, int) for b in auxiliary_data_bands)
-            ):
-                raise ValueError("Auxiliary data band number must be an iterable containing only integers.")
-            if any((1 > b or self.count < b) for b in auxiliary_data_bands):
-                raise ValueError(
-                    f"Auxiliary data band numbers must be between 1 and the total number of bands ({self.count})."
-                )
-            if data_band in auxiliary_data_bands:
-                raise ValueError(
-                    f"Main data band {data_band} should not be listed in auxiliary data bands {auxiliary_data_bands}."
-                )
-
-            # Ensure auxiliary column name is defined if auxiliary data bands is not None
-            if auxiliary_column_names is not None:
-                if not (
-                    isinstance(auxiliary_column_names, Iterable)
-                    and all(isinstance(b, str) for b in auxiliary_column_names)
-                ):
-                    raise ValueError("Auxiliary column names must be an iterable containing only strings.")
-                if not len(auxiliary_column_names) == len(auxiliary_data_bands):
-                    raise ValueError(
-                        f"Length of auxiliary column name and data band numbers should be the same, "
-                        f"found {len(auxiliary_column_names)} and {len(auxiliary_data_bands)} respectively."
-                    )
-
-            else:
-                auxiliary_column_names = [f"b{i}" for i in auxiliary_data_bands]
-
-            # Define bigger list with all bands and names
-            all_bands = [data_band] + auxiliary_data_bands
-            all_column_names = [data_column_name] + auxiliary_column_names
-
-        else:
-            all_bands = [data_band]
-            all_column_names = [data_column_name]
-
-        # If subsample is the entire array, load it to optimize speed
-        if subsample == 1 and not self.is_loaded:
-            self.load(bands=all_bands)
-
-        # Band indexes in the array are band number minus one
-        all_indexes = [b - 1 for b in all_bands]
-
-        # We do 2D subsampling on the data band only, regardless of valid masks on other bands
-        if skip_nodata:
-            if self.is_loaded:
-                if self.count == 1:
-                    self_mask = get_mask_from_array(
-                        self.data
-                    )  # This is to avoid the case where the mask is just "False"
-                else:
-                    self_mask = get_mask_from_array(
-                        self.data[data_band - 1, :, :]
-                    )  # This is to avoid the case where the mask is just "False"
-                valid_mask = ~self_mask
-
-            # Load only mask of valid data from disk if array not loaded
-            else:
-                valid_mask = ~self._load_only_mask(bands=data_band)
-        # If we are not skipping nodata values, valid mask is everywhere
-        else:
-            if self.count == 1:
-                valid_mask = np.ones(self.data.shape, dtype=bool)
-            else:
-                valid_mask = np.ones(self.data[0, :].shape, dtype=bool)
-
-        # Get subsample on valid mask
-        # Build a low memory boolean masked array with invalid values masked to pass to subsampling
-        ma_valid = np.ma.masked_array(data=np.ones(np.shape(valid_mask), dtype=bool), mask=~valid_mask)
-        # Take a subsample within the valid values
-        indices = subsample_array(array=ma_valid, subsample=subsample, random_state=random_state, return_indices=True)
-
-        # If the Raster is loaded, pick from the data while ignoring the mask
-        if self.is_loaded:
-            if self.count == 1:
-                pixel_data = self.data[indices[0], indices[1]]
-            else:
-                # TODO: Combining both indexes at once could reduce memory usage?
-                pixel_data = self.data[all_indexes, :][:, indices[0], indices[1]]
-
-        # Otherwise use rasterio.sample to load only requested pixels
-        else:
-            # Extract the coordinates at subsampled pixels with valid data
-            # To extract data, we always use "upper left" which rasterio interprets as the exact raster coordinates
-            # Further below we redefine output coordinates based on point interpretation
-            x_coords, y_coords = (np.array(a) for a in self.ij2xy(indices[0], indices[1], force_offset="ul"))
-
-            with rio.open(self.filename) as raster:
-                # Rasterio uses indexes (starts at 1)
-                pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords), indexes=all_bands))).T
-
-        # At this point there should not be any nodata anymore, so we can transform everything to normal array
-        if np.ma.isMaskedArray(pixel_data):
-            pixel_data = pixel_data.data
-
-        # If nodata values were not skipped, convert them to NaNs and change data type
-        if skip_nodata is False:
-            pixel_data = pixel_data.astype("float32")
-            pixel_data[pixel_data == self.nodata] = np.nan
-
-        # Now we force the coordinates we define for the point cloud, according to pixel interpretation
-        x_coords_2, y_coords_2 = (
-            np.array(a) for a in self.ij2xy(indices[0], indices[1], force_offset=force_pixel_offset)
+        return _raster_to_pointcloud(
+            source_raster=self,
+            data_column_name=data_column_name,
+            data_band=data_band,
+            auxiliary_data_bands=auxiliary_data_bands,
+            auxiliary_column_names=auxiliary_column_names,
+            subsample=subsample,
+            skip_nodata=skip_nodata,
+            as_array=as_array,
+            random_state=random_state,
+            force_pixel_offset=force_pixel_offset,
         )
-
-        if not as_array:
-            points = Vector(
-                gpd.GeoDataFrame(
-                    pixel_data.T,
-                    columns=all_column_names,
-                    geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
-                    crs=self.crs,
-                )
-            )
-            return points
-        else:
-            # Merge the coordinates and pixel data an array of N x K
-            # This has the downside of converting all the data to the same data type
-            points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T
-            return points_arr
 
     @classmethod
     def from_pointcloud_regular(
@@ -3986,62 +3715,17 @@ class Raster:
         :param area_or_point: Whether to set the pixel interpretation of the raster to "Area" or "Point".
         """
 
-        # Get transform and shape from input
-        if grid_coords is not None:
-
-            # Input checks
-            if (
-                not isinstance(grid_coords, tuple)
-                or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
-                or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
-            ):
-                raise TypeError("Input grid coordinates must be 1D arrays.")
-
-            diff_x = np.diff(grid_coords[0])
-            diff_y = np.diff(grid_coords[1])
-
-            if not all(diff_x == diff_x[0]) and all(diff_y == diff_y[0]):
-                raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
-
-            # Build transform from min X, max Y and step in both
-            out_transform = rio.transform.from_origin(
-                np.min(grid_coords[0]), np.max(grid_coords[1]), diff_x[0], diff_y[0]
-            )
-            # Y is first axis, X is second axis
-            out_shape = (len(grid_coords[1]), len(grid_coords[0]))
-
-        elif transform is not None and shape is not None:
-
-            out_transform = transform
-            out_shape = shape
-
-        else:
-            raise ValueError("Either grid coordinates or both geotransform and shape must be provided.")
-
-        # Create raster from inputs, with placeholder data for now
-        dtype = pointcloud[data_column_name].dtype
-        out_nodata = nodata if not None else _default_nodata(dtype)
-        arr = np.ones(out_shape, dtype=dtype)
-        raster_arr = cls.from_array(
-            data=arr, transform=out_transform, crs=pointcloud.crs, nodata=out_nodata, area_or_point=area_or_point
+        arr, transform, crs, nodata, aop = _regular_pointcloud_to_raster(
+            pointcloud=pointcloud,
+            grid_coords=grid_coords,
+            transform=transform,
+            shape=shape,
+            nodata=nodata,
+            data_column_name=data_column_name,
+            area_or_point=area_or_point,
         )
 
-        # Get indexes of point cloud coordinates in the raster, forcing no shift
-        i, j = raster_arr.xy2ij(
-            x=pointcloud.geometry.x.values, y=pointcloud.geometry.y.values, shift_area_or_point=False
-        )
-
-        # If coordinates are not integer type (forced in xy2ij), then some points are not falling on exact coordinates
-        if not np.issubdtype(i.dtype, np.integer) or not np.issubdtype(i.dtype, np.integer):
-            raise ValueError("Some point cloud coordinates differ from the grid coordinates.")
-
-        # Set values
-        mask = np.ones(np.shape(arr), dtype=bool)
-        mask[i, j] = False
-        arr[i, j] = pointcloud[data_column_name].values
-        raster_arr.data = np.ma.masked_array(data=arr, mask=mask)
-
-        return raster_arr
+        return cls.from_array(data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point)
 
     def polygonize(
         self,
@@ -4059,60 +3743,7 @@ class Raster:
         :returns: Vector containing the polygonized geometries associated to target values.
         """
 
-        # Mask a unique value set by a number
-        if isinstance(target_values, (int, float, np.integer, np.floating)):
-            if np.sum(self.data == target_values) == 0:
-                raise ValueError(f"no pixel with in_value {target_values}")
-
-            bool_msk = np.array(self.data == target_values).astype(np.uint8)
-
-        # Mask values within boundaries set by a tuple
-        elif isinstance(target_values, tuple):
-            if np.sum((self.data > target_values[0]) & (self.data < target_values[1])) == 0:
-                raise ValueError(f"no pixel with in_value between {target_values[0]} and {target_values[1]}")
-
-            bool_msk = ((self.data > target_values[0]) & (self.data < target_values[1])).astype(np.uint8)
-
-        # Mask specific values set by a sequence
-        elif isinstance(target_values, list) or isinstance(target_values, np.ndarray):
-            if np.sum(np.isin(self.data, np.array(target_values))) == 0:
-                raise ValueError("no pixel with in_value " + ", ".join(map("{}".format, target_values)))
-
-            bool_msk = np.isin(self.data, np.array(target_values)).astype("uint8")
-
-        # Mask all valid values
-        elif target_values == "all":
-            # Using getmaskarray is necessary in case .data.mask is nomask (False)
-            bool_msk = (~np.ma.getmaskarray(self.data)).astype("uint8")
-
-        else:
-            raise ValueError("in_value must be a number, a tuple or a sequence")
-
-        # GeoPandas.from_features() only supports certain dtypes, we find the best common dtype to optimize memory usage
-        # TODO: this should be a function independent of polygonize, reused in several places
-        gpd_dtypes = ["uint8", "uint16", "int16", "int32", "float32"]
-        list_common_dtype_index = []
-        for gpd_type in gpd_dtypes:
-            polygonize_dtype = np.promote_types(gpd_type, self.dtype)
-            if str(polygonize_dtype) in gpd_dtypes:
-                list_common_dtype_index.append(gpd_dtypes.index(gpd_type))
-        if len(list_common_dtype_index) == 0:
-            final_dtype = "float32"
-        else:
-            final_dtype_index = min(list_common_dtype_index)
-            final_dtype = gpd_dtypes[final_dtype_index]
-
-        results = (
-            {"properties": {"raster_value": v}, "geometry": s}
-            for i, (s, v) in enumerate(shapes(self.data.astype(final_dtype), mask=bool_msk, transform=self.transform))
-        )
-
-        gdf = gpd.GeoDataFrame.from_features(list(results))
-        gdf.insert(0, data_column_name, range(0, 0 + len(gdf)))
-        gdf = gdf.set_geometry(col="geometry")
-        gdf = gdf.set_crs(self.crs)
-
-        return gv.Vector(gdf)
+        return _polygonize(source_raster=self, target_values=target_values, data_column_name=data_column_name)
 
     def proximity(
         self,
@@ -4143,7 +3774,7 @@ class Raster:
         :return: Proximity distances raster.
         """
 
-        proximity = proximity_from_vector_or_raster(
+        proximity = _proximity_from_vector_or_raster(
             raster=self,
             vector=vector,
             target_values=target_values,
@@ -4169,8 +3800,7 @@ class Raster:
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def subsample(
@@ -4179,8 +3809,7 @@ class Raster:
         return_indices: Literal[True],
         *,
         random_state: int | np.random.Generator | None = None,
-    ) -> tuple[NDArrayNum, ...]:
-        ...
+    ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
     def subsample(
@@ -4188,8 +3817,7 @@ class Raster:
         subsample: float | int,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
-        ...
+    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     def subsample(
         self,
@@ -4329,8 +3957,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> Mask:
-        ...
+    ) -> Mask: ...
 
     @overload
     def reproject(
@@ -4349,8 +3976,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def reproject(
@@ -4369,8 +3995,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-    ) -> Mask | None:
-        ...
+    ) -> Mask | None: ...
 
     def reproject(
         self: Mask,
@@ -4436,36 +4061,33 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
-    ) -> Mask:
-        ...
+    ) -> Mask: ...
 
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
-    ) -> Mask | None:
-        ...
+    ) -> Mask | None: ...
 
     def crop(
         self: Mask,
-        crop_geom: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -4475,16 +4097,16 @@ class Mask(Raster):
             raise ValueError(NotImplementedError)
             # self._data = self.data.astype("float32")
             # if inplace:
-            #     super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     self._data = self.data.astype(bool)
             #     return None
             # else:
-            #     output = super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            #     output = super().crop(bbox=bbox, mode=mode, inplace=inplace)
             #     output._data = output.data.astype(bool)
             #     return output
         # Otherwise, run a classic crop
         else:
-            return super().crop(crop_geom=crop_geom, mode=mode, inplace=inplace)
+            return super().crop(bbox=bbox, mode=mode, inplace=inplace)
 
     def polygonize(
         self,
@@ -4535,6 +4157,7 @@ class Mask(Raster):
                 "crs": self.crs,
                 "nodata": self.nodata,
                 "area_or_point": self.area_or_point,
+                "tags": self.tags,
             }
         )
         return raster.proximity(
@@ -4590,83 +4213,3 @@ class Mask(Raster):
         """Bitwise inversion of a mask."""
 
         return self.copy(~self.data)
-
-
-# -----------------------------------------
-# Additional stand-alone utility functions
-# -----------------------------------------
-
-
-def proximity_from_vector_or_raster(
-    raster: Raster,
-    vector: Vector | None = None,
-    target_values: list[float] | None = None,
-    geometry_type: str = "boundary",
-    in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
-    distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
-) -> NDArrayNum:
-    """
-    (This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector)
-    Proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's geometry type
-    rasterized on the Raster.
-
-    :param raster: Raster to burn the proximity grid on.
-    :param vector: Vector for which to compute the proximity to geometry,
-        if not provided computed on the Raster target pixels.
-    :param target_values: (Only with a Raster) List of target values to use for the proximity,
-        defaults to all non-zero values.
-    :param geometry_type: (Only with a Vector) Type of geometry to use for the proximity, defaults to 'boundary'.
-    :param in_or_out: (Only with a Vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
-    :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
-    """
-
-    # 1/ First, if there is a vector input, we rasterize the geometry type
-    # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
-    if vector is not None:
-
-        # TODO: Only when using centroid... Maybe we should leave this operation to the user anyway?
-        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS.*")
-
-        # We create a geodataframe with the geometry type
-        boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
-        # We mask the pixels that make up the geometry type
-        mask_boundary = Vector(boundary_shp).create_mask(raster, as_array=True)
-
-    else:
-        # We mask target pixels
-        if target_values is not None:
-            mask_boundary = np.logical_or.reduce([raster.get_nanarray() == target_val for target_val in target_values])
-        # Otherwise, all non-zero values are considered targets
-        else:
-            mask_boundary = raster.get_nanarray().astype(bool)
-
-    # 2/ Now, we compute the distance matrix relative to the masked geometry type
-    if distance_unit.lower() == "georeferenced":
-        sampling: int | tuple[float | int, float | int] = raster.res
-    elif distance_unit.lower() == "pixel":
-        sampling = 1
-    else:
-        raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
-
-    # If not all pixels are targets, then we compute the distance
-    non_targets = np.count_nonzero(mask_boundary)
-    if non_targets > 0:
-        proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
-    # Otherwise, pass an array full of nodata
-    else:
-        proximity = np.ones(np.shape(mask_boundary)) * np.nan
-
-    # 3/ If there was a vector input, apply the in_and_out argument to optionally mask inside/outside
-    if vector is not None:
-        if in_or_out == "both":
-            pass
-        elif in_or_out in ["in", "out"]:
-            mask_polygon = Vector(vector.ds).create_mask(raster, as_array=True)
-            if in_or_out == "in":
-                proximity[~mask_polygon] = 0
-            else:
-                proximity[mask_polygon] = 0
-        else:
-            raise ValueError('The type of proximity must be one of "in", "out" or "both".')
-
-    return proximity

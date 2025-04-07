@@ -10,6 +10,7 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
 warnings.filterwarnings("ignore", category=UserWarning, message="No nodata set*")
+warnings.filterwarnings("ignore", category=UserWarning, message="One raster has a pixel interpretation*")
 ####
 
 import geoutils as gu

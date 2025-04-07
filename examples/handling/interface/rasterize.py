@@ -4,6 +4,7 @@ Rasterize a vector
 
 This example demonstrates the rasterizing of a vector using :func:`geoutils.Vector.rasterize`.
 """
+
 # %%
 # We open a raster and vector.
 

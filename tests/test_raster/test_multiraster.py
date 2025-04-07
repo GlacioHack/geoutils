@@ -1,6 +1,7 @@
 """
 Test tools involving multiple rasters.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -13,6 +14,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
+from geoutils._typing import NDArrayNum
 from geoutils.raster import RasterType
 from geoutils.raster.raster import _default_nodata
 
@@ -143,11 +145,6 @@ def images_different_crs():  # type: ignore
 
 
 @pytest.fixture
-def sat_images():  # type: ignore
-    return RealImageStack("everest_landsat_b4", cls=gu.SatelliteImage)
-
-
-@pytest.fixture
 def images_3d():  # type: ignore
     return RealImageStack("everest_landsat_rgb")
 
@@ -162,7 +159,6 @@ class TestMultiRaster:
         "rasters",
         [
             pytest.lazy_fixture("images_1d"),
-            pytest.lazy_fixture("sat_images"),
             pytest.lazy_fixture("images_different_crs"),
             pytest.lazy_fixture("images_3d"),
             pytest.lazy_fixture("images_nodata_zero"),
@@ -203,7 +199,7 @@ class TestMultiRaster:
             assert rasters.img.width == pytest.approx(stacked_img.width, abs=1)
         else:
             assert rasters.img.shape == stacked_img.shape
-        assert type(stacked_img) == gu.Raster  # Check output object is always Raster, whatever input was given
+        assert isinstance(stacked_img, gu.Raster)  # Check output object is always Raster, whatever input was given
         assert np.count_nonzero(np.isnan(stacked_img.data)) == 0  # Check no NaNs introduced
 
         merged_bounds = gu.projtools.merge_bounds(
@@ -305,6 +301,31 @@ class TestMultiRaster:
         # Check that only works if CRS were the same
         if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
             assert merged_img2 == merged_img
+
+        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and(*x)
+
+        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
+
+    @pytest.mark.parametrize(
+        "rasters",
+        [
+            pytest.lazy_fixture("images_1d"),
+            pytest.lazy_fixture("images_3d"),
+        ],
+    )  # type: ignore
+    def test_merge_rasters__errors(self, rasters) -> None:
+        """Test errors of merge raster are properly raised."""
+
+        # For merge algo: function that raises another type error than the expect axis error
+        msg = "not the right axis message"
+
+        def custom_func(x: NDArrayNum) -> None:
+            raise TypeError(msg)
+
+        with pytest.raises(TypeError, match=msg):
+            gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
 
     # Group rasters for for testing `load_multiple_rasters`
     # two overlapping, single band rasters

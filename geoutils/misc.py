@@ -1,4 +1,23 @@
-"""Miscellaneous functions, mainly for testing."""
+# Copyright (c) 2025 GeoUtils developers
+#
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Miscellaneous functions for maintenance, documentation and testing."""
+
 from __future__ import annotations
 
 import copy
@@ -13,7 +32,6 @@ try:
 except ImportError:
     _has_yaml = False
 
-import rasterio as rio
 from packaging.version import Version
 
 import geoutils
@@ -136,22 +154,6 @@ def copy_doc(
         return decorated
 
     return decorator
-
-
-def resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
-    """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
-    # Try to match the string version of the resampling method with a rio Resampling enum name
-    for method in rio.enums.Resampling:
-        if method.name == method_str:
-            resampling_method = method
-            break
-    # If no match was found, raise an error.
-    else:
-        raise ValueError(
-            f"'{method_str}' is not a valid rasterio.enums.Resampling method. "
-            f"Valid methods: {[method.name for method in rio.enums.Resampling]}"
-        )
-    return resampling_method
 
 
 def diff_environment_yml(

@@ -1,4 +1,5 @@
 #
+#
 # Configuration file for the Sphinx documentation builder.
 #
 import glob
@@ -14,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
 project = "GeoUtils"
-copyright = "2021, GeoUtils Developers"
+copyright = "2025, GeoUtils Developers"
 author = "GeoUtils Developers"
 
 
@@ -124,7 +125,6 @@ plot_formats = [(".png", 500)]
 inheritance_alias = {
     "geoutils.raster.raster.Raster": "geoutils.Raster",
     "geoutils.raster.raster.Mask": "geoutils.Mask",
-    "geoutils.raster.satimg.SatelliteImage": "geoutils.SatelliteImage",
     "geoutils.vector.Vector": "geoutils.Vector",
     "xdem.dem.DEM": "xdem.DEM",
 }
@@ -202,7 +202,7 @@ html_theme_options = {
         'to update your code see <a href="https://github.com/GlacioHack/geoutils/releases/tag/v0.1.0">here</a>. ⚠️'
         "<br>Future changes will come with deprecation warnings! 🙂"
     ),
-    "show_toc_level": 3
+    "show_toc_level": 3,
     # "logo_only": True,
     # "icon_links": [
     #         {

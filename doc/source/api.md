@@ -37,7 +37,7 @@ documentation.
 
 (api-raster-attrs)=
 
-### Unique attributes
+### Main attributes
 
 ```{eval-rst}
 .. autosummary::
@@ -60,16 +60,25 @@ documentation.
     Raster.height
     Raster.width
     Raster.count
-    Raster.count_on_disk
     Raster.bands
-    Raster.bands_on_disk
     Raster.res
     Raster.bounds
     Raster.dtype
+```
+
+### Other attributes
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.count_on_disk
+    Raster.bands_on_disk
     Raster.is_loaded
     Raster.is_modified
     Raster.name
     Raster.driver
+    Raster.tags
 ```
 
 (api-geo-handle)=
@@ -81,6 +90,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.crop
+    Raster.icrop
     Raster.reproject
     Raster.polygonize
     Raster.proximity
@@ -95,6 +105,15 @@ documentation.
     :toctree: gen_modules/
 
     Raster.plot
+```
+
+### Get statistics
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.get_stats
 ```
 
 ### Get or update data methods
@@ -203,36 +222,6 @@ And reverse operations.
     Raster.__array_function__
 ```
 
-## SatelliteImage
-
-```{eval-rst}
-.. minigallery:: geoutils.SatelliteImage
-      :add-heading:
-```
-
-### Opening a file
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    SatelliteImage
-```
-
-### Satellite image metadata
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    SatelliteImage.datetime
-    SatelliteImage.tile_name
-    SatelliteImage.satellite
-    SatelliteImage.sensor
-    SatelliteImage.product
-    SatelliteImage.version
-```
-
 ## Mask
 
 ```{eval-rst}
@@ -289,7 +278,7 @@ And reverse operations.
     Vector.info
 ```
 
-### Unique attributes
+### Main attributes
 
 ```{eval-rst}
 .. autosummary::

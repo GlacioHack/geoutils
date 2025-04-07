@@ -1,3 +1,21 @@
+# Copyright (c) 2025 GeoUtils developers
+#
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Module for dask-delayed functions for out-of-memory raster operations.
 """
@@ -157,7 +175,7 @@ def delayed_subsample(
     flattened chunk). For this reason, a loaded array will also have a different subsample due to its direct 1D
     indexing (per valid value for the entire flattened array).
 
-    To ensure you re-use a similar subsample of valid values for several arrays, call this function with
+    To ensure you reuse a similar subsample of valid values for several arrays, call this function with
     return_indices=True, then sample your arrays out-of-memory with .vindex[indices[0], indices[1]]
     (this assumes that these arrays have valid values at the same locations).
 
@@ -736,7 +754,7 @@ def delayed_reproject(
     src_block_ids = np.array(src_geotiling.get_block_locations())
     meta_params = [
         (
-            _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)
+            _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)  # type: ignore
             if len(sbid) > 0
             else ({}, [])
         )

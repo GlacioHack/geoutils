@@ -14,6 +14,8 @@ dependencies:
   - xarray
   - dask
   - rioxarray=0.*
+  - affine
+  - shapely
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
@@ -31,6 +33,7 @@ dependencies:
   - pylint
   - netcdf4  # To write synthetic data with chunksizes
   - dask-memusage
+  - pre-commit
 
   # Doc dependencies
   - sphinx

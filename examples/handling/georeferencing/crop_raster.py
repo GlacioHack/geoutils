@@ -4,6 +4,7 @@ Crop a raster
 
 This example demonstrates the cropping of a raster using :func:`geoutils.Raster.crop`.
 """
+
 # %%
 # We open a raster and vector, and subset the latter.
 
