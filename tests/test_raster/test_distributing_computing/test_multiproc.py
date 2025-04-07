@@ -7,9 +7,11 @@ from typing import Any
 
 import numpy as np
 import pytest
+import rasterio as rio
 import scipy
 from numpy import floating
 
+import geoutils as gu
 from geoutils import Raster, examples
 from geoutils.raster import RasterType
 from geoutils.raster.distributed_computing import (
@@ -161,3 +163,71 @@ class TestMultiproc:
         tiled_mean = sum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
         assert total_stats["valid_count"] == tiled_count
+
+    @pytest.mark.parametrize("example", [aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
+    @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])  # type: ignore
+    def test_multiproc_reproject(self, example, tile_size, cluster):
+        """Test for multiproc_reproject"""
+
+        r = gu.Raster(example)
+        outfile = "test.tif"
+        config = MultiprocConfig(tile_size, outfile, cluster)
+
+        # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
+        if r.nodata is None:
+            r.set_nodata(0)
+
+        # - Test reprojection with bounds and resolution -
+        dst_bounds = rio.coords.BoundingBox(
+            left=r.bounds.left, bottom=r.bounds.bottom + r.res[0], right=r.bounds.right - 2 * r.res[1], top=r.bounds.top
+        )
+        res_tuple = (r.res[0] * 0.5, r.res[1] * 3)
+
+        # Single-process reprojection
+        r_single = r.reproject(bounds=dst_bounds, res=res_tuple)
+
+        # Multiprocessing reprojection
+        r.reproject(bounds=dst_bounds, res=res_tuple, multiproc_config=config)
+        r_multi = Raster(outfile)
+
+        # Assert the results are the same
+        assert r_single.raster_equal(r_multi)
+
+        # - Test reprojection with CRS change -
+        for out_crs in [rio.crs.CRS.from_epsg(4326)]:
+
+            # Single-process reprojection
+            r_single = r.reproject(crs=out_crs)
+
+            # Multiprocessing reprojection
+            r.reproject(crs=out_crs, multiproc_config=config)
+            r_multi = Raster(outfile)
+
+            # Assert the results are the same
+            assert r_single.raster_equal(r_multi)
+
+        # Check that reprojection works for several bands in multiproc as well
+        for n in [2, 3, 4]:
+            img1 = Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"),
+                transform=rio.transform.from_origin(0, 500, 1, 1),
+                crs=4326,
+                nodata=0,
+            )
+            img2 = Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"),
+                transform=rio.transform.from_origin(50, 500, 1, 1),
+                crs=4326,
+                nodata=0,
+            )
+
+            out_img_single = img2.reproject(img1)
+            img2.reproject(ref=img1, multiproc_config=config)
+            out_img_multi = Raster(outfile)
+
+            assert out_img_multi.count == n
+            assert out_img_multi.shape == (500, 500)
+            assert out_img_single.raster_equal(out_img_multi)
+
+        os.remove(outfile)
