@@ -1000,7 +1000,7 @@ class TestRaster:
         assert np.array_equal(r.data.mask, r2.data.mask)
 
         # -- Third test: if r.data is modified, it does not affect r2.data --
-        r += 5
+        r.data += 5
         assert not np.array_equal(r.data.data, r2.data.data, equal_nan=True)
 
         # -- Fourth test: check the new array parameter works with either ndarray filled with NaNs, or masked arrays --
@@ -1931,7 +1931,7 @@ class TestRaster:
         assert not np.shares_memory(red_c.data, img.data)
 
         # Modify the copy, and make sure the original data is not modified.
-        red_c += 1
+        red_c.data += 1
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
@@ -2273,7 +2273,7 @@ class TestArithmetic:
         assert r1.raster_equal(r2)
 
         # Change data
-        r2 += 1
+        r2.data += 1
         assert not r1.raster_equal(r2)
 
         # Change mask (False by default)
@@ -2333,7 +2333,7 @@ class TestArithmetic:
         assert r1.georeferenced_grid_equal(r2)
 
         # Change data
-        r2 += 1
+        r2.data += 1
         assert r1.georeferenced_grid_equal(r2)
 
         # Change mask (False by default)

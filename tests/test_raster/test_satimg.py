@@ -70,6 +70,7 @@ class TestSatImg:
         # Check nothing outputs to console
         assert len(output2) == 0
 
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
     def test_save_tags(self, example: str) -> None:
         """Check that the metadata read is saved in tags of raster metadata."""
 
