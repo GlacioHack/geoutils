@@ -2179,12 +2179,18 @@ class Raster:
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
 
     @overload
-    def get_nanarray(self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False) -> NDArrayNum: ...
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
+    ) -> NDArrayNum: ...
 
     @overload
-    def get_nanarray(self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]) -> tuple[NDArrayNum, NDArrayBool]: ...
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
+    ) -> tuple[NDArrayNum, NDArrayBool]: ...
 
-    def get_nanarray(self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
+    ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
         Get NaN array from the raster.
 
