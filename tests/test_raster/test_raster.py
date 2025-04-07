@@ -434,7 +434,7 @@ class TestRaster:
             there is no mask defined at all, e.g. for classic array with NaNs),
         4. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array,
         5. Raises an error if the new data does not have the right shape,
-        6. Raises an error if the new data does not have the dtype of the Raster.
+        6. Does not raise an error if the new data does not have the dtype of the Raster.
         7. Raises a warning if the new data has the nodata value in the masked array, but unmasked.
         """
 
@@ -570,21 +570,14 @@ class TestRaster:
             assert np.array_equal(r3.data.data, arr_with_unmasked_nodata, equal_nan=True)
             assert np.array_equal(r3.data.mask, np.logical_or(mask, ~np.isfinite(arr_with_unmasked_nodata)))
 
-        # Check that setting data with a different data type results in an error
+        # Check that setting data with a different data type works
         rst = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=nodata)
         if "int" in dtype:
             new_dtype = "float32"
         else:
             new_dtype = "uint8"
 
-        with pytest.raises(
-            ValueError,
-            match=re.escape(
-                "New data must be of the same type as existing data: {}. Use copy() to set a new array "
-                "with different dtype, or astype() to change type.".format(str(np.dtype(dtype)))
-            ),
-        ):
-            rst.data = rst.data.astype(new_dtype)
+        rst.data = rst.data.astype(new_dtype)
 
         # Check that setting data with a different shape results in an error
         new_shape = (1, 25)
@@ -1000,7 +993,7 @@ class TestRaster:
         assert np.array_equal(r.data.mask, r2.data.mask)
 
         # -- Third test: if r.data is modified, it does not affect r2.data --
-        r.data += 5
+        r.data = r.data + 1
         assert not np.array_equal(r.data.data, r2.data.data, equal_nan=True)
 
         # -- Fourth test: check the new array parameter works with either ndarray filled with NaNs, or masked arrays --
@@ -1931,7 +1924,7 @@ class TestRaster:
         assert not np.shares_memory(red_c.data, img.data)
 
         # Modify the copy, and make sure the original data is not modified.
-        red_c.data += 1
+        red_c.data = red_c.data + 1
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
@@ -2273,7 +2266,7 @@ class TestArithmetic:
         assert r1.raster_equal(r2)
 
         # Change data
-        r2.data += 1
+        r2.data = r2.data + 1
         assert not r1.raster_equal(r2)
 
         # Change mask (False by default)
@@ -2333,7 +2326,7 @@ class TestArithmetic:
         assert r1.georeferenced_grid_equal(r2)
 
         # Change data
-        r2.data += 1
+        r2.data = r2.data + 1
         assert r1.georeferenced_grid_equal(r2)
 
         # Change mask (False by default)
@@ -2835,7 +2828,7 @@ class TestArrayInterface:
             ufunc[0] != "_"
             and ufunc.islower()
             and "err" not in ufunc
-            and ufunc not in ["e", "pi", "frompyfunc", "euler_gamma"]
+            and ufunc not in ["e", "pi", "frompyfunc", "euler_gamma", "vecdot", "vecmat"]
         )
     ]
 
