@@ -261,6 +261,16 @@ And reverse operations.
     raster.merge_rasters
 ```
 
+## Multiprocessing
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    raster.MultiprocConfig
+
+```
+
 ## Vector
 
 ```{eval-rst}
