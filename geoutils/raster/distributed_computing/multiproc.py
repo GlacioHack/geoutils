@@ -19,12 +19,10 @@
 """Process out-of-memory calculations"""
 from __future__ import annotations
 
-from collections import abc
 from typing import Any, Callable, Literal, overload
 
 import numpy as np
 import rasterio as rio
-from rasterio import CRS
 from rasterio._io import Resampling
 
 import geoutils as gu
@@ -37,10 +35,6 @@ from geoutils.raster.distributed_computing.delayed_dask import (
     _build_geotiling_and_meta,
     _chunks2d_from_chunksizes_shape,
     _reproject_per_block,
-)
-from geoutils.raster.geotransformations import (
-    _get_target_georeferenced_grid,
-    _user_input_reproject,
 )
 from geoutils.raster.tiling import compute_tiling
 
@@ -383,55 +377,20 @@ def _wrapper_multiproc_reproject_per_block(
 def _multiproc_reproject(
     rst: gu.Raster,
     config: MultiprocConfig,
-    ref: gu.Raster | str | None = None,
-    crs: CRS | str | int | None = None,
-    res: float | abc.Iterable[float] | None = None,
-    grid_size: tuple[int, int] | None = None,
-    bounds: rio.coords.BoundingBox | None = None,
-    nodata: int | float | None = None,
-    dtype: DTypeLike | None = None,
-    resampling: Resampling | str = Resampling.bilinear,
-    force_source_nodata: int | float | None = None,
+    src_crs: rio.CRS,
+    src_nodata: int | float | None,
+    dst_shape: tuple[int, int],
+    dst_transform: rio.Affine,
+    dst_crs: rio.CRS,
+    dst_nodata: int | float | None,
+    dtype: DTypeLike,
+    resampling: Resampling,
     **kwargs: Any,
 ) -> None:
     """
     Reproject georeferenced raster on out-of-memory chunks with multiprocessing.
-
-    :param rst: raster data source to be reprojected.
-    :param config: Configuration object containing chunk size, output file path, and an optional cluster.
-    :param ref: Reference raster to match resolution, bounds and CRS.
-    :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
-        defaults to this raster's CRS.
-    :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
-            Do not use with ``grid_size``.
-    :param grid_size: Destination grid size as (x, y). Do not use with ``res``.
-    :param bounds: Destination bounds as a Rasterio bounding box.
-    :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
-        not exist, will use GDAL's default.
-    :param dtype: Destination data type of array.
-    :param resampling: A Rasterio resampling method, can be passed as a string.
-        See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
-        for the full list.
-    :param force_source_nodata: Force a source nodata value (read from the metadata by default).
+    See Raster.reproject() for details.
     """
-    # Process user inputs
-    dst_crs, dst_dtype, src_nodata, dst_nodata, dst_res, dst_bounds = _user_input_reproject(
-        source_raster=rst,
-        ref=ref,
-        crs=crs,
-        bounds=bounds,
-        res=res,
-        nodata=nodata,
-        dtype=dtype,
-        force_source_nodata=force_source_nodata,
-    )
-
-    # Retrieve transform and grid_size
-    dst_transform, dst_grid_size = _get_target_georeferenced_grid(
-        rst, crs=dst_crs, grid_size=grid_size, res=dst_res, bounds=dst_bounds
-    )
-    dst_width, dst_height = dst_grid_size
-    dst_shape = (dst_height, dst_width)
 
     # Prepare geotiling and reprojection metadata for source and destination grids
     src_chunks = _chunks2d_from_chunksizes_shape(chunksizes=(config.chunk_size, config.chunk_size), shape=rst.shape)
@@ -449,18 +408,15 @@ def _multiproc_reproject(
     )
 
     # 4/ Call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
-
-    # Add fixed arguments to keywords
     kwargs.update(
         {
             "src_nodata": src_nodata,
             "dst_nodata": dst_nodata,
             "resampling": resampling,
-            "src_crs": rst.crs,
+            "src_crs": src_crs,
             "dst_crs": dst_crs,
         }
     )
-
     # Get location of destination blocks to write file
     dst_block_ids = np.array(dst_geotiling.get_block_locations())
 
@@ -485,12 +441,12 @@ def _multiproc_reproject(
     # Retrieve metadata for saving file
     file_metadata = {
         "driver": "GTIFF",
-        "width": dst_width,
-        "height": dst_height,
+        "width": dst_shape[1],
+        "height": dst_shape[0],
         "count": rst.count,
         "crs": dst_crs,
         "transform": dst_transform,
-        "dtype": rst.dtype,
+        "dtype": dtype,
         "nodata": dst_nodata,
     }
 

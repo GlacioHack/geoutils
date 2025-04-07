@@ -72,10 +72,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     reproject_from_latlon,
 )
-from geoutils.raster.distributed_computing.multiproc import (
-    MultiprocConfig,
-    _multiproc_reproject,
-)
+from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _bounds,
     _cast_nodata,
@@ -2642,22 +2639,6 @@ class Raster:
         :returns: Reprojected raster (or None if inplace or computed out-of-memory).
 
         """
-        if multiproc_config is not None:
-            _multiproc_reproject(
-                self,
-                multiproc_config,
-                ref,
-                crs,
-                res,
-                grid_size,
-                bounds,
-                nodata,
-                dtype,
-                resampling,
-                force_source_nodata,
-            )
-            return None
-
         # Reproject
         return_copy, data, transformed, crs, nodata = _reproject(
             source_raster=self,
@@ -2673,6 +2654,7 @@ class Raster:
             silent=silent,
             n_threads=n_threads,
             memory_limit=memory_limit,
+            multiproc_config=multiproc_config,
         )
 
         # If return copy is True (target georeferenced grid was the same as input)
@@ -2681,6 +2663,10 @@ class Raster:
                 return None
             else:
                 return self
+
+        # If data is None -> multiprocessing -> results on disk -> return None
+        if data is None:
+            return None
 
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
         assert data is not None

@@ -184,12 +184,15 @@ class TestMultiproc:
         )
         res_tuple = (r.res[0] * 0.5, r.res[1] * 3)
 
-        # Single-process reprojection
-        r_single = r.reproject(bounds=dst_bounds, res=res_tuple)
-
         # Multiprocessing reprojection
         r.reproject(bounds=dst_bounds, res=res_tuple, multiproc_config=config)
         r_multi = Raster(outfile)
+
+        # Assert that the raster has not been loaded during reprojection
+        assert not r.is_loaded
+
+        # Single-process reprojection
+        r_single = r.reproject(bounds=dst_bounds, res=res_tuple)
 
         # Assert the results are the same
         assert r_single.raster_equal(r_multi)
