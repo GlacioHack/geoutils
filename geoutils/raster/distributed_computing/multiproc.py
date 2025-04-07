@@ -34,10 +34,8 @@ from geoutils.raster.distributed_computing.cluster import (
     ClusterGenerator,
 )
 from geoutils.raster.distributed_computing.delayed_dask import (
-    ChunkedGeoGrid,
-    GeoGrid,
+    _build_geotiling_and_meta,
     _chunks2d_from_chunksizes_shape,
-    _combined_blocks_shape_transform,
     _reproject_per_block,
 )
 from geoutils.raster.geotransformations import (
@@ -435,52 +433,20 @@ def _multiproc_reproject(
     dst_width, dst_height = dst_grid_size
     dst_shape = (dst_height, dst_width)
 
-    # 1/ Define source and destination chunked georeferenced grid through simple classes storing CRS/transform/shape,
-    # which allow to consistently derive shape/transform for each block and their CRS-projected footprints
-
-    # Define georeferenced grids for source/destination array
-    src_geogrid = GeoGrid(transform=rst.transform, shape=rst.shape, crs=rst.crs)
-    dst_geogrid = GeoGrid(transform=dst_transform, shape=dst_shape, crs=dst_crs)
-
-    # Add the chunking
-    chunks_x = tuple(
-        (config.chunk_size if i <= rst.shape[0] else rst.shape[0] % config.chunk_size)
-        for i in np.arange(config.chunk_size, rst.shape[0] + config.chunk_size, config.chunk_size)
-    )
-    chunks_y = tuple(
-        (config.chunk_size if i <= rst.shape[1] else rst.shape[1] % config.chunk_size)
-        for i in np.arange(config.chunk_size, rst.shape[1] + config.chunk_size, config.chunk_size)
-    )
-    src_chunks = (chunks_x, chunks_y)
-
-    src_geotiling = ChunkedGeoGrid(grid=src_geogrid, chunks=src_chunks)
-
-    # For destination, we need to create the chunks based on destination chunksizes
-    dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=(config.chunk_size, config.chunk_size), shape=dst_shape)
-    dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
-
-    # 2/ Get footprints of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
-    # overlap, then map indexes of source blocks that intersect a given destination block
-    src_footprints = src_geotiling.get_block_footprints(crs=dst_crs)
-    dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
-    dest2source = [np.where(dst.intersects(src_footprints).values)[0] for dst in dst_footprints]
-
-    # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
-    # transform of each tuples of source blocks
-    src_block_ids = np.array(src_geotiling.get_block_locations())
-    meta_params = [
-        (
-            _combined_blocks_shape_transform(sub_block_ids=src_block_ids[sbid], src_geogrid=src_geogrid)  # type: ignore
-            if len(sbid) > 0
-            else ({}, [])
+    # Prepare geotiling and reprojection metadata for source and destination grids
+    src_chunks = _chunks2d_from_chunksizes_shape(chunksizes=(config.chunk_size, config.chunk_size), shape=rst.shape)
+    src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids = (
+        _build_geotiling_and_meta(
+            src_shape=rst.shape,
+            src_transform=rst.transform,
+            src_crs=rst.crs,
+            dst_shape=dst_shape,
+            dst_transform=dst_transform,
+            dst_crs=dst_crs,
+            src_chunks=src_chunks,
+            dst_chunksizes=(config.chunk_size, config.chunk_size),
         )
-        for sbid in dest2source
-    ]
-    # We also add the output transform/shape for this destination chunk in the combined meta
-    # (those are the only two that are chunk-specific)
-    dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
-    for i, (c, _) in enumerate(meta_params):
-        c.update({"dst_shape": dst_block_geogrids[i].shape, "dst_transform": tuple(dst_block_geogrids[i].transform)})
+    )
 
     # 4/ Call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
 
