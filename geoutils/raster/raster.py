@@ -48,6 +48,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
 
+import geoutils as gu
 from geoutils._config import config
 from geoutils._typing import (
     ArrayLike,
@@ -613,7 +614,7 @@ class Raster:
         return _bounds(transform=self.transform, shape=self.shape)
 
     @property
-    def footprint(self) -> Vector:
+    def footprint(self) -> gu.Vector:
         """Footprint of the raster."""
         return self.get_footprint_projected(self.crs)
 
@@ -661,7 +662,7 @@ class Raster:
 
     @property
     def name(self) -> str | None:
-        """Name of the file on disk, if it exists."""
+        """Name of the raster file on disk, if it exists."""
         return self._name
 
     @property
@@ -2425,7 +2426,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -2434,7 +2435,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -2443,7 +2444,7 @@ class Raster:
     @overload
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2451,7 +2452,7 @@ class Raster:
 
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -2923,7 +2924,7 @@ class Raster:
 
         return new_bounds
 
-    def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> Vector:
+    def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> gu.Vector:
         """
         Get raster footprint projected in a specified CRS.
 
@@ -2935,7 +2936,7 @@ class Raster:
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
-        return Vector(
+        return gu.Vector(
             _get_footprint_projected(
                 bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
             )
@@ -3599,7 +3600,7 @@ class Raster:
         as_array: Literal[True],
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> Vector: ...
+    ) -> gu.Vector: ...
 
     @overload
     def to_pointcloud(
@@ -3614,7 +3615,7 @@ class Raster:
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | Vector: ...
+    ) -> NDArrayNum | gu.Vector: ...
 
     def to_pointcloud(
         self,
@@ -3627,7 +3628,7 @@ class Raster:
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | Vector:
+    ) -> NDArrayNum | gu.PointCloud:
         """
         Convert raster to point cloud.
 
@@ -3731,7 +3732,7 @@ class Raster:
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
         data_column_name: str = "id",
-    ) -> Vector:
+    ) -> gu.Vector:
         """
         Polygonize the raster into a vector.
 
@@ -3740,14 +3741,14 @@ class Raster:
         :param data_column_name: Data column name to be associated with target values in the output vector
             (defaults to "id").
 
-        :returns: Vector containing the polygonized geometries associated to target values.
+        :returns: gu.Vector containing the polygonized geometries associated to target values.
         """
 
         return _polygonize(source_raster=self, target_values=target_values, data_column_name=data_column_name)
 
     def proximity(
         self,
-        vector: Vector | None = None,
+        vector: gu.Vector | None = None,
         target_values: list[float] | None = None,
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
@@ -3763,7 +3764,7 @@ class Raster:
         passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
         See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
 
-        :param vector: Vector for which to compute the proximity to geometry,
+        :param vector: gu.Vector for which to compute the proximity to geometry,
             if not provided computed on this raster target pixels.
         :param target_values: (Only with raster) List of target values to use for the proximity,
             defaults to all non-zero values.
@@ -4061,7 +4062,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        bbox: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -4070,7 +4071,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        bbox: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -4079,7 +4080,7 @@ class Mask(Raster):
     @overload
     def crop(
         self: Mask,
-        bbox: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -4087,7 +4088,7 @@ class Mask(Raster):
 
     def crop(
         self: Mask,
-        bbox: Mask | Vector | list[float] | tuple[float, ...],
+        bbox: Mask | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -4112,7 +4113,7 @@ class Mask(Raster):
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1,
         data_column_name: str = "id",
-    ) -> Vector:
+    ) -> gu.Vector:
         # If target values is passed but does not correspond to 0 or 1, raise a warning
         if not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
             warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
@@ -4131,7 +4132,7 @@ class Mask(Raster):
 
     def proximity(
         self,
-        vector: Vector | None = None,
+        vector: gu.Vector | None = None,
         target_values: list[float] | None = None,
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
