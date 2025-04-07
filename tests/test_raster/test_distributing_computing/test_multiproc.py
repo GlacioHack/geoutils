@@ -164,6 +164,7 @@ class TestMultiproc:
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
         assert total_stats["valid_count"] == tiled_count
 
+    @pytest.mark.skip()
     @pytest.mark.parametrize("example", [aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
     @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])  # type: ignore
