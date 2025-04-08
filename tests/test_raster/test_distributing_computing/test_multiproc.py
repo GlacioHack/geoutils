@@ -112,7 +112,7 @@ class TestMultiproc:
         raster = Raster(example)
         output_file = "output.tif"
         depth = 10
-        config = MultiprocConfig(tile_size, output_file, cluster)
+        config = MultiprocConfig(tile_size, output_file, cluster=cluster)
 
         addition = 5
         factor = 0.5

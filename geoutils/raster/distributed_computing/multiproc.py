@@ -48,16 +48,20 @@ class MultiprocConfig:
     It is designed to be passed into functions that require multiprocessing capabilities.
     """
 
-    def __init__(self, chunk_size: int, outfile: str | None = None, cluster: AbstractCluster | None = None):
+    def __init__(
+        self, chunk_size: int, outfile: str | None = None, driver: str = "GTiff", cluster: AbstractCluster | None = None
+    ):
         """
         Initialize the MultiprocConfig instance with multiprocessing settings.
 
         :param chunk_size: The size of the chunks for splitting raster data.
         :param outfile: The file path where the output will be written.
+        :param driver: Driver to write file with.
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
         self.chunk_size = chunk_size
         self.outfile = outfile
+        self.driver = driver
         if cluster is None:
             # Initialize a basic multiprocessing cluster if none is provided
             cluster = ClusterGenerator("basic")  # type: ignore
@@ -196,7 +200,7 @@ def map_overlap_multiproc_save(
     # get first tile to retrieve dtype and nodata
     result_tile0, _ = config.cluster.get_res(tasks[0])
     file_metadata = {
-        "driver": "GTIFF",
+        "driver": config.driver,
         "width": raster.width,
         "height": raster.height,
         "count": raster.count,
