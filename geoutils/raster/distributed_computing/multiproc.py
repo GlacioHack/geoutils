@@ -346,15 +346,6 @@ def map_multiproc_collect(
         raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
 
 
-def _multiproc_reproject_per_block(
-    *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
-) -> NDArrayNum:
-    """
-    Delayed reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
-    """
-    return _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
-
-
 def _wrapper_multiproc_reproject_per_block(
     rst: gu.Raster,
     src_block_ids: list[dict[str, int]],
@@ -364,16 +355,15 @@ def _wrapper_multiproc_reproject_per_block(
     combined_meta: dict[str, Any],
     **kwargs: Any,
 ) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
-    """Wrapper to use reproject_per_block for multiprocessing."""
+    """Wrapper to use Delayed reprojection per destination block
+    (also rebuilds a square array combined from intersecting source blocks)."""
 
     # Get source array block for each destination block
     s = src_block_ids
     src_arrs = (rst.icrop(bbox=(s[idx]["xs"], s[idx]["ys"], s[idx]["xe"], s[idx]["ye"])).data for idx in idx_d2s)
 
     # Call reproject per block
-    dst_block_arr = _multiproc_reproject_per_block(
-        *src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs
-    )
+    dst_block_arr = _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
 
     return dst_block_arr, (dst_block_id["ys"], dst_block_id["ye"], dst_block_id["xs"], dst_block_id["xe"])
 
