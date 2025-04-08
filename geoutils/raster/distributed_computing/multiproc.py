@@ -200,7 +200,6 @@ def map_overlap_multiproc_save(
     # get first tile to retrieve dtype and nodata
     result_tile0, _ = config.cluster.get_res(tasks[0])
     file_metadata = {
-        "driver": config.driver,
         "width": raster.width,
         "height": raster.height,
         "count": raster.count,
@@ -226,7 +225,7 @@ def _write_multiproc_result(
     # Create a new raster file to save the processed results
     if file_metadata is None:
         file_metadata = {}
-    with rio.open(config.outfile, "w", **file_metadata) as dst:
+    with rio.open(config.outfile, "w", driver=config.driver, **file_metadata) as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
@@ -434,7 +433,6 @@ def _multiproc_reproject(
 
     # Retrieve metadata for saving file
     file_metadata = {
-        "driver": "GTIFF",
         "width": dst_shape[1],
         "height": dst_shape[0],
         "count": rst.count,
