@@ -32,8 +32,8 @@ It provides methods for setting up raster classification, computing statistics f
   - Class names are saved as a `.json` file.
   - Computed statistics are saved as a `.csv` file.
 
-## The {class}`~geoutils.raster.RasterClassification` class
-{class}`~geoutils.raster.RasterClassification` is a specific implementation of {class}`~geoutils.raster.ClassificationLayer`
+## Apply binning
+{class}`~geoutils.raster.RasterBinning` is a specific implementation of {class}`~geoutils.raster.ClassificationLayer`
 designed for classifying continuous raster data using binning. This class allows you to define ranges (bins) for continuous raster values
 and classify the pixels into discrete classes based on these ranges.
 
@@ -51,7 +51,7 @@ and classify the pixels into discrete classes based on these ranges.
 ```{code-cell} ipython3
 import numpy as np
 import geoutils as gu
-from geoutils.raster import RasterClassification
+from geoutils.raster import RasterBinning
 
 # load raster (note, the raster parameter can also be a file path)
 raster_file = gu.examples.get_path("exploradores_aster_dem")
@@ -60,34 +60,80 @@ raster = gu.Raster(raster_file)
 # Define bins
 bins = [0, 1000, 2000, 3000, np.inf]
 
-# Create RasterClassification object
-classification = RasterClassification(raster, "elevation", bins)
+# Create RasterBinning object
+binning= RasterBinning(raster, "elevation", bins)
 
 # Apply the classification
-classification.apply_classification()
+binning.apply_classification()
 
 # Compute statistics
-classification.get_stats(req_stats_classes=["[0, 1000)", "[3000, inf)"])
+binning.get_stats(req_stats_classes=["[0, 1000)", "[3000, inf)"])
 
 # Save results
-classification.save("elevation_classification")
+binning.save("elevation_binning")
 ```
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
 import os
-os.remove("elevation_classification/elevation.tif")
-os.remove("elevation_classification/elevation_classes.json")
-os.remove("elevation_classification/elevation_stats.csv")
-os.rmdir("elevation_classification")
+os.remove("elevation_binning/elevation.tif")
+os.remove("elevation_binning/elevation_classes.json")
+os.remove("elevation_binning/elevation_stats.csv")
+os.rmdir("elevation_binning")
 ```
 
 ```{code-cell} ipython3
 # print stats
-print(classification.stats_df)
+print(binning.stats_df)
 ```
 
 ### Methods:
-- {func}`~geoutils.raster.RasterClassification.apply_classification` classifies the raster based on the specified bins.
+- {func}`~geoutils.raster.RasterBinning.apply_classification` classifies the raster based on the specified bins.
 It assigns each pixel to the appropriate class based on which bin the pixel value falls into.
 The resulting classification is stored as a multi-band {class}`~geoutils.Mask` object.
+
+
+## Apply segmentation
+
+{class}`~geoutils.raster.Segmentation` is a subclass of {class}`~geoutils.raster.ClassificationLayer` designed for
+categorical classification from pre-defined segmentation masks. It allows assigning class names to each mask and computing related statistics.
+
+### Example Workflow:
+
+1. **Load Raster:** Load a raster (e.g., satellite image).
+2. **Provide Masks:** Supply segmentation masks as a {class}`~geoutils.Mask` or boolean NumPy array.
+3. **Assign Class Names:** Provide a dictionary mapping class IDs to names.
+4. **Apply Classification & Save Results:** Optionally compute stats or export masks.
+
+```{code-cell} ipython3
+from geoutils.raster import Segmentation
+from geoutils import Mask
+
+# Load raster
+raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
+
+# Create dummy mask (e.g., two classes)
+mask_array = np.stack([raster.data > 1000, raster.data <= 1000])
+class_names = {0: "Water", 1: "Land"}
+
+# Initialize Segmentation
+seg = Segmentation(raster, "water", mask_array, class_names)
+
+# Compute stats
+seg.get_stats()
+
+# Save stats
+seg.save("segmentation_output")
+```
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+import os
+os.remove("segmentation_output/water_stats.csv")
+os.rmdir("segmentation_output")
+```
+
+```{code-cell} ipython3
+# print stats
+print(seg.stats_df)
+```
