@@ -232,7 +232,7 @@ And reverse operations.
     raster.ClassificationLayer.get_stats
     raster.ClassificationLayer.save
     raster.RasterBinning
-    raster.RasterBinning.apply_classification
+    raster.RasterBinning.apply
     raster.Segmentation
 ```
 
