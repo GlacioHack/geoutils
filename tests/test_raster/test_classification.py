@@ -48,7 +48,7 @@ class TestRasterClassification:
         """
         Test the classification on the mock raster and ensure correct output.
         """
-        self.mock_classifier.apply_classification()
+        self.mock_classifier.apply()
 
         # Check that classification_masks is correctly created
         assert self.mock_classifier.classification_masks is not None
@@ -76,7 +76,7 @@ class TestRasterClassification:
         """
         Test the classification on raster and ensure it runs without errors.
         """
-        classifier.apply_classification()
+        classifier.apply()
 
         assert classifier.classification_masks is not None
         assert isinstance(classifier.classification_masks, Mask)
@@ -88,7 +88,7 @@ class TestRasterClassification:
         """
         Test the statistics calculation on the mock raster.
         """
-        self.mock_classifier.apply_classification()
+        self.mock_classifier.apply()
         self.mock_classifier.get_stats(req_stats="mean")
 
         # Check that stats_df is correctly populated
@@ -117,7 +117,7 @@ class TestRasterClassification:
         Test the statistics outputs.
         """
         classifier, req_stats_classes = classifier_req_classes
-        classifier.apply_classification()
+        classifier.apply()
         classifier.get_stats(req_stats=req_stats, req_stats_classes=req_stats_classes)
 
         # Check that stats_df is correctly populated
@@ -151,7 +151,7 @@ class TestRasterClassification:
         Test the save functionality to ensure the classification, class names, and statistics are correctly saved.
         """
         output_dir = "test_raster_classification_output"
-        classifier.apply_classification()
+        classifier.apply()
         classifier.get_stats()
         classifier.save(output_dir)
 

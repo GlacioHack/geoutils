@@ -52,7 +52,7 @@ class ClassificationLayer(ABC):
         self.stats_df: pd.DataFrame | None = None  # Will store computed statistics for required classes
 
     @abstractmethod
-    def apply_classification(self) -> None:
+    def apply(self) -> None:
         """
         Abstract method to apply the classification logic. Subclasses should implement their specific classification
         logic. This method will create the classification as a :class:`geoutils.Mask` object.
@@ -164,7 +164,7 @@ class RasterBinning(ClassificationLayer):
         self.bins = bins
         self.class_names = {i: f"[{self.bins[i - 1]}, {self.bins[i]})" for i in range(1, len(self.bins))}
 
-    def apply_classification(self) -> None:
+    def apply(self) -> None:
         """
         Apply classification based on the bin ranges. This creates a :class:`geoutils.Mask` object where each
         band represent one class.
@@ -211,7 +211,7 @@ class Segmentation(ClassificationLayer):
             )
         self.class_names = class_names
 
-    def apply_classification(self) -> None:
+    def apply(self) -> None:
         """Masks already existing -> No application is needed"""
         pass
 
