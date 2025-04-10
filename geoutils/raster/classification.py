@@ -21,11 +21,12 @@
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 
+from geoutils._typing import NDArrayBool
 from geoutils.raster import Mask, Raster, RasterType
 
 
@@ -109,36 +110,41 @@ class ClassificationLayer(ABC):
             # Convert the list of dictionaries into a pandas DataFrame
         self.stats_df = pd.DataFrame(stats_list)
 
-    def save(self, output_dir: str) -> None:
+    def save(self, output_dir: str, save_list: list[Literal["masks", "names", "stats"]] | None = None) -> None:
         """
         Save the classification result, class names, and computed statistics to files.
 
         :param output_dir: Directory where the output files will be saved.
+        :param save_list: Objects to save.
         """
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+        if save_list is None:
+            save_list = ["masks", "names", "stats"]
 
         # Save classification as a GeoTIFF file
-        if self.classification_masks is not None:
+        if self.classification_masks is not None and "masks" in save_list:
             classification_path = os.path.join(output_dir, f"{self.name}.tif")
             self.classification_masks.save(classification_path)
             print("Classification masks saved under", classification_path)
 
         # Save class names as a JSON file
-        if self.class_names is not None:
+        if self.class_names is not None and "names" in save_list:
             class_names_path = os.path.join(output_dir, f"{self.name}_classes.json")
             with open(class_names_path, "w") as f:
                 json.dump(self.class_names, f, indent=4)
             print("Class names saved under", class_names_path)
 
         # Save statistics as CSV file
-        if self.stats_df is not None:
+        if self.stats_df is not None and "stats" in save_list:
             stats_csv_path = os.path.join(output_dir, f"{self.name}_stats.csv")
             self.stats_df.to_csv(stats_csv_path, index=False)
             print("Stats saved under", stats_csv_path)
 
 
-class RasterClassification(ClassificationLayer):
+class RasterBinning(ClassificationLayer):
+    """Apply binning to a raster using input bins"""
+
     def __init__(
         self,
         raster: RasterType | str,
@@ -146,15 +152,15 @@ class RasterClassification(ClassificationLayer):
         bins: list[float],
     ) -> None:
         """
-        Initialize the RasterClassification object.
+        Initialize the RasterBinning object.
         :param raster: The Raster object to classify (only 1-band).
         :param name: The name of the classification.
         :param bins: List of bin edges to classify the raster values (e.g., [0, 10, 20, 50, 100, inf]).
         """
         super().__init__(raster, name)
-        # Classification works with 1-band rasters
+        # Classification works with 1-band raster
         if self.raster.count != 1:
-            raise ValueError("Raster is multi-band, it has to be a 1-band raster")
+            self.raster._data = self.raster.data[0]
         self.bins = bins
         self.class_names = {i: f"[{self.bins[i - 1]}, {self.bins[i]})" for i in range(1, len(self.bins))}
 
@@ -171,3 +177,46 @@ class RasterClassification(ClassificationLayer):
 
         # Store classification as a Mask object
         self.classification_masks = Mask.from_array(masks_array, transform=self.raster.transform, crs=self.raster.crs)
+
+
+class Segmentation(ClassificationLayer):
+    """
+    Segmentation classification using pre-defined masks.
+
+    This class handles classification of a raster using a set of boolean masks
+    that define class membership for each pixel.
+    """
+
+    def __init__(
+        self,
+        raster: RasterType | str,
+        name: str,
+        classification_masks: Mask | NDArrayBool,
+        class_names: dict[int | list[int], str],
+    ) -> None:
+        """
+        Initialize a Segmentation classification object.
+
+        :param raster: Input raster or path to raster file.
+        :param name: Name of the classification layer.
+        :param classification_masks: Boolean masks indicating class membership. Can be a `Mask` or raw NumPy array.
+        :param class_names: Dictionary mapping class indices to class names.
+        """
+        super().__init__(raster, name)
+        if isinstance(classification_masks, Mask):
+            self.classification_masks = classification_masks
+        else:
+            self.classification_masks = Mask.from_array(
+                classification_masks, transform=self.raster.transform, crs=self.raster.crs
+            )
+        self.class_names = class_names
+
+    def apply_classification(self) -> None:
+        """Masks already existing -> No application is needed"""
+        pass
+
+    def save(self, output_dir: str, save_list: list[Literal["masks", "names", "stats"]] | None = None) -> None:
+        """Save only statistic in pd.dataframe as classification masks and class names are already known"""
+        if save_list is None:
+            save_list = ["stats"]
+        return super().save(output_dir, save_list=save_list)
