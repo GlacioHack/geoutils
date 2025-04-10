@@ -63,8 +63,8 @@ bins = [0, 1000, 2000, 3000, np.inf]
 # Create RasterBinning object
 binning= RasterBinning(raster, "elevation", bins)
 
-# Apply the classification
-binning.apply_classification()
+# Apply binning
+binning.apply()
 
 # Compute statistics
 binning.get_stats(req_stats_classes=["[0, 1000)", "[3000, inf)"])
@@ -88,7 +88,7 @@ print(binning.stats_df)
 ```
 
 ### Methods:
-- {func}`~geoutils.raster.RasterBinning.apply_classification` classifies the raster based on the specified bins.
+- {func}`~geoutils.raster.RasterBinning.apply` classifies the raster based on the specified bins.
 It assigns each pixel to the appropriate class based on which bin the pixel value falls into.
 The resulting classification is stored as a multi-band {class}`~geoutils.Mask` object.
 
