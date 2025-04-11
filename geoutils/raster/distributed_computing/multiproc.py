@@ -19,6 +19,7 @@
 """Process out-of-memory calculations"""
 from __future__ import annotations
 
+import tempfile
 from typing import Any, Callable, Literal, overload
 
 import numpy as np
@@ -60,7 +61,11 @@ class MultiprocConfig:
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
         self.chunk_size = chunk_size
-        self.outfile = outfile
+        if outfile is None:
+            with tempfile.NamedTemporaryFile() as tmp:
+                self.outfile = tmp.name
+        else:
+            self.outfile = outfile
         self.driver = driver
         if cluster is None:
             # Initialize a basic multiprocessing cluster if none is provided
@@ -157,7 +162,7 @@ def map_overlap_multiproc_save(
     *args: Any,
     depth: int = 0,
     **kwargs: Any,
-) -> None:
+) -> gu.Raster:
     """
     Applies a function to raster tiles in parallel and saves the result to a file.
 
@@ -209,18 +214,14 @@ def map_overlap_multiproc_save(
         "nodata": result_tile0.nodata,
     }
 
-    _write_multiproc_result(tasks, config, file_metadata)
+    return _write_multiproc_result(tasks, config, file_metadata)
 
 
 def _write_multiproc_result(
     tasks: list[Any],
     config: MultiprocConfig,
     file_metadata: dict[str, Any] | None = None,
-) -> None:
-
-    # Ensure that an output file is provided
-    if config.outfile is None:
-        raise ValueError("Output file must be provided when the function returns a Raster.")
+) -> gu.Raster:
 
     # Create a new raster file to save the processed results
     if file_metadata is None:
@@ -248,6 +249,7 @@ def _write_multiproc_result(
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
             print(f"Raster saved under {config.outfile}")
+            return gu.Raster(config.outfile)
         except Exception as e:
             raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
 

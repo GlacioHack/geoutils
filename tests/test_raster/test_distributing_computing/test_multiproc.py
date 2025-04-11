@@ -117,7 +117,7 @@ class TestMultiproc:
         addition = 5
         factor = 0.5
         # Apply the multiproc map function
-        map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded
@@ -125,13 +125,22 @@ class TestMultiproc:
         # Ensure the output file is created and valid
         assert os.path.exists(output_file)
 
-        # Open the output file and compare with the operation on full raster
-        output_raster = Raster(output_file)
+        # Compare with the operation on full raster
         new_raster = _custom_func(raster, addition, factor)
         assert output_raster.raster_equal(new_raster)
 
+        # Assert raster has been properly saved in output_file
+        output_raster_saved = Raster(output_file)
+        assert output_raster_saved.raster_equal(output_raster)
+
         # Remove output file
         os.remove(output_file)
+
+        # With a tempfile :
+        config = MultiprocConfig(tile_size)
+        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster_saved = Raster(config.outfile)
+        assert output_raster_saved.raster_equal(output_raster)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
@@ -172,8 +181,7 @@ class TestMultiproc:
         """Test for multiproc_reproject"""
 
         r = gu.Raster(example)
-        outfile = "test.tif"
-        config = MultiprocConfig(tile_size, outfile, cluster)
+        config = MultiprocConfig(tile_size, cluster=cluster)
 
         # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
         if r.nodata is None:
@@ -186,8 +194,7 @@ class TestMultiproc:
         res_tuple = (r.res[0] * 0.5, r.res[1] * 3)
 
         # Multiprocessing reprojection
-        r.reproject(bounds=dst_bounds, res=res_tuple, multiproc_config=config)
-        r_multi = Raster(outfile)
+        r_multi = r.reproject(bounds=dst_bounds, res=res_tuple, multiproc_config=config)
 
         # Assert that the raster has not been loaded during reprojection
         assert not r.is_loaded
@@ -205,8 +212,7 @@ class TestMultiproc:
             r_single = r.reproject(crs=out_crs)
 
             # Multiprocessing reprojection
-            r.reproject(crs=out_crs, multiproc_config=config)
-            r_multi = Raster(outfile)
+            r_multi = r.reproject(crs=out_crs, multiproc_config=config)
 
             # Assert the results are the same
             assert r_single.raster_equal(r_multi)
@@ -227,11 +233,8 @@ class TestMultiproc:
             )
 
             out_img_single = img2.reproject(img1)
-            img2.reproject(ref=img1, multiproc_config=config)
-            out_img_multi = Raster(outfile)
+            out_img_multi = img2.reproject(ref=img1, multiproc_config=config)
 
             assert out_img_multi.count == n
             assert out_img_multi.shape == (500, 500)
             assert out_img_single.raster_equal(out_img_multi)
-
-        os.remove(outfile)

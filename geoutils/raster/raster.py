@@ -2565,26 +2565,6 @@ class Raster:
         multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
-    @overload
-    def reproject(
-        self: RasterType,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | abc.Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: bool = False,
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterType | None: ...
-
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -2664,9 +2644,16 @@ class Raster:
             else:
                 return self
 
-        # If data is None -> multiprocessing -> results on disk -> return None
-        if data is None:
-            return None
+        # If multiprocessing -> results on disk -> load metadata
+        if multiproc_config:
+            result_raster = Raster(multiproc_config.outfile)
+            if inplace:
+                crs = result_raster.crs
+                nodata = result_raster.nodata
+                transformed = result_raster.transform
+                data = result_raster.data
+            else:
+                return result_raster  # type: ignore
 
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
         assert data is not None
