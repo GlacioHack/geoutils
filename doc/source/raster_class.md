@@ -244,24 +244,20 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 ```{note}
 Reprojecting a {class}`~geoutils.Raster` can be done out-of-memory in multiprocessing by passing a
 {class}`~geoutils.raster.MultiprocConfig` parameter to the {func}`~geoutils.Raster.reproject` function.
-In this case, the reprojected raster is saved on disk under the specify path.
+In this case, the reprojected raster is saved on disk under the specify path in {class}`~geoutils.raster.MultiprocConfig` (or a temporary file) and the raster metadata are loaded from the file.
 ```
 
 ```{code-cell} ipython3
 # Same example out-of-memory
 from geoutils.raster import MultiprocConfig, ClusterGenerator
 cluster = ClusterGenerator("multi", nb_workers=4)
-mp_config = MultiprocConfig(chunk_size=200, outfile= "test.tif", cluster=None)  # Pass a cluster to perform reprojection in multiprocessing
-rast.reproject(
+mp_config = MultiprocConfig(chunk_size=200, cluster=None)  # Pass a cluster to perform reprojection in multiprocessing
+rast_reproj = rast.reproject(
     res=0.1,
     bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
     resampling="cubic",
     multiproc_config=mp_config)
-```
-```{code-cell} ipython3
-:tags: [remove-cell]
-import os
-os.remove(mp_config.outfile)
+rast_reproj
 ```
 
 ## Crop

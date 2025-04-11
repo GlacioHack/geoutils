@@ -29,7 +29,7 @@ Both functions require a **multiprocessing configuration** defined with {class}`
 
 ## Using {class}`~geoutils.raster.MultiprocConfig`
 
-{class}`~geoutils.raster.MultiprocConfig` defines tiling and processing settings, such as chunk size, output file, and computing cluster. It ensures that computations are performed **without loading the entire raster into memory**.
+{class}`~geoutils.raster.MultiprocConfig` defines tiling and processing settings, such as chunk size, output file, driver, and computing cluster. It ensures that computations are performed **without loading the entire raster into memory**.
 
 ### Example: creating a {class}`~geoutils.raster.MultiprocConfig` object
 ```{code-cell} ipython3
@@ -44,7 +44,7 @@ config_np = config_basic.copy()
 config_np.cluster = ClusterGenerator("multi", nb_workers=4)
 ```
 - **`chunk_size=200`**: The raster is divided into 200x200 pixel tiles.
-- **`outfile="output.tif"`**: Required when saving results.
+- **`outfile="output.tif"`**: The results will be saved under this file (if not provided, temporary file by default).
 - **`cluster=ClusterGenerator("multi", nb_workers=4)`**: Enables parallel processing.
 
 ---
@@ -52,6 +52,7 @@ config_np.cluster = ClusterGenerator("multi", nb_workers=4)
 ## {func}`~geoutils.raster.map_overlap_multiproc_save`: process and save large rasters
 
 This function applies a user-defined function to raster tiles and **saves the output** to a file. The entire raster is **never loaded into memory at once**, making it suitable for processing large datasets.
+The function returned the raster metadata loaded from the file.
 
 ### When to use
 - When the function **returns a Raster**.
@@ -75,7 +76,8 @@ def filter(raster: RasterType, size: int) -> RasterType:
     return raster
 
 size = 1
-map_overlap_multiproc_save(filter, filename_rast, config_basic, size, depth=size+1)
+raster_filtered = map_overlap_multiproc_save(filter, filename_rast, config_basic, size, depth=size+1)
+raster_filtered
 ```
 
 ```{code-cell} ipython3
