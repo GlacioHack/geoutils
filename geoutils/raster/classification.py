@@ -47,7 +47,7 @@ class ClassificationLayer(ABC):
         else:
             self.raster = raster
         self.name = name
-        self.class_names: dict[int | list[int], str] | None = None  # Will be set in subclasses
+        self.class_names: dict[str, int | list[int]] = {}  # Will be set in subclasses
         self.classification_masks: Mask | None = None  # Will store classification result (as geoutils.Mask)
         self.stats_df: pd.DataFrame | None = None  # Will store computed statistics for required classes
 
@@ -60,11 +60,15 @@ class ClassificationLayer(ABC):
         pass
 
     def get_stats(
-        self, req_stats: str | list[str] | None = None, req_stats_classes: str | list[str] | None = None
+        self,
+        raster: RasterType | None = None,
+        req_stats: str | list[str] | None = None,
+        req_stats_classes: str | list[str] | None = None,
     ) -> None:
         """
         Compute the required statistics on the classified pixels.
 
+        :param raster: Raster on which the classification masks should be applied for computing the stats.
         :param req_stats: List of required statistics to compute (optional, default is all statistics in
             geoutils.Raster.get_stats).
         :param req_stats_classes: List of classes on which to compute statistics (optional, default is all classes).
@@ -83,18 +87,22 @@ class ClassificationLayer(ABC):
         # Check if req_stats_classes are class names
         if req_stats_classes:
             for req_class in req_stats_classes:
-                if req_class not in self.class_names.values():
+                if req_class not in self.class_names.keys():
                     raise ValueError(f"{req_class} is not a class name. Class names are : f{self.class_names.values()}")
+
+        if raster is None:
+            raster = self.raster  # type: ignore
+        assert isinstance(raster, Raster)
 
         stats_list = []
 
         # Loop over each class in the classification mask
-        for i, (class_idx, class_name) in enumerate(self.class_names.items()):
+        for i, (class_name, class_idx) in enumerate(self.class_names.items()):
             if req_stats_classes and class_name not in req_stats_classes:
                 continue
 
             # Compute statistics for the class
-            class_stats = self.raster.get_stats(
+            class_stats = raster.get_stats(
                 stats_name=req_stats, inlier_mask=self.classification_masks[i]  # type: ignore
             )
 
@@ -162,7 +170,7 @@ class RasterBinning(ClassificationLayer):
         if self.raster.count != 1:
             self.raster._data = self.raster.data[0]
         self.bins = bins
-        self.class_names = {i: f"[{self.bins[i - 1]}, {self.bins[i]})" for i in range(1, len(self.bins))}
+        self.class_names = {f"[{self.bins[i - 1]}, {self.bins[i]})": i for i in range(1, len(self.bins))}
 
     def apply(self) -> None:
         """
@@ -192,7 +200,7 @@ class Segmentation(ClassificationLayer):
         raster: RasterType | str,
         name: str,
         classification_masks: Mask | NDArrayBool,
-        class_names: dict[int | list[int], str],
+        class_names: dict[str, int | list[int]],
     ) -> None:
         """
         Initialize a Segmentation classification object.
@@ -200,7 +208,7 @@ class Segmentation(ClassificationLayer):
         :param raster: Input raster or path to raster file.
         :param name: Name of the classification layer.
         :param classification_masks: Boolean masks indicating class membership. Can be a `Mask` or raw NumPy array.
-        :param class_names: Dictionary mapping class indices to class names.
+        :param class_names: Dictionary mapping class names to class indices.
         """
         super().__init__(raster, name)
         if isinstance(classification_masks, Mask):
@@ -220,3 +228,89 @@ class Segmentation(ClassificationLayer):
         if save_list is None:
             save_list = ["stats"]
         return super().save(output_dir, save_list=save_list)
+
+
+class Fusion(ClassificationLayer):
+    """
+    A fusion classification layer that combines multiple classification masks into fused classes.
+
+    This class takes a list of binary classification masks and fuses them using logical operations.
+    The final fused masks are stored in a multi-band Mask, where each band represents a unique
+    combination of classes from the input layers.
+    """
+
+    def __init__(
+        self,
+        raster: RasterType | str,
+        name: str,
+        layers_to_fuse: list[Mask | NDArrayBool],
+        layers_class_names: list[dict[str, int | list[int]]],
+    ) -> None:
+        """
+        Initialize a Fusion classification object.
+
+        :param raster: Input raster or path to raster file.
+        :param name: Name of the classification layer.
+        :param layers_to_fuse: The list of classification masks to fuse.
+        :param layers_class_names: List of class-name-to-index mappings for each classification layer.
+        """
+        super().__init__(raster=raster, name=name)
+        self.list_classification_layers = layers_to_fuse
+        self.layers_class_names = layers_class_names
+
+    def apply(self) -> None:
+        """
+        Apply fusion classification by computing the intersection of masks from each input classification layer.
+        The fused classification mask is stored as a 3D Mask object in `self.classification_masks`.
+        The combined class names are stored in `self.class_names`.
+        """
+
+        from itertools import product
+
+        def _get_combined_mask(mask_layer: NDArrayBool, indices: int | list[int]) -> NDArrayBool:
+            """
+            Return a combined mask from a single classification layer using AND logic.
+            """
+            if isinstance(indices, list):
+                combined = mask_layer[indices[0] - 1].copy()
+                for idx in indices[1:]:
+                    combined &= mask_layer[idx - 1]
+                return combined
+            return mask_layer[indices - 1].copy()
+
+        # Generate all possible combinations of class names across layers
+        class_combinations = list(product(*[list(cn.keys()) for cn in self.layers_class_names]))
+
+        fused_masks: list[NDArrayBool] = []
+        fused_class_names: dict[str, int] = {}
+
+        for i, combo in enumerate(class_combinations):
+            # Start by getting the mask(s) for the first layer
+            idx = self.layers_class_names[0][combo[0]]
+            combined_mask = _get_combined_mask(self.list_classification_layers[0], idx)  # type: ignore
+
+            # Fuse with remaining layers using OR
+            for j in range(1, len(combo)):
+                idx = self.layers_class_names[j][combo[j]]
+                next_mask = _get_combined_mask(self.list_classification_layers[j], idx)  # type: ignore
+                combined_mask |= next_mask
+
+            # Only keep if at least one pixel is False
+            if not combined_mask.all():
+                fused_masks.append(combined_mask)
+                fused_class_names["_".join(combo)] = i + 1
+
+        # Handle empty case
+        if fused_masks:
+            stacked_mask = np.stack(fused_masks)
+        else:
+            stacked_mask = np.zeros((1,) + self.raster.shape, dtype=bool)
+            fused_class_names["empty_class"] = 1
+
+        # Store results
+        self.classification_masks = Mask.from_array(
+            stacked_mask,
+            transform=self.raster.transform,
+            crs=self.raster.crs,
+        )
+        self.class_names = fused_class_names  # type: ignore
