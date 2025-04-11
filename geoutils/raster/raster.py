@@ -1732,7 +1732,8 @@ class Raster:
                 f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape}."
             )
 
-        # Cast nodata if the new array has incompatible type with the old nodata value
+        # Cast nodata if the new array has incompatible dtype with the old nodata value
+        # (we accept setting an array with new dtype to mirror NumPy behaviour)
         self._nodata = _cast_nodata(new_data.dtype, self.nodata)
 
         # If the new data is not masked and has non-finite values, we define a default nodata value

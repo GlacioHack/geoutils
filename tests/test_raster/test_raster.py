@@ -964,8 +964,8 @@ class TestRaster:
 
         # Open data, modify, and copy
         r = gu.Raster(example)
+        r.data = r.data + 5
         r2 = r.copy()
-
         # Objects should be different (not pointing to the same memory)
         assert r is not r2
 
@@ -1049,8 +1049,12 @@ class TestRaster:
         r = gu.Raster(example)
         assert not r.is_modified
 
-        # This should not trigger the hash either
+        # This should not trigger the hash
         r.load()
+        assert not r.is_modified
+
+        # This should not trigger the hash either
+        r.data = r.data + np.array([0], dtype=r.dtype)
         assert not r.is_modified
 
         # This will
@@ -1917,6 +1921,12 @@ class TestRaster:
             red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
+        assert np.array_equal(
+            red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
+        )
+
+        # Modify the red band and make sure it propagates to the original img (it's not a copy)
+        red.data = red.data + 1
         # Copy the bands instead of pointing to the same memory.
         red_c = img.split_bands(copy=True, bands=1)[0]
 
