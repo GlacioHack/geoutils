@@ -42,7 +42,7 @@ class TestRasterClassification:
         assert isinstance(classifier, RasterBinning)
         assert classifier.name is name
         assert classifier.bins == bins
-        assert classifier.class_names == {i: f"[{bins[i-1]}, {bins[i]})" for i in range(1, len(bins))}
+        assert classifier.class_names == {f"[{bins[i-1]}, {bins[i]})": i for i in range(1, len(bins))}
 
     def test_apply_mock_classification(self) -> None:
         """
@@ -139,11 +139,10 @@ class TestRasterClassification:
         assert stats_df.iloc
         assert isinstance(classifier.class_names, dict)
         for i in range(num_classes):
-            class_name = classifier.class_names.get(i + 1)
-            assert stats_df.iloc[i]["class_name"] == class_name
+            assert stats_df.iloc[i]["class_idx"] == classifier.class_names.get(stats_df.iloc[i]["class_name"])
 
         # Ensure that all rows are populated with valid statistics
-        assert not stats_df.isnull().values.any()  # There should be no NaN values in the DataFrame
+        assert not stats_df.isnull().values.any()
 
     @pytest.mark.parametrize("classifier", [landsat_classifier, aster_classifier])  # type: ignore
     def test_save(self, classifier: RasterBinning):
@@ -183,13 +182,13 @@ class TestSegmentation:
         ]
     )
 
-    mock_class_names = {1: "Class A", 2: "Class B"}
+    mock_class_names: dict[str, int | list[int]] = {"Class A": 1, "Class B": 2}
 
     segmentation_classifier = Segmentation(
         raster=mock_raster,
         name="segmentation_test",
         classification_masks=mock_segmentation_masks,
-        class_names=mock_class_names,  # type: ignore
+        class_names=mock_class_names,
     )
 
     def test_initialization(self) -> None:
