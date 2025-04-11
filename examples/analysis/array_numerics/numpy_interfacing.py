@@ -28,10 +28,8 @@ gradient_y, gradient_x = np.gradient(rast)
 # Estimate the orientation in degrees casting to 2D
 aspect = np.arctan2(-gradient_x, gradient_y)
 aspect = (aspect * 180 / np.pi) + np.pi
-# We copy the new array into a raster
-asp = rast.copy(new_array=aspect)
 
-asp.plot(cmap="twilight", cbar_title="Aspect (degrees)")
+aspect.plot(cmap="twilight", cbar_title="Aspect (degrees)")
 
 # %%
 #
@@ -41,7 +39,7 @@ asp.plot(cmap="twilight", cbar_title="Aspect (degrees)")
 # We use NumPy logical operations to isolate the terrain oriented South and above three thousand meters. The rasters will be logically cast to a
 # :class:`Mask<geoutils.Mask>`.
 
-mask = np.logical_and.reduce((asp > -45, asp < 45, rast > 3000))
+mask = np.logical_and.reduce((aspect > -45, aspect < 45, rast > 3000))
 mask
 
 # %%
