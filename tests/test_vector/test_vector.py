@@ -145,7 +145,7 @@ class TestGeoPandasMethods:
 
     # Properties and methods derived from Shapely or GeoPandas
     # List of properties and methods with non-geometric output that are implemented in GeoUtils
-    main_properties = ["crs", "geometry", "total_bounds"]
+    main_properties = ["crs", "geometry", "total_bounds", "active_geometry_name"]
     nongeo_properties = [
         "area",
         "length",
@@ -156,6 +156,8 @@ class TestGeoPandasMethods:
         "is_simple",
         "is_valid",
         "has_z",
+        "is_ccw",
+        "is_closed"
     ]
     nongeo_methods = [
         "contains",
@@ -171,10 +173,21 @@ class TestGeoPandasMethods:
         "covers",
         "covered_by",
         "distance",
+        "is_valid_reason",
+        "count_coordinates",
+        "count_geometries",
+        "count_interior_rings",
+        "get_precision",
+        "minimum_clearance",
+        "contains_properly",
+        "dwithin",
+        "hausdorff_distance",
+        "frechet_distance",
+        "relate_pattern",
     ]
 
     # List of properties and methods with geometric output that are implemented in GeoUtils
-    geo_properties = ["boundary", "unary_union", "centroid", "convex_hull", "envelope", "exterior"]
+    geo_properties = ["boundary", "centroid", "convex_hull", "envelope", "exterior"]
     geo_methods = [
         "representative_point",
         "normalize",
@@ -182,6 +195,7 @@ class TestGeoPandasMethods:
         "difference",
         "symmetric_difference",
         "union",
+        "union_all",
         "intersection",
         "clip_by_rect",
         "buffer",
@@ -191,6 +205,24 @@ class TestGeoPandasMethods:
         "rotate",
         "scale",
         "skew",
+        "concave_hull",
+        "delaunay_triangles",
+        "voronoi_polygons",
+        "minimum_rotated_rectangle",
+        "extract_unique_points",
+        "offset_curve",
+        "remove_repeated_points",
+        "reverse",
+        "segmentize",
+        "transform",
+        "force_2d",
+        "force_3d",
+        "line_merge",
+        "intersection_all",
+        "snap",
+        "build_area",
+        "polygonize",
+        "shortest_line",
         "dissolve",
         "explode",
         "sjoin",
@@ -208,10 +240,13 @@ class TestGeoPandasMethods:
         "from_postgis",
         "from_dict",
         "from_features",
+        "from_arrow",
         "to_feather",
         "to_parquet",
         "to_file",
         "to_postgis",
+        "to_arrow",
+        "to_geo_dict",
         "to_json",
         "to_wkb",
         "to_wkt",
@@ -229,6 +264,7 @@ class TestGeoPandasMethods:
         "plot",
         "explore",
         "cascaded_union",
+        "unary_union",
         "bounds",
         "relate",
         "project",
@@ -339,7 +375,7 @@ class TestGeoPandasMethods:
     def test_nongeo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """
         Check non-geometric methods are consistent with GeoPandas.
-        All these methods require two inputs ("other", "df", or "right" argument), except one.
+        Many of these methods require two inputs ("other", "df", or "right" argument), except a few.
         """
 
         # Remove warnings about operations in a non-projected system, and future changes
@@ -347,12 +383,24 @@ class TestGeoPandasMethods:
         warnings.simplefilter("ignore", category=FutureWarning)
 
         # Get method for each class
-        if method != "geom_equals_exact":
-            output_geoutils = getattr(vector1, method)(vector2)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
-        else:
+
+        # Methods with no input
+        if method in ["is_valid_reason", "count_coordinates", "count_geometries", "count_interior_rings", "get_precision",
+                      "minimum_clearance"]:
+            output_geoutils = getattr(vector1, method)()
+            output_geopandas = getattr(vector1.ds, method)()
+        elif method == "geom_equals_exact":
             output_geoutils = getattr(vector1, method)(vector2, tolerance=0.1)
             output_geopandas = getattr(vector1.ds, method)(vector2.ds, tolerance=0.1)
+        elif method == "dwithin":
+            output_geoutils = getattr(vector1, method)(vector2, distance=0.1)
+            output_geopandas = getattr(vector1.ds, method)(vector2.ds, distance=0.1)
+        elif method == "relate_pattern":
+            output_geoutils = getattr(vector1, method)(vector2, pattern="*T*******")
+            output_geopandas = getattr(vector1.ds, method)(vector2.ds, pattern="*T*******")
+        else:
+            output_geoutils = getattr(vector1, method)(vector2)
+            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
 
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
@@ -385,6 +433,9 @@ class TestGeoPandasMethods:
         else:
             assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
 
+
+
+
     specific_method_args = {
         "buffer": {"distance": 1},
         "clip_by_rect": {"xmin": 10.5, "ymin": 10.5, "xmax": 11, "ymax": 11},
@@ -400,6 +451,13 @@ class TestGeoPandasMethods:
         "rename_geometry": {"col": "lol"},
         "set_geometry": {"col": synthvec1.geometry},
         "clip": {"mask": poly},
+        "concave_hull": {"ratio": 0.5},
+        "delaunay_triangles": {"tolerance": 0.1},
+        "voronoi_polygons": {"tolerance": 0.0},
+        "offset_curve": {"distance": 0.1},
+        "remove_repeated_points": {"tolerance": 0},
+        "segmentize": {"max_segment_length": 0.1},
+        "transform": {"transformation": lambda x: x+1},
     }
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1])  # type: ignore
@@ -421,13 +479,19 @@ class TestGeoPandasMethods:
             "sjoin",
             "sjoin_nearest",
             "overlay",
+            "shortest_line"
         ]:
             output_geoutils = getattr(vector1, method)(vector2)
             output_geopandas = getattr(vector1.ds, method)(vector2.ds)
         # Methods that require zero input
-        elif method in ["representative_point", "normalize", "make_valid", "dissolve", "explode"]:
+        elif method in ["representative_point", "normalize", "make_valid", "dissolve", "explode",
+                        "minimum_rotated_rectangle", "extract_unique_points", "reverse", "force_2d", "force_3d",
+                        "intersection_all", "union_all", "build_area", "polygonize", "line_merge"]:
             output_geoutils = getattr(vector1, method)()
             output_geopandas = getattr(vector1.ds, method)()
+        elif method in ["snap"]:
+            output_geoutils = getattr(vector1, method)(vector2, tolerance=0.1)
+            output_geopandas = getattr(vector1.ds, method)(vector2.ds, tolerance=0.1)
         elif method in self.specific_method_args.keys():
             output_geoutils = getattr(vector1, method)(**self.specific_method_args[method])
             output_geopandas = getattr(vector1.ds, method)(**self.specific_method_args[method])
@@ -436,7 +500,7 @@ class TestGeoPandasMethods:
 
         # Assert output types
         assert isinstance(output_geoutils, gu.Vector)
-        assert isinstance(output_geopandas, (gpd.GeoSeries, gpd.GeoDataFrame))
+        assert isinstance(output_geopandas, (BaseGeometry, gpd.GeoSeries, gpd.GeoDataFrame))
 
         # Separate cases depending on GeoPandas' output, and nature of the function
         # Simplify is a special case that can make geometries invalid, so adjust test
@@ -446,6 +510,8 @@ class TestGeoPandasMethods:
             # assert_geoseries_equal(
             #     output_geopandas.make_valid(), output_geoutils.ds.geometry.make_valid(), check_less_precise=True
             # )
+        elif isinstance(output_geopandas, BaseGeometry):
+            output_geopandas.equals(output_geoutils.ds.geometry)
         # For geoseries output, check equality of it
         elif isinstance(output_geopandas, gpd.GeoSeries):
             assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
