@@ -242,6 +242,8 @@ def _default_nodata(dtype: DTypeLike) -> int:
         "int16": -32768,
         "uint32": 99999,
         "int32": -99999,
+        "uint64": 99999,
+        "int64": -99999,
         "float16": -99999,
         "float32": -99999,
         "float64": -99999,
