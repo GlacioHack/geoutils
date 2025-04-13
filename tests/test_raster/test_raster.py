@@ -420,7 +420,7 @@ class TestRaster:
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]
+        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "float32", "float64", "float128"]
     )  # type: ignore
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
@@ -1564,8 +1564,9 @@ class TestRaster:
         assert _default_nodata("int8") == np.iinfo("int8").min
         assert _default_nodata("uint16") == np.iinfo("uint16").max
         assert _default_nodata("int16") == np.iinfo("int16").min
-        assert _default_nodata("uint32") == 99999
-        for dtype in ["int32", "float32", "float64", "longdouble"]:
+        for dtype in ["uint32", "uint64"]:
+            assert _default_nodata(dtype) == 99999
+        for dtype in ["int32", "int64", "float32", "float64", "longdouble"]:
             assert _default_nodata(dtype) == -99999
 
         # Check it works with most frequent np.dtypes too
