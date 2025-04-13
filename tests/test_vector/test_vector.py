@@ -179,11 +179,15 @@ class TestGeoPandasMethods:
         "count_interior_rings",
         "get_precision",
         "minimum_clearance",
+        "minimum_bounding_radius",
         "contains_properly",
         "dwithin",
         "hausdorff_distance",
         "frechet_distance",
+        "hilbert_distance",
         "relate_pattern",
+        "relate",
+        "project",
     ]
 
     # List of properties and methods with geometric output that are implemented in GeoUtils
@@ -209,6 +213,7 @@ class TestGeoPandasMethods:
         "delaunay_triangles",
         "voronoi_polygons",
         "minimum_rotated_rectangle",
+        "minimum_bounding_circle",
         "extract_unique_points",
         "offset_curve",
         "remove_repeated_points",
@@ -232,7 +237,11 @@ class TestGeoPandasMethods:
         "set_crs",
         "rename_geometry",
         "set_geometry",
+        "set_precision",
+        "get_geometry",
+        "shared_paths",
         "clip",
+        "interpolate",
     ]
     # List of class methods
     io_methods = [
@@ -254,31 +263,28 @@ class TestGeoPandasMethods:
     ]
 
     # List of other properties and methods
-    other = ["has_sindex", "sindex", "estimate_utm_crs", "cx", "iterfeatures"]
+    other = ["has_sindex", "sindex", "estimate_utm_crs", "cx", "iterfeatures", "get_coordinates"]
     all_declared = (
         main_properties + nongeo_methods + nongeo_properties + geo_methods + geo_properties + other + io_methods
     )
 
+    # Methods that are implemented but difficult to test, so we only check consistency of signature (name/args),
+    # but we skip the test with placeholder data
+    exceptions_skip_test = ["interpolate", "project", "shared_paths"]
+
     # Exceptions for GeoPandasBase functions not implemented (or deprecrated) in GeoSeries/GeoDataFrame
     exceptions_unimplemented = [
-        "plot",
-        "explore",
-        "cascaded_union",
-        "unary_union",
-        "bounds",
-        "relate",
-        "project",
-        "interpolate",
+        "plot",  # Own implementation in Vector
+        "explore",  # Not implemented in Vector
+        "cascaded_union",  # Deprecated
+        "unary_union",  # Deprecated
+        "bounds",  # Own implementation in Vector
         "equals",
         "type",
         "convert_dtypes",
         "merge",
         "apply",
         "astype",
-        "minimum_bounding_circle",
-        "minimum_bounding_radius",
-        "get_coordinates",
-        "hilbert_distance",
         "sample_points",
         "copy",
     ]
@@ -326,8 +332,11 @@ class TestGeoPandasMethods:
     def test_overridden_funcs_args(self, method: str) -> None:
         """Check that all methods overridden have the same arguments as in GeoPandas."""
 
+        # Skip methods with added in-place argument
+        if method in ["translate", "set_precision"]:
+            return
         # Get GeoPandas class where the methods live
-        if method in self.geobase_methods.keys():
+        elif method in self.geobase_methods.keys():
             upstream_class = gpd.base.GeoPandasBase
         elif method in self.gdf_methods.keys():
             upstream_class = gpd.GeoDataFrame
@@ -385,13 +394,17 @@ class TestGeoPandasMethods:
         # Get method for each class
 
         # Methods with no input
-        if method in [
+        if method in self.exceptions_skip_test:
+            return
+        elif method in [
             "is_valid_reason",
             "count_coordinates",
             "count_geometries",
             "count_interior_rings",
             "get_precision",
             "minimum_clearance",
+            "minimum_bounding_radius",
+            "hilbert_distance",
         ]:
             output_geoutils = getattr(vector1, method)()
             output_geopandas = getattr(vector1.ds, method)()
@@ -453,6 +466,7 @@ class TestGeoPandasMethods:
         "set_crs": {"crs": pyproj.CRS.from_epsg(32610), "allow_override": True},
         "rename_geometry": {"col": "lol"},
         "set_geometry": {"col": synthvec1.geometry},
+        "set_precision": {"grid_size": 1},
         "clip": {"mask": poly},
         "concave_hull": {"ratio": 0.5},
         "delaunay_triangles": {"tolerance": 0.1},
@@ -461,6 +475,7 @@ class TestGeoPandasMethods:
         "remove_repeated_points": {"tolerance": 0},
         "segmentize": {"max_segment_length": 0.1},
         "transform": {"transformation": lambda x: x + 1},
+        "get_geometry": {"index": 1},
     }
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1])  # type: ignore
@@ -474,7 +489,9 @@ class TestGeoPandasMethods:
         warnings.simplefilter("ignore", category=FutureWarning)
 
         # Methods that require two inputs
-        if method in [
+        if method in self.exceptions_skip_test:
+            return
+        elif method in [
             "difference",
             "symmetric_difference",
             "union",
@@ -494,6 +511,7 @@ class TestGeoPandasMethods:
             "dissolve",
             "explode",
             "minimum_rotated_rectangle",
+            "minimum_bounding_circle",
             "extract_unique_points",
             "reverse",
             "force_2d",
