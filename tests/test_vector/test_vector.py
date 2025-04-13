@@ -157,7 +157,7 @@ class TestGeoPandasMethods:
         "is_valid",
         "has_z",
         "is_ccw",
-        "is_closed"
+        "is_closed",
     ]
     nongeo_methods = [
         "contains",
@@ -385,8 +385,14 @@ class TestGeoPandasMethods:
         # Get method for each class
 
         # Methods with no input
-        if method in ["is_valid_reason", "count_coordinates", "count_geometries", "count_interior_rings", "get_precision",
-                      "minimum_clearance"]:
+        if method in [
+            "is_valid_reason",
+            "count_coordinates",
+            "count_geometries",
+            "count_interior_rings",
+            "get_precision",
+            "minimum_clearance",
+        ]:
             output_geoutils = getattr(vector1, method)()
             output_geopandas = getattr(vector1.ds, method)()
         elif method == "geom_equals_exact":
@@ -433,9 +439,6 @@ class TestGeoPandasMethods:
         else:
             assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
 
-
-
-
     specific_method_args = {
         "buffer": {"distance": 1},
         "clip_by_rect": {"xmin": 10.5, "ymin": 10.5, "xmax": 11, "ymax": 11},
@@ -457,7 +460,7 @@ class TestGeoPandasMethods:
         "offset_curve": {"distance": 0.1},
         "remove_repeated_points": {"tolerance": 0},
         "segmentize": {"max_segment_length": 0.1},
-        "transform": {"transformation": lambda x: x+1},
+        "transform": {"transformation": lambda x: x + 1},
     }
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1])  # type: ignore
@@ -479,14 +482,28 @@ class TestGeoPandasMethods:
             "sjoin",
             "sjoin_nearest",
             "overlay",
-            "shortest_line"
+            "shortest_line",
         ]:
             output_geoutils = getattr(vector1, method)(vector2)
             output_geopandas = getattr(vector1.ds, method)(vector2.ds)
         # Methods that require zero input
-        elif method in ["representative_point", "normalize", "make_valid", "dissolve", "explode",
-                        "minimum_rotated_rectangle", "extract_unique_points", "reverse", "force_2d", "force_3d",
-                        "intersection_all", "union_all", "build_area", "polygonize", "line_merge"]:
+        elif method in [
+            "representative_point",
+            "normalize",
+            "make_valid",
+            "dissolve",
+            "explode",
+            "minimum_rotated_rectangle",
+            "extract_unique_points",
+            "reverse",
+            "force_2d",
+            "force_3d",
+            "intersection_all",
+            "union_all",
+            "build_area",
+            "polygonize",
+            "line_merge",
+        ]:
             output_geoutils = getattr(vector1, method)()
             output_geopandas = getattr(vector1.ds, method)()
         elif method in ["snap"]:

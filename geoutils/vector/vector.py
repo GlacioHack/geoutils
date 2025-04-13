@@ -639,9 +639,27 @@ class Vector:
         return self._override_gdf_output(self.ds.clip_by_rect(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax))
 
     @copy_doc(gpd.GeoSeries, "Vector")
-    def buffer(self, distance: float, resolution: int = 16, cap_style: str = "round", join_style: str = "round", mitre_limit: float = 5.0, single_sided: bool = False, **kwargs: Any) -> Vector:
-        return self._override_gdf_output(self.ds.buffer(distance=distance, resolution=resolution, cap_style=cap_style,
-                                                        join_style=join_style, mitre_limit=mitre_limit, single_sided=single_sided, **kwargs))
+    def buffer(
+        self,
+        distance: float,
+        resolution: int = 16,
+        cap_style: str = "round",
+        join_style: str = "round",
+        mitre_limit: float = 5.0,
+        single_sided: bool = False,
+        **kwargs: Any,
+    ) -> Vector:
+        return self._override_gdf_output(
+            self.ds.buffer(
+                distance=distance,
+                resolution=resolution,
+                cap_style=cap_style,
+                join_style=join_style,
+                mitre_limit=mitre_limit,
+                single_sided=single_sided,
+                **kwargs,
+            )
+        )
 
     @copy_doc(gpd.GeoSeries, "Vector")
     def simplify(self, tolerance: float, preserve_topology: bool = True) -> Vector:
@@ -673,7 +691,9 @@ class Vector:
 
     @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
     def voronoi_polygons(self, tolerance: float = 0.0, extend_to: Any = None, only_edges: bool = False) -> Vector:
-        return self._override_gdf_output(self.ds.voronoi_polygons(tolerance=tolerance, extend_to=extend_to, only_edges=only_edges))
+        return self._override_gdf_output(
+            self.ds.voronoi_polygons(tolerance=tolerance, extend_to=extend_to, only_edges=only_edges)
+        )
 
     @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
     def minimum_rotated_rectangle(self) -> Vector:
@@ -684,8 +704,12 @@ class Vector:
         return self._override_gdf_output(self.ds.extract_unique_points())
 
     @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
-    def offset_curve(self, distance: float, quad_segs: int = 8, join_style: str = "round", mitre_limit: float = 5.0) -> Vector:
-        return self._override_gdf_output(self.ds.offset_curve(distance=distance, quad_segs=quad_segs, join_style=join_style, mitre_limit=mitre_limit))
+    def offset_curve(
+        self, distance: float, quad_segs: int = 8, join_style: str = "round", mitre_limit: float = 5.0
+    ) -> Vector:
+        return self._override_gdf_output(
+            self.ds.offset_curve(distance=distance, quad_segs=quad_segs, join_style=join_style, mitre_limit=mitre_limit)
+        )
 
     @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
     def remove_repeated_points(self, tolerance: float = 0.0) -> Vector:
@@ -831,7 +855,7 @@ class Vector:
                 lsuffix=lsuffix,
                 rsuffix=rsuffix,
                 distance_col=distance_col,
-                exclusive=exclusive
+                exclusive=exclusive,
             )
         )
 
@@ -875,7 +899,10 @@ class Vector:
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def set_precision(
-        self, grid_size: float = 0.0, mode: str = "valid_output", inplace: bool = False,
+        self,
+        grid_size: float = 0.0,
+        mode: str = "valid_output",
+        inplace: bool = False,
     ) -> Vector | None:
 
         if inplace:
@@ -945,7 +972,6 @@ class Vector:
 
         return cls(gpd.GeoDataFrame.from_arrow(table=table, geometry=geometry))
 
-
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def from_features(cls, features: Iterable[dict[str, Any]], crs: CRS, columns: list[str]) -> Vector:
@@ -1011,12 +1037,16 @@ class Vector:
         )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_arrow(self, index: Any = None, geometry_encoding: Any = "WKB", interleaved: Any = True, include_z: Any = None) -> Any:
+    def to_arrow(
+        self, index: Any = None, geometry_encoding: Any = "WKB", interleaved: Any = True, include_z: Any = None
+    ) -> Any:
 
-        return self.ds.to_arrow(index=index, geometry_encoding=geometry_encoding, interleaved=interleaved, include_z=include_z)
+        return self.ds.to_arrow(
+            index=index, geometry_encoding=geometry_encoding, interleaved=interleaved, include_z=include_z
+        )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_geo_dict(self, na: Any = "null", show_bbox: bool = False, drop_id: bool = False) -> dict[str, str | list[dict[str, str | ... | dict | None] | dict[str, ...] | ...] | tuple]:
+    def to_geo_dict(self, na: Any = "null", show_bbox: bool = False, drop_id: bool = False) -> Any:
 
         return self.ds.to_geo_dict(na=na, show_bbox=show_bbox, drop_id=drop_id)
 
