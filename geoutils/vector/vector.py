@@ -784,7 +784,9 @@ class Vector:
     # -----------------------------------------------
 
     @copy_doc(gpd.GeoSeries, "Vector")
-    def get_coordinates(self, include_z: bool = False, ignore_index: bool = False, index_parts: bool = False) -> pd.DataFrame:
+    def get_coordinates(
+        self, include_z: bool = False, ignore_index: bool = False, index_parts: bool = False
+    ) -> pd.DataFrame:
         return self.ds.get_coordinates(include_z=include_z, ignore_index=ignore_index, index_parts=index_parts)
 
     # ----------------------------------------------
