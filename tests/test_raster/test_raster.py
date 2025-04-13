@@ -420,7 +420,7 @@ class TestRaster:
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "float32", "float64", "float128"]
+        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "float32", "float64", "longdouble"]
     )  # type: ignore
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
