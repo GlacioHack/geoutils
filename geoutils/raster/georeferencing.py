@@ -173,7 +173,7 @@ def _outside_image(
     """See description of Raster.outside_image."""
 
     if not index:
-        xi, yj = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
+        yj, xi = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
 
     if np.any(np.array((xi, yj)) < 0):
         return True
@@ -242,6 +242,8 @@ def _default_nodata(dtype: DTypeLike) -> int:
         "int16": -32768,
         "uint32": 99999,
         "int32": -99999,
+        "uint64": 99999,
+        "int64": -99999,
         "float16": -99999,
         "float32": -99999,
         "float64": -99999,

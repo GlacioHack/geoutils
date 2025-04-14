@@ -73,6 +73,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     reproject_from_latlon,
 )
+from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _bounds,
     _cast_nodata,
@@ -1691,7 +1692,7 @@ class Raster:
 
         1. Writes the data in a masked array, whether the input is a classic array or a masked_array,
         2. Reshapes the data to a 2D array if it is single band,
-        3. Raises an error if the dtype is different from that of the Raster, and points towards .copy() or .astype(),
+        3. If new dtype is different from Raster and nodata is not compatible, casts the nodata value to new dtype,
         4. Sets a new nodata value to the Raster if none is set and if the provided array contains non-finite values
             that are unmasked (including if there is no mask at all, e.g. NaNs in a classic array),
         5. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array. Note that
@@ -1728,17 +1729,14 @@ class Raster:
             dtype = str(new_data.dtype)
             orig_shape = new_data.shape
 
-        # Check that new_data has the right type
-        if str(new_data.dtype) != dtype:
-            raise ValueError(
-                "New data must be of the same type as existing data: {}. Use copy() to set a new array with "
-                "different dtype, or astype() to change type.".format(dtype)
-            )
-
         if new_data.shape != orig_shape:
             raise ValueError(
                 f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape}."
             )
+
+        # Cast nodata if the new array has incompatible dtype with the old nodata value
+        # (we accept setting an array with new dtype to mirror NumPy behaviour)
+        self._nodata = _cast_nodata(new_data.dtype, self.nodata)
 
         # If the new data is not masked and has non-finite values, we define a default nodata value
         if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
@@ -2184,17 +2182,24 @@ class Raster:
         return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
 
     @overload
-    def get_nanarray(self, return_mask: Literal[False] = False) -> NDArrayNum: ...
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
+    ) -> NDArrayNum: ...
 
     @overload
-    def get_nanarray(self, return_mask: Literal[True]) -> tuple[NDArrayNum, NDArrayBool]: ...
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
+    ) -> tuple[NDArrayNum, NDArrayBool]: ...
 
-    def get_nanarray(self, return_mask: bool = False) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
+    ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
         Get NaN array from the raster.
 
         Optionally, return the mask from the masked array.
 
+        :param floating_dtype: Floating dtype to convert to, if masked array is not of floating type.
         :param return_mask: Whether to return the mask of valid data.
 
         :returns Array with masked data as NaNs, (Optional) Mask of invalid data.
@@ -2203,7 +2208,7 @@ class Raster:
         # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
         if "int" in str(self.data.dtype):
             # Get the array with masked value fill with NaNs
-            nanarray = self.data.astype("float32").filled(fill_value=np.nan).squeeze()
+            nanarray = self.data.astype(floating_dtype).filled(fill_value=np.nan).squeeze()
         else:
             # Same here
             nanarray = self.data.filled(fill_value=np.nan).squeeze()
@@ -2392,14 +2397,14 @@ class Raster:
                 # If casting was not necessary, copy all attributes except array
                 # Otherwise update array, nodata and
                 if cast_required:
-                    return (
+                    return tuple(
                         self.from_array(
                             data=output, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
                         )
                         for output in outputs
                     )
                 else:
-                    return (self.copy(new_array=output) for output in outputs)
+                    return tuple(self.copy(new_array=output) for output in outputs)
             else:
                 return outputs
         # Second, if there is a single output which is an array
@@ -2542,6 +2547,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> RasterType: ...
 
     @overload
@@ -2561,27 +2567,9 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
-    @overload
-    def reproject(
-        self: RasterType,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | abc.Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: bool = False,
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-    ) -> RasterType | None: ...
-
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -2597,6 +2585,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -2606,6 +2595,10 @@ class Raster:
         Alternatively, the destination resolution, bounds and CRS can be passed individually.
 
         Any resampling algorithm implemented in Rasterio can be passed as a string.
+
+        The reprojection can be computed out-of-memory in multiprocessing by passing a
+        :class:`~geoutils.raster.MultiprocConfig` object.
+        The reprojected raster is written to disk under the path specified in the configuration
 
         :param ref: Reference raster to match resolution, bounds and CRS.
         :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
@@ -2626,11 +2619,11 @@ class Raster:
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
+        :param multiproc_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
-        :returns: Reprojected raster (or None if inplace).
+        :returns: Reprojected raster (or None if inplace or computed out-of-memory).
 
         """
-
         # Reproject
         return_copy, data, transformed, crs, nodata = _reproject(
             source_raster=self,
@@ -2646,6 +2639,7 @@ class Raster:
             silent=silent,
             n_threads=n_threads,
             memory_limit=memory_limit,
+            multiproc_config=multiproc_config,
         )
 
         # If return copy is True (target georeferenced grid was the same as input)
@@ -2654,6 +2648,17 @@ class Raster:
                 return None
             else:
                 return self
+
+        # If multiprocessing -> results on disk -> load metadata
+        if multiproc_config:
+            result_raster = Raster(multiproc_config.outfile)
+            if inplace:
+                crs = result_raster.crs
+                nodata = result_raster.nodata
+                transformed = result_raster.transform
+                data = result_raster.data
+            else:
+                return result_raster  # type: ignore
 
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
         assert data is not None
@@ -3958,6 +3963,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask: ...
 
     @overload
@@ -3977,6 +3983,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
     @overload
@@ -3996,6 +4003,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask | None: ...
 
     def reproject(
@@ -4013,6 +4021,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask | None:
         # Depending on resampling, adjust to rasterio supported types
         if resampling in [Resampling.nearest, "nearest"]:
