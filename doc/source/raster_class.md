@@ -241,24 +241,40 @@ passed.
 Resampling methods are listed in **[the dedicated section of Rasterio's API](https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling)**.
 ```
 
-```{note}
-Reprojecting a {class}`~geoutils.Raster` can be done out-of-memory in multiprocessing by passing a
-{class}`~geoutils.raster.MultiprocConfig` parameter to the {func}`~geoutils.Raster.reproject` function.
-In this case, the reprojected raster is saved on disk under the specify path in {class}`~geoutils.raster.MultiprocConfig` (or a temporary file) and the raster metadata are loaded from the file.
-```
+[//]: # (```{note})
 
-```{code-cell} ipython3
-# Same example out-of-memory
-from geoutils.raster import MultiprocConfig, ClusterGenerator
-cluster = ClusterGenerator("multi", nb_workers=4)
-mp_config = MultiprocConfig(chunk_size=200, cluster=None)  # Pass a cluster to perform reprojection in multiprocessing
-rast_reproj = rast.reproject(
-    res=0.1,
-    bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
-    resampling="cubic",
-    multiproc_config=mp_config)
-rast_reproj
-```
+[//]: # (Reprojecting a {class}`~geoutils.Raster` can be done out-of-memory in multiprocessing by passing a)
+
+[//]: # ({class}`~geoutils.raster.MultiprocConfig` parameter to the {func}`~geoutils.Raster.reproject` function.)
+
+[//]: # (In this case, the reprojected raster is saved on disk under the specify path in {class}`~geoutils.raster.MultiprocConfig` &#40;or a temporary file&#41; and the raster metadata are loaded from the file.)
+
+[//]: # (```)
+
+[//]: # ()
+[//]: # (```{code-cell} ipython3)
+
+[//]: # (# Same example out-of-memory)
+
+[//]: # (from geoutils.raster import MultiprocConfig, ClusterGenerator)
+
+[//]: # (cluster = ClusterGenerator&#40;"multi", nb_workers=4&#41;)
+
+[//]: # (mp_config = MultiprocConfig&#40;chunk_size=200, cluster=None&#41;  # Pass a cluster to perform reprojection in multiprocessing)
+
+[//]: # (rast_reproj = rast.reproject&#40;)
+
+[//]: # (    res=0.1,)
+
+[//]: # (    bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},)
+
+[//]: # (    resampling="cubic",)
+
+[//]: # (    multiproc_config=mp_config&#41;)
+
+[//]: # (rast_reproj)
+
+[//]: # (```)
 
 ## Crop
 

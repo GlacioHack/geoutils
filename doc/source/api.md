@@ -261,15 +261,20 @@ And reverse operations.
     raster.merge_rasters
 ```
 
-## Multiprocessing
+[//]: # (## Multiprocessing)
 
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
+[//]: # ()
+[//]: # (```{eval-rst})
 
-    raster.MultiprocConfig
+[//]: # (.. autosummary::)
 
-```
+[//]: # (    :toctree: gen_modules/)
+
+[//]: # ()
+[//]: # (    raster.MultiprocConfig)
+
+[//]: # ()
+[//]: # (```)
 
 ## Vector
 
