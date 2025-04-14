@@ -85,7 +85,7 @@ class TestSatImg:
         saved = gu.Raster(temp_file)
         saved_tags = saved.tags
         rast_tags = rast.tags
-        # Do not check COMPRESSION tags 
+        # Do not check COMPRESSION tags
         saved_tags.pop("COMPRESSION", None)
         rast_tags.pop("COMPRESSION", None)
         assert saved_tags == rast_tags
