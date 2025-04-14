@@ -33,8 +33,9 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
-from geoutils._typing import DTypeLike, MArrayNum
+from geoutils._typing import DTypeLike, MArrayNum, NDArrayNum
 from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
+from geoutils.raster.distributed_computing.delayed_dask import _rio_reproject
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
@@ -328,7 +329,6 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
         ]
     )
 
-
 def _reproject(
     source_raster: gu.Raster,
     ref: gu.Raster,
@@ -391,64 +391,26 @@ def _reproject(
 
     # 4/ Perform reprojection
 
+    reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
+
     if multiproc_config is not None:
         _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
         return False, None, None, None, None
-    # --- Set the performance keywords --- #
-    if n_threads == 0:
-        # Default to cpu count minus one. If the cpu count is undefined, num_threads will be 1
-        cpu_count = os.cpu_count() or 2
-        num_threads = cpu_count - 1
-    else:
-        num_threads = n_threads
-    data = np.ones((source_raster.count, reproj_kwargs["dst_shape"][0], reproj_kwargs["dst_shape"][1]), dtype=dtype)
-    reproj_kwargs.update(
-        {
-            "destination": data,
-            "num_threads": num_threads,
-            "warp_mem_limit": memory_limit,
-            "XSCALE": 1,
-            "YSCALE": 1,
-            "tolerance": 0,
-        }
-    )
 
-    # --- Run the reprojection of data --- #
-    # If data is loaded, reproject the numpy array directly
-    if source_raster.is_loaded:
-        # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        # TODO: another option is to apply rio.warp.reproject to the mask to identify invalid pixels
+    else:
         if src_nodata is None and np.sum(source_raster.data.mask) > 0:
             raise ValueError(
                 "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
                 "with `force_source_nodata`."
             )
-
-        # Mask not taken into account by rasterio, need to fill with src_nodata
-        data, transformed = rio.warp.reproject(source_raster.data.filled(src_nodata), **reproj_kwargs)
-
-    # If not, uses the dataset instead
-    else:
-        data = []  # type: ignore
-        for k in range(source_raster.count):
-            with rio.open(source_raster.filename) as ds:
-                band = rio.band(ds, k + 1)
-                band, transformed = rio.warp.reproject(band, **reproj_kwargs)
-                data.append(band.squeeze())
-
-        data = np.array(data)
-
-    # Enforce output type
-    data = np.ma.masked_array(data.astype(dtype), fill_value=nodata)
-
-    if nodata is not None:
-        data.mask = data == nodata
-
-    # Check for funny business.
-    if reproj_kwargs["dst_transform"] is not None:
-        assert reproj_kwargs["dst_transform"] == transformed
-
-    return False, data, transformed, crs, nodata
+        src_arr = source_raster.data.filled(src_nodata)
+        # All masked values must be set to a nodata value for rasterio's reproject to work properly
+        dst_arr = _rio_reproject(src_arr, reproj_kwargs=reproj_kwargs)
+        # Set mask
+        dst_arr = np.ma.masked_array(dst_arr.astype(dtype), fill_value=nodata)
+        if nodata is not None:
+            dst_arr.mask = dst_arr == nodata
+        return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
 
 
 #########

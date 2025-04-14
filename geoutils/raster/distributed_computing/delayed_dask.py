@@ -22,8 +22,10 @@ Module for dask-delayed functions for out-of-memory raster operations.
 
 from __future__ import annotations
 
+import os
 import warnings
 from typing import Any, Literal, TypeVar
+from packaging.version import Version
 
 import dask.array as da
 import dask.delayed
@@ -719,16 +721,44 @@ def _build_geotiling_and_meta(
 
     return src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids
 
+def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:
+    """Rasterio reprojection wrapper."""
 
-@dask.delayed  # type: ignore
-def _delayed_reproject_per_block(
-    *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
-) -> NDArrayNum:
-    """
-    Delayed reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
-    """
-    return _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
+    # Check if multiband
+    is_multiband = len(src_arr.shape) > 2
 
+    # Prepare destination array
+    shape = (src_arr.shape[0], *reproj_kwargs["dst_shape"]) if is_multiband else reproj_kwargs["dst_shape"]
+    dst_arr = np.zeros(shape, dtype=reproj_kwargs["dtype"])
+
+    # Performance keywords
+    if reproj_kwargs["n_threads"] == 0:
+        # Default to cpu count minus one. If the cpu count is undefined, num_threads will be 1
+        cpu_count = os.cpu_count() or 2
+        num_threads = cpu_count - 1
+    else:
+        num_threads = reproj_kwargs["n_threads"]
+
+    # We force XSCALE=1 and YSCALE=1 passed to GDAL.Warp to avoid resampling deformations depending on extent/shape,
+    # which leads to different results on chunks or a full array
+    # See: https://gdal.org/en/stable/api/gdalwarp_cpp.html#_CPPv415GDALWarpOptions
+    # And: https://github.com/rasterio/rasterio/issues/2995
+    reproj_kwargs.update(
+        {
+            "num_threads": num_threads,
+            "XSCALE": 1,
+            "YSCALE": 1,
+        }
+    )
+    # If Rasterio has old enough version, force tolerance to 0 to avoid deformations on chunks
+    # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
+    if Version(rio.__version__) > Version("1.4.3"):
+        reproj_kwargs.update({"tolerance": 0})
+
+    # Run reprojection
+    _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
+
+    return dst_arr
 
 def _reproject_per_block(
     *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
@@ -760,27 +790,27 @@ def _reproject_per_block(
     src_transform = rio.transform.Affine(*combined_meta["src_transform"])
     dst_transform = rio.transform.Affine(*combined_meta["dst_transform"])
 
-    # Reproject
-    shape = (src_arrs[0].shape[0], *combined_meta["dst_shape"]) if is_multiband else combined_meta["dst_shape"]
-    dst_arr = np.zeros(shape, dtype=comb_src_arr.dtype)
+    # Reproject wrapper
 
-    _ = rio.warp.reproject(
-        comb_src_arr,
-        dst_arr,
-        src_transform=src_transform,
-        src_crs=kwargs["src_crs"],
-        dst_transform=dst_transform,
-        dst_crs=kwargs["dst_crs"],
-        resampling=kwargs["resampling"],
-        src_nodata=kwargs["src_nodata"],
-        dst_nodata=kwargs["dst_nodata"],
-        num_threads=1,  # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
-        XSCALE=1,
-        YSCALE=1,
-        tolerance=0,
-    )
+    # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
+    kwargs.update({"dst_shape": combined_meta["dst_shape"], "src_transform": src_transform,
+                   "dst_transform": dst_transform, "n_threads": 1})
+    # Define dtype if undefined
+    if "dtype" not in kwargs:
+        kwargs.update({"dtype": comb_src_arr.dtype})
+
+    dst_arr = _rio_reproject(comb_src_arr, reproj_kwargs=kwargs)
 
     return dst_arr
+
+@dask.delayed  # type: ignore
+def _delayed_reproject_per_block(
+    *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
+) -> NDArrayNum:
+    """
+    Delayed reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
+    """
+    return _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
 
 
 def delayed_reproject(
