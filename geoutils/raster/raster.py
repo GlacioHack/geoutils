@@ -72,6 +72,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     reproject_from_latlon,
 )
+from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _bounds,
     _cast_nodata,
@@ -2545,6 +2546,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> RasterType: ...
 
     @overload
@@ -2564,27 +2566,9 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
-    @overload
-    def reproject(
-        self: RasterType,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | abc.Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: bool = False,
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-    ) -> RasterType | None: ...
-
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -2600,6 +2584,7 @@ class Raster:
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -2609,6 +2594,10 @@ class Raster:
         Alternatively, the destination resolution, bounds and CRS can be passed individually.
 
         Any resampling algorithm implemented in Rasterio can be passed as a string.
+
+        The reprojection can be computed out-of-memory in multiprocessing by passing a
+        :class:`~geoutils.raster.MultiprocConfig` object.
+        The reprojected raster is written to disk under the path specified in the configuration
 
         :param ref: Reference raster to match resolution, bounds and CRS.
         :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
@@ -2629,11 +2618,11 @@ class Raster:
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
+        :param multiproc_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
-        :returns: Reprojected raster (or None if inplace).
+        :returns: Reprojected raster (or None if inplace or computed out-of-memory).
 
         """
-
         # Reproject
         return_copy, data, transformed, crs, nodata = _reproject(
             source_raster=self,
@@ -2649,6 +2638,7 @@ class Raster:
             silent=silent,
             n_threads=n_threads,
             memory_limit=memory_limit,
+            multiproc_config=multiproc_config,
         )
 
         # If return copy is True (target georeferenced grid was the same as input)
@@ -2657,6 +2647,17 @@ class Raster:
                 return None
             else:
                 return self
+
+        # If multiprocessing -> results on disk -> load metadata
+        if multiproc_config:
+            result_raster = Raster(multiproc_config.outfile)
+            if inplace:
+                crs = result_raster.crs
+                nodata = result_raster.nodata
+                transformed = result_raster.transform
+                data = result_raster.data
+            else:
+                return result_raster  # type: ignore
 
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
         assert data is not None
@@ -3961,6 +3962,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask: ...
 
     @overload
@@ -3980,6 +3982,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
     @overload
@@ -3999,6 +4002,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask | None: ...
 
     def reproject(
@@ -4016,6 +4020,7 @@ class Mask(Raster):
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
+        multiproc_config: MultiprocConfig | None = None,
     ) -> Mask | None:
         # Depending on resampling, adjust to rasterio supported types
         if resampling in [Resampling.nearest, "nearest"]:

@@ -34,6 +34,7 @@ from rasterio.enums import Resampling
 
 import geoutils as gu
 from geoutils._typing import DTypeLike, MArrayNum
+from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
@@ -290,6 +291,8 @@ def _get_reproj_params(
         "resampling": resampling if isinstance(resampling, Resampling) else _resampling_method_from_str(resampling),
         "src_nodata": src_nodata,
         "dst_nodata": nodata,
+        "dst_crs": crs,
+        "dtype": dtype,
     }
 
     # Second, determine target transform and grid size
@@ -299,9 +302,7 @@ def _get_reproj_params(
 
     # Finally, update reprojection options accordingly
     reproj_kwargs.update({"dst_transform": transform})
-    data = np.ones((source_raster.count, grid_size[1], grid_size[0]), dtype=dtype)
-    reproj_kwargs.update({"destination": data})
-    reproj_kwargs.update({"dst_crs": crs})
+    reproj_kwargs.update({"dst_shape": grid_size[::-1]})
 
     return reproj_kwargs
 
@@ -313,7 +314,7 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
     transform = reproj_kwargs["dst_transform"]
     src_crs = reproj_kwargs["src_crs"]
     crs = reproj_kwargs["dst_crs"]
-    grid_size = reproj_kwargs["destination"].shape[1:][::-1]
+    grid_size = reproj_kwargs["dst_shape"][::-1]
     src_res = _res(src_transform)
     res = _res(transform)
 
@@ -342,6 +343,7 @@ def _reproject(
     silent: bool = False,
     n_threads: int = 0,
     memory_limit: int = 64,
+    multiproc_config: gu.raster.MultiprocConfig | None = None,
 ) -> tuple[bool, MArrayNum | None, affine.Affine | None, CRS | None, int | float | None]:
     """
     Reproject raster. See Raster.reproject() for details.
@@ -389,6 +391,9 @@ def _reproject(
 
     # 4/ Perform reprojection
 
+    if multiproc_config is not None:
+        _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
+        return False, None, None, None, None
     # --- Set the performance keywords --- #
     if n_threads == 0:
         # Default to cpu count minus one. If the cpu count is undefined, num_threads will be 1
@@ -396,7 +401,17 @@ def _reproject(
         num_threads = cpu_count - 1
     else:
         num_threads = n_threads
-    reproj_kwargs.update({"num_threads": num_threads, "warp_mem_limit": memory_limit})
+    data = np.ones((source_raster.count, reproj_kwargs["dst_shape"][0], reproj_kwargs["dst_shape"][1]), dtype=dtype)
+    reproj_kwargs.update(
+        {
+            "destination": data,
+            "num_threads": num_threads,
+            "warp_mem_limit": memory_limit,
+            "XSCALE": 1,
+            "YSCALE": 1,
+            "tolerance": 0,
+        }
+    )
 
     # --- Run the reprojection of data --- #
     # If data is loaded, reproject the numpy array directly

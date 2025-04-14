@@ -7,9 +7,11 @@ from typing import Any
 
 import numpy as np
 import pytest
+import rasterio as rio
 import scipy
 from numpy import floating
 
+import geoutils as gu
 from geoutils import Raster, examples
 from geoutils.raster import RasterType
 from geoutils.raster.distributed_computing import (
@@ -20,8 +22,8 @@ from geoutils.raster.distributed_computing import (
 )
 from geoutils.raster.distributed_computing.multiproc import (
     _apply_func_block,
+    _load_raster_tile,
     _remove_tile_padding,
-    load_raster_tile,
 )
 
 
@@ -58,7 +60,7 @@ class TestMultiproc:
         tile = np.array([50, 125, 100, 200])  # [rowmin, rowmax, colmin, colmax]
 
         # Load the tile and verify dimensions
-        raster_tile = load_raster_tile(raster, tile)
+        raster_tile = _load_raster_tile(raster, tile)
         assert np.array_equal(raster_tile.data, raster.data[..., tile[0] : tile[1], tile[2] : tile[3]])
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
@@ -72,8 +74,8 @@ class TestMultiproc:
         tile = np.array([0, 100, 50, 150])
         tile_pad = tile + np.array([-1, 1, -1, 1]) * padding
 
-        raster_tile = load_raster_tile(raster, tile)
-        raster_tile_with_padding = load_raster_tile(raster, tile_pad)
+        raster_tile = _load_raster_tile(raster, tile)
+        raster_tile_with_padding = _load_raster_tile(raster, tile_pad)
 
         # Remove padding and ensure it's back to the original size
         _remove_tile_padding((raster.height, raster.width), raster_tile_with_padding, tile, padding)
@@ -94,7 +96,7 @@ class TestMultiproc:
 
         raster = _custom_func_overlap(raster, size)
         # If padding >=1, The result should be the equal to the original tile filtered
-        original_tile_filtered = load_raster_tile(raster, tile)
+        original_tile_filtered = _load_raster_tile(raster, tile)
         if padding >= size - 1:
             assert result_tile.raster_equal(original_tile_filtered)
         else:
@@ -110,12 +112,12 @@ class TestMultiproc:
         raster = Raster(example)
         output_file = "output.tif"
         depth = 10
-        config = MultiprocConfig(tile_size, output_file, cluster)
+        config = MultiprocConfig(tile_size, output_file, cluster=cluster)
 
         addition = 5
         factor = 0.5
         # Apply the multiproc map function
-        map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded
@@ -123,13 +125,22 @@ class TestMultiproc:
         # Ensure the output file is created and valid
         assert os.path.exists(output_file)
 
-        # Open the output file and compare with the operation on full raster
-        output_raster = Raster(output_file)
+        # Compare with the operation on full raster
         new_raster = _custom_func(raster, addition, factor)
         assert output_raster.raster_equal(new_raster)
 
+        # Assert raster has been properly saved in output_file
+        output_raster_saved = Raster(output_file)
+        assert output_raster_saved.raster_equal(output_raster)
+
         # Remove output file
         os.remove(output_file)
+
+        # With a tempfile :
+        config = MultiprocConfig(tile_size)
+        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster_saved = Raster(config.outfile)
+        assert output_raster_saved.raster_equal(output_raster)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
@@ -146,6 +157,8 @@ class TestMultiproc:
         results = map_multiproc_collect(_custom_func_stats, raster, config, return_tile=return_tile)
         if return_tile:
             list_stats = [result[0] for result in results]
+            list_tiles = [result[1] for result in results]
+            assert np.array_equal(list_tiles[0], np.array([0, tile_size, 0, tile_size]))
         else:
             list_stats = results
 
@@ -159,3 +172,69 @@ class TestMultiproc:
         tiled_mean = sum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
         assert total_stats["valid_count"] == tiled_count
+
+    @pytest.mark.skip()
+    @pytest.mark.parametrize("example", [aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
+    @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])  # type: ignore
+    def test_multiproc_reproject(self, example, tile_size, cluster):
+        """Test for multiproc_reproject"""
+
+        r = gu.Raster(example)
+        config = MultiprocConfig(tile_size, cluster=cluster)
+
+        # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
+        if r.nodata is None:
+            r.set_nodata(0)
+
+        # - Test reprojection with bounds and resolution -
+        dst_bounds = rio.coords.BoundingBox(
+            left=r.bounds.left, bottom=r.bounds.bottom + r.res[0], right=r.bounds.right - 2 * r.res[1], top=r.bounds.top
+        )
+        res_tuple = (r.res[0] * 0.5, r.res[1] * 3)
+
+        # Multiprocessing reprojection
+        r_multi = r.reproject(bounds=dst_bounds, res=res_tuple, multiproc_config=config)
+
+        # Assert that the raster has not been loaded during reprojection
+        assert not r.is_loaded
+
+        # Single-process reprojection
+        r_single = r.reproject(bounds=dst_bounds, res=res_tuple)
+
+        # Assert the results are the same
+        assert r_single.raster_equal(r_multi)
+
+        # - Test reprojection with CRS change -
+        for out_crs in [rio.crs.CRS.from_epsg(4326)]:
+
+            # Single-process reprojection
+            r_single = r.reproject(crs=out_crs)
+
+            # Multiprocessing reprojection
+            r_multi = r.reproject(crs=out_crs, multiproc_config=config)
+
+            # Assert the results are the same
+            assert r_single.raster_equal(r_multi)
+
+        # Check that reprojection works for several bands in multiproc as well
+        for n in [2, 3, 4]:
+            img1 = Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"),
+                transform=rio.transform.from_origin(0, 500, 1, 1),
+                crs=4326,
+                nodata=0,
+            )
+            img2 = Raster.from_array(
+                np.ones((n, 500, 500), dtype="uint8"),
+                transform=rio.transform.from_origin(50, 500, 1, 1),
+                crs=4326,
+                nodata=0,
+            )
+
+            out_img_single = img2.reproject(img1)
+            out_img_multi = img2.reproject(ref=img1, multiproc_config=config)
+
+            assert out_img_multi.count == n
+            assert out_img_multi.shape == (500, 500)
+            assert out_img_single.raster_equal(out_img_multi)

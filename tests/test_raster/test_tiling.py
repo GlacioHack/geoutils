@@ -45,6 +45,14 @@ class TestTiling:
             )
             assert np.array_equal(tiling_grid_mock, expected_tiling)
 
+        tiling_grid_mock = _generate_tiling_grid(0, 0, 55, 55, 50, 50, overlap)
+        if overlap == 0:
+            expected_tiling = np.array([[[0, 50, 0, 50], [0, 50, 50, 55]], [[50, 55, 0, 50], [50, 55, 50, 55]]])
+            assert np.array_equal(tiling_grid_mock, expected_tiling)
+        elif overlap == 5:
+            expected_tiling = np.array([[[0, 55, 0, 55]]])
+            assert np.array_equal(tiling_grid_mock, expected_tiling)
+
         # Test with real data
         img = gu.Raster(self.landsat_b4_path)
 
@@ -58,6 +66,11 @@ class TestTiling:
         # Calculate expected number of tiles
         nb_row_tiles = np.ceil(row_max / row_split).astype(int)
         nb_col_tiles = np.ceil(col_max / col_split).astype(int)
+
+        if 0 < col_max % col_split <= overlap:
+            nb_col_tiles = max(nb_col_tiles - 1, 1)
+        if 0 < row_max % row_split <= overlap:
+            nb_row_tiles = max(nb_row_tiles - 1, 1)
 
         # Check that the tiling grid has the expected shape
         assert tiling_grid.shape == (nb_row_tiles, nb_col_tiles, 4)

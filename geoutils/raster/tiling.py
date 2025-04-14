@@ -17,6 +17,7 @@
 # limitations under the License.
 
 """Tiling tools for arrays and rasters."""
+from __future__ import annotations
 
 import math
 import sys
@@ -24,8 +25,8 @@ import sys
 import numpy as np
 from matplotlib.patches import Rectangle
 
+import geoutils as gu
 from geoutils._typing import NDArrayNum
-from geoutils.raster import RasterType
 
 
 def _get_closest_rectangle(size: int) -> tuple[int, int]:
@@ -154,9 +155,20 @@ def _generate_tiling_grid(
     :return: A numpy array grid with splits in two dimensions (0: row, 1: column),
              where each cell contains [row_min, row_max, col_min, col_max].
     """
+    # Calculate the total range of rows and columns
+    col_range = col_max - col_min
+    row_range = row_max - row_min
+
     # Calculate the number of splits considering overlap
-    nb_col_split = math.ceil((col_max - col_min) / col_split)
-    nb_row_split = math.ceil((row_max - row_min) / row_split)
+    nb_col_split = math.ceil(col_range / col_split)
+    nb_row_split = math.ceil(row_range / row_split)
+
+    # If the leftover part after full split is smaller than or equal to the overlap, reduce the number of splits by 1
+    # This ensures we do not generate unnecessary additional tiles that overlap too much.
+    if 0 < col_range % col_split <= overlap:
+        nb_col_split = max(nb_col_split - 1, 1)
+    if 0 < row_range % row_split <= overlap:
+        nb_row_split = max(nb_row_split - 1, 1)
 
     # Initialize the output grid
     tiling_grid = np.zeros(shape=(nb_row_split, nb_col_split, 4), dtype=int)
@@ -201,7 +213,7 @@ def compute_tiling(
     return tiling_grid
 
 
-def plot_tiling(raster: RasterType, tiling_grid: NDArrayNum) -> None:
+def plot_tiling(raster: gu.Raster, tiling_grid: NDArrayNum) -> None:
     """
     Plot raster with its tiling.
 
