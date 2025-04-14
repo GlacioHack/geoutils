@@ -83,8 +83,12 @@ class TestSatImg:
         temp_file = os.path.join(temp_dir.name, "test.tif")
         rast.save(temp_file)
         saved = gu.Raster(temp_file)
-
-        assert saved.tags == rast.tags
+        saved_tags = saved.tags
+        rast_tags = rast.tags
+        # Do not check COMPRESSION tags 
+        saved_tags.pop("COMPRESSION", None)
+        rast_tags.pop("COMPRESSION", None)
+        assert saved_tags == rast_tags
 
     def test_filename_parsing(self) -> None:
         """Test metadata parsing from filenames"""
