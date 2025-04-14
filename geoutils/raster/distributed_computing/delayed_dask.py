@@ -25,7 +25,6 @@ from __future__ import annotations
 import os
 import warnings
 from typing import Any, Literal, TypeVar
-from packaging.version import Version
 
 import dask.array as da
 import dask.delayed
@@ -34,6 +33,7 @@ import numpy as np
 import pandas as pd
 import rasterio as rio
 from dask.utils import cached_cumsum
+from packaging.version import Version
 from rasterio import CRS
 from scipy.interpolate import interpn
 
@@ -721,6 +721,7 @@ def _build_geotiling_and_meta(
 
     return src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids
 
+
 def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:
     """Rasterio reprojection wrapper."""
 
@@ -760,6 +761,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 
     return dst_arr
 
+
 def _reproject_per_block(
     *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
 ) -> NDArrayNum:
@@ -793,15 +795,22 @@ def _reproject_per_block(
     # Reproject wrapper
 
     # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
-    kwargs.update({"dst_shape": combined_meta["dst_shape"], "src_transform": src_transform,
-                   "dst_transform": dst_transform, "n_threads": 1})
+    kwargs.update(
+        {
+            "dst_shape": combined_meta["dst_shape"],
+            "src_transform": src_transform,
+            "dst_transform": dst_transform,
+            "n_threads": 1,
+        }
+    )
     # Define dtype if undefined
     if "dtype" not in kwargs:
         kwargs.update({"dtype": comb_src_arr.dtype})
 
-    dst_arr = _rio_reproject(comb_src_arr, reproj_kwargs=kwargs)
+    dst_arr = _rio_reproject(comb_src_arr, reproj_kwargs=kwargs)  # type: ignore
 
     return dst_arr
+
 
 @dask.delayed  # type: ignore
 def _delayed_reproject_per_block(

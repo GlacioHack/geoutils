@@ -33,9 +33,9 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
-from geoutils._typing import DTypeLike, MArrayNum, NDArrayNum
-from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
+from geoutils._typing import DTypeLike, MArrayNum
 from geoutils.raster.distributed_computing.delayed_dask import _rio_reproject
+from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
@@ -328,6 +328,7 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
             np.all(np.array(res) == src_res) or (res is None),
         ]
     )
+
 
 def _reproject(
     source_raster: gu.Raster,
