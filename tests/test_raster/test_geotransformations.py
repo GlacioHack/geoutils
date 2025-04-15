@@ -12,7 +12,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.raster.geotransformations import _resampling_method_from_str
+from geoutils.raster._geotransformations import _resampling_method_from_str
 from geoutils.raster.raster import _default_nodata
 
 DO_PLOT = False
