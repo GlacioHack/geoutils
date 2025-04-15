@@ -8,11 +8,11 @@ from __future__ import annotations
 import os
 import warnings
 from typing import Any, Iterable
-from packaging.version import Version
 
 import affine
 import numpy as np
 import rasterio as rio
+from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
@@ -27,6 +27,7 @@ from geoutils.raster.georeferencing import (
 ###########################
 # 1/ REPROJECT SUBFUNCTIONS
 ###########################
+
 
 def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
@@ -308,7 +309,6 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
             np.all(np.array(res) == src_res) or (res is None),
         ]
     )
-
 
 
 def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:

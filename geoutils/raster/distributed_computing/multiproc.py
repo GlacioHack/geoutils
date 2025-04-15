@@ -28,12 +28,15 @@ from rasterio._io import Resampling
 
 import geoutils as gu
 from geoutils._typing import DTypeLike, NDArrayNum
+from geoutils.raster.distributed_computing.chunked import (
+    _build_geotiling_and_meta,
+    _chunks2d_from_chunksizes_shape,
+    _reproject_per_block,
+)
 from geoutils.raster.distributed_computing.cluster import (
     AbstractCluster,
     ClusterGenerator,
 )
-from geoutils.raster.distributed_computing.chunked import _reproject_per_block, _build_geotiling_and_meta, _chunks2d_from_chunksizes_shape
-
 from geoutils.raster.tiling import compute_tiling
 
 

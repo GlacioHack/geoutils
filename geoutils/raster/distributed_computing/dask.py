@@ -33,7 +33,10 @@ from dask.utils import cached_cumsum
 from scipy.interpolate import interpn
 
 from geoutils._typing import NDArrayBool, NDArrayNum
-from geoutils.raster.distributed_computing.chunked import _reproject_per_block, _build_geotiling_and_meta
+from geoutils.raster.distributed_computing.chunked import (
+    _build_geotiling_and_meta,
+    _reproject_per_block,
+)
 
 # 1/ SUBSAMPLING
 # At the date of April 2024:
@@ -410,6 +413,7 @@ def delayed_interp_points(
 
 
 # 3/ REPROJECT (see subfunctions in chunked module)
+
 
 @dask.delayed  # type: ignore
 def _delayed_reproject_per_block(
