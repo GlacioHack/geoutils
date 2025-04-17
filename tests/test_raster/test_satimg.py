@@ -86,6 +86,8 @@ class TestSatImg:
         saved_tags = saved.tags
         rast_tags = rast.tags
         # Do not check COMPRESSION tags
+        # The file "saved" is just read, it has no compression by default (no COMPRESSION tag)
+        # The file "rast" is saved, therefore a compression is applied (COMPRESSION tag)
         saved_tags.pop("COMPRESSION", None)
         rast_tags.pop("COMPRESSION", None)
         assert saved_tags == rast_tags
