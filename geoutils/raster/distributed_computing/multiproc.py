@@ -19,6 +19,7 @@
 """Process out-of-memory calculations"""
 from __future__ import annotations
 
+import logging
 import tempfile
 from typing import Any, Callable, Literal, overload
 
@@ -252,12 +253,12 @@ def _write_multiproc_result(
 
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
-            print(f"Raster saved under {config.outfile}")
-            if is_mask:
-                return gu.Mask(config.outfile)
-            return gu.Raster(config.outfile)
+            logging.warning(f"Raster saved under {config.outfile}")
         except Exception as e:
             raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
+    if is_mask:
+        return gu.Mask(config.outfile)
+    return gu.Raster(config.outfile)
 
 
 @overload
