@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from geoutils import examples
-from geoutils.raster import Mask, Raster, RasterBinning, Segmentation
+from geoutils.raster import Fusion, Mask, Raster, RasterBinning, Segmentation
 
 
 class TestRasterClassification:
@@ -222,3 +222,74 @@ class TestSegmentation:
         for i, class_name in enumerate(expected_classes):
             assert stats_df.iloc[i]["class_name"] == class_name
             assert stats_df.iloc[i]["mean"] == expected_means[i]
+
+
+class TestFusion:
+    aster_dem_path = examples.get_path("exploradores_aster_dem")
+    aster_dem = Raster(aster_dem_path)
+
+    # Define two different binning for the fusion
+    bins1 = [0, 1000, 2000, 3000, np.inf]
+    bins2 = [0, 1500, 2500, np.inf]
+
+    classifier1 = RasterBinning(raster=aster_dem, name="aster1", bins=bins1)
+    classifier2 = RasterBinning(raster=aster_dem, name="aster2", bins=bins2)
+    classifier1.apply()
+    classifier2.apply()
+
+    def test_fusion_output(self) -> None:
+        assert self.classifier1.classification_masks is not None
+        assert self.classifier2.classification_masks is not None
+        fusion = Fusion(
+            raster=self.aster_dem,
+            name="fusion_test",
+            layers_to_fuse=[self.classifier1.classification_masks, self.classifier2.classification_masks],
+            layers_class_names=[self.classifier1.class_names, self.classifier2.class_names],
+        )
+        fusion.apply()
+
+        # Assert classification_masks is created
+        assert isinstance(fusion.classification_masks, Mask)
+
+        # Assert it has the expected number of bands (6)
+        assert fusion.classification_masks.count == 6
+        assert len(fusion.class_names) == 6
+
+        # Assert it has the expected classes
+        expected_classes = [
+            "[0, 1000)_[0, 1500)",
+            "[1000, 2000)_[0, 1500)",
+            "[1000, 2000)_[1500, 2500)",
+            "[2000, 3000)_[1500, 2500)",
+            "[2000, 3000)_[2500, inf)",
+            "[3000, inf)_[2500, inf)",
+        ]
+        assert set(fusion.class_names.keys()).issubset(expected_classes)
+
+        # Assert fusion worked properly
+        # First and last mask of classifier1 and fusion should be the same
+        assert np.array_equal(self.classifier1.classification_masks.data[0], fusion.classification_masks.data[0])
+        assert np.array_equal(self.classifier1.classification_masks.data[-1], fusion.classification_masks.data[-1])
+
+        # Min and Max should be inside both intervals
+        def parse_interval(interval: str) -> tuple[float, float]:
+            interval = interval.strip("[)")
+            lower, upper = interval.split(", ")
+            return float(lower), float(upper) if upper != "inf)" else np.inf
+
+        fusion.get_stats()
+        assert fusion.stats_df is not None
+        assert not fusion.stats_df.isnull().values.any()
+
+        for _, row in fusion.stats_df.iterrows():
+            class1_label, class2_label = row["class_name"].split("_")
+            lower1, upper1 = parse_interval(class1_label)
+            lower2, upper2 = parse_interval(class2_label)
+            assert row["Min"] >= lower1
+            assert row["Min"] >= lower2
+            assert row["Max"] < upper1
+            assert row["Max"] < upper2
+
+        # Assert that fused masks have at least some `False` values
+        for band in fusion.classification_masks.data:
+            assert not np.all(band)
