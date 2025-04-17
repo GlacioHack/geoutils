@@ -151,7 +151,7 @@ class ClassificationLayer(ABC):
             logging.warning("Stats saved under %s", stats_csv_path)
 
 
-class RasterBinning(ClassificationLayer):
+class Binning(ClassificationLayer):
     """Apply binning to a raster using input bins"""
 
     def __init__(
@@ -237,7 +237,7 @@ class Fusion(ClassificationLayer):
 
     This class takes a list of binary classification masks and fuses them using logical operations.
     The final fused masks are stored in a multi-band Mask, where each band represents a unique
-    combination of classes from the input layers.
+    combination of classes from the input layers. Empty fused classes are removed.
     """
 
     def __init__(
