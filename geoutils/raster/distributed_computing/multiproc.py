@@ -234,6 +234,7 @@ def _write_multiproc_result(
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
                 result_tile, dst_tile = config.cluster.get_res(results)
+                is_mask = isinstance(result_tile, gu.Mask)
 
                 # Define the window in the output file where the tile should be written
                 dst_window = rio.windows.Window(
@@ -252,6 +253,8 @@ def _write_multiproc_result(
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
             print(f"Raster saved under {config.outfile}")
+            if is_mask:
+                return gu.Mask(config.outfile)
             return gu.Raster(config.outfile)
         except Exception as e:
             raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
