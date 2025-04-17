@@ -152,6 +152,10 @@ def _apply_func_block(
     elif isinstance(result_tile, tuple) and isinstance(result_tile[0], gu.Raster):
         _remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
 
+    if isinstance(result_tile, gu.Mask):
+        result_tile.astype("uint8", inplace=True)
+        result_tile.set_nodata(255)
+
     return result_tile, tile
 
 
@@ -220,12 +224,10 @@ def map_overlap_multiproc_save(
 def _write_multiproc_result(
     tasks: list[Any],
     config: MultiprocConfig,
-    file_metadata: dict[str, Any] | None = None,
+    file_metadata: dict[str, Any],
 ) -> gu.Raster:
 
     # Create a new raster file to save the processed results
-    if file_metadata is None:
-        file_metadata = {}
     with rio.open(config.outfile, "w", driver=config.driver, **file_metadata) as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
