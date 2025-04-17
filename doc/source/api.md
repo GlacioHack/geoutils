@@ -231,9 +231,9 @@ And reverse operations.
     raster.ClassificationLayer
     raster.ClassificationLayer.get_stats
     raster.ClassificationLayer.save
-    raster.RasterBinning
-    raster.RasterBinning.apply
+    raster.Binning
     raster.Segmentation
+    raster.Fusion
 ```
 
 ## Mask
