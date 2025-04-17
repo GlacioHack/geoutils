@@ -19,6 +19,7 @@
 """Functionalities for classifications of Raster objects"""
 
 import json
+import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Literal
@@ -134,20 +135,20 @@ class ClassificationLayer(ABC):
         if self.classification_masks is not None and "masks" in save_list:
             classification_path = os.path.join(output_dir, f"{self.name}.tif")
             self.classification_masks.save(classification_path)
-            print("Classification masks saved under", classification_path)
+            logging.warning("Classification masks saved under %s", classification_path)
 
         # Save class names as a JSON file
         if self.class_names is not None and "names" in save_list:
             class_names_path = os.path.join(output_dir, f"{self.name}_classes.json")
             with open(class_names_path, "w") as f:
                 json.dump(self.class_names, f, indent=4)
-            print("Class names saved under", class_names_path)
+            logging.warning("Class names saved under %s", class_names_path)
 
         # Save statistics as CSV file
         if self.stats_df is not None and "stats" in save_list:
             stats_csv_path = os.path.join(output_dir, f"{self.name}_stats.csv")
             self.stats_df.to_csv(stats_csv_path, index=False)
-            print("Stats saved under", stats_csv_path)
+            logging.warning("Stats saved under %s", stats_csv_path)
 
 
 class RasterBinning(ClassificationLayer):
@@ -299,6 +300,8 @@ class Fusion(ClassificationLayer):
             if not combined_mask.all():
                 fused_masks.append(combined_mask)
                 fused_class_names["_".join(combo)] = i + 1
+            else:
+                logging.warning("Empty class %s, removed from the fusion", "_".join(combo))
 
         # Handle empty case
         if fused_masks:
