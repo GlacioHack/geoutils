@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from geoutils import examples
-from geoutils.raster import Fusion, Mask, Raster, RasterBinning, Segmentation
+from geoutils.raster import Binning, Fusion, Mask, Raster, Segmentation
 
 
 class TestRasterClassification:
@@ -27,9 +27,9 @@ class TestRasterClassification:
     aster_bins = [0, 1000, 2000, 3000, np.inf]
 
     # Initialize the RasterClassification instance
-    mock_classifier = RasterBinning(raster=mock_raster, name="mock", bins=mock_bins)
-    landsat_classifier = RasterBinning(raster=landsat_b4_path, name="landsat", bins=landsat_bins)
-    aster_classifier = RasterBinning(raster=aster_dem, name="aster", bins=aster_bins)
+    mock_classifier = Binning(raster=mock_raster, name="mock", bins=mock_bins)
+    landsat_classifier = Binning(raster=landsat_b4_path, name="landsat", bins=landsat_bins)
+    aster_classifier = Binning(raster=aster_dem, name="aster", bins=aster_bins)
 
     @pytest.mark.parametrize(
         "classifier_bins_name", [(landsat_classifier, landsat_bins, "landsat"), (aster_classifier, aster_bins, "aster")]
@@ -39,7 +39,7 @@ class TestRasterClassification:
         Test if the RasterClassification initializes correctly.
         """
         classifier, bins, name = classifier_bins_name
-        assert isinstance(classifier, RasterBinning)
+        assert isinstance(classifier, Binning)
         assert classifier.name is name
         assert classifier.bins == bins
         assert classifier.class_names == {f"[{bins[i-1]}, {bins[i]})": i for i in range(1, len(bins))}
@@ -72,7 +72,7 @@ class TestRasterClassification:
         assert np.array_equal(masks_array, expected_masks)
 
     @pytest.mark.parametrize("classifier", [landsat_classifier, aster_classifier])  # type: ignore
-    def test_apply_classification(self, classifier: RasterBinning):
+    def test_apply_classification(self, classifier: Binning):
         """
         Test the classification on raster and ensure it runs without errors.
         """
@@ -110,7 +110,7 @@ class TestRasterClassification:
     @pytest.mark.parametrize("req_stats", [None, ["Min", "Max", "Mean"]])  # type: ignore
     def test_get_stats(
         self,
-        classifier_req_classes: tuple[RasterBinning, str | list[str] | None],
+        classifier_req_classes: tuple[Binning, str | list[str] | None],
         req_stats: str | list[str] | None,
     ):
         """
@@ -145,7 +145,7 @@ class TestRasterClassification:
         assert not stats_df.isnull().values.any()
 
     @pytest.mark.parametrize("classifier", [landsat_classifier, aster_classifier])  # type: ignore
-    def test_save(self, classifier: RasterBinning):
+    def test_save(self, classifier: Binning):
         """
         Test the save functionality to ensure the classification, class names, and statistics are correctly saved.
         """
@@ -232,8 +232,8 @@ class TestFusion:
     bins1 = [0, 1000, 2000, 3000, np.inf]
     bins2 = [0, 1500, 2500, np.inf]
 
-    classifier1 = RasterBinning(raster=aster_dem, name="aster1", bins=bins1)
-    classifier2 = RasterBinning(raster=aster_dem, name="aster2", bins=bins2)
+    classifier1 = Binning(raster=aster_dem, name="aster1", bins=bins1)
+    classifier2 = Binning(raster=aster_dem, name="aster2", bins=bins2)
     classifier1.apply()
     classifier2.apply()
 
