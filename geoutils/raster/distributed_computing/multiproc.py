@@ -152,6 +152,7 @@ def _apply_func_block(
     elif isinstance(result_tile, tuple) and isinstance(result_tile[0], gu.Raster):
         _remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
 
+    # If the raster is a mask, convert to uint8 before saving and force nodata to 255
     if isinstance(result_tile, gu.Mask):
         result_tile.astype("uint8", inplace=True)
         result_tile.set_nodata(255)
