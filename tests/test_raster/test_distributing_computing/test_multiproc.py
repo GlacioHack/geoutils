@@ -3,6 +3,7 @@ Tests for multiprocessing functions
 """
 
 import os
+from multiprocessing import cpu_count
 from typing import Any
 
 import numpy as np
@@ -55,6 +56,9 @@ def _custom_func_mask(raster: RasterType) -> gu.Mask:
 class TestMultiproc:
     aster_dem_path = examples.get_path("exploradores_aster_dem")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+
+    num_workers = min(2, cpu_count())  # Safer limit for CI
+    cluster = ClusterGenerator("test", nb_workers=num_workers)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_load_raster_tile(self, example) -> None:
@@ -110,7 +114,7 @@ class TestMultiproc:
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
-    @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])
+    @pytest.mark.parametrize("cluster", [None, cluster])
     def test_map_overlap_multiproc_save(self, example, tile_size, cluster):
         """
         Test the multiprocessing map function with a simple operation returning a raster.
@@ -155,7 +159,7 @@ class TestMultiproc:
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
-    @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])
+    @pytest.mark.parametrize("cluster", [None, cluster])
     @pytest.mark.parametrize("return_tile", [False, True])
     def test_map_multiproc_collect(self, example, tile_size, cluster, return_tile):
         """
@@ -184,10 +188,10 @@ class TestMultiproc:
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
         assert total_stats["valid_count"] == tiled_count
 
-    @pytest.mark.skip()
+    # @pytest.mark.skip()
     @pytest.mark.parametrize("example", [aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
-    @pytest.mark.parametrize("cluster", [None, ClusterGenerator("multi", 4)])  # type: ignore
+    @pytest.mark.parametrize("cluster", [None, cluster])  # type: ignore
     def test_multiproc_reproject(self, example, tile_size, cluster):
         """Test for multiproc_reproject"""
 
