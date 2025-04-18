@@ -476,6 +476,8 @@ class Raster:
                 # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
                 converted_tags = decode_sensor_metadata(self.tags)
                 self._tags.update(converted_tags)
+                # Add image structure in tags
+                self._tags.update(ds.tags(ns="IMAGE_STRUCTURE"))
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
