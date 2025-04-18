@@ -19,6 +19,7 @@
 """Process out-of-memory calculations"""
 from __future__ import annotations
 
+import logging
 import tempfile
 from typing import Any, Callable, Literal, overload
 
@@ -152,6 +153,11 @@ def _apply_func_block(
     elif isinstance(result_tile, tuple) and isinstance(result_tile[0], gu.Raster):
         _remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
 
+    # If the raster is a mask, convert to uint8 before saving and force nodata to 255
+    if isinstance(result_tile, gu.Mask):
+        result_tile.astype("uint8", inplace=True)
+        result_tile.set_nodata(255)
+
     return result_tile, tile
 
 
@@ -220,17 +226,16 @@ def map_overlap_multiproc_save(
 def _write_multiproc_result(
     tasks: list[Any],
     config: MultiprocConfig,
-    file_metadata: dict[str, Any] | None = None,
+    file_metadata: dict[str, Any],
 ) -> gu.Raster:
 
     # Create a new raster file to save the processed results
-    if file_metadata is None:
-        file_metadata = {}
     with rio.open(config.outfile, "w", driver=config.driver, **file_metadata) as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
                 result_tile, dst_tile = config.cluster.get_res(results)
+                is_mask = isinstance(result_tile, gu.Mask)
 
                 # Define the window in the output file where the tile should be written
                 dst_window = rio.windows.Window(
@@ -248,10 +253,12 @@ def _write_multiproc_result(
 
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
-            print(f"Raster saved under {config.outfile}")
-            return gu.Raster(config.outfile)
+            logging.warning(f"Raster saved under {config.outfile}")
         except Exception as e:
             raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
+    if is_mask:
+        return gu.Mask(config.outfile)
+    return gu.Raster(config.outfile)
 
 
 @overload
