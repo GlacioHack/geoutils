@@ -46,6 +46,12 @@ def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
     return raster.get_stats(stats_name=["mean", "valid_count"])
 
 
+# Define a simple function which return a Mask
+def _custom_func_mask(raster: RasterType) -> gu.Mask:
+    mask_array = raster.get_mask()
+    return gu.Mask.from_array(mask_array, raster.transform, raster.crs)
+
+
 class TestMultiproc:
     aster_dem_path = examples.get_path("exploradores_aster_dem")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
@@ -141,6 +147,11 @@ class TestMultiproc:
         output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
         output_raster_saved = Raster(config.outfile)
         assert output_raster_saved.raster_equal(output_raster)
+
+        if raster.count == 1:
+            # With a wrapper returning a Mask
+            output_mask = map_overlap_multiproc_save(_custom_func_mask, raster, config, depth=depth)
+            assert np.array_equal(raster.get_mask(), output_mask.data)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore

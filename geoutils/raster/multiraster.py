@@ -30,8 +30,8 @@ from tqdm import tqdm
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
+from geoutils.raster._geotransformations import _resampling_method_from_str
 from geoutils.raster.array import get_array_and_mask
-from geoutils.raster.geotransformations import _resampling_method_from_str
 from geoutils.raster.raster import RasterType, _default_nodata
 
 
