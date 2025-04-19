@@ -32,11 +32,11 @@ import geoutils as gu
 from geoutils._typing import NDArrayNum
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.georeferencing import _default_nodata, _xy2ij
-from geoutils.raster.sampling import subsample_array
+from geoutils.stats import subsample_array
 
 
 def _regular_pointcloud_to_raster(
-    pointcloud: gpd.GeoDataFrame,
+    pointcloud: gpd.GeoDataFrame | gu.PointCloud,
     grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
     transform: rio.transform.Affine = None,
     shape: tuple[int, int] = None,
@@ -47,6 +47,14 @@ def _regular_pointcloud_to_raster(
     """
     Convert a regular point cloud to a raster. See Raster.from_pointcloud_regular() for details.
     """
+
+    # Extract geodataframe and data column name depending on input
+    if isinstance(pointcloud, gu.PointCloud):
+        gdf_pc = pointcloud.ds
+        data_column_name = pointcloud.data_column
+    else:
+        gdf_pc = pointcloud
+        data_column_name = data_column_name
 
     # Get transform and shape from input
     if grid_coords is not None:
@@ -79,14 +87,14 @@ def _regular_pointcloud_to_raster(
         raise ValueError("Either grid coordinates or both geotransform and shape must be provided.")
 
     # Create raster from inputs, with placeholder data for now
-    dtype = pointcloud[data_column_name].dtype
+    dtype = gdf_pc[data_column_name].dtype
     out_nodata = nodata if nodata is not None else _default_nodata(dtype)
     arr = np.ones(out_shape, dtype=dtype)
 
     # Get indexes of point cloud coordinates in the raster, forcing no shift
     i, j = _xy2ij(
-        x=pointcloud.geometry.x.values,
-        y=pointcloud.geometry.y.values,
+        x=gdf_pc.geometry.x.values,
+        y=gdf_pc.geometry.y.values,
         shift_area_or_point=False,
         transform=out_transform,
         area_or_point=area_or_point,
@@ -99,12 +107,12 @@ def _regular_pointcloud_to_raster(
     # Set values
     mask = np.ones(np.shape(arr), dtype=bool)
     mask[i, j] = False
-    arr[i, j] = pointcloud[data_column_name].values
+    arr[i, j] = gdf_pc[data_column_name].values
 
     # Set output values
     raster_arr = np.ma.masked_array(data=arr, mask=mask)
 
-    return raster_arr, out_transform, pointcloud.crs, out_nodata, area_or_point
+    return raster_arr, out_transform, gdf_pc.crs, out_nodata, area_or_point
 
 
 def _raster_to_pointcloud(

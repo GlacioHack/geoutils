@@ -20,10 +20,10 @@
 GeoUtils is a Python package for the analysis of geospatial data.
 """
 
-from geoutils import examples, stats, projtools  # noqa
+from geoutils import examples, projtools  # noqa
 from geoutils._config import config  # noqa
 
-from geoutils.raster import Mask, Raster  # noqa isort:skip
+from geoutils.raster import RasterMask, Raster  # noqa isort:skip
 from geoutils.vector import Vector  # noqa isort:skip
 from geoutils.pointcloud import PointCloud  # noqa isort:skip
 

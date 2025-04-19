@@ -41,6 +41,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import shapely
+
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -120,6 +122,7 @@ class Vector:
             self._name = filename_or_dataset
         if isinstance(filename_or_dataset, pathlib.Path):
             self._name = filename_or_dataset.name
+
 
     @property
     def crs(self) -> CRS:
@@ -1478,23 +1481,21 @@ class Vector:
     @overload
     def create_mask(
         self,
-        raster: str | gu.Raster | None = None,
+        ref: str | gu.Raster | gu.PointCloud | None = None,
         crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
+        res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
         as_array: Literal[False] = False,
-    ) -> gu.Mask: ...
+    ) -> gu.RasterMask: ...
 
     @overload
     def create_mask(
         self,
-        raster: str | gu.Raster | None = None,
+        ref: str | gu.Raster | gu.PointCloud | None = None,
         crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
+        res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
         *,
@@ -1503,45 +1504,49 @@ class Vector:
 
     def create_mask(
         self,
-        raster: gu.Raster | None = None,
+        ref: gu.Raster | None = None,
         crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
+        res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
+        points: tuple[NDArrayNum, NDArrayNum] = None,
         as_array: bool = False,
-    ) -> gu.Mask | NDArrayBool:
+    ) -> gu.RasterMask | NDArrayBool:
         """
-        Create a mask from the vector features.
+        Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
+        feature, False if not).
 
-        **Match-reference:** a raster can be passed to match its resolution, bounds and CRS when creating the mask.
+        For a raster reference, creates a raster mask with the resolution, bounds and CRS of the reference raster.
+        For a point cloud reference, creates a point mask with the coordinates and CRS of the reference point cloud.
 
-        Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
-        Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
+        Alternatively, for a raster mask, one can specify a grid to rasterize on based on bounds, resolution and CRS.
+        For a point mask, one can specify the points coordinates and CRS.
 
-        Vector features which fall outside the bounds of the raster file are not written to the new mask file.
+        :param ref: Reference raster or pointcloud to use during masking.
+        :param res: (Only for raster masking) Spatial resolution of mask. Required if no reference is passed.
+        :param points: (Only for point cloud masking) Point X/Y coordinates of mask. Required if no reference is passed.
+        :param bounds: (Only for raster masking) Bounds of mask (left, bottom, right, top). Optional, defaults to this
+            vector's bounds. Only used if no reference is passed.
+        :param crs: Coordinate reference system for output mask. Optional, defaults to this vector's crs. Only used if
+            no reference is passed.
+        :param as_array: Whether to return mask as a boolean array.
 
-        :param raster: Reference raster to match during rasterization.
-        :param crs: A pyproj or rasterio CRS object (Default to raster.crs if not None then self.crs)
-        :param xres: Output raster spatial resolution in x. Only is raster is None.
-        :param yres: Output raster spatial resolution in y. Only if raster is None. (Default to xres)
-        :param bounds: Output raster bounds (left, bottom, right, top). Only if raster is None (Default to self bounds)
-        :param buffer: Size of buffer to be added around the features, in the raster's projection units.
-            If a negative value is set, will erode the features.
-        :param as_array: Return mask as a boolean array
-
-        :returns: A Mask object contain a boolean array
+        :returns: A raster or point cloud mask.
         """
 
-        mask, transform, crs = _create_mask(
-            gdf=self.ds, raster=raster, crs=crs, xres=xres, yres=yres, bounds=bounds, buffer=buffer, as_array=as_array
-        )
+        # Create mask
+        mask, transform, crs, pts = _create_mask(gdf=self.ds, ref=ref, crs=crs, res=res, points=points, bounds=bounds)
 
         # Return output as mask or as array
         if as_array:
             return mask.squeeze()
         else:
-            return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+            # If pts is None, the output is a point cloud mask
+            if pts is not None:
+                return gu.PointCloud.from_xyz(x=pts.x.values, y=pts.y.values, z=mask, crs=crs)
+            # Otherwise, the transform is not None
+            else:
+                assert transform is not None  # For mypy
+                return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     def rasterize(
         self,
@@ -1552,7 +1557,7 @@ class Vector:
         bounds: tuple[float, float, float, float] | None = None,
         in_value: int | float | abc.Iterable[int | float] | None = None,
         out_value: int | float = 0,
-    ) -> gu.Raster | gu.Mask:
+    ) -> gu.Raster | gu.RasterMask:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
 
