@@ -104,7 +104,7 @@ class TestRasterVectorInterface:
         mask = vector.create_mask(xres=1.01)
 
         # Check that by default, create_mask returns a Mask
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
 
         # Check that an error is raised if xres is not passed
         with pytest.raises(ValueError, match="At least raster or xres must be set."):
@@ -157,10 +157,10 @@ class TestRasterVectorInterface:
 
         # For an in_value of 1 and out_value of 0 (default), it returns a mask
         burned_mask = vct.rasterize(raster=rst, in_value=1)
-        assert isinstance(burned_mask, gu.Mask)
+        assert isinstance(burned_mask, gu.RasterMask)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
-        assert burned_mask.raster_equal(vct.create_mask(raster=rst))
+        assert burned_mask.raster_equal(vct.create_mask(rst))
 
         # The two rasterization should match
         assert np.all(burned_in2_out1[burned_mask] == 2)
@@ -236,7 +236,7 @@ class TestMaskVectorInterface:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_polygonize(self, mask: gu.Mask) -> None:
+    def test_polygonize(self, mask: gu.RasterMask) -> None:
         mask_orig = mask.copy()
         # Run default
         vect = mask.polygonize()
