@@ -1948,8 +1948,12 @@ class Raster:
         if not self.is_loaded:
             self.load()
 
+        # Get data band
+        data = self.data[band - 1, :, :] if self.count > 1 else self.data
+
+        # Derive inlier mask
         if inlier_mask is not None:
-            valid_points = np.count_nonzero(~self.get_mask())
+            valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
             if isinstance(inlier_mask, RasterMask):
                 inlier_points = np.count_nonzero(~inlier_mask.data)
             else:
@@ -1958,7 +1962,9 @@ class Raster:
             dem_masked.set_mask(inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        data = self.data[band, :, :] if self.count > 1 else self.data
+        # If no name is passed, derive all statistics
+        # TODO: All stats are computed even when only one or an independent user-callable is asked for
+        #  Need to modify code to remove this requirement
         stats_dict = _statistics(data=data, counts=counts)
         if stats_name is None:
             return stats_dict
@@ -1974,13 +1980,13 @@ class Raster:
             result = {}
             for name in stats_name:
                 if callable(name):
-                    result[name.__name__] = name(self.data[band] if self.count > 1 else self.data)
+                    result[name.__name__] = name(data)
                 else:
                     result[name] = _get_single_stat(stats_dict, stats_aliases, name)
             return result
         else:
             if callable(stats_name):
-                return stats_name(self.data[band] if self.count > 1 else self.data)
+                return stats_name(data)
             else:
                 return _get_single_stat(stats_dict, stats_aliases, stats_name)
 

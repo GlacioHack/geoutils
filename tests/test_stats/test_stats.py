@@ -12,7 +12,7 @@ from geoutils import examples
 import geoutils as gu
 
 class TestStats:
-    
+
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_rgb_path = examples.get_path("everest_landsat_rgb")
     aster_dem_path = examples.get_path("exploradores_aster_dem")
@@ -68,6 +68,8 @@ class TestStats:
             stats_masked = raster.get_stats(inlier_mask=empty_mask)
         assert "Empty raster, returns Nan for all stats" in caplog.text
         for name in expected_stats + expected_stats_mask:
+            print(name)
+            print(stats_masked)
             assert np.isnan(stats_masked.get(name))
 
         # Single stat

@@ -47,9 +47,9 @@ def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
 
 
 # Define a simple function which return a Mask
-def _custom_func_mask(raster: RasterType) -> gu.Mask:
+def _custom_func_mask(raster: RasterType) -> gu.RasterMask:
     mask_array = raster.get_mask()
-    return gu.Mask.from_array(mask_array, raster.transform, raster.crs)
+    return gu.RasterMask.from_array(mask_array, raster.transform, raster.crs)
 
 
 class TestMultiproc:

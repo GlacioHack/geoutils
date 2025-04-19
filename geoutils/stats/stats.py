@@ -66,8 +66,9 @@ def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict
     """
 
     # Pre-computing depending on nature of array
+    # TODO: Array is duplicated into filled array with NaN at every call, doubling memory usage
     if np.ma.isMaskedArray(data):
-        mask = np.ma.getmaskarray(data)
+        mask = ~np.ma.getmaskarray(data)
         mdata = np.ma.filled(data.astype(float), np.nan)
     else:
         mask = ~np.isfinite(data)
