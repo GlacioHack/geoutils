@@ -30,7 +30,7 @@ jobs:
 
       - name: Check no package is missing in setup.cfg
         run: |
-          outputs = $(cat pip.txt)
+          outputs=$(cat pip.txt)
           if [[  == *"Package would be ignored"* ]]; then echo "::error title=MISSING-PACKAGES::Missing packages in setup.cfg"; exit 1; fi;
 
       # Check import works
