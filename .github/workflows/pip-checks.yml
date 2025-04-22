@@ -31,7 +31,7 @@ jobs:
         run: |
           outputs=$(python -m pip install -e . -vv 2>&1)
           echo $outputs
-          if [[ $output == *"Package would be ignored"* ]]; then echo "::error title=Package-ignored::See pip warning"; fi;
+          if [[ $outputs == *"Package would be ignored"* ]]; then echo "::error title=Missing-package-in-setup-cfg::See pip warning"; fi;
 
       # Check import works
       - name: Check import works with base environment
