@@ -96,7 +96,7 @@ jobs:
         conda list
 
     - name: Test with pytest
-      run: python -m pytest -ra --cov=geoutils/
+      run: pytest -ra --cov=geoutils/
 
     - name: Converting coverage to LCOV format
       run: coveragepy-lcov --data_file_path .coverage --output_file_path coverage.info
