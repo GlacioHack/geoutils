@@ -31,7 +31,13 @@ jobs:
         run: |
           outputs=$(python -m pip install -e . -vv 2>&1)
           echo $outputs
-          if [[ $outputs == *"Package would be ignored"* ]]; then echo "::error title=Missing-package-in-setup-cfg::See pip warning"; fi;
+          
+      - name: Check not package is ignored
+        if: $outputs == *"Package would be ignored"*
+        uses: actions/github-script@v3
+        with:
+          script: |
+            core.setFailed('Missing packages not declared in setup.cfg!')
 
       # Check import works
       - name: Check import works with base environment
