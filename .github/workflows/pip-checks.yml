@@ -26,12 +26,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install project
-        run: |
-          outputs=$(python -m pip install -e . -vv 2>&1)
-          echo $outputs
-          
+        run: python -m pip install -e . -vv | tee pip.txt
+
       - name: Check no package is missing in setup.cfg
-        run: if [[ $output == *"Package would be ignored"* ]]; then echo "::error title=MISSING-PACKAGES::Missing packages in setup.cfg"; exit 1; fi;
+        run: |
+          outputs = $(cat pip.txt)
+          if [[  == *"Package would be ignored"* ]]; then echo "::error title=MISSING-PACKAGES::Missing packages in setup.cfg"; exit 1; fi;
 
       # Check import works
       - name: Check import works with base environment
