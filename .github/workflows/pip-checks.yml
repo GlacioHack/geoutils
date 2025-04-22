@@ -26,8 +26,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # Use pip install
+      # Raise error if pip warns incomplete package list in setup.cfg is ignored to avoid failure in the conda feedstock
       - name: Install project
-        run: python -m pip install -e .
+        run: |
+          outputs=$(python -m pip install -e . -vv 2>&1)
+          echo $outputs
+          if [[ $output == *"Package would be ignored"* ]]; then echo "::error title=Package-ignored::See pip warning"; fi;
 
       # Check import works
       - name: Check import works with base environment
