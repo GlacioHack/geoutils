@@ -54,7 +54,7 @@ class TestRasterVectorInterface:
         """
         # First with given res and bounds -> Should be a 21 x 21 array with 0 everywhere except center pixel
         vector = self.vector.copy()
-        out_mask = vector.create_mask(xres=1, bounds=(0, 0, 21, 21), as_array=True)
+        out_mask = vector.create_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
         ref_mask = np.zeros((21, 21), dtype="bool")
         ref_mask[10, 10] = True
         assert out_mask.shape == (21, 21)
@@ -74,53 +74,24 @@ class TestRasterVectorInterface:
         # rst = gu.Raster.from_array(np.zeros((2, 21, 21)), transform=(1., 0., 0., 0., -1., 21.), crs='EPSG:4326')
         # out_mask = vector.create_mask(rst)
 
-        # Test that buffer = 0 works
-        out_mask_buff = vector.create_mask(rst, buffer=0, as_array=True)
-        assert np.all(ref_mask == out_mask_buff)
-
-        # Test that buffer > 0 works
-        rst = gu.Raster.from_array(np.zeros((21, 21)), transform=(1.0, 0.0, 0.0, 0.0, -1.0, 21.0), crs="EPSG:4326")
-        out_mask = vector.create_mask(rst, as_array=True)
-        for buffer in np.arange(1, 8):
-            out_mask_buff = vector.create_mask(rst, buffer=buffer, as_array=True)
-            diff = out_mask_buff & ~out_mask
-            assert np.count_nonzero(diff) > 0
-            # Difference between masks should always be thinner than buffer + 1
-            eroded_diff = binary_erosion(diff.squeeze(), np.ones((buffer + 1, buffer + 1)))
-            assert np.count_nonzero(eroded_diff) == 0
-
-        # Test that buffer < 0 works
-        vector_5 = self.vector_5
-        out_mask = vector_5.create_mask(rst, as_array=True)
-        for buffer in np.arange(-1, -3, -1):
-            out_mask_buff = vector_5.create_mask(rst, buffer=buffer, as_array=True)
-            diff = ~out_mask_buff & out_mask
-            assert np.count_nonzero(diff) > 0
-            # Difference between masks should always be thinner than buffer + 1
-            eroded_diff = binary_erosion(diff.squeeze(), np.ones((abs(buffer) + 1, abs(buffer) + 1)))
-            assert np.count_nonzero(eroded_diff) == 0
-
         # Check that no warning is raised when creating a mask with a xres not multiple of vector bounds
-        mask = vector.create_mask(xres=1.01)
+        mask = vector.create_mask(res=1.01)
 
         # Check that by default, create_mask returns a Mask
         assert isinstance(mask, gu.RasterMask)
 
         # Check that an error is raised if xres is not passed
-        with pytest.raises(ValueError, match="At least raster or xres must be set."):
+        with pytest.raises(ValueError, match="Without a reference for masking, specify at least the resolution "
+                                             "a raster mask, or the points coordinates for a point cloud mask."):
             vector.create_mask()
 
-        # Check that an error is raised if buffer is the wrong type
-        with pytest.raises(TypeError, match="Buffer must be a number, currently set to str."):
-            vector.create_mask(rst, buffer="lol")  # type: ignore
-
         # If the raster has the wrong type
-        with pytest.raises(TypeError, match="Raster must be a geoutils.Raster or None."):
+        with pytest.raises(ValueError, match="Reference must be a raster or a point cloud."):
             vector.create_mask("lol")  # type: ignore
 
         # Check that a warning is raised if the bounds were passed specifically by the user
         with pytest.warns(UserWarning):
-            vector.create_mask(xres=1.01, bounds=(0, 0, 21, 21))
+            vector.create_mask(res=1.01, bounds=(0, 0, 21, 21))
 
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = gu.examples.get_path("everest_landsat_b4_cropped")

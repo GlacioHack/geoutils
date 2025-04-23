@@ -3140,7 +3140,7 @@ class Raster:
             # Otherwise
         else:
             if input_latlon:
-                points = reproject_from_latlon(points, out_crs=self.crs)  # type: ignore
+                points = reproject_from_latlon((points[1], points[0]), out_crs=self.crs)  # type: ignore
 
         x, y = points
 
@@ -3390,6 +3390,7 @@ class Raster:
             xi=xi, yj=yj, transform=self.transform, shape=self.shape, area_or_point=self.area_or_point, index=index
         )
 
+    @overload
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
@@ -3397,12 +3398,63 @@ class Raster:
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
         band: int = 1,
         input_latlon: bool = False,
+        *,
+        as_array: Literal[False] = False,
+        shift_area_or_point: bool | None = None,
+        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        **kwargs: Any,
+    ) -> gu.PointCloud:
+        ...
+
+    @overload
+    def interp_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        band: int = 1,
+        input_latlon: bool = False,
+        *,
+        as_array: Literal[True],
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum:
+        ...
+
+    @overload
+    def interp_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        band: int = 1,
+        input_latlon: bool = False,
+        *,
+        as_array: bool = False,
+        shift_area_or_point: bool | None = None,
+        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        **kwargs: Any,
+    ) -> NDArrayNum | gu.PointCloud:
+        ...
+
+    def interp_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        band: int = 1,
+        input_latlon: bool = False,
+        as_array: bool = False,
+        shift_area_or_point: bool | None = None,
+        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        **kwargs: Any,
+    ) -> NDArrayNum | gu.PointCloud:
         """
          Interpolate raster values at a set of points.
+
+         Returns a point cloud with data column the interpolated values at the point coordinates, or optionally just
+         the array of interpolated rvalues.
 
          Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid using "nearest" or "linear" (for speed),
          otherwise uses scipy.interpn on a regular grid.
@@ -3422,6 +3474,8 @@ class Raster:
             quintic method), or rounded down, or a fixed integer.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster CRS.
+        :param as_array: Whether to return a point cloud with data column the interpolated values (default) or an
+            array of interpolated values.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
@@ -3444,7 +3498,7 @@ class Raster:
             if input_latlon:
                 points = reproject_from_latlon(points, out_crs=self.crs)  # type: ignore
 
-        return _interp_points(
+        z = _interp_points(
             array,
             transform=self.transform,
             area_or_point=self.area_or_point,
@@ -3455,6 +3509,12 @@ class Raster:
             force_scipy_function=force_scipy_function,
             **kwargs,
         )
+
+        # Return array or pointcloud
+        if as_array:
+            return z
+        else:
+            return gu.PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
 
     def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """

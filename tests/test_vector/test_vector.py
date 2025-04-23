@@ -55,7 +55,7 @@ class TestVector:
         assert isinstance(v3, gu.Vector)
 
         # Check errors are raised when filename has wrong type
-        with pytest.raises(TypeError, match="Filename argument should be a string, Path or geopandas.GeoDataFrame."):
+        with pytest.raises(TypeError, match="Filename argument should be a string, path or geodataframe."):
             gu.Vector(1)  # type: ignore
 
     def test_copy(self) -> None:
