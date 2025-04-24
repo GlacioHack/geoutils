@@ -63,7 +63,7 @@ binning= Binning(raster, "elevation", bins)
 binning.apply()
 
 # Compute statistics
-binning.get_stats(req_stats_classes=["[0, 1000)", "[3000, inf)"])
+binning.get_stats(classes=["[0, 1000)", "[3000, inf)"])
 
 # Save results
 binning.save("elevation_binning")
@@ -102,13 +102,13 @@ raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
 # Create dummy mask (e.g., two classes)
 mask_array = np.stack([raster.data > 1000, raster.data <= 1000])
-class_names = {0: "Water", 1: "Land"}
+class_names = {"Water": 1, "Land": 2}
 
 # Initialize Segmentation
 seg = Segmentation(raster, "water", mask_array, class_names)
 
 # Compute stats
-seg.get_stats(req_stats=["mean", "median"])
+seg.get_stats(stats=["Mean", "Median"])
 
 # Save stats
 seg.save("segmentation_output")
