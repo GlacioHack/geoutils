@@ -1,3 +1,5 @@
+"""Tests for classification layers"""
+
 import os
 
 import numpy as np
@@ -8,7 +10,7 @@ from geoutils import examples
 from geoutils.raster import Binning, Fusion, Mask, Raster, Segmentation
 
 
-class TestRasterClassification:
+class TestBinning:
     aster_dem_path = examples.get_path("exploradores_aster_dem")
     landsat_b4_path = examples.get_path("everest_landsat_b4")
 
@@ -89,7 +91,7 @@ class TestRasterClassification:
         Test the statistics calculation on the mock raster.
         """
         self.mock_classifier.apply()
-        self.mock_classifier.get_stats(req_stats="mean")
+        self.mock_classifier.get_stats(stats="mean")
 
         # Check that stats_df is correctly populated
         assert self.mock_classifier.stats_df is not None
@@ -118,7 +120,7 @@ class TestRasterClassification:
         """
         classifier, req_stats_classes = classifier_req_classes
         classifier.apply()
-        classifier.get_stats(req_stats=req_stats, req_stats_classes=req_stats_classes)
+        classifier.get_stats(stats=req_stats, classes=req_stats_classes)
 
         # Check that stats_df is correctly populated
         assert classifier.stats_df is not None
@@ -208,7 +210,7 @@ class TestSegmentation:
         """
         Test the statistics calculation for segmentation classification.
         """
-        self.segmentation_classifier.get_stats(req_stats="mean")
+        self.segmentation_classifier.get_stats(stats="mean")
 
         # Check that stats_df is correctly populated
         assert self.segmentation_classifier.stats_df is not None

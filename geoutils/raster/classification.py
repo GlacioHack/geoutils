@@ -63,16 +63,16 @@ class ClassificationLayer(ABC):
     def get_stats(
         self,
         raster: RasterType | None = None,
-        req_stats: str | list[str] | None = None,
-        req_stats_classes: str | list[str] | None = None,
+        stats: str | list[str] | None = None,
+        classes: str | list[str] | None = None,
     ) -> None:
         """
         Compute the required statistics on the classified pixels.
 
         :param raster: Raster on which the classification masks should be applied for computing the stats.
-        :param req_stats: List of required statistics to compute (optional, default is all statistics in
+        :param stats: List of required statistics to compute (optional, default is all statistics in
             geoutils.Raster.get_stats).
-        :param req_stats_classes: List of classes on which to compute statistics (optional, default is all classes).
+        :param classes: List of classes on which to compute statistics (optional, default is all classes).
 
         :raise ValueError: if req_stats_classes are not class names.
         """
@@ -80,16 +80,18 @@ class ClassificationLayer(ABC):
             raise ValueError("Classification has not been applied yet. Call apply_classification() first.")
 
         # Convert req_stats and req_stats_classes to list
-        if isinstance(req_stats, str):
-            req_stats = [req_stats]
-        if isinstance(req_stats_classes, str):
-            req_stats_classes = [req_stats_classes]
+        if isinstance(stats, str):
+            stats = [stats]
+        if isinstance(classes, str):
+            classes = [classes]
 
         # Check if req_stats_classes are class names
-        if req_stats_classes:
-            for req_class in req_stats_classes:
+        if classes:
+            for req_class in classes:
                 if req_class not in self.class_names.keys():
-                    raise ValueError(f"{req_class} is not a class name. Class names are : f{self.class_names.values()}")
+                    raise ValueError(
+                        f"{req_class} is not a class name. Class names are: {list(self.class_names.keys())}"
+                    )
 
         if raster is None:
             raster = self.raster  # type: ignore
@@ -99,13 +101,11 @@ class ClassificationLayer(ABC):
 
         # Loop over each class in the classification mask
         for i, (class_name, class_idx) in enumerate(self.class_names.items()):
-            if req_stats_classes and class_name not in req_stats_classes:
+            if classes and class_name not in classes:
                 continue
 
             # Compute statistics for the class
-            class_stats = raster.get_stats(
-                stats_name=req_stats, inlier_mask=self.classification_masks[i]  # type: ignore
-            )
+            class_stats = raster.get_stats(stats_name=stats, inlier_mask=self.classification_masks[i])  # type: ignore
 
             # Store class, bin info (if applicable), and stats as a dictionary
             class_info: dict[str, str | int | list[int] | np.floating[Any]] = {
