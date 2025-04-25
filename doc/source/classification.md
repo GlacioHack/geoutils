@@ -80,7 +80,7 @@ os.rmdir("elevation_binning")
 
 ```{code-cell} ipython3
 # print stats
-print(binning.stats_df)
+binning.stats_df
 ```
 
 ## Apply segmentation
@@ -123,7 +123,7 @@ os.rmdir("segmentation_output")
 
 ```{code-cell} ipython3
 # print stats
-print(seg.stats_df)
+seg.stats_df
 ```
 
 ## Apply fusion
@@ -187,5 +187,5 @@ os.rmdir("fusion_output")
 
 ```{code-cell} ipython3
 # print stats
-print(fusion.stats_df)
+fusion.stats_df
 ```
