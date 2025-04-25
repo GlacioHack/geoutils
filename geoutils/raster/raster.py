@@ -58,6 +58,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.filters import _filter
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.interpolate import _interp_points
 from geoutils.interface.raster_point import (
@@ -72,6 +73,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     reproject_from_latlon,
 )
+from geoutils.raster.array import get_array_and_mask, get_mask_from_array
 from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _bounds,
@@ -3530,6 +3532,54 @@ class Raster:
             force_scipy_function=force_scipy_function,
             **kwargs,
         )
+
+    @overload
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[False] = False,
+        **kwargs: dict[str, Any],
+    ) -> RasterType: ...
+
+    @overload
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[True],
+        **kwargs: dict[str, Any],
+    ) -> None: ...
+
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        inplace: bool = False,
+        **kwargs: dict[str, Any],
+    ) -> RasterType | None:
+        """
+        Apply a filter to the array.
+
+        :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "distance")
+                       for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
+        :param inplace: Whether to modify the raster in-place.
+
+        :return: A new Raster instance with the filtered data (or None if inplace)
+
+        :raises ValueError: If the filter name is not one of the predefined options.
+        :raises TypeError: If `method` is neither a string nor a callable.
+        """
+        array = get_array_and_mask(self.data)[0]
+        array = _filter(array, method, **kwargs)
+        mask = get_mask_from_array(array)
+        array[mask] = self.nodata
+        masked_array = np.ma.masked_array(array, mask)
+        masked_array.set_fill_value(self.nodata)
+        if inplace:
+            self._data = masked_array
+            return None
+        else:
+            return self.from_array(masked_array, self.transform, self.crs, self.nodata, self.area_or_point)
 
     def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """
