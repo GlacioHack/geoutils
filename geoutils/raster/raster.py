@@ -3560,7 +3560,7 @@ class Raster:
         """
         Apply a filter to the array.
 
-        :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "distance")
+        :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
                        for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
         :param inplace: Whether to modify the raster in-place.
 
