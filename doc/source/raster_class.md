@@ -370,6 +370,32 @@ Both {func}`~geoutils.Raster.reduce_points` and {func}`~geoutils.Raster.interp_p
 {class}`list` of coordinates.
 ```
 
+## Filter
+Filtering a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.filter` function.
+The following filters are available:
+
+| Filter Name | Description                                                                             | Typical Effect                                                  |
+|:------------|:----------------------------------------------------------------------------------------|:----------------------------------------------------------------|
+| `gaussian`  | Applies a Gaussian (blur) filter with a specified sigma.                                | Smooths the image, reduces noise while slightly blurring edges. |
+| `median`    | Applies a median filter over a sliding window.                                          | Reduces noise while preserving edges better than Gaussian.      |
+| `mean`      | Applies a mean (average) filter with a specified kernel size.                           | Smooths the image uniformly, reduces high-frequency noise.      |
+| `max`       | Applies a maximum filter over a sliding window.                                         | Enhances bright regions, expands high-intensity areas.          |
+| `min`       | Applies a minimum filter over a sliding window. | Suppresses bright regions, expands dark regions. |
+| `distance`  | Removes pixels that deviate strongly from local neighborhood average (within a radius). | Removes outliers and anomalous values based on local context.   |
+
+You can also pass a hand-made filter function for numpy arrays
+
+```{code-cell} ipython3
+# Filter the raster with a gaussian kernel
+rast_filtered = rast.filter("gaussian", sigma=5)
+
+# Filter the raster with a hand-made filter
+def double_filter(arr: np.ndarray) -> np.ndarray:
+    return arr * 2
+
+rast_double = rast.filter(double_filter)
+```
+
 ## Export
 
 A {class}`~geoutils.Raster` can be exported to different formats, to facilitate inter-compatibility with different packages and code versions.
