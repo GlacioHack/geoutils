@@ -105,3 +105,9 @@ class TestTiling:
 
         for col in range(nb_col_tiles - 1):
             assert tiling_grid[0, col + 1, 2] == tiling_grid[0, col, 3] - 2 * overlap
+
+    def test_tiling_overlap_errors(self) -> None:
+        with pytest.raises(ValueError):
+            _generate_tiling_grid(0, 0, 100, 100, 50, 50, -1)
+        with pytest.raises(TypeError):
+            _generate_tiling_grid(0, 0, 100, 100, 50, 50, 0.5)  # type: ignore
