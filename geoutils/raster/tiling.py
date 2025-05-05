@@ -155,6 +155,11 @@ def _generate_tiling_grid(
     :return: A numpy array grid with splits in two dimensions (0: row, 1: column),
              where each cell contains [row_min, row_max, col_min, col_max].
     """
+    if overlap < 0:
+        raise ValueError(f"Overlap negative : {overlap}, must be positive")
+    if not isinstance(overlap, int):
+        raise TypeError(f"Overlap : {overlap}, must be an integer")
+
     # Calculate the total range of rows and columns
     col_range = col_max - col_min
     row_range = row_max - row_min
@@ -203,6 +208,9 @@ def compute_tiling(
     :param ref_shape: The shape of another raster to coregister, use to validate the shape.
     :param overlap: Size of overlap between tiles (optional).
     :return: tiling_grid (array of tile boundaries).
+
+    :raises ValueError: if overlap is negative.
+    :raises TypeError: if overlap is not an integer.
     """
     if raster_shape != ref_shape:
         raise Exception("Reference and secondary rasters do not have the same shape")

@@ -255,7 +255,7 @@ def _write_multiproc_result(
                 dst.write(data, window=dst_window)
             logging.warning(f"Raster saved under {config.outfile}")
         except Exception as e:
-            raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
+            raise RuntimeError(f"Error retrieving raster tiles from multiprocessing tasks: {e}")
     if is_mask:
         return gu.Mask(config.outfile)
     return gu.Raster(config.outfile)
