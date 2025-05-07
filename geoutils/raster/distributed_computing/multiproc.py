@@ -253,7 +253,7 @@ def _write_multiproc_result(
 
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
-            logging.warning(f"Raster saved under {config.outfile}")
+            logging.info(f"Raster saved under {config.outfile}")
         except Exception as e:
             raise RuntimeError(f"Error retrieving raster tiles from multiprocessing tasks: {e}")
     if is_mask:
