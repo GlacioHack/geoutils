@@ -222,6 +222,20 @@ And reverse operations.
     Raster.__array_function__
 ```
 
+### Classification
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    raster.ClassificationLayer
+    raster.ClassificationLayer.get_stats
+    raster.ClassificationLayer.save
+    raster.Binning
+    raster.Segmentation
+    raster.Fusion
+```
+
 ## Mask
 
 ```{eval-rst}
