@@ -1,36 +1,25 @@
-"""Functions to test the filtering tools."""
-
 from __future__ import annotations
-
-from collections.abc import Callable
 
 import numpy as np
 import pytest
-
+import scipy
 import geoutils as gu
 from geoutils._typing import NDArrayNum
 from geoutils.raster import get_array_and_mask
+from collections.abc import Callable
 
 
-class TestFilters:
-    """Test cases for the filter functions."""
-
-    # Load example data.
+class TestGaussianFilter:
     landsat_dem = gu.Raster(gu.examples.get_path("everest_landsat_b4")).astype(np.float32)
-    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
 
     def test_gauss(self) -> None:
-        """Test applying the various Gaussian filters on rasters with/without NaNs"""
-
-        # Test applying scipy's Gaussian filter
-        # smoothing should not yield values below.above original DEM
         raster_array = get_array_and_mask(self.landsat_dem)[0]
         raster_sm = gu.filters.gaussian_filter(raster_array, sigma=5)
         assert np.min(raster_array) <= np.min(raster_sm)
         assert np.max(raster_array) >= np.max(raster_sm)
         assert raster_array.shape == raster_sm.shape
 
-        # Test that it works with NaNs too
+        # Test with NaNs
         nan_count = 1000
         rng = np.random.default_rng(42)
         cols = rng.integers(0, high=self.landsat_dem.width - 1, size=nan_count, dtype=int)
@@ -39,57 +28,32 @@ class TestFilters:
         raster_with_nans[rows, cols] = np.nan
 
         raster_sm = gu.filters.gaussian_filter(raster_with_nans, sigma=10)
-        assert np.nanmin(raster_with_nans) <= np.min(raster_sm)
-        assert np.nanmax(raster_with_nans) >= np.max(raster_sm)
+        assert np.nanmin(raster_with_nans) <= np.nanmin(raster_sm)
+        assert np.nanmax(raster_with_nans) >= np.nanmax(raster_sm)
 
-        # Test that it works with 3D arrays
+        # 3D arrays
         array_3d = np.vstack((raster_array[np.newaxis, :], raster_array[np.newaxis, :]))
         raster_sm = gu.filters.gaussian_filter(array_3d, sigma=5)
         assert array_3d.shape == raster_sm.shape
 
-        # Tests that it fails with 1D arrays with appropriate error
+        # 1D array should raise
         data = raster_array[:, 0]
         pytest.raises(ValueError, gu.filters.gaussian_filter, data, sigma=5)
 
-    def test_dist_filter(self) -> None:
-        """Test that distance_filter works"""
 
-        # Calculate dDEM
-        ddem = self.landsat_dem.copy()
-
-        # Add random outliers
-        count = 1000
-        rng = np.random.default_rng(42)
-        cols = rng.integers(0, high=self.landsat_dem.width - 1, size=count, dtype=int)
-        rows = rng.integers(0, high=self.landsat_dem.height - 1, size=count, dtype=int)
-        ddem.data[rows, cols] = 5000
-
-        # Filter gross outliers
-        filtered_ddem = gu.filters.distance_filter(ddem.data, radius=20, outlier_threshold=50)
-
-        # Check that all outliers were properly filtered
-        assert np.all(np.isnan(filtered_ddem[rows, cols]))
-
-        # Assert that non filtered pixels remain the same
-        assert ddem.data.shape == filtered_ddem.shape
-        assert np.all(ddem.data[np.isfinite(filtered_ddem)] == filtered_ddem[np.isfinite(filtered_ddem)])
-
-        # Check that it works with NaNs too
-        ddem.data[rows[:500], cols[:500]] = np.nan
-        filtered_ddem = gu.filters.distance_filter(ddem.data, radius=20, outlier_threshold=50)
-        assert np.all(np.isnan(filtered_ddem[rows, cols]))
+class TestStatisticalFilters:
+    landsat_dem = gu.Raster(gu.examples.get_path("everest_landsat_b4")).astype(np.float32)
 
     @pytest.mark.parametrize(
         "name, filter_func",
         [
-            ("median", lambda arr: gu.filters.median_filter(arr, **{"size": 5})),  # type:ignore
-            ("mean", lambda arr: gu.filters.mean_filter(arr, kernel_size=5)),  # type:ignore
-            ("min", lambda arr: gu.filters.min_filter(arr, **{"size": 5})),  # type:ignore
-            ("max", lambda arr: gu.filters.max_filter(arr, **{"size": 5})),  # type:ignore
+            ("median", lambda arr: gu.filters.median_filter(arr, **{"window_size": 5})),
+            ("mean", lambda arr: gu.filters.mean_filter(arr, kernel_size=5)),
+            ("min", lambda arr: gu.filters.min_filter(arr, **{"size": 5})),
+            ("max", lambda arr: gu.filters.max_filter(arr, **{"size": 5})),
         ],
     )
     def test_filters(self, name: str, filter_func: Callable[[NDArrayNum], NDArrayNum]) -> None:
-        """Test that all the filters applied on rasters with/without NaNs, work"""
         raster_array = get_array_and_mask(self.landsat_dem)[0]
         raster_filtered = filter_func(raster_array)
 
@@ -105,7 +69,7 @@ class TestFilters:
 
         assert raster_array.shape == raster_filtered.shape
 
-        # Test that it works with NaNs too
+        # Test with NaNs
         nan_count = 1000
         rng = np.random.default_rng(42)
         cols = rng.integers(0, high=self.landsat_dem.width - 1, size=nan_count, dtype=int)
@@ -115,11 +79,8 @@ class TestFilters:
 
         raster_with_nans_filtered = filter_func(raster_with_nans)
         if name in ("median", "mean"):
-            # smoothing should not yield values below.above original DEM
             assert np.nanmin(raster_with_nans) <= np.nanmin(raster_with_nans_filtered)
-            # assert np.nanmax(raster_with_nans) >= np.nanmax(raster_with_nans_filtered)
             assert np.min(raster_filtered) == np.nanmin(raster_with_nans_filtered)
-            # assert np.max(raster_filtered) == np.nanmax(raster_with_nans_filtered)
         elif name == "min":
             assert np.nanmin(raster_with_nans) == np.nanmin(raster_with_nans_filtered)
             assert np.min(raster_filtered) == np.nanmin(raster_with_nans_filtered)
@@ -129,29 +90,112 @@ class TestFilters:
             assert np.nanmax(raster_with_nans) == np.nanmax(raster_with_nans_filtered)
             assert np.max(raster_filtered) == np.nanmax(raster_with_nans_filtered)
 
-        # Test that it works with 3D arrays
+        # 3D arrays (except for mean)
         if name != "mean":
             array_3d = np.vstack((raster_array[np.newaxis, :], raster_array[np.newaxis, :]))
             raster_filtered = filter_func(array_3d)
             assert array_3d.shape == raster_filtered.shape
 
-            # Tests that it fails with 1D arrays with appropriate error
             data = raster_array[:, 0]
             pytest.raises(ValueError, filter_func, data)
 
+    def test_median_filter_nan_consistency(self):
+        arr = np.array([[1, 2, np.nan], [4, np.nan, 6], [7, 8, 9]], dtype=np.float32)
+        filtered_scipy = gu.filters.median_filter(arr, window_size=3, engine="scipy")
+        filtered_numba = gu.filters.median_filter(arr, window_size=3, engine="numba")
+
+        assert filtered_scipy.shape == arr.shape
+        assert filtered_numba.shape == arr.shape
+        mask = np.isfinite(filtered_scipy) & np.isfinite(filtered_numba)
+        np.testing.assert_allclose(filtered_scipy[mask], filtered_numba[mask], rtol=1e-5)
+
+    def test_median_filter_even_window_size_raises(self):
+        arr = np.random.rand(10, 10).astype(np.float32)
+        with pytest.raises(ValueError):
+            gu.filters.median_filter(arr, window_size=4, engine="scipy")
+
+    def test_mean_filter_preserves_nans(self):
+        arr = np.array([[np.nan, 2, 3], [4, 5, np.nan], [7, 8, 9]], dtype=np.float32)
+        filtered = gu.filters.mean_filter(arr, kernel_size=3)
+        assert np.isnan(filtered[0, 0])
+        assert np.isnan(filtered[1, 2])
+
+    def test_min_max_filter_all_nans(self):
+        arr = np.full((5, 5), np.nan)
+        filtered_min = gu.filters.min_filter(arr, size=3)
+        filtered_max = gu.filters.max_filter(arr, size=3)
+        assert np.all(np.isnan(filtered_min))
+        assert np.all(np.isnan(filtered_max))
+
+
+class TestDistanceFilter:
+    landsat_dem = gu.Raster(gu.examples.get_path("everest_landsat_b4")).astype(np.float32)
+
+    def test_dist_filter(self) -> None:
+        ddem = self.landsat_dem.copy()
+
+        count = 1000
+        rng = np.random.default_rng(42)
+        cols = rng.integers(0, high=self.landsat_dem.width - 1, size=count, dtype=int)
+        rows = rng.integers(0, high=self.landsat_dem.height - 1, size=count, dtype=int)
+        ddem.data[rows, cols] = 5000
+
+        filtered_ddem = gu.filters.distance_filter(ddem.data, radius=20, outlier_threshold=50)
+        assert np.all(np.isnan(filtered_ddem[rows, cols]))
+        assert ddem.data.shape == filtered_ddem.shape
+        assert np.all(ddem.data[np.isfinite(filtered_ddem)] == filtered_ddem[np.isfinite(filtered_ddem)])
+
+        ddem.data[rows[:500], cols[:500]] = np.nan
+        filtered_ddem = gu.filters.distance_filter(ddem.data, radius=20, outlier_threshold=50)
+        assert np.all(np.isnan(filtered_ddem[rows, cols]))
+
+    def test_distance_filter_all_nans(self):
+        arr = np.full((10, 10), np.nan)
+        filtered = gu.filters.distance_filter(arr, radius=2, outlier_threshold=1)
+        assert np.all(np.isnan(filtered))
+
+    def test_distance_filter_no_outliers(self):
+        arr = np.ones((10, 10)) * 10
+        filtered = gu.filters.distance_filter(arr, radius=2, outlier_threshold=5)
+        np.testing.assert_array_equal(arr, filtered)
+
+
+class TestGenericFilter:
+    landsat_dem = gu.Raster(gu.examples.get_path("everest_landsat_b4")).astype(np.float32)
+
     def test_generic_filter(self) -> None:
-        """Test that the generic filter applied on rasters works"""
-
         raster_array = get_array_and_mask(self.landsat_dem)[0]
-        raster_filtered = gu.filters.generic_filter(raster_array, np.nanmin, **{"size": 5})  # type:ignore
-
+        raster_filtered = gu.filters.generic_filter(raster_array, scipy.ndimage.minimum_filter, **{"size": 5})
         assert np.nansum(raster_array) != np.nansum(raster_filtered)
 
-    @pytest.mark.parametrize(  # type: ignore
+    def test_generic_filter_1d_input_raises(self):
+        arr = np.arange(10)
+        with pytest.raises(ValueError):
+            gu.filters.generic_filter(arr, scipy.ndimage.gaussian_filter, sigma=1)
+
+    def test_filter_with_custom_callable(self):
+        arr = np.arange(9).reshape(3, 3).astype(np.float32)
+
+        def double(arr):
+            return arr * 2
+
+        filtered = gu.filters._filter(arr, method=double)
+        np.testing.assert_array_equal(filtered, double(arr))
+
+    def test_filter_with_invalid_method_type_raises(self):
+        arr = np.arange(9).reshape(3, 3).astype(np.float32)
+        with pytest.raises(TypeError):
+            gu.filters._filter(arr, method=1234)
+
+
+class TestRasterFilters:
+    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
+
+    @pytest.mark.parametrize(
         "method, kwargs",
         [
             ("gaussian", {"sigma": 1}),
-            ("median", {"size": 3}),
+            ("median", {"window_size": 3}),
             ("mean", {"kernel_size": 3}),
             ("max", {"size": 3}),
             ("min", {"size": 3}),
