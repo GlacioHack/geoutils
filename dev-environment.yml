@@ -23,6 +23,7 @@ dependencies:
   # Optional dependencies
   - laspy
   - scikit-image
+  - numba
 
   # Test dependencies
   - gdal  # To test functionalities against GDAL
