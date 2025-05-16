@@ -95,3 +95,8 @@ dask: Parallel computing with task scheduling.
 Copyright (c) 2025 Dask core developers.
 Website: https://www.dask.org/
 License: New BSD License.
+
+Numba: A Just-in-Time Compiler for Python that accelerates numerical functions.
+Copyright (c) 2012-2023 Anaconda, Inc.
+Website: https://numba.pydata.org/
+License: BSD 2-Clause.
