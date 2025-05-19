@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 import scipy
+
 import geoutils as gu
 from geoutils._typing import NDArrayNum
 from geoutils.raster import get_array_and_mask
-from collections.abc import Callable
 
 
 class TestGaussianFilter:
@@ -49,7 +51,7 @@ class TestStatisticalFilters:
 
     landsat_dem = gu.Raster(gu.examples.get_path("everest_landsat_b4")).astype(np.float32)
 
-    @pytest.mark.parametrize(
+    @pytest.mark.parametrize(  # type: ignore
         "name, filter_func",
         [
             ("median", lambda arr: gu.filters.median_filter(arr, window_size=5)),
@@ -103,7 +105,7 @@ class TestStatisticalFilters:
             data = raster_array[:, 0]
             pytest.raises(ValueError, filter_func, data)
 
-    def test_median_filter_nan_consistency(self):
+    def test_median_filter_nan_consistency(self) -> None:
         """Test that different median filter engines return consistent results with NaNs."""
         arr = np.array([[1, 2, np.nan], [4, np.nan, 6], [7, 8, 9]], dtype=np.float32)
         filtered_scipy = gu.filters.median_filter(arr, window_size=3, engine="scipy")
@@ -114,20 +116,20 @@ class TestStatisticalFilters:
         mask = np.isfinite(filtered_scipy) & np.isfinite(filtered_numba)
         np.testing.assert_allclose(filtered_scipy[mask], filtered_numba[mask], rtol=1e-5)
 
-    def test_median_filter_even_window_size_raises(self):
+    def test_median_filter_even_window_size_raises(self) -> None:
         """Ensure median filter raises with even window size."""
         arr = np.random.rand(10, 10).astype(np.float32)
         with pytest.raises(ValueError):
             gu.filters.median_filter(arr, window_size=4, engine="scipy")
 
-    def test_mean_filter_preserves_nans(self):
+    def test_mean_filter_preserves_nans(self) -> None:
         """Test that mean filter maintains NaNs in the output."""
         arr = np.array([[np.nan, 2, 3], [4, 5, np.nan], [7, 8, 9]], dtype=np.float32)
         filtered = gu.filters.mean_filter(arr, kernel_size=3)
         assert np.isnan(filtered[0, 0])
         assert np.isnan(filtered[1, 2])
 
-    def test_min_max_filter_all_nans(self):
+    def test_min_max_filter_all_nans(self) -> None:
         """Test that min/max filters on all-NaN arrays return NaN arrays."""
         arr = np.full((5, 5), np.nan)
         filtered_min = gu.filters.min_filter(arr, size=3)
@@ -160,13 +162,13 @@ class TestDistanceFilter:
         filtered_ddem = gu.filters.distance_filter(ddem.data, radius=20, outlier_threshold=50)
         assert np.all(np.isnan(filtered_ddem[rows, cols]))
 
-    def test_distance_filter_all_nans(self):
+    def test_distance_filter_all_nans(self) -> None:
         """Distance filter should return NaNs if all input is NaNs."""
         arr = np.full((10, 10), np.nan)
         filtered = gu.filters.distance_filter(arr, radius=2, outlier_threshold=1)
         assert np.all(np.isnan(filtered))
 
-    def test_distance_filter_no_outliers(self):
+    def test_distance_filter_no_outliers(self) -> None:
         """Ensure no changes occur when no outliers are present."""
         arr = np.ones((10, 10)) * 10
         filtered = gu.filters.distance_filter(arr, radius=2, outlier_threshold=5)
@@ -184,27 +186,27 @@ class TestGenericFilter:
         raster_filtered = gu.filters.generic_filter(raster_array, scipy.ndimage.minimum_filter, size=5)
         assert np.nansum(raster_array) != np.nansum(raster_filtered)
 
-    def test_generic_filter_1d_input_raises(self):
+    def test_generic_filter_1d_input_raises(self) -> None:
         """Generic filter should raise on 1D input."""
         arr = np.arange(10)
         with pytest.raises(ValueError):
             gu.filters.generic_filter(arr, scipy.ndimage.gaussian_filter, sigma=1)
 
-    def test_filter_with_custom_callable(self):
+    def test_filter_with_custom_callable(self) -> None:
         """Test using a custom function as filter method."""
         arr = np.arange(9).reshape(3, 3).astype(np.float32)
 
-        def double(arr):
+        def double(arr: NDArrayNum) -> NDArrayNum:
             return arr * 2
 
         filtered = gu.filters._filter(arr, method=double)
         np.testing.assert_array_equal(filtered, double(arr))
 
-    def test_filter_with_invalid_method_type_raises(self):
+    def test_filter_with_invalid_method_type_raises(self) -> None:
         """Passing an invalid method type should raise a TypeError."""
         arr = np.arange(9).reshape(3, 3).astype(np.float32)
         with pytest.raises(TypeError):
-            gu.filters._filter(arr, method=1234)
+            gu.filters._filter(arr, method="1234")
 
 
 class TestRasterFilters:
@@ -212,7 +214,7 @@ class TestRasterFilters:
 
     aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
 
-    @pytest.mark.parametrize(
+    @pytest.mark.parametrize(  # type: ignore
         "method, kwargs",
         [
             ("gaussian", {"sigma": 1}),
@@ -231,6 +233,7 @@ class TestRasterFilters:
 
     def test_raster_filter_callable(self) -> None:
         """Apply a custom callable as a filter on a Raster object."""
+
         def double_filter(arr: NDArrayNum) -> NDArrayNum:
             return arr * 2
 

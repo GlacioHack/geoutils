@@ -19,17 +19,19 @@
 
 """Filters to remove outliers and reduce noise in rasters."""
 from __future__ import annotations
+
 from collections.abc import Callable
 from typing import Any, Literal
-from scipy.ndimage import generic_filter as scipy_generic_filter
-import scipy
-from geoutils._typing import NDArrayNum
-import numpy as np
-from numba import jit, prange
 
-def _filter(
-    array: NDArrayNum, method: str | Callable[..., NDArrayNum], **kwargs: dict[str, Any]
-) -> NDArrayNum:
+import numpy as np
+import scipy
+from numba import jit, prange
+from scipy.ndimage import generic_filter as scipy_generic_filter
+
+from geoutils._typing import NDArrayNum
+
+
+def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], **kwargs: dict[str, Any]) -> NDArrayNum:
     """
     Apply a filter to the array. See description of raster.filter.
     """
@@ -44,10 +46,7 @@ def _filter(
         }
 
         if method not in filter_map:
-            raise ValueError(
-                f"Unsupported filter method '{method}'. "
-                f"Available methods: {list(filter_map.keys())}"
-            )
+            raise ValueError(f"Unsupported filter method '{method}'. " f"Available methods: {list(filter_map.keys())}")
 
         filter_func = filter_map[method]
 
@@ -71,14 +70,14 @@ def gaussian_filter(array: NDArrayNum, sigma: float) -> NDArrayNum:
 
     :returns: The filtered array (same shape as input)
     """
-    return generic_filter(array, scipy.ndimage.gaussian_filter, sigma=sigma)
+    return generic_filter(array, scipy.ndimage.gaussian_filter, **{"sigma": sigma})  # type: ignore
 
 
-@jit(parallel=True)
-def median_filter_numba(dem: np.ndarray, window_size: int):
+@jit(nopython=True, parallel=True)  # type: ignore
+def median_filter_numba(array: NDArrayNum, window_size: int) -> NDArrayNum:
 
     # Get input shapes
-    N1, N2 = dem.shape
+    N1, N2 = array.shape
 
     # Define ranges to loop through given padding
     row_range = N1 - window_size + 1
@@ -91,11 +90,10 @@ def median_filter_numba(dem: np.ndarray, window_size: int):
     for row in prange(row_range):
         for col in prange(col_range):
 
-            outputs[row, col] = np.nanmedian(
-                dem[row : row + window_size, col : col + window_size]
-            )
+            outputs[row, col] = np.nanmedian(array[row : row + window_size, col : col + window_size])
 
     return outputs
+
 
 def median_filter(array: NDArrayNum, window_size: int, engine: Literal["scipy", "numba"] = "numba") -> NDArrayNum:
     """
@@ -113,6 +111,7 @@ def median_filter(array: NDArrayNum, window_size: int, engine: Literal["scipy", 
         return np.stack([_apply_median_filter_2d(slice_, window_size, engine) for slice_ in array])
     else:
         raise ValueError("Input array must be 2D or 3D.")
+
 
 def _apply_median_filter_2d(array: NDArrayNum, window_size: int, engine: Literal["scipy", "numba"]) -> NDArrayNum:
     """
@@ -133,9 +132,8 @@ def _apply_median_filter_2d(array: NDArrayNum, window_size: int, engine: Literal
         array = np.pad(array, pad_width=((hw, hw), (hw, hw)), constant_values=np.nan)
         return median_filter_numba(array, window_size)
 
-def mean_filter(
-    array: NDArrayNum, kernel_size: int, **kwargs: Any
-) -> NDArrayNum:
+
+def mean_filter(array: NDArrayNum, kernel_size: int, **kwargs: Any) -> NDArrayNum:
     """
     Apply a mean filter to a raster that may contain NaNs.
 
@@ -149,7 +147,7 @@ def mean_filter(
     if np.ndim(array) not in [2]:
         raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D array.")
     kernel = np.ones((kernel_size, kernel_size)) / kernel_size**2
-    return generic_filter(array, scipy.ndimage.convolve, weights=kernel, **kwargs)
+    return generic_filter(array, scipy.ndimage.convolve, **{"weights": kernel, **kwargs})  # type: ignore
 
 
 def min_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
@@ -162,9 +160,7 @@ def min_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
     """
     # Check that array dimension is 2 or 3
     if np.ndim(array) not in [2, 3]:
-        raise ValueError(
-            f"Invalid array shape given: {array.shape}. Expected 2D or 3D array."
-        )
+        raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
 
     nans = np.isnan(array)
     # We replace temporarily NaNs by infinite values during filtering to avoid spreading NaNs
@@ -184,9 +180,7 @@ def max_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
     """
     # Check that array dimension is 2 or 3
     if np.ndim(array) not in [2, 3]:
-        raise ValueError(
-            f"Invalid array shape given: {array.shape}. Expected 2D or 3D array."
-        )
+        raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
 
     nans = np.isnan(array)
     # We replace temporarily NaNs by negative infinite values during filtering to avoid spreading NaNs
@@ -196,9 +190,7 @@ def max_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
     return np.where(nans, array, array_nans_replaced_f)
 
 
-def distance_filter(
-    array: NDArrayNum, radius: float, outlier_threshold: float
-) -> NDArrayNum:
+def distance_filter(array: NDArrayNum, radius: float, outlier_threshold: float) -> NDArrayNum:
     """
     Filter out pixels whose value is distantly more than a set threshold from the average value of all neighbor \
 pixels within a given radius.
@@ -237,7 +229,7 @@ pixels within a given radius.
 def generic_filter(
     array: NDArrayNum,
     filter_function: Callable[..., NDArrayNum],
-    **kwargs: dict[Any, Any],
+    **kwargs: dict[Any, Any] | int,
 ) -> NDArrayNum:
     """
     Apply a filter from a function.
@@ -249,8 +241,6 @@ def generic_filter(
     """
     # Check that array dimension is 2 or 3
     if np.ndim(array) not in [2, 3]:
-        raise ValueError(
-            f"Invalid array shape given: {array.shape}. Expected 2D or 3D array."
-        )
+        raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
 
     return filter_function(array, **kwargs)
