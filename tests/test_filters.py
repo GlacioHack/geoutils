@@ -205,7 +205,7 @@ class TestGenericFilter:
     def test_filter_with_invalid_method_type_raises(self) -> None:
         """Passing an invalid method type should raise a TypeError."""
         arr = np.arange(9).reshape(3, 3).astype(np.float32)
-        with pytest.raises(TypeError):
+        with pytest.raises(ValueError):
             gu.filters._filter(arr, method="1234")
 
 
