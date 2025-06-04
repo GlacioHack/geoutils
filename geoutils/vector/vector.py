@@ -494,10 +494,6 @@ class Vector:
         return self._override_gdf_output(self.ds.geom_equals(other=other.ds, align=align))
 
     @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
-    def geom_almost_equals(self, other: Vector, decimal: int = 6, align: bool = True) -> pd.Series:
-        return self._override_gdf_output(self.ds.geom_almost_equals(other=other.ds, decimal=decimal, align=align))
-
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     def geom_equals_exact(
         self,
         other: Vector,
