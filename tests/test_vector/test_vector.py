@@ -162,7 +162,6 @@ class TestGeoPandasMethods:
     nongeo_methods = [
         "contains",
         "geom_equals",
-        "geom_almost_equals",
         "geom_equals_exact",
         "crosses",
         "disjoint",
