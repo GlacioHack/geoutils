@@ -96,8 +96,8 @@ def _estimate_subsample_memusage(darr: da.Array, chunksizes_in_mem: tuple[int, i
 
     # Final estimate of memory usage of operation in MB
     max_op_memusage = fac_dask_margin * (chunk_memusage + sample_memusage + out_memusage + meta_memusage) / (2**20)
-    # We add a base memory usage of ~80 MB + 10MB per 1000 chunks (loaded in background by Dask even on tiny data)
-    max_op_memusage += 80 + 10 * (num_chunks / 1000)
+    # We add a base memory usage of ~130 MB + 10MB per 1000 chunks (loaded in background by Dask even on tiny data)
+    max_op_memusage += 130 + 10 * (num_chunks / 1000)
 
     return max_op_memusage
 
