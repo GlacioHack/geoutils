@@ -16,13 +16,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from geoutils.raster.raster import Raster, RasterType, RasterMask, handled_array_funcs  # noqa isort:skip
-from geoutils.raster.array import *  # noqa
-from geoutils.raster.distributed_computing import *  # noqa
-from geoutils.raster.georeferencing import *  # noqa
-from geoutils.raster.geotransformations import *  # noqa
-from geoutils.raster.multiraster import *  # noqa
-from geoutils.raster.satimg import *  # noqa
-from geoutils.raster.tiling import *  # noqa
-
-__all__ = ["RasterType", "Raster"]
+from geoutils.stats.sampling import *  # noqa
+from geoutils.stats.estimators import *  # noqa
+from geoutils.stats.stats import *  # noqa
