@@ -956,40 +956,6 @@ class Vector:
         )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_crs(self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False) -> Vector | None:
-
-        if inplace:
-            self.ds = self.ds.to_crs(crs=crs, epsg=epsg)
-            return None
-        else:
-            return self._override_gdf_output(self.ds.to_crs(crs=crs, epsg=epsg))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def set_crs(
-        self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False, allow_override: bool = False
-    ) -> Vector | None:
-
-        if inplace:
-            self.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
-            return None
-        else:
-            return self._override_gdf_output(self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def set_precision(
-        self,
-        grid_size: float = 0.0,
-        mode: str = "valid_output",
-        inplace: bool = False,
-    ) -> Vector | None:
-
-        if inplace:
-            self.ds = self.ds.set_precision(grid_size=grid_size, mode=mode)
-            return None
-        else:
-            return self._override_gdf_output(self.ds.set_precision(grid_size=grid_size, mode=mode))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
     def set_geometry(self, col: str, drop: bool = False, inplace: bool = False, crs: CRS = None) -> Vector | None:
 
         if inplace:
@@ -998,6 +964,48 @@ class Vector:
         else:
             return self._override_gdf_output(self.ds.set_geometry(col=col, drop=drop, crs=crs))
 
+    # Subsection of methods that shouldn't override the output for Vector subclasses
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_crs(self: VectorType, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False) -> VectorType | None:
+
+        if inplace:
+            self.ds = self.ds.to_crs(crs=crs, epsg=epsg)
+            return None
+        else:
+            copy = self.copy()
+            copy.ds = self.ds.to_crs(crs=crs, epsg=epsg)
+            return copy
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def set_crs(
+        self: VectorType, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False, allow_override: bool = False
+    ) -> VectorType | None:
+
+        if inplace:
+            self.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
+            return None
+        else:
+            copy = self.copy()
+            copy.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
+            return copy
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def set_precision(
+        self: VectorType,
+        grid_size: float = 0.0,
+        mode: str = "valid_output",
+        inplace: bool = False,
+    ) -> VectorType | None:
+
+        if inplace:
+            self.ds = self.ds.set_precision(grid_size=grid_size, mode=mode)
+            return None
+        else:
+            copy = self.copy()
+            copy.ds = self.ds.set_precision(grid_size=grid_size, mode=mode)
+            return copy
+
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def rename_geometry(self, col: str, inplace: bool = False) -> Vector | None:
 
@@ -1005,7 +1013,9 @@ class Vector:
             self.ds = self.ds.set_geometry(col=col)
             return None
         else:
-            return self._override_gdf_output(self.ds.rename_geometry(col=col))
+            copy = self.copy()
+            copy.ds = self.ds.rename_geometry(col=col)
+            return copy
 
     # -----------------------------------
     # GeoDataFrame: other functionalities
@@ -1411,7 +1421,9 @@ class Vector:
             self.ds = new_ds
             return None
         else:
-            return Vector(new_ds)
+            copy = self.copy()
+            copy.ds = new_ds
+            return copy
 
     @overload
     def translate(

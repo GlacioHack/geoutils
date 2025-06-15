@@ -35,7 +35,8 @@ class TestPointCloud:
         crs=4326,
     )
     # 3/ LAS file
-    fn_las = "/home/atom/ongoing/own/geoutils/test.laz"
+    fn_las = "/home/atom/code/devel/libs/geoutils-data/data/Coromandel_Lidar/points.laz"
+    # fn_las = gu.examples.get_path("coromandel_lidar")
 
     # 4/ Non-point vector (for error raising)
     poly = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
@@ -241,6 +242,25 @@ class TestPointCloud:
         assert np.array_equal(np.stack(xyz_from_pc), self.arr_points.T)
 
 
+    specific_method_args = {
+        "reproject": {"crs": CRS.from_epsg(32610)},
+        "crop": {"crop_geom": (np.min(gdf1.geometry.x.values), np.min(gdf1.geometry.y.values),
+                               np.max(gdf1.geometry.x.values), np.max(gdf1.geometry.y.values))},
+        "translate": {"xoff": 1, "yoff": 1},
+        "set_precision": {"grid_size": 1},
+        "to_crs": {"crs": CRS.from_epsg(32610)},
+        "set_crs": {"crs": CRS.from_epsg(32610), "allow_override": True},
+        "rename_geometry": {"col": "lol"},
+    }
+
+    @pytest.mark.parametrize("method", ["reproject", "crop", "translate", "set_precision", "to_crs", "set_crs", "rename_geometry"])  # type: ignore
+    def test_cast_vector_methods__geometry_invariant(self, method: str):
+        """Test that method that don't modify geometry do cast back to a PointCloud."""
+
+        pc1 = PointCloud(self.gdf1, data_column="b1")
+
+        getattr(pc1, method)(**self.specific_method_args[method])
+        assert isinstance(pc1, PointCloud)
 
 class TestArithmetic:
     """

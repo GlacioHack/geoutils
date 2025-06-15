@@ -521,7 +521,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
-        if z.dtype == bool:
+        if z[0].dtype == bool:
             return PointCloudMask(filename_or_dataset=gdf, data_column=data_column)  # type: ignore
         # Otherwise, keep as a given PointCloudType subclass
         else:
