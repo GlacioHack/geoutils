@@ -25,8 +25,8 @@ from typing import Any
 
 import numpy as np
 
-from geoutils.stats.estimators import nmad, linear_error
 from geoutils._typing import NDArrayNum
+from geoutils.stats.estimators import linear_error, nmad
 
 _STATS_ALIASES = {
     "mean": "Mean",
@@ -54,6 +54,7 @@ _STATS_ALIASES = {
     "percentagevalidinlierpoints": "Percentage valid inlier points",
     "percentageinlierpoints": "Percentage inlier points",
 }
+
 
 def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
     """

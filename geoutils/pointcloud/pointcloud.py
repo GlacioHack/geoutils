@@ -22,7 +22,7 @@ from __future__ import annotations
 import os.path
 import pathlib
 import warnings
-from typing import Any, Iterable, Literal, Callable, overload
+from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 
 import geopandas as gpd
 import numpy as np
@@ -33,11 +33,11 @@ from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
-from geoutils._typing import ArrayLike, NDArrayNum, NDArrayBool, DTypeLike, Number
+from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
-from geoutils.stats.stats import _get_single_stat, _statistics, _STATS_ALIASES
 from geoutils.stats.sampling import subsample_array
+from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
 
 try:
     import laspy
@@ -112,6 +112,8 @@ _HANDLED_FUNCTIONS_2NIN = [
 ]
 handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
 
+# This is a generic Vector-type (if subclasses are made, this will change appropriately)
+PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
 
 
 def _load_laspy_data(filename: str, columns: list[str]) -> gpd.GeoDataFrame:
@@ -159,11 +161,13 @@ def _load_laspy_metadata(
 #
 #     return
 
+
 def _cast_numeric_array_pointcloud(
-    pc: PointCloud, other: PointCloud | NDArrayNum | Number, operation_name: str
-) -> tuple[Number, NDArrayNum]:
+    pc: PointCloudType, other: PointCloudType | NDArrayNum | Number, operation_name: str
+) -> NDArrayNum | Number:
     """
-    Cast a point cloud and another point cloud or array or number to arrays with proper metadata, or raise an error message.
+    Cast a point cloud and another point cloud or array or number to arrays with proper metadata, or raise an error
+    message.
 
     :param pc: Pointcloud.
     :param other: Point cloud or array or number.
@@ -203,13 +207,16 @@ def _cast_numeric_array_pointcloud(
             pass
         else:
             raise ValueError(
-                "The array must be 1-dimensional with the same number of points as the point cloud for " + operation_name + "."
+                "The array must be 1-dimensional with the same number of points as the point cloud for "
+                + operation_name
+                + "."
             )
 
     else:
-        other_data = other
+        other_data = other  # type: ignore
 
     return other_data
+
 
 class PointCloud(gu.Vector):  # type: ignore[misc]
     """
@@ -420,22 +427,19 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
     @overload
     def astype(
-            self: PointCloud, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False
-    ) -> PointCloud:
-        ...
+        self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, *, inplace: Literal[False] = False
+    ) -> PointCloud: ...
 
     @overload
-    def astype(self: PointCloud, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[True]) -> None:
-        ...
+    def astype(self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, *, inplace: Literal[True]) -> None: ...
 
     @overload
     def astype(
-            self: PointCloud, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: bool = False
-    ) -> PointCloud | None:
-        ...
+        self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, *, inplace: bool = False
+    ) -> PointCloud | None: ...
 
     def astype(
-            self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, inplace: bool = False
+        self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, inplace: bool = False
     ) -> PointCloud | None:
         """
         Convert data type of the point cloud data column.
@@ -463,8 +467,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             else:
                 return self.copy(new_array=out_data)
 
-
-    def copy(self: PointCloud, new_array: NDArrayNum | None = None) -> PointCloud:
+    def copy(self: PointCloud, new_array: NDArrayNum | NDArrayBool | None = None) -> PointCloud:
         """
         Copy the point cloud in-memory.
 
@@ -473,26 +476,23 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :return: Copy of the point cloud.
         """
 
-
         # Define new array
         if new_array is not None:
             if not isinstance(new_array, np.ndarray):
                 raise ValueError("New data must be an array.")
             new_array = new_array.squeeze()
             if not (new_array.ndim == 1 and new_array.shape[0] == self.nb_points):
-                raise ValueError("New data array must be 1-dimensional with the same number of points as the point "
-                                 "cloud being copied.")
+                raise ValueError(
+                    "New data array must be 1-dimensional with the same number of points as the point "
+                    "cloud being copied."
+                )
             data = new_array
         else:
             data = self.data.copy()
 
         # Send to from_array
         cp = self.from_xyz(
-            x=self.geometry.x.values,
-            y=self.geometry.y.values,
-            z=data,
-            crs=self.crs,
-            data_column=self.data_column
+            x=self.geometry.x.values, y=self.geometry.y.values, z=data, crs=self.crs, data_column=self.data_column
         )
 
         return cp
@@ -515,9 +515,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
 
         # Build geodataframe
-        gdf = gpd.GeoDataFrame(
-            geometry=gpd.points_from_xy(x=x, y=y, crs=crs), data={data_column: z}
-        )
+        gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=x, y=y, crs=crs), data={data_column: z})
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
@@ -526,7 +524,6 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         # Otherwise, keep as a given PointCloudType subclass
         else:
             return cls(filename_or_dataset=gdf, data_column=data_column)
-
 
     @classmethod
     def from_array(cls, data: NDArrayNum, crs: CRS, data_column: str = "z") -> PointCloud:
@@ -582,17 +579,20 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         return list(zip(self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values))
 
     def __array_ufunc__(
-            self,
-            ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
-            method: str,
-            *inputs: PointCloud | tuple[PointCloud, PointCloud] | tuple[NDArrayNum, PointCloud] | tuple[PointCloud, NDArrayNum],
-            **kwargs: Any,
+        self,
+        ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
+        method: str,
+        *inputs: tuple[PointCloud]
+        | tuple[PointCloud, PointCloud]
+        | tuple[NDArrayNum, PointCloud]
+        | tuple[PointCloud, NDArrayNum],
+        **kwargs: Any,
     ) -> PointCloud | tuple[PointCloud, PointCloud]:
         """
         Method to cast NumPy universal functions directly on PointCloud classes, by passing to the masked array.
-        This function basically applies the ufunc (with its method and kwargs) to .data, and rebuilds the PointCloud from
-        self.__class__. The cases separate the number of input nin and output nout, to properly feed .data and return
-        PointCloud objects.
+        This function basically applies the ufunc (with its method and kwargs) to .data, and rebuilds the PointCloud
+        from self.__class__. The cases separate the number of input nin and output nout, to properly feed .data and
+        return PointCloud objects.
         See more details in NumPy doc, e.g., https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch.
         """
 
@@ -621,7 +621,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                 pc = inputs[0]
                 other = inputs[1]
             else:
-                pc = inputs[1]
+                pc = inputs[1]  # type: ignore
                 other = inputs[0]
             _ = _cast_numeric_array_pointcloud(pc, other, "an arithmetic operation")  # type: ignore
 
@@ -646,7 +646,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                 return self.copy(new_array=output[0]), self.copy(new_array=output[1])
 
     def __array_function__(
-            self, func: Callable[[NDArrayNum, Any], Any], types: tuple[type], args: Any, kwargs: Any
+        self, func: Callable[[NDArrayNum, Any], Any], types: tuple[type], args: Any, kwargs: Any
     ) -> Any:
         """
         Method to cast NumPy array function directly on a Point cloud object by applying it to the masked array.
@@ -842,7 +842,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
     def __eq__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:  # type: ignore
         """
-        Element-wise equality of two point clouds, or a point cloud and a numpy array, or a point cloud and single number.
+        Element-wise equality of two point clouds, or a point cloud and a numpy array, or a point cloud and single
+        number.
 
         This operation casts the result into a Mask.
 
@@ -856,7 +857,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
     def __ne__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:  # type: ignore
         """
-        Element-wise negation of two point clouds, or a point cloud and a numpy array, or a point cloud and single number.
+        Element-wise negation of two point clouds, or a point cloud and a numpy array, or a point cloud and single
+        number.
 
         This operation casts the result into a Mask.
 
@@ -868,7 +870,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         out_data = self.data != other_data
         return self.copy(new_array=out_data)
 
-    def __lt__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
+    def __lt__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:  # type: ignore
         """
         Element-wise lower than comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
@@ -883,7 +885,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         out_data = self.data < other_data
         return self.copy(new_array=out_data)
 
-    def __le__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
+    def __le__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:  # type: ignore
         """
         Element-wise lower or equal comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
@@ -898,7 +900,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         out_data = self.data <= other_data
         return self.copy(new_array=out_data)
 
-    def __gt__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
+    def __gt__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:  # type: ignore
         """
         Element-wise greater than comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
@@ -913,7 +915,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         out_data = self.data > other_data
         return self.copy(new_array=out_data)
 
-    def __ge__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
+    def __ge__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:  # type: ignore
         """
         Element-wise greater or equal comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
@@ -927,7 +929,6 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = self.data >= other_data
         return self.copy(new_array=out_data)
-
 
     def pointcloud_equal(self, other: PointCloud, **kwargs: Any) -> bool:
         """
@@ -956,34 +957,35 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :return: Whether the two objects have the same georeferenced points.
         """
 
-        return all([self.crs == pc.crs,
-                    np.array_equal(self.geometry.x.values, pc.geometry.x.values),
-                    np.array_equal(self.geometry.y.values, pc.geometry.y.values)])
+        return all(
+            [
+                self.crs == pc.crs,
+                np.array_equal(self.geometry.x.values, pc.geometry.x.values),
+                np.array_equal(self.geometry.y.values, pc.geometry.y.values),
+            ]
+        )
 
     @overload
     def get_stats(
-            self,
-            stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
-    ) -> np.floating[Any]:
-        ...
+        self,
+        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
+    ) -> np.floating[Any]: ...
 
     @overload
     def get_stats(
-            self,
-            stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
-    ) -> dict[str, np.floating[Any]]:
-        ...
+        self,
+        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
+    ) -> dict[str, np.floating[Any]]: ...
 
     def get_stats(
-            self,
-            stats_name: (
-                    str | Callable[[NDArrayNum], np.floating[Any]] | list[
-                str | Callable[[NDArrayNum], np.floating[Any]]] | None
-            ) = None,
+        self,
+        stats_name: (
+            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
+        ) = None,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
         """
-        Retrieve specified statistics or all available statistics for the point cloud data. Allows passing custom callables
-        to calculate custom stats.
+        Retrieve specified statistics or all available statistics for the point cloud data. Allows passing custom
+        callables to calculate custom stats.
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
@@ -1026,8 +1028,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def subsample(
@@ -1036,8 +1037,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         return_indices: Literal[True],
         *,
         random_state: int | np.random.Generator | None = None,
-    ) -> tuple[NDArrayNum, ...]:
-        ...
+    ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
     def subsample(
@@ -1045,8 +1045,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         subsample: float | int,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
-        ...
+    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     def subsample(
         self,
@@ -1068,7 +1067,6 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         return subsample_array(
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
-
 
     def grid(
         self,
@@ -1106,13 +1104,12 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         return gu.Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=None)
 
-    def subsample(self, subsample: float | int, random_state: int | np.random.Generator | None = None) -> PointCloud:
-
-        indices = subsample_array(
-            array=self.data, subsample=subsample, return_indices=True, random_state=random_state
-        )
-
-        return PointCloud(self.ds[indices])
+    # def subsample(self, subsample: float | int, random_state: int | np.random.Generator | None = None) -> PointCloud:
+    #
+    #     indices = subsample_array(array=self.data, subsample=subsample,
+    #     return_indices=True, random_state=random_state)
+    #
+    #     return PointCloud(self.ds[indices])
 
     # @classmethod
     # def from_point cloud(cls, point cloud: gu.Point cloud) -> PointCloud:
@@ -1122,36 +1119,35 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
 
 class PointCloudMask(PointCloud):
-
     """
-   The georeferenced point cloud mask.
+    The georeferenced point cloud mask.
 
-   A point cloud mask is a point cloud with a boolean data columns (True or False), that can serve to index or assign
-   values to other point clouds of the same georeferenced points.
+    A point cloud mask is a point cloud with a boolean data columns (True or False), that can serve to index or assign
+    values to other point clouds of the same georeferenced points.
 
-   Subclasses :class:`geoutils.PointCloud`.
+    Subclasses :class:`geoutils.PointCloud`.
 
-    Main attributes:
-        ds: :class:`geopandas.GeoDataFrame`
-            Geodataframe of the point cloud.
-        data_column: str
-            Name of point cloud data column.
-        crs: :class:`pyproj.crs.CRS`
-            Coordinate reference system of the point cloud.
-        bounds: :class:`rio.coords.BoundingBox`
-            Coordinate bounds of the point cloud.
+     Main attributes:
+         ds: :class:`geopandas.GeoDataFrame`
+             Geodataframe of the point cloud.
+         data_column: str
+             Name of point cloud data column.
+         crs: :class:`pyproj.crs.CRS`
+             Coordinate reference system of the point cloud.
+         bounds: :class:`rio.coords.BoundingBox`
+             Coordinate bounds of the point cloud.
 
-   All other attributes are derivatives of those attributes, or read from the file on disk.
-   See the API for more details.
-   """
+    All other attributes are derivatives of those attributes, or read from the file on disk.
+    See the API for more details.
+    """
 
     def __init__(
-            self,
-            filename_or_dataset: PointCloud | str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-            **kwargs: Any,
+        self,
+        filename_or_dataset: PointCloud | str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
+        **kwargs: Any,
     ) -> None:
 
-        self._data: MArrayNum | MArrayBool | None = None  # type: ignore
+        self._data: NDArrayNum | NDArrayBool | None = None  # type: ignore
 
         # If a Mask is passed, simply point back to Mask
         if isinstance(filename_or_dataset, PointCloudMask):
@@ -1165,10 +1161,11 @@ class PointCloudMask(PointCloud):
             # Convert masked array to boolean
             self._data = self.data.astype(bool)  # type: ignore
 
-
     def __and__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
         """Bitwise and between masks, or a mask and an array."""
-        other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
+        other_data = _cast_numeric_array_pointcloud(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )
 
         return self.copy(self.data & other_data)  # type: ignore
 
@@ -1180,7 +1177,9 @@ class PointCloudMask(PointCloud):
     def __or__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
         """Bitwise or between masks, or a mask and an array."""
 
-        other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
+        other_data = _cast_numeric_array_pointcloud(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )
 
         return self.copy(self.data | other_data)  # type: ignore
 
@@ -1192,7 +1191,9 @@ class PointCloudMask(PointCloud):
     def __xor__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
         """Bitwise xor between masks, or a mask and an array."""
 
-        other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
+        other_data = _cast_numeric_array_pointcloud(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )
 
         return self.copy(self.data ^ other_data)  # type: ignore
 

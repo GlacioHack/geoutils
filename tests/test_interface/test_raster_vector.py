@@ -7,7 +7,6 @@ import warnings
 import geopandas as gpd
 import numpy as np
 import pytest
-from scipy.ndimage import binary_erosion
 from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
@@ -81,8 +80,11 @@ class TestRasterVectorInterface:
         assert isinstance(mask, gu.RasterMask)
 
         # Check that an error is raised if xres is not passed
-        with pytest.raises(ValueError, match="Without a reference for masking, specify at least the resolution "
-                                             "a raster mask, or the points coordinates for a point cloud mask."):
+        with pytest.raises(
+            ValueError,
+            match="Without a reference for masking, specify at least the resolution "
+            "a raster mask, or the points coordinates for a point cloud mask.",
+        ):
             vector.create_mask()
 
         # If the raster has the wrong type

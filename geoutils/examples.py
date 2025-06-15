@@ -41,7 +41,7 @@ _FILEPATHS_DATA = {
     "exploradores_rgi_outlines": os.path.join(
         _EXAMPLES_DIRECTORY, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg"
     ),
-    "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz")
+    "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz"),
 }
 
 available = list(_FILEPATHS_DATA.keys())

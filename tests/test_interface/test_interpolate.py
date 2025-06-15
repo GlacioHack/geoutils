@@ -117,13 +117,25 @@ class TestInterpolate:
         # Nearest = Linear interpolation at the location of a data point
         # Regular grid = Equal grid interpolation at the location of a data point
 
-        raster_points = raster.interp_points((points_x, points_y), method="nearest", shift_area_or_point=shift_aop, as_array=True)
-        raster_points_lin = raster.interp_points((points_x, points_y), method="linear", shift_area_or_point=shift_aop, as_array=True)
+        raster_points = raster.interp_points(
+            (points_x, points_y), method="nearest", shift_area_or_point=shift_aop, as_array=True
+        )
+        raster_points_lin = raster.interp_points(
+            (points_x, points_y), method="linear", shift_area_or_point=shift_aop, as_array=True
+        )
         raster_points_interpn = raster.interp_points(
-            (points_x, points_y), method="nearest", force_scipy_function="interpn", shift_area_or_point=shift_aop, as_array=True
+            (points_x, points_y),
+            method="nearest",
+            force_scipy_function="interpn",
+            shift_area_or_point=shift_aop,
+            as_array=True,
         )
         raster_points_interpn_lin = raster.interp_points(
-            (points_x, points_y), method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop, as_array=True
+            (points_x, points_y),
+            method="linear",
+            force_scipy_function="interpn",
+            shift_area_or_point=shift_aop,
+            as_array=True,
         )
 
         assert np.array_equal(raster_points, raster_points_lin)
@@ -146,7 +158,11 @@ class TestInterpolate:
             (points_x_in, points_y_in), method="linear", shift_area_or_point=shift_aop, as_array=True
         )
         raster_points_in_interpn = raster.interp_points(
-            (points_x_in, points_y_in), method="linear", force_scipy_function="interpn", shift_area_or_point=shift_aop, as_array=True
+            (points_x_in, points_y_in),
+            method="linear",
+            force_scipy_function="interpn",
+            shift_area_or_point=shift_aop,
+            as_array=True,
         )
 
         assert np.array_equal(raster_points_in, raster_points_in_interpn)
@@ -189,14 +205,14 @@ class TestInterpolate:
                 method=method,
                 force_scipy_function="map_coordinates",
                 shift_area_or_point=shift_aop,
-                as_array = True
+                as_array=True,
             )
             raster_points_interpn = raster.interp_points(
                 (points_x_rand, points_y_rand),
                 method=method,
                 force_scipy_function="interpn",
                 shift_area_or_point=shift_aop,
-                as_array = True
+                as_array=True,
             )
 
             # Not exactly equal in floating point precision since changes in Scipy 1.13.0,
@@ -218,14 +234,14 @@ class TestInterpolate:
                 method=method,
                 force_scipy_function="map_coordinates",
                 shift_area_or_point=shift_aop,
-                as_array=True
+                as_array=True,
             )
             raster_points_interpn_edge = raster.interp_points(
                 (points_x_rand, points_y_rand),
                 method=method,
                 force_scipy_function="interpn",
                 shift_area_or_point=shift_aop,
-                as_array=True
+                as_array=True,
             )
 
             assert all(~np.isfinite(raster_points_mapcoords_edge))
@@ -346,8 +362,12 @@ class TestInterpolate:
         ]
         i, j = list(zip(*indices_nan))
         x, y = r.ij2xy(i, j)
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True)
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True)
+        vals = r.interp_points(
+            (x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True
+        )
+        vals2 = r.interp_points(
+            (x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True
+        )
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
@@ -356,10 +376,18 @@ class TestInterpolate:
         yoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
 
         vals = r.interp_points(
-            (x + xoffset, y + yoffset), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True
+            (x + xoffset, y + yoffset),
+            method=method,
+            force_scipy_function="map_coordinates",
+            dist_nodata_spread=dist,
+            as_array=True,
         )
         vals2 = r.interp_points(
-            (x + xoffset, y + yoffset), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True
+            (x + xoffset, y + yoffset),
+            method=method,
+            force_scipy_function="interpn",
+            dist_nodata_spread=dist,
+            as_array=True,
         )
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
@@ -377,8 +405,12 @@ class TestInterpolate:
         i, j = np.where(mask_nan_dilated)
         x, y = r.ij2xy(i, j)
         # And interpolate at those coordinates
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True)
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True)
+        vals = r.interp_points(
+            (x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True
+        )
+        vals2 = r.interp_points(
+            (x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True
+        )
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
@@ -401,8 +433,12 @@ class TestInterpolate:
         i, j = list(zip(*indices_edge))
         x, y = r.ij2xy(i, j)
         # And get their interpolated value
-        vals = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True)
-        vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True)
+        vals = r.interp_points(
+            (x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True
+        )
+        vals2 = r.interp_points(
+            (x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True
+        )
 
         # Then we fill the NaNs in the raster with a placeholder value of the raster mean
         r_arr = r.get_nanarray()
@@ -436,20 +472,28 @@ class TestInterpolate:
                 method=method,
                 force_scipy_function="map_coordinates",
                 dist_nodata_spread=dist,
-                as_array=True
+                as_array=True,
             )
             vals2 = r.interp_points(
-                (x + xoffset, y + yoffset), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True
+                (x + xoffset, y + yoffset),
+                method=method,
+                force_scipy_function="interpn",
+                dist_nodata_spread=dist,
+                as_array=True,
             )
             vals_near = r2.interp_points(
                 (x + xoffset, y + yoffset),
                 method=method,
                 force_scipy_function="map_coordinates",
                 dist_nodata_spread=dist,
-                as_array=True
+                as_array=True,
             )
             vals2_near = r2.interp_points(
-                (x + xoffset, y + yoffset), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True
+                (x + xoffset, y + yoffset),
+                method=method,
+                force_scipy_function="interpn",
+                dist_nodata_spread=dist,
+                as_array=True,
             )
 
             # Both sets of values should be exactly the same, without any NaNs
@@ -467,7 +511,9 @@ class TestInterpolate:
             vals = r.interp_points(
                 (x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True
             )
-            vals2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True)
+            vals2 = r.interp_points(
+                (x, y), method=method, force_scipy_function="interpn", dist_nodata_spread=dist, as_array=True
+            )
             vals_near = r2.interp_points(
                 (x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True
             )

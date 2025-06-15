@@ -16,6 +16,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from geoutils.stats.sampling import *  # noqa
 from geoutils.stats.estimators import *  # noqa
+from geoutils.stats.sampling import *  # noqa
 from geoutils.stats.stats import *  # noqa

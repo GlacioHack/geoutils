@@ -23,7 +23,6 @@ Module for Raster class.
 
 from __future__ import annotations
 
-import logging
 import math
 import pathlib
 import warnings
@@ -67,14 +66,12 @@ from geoutils.interface.raster_point import (
 )
 from geoutils.interface.raster_vector import _polygonize
 from geoutils.misc import deprecate
-from geoutils.stats.stats import _get_single_stat, _statistics, _STATS_ALIASES
-from geoutils.stats.sampling import subsample_array
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
     reproject_from_latlon,
-    reproject_points
+    reproject_points,
 )
 from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
@@ -93,8 +90,8 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.stats import linear_error, nmad
-from geoutils.vector.vector import Vector
+from geoutils.stats.sampling import subsample_array
+from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -1970,8 +1967,12 @@ class Raster:
             return stats_dict
 
         if counts is None:
-            ignore_aliases = ["validinliercount", "totalinliercount",
-                              "percentagevalidinlierpoints", "percentageinlierpoints"]
+            ignore_aliases = [
+                "validinliercount",
+                "totalinliercount",
+                "percentagevalidinlierpoints",
+                "percentageinlierpoints",
+            ]
             stats_aliases = {k: _STATS_ALIASES[k] for k in _STATS_ALIASES.keys() if k not in ignore_aliases}
         else:
             stats_aliases = _STATS_ALIASES
@@ -3108,11 +3109,12 @@ class Raster:
         Uses Rasterio's windowed reading to keep memory usage low (for a raster not loaded).
 
         :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
-            coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud object in any CRS.
+            coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
             If points fall outside of image, value returned is nan.
         :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
         :param window: Window size to read around coordinates. Must be odd.
-        :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster CRS.
+        :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
+            CRS.
         :param band: Band number to extract from (from 1 to self.count).
         :param masked: Whether to return a masked array, or classic array.
         :param return_window: Whether to return the windows (in addition to the reduced value).
@@ -3403,8 +3405,7 @@ class Raster:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> gu.PointCloud:
-        ...
+    ) -> gu.PointCloud: ...
 
     @overload
     def interp_points(
@@ -3419,8 +3420,7 @@ class Raster:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def interp_points(
@@ -3435,8 +3435,7 @@ class Raster:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> NDArrayNum | gu.PointCloud:
-        ...
+    ) -> NDArrayNum | gu.PointCloud: ...
 
     def interp_points(
         self,
@@ -3464,7 +3463,7 @@ class Raster:
          of shift_area_or_point for more details.
 
         :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
-            coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud object in any CRS.
+            coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
             If points fall outside of image, value returned is nan.
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
@@ -3473,7 +3472,8 @@ class Raster:
             rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
             quintic method), or rounded down, or a fixed integer.
         :param band: Band to use (from 1 to self.count).
-        :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster CRS.
+        :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
+        CRS.
         :param as_array: Whether to return a point cloud with data column the interpolated values (default) or an
             array of interpolated values.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel

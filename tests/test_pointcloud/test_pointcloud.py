@@ -9,12 +9,12 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
-from shapely import Polygon
 from pyproj import CRS
+from shapely import Polygon
 
+import geoutils as gu
 from geoutils import PointCloud
 from geoutils._typing import NDArrayNum
-import geoutils as gu
 
 
 class TestPointCloud:
@@ -241,11 +241,16 @@ class TestPointCloud:
         xyz_from_pc = pc1.to_xyz()
         assert np.array_equal(np.stack(xyz_from_pc), self.arr_points.T)
 
-
     specific_method_args = {
         "reproject": {"crs": CRS.from_epsg(32610)},
-        "crop": {"crop_geom": (np.min(gdf1.geometry.x.values), np.min(gdf1.geometry.y.values),
-                               np.max(gdf1.geometry.x.values), np.max(gdf1.geometry.y.values))},
+        "crop": {
+            "crop_geom": (
+                np.min(gdf1.geometry.x.values),
+                np.min(gdf1.geometry.y.values),
+                np.max(gdf1.geometry.x.values),
+                np.max(gdf1.geometry.y.values),
+            )
+        },
         "translate": {"xoff": 1, "yoff": 1},
         "set_precision": {"grid_size": 1},
         "to_crs": {"crs": CRS.from_epsg(32610)},
@@ -253,7 +258,9 @@ class TestPointCloud:
         "rename_geometry": {"col": "lol"},
     }
 
-    @pytest.mark.parametrize("method", ["reproject", "crop", "translate", "set_precision", "to_crs", "set_crs", "rename_geometry"])  # type: ignore
+    @pytest.mark.parametrize(
+        "method", ["reproject", "crop", "translate", "set_precision", "to_crs", "set_crs", "rename_geometry"]
+    )  # type: ignore
     def test_cast_vector_methods__geometry_invariant(self, method: str):
         """Test that method that don't modify geometry do cast back to a PointCloud."""
 
@@ -261,6 +268,7 @@ class TestPointCloud:
 
         getattr(pc1, method)(**self.specific_method_args[method])
         assert isinstance(pc1, PointCloud)
+
 
 class TestArithmetic:
     """
@@ -302,7 +310,9 @@ class TestArithmetic:
 
     # Create rasters with different shape, crs or transforms for testing errors
     # Wrong shaped arrays to check errors are raised
-    arr_wrong_shape = rng.integers(min_val, max_val, (3, nb_points - 1), dtype="int32") + rng.normal(size=(3, nb_points - 1))
+    arr_wrong_shape = rng.integers(min_val, max_val, (3, nb_points - 1), dtype="int32") + rng.normal(
+        size=(3, nb_points - 1)
+    )
     mask_wrong_shape = rng.integers(0, 2, size=nb_points - 1, dtype=bool)
 
     # Wrong coordinate array to check errors are raised
@@ -337,7 +347,6 @@ class TestArithmetic:
         pc2 = pc1.copy()
         pc2 = pc2.set_crs(self.wrong_crs, allow_override=True)
         assert not pc1.pointcloud_equal(pc2)
-
 
     def test_georeferenced_coords_equal(self) -> None:
         """
@@ -507,9 +516,9 @@ class TestArithmetic:
 
     @classmethod
     def copy(
-            cls: type[TestArithmetic],
-            data: NDArrayNum,
-            pc_ref: gu.PointCloud,
+        cls: type[TestArithmetic],
+        data: NDArrayNum,
+        pc_ref: gu.PointCloud,
     ) -> gu.PointCloud:
         """
         Generate a pointcloud from numpy array, with set georeferencing. Used for testing only.
@@ -874,7 +883,9 @@ class TestArrayInterface:
     crs = CRS(4326)
 
     # Wrong shaped arrays to check errors are raised
-    arr_wrong_shape = rng.integers(min_val, max_val, (3, nb_points - 1), dtype="int32") + rng.normal(size=(3, nb_points - 1))
+    arr_wrong_shape = rng.integers(min_val, max_val, (3, nb_points - 1), dtype="int32") + rng.normal(
+        size=(3, nb_points - 1)
+    )
     mask_wrong_shape = rng.integers(0, 2, size=nb_points - 1, dtype=bool)
 
     # Wrong coordinate array to check errors are raised
@@ -884,9 +895,7 @@ class TestArrayInterface:
     wrong_crs = CRS(32610)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "float32"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int8", "float32"])  # type: ignore
     def test_array_ufunc_1nin_1nout(self, ufunc_str: str, dtype: str) -> None:
         """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
 
@@ -935,15 +944,9 @@ class TestArrayInterface:
                     ufunc(pc)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "float32"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "float32"]
-    )  # type: ignore
-    def test_array_ufunc_2nin_1nout(
-        self, ufunc_str: str, dtype1: str, dtype2: str
-    ) -> None:
+    @pytest.mark.parametrize("dtype1", ["uint8", "int8", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int8", "float32"])  # type: ignore
+    def test_array_ufunc_2nin_1nout(self, ufunc_str: str, dtype1: str, dtype2: str) -> None:
         """Test that ufuncs with two input arguments consistently return the same result as for masked arrays."""
 
         data1 = self.data1.astype(dtype1)
@@ -1021,9 +1024,7 @@ class TestArrayInterface:
                     ufunc(pc1, pc2)
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "float32"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int8", "float32"])  # type: ignore
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str) -> None:
         """
         Test that single-input array functions that we support give the same output as they would on the masked array.
@@ -1046,11 +1047,11 @@ class TestArrayInterface:
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             if "percentile" in arrfunc_str:
-                args = (80,)
+                args = (80.0,)
             elif "quantile" in arrfunc_str:
                 args = (0.8,)
             else:
-                args = ()
+                args = ()  # type: ignore
 
             output_pc = arrfunc(pc, *args)
             output_arr = arrfunc(pc.data, *args)
@@ -1069,15 +1070,9 @@ class TestArrayInterface:
                 assert np.array_equal(output_pc, output_arr, equal_nan=True)
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "float32"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "float32"]
-    )  # type: ignore
-    def test_array_functions_2nin(
-        self, arrfunc_str: str, dtype1: str, dtype2: str
-    ) -> None:
+    @pytest.mark.parametrize("dtype1", ["uint8", "int8", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int8", "float32"])  # type: ignore
+    def test_array_functions_2nin(self, arrfunc_str: str, dtype1: str, dtype2: str) -> None:
         """
         Test that double-input array functions that we support give the same output as they would on the masked array.
         """

@@ -41,8 +41,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import shapely
-
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -122,7 +120,6 @@ class Vector:
             self._name = filename_or_dataset
         if isinstance(filename_or_dataset, pathlib.Path):
             self._name = filename_or_dataset.name
-
 
     @property
     def crs(self) -> CRS:
@@ -967,7 +964,9 @@ class Vector:
     # Subsection of methods that shouldn't override the output for Vector subclasses
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_crs(self: VectorType, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False) -> VectorType | None:
+    def to_crs(
+        self: VectorType, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False
+    ) -> VectorType | None:
 
         if inplace:
             self.ds = self.ds.to_crs(crs=crs, epsg=epsg)
@@ -979,7 +978,11 @@ class Vector:
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def set_crs(
-        self: VectorType, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False, allow_override: bool = False
+        self: VectorType,
+        crs: CRS | None = None,
+        epsg: int | None = None,
+        inplace: bool = False,
+        allow_override: bool = False,
     ) -> VectorType | None:
 
         if inplace:
@@ -1232,64 +1235,8 @@ class Vector:
     # --------------------------------
 
     @property
-    def crs(self) -> rio.crs.CRS:
-        """Coordinate reference system of the vector."""
-        return self.ds.crs
-
-    @property
-    def ds(self) -> gpd.GeoDataFrame:
-        """Geodataframe of the vector."""
-        return self._ds
-
-    @ds.setter
-    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
-        """Set a new geodataframe."""
-
-        if isinstance(new_ds, gpd.GeoDataFrame):
-            self._ds = new_ds
-        elif isinstance(new_ds, gpd.GeoSeries):
-            self._ds = gpd.GeoDataFrame(geometry=new_ds)
-        else:
-            raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
-
-    def vector_equal(self, other: Vector, **kwargs: Any) -> bool:
-        """
-        Check if two vectors are equal.
-
-        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
-        """
-
-        try:
-            assert_geodataframe_equal(self.ds, other.ds, **kwargs)
-            vector_eq = True
-        except AssertionError:
-            vector_eq = False
-
-        return vector_eq
-
-    @property
-    def name(self) -> str | None:
-        """Name on disk, if it exists."""
-        return self._name
-
-    @property
-    def geometry(self) -> gpd.GeoSeries:
-        return self.ds.geometry
-
-    @property
     def active_geometry_name(self) -> str:
         return self.ds.active_geometry_name
-
-    @property
-    def index(self) -> pd.Index:
-        return self.ds.index
-
-    def copy(self: VectorType) -> VectorType:
-        """Return a copy of the vector."""
-        # Utilise the copy method of GeoPandas
-        new_vector = self.__new__(type(self))
-        new_vector.__init__(self.ds.copy())  # type: ignore
-        return new_vector  # type: ignore
 
     @overload
     def crop(
@@ -1489,36 +1436,36 @@ class Vector:
     @overload
     def create_mask(
         self,
-        ref: str | gu.Raster | gu.PointCloud | None = None,
+        ref: gu.PointCloud | gu.Raster | None = None,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
+        points: tuple[NDArrayNum, NDArrayNum] = None,
         *,
         as_array: Literal[False] = False,
-    ) -> gu.RasterMask: ...
+    ) -> gu.PointCloudMask | gu.RasterMask: ...
 
     @overload
     def create_mask(
         self,
-        ref: str | gu.Raster | gu.PointCloud | None = None,
+        ref: gu.Raster | gu.PointCloud | None = None,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
+        points: tuple[NDArrayNum, NDArrayNum] = None,
         *,
         as_array: Literal[True],
-    ) -> NDArrayNum: ...
+    ) -> NDArrayBool: ...
 
     def create_mask(
         self,
-        ref: gu.Raster | None = None,
+        ref: gu.Raster | gu.PointCloud | None = None,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         points: tuple[NDArrayNum, NDArrayNum] = None,
         as_array: bool = False,
-    ) -> gu.RasterMask | NDArrayBool:
+    ) -> gu.RasterMask | gu.PointCloudMask | NDArrayBool:
         """
         Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
         feature, False if not).

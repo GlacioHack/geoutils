@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Iterable, Literal
+from typing import Iterable, Literal
 
 import affine
 import geopandas as gpd
@@ -206,7 +206,9 @@ def _create_mask_pointcloud(gdf: gpd.GeoDataFrame, pts: gpd.GeoSeries) -> NDArra
     return mask
 
 
-def _create_mask_raster(gdf: gpd.GeoDataFrame, out_shape: tuple[int, int], transform: affine.Affine, crs: CRS) -> NDArrayBool:
+def _create_mask_raster(
+    gdf: gpd.GeoDataFrame, out_shape: tuple[int, int], transform: affine.Affine, crs: CRS
+) -> NDArrayBool:
     """Subfunction to create a raster mask using rasterio.features.rasterize()."""
 
     # Copying GeoPandas dataframe before applying changes
@@ -228,11 +230,12 @@ def _create_mask_raster(gdf: gpd.GeoDataFrame, out_shape: tuple[int, int], trans
 
     return mask
 
+
 def _create_mask(
     gdf: gpd.GeoDataFrame,
     ref: gu.Raster | gu.PointCloud | None = None,
     crs: CRS | None = None,
-    res: float | None = None,
+    res: float | tuple[float, float] | None = None,
     bounds: tuple[float, float, float, float] | None = None,
     points: tuple[NDArrayNum, NDArrayNum] | None = None,
 ) -> tuple[NDArrayBool, affine.Affine | None, gpd.GeoSeries | None, CRS]:
@@ -245,8 +248,10 @@ def _create_mask(
 
     else:
         if res is None and points is None:
-            raise ValueError("Without a reference for masking, specify at least the resolution a raster mask, "
-                             "or the points coordinates for a point cloud mask.")
+            raise ValueError(
+                "Without a reference for masking, specify at least the resolution a raster mask, "
+                "or the points coordinates for a point cloud mask."
+            )
 
     # If raster reference or user-input exists, we compute a raster mask
     if (ref is not None and isinstance(ref, gu.Raster)) or res is not None:
@@ -313,7 +318,7 @@ def _create_mask(
             if crs is None:
                 crs = gdf.crs
 
-            pts = gpd.points_from_xy(x=points[0], y=points[1], crs=crs)
+            pts = gpd.points_from_xy(x=points[0], y=points[1], crs=crs)  # type: ignore
 
         mask = _create_mask_pointcloud(gdf=gdf, pts=pts)
         transform = None

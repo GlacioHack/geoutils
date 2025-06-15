@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
 import logging
-import pytest
+from cmath import isnan
+from typing import Any
 
 import numpy as np
-from cmath import isnan
+import pytest
 
-from geoutils._typing import NDArrayNum
-from geoutils import examples
 import geoutils as gu
+from geoutils import examples
+from geoutils._typing import NDArrayNum
+
 
 class TestStats:
 
@@ -98,4 +99,3 @@ class TestStats:
             stat = raster.get_stats(stats_name="80 percentile")
             assert isnan(stat)
         assert "Statistic name '80 percentile' is not recognized" in caplog.text
-
