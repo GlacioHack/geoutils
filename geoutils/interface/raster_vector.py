@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Iterable, Literal
+from typing import Iterable, Literal
 
 import affine
 import geopandas as gpd
@@ -33,6 +33,7 @@ from rasterio.features import shapes
 
 import geoutils as gu
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
+from geoutils.raster.georeferencing import _bounds
 
 
 def _polygonize(
@@ -181,7 +182,7 @@ def _rasterize(
 
     # We return a mask if there is a single value to burn and this value is 1
     if isinstance(in_value, (int, np.integer, float, np.floating)) and in_value == 1:
-        output = gu.Mask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+        output = gu.RasterMask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     # Otherwise we return a Raster if there are several values to burn
     else:
@@ -190,86 +191,136 @@ def _rasterize(
     return output
 
 
-def _create_mask(
-    gdf: gpd.GeoDataFrame,
-    raster: gu.Raster | None = None,
-    crs: CRS | None = None,
-    xres: float | None = None,
-    yres: float | None = None,
-    bounds: tuple[float, float, float, float] | None = None,
-    buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
-    as_array: bool = False,
-) -> tuple[NDArrayBool, affine.Affine, CRS]:
+def _create_mask_pointcloud(gdf: gpd.GeoDataFrame, pts: gpd.GeoSeries) -> NDArrayBool:
+    """Subfunction to create a point cloud mask using geopandas."""
 
-    # If no raster given, use provided dimensions
-    if raster is None:
-        # At minimum, xres must be set
-        if xres is None:
-            raise ValueError("At least raster or xres must be set.")
-        if yres is None:
-            yres = xres
+    # Project to same CRS
+    pts_reproj = pts.to_crs(crs=gdf.crs)
 
-        # By default, use self's CRS and bounds
-        if crs is None:
-            crs = gdf.crs
-        if bounds is None:
-            bounds_shp = True
-            bounds = gdf.total_bounds
-        else:
-            bounds_shp = False
+    # Check that points are contained no matter alignment
+    contained = pts_reproj.within(gdf, align=False)
 
-        # Calculate raster shape
-        left, bottom, right, top = bounds
-        height = abs((right - left) / xres)
-        width = abs((top - bottom) / yres)
+    # Extract resulting boolean array
+    mask = contained.values
 
-        if width % 1 != 0 or height % 1 != 0:
-            # Only warn if the bounds were provided, and not derived from the vector
-            if not bounds_shp:
-                warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds.")
+    return mask
 
-        width = int(np.round(width))
-        height = int(np.round(height))
-        out_shape = (height, width)
 
-        # Calculate raster transform
-        transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
-
-    # otherwise use directly raster's dimensions
-    elif isinstance(raster, gu.Raster):
-        out_shape = raster.shape
-        transform = raster.transform
-        crs = raster.crs
-        bounds = raster.bounds
-    else:
-        raise TypeError("Raster must be a geoutils.Raster or None.")
+def _create_mask_raster(
+    gdf: gpd.GeoDataFrame, out_shape: tuple[int, int], transform: affine.Affine, crs: CRS
+) -> NDArrayBool:
+    """Subfunction to create a raster mask using rasterio.features.rasterize()."""
 
     # Copying GeoPandas dataframe before applying changes
     gdf = gdf.copy()
 
     # Crop vector geometries to avoid issues when reprojecting
+    bounds = _bounds(transform=transform, shape=out_shape)
     left, bottom, right, top = bounds  # type: ignore
     x1, y1, x2, y2 = warp.transform_bounds(crs, gdf.crs, left, bottom, right, top)
     gdf = gdf.cx[x1:x2, y1:y2]
 
-    # Reproject vector into raster CRS
+    # Reproject vector to raster CRS (almost always faster)
     gdf = gdf.to_crs(crs)
-
-    # Create a buffer around the features
-    if not isinstance(buffer, (int, float, np.number)):
-        raise TypeError(f"Buffer must be a number, currently set to {type(buffer).__name__}.")
-    if buffer != 0:
-        gdf.geometry = [geom.buffer(buffer) for geom in gdf.geometry]
-    elif buffer == 0:
-        pass
 
     # Rasterize geometry
     mask = features.rasterize(
         shapes=gdf.geometry, fill=0, out_shape=out_shape, transform=transform, default_value=1, dtype="uint8"
     ).astype("bool")
 
-    # Force output mask to be of same dimension as input raster
-    if raster is not None:
-        mask = mask.reshape((raster.count, raster.height, raster.width))  # type: ignore
+    return mask
 
-    return mask, transform, crs
+
+def _create_mask(
+    gdf: gpd.GeoDataFrame,
+    ref: gu.Raster | gu.PointCloud | None = None,
+    crs: CRS | None = None,
+    res: float | tuple[float, float] | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
+    points: tuple[NDArrayNum, NDArrayNum] | None = None,
+) -> tuple[NDArrayBool, affine.Affine | None, gpd.GeoSeries | None, CRS]:
+    """See Vector.create_mask for description."""
+
+    # Raise errors for wrong inputs
+    if ref is not None:
+        if not isinstance(ref, (gu.Raster, gu.PointCloud)):
+            raise ValueError("Reference must be a raster or a point cloud.")
+
+    else:
+        if res is None and points is None:
+            raise ValueError(
+                "Without a reference for masking, specify at least the resolution a raster mask, "
+                "or the points coordinates for a point cloud mask."
+            )
+
+    # If raster reference or user-input exists, we compute a raster mask
+    if (ref is not None and isinstance(ref, gu.Raster)) or res is not None:
+
+        # For a reference, extract transform and CRS
+        if ref is not None:
+            transform = ref.transform
+            out_shape = ref.shape
+            crs = ref.crs
+
+        # For a user-input res
+        else:
+
+            # By default, use self's CRS
+            if crs is None:
+                crs = gdf.crs
+
+            # Case of a raster mask
+            if res is not None:
+                # Get resolution
+                if isinstance(res, tuple):
+                    xres, yres = res
+                else:
+                    xres = res
+                    yres = res
+
+            # Get bounds
+            if bounds is None:
+                bounds_shp = True
+                bounds = gdf.total_bounds
+            else:
+                bounds_shp = False
+
+            # Calculate raster shape
+            left, bottom, right, top = bounds
+            height = abs((right - left) / xres)
+            width = abs((top - bottom) / yres)
+
+            if width % 1 != 0 or height % 1 != 0:
+                # Only warn if the bounds were provided, and not derived from the vector
+                if not bounds_shp:
+                    warnings.warn("Bounds not a multiple of resolution, using rounded bounds.")
+
+            width = int(np.round(width))
+            height = int(np.round(height))
+            out_shape = (height, width)
+
+            # Calculate raster transform
+            transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
+
+        # Compute raster mask
+        mask = _create_mask_raster(gdf=gdf, transform=transform, out_shape=out_shape, crs=crs)
+        pts = None
+
+    # For a point cloud reference or user-input, compute a point cloud mask
+    else:
+
+        # For a reference, extract geometry
+        if ref is not None:
+            pts = ref.ds.geometry
+
+        else:
+
+            if crs is None:
+                crs = gdf.crs
+
+            pts = gpd.points_from_xy(x=points[0], y=points[1], crs=crs)  # type: ignore
+
+        mask = _create_mask_pointcloud(gdf=gdf, pts=pts)
+        transform = None
+
+    return mask, transform, crs, pts

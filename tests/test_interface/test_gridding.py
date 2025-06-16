@@ -1,4 +1,4 @@
-"""Test module for point cloud functionalities."""
+"""Test module for gridding functionalities."""
 
 import geopandas as gpd
 import numpy as np
@@ -25,16 +25,18 @@ class TestPointCloud:
 
         # Generate random coordinates to interpolate, to create an irregular point cloud
         points = rng.integers(low=1, high=shape[0] - 1, size=(100, 2)) + rng.normal(0, 0.15, size=(100, 2))
-        b1_value = rst.interp_points((points[:, 0], points[:, 1]))
+        b1_value = rst.interp_points((points[:, 0], points[:, 1]), as_array=True)
         pc = gpd.GeoDataFrame(data={"b1": b1_value}, geometry=gpd.points_from_xy(x=points[:, 0], y=points[:, 1]))
         grid_coords = rst.coords(grid=False)
 
         # Grid the point cloud
-        gridded_pc = _grid_pointcloud(pc, grid_coords=grid_coords)
+        gridded_pc, output_transform = _grid_pointcloud(pc, grid_coords=grid_coords)
 
         # Compare back to raster, all should be very close (but not exact, some info is lost due to interpolations)
         valids = np.isfinite(gridded_pc)
         assert np.allclose(gridded_pc[valids], rst.data.data[valids], rtol=10e-5)
+        # And the transform exactly the same
+        assert output_transform == transform
 
         # 2/ Check the propagation of nodata values
 
@@ -86,7 +88,7 @@ class TestPointCloud:
         assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
 
         # Check for a different distance value
-        gridded_pc = _grid_pointcloud(pc, grid_coords=grid_coords, dist_nodata_pixel=0.5)
+        gridded_pc, output_transform = _grid_pointcloud(pc, grid_coords=grid_coords, dist_nodata_pixel=0.5)
         ind_close = np.array(list_min_dist) <= 0.5
 
         # We get the indexes for these coordinates
