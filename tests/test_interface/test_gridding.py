@@ -25,7 +25,7 @@ class TestPointCloud:
 
         # Generate random coordinates to interpolate, to create an irregular point cloud
         points = rng.integers(low=1, high=shape[0] - 1, size=(100, 2)) + rng.normal(0, 0.15, size=(100, 2))
-        b1_value = rst.interp_points((points[:, 0], points[:, 1]))
+        b1_value = rst.interp_points((points[:, 0], points[:, 1]), as_array=True)
         pc = gpd.GeoDataFrame(data={"b1": b1_value}, geometry=gpd.points_from_xy(x=points[:, 0], y=points[:, 1]))
         grid_coords = rst.coords(grid=False)
 

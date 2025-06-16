@@ -34,9 +34,9 @@ class TestPointCloud:
         geometry=gpd.points_from_xy(x=arr_points2[:, 0], y=arr_points2[:, 1]),
         crs=4326,
     )
+
     # 3/ LAS file
-    fn_las = "/home/atom/code/devel/libs/geoutils-data/data/Coromandel_Lidar/points.laz"
-    # fn_las = gu.examples.get_path("coromandel_lidar")
+    fn_las = gu.examples.get_path("coromandel_lidar")
 
     # 4/ Non-point vector (for error raising)
     poly = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
