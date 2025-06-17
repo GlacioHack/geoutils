@@ -165,7 +165,7 @@ A {class}`~geoutils.Raster` can be applied any pythonic arithmetic operation ({f
 ```
 
 A {class}`~geoutils.Raster` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.Mask`.
+{func}`<<operator.lt>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.RasterMask`.
 
 ```{code-cell} ipython3
 # What raster pixels are less than 100?
@@ -184,7 +184,7 @@ A {class}`~geoutils.Raster` can be applied any NumPy universal functions and mos
 np.sqrt(rast)
 ```
 
-Logical comparison functions will cast to a {class}`~geoutils.Mask`.
+Logical comparison functions will cast to a {class}`~geoutils.RasterMask`.
 
 ```{code-cell} ipython3
 # Is the raster close to another within tolerance?
@@ -315,7 +315,7 @@ Polygonizing a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Ra
 {class}`~geoutils.Vector`.
 
 ```{note}
-For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels. See
+For a {class}`~geoutils.RasterMask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels. See
 {ref}`mask-class-poly-overloaded`.
 ```
 
@@ -331,7 +331,7 @@ Computing proximity from a {class}`~geoutils.Raster` is done through by the {fun
 to any target pixels in the {class}`~geoutils.Raster`.
 
 ```{note}
-For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels. See
+For a {class}`~geoutils.RasterMask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels. See
 {ref}`mask-class-prox-overloaded`.
 ```
 

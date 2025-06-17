@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import warnings
+import tempfile
 
 import geopandas as gpd
 import numpy as np
@@ -73,7 +75,7 @@ class TestPointCloud:
         """
         Test loading of a point cloud (only possible with a LAS file).
 
-        This test also serves to test the overridden methods "crs", "bounds", "nb_points", "all_columns" in relation
+        This test also serves to test the overridden methods "crs", "bounds", "nb_points", "nongeo_columns" in relation
         to loading.
         """
 
@@ -85,8 +87,8 @@ class TestPointCloud:
         assert not pc.is_loaded
         before_crs = pc.crs
         before_bounds = pc.bounds
-        before_nb_points = pc.nb_points
-        before_columns = pc.all_columns
+        before_nb_points = pc.point_count
+        before_columns = pc.columns
 
         # Load and fetch after metadata
         pc.load(columns="all")
@@ -94,20 +96,20 @@ class TestPointCloud:
 
         after_crs = pc.crs
         after_bounds = pc.bounds
-        after_nb_points = pc.nb_points
-        after_columns = pc.all_columns
+        after_nb_points = pc.point_count
+        after_columns = pc.columns
 
         # Check those are equal
         assert before_crs == after_crs
         assert before_bounds == after_bounds
         assert before_nb_points == after_nb_points
-        assert all(before_columns == after_columns)
+        assert before_columns == after_columns
 
         # 2/ Check default column argument
         pc = PointCloud(self.fn_las, data_column="Z")
         pc.load()
 
-        assert pc.all_columns == ["Z"]
+        assert pc._nongeo_columns == ["Z"]
 
         # 3/ Check implicit loading when calling a function requiring .ds
         pc = PointCloud(self.fn_las, data_column="Z")
@@ -257,6 +259,40 @@ class TestPointCloud:
         "set_crs": {"crs": CRS.from_epsg(32610), "allow_override": True},
         "rename_geometry": {"col": "lol"},
     }
+
+    def test_to_las(self) -> None:
+
+        # 1/ For a X/Y/Z point cloud with no auxiliary data
+        pc1 = PointCloud(self.gdf1, data_column="b1")
+
+        # Temporary folder
+        temp_dir = tempfile.TemporaryDirectory()
+
+        # Save file to temporary file, with defaults opts
+        temp_file = os.path.join(temp_dir.name, "test.las")
+        pc1.to_las(temp_file)
+        saved1 = gu.PointCloud(temp_file, data_column="Z")
+
+        # Check loaded point cloud is equal to saved one
+        atol = 0.1
+        assert np.allclose(pc1.geometry.x.values, saved1.geometry.x.values, atol=atol)
+        assert np.allclose(pc1.geometry.y.values, saved1.geometry.y.values, atol=atol)
+        assert np.allclose(pc1.data, saved1.data, atol=atol)
+
+        # 2/ For a X/Y/Z point cloud with some auxiliary data
+        pc2 = PointCloud(self.gdf2, data_column="b1")
+
+        # Save file to temporary file, with defaults opts
+        temp_file = os.path.join(temp_dir.name, "test2.las")
+        pc2.to_las(temp_file)
+        saved2 = gu.PointCloud(temp_file, data_column="Z")
+        saved2.load(["Z", "b2"])
+
+        # Check loaded point cloud is equal to saved one
+        assert np.allclose(pc2.geometry.x.values, saved2.geometry.x.values, atol=atol)
+        assert np.allclose(pc2.geometry.y.values, saved2.geometry.y.values, atol=atol)
+        assert np.allclose(pc2.data, saved2.data, atol=atol)
+        assert np.allclose(pc2["b2"].values, saved2["b2"].values, atol=atol)
 
     @pytest.mark.parametrize(
         "method", ["reproject", "crop", "translate", "set_precision", "to_crs", "set_crs", "rename_geometry"]

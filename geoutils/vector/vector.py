@@ -1024,7 +1024,7 @@ class Vector:
     # GeoDataFrame: other functionalities
     # -----------------------------------
 
-    def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Vector:
+    def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Any:
         """
         Index the geodataframe.
         """

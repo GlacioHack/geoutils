@@ -79,7 +79,7 @@ def download_examples(overwrite: bool = False) -> None:
             tar.extractall(tmp_dir)
 
         # Find the first directory in the temp_dir (should only be one) and construct the example data dir paths.
-        for dir_name in ["Everest_Landsat", "Exploradores_ASTER"]:
+        for dir_name in ["Everest_Landsat", "Exploradores_ASTER", "Coromandel_Lidar"]:
             tmp_dir_name = os.path.join(
                 tmp_dir,
                 [dirname for dirname in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, dirname))][0],
