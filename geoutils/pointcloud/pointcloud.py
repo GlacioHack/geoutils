@@ -657,6 +657,68 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         return list(zip(self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values))
 
+
+    def __getitem__(self, index: PointCloudMask | NDArrayBool | Any) -> NDArrayNum | PointCloud:
+        """
+        Index the point cloud.
+
+        In addition to all index types supported by NumPy, also supports a mask of same georeferencing or a
+        boolean array of the same shape as the raster.
+        """
+
+        if isinstance(index, (PointCloudMask, np.ndarray)):
+            _cast_numeric_array_pointcloud(self, index, operation_name="an indexing operation")  # type: ignore
+
+        # If input is mask with the same shape and georeferencing
+        if isinstance(index, PointCloudMask):
+            return self.data[index.data]
+        # If input is array with the same shape
+        elif isinstance(index, np.ndarray):
+            if str(index.dtype) != "bool":
+                index = index.astype(bool)
+                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
+            return self.data[index]
+        # Otherwise, use any other possible index and leave it to NumPy
+        else:
+            return self.data[index]
+
+    def __setitem__(self, index: PointCloudMask | NDArrayBool | Any, assign: NDArrayNum | Number) -> None:
+        """
+        Perform index assignment on the point cloud.
+
+        In addition to all index types supported by NumPy, also supports a mask of same georeferencing or a
+        boolean array of the same shape as the raster.
+        """
+
+        # First, check index
+        if isinstance(index, (PointCloudMask, np.ndarray)):
+            _cast_numeric_array_pointcloud(self, index, operation_name="an index assignment operation")  # type: ignore
+
+        # If input is mask with the same shape and georeferencing
+        if isinstance(index, PointCloudMask):
+            ind = index.data
+        # If input is array with the same shape
+        elif isinstance(index, np.ndarray):
+            if str(index.dtype) != "bool":
+                ind = index.astype(bool)
+                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
+            else:
+                ind = index
+        # Otherwise, use the index, NumPy will raise appropriate errors itself
+        else:
+            ind = index
+
+        # Second, assign the data, here also let NumPy do the job
+
+        # We need to explicitly load here, as we cannot call the data getter/setter directly
+        if not self.is_loaded:
+            self.load()
+
+        # Assign the values to the index (single band raster with mask/array, or other NumPy index)
+        self.data[ind] = assign  # type: ignore
+
+        return None
+
     def __array_ufunc__(
         self,
         ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],

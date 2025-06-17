@@ -1071,7 +1071,7 @@ class Raster:
 
         return str(s)
 
-    def __getitem__(self, index: RasterMask | NDArrayBool | Any) -> NDArrayBool | Raster:
+    def __getitem__(self, index: RasterMask | NDArrayBool | Any) -> NDArrayNum | Raster:
         """
         Index the raster.
 
@@ -1123,6 +1123,8 @@ class Raster:
             if str(index.dtype) != "bool":
                 ind = index.astype(bool)
                 warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
+            else:
+                ind = index
             use_all_bands = False
         # Otherwise, use the index, NumPy will raise appropriate errors itself
         else:
