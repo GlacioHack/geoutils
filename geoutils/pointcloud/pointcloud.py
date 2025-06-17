@@ -157,9 +157,16 @@ def _load_laspy_metadata(
     return crs, nb_points, bounds, columns_names
 
 
-def _write_laspy(filename: str, pc: gpd.GeoDataFrame, data_column: str, version: Any=None,
-                 point_format: Any=None, offsets: tuple[float, float, float] = None,
-                 scales: tuple[float, float, float]=None, **kwargs) -> None:
+def _write_laspy(
+    filename: str | pathlib.Path,
+    pc: gpd.GeoDataFrame,
+    data_column: str,
+    version: Any = None,
+    point_format: Any = None,
+    offsets: tuple[float, float, float] = None,
+    scales: tuple[float, float, float] = None,
+    **kwargs: Any,
+) -> None:
     """Write a point cloud geodataframe to a LAS/LAZ/COPC file."""
 
     # Initiate header with user arguments
@@ -168,7 +175,7 @@ def _write_laspy(filename: str, pc: gpd.GeoDataFrame, data_column: str, version:
         header.scales = np.array(scales)
     if offsets is not None:
         header.offsets = np.array(offsets)
-    for k,v in kwargs.items():
+    for k, v in kwargs.items():
         setattr(header, k, v)
 
     # Adding extra dimensions for auxiliary variables
@@ -370,7 +377,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             return self._bounds
 
     def columns(self) -> pd.Index:
-        # Overridding method in Vector in case dataset is not loaded
+        # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().columns
         # Return columns on disk (adding a placeholder geometry to replace X/Y)
@@ -558,9 +565,16 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param kwargs: Other keyword arguments to set the LAS file header (e.g., "offsets", "scales").
         """
 
-        _write_laspy(filename=filename, pc=self.ds, data_column=self.data_column, version=version,
-                     point_format=point_format, offsets=offsets, scales=scales, **kwargs)
-
+        _write_laspy(
+            filename=filename,
+            pc=self.ds,
+            data_column=self.data_column,
+            version=version,
+            point_format=point_format,
+            offsets=offsets,
+            scales=scales,
+            **kwargs,
+        )
 
     @classmethod
     def from_xyz(cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str = "z") -> PointCloud:
