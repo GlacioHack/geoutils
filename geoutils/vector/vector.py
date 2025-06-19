@@ -358,9 +358,6 @@ class Vector:
             legend_kwds=legend_kwds,
             **kwargs,
         )
-
-        cax
-
         plt.sca(ax0)
 
         # If returning axes

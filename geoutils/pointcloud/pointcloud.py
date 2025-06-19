@@ -31,6 +31,9 @@ from pyproj import CRS
 from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
+import matplotlib
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import geoutils as gu
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
@@ -657,65 +660,32 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         return list(zip(self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values))
 
-
-    def __getitem__(self, index: PointCloudMask | NDArrayBool | Any) -> NDArrayNum | PointCloud:
+    def __getitem__(self, index: PointCloudMask | NDArrayBool | Any) -> PointCloud:
         """
         Index the point cloud.
 
-        In addition to all index types supported by NumPy, also supports a mask of same georeferencing or a
-        boolean array of the same shape as the raster.
+        In addition to all index types supported by GeoPandas, also supports a point cloud mask of same georeferencing.
         """
 
-        if isinstance(index, (PointCloudMask, np.ndarray)):
+        if isinstance(index, PointCloudMask):
             _cast_numeric_array_pointcloud(self, index, operation_name="an indexing operation")  # type: ignore
 
-        # If input is mask with the same shape and georeferencing
-        if isinstance(index, PointCloudMask):
-            return self.data[index.data]
-        # If input is array with the same shape
-        elif isinstance(index, np.ndarray):
-            if str(index.dtype) != "bool":
-                index = index.astype(bool)
-                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
-            return self.data[index]
-        # Otherwise, use any other possible index and leave it to NumPy
-        else:
-            return self.data[index]
-
-    def __setitem__(self, index: PointCloudMask | NDArrayBool | Any, assign: NDArrayNum | Number) -> None:
-        """
-        Perform index assignment on the point cloud.
-
-        In addition to all index types supported by NumPy, also supports a mask of same georeferencing or a
-        boolean array of the same shape as the raster.
-        """
-
-        # First, check index
-        if isinstance(index, (PointCloudMask, np.ndarray)):
-            _cast_numeric_array_pointcloud(self, index, operation_name="an index assignment operation")  # type: ignore
-
-        # If input is mask with the same shape and georeferencing
+        # If input is mask with the same shape and georeferencing, convert to ndarray
         if isinstance(index, PointCloudMask):
             ind = index.data
-        # If input is array with the same shape
-        elif isinstance(index, np.ndarray):
-            if str(index.dtype) != "bool":
-                ind = index.astype(bool)
-                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
-            else:
-                ind = index
-        # Otherwise, use the index, NumPy will raise appropriate errors itself
+        # Otherwise, use index and leave it to GeoPandas
         else:
             ind = index
 
-        # Second, assign the data, here also let NumPy do the job
+        return PointCloud(super().__getitem__(ind), data_column=self.data_column)
 
-        # We need to explicitly load here, as we cannot call the data getter/setter directly
-        if not self.is_loaded:
-            self.load()
+    def __setitem__(self, index: Any, assign: Any) -> None:
+        """
+        Perform index assignment on the point cloud.
+        """
 
-        # Assign the values to the index (single band raster with mask/array, or other NumPy index)
-        self.data[ind] = assign  # type: ignore
+        # Let the vector class do the job
+        super().__setitem__(index, assign)
 
         return None
 
@@ -837,6 +807,122 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         # Else, return outputs directly
         else:
             return outputs
+
+    def plot(
+        self,
+        column: str | None = None,
+        ref_crs: gu.Raster | gu.Vector | gpd.GeoDataFrame | str | CRS | int | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        return_axes: bool = False,
+        **kwargs: Any,
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
+        r"""
+        Plot the point cloud.
+
+        This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs which
+        you give this method will be passed to it.
+
+        :param column: Column to plot. Default is the data column of the point cloud.
+        :param ref_crs: Coordinate reference system to match when plotting.
+        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
+        :param vmin: Colorbar minimum value. Default is data min.
+        :param vmax: Colorbar maximum value. Default is data max.
+        :param alpha: Transparency of raster and colorbar.
+        :param cbar_title: Colorbar label. Default is None.
+        :param add_cbar: Set to True to display a colorbar. Default is True if a "column" argument is passed.
+        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
+            will create a new axis.
+        :param return_axes: Whether to return axes.
+
+        :returns: None, or (ax, caxes) if return_axes is True
+        """
+
+        # Ensure that the vector is in the same crs as a reference
+        if isinstance(ref_crs, (gu.Raster, gu.Vector, gpd.GeoDataFrame, str)):
+            vect_reproj = self.reproject(ref=ref_crs)
+        elif isinstance(ref_crs, (CRS, int)):
+            vect_reproj = self.reproject(crs=ref_crs)
+        else:
+            vect_reproj = self
+
+        if column is None:
+            column = self.data_column
+
+        # Create axes, or get current ones by default (like in matplotlib)
+        if ax is None:
+            ax0 = plt.gca()
+        elif isinstance(ax, str) and ax.lower() == "new":
+            _, ax0 = plt.subplots()
+        elif isinstance(ax, matplotlib.axes.Axes):
+            ax0 = ax
+        else:
+            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
+
+        # Set add_cbar depending on column argument
+        if add_cbar:
+            add_cbar = True
+        else:
+            add_cbar = False
+
+        # Update with this function's arguments
+        if add_cbar:
+            legend = True
+        else:
+            legend = False
+
+        if "legend" in list(kwargs.keys()):
+            legend = kwargs.pop("legend")
+
+        # Get colormap arguments that might have been passed in the keyword args
+        if "legend_kwds" in list(kwargs.keys()) and legend:
+            legend_kwds = kwargs.pop("legend_kwds")
+            if cbar_title is not None:
+                legend_kwds.update({"label": cbar_title})  # Pad updates depending on figsize during plot,
+        else:
+            if cbar_title is not None:
+                legend_kwds = {"label": cbar_title}
+            else:
+                legend_kwds = None
+
+        # Add colorbar
+        if add_cbar or cbar_title:
+            divider = make_axes_locatable(ax0)
+            cax = divider.append_axes("right", size="5%", pad="2%")
+            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            cbar = matplotlib.colorbar.ColorbarBase(
+                cax, cmap=cmap, norm=norm
+            )  # , orientation="horizontal", ticklocation="top")
+            cbar.solids.set_alpha(alpha)
+        else:
+            cax = None
+            cbar = None
+
+        # Plot
+        vect_reproj.ds.plot(
+            ax=ax0,
+            cax=cax,
+            column=column,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            alpha=alpha,
+            legend=legend,
+            legend_kwds=legend_kwds,
+            **kwargs,
+        )
+        plt.sca(ax0)
+
+        # If returning axes
+        if return_axes:
+            return ax0, cax
+        else:
+            return None
 
     def __add__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
         """

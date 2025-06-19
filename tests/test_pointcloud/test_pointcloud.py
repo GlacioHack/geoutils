@@ -150,72 +150,32 @@ class TestPointCloud:
         vals_arr = pc[arr]
         vals_mask = pc[mask]
 
-        # Those indexing operations should yield the same 1D array of values
-        assert np.array_equal(vals_mask, vals_arr, equal_nan=True)
+        # Those indexing operations should yield the same point cloud
+        assert isinstance(vals_arr, PointCloud)
+        assert isinstance(vals_mask, PointCloud)
+        assert vals_mask.pointcloud_equal(vals_arr)
 
         # Now, we test index assignment
         pc2 = pc.copy()
 
         # It should work with a number, or a 1D array of the same length as the indexed one
-        pc[mask] = 1.0
-        pc2[mask] = np.ones(pc2.point_count)[arr]
+        pc["b1"] = 1.0
+        pc2["b1"] = np.ones(pc2.point_count)
 
-        # The rasters should be the same
+        # The point clouds should be the same
         assert pc2.pointcloud_equal(pc)
-
-        # -- Second, we test NumPy indexes (slices, integers, ellipses, new axes) --
-
-        # Indexing
-        assert np.array_equal(pc[0], pc.data[0])  # Test an integer
-        assert np.array_equal(pc[0:10], pc.data[0:10])  # Test a slice
-        # New axis adds a dimension, but the 0 index reduces one, so we still get a 2D raster
-        assert np.array_equal(pc[np.newaxis, 0], pc.data[np.newaxis, 0])  # Test a new axis
-        assert np.array_equal(pc[...], pc.data[...])  # Test an ellipsis
-
-        # Index assignment
-        pc[0] = 1
-        assert np.array_equal(pc.data[0], np.ones(np.shape(pc.data[0])))  # Test an integer
-        pc[0:10] = 1
-        assert np.array_equal(pc.data[0:10], np.ones(np.shape(pc.data[0:10])))  # Test a slice
-        # Same as above for the new axis
-        pc[0, np.newaxis] = 1
-        assert np.array_equal(pc.data[0, np.newaxis], np.ones(np.shape(pc.data[0, np.newaxis])))  # Test a new axis
-        pc[...] = 1
-        assert np.array_equal(pc.data[...], np.ones(np.shape(pc.data[...])))  # Test an ellipsis
 
         # -- Finally, we check that errors are raised for both indexing and index assignment --
 
         # For indexing
         op_name_index = "an indexing operation"
         op_name_assign = "an index assignment operation"
-        message_raster = (
-            "Both point clouds must have the same points X/Y coordinates and CRS for {}."
-        )
-        message_array = (
-            "The array must be 1-dimensional with the same number of points as the point cloud for {}."
-        )
-
-        # An error when the shape is wrong
-        with pytest.raises(ValueError, match=re.escape(message_array.format(op_name_index))):
-            pc[arr[:-1]]
+        message_pc = "Both point clouds must have the same points X/Y coordinates and CRS for {}."
 
         # An error when the georeferencing of the Mask does not match
         mask.translate(1, 1, inplace=True)
-        with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_index))):
+        with pytest.raises(ValueError, match=re.escape(message_pc.format(op_name_index))):
             pc[mask]
-
-        # A warning when the array type is not boolean
-        with pytest.warns(UserWarning, match="Input array was cast to boolean for indexing."):
-            pc[arr.astype("uint8")]
-            pc[arr.astype("uint8")] = 1
-
-        # For index assignment
-        # An error when the shape is wrong
-        with pytest.raises(ValueError, match=re.escape(message_array.format(op_name_assign))):
-            pc[arr[:-1]] = 1
-
-        with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_assign))):
-            pc[mask] = 1
 
     def test_data_column(self) -> None:
         """Test the setting and getting of the main data column."""
