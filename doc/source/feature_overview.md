@@ -195,10 +195,10 @@ import numpy as np
 rast = (rast - np.min(rast)) / (np.max(rast) - np.min(rast))
 ```
 
-## Casting to {class}`~geoutils.Mask`, indexing and overload
+## Casting to {class}`~geoutils.RasterMask`, indexing and overload
 
 All {class}`~geoutils.Raster` objects also support Python logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.Mask`, a boolean raster that inherits all methods from {class}`~geoutils.Raster`.
+{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.RasterMask`, a boolean raster that inherits all methods from {class}`~geoutils.Raster`.
 
 ```{code-cell} ipython3
 # Get mask of an AOI: infrared index above 0.6, at least 200 m from glaciers
@@ -213,7 +213,7 @@ values_aoi = rast[mask_aoi]
 ```
 
 Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
-{class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
+{class}`~geoutils.RasterMask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{code-cell} ipython3
 # Polygonize areas where mask is True
