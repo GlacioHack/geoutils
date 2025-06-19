@@ -169,7 +169,6 @@ class TestPointCloud:
 
         # For indexing
         op_name_index = "an indexing operation"
-        op_name_assign = "an index assignment operation"
         message_pc = "Both point clouds must have the same points X/Y coordinates and CRS for {}."
 
         # An error when the georeferencing of the Mask does not match

@@ -25,15 +25,15 @@ import warnings
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 
 import geopandas as gpd
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
-import matplotlib
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import geoutils as gu
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
@@ -675,7 +675,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             ind = index.data
         # Otherwise, use index and leave it to GeoPandas
         else:
-            ind = index
+            ind = index  # type: ignore
 
         return PointCloud(super().__getitem__(ind), data_column=self.data_column)
 
