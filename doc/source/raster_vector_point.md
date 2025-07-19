@@ -105,7 +105,7 @@ _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
 
-It returns a {class}`~geoutils.Mask`, a georeferenced boolean raster (or optionally, a boolean NumPy array), which
+It returns a {class}`~geoutils.RasterMask`, a georeferenced boolean raster (or optionally, a boolean NumPy array), which
 can both be used for indexing or index assignment of a raster.
 
 ```{code-cell} ipython3
@@ -118,7 +118,7 @@ np.mean(rast[mask])
 {func}`geoutils.Raster.polygonize`
 
 Polygonization of a raster **consists of delimiting contiguous raster pixels with the same target values into vector polygon
-geometries**. By default, all raster values are used as targets. When using polygonize on a {class}`~geoutils.Mask`,
+geometries**. By default, all raster values are used as targets. When using polygonize on a {class}`~geoutils.RasterMask`,
 the targets are implicitly the valid values of the mask.
 
 ```{code-cell} ipython3

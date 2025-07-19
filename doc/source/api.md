@@ -222,10 +222,10 @@ And reverse operations.
     Raster.__array_function__
 ```
 
-## Mask
+## Raster mask
 
 ```{eval-rst}
-.. minigallery:: geoutils.Mask
+.. minigallery:: geoutils.RasterMask
       :add-heading:
 ```
 
@@ -561,4 +561,99 @@ To ensure those are up-to-date with GeoPandas, alternatively call those from {at
 ```{seealso}
 The methods above are described in [GeoPandas GeoSeries's API](https://geopandas.org/en/stable/docs/reference/geoseries.html) and [Shapely object's
 documentation](https://shapely.readthedocs.io/en/stable/properties.html).
+```
+
+## Point cloud
+
+```{eval-rst}
+.. minigallery:: geoutils.PointCloud
+      :add-heading:
+```
+
+### Opening a file
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud
+    PointCloud.info
+```
+
+### Main attributes
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.ds
+    PointCloud.data_column
+    PointCloud.data
+    PointCloud.crs
+```
+
+# Other attributes
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.nb_points
+    PointCloud.data_column
+```
+
+
+### Create and convert from data
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.from_xyz
+    PointCloud.from_array
+    PointCloud.from_tuples
+    PointCloud.to_xyz
+    PointCloud.to_array
+    PointCloud.to_tuples
+
+```
+
+### Geospatial
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.crop
+    PointCloud.reproject
+    PointCloud.translate
+```
+
+### Interface with raster
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.grid
+```
+
+### Statistics
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.get_stats
+    PointCloud.subsample
+```
+
+### Testing methods
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.pointcloud_equal
+    PointCloud.georeferenced_coords_equal
 ```

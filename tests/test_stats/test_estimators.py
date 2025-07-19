@@ -1,5 +1,5 @@
 """
-Test functions for stats
+Test the statistical estimator module.
 """
 
 import numpy as np
@@ -9,7 +9,7 @@ from geoutils import Raster, examples
 from geoutils.stats import linear_error, nmad
 
 
-class TestStats:
+class TestEstimators:
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_raster = Raster(landsat_b4_path)
 
