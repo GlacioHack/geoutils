@@ -394,7 +394,8 @@ rast_reproj.to_pointcloud()
 rast_reproj.to_xarray()
 ```
 
-## Obtain Statistics
+## Obtain statistics
+
 The {func}`~geoutils.Raster.get_stats` method allows to extract key statistical information from a raster in a dictionary.
 Supported statistics are :
 - **Mean:** arithmetic mean of the data, ignoring masked values.
@@ -422,7 +423,6 @@ If an inlier mask is passed:
 
 Callable functions are supported as well.
 
-### Usage Examples:
 - Get all statistics in a dict:
 ```{code-cell} ipython3
 rast.get_stats()

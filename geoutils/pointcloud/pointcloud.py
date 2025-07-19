@@ -262,8 +262,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     """
     The georeferenced point cloud.
 
-    A point cloud is a vector of 2D point geometries associated to numeric values from a data column, and potentially
-    auxiliary data columns.
+    A point cloud is a vector of 2D point geometries associated to numeric values from a main data column, and can
+    also contain auxiliary data columns.
 
      Main attributes:
         ds: :class:`geopandas.GeoDataFrame`
