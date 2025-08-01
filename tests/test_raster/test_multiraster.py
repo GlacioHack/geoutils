@@ -11,6 +11,7 @@ import numpy as np
 import pyproj
 import pytest
 import rasterio as rio
+from pytest_lazy_fixtures import lf as lazy_fixtures
 
 import geoutils as gu
 from geoutils import examples
@@ -158,10 +159,10 @@ class TestMultiRaster:
     @pytest.mark.parametrize(
         "rasters",
         [
-            pytest.lazy_fixture("images_1d"),
-            pytest.lazy_fixture("images_different_crs"),
-            pytest.lazy_fixture("images_3d"),
-            pytest.lazy_fixture("images_nodata_zero"),
+            lazy_fixtures("images_1d"),
+            lazy_fixtures("images_different_crs"),
+            lazy_fixtures("images_3d"),
+            lazy_fixtures("images_nodata_zero"),
         ],
     )  # type: ignore
     def test_stack_rasters(self, rasters) -> None:  # type: ignore
@@ -252,9 +253,9 @@ class TestMultiRaster:
     @pytest.mark.parametrize(
         "rasters",
         [
-            pytest.lazy_fixture("images_1d"),
-            pytest.lazy_fixture("images_3d"),
-            pytest.lazy_fixture("images_different_crs"),
+            lazy_fixtures("images_1d"),
+            lazy_fixtures("images_3d"),
+            lazy_fixtures("images_different_crs"),
         ],
     )  # type: ignore
     def test_merge_rasters(self, rasters) -> None:  # type: ignore
@@ -311,8 +312,8 @@ class TestMultiRaster:
     @pytest.mark.parametrize(
         "rasters",
         [
-            pytest.lazy_fixture("images_1d"),
-            pytest.lazy_fixture("images_3d"),
+            lazy_fixtures("images_1d"),
+            lazy_fixtures("images_3d"),
         ],
     )  # type: ignore
     def test_merge_rasters__errors(self, rasters) -> None:
