@@ -47,6 +47,7 @@ from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
+from scipy import stats
 
 from geoutils._config import config
 from geoutils._typing import (
@@ -1925,6 +1926,7 @@ class Raster:
             "Sum": np.ma.sum(data),
             "Sum of squares": np.ma.sum(np.square(data)),
             "90th percentile": np.nanpercentile(mdata, 90),
+            "IQR": stats.iqr(mdata, nan_policy="omit"),
             "LE90": linear_error(mdata, interval=90),
             "NMAD": nmad(data),
             "RMSE": np.sqrt(np.ma.mean(np.square(data))),
@@ -1986,7 +1988,7 @@ class Raster:
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
-            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
+            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
@@ -2023,6 +2025,7 @@ class Raster:
             "sum2": "Sum of squares",
             "90thpercentile": "90th percentile",
             "90percentile": "90th percentile",
+            "iqr": "IQR",
             "le90": "LE90",
             "nmad": "NMAD",
             "rmse": "RMSE",

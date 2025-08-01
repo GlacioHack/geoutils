@@ -1959,6 +1959,7 @@ class TestRaster:
             "Sum",
             "Sum of squares",
             "90th percentile",
+            "IQR",
             "LE90",
             "NMAD",
             "RMSE",
