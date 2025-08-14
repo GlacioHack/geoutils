@@ -2032,6 +2032,7 @@ class TestRaster:
         mdata = np.ma.filled(raster.data.astype(float), np.nan)
         assert raster.get_stats(stats_name="iqr") == np.nanpercentile(mdata, 75) - np.nanpercentile(mdata, 25)
 
+
 class TestMask:
     # Paths to example data
     landsat_b4_path = examples.get_path("everest_landsat_b4")
