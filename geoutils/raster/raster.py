@@ -1926,7 +1926,7 @@ class Raster:
             "Sum": np.ma.sum(data),
             "Sum of squares": np.ma.sum(np.square(data)),
             "90th percentile": np.nanpercentile(mdata, 90),
-            "IQR": stats.iqr(mdata, nan_policy="omit"), # ignore masked value (nan)
+            "IQR": stats.iqr(mdata, nan_policy="omit"),  # ignore masked value (nan)
             "LE90": linear_error(mdata, interval=90),
             "NMAD": nmad(data),
             "RMSE": np.sqrt(np.ma.mean(np.square(data))),
