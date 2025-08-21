@@ -22,20 +22,20 @@ This file keeps track of authors contributions.
 
 ## Contributors
 
-- **Marine Bouchet** [@marinebcht](https://github.com/marinebcht)
-
 ---
 
 - **Bob McNabb** [@iamdonovan](https://github/iamdonovan)
 - **Eli Schwat** [@elischwat](https://github.com/elischwat)
-- **Valentin Schaffner** [@vschaffn](https://github/vschaffn) <valentin.schaffner@cs-soprasteria.com>
+- **Valentin Schaffner** [@vschaffn](https://github/vschaffn)
 - **Alice De Bardonnèche-Richard** [@adebardo](https://github/adebardo) <alice.de-bardonneche-richard@cs-soprasteria.com>
+- **Marine Bouchet** [@marinebcht](https://github.com/marinebcht)
 - **Emmanuel Dubois** [@duboise-cnes](https://github/duboise-cnes) <emmanuel.dubois@cnes.fr>
 - **Amelie Froessl** [@ameliefroessl](https://github.com/ameliefroessl)
 - **Friedrich Knuth** [@friedrichknuth](https://github/friedrichknuth)
 - **Adrien Wehrlé** [@AdrienWehrle](https://github.com/AdrienWehrle)
 - **Fabien Maussion** [@fmaussion](https://github.com/fmaussion)
 - **Johannes Landmann** [@jlandmann](https://github/jlandmann)
+
 
 Update here with new contributors.
 
