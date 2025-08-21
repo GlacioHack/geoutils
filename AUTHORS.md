@@ -19,9 +19,10 @@ This file keeps track of authors contributions.
 - **Amaury Dehecq** [@adehecq](https://github/adehecq)
 - **Erik Schytt Mannerfelt** [@erikmannerfelt](https://github/erikmannerfelt)
 - **Andrew Tedstone** [@atedstone](https://github/atedstone)
-- **Marine Bouchet** [@marinebcht](https://github/marinebcht)
 
 ## Contributors
+
+- **Marine Bouchet** [@marinebcht](https://github.com/marinebcht)
 
 ---
 
