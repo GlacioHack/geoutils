@@ -1959,6 +1959,7 @@ class TestRaster:
             "Sum",
             "Sum of squares",
             "90th percentile",
+            "IQR",
             "LE90",
             "NMAD",
             "RMSE",
@@ -2026,6 +2027,10 @@ class TestRaster:
             stat = raster.get_stats(stats_name="80 percentile")
             assert isnan(stat)
         assert "Statistic name '80 percentile' is not recognized" in caplog.text
+
+        # IQR (scipy) validation with numpy
+        mdata = np.ma.filled(raster.data.astype(float), np.nan)
+        assert raster.get_stats(stats_name="iqr") == np.nanpercentile(mdata, 75) - np.nanpercentile(mdata, 25)
 
 
 class TestMask:
