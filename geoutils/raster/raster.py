@@ -2002,11 +2002,11 @@ class Raster:
         if inlier_mask is not None:
             valid_points = np.count_nonzero(~self.get_mask())
             if isinstance(inlier_mask, Mask):
-                inlier_points = np.count_nonzero(~inlier_mask.data)
+                inlier_points = np.count_nonzero(inlier_mask.data)
             else:
-                inlier_points = np.count_nonzero(~inlier_mask)
+                inlier_points = np.count_nonzero(inlier_mask)
             dem_masked = self.copy()
-            dem_masked.set_mask(inlier_mask)
+            dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
         stats_dict = self._statistics(band=band, counts=counts)
         if stats_name is None:

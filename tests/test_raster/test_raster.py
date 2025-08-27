@@ -1985,7 +1985,7 @@ class TestRaster:
             assert isinstance(stats.get(name), stat_types)
 
         # With mask
-        inlier_mask = raster.get_mask()
+        inlier_mask = ~raster.get_mask()
         stats_masked = raster.get_stats(inlier_mask=inlier_mask)
         for name in expected_stats_mask:
             assert name in stats_masked
@@ -1994,9 +1994,10 @@ class TestRaster:
         assert stats_masked == stats
 
         # Empty mask
-        empty_mask = np.ones_like(inlier_mask)
+        empty_mask = np.zeros_like(inlier_mask)
         with caplog.at_level(logging.WARNING):
             stats_masked = raster.get_stats(inlier_mask=empty_mask)
+        print(stats_masked)
         assert "Empty raster, returns Nan for all stats" in caplog.text
         for name in expected_stats + expected_stats_mask:
             assert np.isnan(stats_masked.get(name))
