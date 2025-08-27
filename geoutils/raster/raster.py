@@ -1992,9 +1992,11 @@ class Raster:
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
-        :param inlier_mask: A boolean mask to filter values for statistical calculations.
+        :param inlier_mask: A boolean mask to filter values for statistical calculations, with 1/True pixels used for
+            calculating the statistics
         :param band: The index of the band for which to compute statistics. Default is 1.
-        :param counts: (number of finite data points in the array, number of valid points in inlier_mask). DO NOT USE.
+        :param counts: (number of finite data points in the array, number of valid points (1/True, meaning "to keep")
+            in inlier_mask). DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         if not self.is_loaded:
