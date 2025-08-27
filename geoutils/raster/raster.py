@@ -1992,7 +1992,8 @@ class Raster:
             Custom callables can also be provided.
         :param inlier_mask: A boolean mask to filter values for statistical calculations.
         :param band: The index of the band for which to compute statistics. Default is 1.
-        :param counts: (number of finite data points in the array, number of valid points in inlier_mask). DO NOT USE.
+        :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
+            in inlier_mask). DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         if not self.is_loaded:
@@ -2000,11 +2001,11 @@ class Raster:
         if inlier_mask is not None:
             valid_points = np.count_nonzero(~self.get_mask())
             if isinstance(inlier_mask, Mask):
-                inlier_points = np.count_nonzero(~inlier_mask.data)
+                inlier_points = np.count_nonzero(inlier_mask.data)
             else:
-                inlier_points = np.count_nonzero(~inlier_mask)
+                inlier_points = np.count_nonzero(inlier_mask)
             dem_masked = self.copy()
-            dem_masked.set_mask(inlier_mask)
+            dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
         stats_dict = self._statistics(band=band, counts=counts)
         if stats_name is None:
