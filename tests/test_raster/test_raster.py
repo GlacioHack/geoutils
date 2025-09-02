@@ -1983,7 +1983,7 @@ class TestRaster:
             assert name in stats
             assert isinstance(stats.get(name), stat_types)
 
-        # With mask
+        # With mask (inlier=True)
         inlier_mask = ~raster.get_mask()
         stats_masked = raster.get_stats(inlier_mask=inlier_mask)
         for name in expected_stats_mask:
@@ -1992,7 +1992,7 @@ class TestRaster:
             stats_masked.pop(name)
         assert stats_masked == stats
 
-        # Empty mask
+        # Empty mask (=False)
         empty_mask = np.zeros_like(inlier_mask)
         with caplog.at_level(logging.WARNING):
             stats_masked = raster.get_stats(inlier_mask=empty_mask)
