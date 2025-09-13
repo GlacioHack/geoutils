@@ -46,7 +46,6 @@ from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
-from scipy import stats
 
 import geoutils as gu
 from geoutils._config import config
