@@ -46,6 +46,7 @@ from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
+from scipy import stats
 
 import geoutils as gu
 from geoutils._config import config
@@ -1934,13 +1935,14 @@ class Raster:
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
-            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
+            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
-        :param inlier_mask: A boolean mask to filter values for statistical calculations.
+        :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
-        :param counts: (number of finite data points in the array, number of valid points in inlier_mask). DO NOT USE.
+        :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
+            in inlier_mask). DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         # Force load if not loaded
@@ -1954,11 +1956,11 @@ class Raster:
         if inlier_mask is not None:
             valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
             if isinstance(inlier_mask, RasterMask):
-                inlier_points = np.count_nonzero(~inlier_mask.data)
+                inlier_points = np.count_nonzero(inlier_mask.data)
             else:
-                inlier_points = np.count_nonzero(~inlier_mask)
+                inlier_points = np.count_nonzero(inlier_mask)
             dem_masked = self.copy()
-            dem_masked.set_mask(inlier_mask)
+            dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
         # If no name is passed, derive all statistics

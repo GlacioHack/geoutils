@@ -24,6 +24,7 @@ import logging
 from typing import Any
 
 import numpy as np
+from scipy.stats import iqr
 
 from geoutils._typing import NDArrayNum
 from geoutils.stats.estimators import linear_error, nmad
@@ -40,6 +41,7 @@ _STATS_ALIASES = {
     "sum2": "Sum of squares",
     "90thpercentile": "90th percentile",
     "90percentile": "90th percentile",
+    "iqr": "IQR",
     "le90": "LE90",
     "nmad": "NMAD",
     "rmse": "RMSE",
@@ -86,6 +88,7 @@ def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict
         "Sum of squares": np.ma.sum(np.square(data)),
         "90th percentile": np.nanpercentile(mdata, 90),
         "LE90": linear_error(mdata, interval=90),
+        "IQR": iqr(mdata, nan_policy="omit"),  # ignore masked value (nan),
         "NMAD": nmad(data),
         "RMSE": np.sqrt(np.ma.mean(np.square(data))),
         "Standard deviation": np.ma.std(data),
