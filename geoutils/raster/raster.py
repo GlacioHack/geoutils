@@ -4217,3 +4217,11 @@ class RasterMask(Raster):
         """Bitwise inversion of a mask."""
 
         return self.copy(~self.data)
+
+
+class Mask(RasterMask):
+    """Deprecated raster mask class, used RasterMask."""
+
+    @deprecate(removal_version=Version("0.3.0"), details="The Mask class is deprecated, use RasterMask instead.")
+    def __init__(self, *args: Any):
+        super().__init__(*args)

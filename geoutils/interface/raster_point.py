@@ -117,15 +117,15 @@ def _regular_pointcloud_to_raster(
 
 def _raster_to_pointcloud(
     source_raster: gu.Raster,
-    data_column_name: str,
-    data_band: int,
-    auxiliary_data_bands: list[int] | None,
-    auxiliary_column_names: list[str] | None,
-    subsample: float | int,
-    skip_nodata: bool,
-    as_array: bool,
-    random_state: int | np.random.Generator | None,
-    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
+    data_column_name: str = "b1",
+    data_band: int = 1,
+    auxiliary_data_bands: list[int] | None = None,
+    auxiliary_column_names: list[str] | None = None,
+    subsample: float | int = 1,
+    skip_nodata: bool = True,
+    as_array: bool = False,
+    random_state: int | np.random.Generator | None = None,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
 ) -> NDArrayNum | gu.PointCloud:
     """
     Convert a raster to a point cloud. See Raster.to_pointcloud() for details.
