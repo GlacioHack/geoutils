@@ -1352,7 +1352,7 @@ class Raster:
         self_data, other_data, nodata, aop = _cast_numeric_array_raster(
             self, other, operation_name="an arithmetic operation"
         )
-        out_data = self_data % other_data
+        out_data = self_data % other_data  # type: ignore
         out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
         return out_rst
 
@@ -3122,10 +3122,12 @@ class Raster:
         :param band: Band number to extract from (from 1 to self.count).
         :param masked: Whether to return a masked array, or classic array.
         :param return_window: Whether to return the windows (in addition to the reduced value).
-        :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input coordinates).
+        :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input
+            coordinates).
         :param boundless: Whether to allow windows that extend beyond the extent.
 
-        :returns: Point cloud of interpolated points, or 1D array of interpolated values. In addition, if return_window=True, return tuple of (values, arrays).
+        :returns: Point cloud of interpolated points, or 1D array of interpolated values.
+            In addition, if return_window=True, return tuple of (values, arrays).
 
         :examples:
 
@@ -4226,6 +4228,8 @@ class RasterMask(Raster):
 class Mask(RasterMask):
     """Deprecated raster mask class, used RasterMask."""
 
-    @deprecate(removal_version=Version("0.3.0"), details="The Mask class is deprecated, use RasterMask instead.")
-    def __init__(self, *args: Any):
+    @deprecate(
+        removal_version=Version("0.3.0"), details="The Mask class is deprecated, use RasterMask instead."
+    )  # type: ignore
+    def __init__(self, *args: Any) -> None:
         super().__init__(*args)

@@ -16,12 +16,12 @@ kernelspec:
 
 GeoUtils supports statistical analysis tailored to geospatial objects.
 
-For a {class}`~geoutils.Raster` or a {class}`~geoutils.PointCloud`, the statistics are naturally performed on the {attr}`~geoutils.Raster.data` attribute 
+For a {class}`~geoutils.Raster` or a {class}`~geoutils.PointCloud`, the statistics are naturally performed on the {attr}`~geoutils.Raster.data` attribute
 which is clearly defined. For a {class}`~geoutils.Vector`, statistics have to be performed on a specific column.
 
 ## Estimators
 
-The {func}`~geoutils.Raster.get_stats` method allows to extract key statistical estimators from a raster or a point cloud, optionally subsetting to an 
+The {func}`~geoutils.Raster.get_stats` method allows to extract key statistical estimators from a raster or a point cloud, optionally subsetting to an
 inlier mask.
 
 Supported statistics are :
@@ -89,10 +89,10 @@ rast.get_stats(inlier_mask=inlier_mask)
 
 ## Subsampling
 
-The {func}`~geoutils.Raster.subsample` method allows to efficiently extract a valid random subsample from a raster or a point cloud. It can conveniently 
+The {func}`~geoutils.Raster.subsample` method allows to efficiently extract a valid random subsample from a raster or a point cloud. It can conveniently
 return the output as a point cloud, or as an array.
 
-The subsample size can be defined either as a fraction of valid values (floating value strictly between 0 and 1), or as a number of samples (integer value 
+The subsample size can be defined either as a fraction of valid values (floating value strictly between 0 and 1), or as a number of samples (integer value
 above 1).
 
 ```{code-cell} ipython3

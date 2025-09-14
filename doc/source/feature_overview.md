@@ -243,7 +243,7 @@ os.remove("myaoi.gpkg")
 
 ## Parsing sensor metadata
 
-In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a {class}`~geoutils.Raster`, 
+In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a {class}`~geoutils.Raster`,
 which tentatively parses metadata recognized from the filename or auxiliary files.
 
 ```{code-cell} ipython3

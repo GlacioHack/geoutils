@@ -21,6 +21,7 @@ pc.plot(cmap="terrain", cbar_title="Elevation (m)")
 # We generate grid coordinates to interpolate to, alternatively we could pass a raster to use as reference.
 
 import numpy as np
+
 grid_coords = (np.linspace(pc.bounds.left, pc.bounds.right, 100), np.linspace(pc.bounds.bottom, pc.bounds.top, 100))
 
 # %%

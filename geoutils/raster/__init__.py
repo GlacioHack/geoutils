@@ -22,10 +22,10 @@ from geoutils.raster.distributed_computing import *  # noqa
 from geoutils.raster.georeferencing import *  # noqa
 from geoutils.raster.geotransformations import *  # noqa
 from geoutils.raster.multiraster import *  # noqa
-from geoutils.raster.satimg import *  # noqa
-from geoutils.raster.tiling import *  # noqa
 
 # To-be-deprecated
 from geoutils.raster.raster import Mask  # noqa
+from geoutils.raster.satimg import *  # noqa
+from geoutils.raster.tiling import *  # noqa
 
 __all__ = ["RasterType", "Raster"]

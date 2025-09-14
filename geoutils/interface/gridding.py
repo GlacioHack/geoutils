@@ -85,7 +85,9 @@ def _grid_pointcloud(
 
     # Get the nearest point for each grid point
     grid_pc = gpd.GeoDataFrame(
-        data={"placeholder": np.ones(len(xx.ravel()))}, geometry=gpd.points_from_xy(x=xx.ravel(), y=yy.ravel()), crs=pc.crs,
+        data={"placeholder": np.ones(len(xx.ravel()))},
+        geometry=gpd.points_from_xy(x=xx.ravel(), y=yy.ravel()),
+        crs=pc.crs,
     )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, message="Geometry is in a geographic CRS.*")

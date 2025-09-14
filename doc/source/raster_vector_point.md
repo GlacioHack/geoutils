@@ -278,7 +278,7 @@ plt.tight_layout()
 (point-gridding)=
 ### Point gridding
 
-Gridding of a point cloud **consists in estimating the values at 2D regular gridded coordinates based on an irregular point cloud** using Delauney triangular 
+Gridding of a point cloud **consists in estimating the values at 2D regular gridded coordinates based on an irregular point cloud** using Delauney triangular
 interpolation (default), inverse-distance weighting or kriging.
 
 ```{note}
@@ -306,5 +306,3 @@ gridded_pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
-
-

@@ -597,8 +597,10 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
 
         # Build geodataframe
-        gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), crs=crs),
-                               data={data_column: np.atleast_1d(z)})
+        gdf = gpd.GeoDataFrame(
+            geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), crs=crs),
+            data={data_column: np.atleast_1d(z)},
+        )
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
@@ -935,7 +937,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = self.data + other_data
-        return self.copy(new_array=out_data)
+        return self.copy(new_array=out_data)  # type: ignore
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
     def __radd__(self: PointCloud, other: NDArrayNum | Number) -> PointCloud:  # type: ignore
@@ -964,7 +966,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = self.data - other_data
-        return self.copy(new_array=out_data)
+        return self.copy(new_array=out_data)  # type: ignore
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
     def __rsub__(self: PointCloud, other: NDArrayNum | Number) -> PointCloud:  # type: ignore
@@ -975,7 +977,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = other_data - self.data
-        return self.copy(new_array=out_data)
+        return self.copy(new_array=out_data)  # type: ignore
 
     def __mul__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
         """
@@ -987,7 +989,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = self.data * other_data
-        return self.copy(new_array=out_data)
+        return self.copy(new_array=out_data)  # type: ignore
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
     def __rmul__(self: PointCloud, other: NDArrayNum | Number) -> PointCloud:  # type: ignore
@@ -996,7 +998,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         For when other is first item in the operation (e.g. 2 * rst).
         """
-        return self.__mul__(other)
+        return self.__mul__(other)  # type: ignore
 
     def __truediv__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
         """
@@ -1008,7 +1010,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = self.data / other_data
-        return self.copy(new_array=out_data)
+        return self.copy(new_array=out_data)  # type: ignore
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
     def __rtruediv__(self: PointCloud, other: NDArrayNum | Number) -> PointCloud:  # type: ignore
@@ -1019,7 +1021,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = other_data / self.data
-        return self.copy(new_array=out_data)
+        return self.copy(new_array=out_data)  # type: ignore
 
     def __floordiv__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
         """
@@ -1030,7 +1032,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Otherwise, other must be a single number.
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
-        out_data = self.data // other_data
+        out_data = self.data // other_data  # type: ignore
         return self.copy(new_array=out_data)
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
@@ -1041,7 +1043,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         For when other is first item in the operation (e.g. 1/rst).
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
-        out_data = other_data // self.data
+        out_data = other_data // self.data  # type: ignore
         return self.copy(new_array=out_data)
 
     def __mod__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
@@ -1053,7 +1055,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Otherwise, other must be a single number.
         """
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
-        out_data = self.data % other_data
+        out_data = self.data % other_data  # type: ignore
         return self.copy(new_array=out_data)
 
     def __pow__(self: PointCloud, power: int | float) -> PointCloud:

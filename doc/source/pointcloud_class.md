@@ -40,7 +40,7 @@ It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector
 main attribute** {attr}`~geoutils.PointCloud.data_column` that identifies the name of the main data associated to the
 point geometries.
 
-Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and 
+Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and
 
 New methods specific to point clouds are detailed further below.
 
@@ -77,7 +77,7 @@ pc
 
 ## Create from arrays or tuples
 
-A {class}`~geoutils.PointCloud` is created from three 1D arrays, from a Nx3 or 3xN array, or from an iterable of 3-tuples by calling the class 
+A {class}`~geoutils.PointCloud` is created from three 1D arrays, from a Nx3 or 3xN array, or from an iterable of 3-tuples by calling the class
 methods {func}`~geoutils.PointCloud.from_xyz`, {func}`~geoutils.PointCloud.from_array` or {func}`~geoutils.PointCloud.from_tuples` respectively.
 
 ```{code-cell} ipython3
@@ -91,7 +91,7 @@ pc3 = geoutils.PointCloud.from_tuples([(1, 2, 3), (4, 5, 6)], crs=4326)
 
 ## Gridding to a raster
 
-Gridding a {class}`~geoutils.PointCloud` into a specific grid can be done through the {func}`~geoutils.PointCloud.grid` function, that applies a 
+Gridding a {class}`~geoutils.PointCloud` into a specific grid can be done through the {func}`~geoutils.PointCloud.grid` function, that applies a
 gridding scheme according to a given methods (inverse-distance weighting, delauney triangle interpolation).
 
 ```{code-cell} ipython3
@@ -104,7 +104,7 @@ rst = pc.grid(grid_coords=coords)
 
 
 A {class}`~geoutils.PointCloud` can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
-{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will output one or two 
+{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will output one or two
 {class}`PointClouds<geoutils.PointCloud>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
 The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
 
@@ -113,8 +113,8 @@ The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the 
 (pc1 + 1)/2
 ```
 
-A {class}`~geoutils.PointCloud` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, 
-{func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, {func}`<<operator.lt>`) with another {class}`~geoutils.PointCloud`, 
+A {class}`~geoutils.PointCloud` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`,
+{func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, {func}`<<operator.lt>`) with another {class}`~geoutils.PointCloud`,
 {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.PointCloudMask`.
 
 ```{code-cell} ipython3
@@ -126,7 +126,7 @@ See {ref}`core-py-ops` for more details.
 
 ## Array interface
 
-A {class}`~geoutils.PointCloud` can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another 
+A {class}`~geoutils.PointCloud` can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another
 {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number.
 The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
 
@@ -154,7 +154,7 @@ Statistics of a point cloud, optionally subsetting to an inlier mask, can be com
 pc.get_stats(["mean", "max", "std"])
 ```
 
-A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid values, and returns either a point 
+A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid values, and returns either a point
 cloud or an array:
 
 ```{code-cell} ipython3

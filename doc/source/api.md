@@ -672,4 +672,3 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 
     PointCloudMask
 ```
-

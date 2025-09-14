@@ -403,7 +403,7 @@ Statistics of a raster, optionally subsetting to an inlier mask, can be computed
 rast.get_stats(["mean", "max", "std"])
 ```
 
-A raster can also be quickly subsampled using {func}`~geoutils.Raster.subsample`, which can consider only valid values, and return either a point cloud or an 
+A raster can also be quickly subsampled using {func}`~geoutils.Raster.subsample`, which can consider only valid values, and return either a point cloud or an
 array:
 
 ```{code-cell} ipython3
@@ -412,5 +412,3 @@ pc_sub = rast.subsample(500)
 ```
 
 See {ref}`stats` for more details.
-
-
