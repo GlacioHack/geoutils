@@ -551,21 +551,21 @@ class TestInterpolate:
         assert y_out == ytest0
 
         # Check that the value at this coordinate is the same as when indexing
-        z_val = r.reduce_points((xtest0, ytest0))
+        z_val = r.reduce_points((xtest0, ytest0), as_array=True)
         z = r.data.data[itest0, jtest0]
         assert z == z_val
 
         # Check that the value is the same the other 4 corners of the pixel
-        assert z == r.reduce_points((xtest0 + 0.49 * r.res[0], ytest0 - 0.49 * r.res[1]))
-        assert z == r.reduce_points((xtest0 - 0.49 * r.res[0], ytest0 + 0.49 * r.res[1]))
-        assert z == r.reduce_points((xtest0 - 0.49 * r.res[0], ytest0 - 0.49 * r.res[1]))
-        assert z == r.reduce_points((xtest0 + 0.49 * r.res[0], ytest0 + 0.49 * r.res[1]))
+        assert z == r.reduce_points((xtest0 + 0.49 * r.res[0], ytest0 - 0.49 * r.res[1]), as_array=True)
+        assert z == r.reduce_points((xtest0 - 0.49 * r.res[0], ytest0 + 0.49 * r.res[1]), as_array=True)
+        assert z == r.reduce_points((xtest0 - 0.49 * r.res[0], ytest0 - 0.49 * r.res[1]), as_array=True)
+        assert z == r.reduce_points((xtest0 + 0.49 * r.res[0], ytest0 + 0.49 * r.res[1]), as_array=True)
 
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
         lat, lon = reproject_to_latlon(points=[xtest0, ytest0], in_crs=r.crs)
-        z_val_2 = r.reduce_points((lon, lat), input_latlon=True)
+        z_val_2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
         assert z_val == z_val_2
 
         # 2/ Band argument
@@ -575,22 +575,22 @@ class TestInterpolate:
         itest = int(itest[0])
         jtest = int(jtest[0])
         # Extract the values
-        z_band1 = r_multi.reduce_points((xtest0, ytest0), band=1)
-        z_band2 = r_multi.reduce_points((xtest0, ytest0), band=2)
-        z_band3 = r_multi.reduce_points((xtest0, ytest0), band=3)
+        z_band1 = r_multi.reduce_points((xtest0, ytest0), band=1, as_array=True)
+        z_band2 = r_multi.reduce_points((xtest0, ytest0), band=2, as_array=True)
+        z_band3 = r_multi.reduce_points((xtest0, ytest0), band=3, as_array=True)
         # Compare to the Raster array slice
         assert list(r_multi.data[:, itest, jtest]) == [z_band1, z_band2, z_band3]
 
         # 3/ Masked argument
         r_multi.data[:, itest, jtest] = np.ma.masked
-        z_not_ma = r_multi.reduce_points((xtest0, ytest0), band=1)
+        z_not_ma = r_multi.reduce_points((xtest0, ytest0), band=1, as_array=True)
         assert not np.ma.is_masked(z_not_ma)
-        z_ma = r_multi.reduce_points((xtest0, ytest0), band=1, masked=True)
+        z_ma = r_multi.reduce_points((xtest0, ytest0), band=1, masked=True, as_array=True)
         assert np.ma.is_masked(z_ma)
 
         # 4/ Window argument
         val_window, z_window = r_multi.reduce_points(
-            (xtest0, ytest0), band=1, window=3, masked=True, return_window=True
+            (xtest0, ytest0), band=1, window=3, masked=True, return_window=True, as_array=True
         )
         assert (
             val_window
@@ -601,7 +601,7 @@ class TestInterpolate:
 
         # 5/ Reducer function argument
         val_window2 = r_multi.reduce_points(
-            (xtest0, ytest0), band=1, window=3, masked=True, reducer_function=np.ma.median
+            (xtest0, ytest0), band=1, window=3, masked=True, reducer_function=np.ma.median, as_array=True
         )
         assert val_window2 == np.ma.median(r_multi.data[0, itest - 1 : itest + 2, jtest - 1 : jtest + 2])
 
@@ -621,16 +621,16 @@ class TestInterpolate:
         # For simple coordinates
         x_coords = [xtest0, xtest0 + 100]
         y_coords = [ytest0, ytest0 - 100]
-        vals = r_multi.reduce_points((x_coords, y_coords))
-        val0, win0 = r_multi.reduce_points((x_coords[0], y_coords[0]), return_window=True)
-        val1, win1 = r_multi.reduce_points((x_coords[1], y_coords[1]), return_window=True)
+        vals = r_multi.reduce_points((x_coords, y_coords), as_array=True)
+        val0, win0 = r_multi.reduce_points((x_coords[0], y_coords[0]), return_window=True, as_array=True)
+        val1, win1 = r_multi.reduce_points((x_coords[1], y_coords[1]), return_window=True, as_array=True)
 
         assert len(vals) == len(x_coords)
         assert np.array_equal(vals[0], val0, equal_nan=True)
         assert np.array_equal(vals[1], val1, equal_nan=True)
 
         # With a return window argument
-        vals, windows = r_multi.reduce_points((x_coords, y_coords), return_window=True)
+        vals, windows = r_multi.reduce_points((x_coords, y_coords), return_window=True, as_array=True)
         assert len(windows) == len(x_coords)
         assert np.array_equal(windows[0], win0, equal_nan=True)
         assert np.array_equal(windows[1], win1, equal_nan=True)
@@ -640,14 +640,14 @@ class TestInterpolate:
         # Lower right pixel
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.reduce_points((x, y)) == r.reduce_points((lon, lat), input_latlon=True) == r.data[-1, -1]
+        assert r.reduce_points((x, y), as_array=True) == r.reduce_points((lon, lat), input_latlon=True, as_array=True) == r.data[-1, -1]
 
         # One pixel above
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.reduce_points((x, y)) == r.reduce_points((lon, lat), input_latlon=True) == r.data[-2, -1]
+        assert r.reduce_points((x, y), as_array=True) == r.reduce_points((lon, lat), input_latlon=True, as_array=True) == r.data[-2, -1]
 
         # One pixel left
         x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.reduce_points((x, y)) == r.reduce_points((lon, lat), input_latlon=True) == r.data[-1, -2]
+        assert r.reduce_points((x, y), as_array=True) == r.reduce_points((lon, lat), input_latlon=True, as_array=True) == r.data[-1, -2]

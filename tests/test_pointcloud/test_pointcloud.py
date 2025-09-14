@@ -138,8 +138,9 @@ class TestPointCloud:
 
         # -- First, we test mask or boolean array indexing and assignment, specific to point clouds --
 
-        # Open a Raster
-        pc = PointCloud(self.gdf1, data_column="b1")
+        # Open a point cloud
+        # We need to do a deep copy to avoid modifying the original object
+        pc = PointCloud(self.gdf1.copy(deep=True), data_column="b1")
 
         # Create a boolean array of the same shape, and a mask of the same transform/crs
         rng = np.random.default_rng(42)

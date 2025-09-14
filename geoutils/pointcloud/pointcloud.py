@@ -663,24 +663,26 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         return list(zip(self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values))
 
-    def __getitem__(self, index: PointCloudMask | NDArrayBool | Any) -> PointCloud:
+    def __getitem__(self, index: PointCloudMask | NDArrayBool | Any) -> PointCloud | Any:
         """
         Index the point cloud.
 
         In addition to all index types supported by GeoPandas, also supports a point cloud mask of same georeferencing.
         """
 
-        if isinstance(index, PointCloudMask):
+        if isinstance(index, PointCloudMask) or isinstance(index, np.ndarray):
+            # If input is mask with the same shape and georeferencing, convert to ndarray
             _cast_numeric_array_pointcloud(self, index, operation_name="an indexing operation")  # type: ignore
+            if isinstance(index, PointCloudMask):
+                ind = index.data
+            else:
+                ind = index
+            return PointCloud(super().__getitem__(ind), data_column=self.data_column)
 
-        # If input is mask with the same shape and georeferencing, convert to ndarray
-        if isinstance(index, PointCloudMask):
-            ind = index.data
         # Otherwise, use index and leave it to GeoPandas
         else:
             ind = index  # type: ignore
-
-        return PointCloud(super().__getitem__(ind), data_column=self.data_column)
+            return super().__getitem__(ind)
 
     def __setitem__(self, index: Any, assign: Any) -> None:
         """
@@ -1356,7 +1358,7 @@ class PointCloudMask(PointCloud):
     """
     The georeferenced point cloud mask.
 
-    A point cloud mask is a point cloud with a boolean data columns (True or False), that can serve to index or assign
+    A point cloud mask is a point cloud with a boolean data column (True or False), that can serve to index or assign
     values to other point clouds of the same georeferenced points.
 
     Subclasses :class:`geoutils.PointCloud`.
