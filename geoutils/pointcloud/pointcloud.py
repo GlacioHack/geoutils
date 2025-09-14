@@ -602,7 +602,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
-        if z[0].dtype == bool:
+        if np.atleast_1d(z)[0].dtype == bool:
             return PointCloudMask(filename_or_dataset=gdf, data_column=data_column)  # type: ignore
         # Otherwise, keep as a given PointCloudType subclass
         else:
@@ -1303,6 +1303,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         res: float | tuple[float, float] | None = None,
         resampling: Literal["nearest", "linear", "cubic"] = "linear",
         dist_nodata_pixel: float = 1.0,
+        nodata: int | float = -9999,
     ) -> gu.Raster:
         """
         Grid point cloud into a raster.
@@ -1317,12 +1318,13 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param resampling: Resampling method within delauney triangles (defaults to linear).
         :param dist_nodata_pixel: Distance from the point cloud after which grid cells are filled by nodata values,
             expressed in number of pixels.
+        :param nodata: Nodata value of output raster (defaults to -9999).
 
         :return: Raster from gridded point cloud.
         """
 
         if isinstance(ref, gu.Raster):
-            if grid_coords is None:
+            if grid_coords is not None:
                 warnings.warn(
                     "Both reference point cloud and grid coordinates were passed for gridding, "
                     "using only the reference point cloud."
@@ -1345,14 +1347,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             dist_nodata_pixel=dist_nodata_pixel,
         )
 
-        return gu.Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=None)
-
-    # def subsample(self, subsample: float | int, random_state: int | np.random.Generator | None = None) -> PointCloud:
-    #
-    #     indices = subsample_array(array=self.data, subsample=subsample,
-    #     return_indices=True, random_state=random_state)
-    #
-    #     return PointCloud(self.ds[indices])
+        return gu.Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=nodata)
 
 
 class PointCloudMask(PointCloud):

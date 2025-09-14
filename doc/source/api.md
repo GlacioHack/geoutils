@@ -591,7 +591,7 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     PointCloud.crs
 ```
 
-# Other attributes
+### Other attributes
 
 ```{eval-rst}
 .. autosummary::
@@ -655,3 +655,21 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     PointCloud.pointcloud_equal
     PointCloud.georeferenced_coords_equal
 ```
+
+
+## Point cloud mask
+
+```{eval-rst}
+.. minigallery:: geoutils.PointCloudMask
+      :add-heading:
+```
+
+### Opening a file
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloudMask
+```
+

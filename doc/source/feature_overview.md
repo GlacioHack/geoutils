@@ -33,10 +33,10 @@ pyplot.rcParams['savefig.dpi'] = 600
 pyplot.rcParams['font.size'] = 9
 ```
 
-## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes
+## The core {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects
 
 In GeoUtils, geospatial handling is object-based and revolves around {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.
-These link to either **on-disk** or **in-memory** datasets, opened by calling the object with a file path.
+These link to either **in-memory** or **on-disk** datasets, opened by calling the object from a filepath for the latter.
 
 ```{code-cell} ipython3
 import geoutils as gu
@@ -243,8 +243,8 @@ os.remove("myaoi.gpkg")
 
 ## Parsing sensor metadata
 
-In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a `{class}`~geoutils.Raster`
-, which tentatively parses metadata recognized from the filename or auxiliary files.
+In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a {class}`~geoutils.Raster`, 
+which tentatively parses metadata recognized from the filename or auxiliary files.
 
 ```{code-cell} ipython3
 # Name of the image we used

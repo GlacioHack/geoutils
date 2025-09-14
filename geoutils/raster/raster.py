@@ -3102,6 +3102,7 @@ class Raster:
         band: int | None = None,
         masked: bool = False,
         return_window: bool = False,
+        as_array: bool = False,
         boundless: bool = True,
     ) -> Any:
         """
@@ -3121,12 +3122,10 @@ class Raster:
         :param band: Band number to extract from (from 1 to self.count).
         :param masked: Whether to return a masked array, or classic array.
         :param return_window: Whether to return the windows (in addition to the reduced value).
+        :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input coordinates).
         :param boundless: Whether to allow windows that extend beyond the extent.
 
-        :returns: When called on a raster or with a specific band set, return value of pixel.
-        :returns: If multiple band raster and the band is not specified, a
-            dictionary containing the value of the pixel in each band.
-        :returns: In addition, if return_window=True, return tuple of (values, arrays)
+        :returns: Point cloud of interpolated points, or 1D array of interpolated values. In addition, if return_window=True, return tuple of (values, arrays).
 
         :examples:
 
@@ -3279,6 +3278,10 @@ class Raster:
             output_val = np.array(list_values)  # type: ignore
             if return_window:
                 output_win = list_windows  # type: ignore
+
+        # Return array or pointcloud
+        if not as_array:
+            output_val = gu.PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
 
         if return_window:
             return (output_val, output_win)
@@ -3476,7 +3479,7 @@ class Raster:
             quintic method), or rounded down, or a fixed integer.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
-        CRS.
+            CRS.
         :param as_array: Whether to return a point cloud with data column the interpolated values (default) or an
             array of interpolated values.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
@@ -3484,7 +3487,7 @@ class Raster:
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_scipy_function: Force to use either map_coordinates or interpn. Mainly for testing purposes.
 
-        :returns rpoints: Array of raster value(s) for the given points.
+        :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
 
         # Extract array supporting NaNs

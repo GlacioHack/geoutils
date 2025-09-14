@@ -89,10 +89,10 @@ sphinx_gallery_conf = {
             os.path.join(example_path, "io", "open_save"),
             os.path.join(example_path, "io", "import_export"),
             os.path.join(example_path, "handling", "georeferencing"),
-            os.path.join(example_path, "handling", "interface"),
+            os.path.join(example_path, "handling", "raster_vector"),
+            os.path.join(example_path, "handling", "raster_point"),
             os.path.join(example_path, "analysis", "array_numerics"),
-            os.path.join(example_path, "analysis", "geospatial"),
-            os.path.join(example_path, "analysis", "point_extraction"),
+            os.path.join(example_path, "analysis", "distance_ops"),
         ]
     ),
     "within_subsection_order": ExampleTitleSortKey,

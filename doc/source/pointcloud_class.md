@@ -27,8 +27,6 @@ GeoUtils aims to support these features, as well the reading and writing of poin
 geoparquet) usually used for **sparse point clouds**, and from point-cloud-type files (e.g., LAS, LAZ, COPC) usually
 used for **dense point clouds**.
 
-TODO: ADD GUIDE PAGE ON POINT CLOUD TYPES AND RASTER COMPARISON?
-
 Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
 
 (pc-obj-def)=
@@ -106,8 +104,8 @@ rst = pc.grid(grid_coords=coords)
 
 
 A {class}`~geoutils.PointCloud` can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
-{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will output one or two {class}
-`Rasters<geoutils.PointCloud>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
+{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will output one or two 
+{class}`PointClouds<geoutils.PointCloud>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
 The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
 
 ```{code-cell} ipython3
@@ -115,9 +113,9 @@ The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the 
 (pc1 + 1)/2
 ```
 
-A {class}`~geoutils.PointCloud` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}
-`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.PointCloudMask`.
+A {class}`~geoutils.PointCloud` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, 
+{func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, {func}`<<operator.lt>`) with another {class}`~geoutils.PointCloud`, 
+{class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.PointCloudMask`.
 
 ```{code-cell} ipython3
 # What are point cloud pixels are larger than 20?
@@ -128,7 +126,7 @@ See {ref}`core-py-ops` for more details.
 
 ## Array interface
 
-A {class}`~geoutils.PointCloud` can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another
+A {class}`~geoutils.PointCloud` can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another 
 {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number.
 The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
 

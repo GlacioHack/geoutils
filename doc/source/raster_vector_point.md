@@ -171,7 +171,7 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.bounds.left, rast.bounds.right, 50)
 y_coords = rng.uniform(rast.bounds.bottom, rast.bounds.top, 50)
 
-pc = rast.interp_points(points=(x_coords, y_coords))
+pc_int = rast.interp_points(points=(x_coords, y_coords))
 ```
 
 The interpolated points can be returned as a {class}`~geoutils.PointCloud`, enabling quick interfacing, or as an array.
@@ -186,7 +186,7 @@ f, ax = plt.subplots(1, 2)
 ax[0].set_title("Raster")
 rast.plot(ax=ax[0], cmap="terrain", cbar_title="Elevation (m)")
 ax[1].set_title("Interpolated\npoint cloud")
-pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)", marker="x")
+pc_int.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)", marker="x")
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
@@ -200,7 +200,7 @@ the closest pixel is returned.
 {func}`geoutils.Raster.reduce_points`
 
 ```{code-cell} ipython3
-vals = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
+pc_red = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 ```
 
 The reduced points can be returned as a {class}`~geoutils.PointCloud`, enabling quick interfacing, or as an array.
@@ -215,7 +215,7 @@ f, ax = plt.subplots(1, 2)
 ax[0].set_title("Raster")
 rast.plot(ax=ax[0], cmap="terrain", cbar_title="Elevation (m)")
 ax[1].set_title("Reduced\npoint cloud")
-pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
+pc_red.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
@@ -288,7 +288,7 @@ For gridding, GeoUtils introduces nodata values in distances surrounding initial
 {func}`geoutils.PointCloud.grid`
 
 ```{code-cell} ipython3
-# Grid points with raster grid as reference, introducing nodata only 10 pixels away from a point
+# Grid points with raster as reference, add nodata only 10 pixels away from points
 gridded_pc = pc.grid(rast, dist_nodata_pixel=10)
 ```
 
