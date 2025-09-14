@@ -163,7 +163,7 @@ values** in surrounding pixels of initial nodata values depending on the order o
 ```
 
 ```{code-cell} ipython3
-# Let's change raster type for a DEM, often requiring interpolation
+# We use a DEM, often requiring interpolation
 rast =  gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
 # Get 50 random points to sample within the raster extent
@@ -171,8 +171,10 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.bounds.left, rast.bounds.right, 50)
 y_coords = rng.uniform(rast.bounds.bottom, rast.bounds.top, 50)
 
-vals = rast.interp_points(points=(x_coords, y_coords))
+pc = rast.interp_points(points=(x_coords, y_coords))
 ```
+
+The interpolated points can be returned as a {class}`~geoutils.PointCloud`, enabling quick interfacing, or as an array.
 
 ```{code-cell} ipython3
 :tags: [hide-input]
@@ -184,10 +186,7 @@ f, ax = plt.subplots(1, 2)
 ax[0].set_title("Raster")
 rast.plot(ax=ax[0], cmap="terrain", cbar_title="Elevation (m)")
 ax[1].set_title("Interpolated\npoint cloud")
-# (Update with release of PointCloud class)
-import geopandas as gpd
-pc = gu.Vector(gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=x_coords, y=y_coords), data={"b1": vals}, crs=rast.crs))
-pc.plot(column="b1", ax=ax[1], cmap="terrain", legend=True, marker="x", cbar_title="Elevation (m)")
+pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)", marker="x")
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
@@ -204,6 +203,8 @@ the closest pixel is returned.
 vals = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 ```
 
+The reduced points can be returned as a {class}`~geoutils.PointCloud`, enabling quick interfacing, or as an array.
+
 ```{code-cell} ipython3
 :tags: [hide-input]
 :mystnb:
@@ -214,14 +215,10 @@ f, ax = plt.subplots(1, 2)
 ax[0].set_title("Raster")
 rast.plot(ax=ax[0], cmap="terrain", cbar_title="Elevation (m)")
 ax[1].set_title("Reduced\npoint cloud")
-# (Update with release of PointCloud class)
-import geopandas as gpd
-pc = gu.Vector(gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=x_coords, y=y_coords), data={"b1": vals}, crs=rast.crs))
-pc.plot(column="b1", ax=ax[1], cmap="terrain", legend=True, cbar_title="Elevation (m)")
+pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
-
 
 ### Raster to points
 
@@ -244,11 +241,10 @@ f, ax = plt.subplots(1, 2)
 ax[0].set_title("Raster")
 rast.plot(ax=ax[0], cmap="terrain", cbar_title="Elevation (m)")
 ax[1].set_title("Regular subsampled\npoint cloud")
-pc.plot(column="b1", ax=ax[1], cmap="terrain", legend=True, cbar_title="Elevation (m)", markersize=2)
+pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)", markersize=2)
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
-
 
 ### Regular points to raster
 
@@ -271,7 +267,7 @@ rast_from_pc = gu.Raster.from_pointcloud_regular(pc, transform=rast.transform, s
 
 f, ax = plt.subplots(1, 2)
 ax[0].set_title("Regular subsampled\npoint cloud")
-pc.plot(column="b1", ax=ax[0], cmap="terrain", legend=True, cbar_title="Elevation (m)", markersize=2)
+pc.plot(ax=ax[0], cmap="terrain", legend=True, cbar_title="Elevation (m)", markersize=2)
 ax[1].set_title("Raster from\npoint cloud")
 rast_from_pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
 _ = ax[1].set_yticklabels([])
@@ -282,6 +278,33 @@ plt.tight_layout()
 (point-gridding)=
 ### Point gridding
 
+Gridding of a point cloud **consists in estimating the values at 2D regular gridded coordinates based on an irregular point cloud** using Delauney triangular 
+interpolation (default), inverse-distance weighting or kriging.
+
+```{note}
+For gridding, GeoUtils introduces nodata values in distances surrounding initial point coordinates, defaulting to a distance of 1 pixel.
+```
+
 {func}`geoutils.PointCloud.grid`
 
-Coming with the next release on point clouds!
+```{code-cell} ipython3
+# Grid points with raster grid as reference, introducing nodata only 10 pixels away from a point
+gridded_pc = pc.grid(rast, dist_nodata_pixel=10)
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+f, ax = plt.subplots(1, 2)
+ax[0].set_title("Point cloud")
+pc.plot(ax=ax[0], cmap="terrain", legend=True, cbar_title="Elevation (m)", markersize=2)
+ax[1].set_title("Gridded raster\nfrom point cloud")
+gridded_pc.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
+_ = ax[1].set_yticklabels([])
+plt.tight_layout()
+```
+
+

@@ -125,6 +125,8 @@ plot_formats = [(".png", 500)]
 inheritance_alias = {
     "geoutils.raster.raster.Raster": "geoutils.Raster",
     "geoutils.raster.raster.RasterMask": "geoutils.RasterMask",
+    "geoutils.pointcloud.pointcloud.PointCloud": "geoutils.PointCloud",
+    "geoutils.pointcloud.pointcloud.PointCloudMask": "geoutils.PointCloudMask",
     "geoutils.vector.Vector": "geoutils.Vector",
     "xdem.dem.DEM": "xdem.DEM",
 }

@@ -235,7 +235,7 @@ And reverse operations.
 .. autosummary::
     :toctree: gen_modules/
 
-    Mask
+    RasterMask
 ```
 
 ### Overloaded Raster methods
@@ -244,10 +244,10 @@ And reverse operations.
 .. autosummary::
     :toctree: gen_modules/
 
-    Mask.crop
-    Mask.reproject
-    Mask.polygonize
-    Mask.proximity
+    RasterMask.crop
+    RasterMask.reproject
+    RasterMask.polygonize
+    RasterMask.proximity
 ```
 
 ## Multiple rasters
@@ -489,7 +489,6 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
 
     Vector.contains
     Vector.geom_equals
-    Vector.geom_almost_equals
     Vector.crosses
     Vector.disjoint
     Vector.intersects
@@ -598,8 +597,7 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 .. autosummary::
     :toctree: gen_modules/
 
-    PointCloud.nb_points
-    PointCloud.data_column
+    PointCloud.point_count
 ```
 
 

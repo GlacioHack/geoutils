@@ -51,7 +51,7 @@ import geoutils as gu
 
 # Instantiate a mask from a filename on disk
 filename_mask = gu.examples.get_path("exploradores_aster_dem")
-mask = gu.Mask(filename_mask, load_data=True)
+mask = gu.RasterMask(filename_mask, load_data=True)
 mask
 ```
 
@@ -101,8 +101,8 @@ mask
 When creating with {func}`geoutils.RasterMask.from_array`, any input {class}`~numpy.ndarray` will be forced to a {class}`bool` {class}`numpy.dtype`.
 
 ```{code-cell} ipython3
-# Create a mask from array directly from the Mask class
-mask = gu.Mask.from_array(
+# Create a mask from array directly from the RasterMask class
+mask = gu.RasterMask.from_array(
         data = ma.astype("float32"),
         transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3),
         crs = pyproj.CRS.from_epsg(4326),

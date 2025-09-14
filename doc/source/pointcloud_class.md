@@ -6,9 +6,9 @@ jupytext:
     extension: .md
     format_name: myst
 kernelspec:
-  display_name: xdem-env
+  display_name: geoutils-env
   language: python
-  name: xdem
+  name: geoutils
 ---
 (point-cloud)=
 
@@ -42,7 +42,9 @@ It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector
 main attribute** {attr}`~geoutils.PointCloud.data_column` that identifies the name of the main data associated to the
 point geometries.
 
-New derivatives attributes and methods specific to point cloud are detailed further below.
+Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and 
+
+New methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
 {attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~xdem.Vector.reproject` and {func}`~xdem.Vector.crop`.
@@ -66,22 +68,100 @@ pyplot.rcParams['savefig.dpi'] = 400
 ```
 
 ```{code-cell} ipython3
-import xdem
+import geoutils
+import numpy as np
 
-# Instantiate a DEM from a filename on disk
-filename_dem = xdem.examples.get_path("longyearbyen_ref_dem")
-dem = xdem.DEM(filename_dem)
-dem
+# Instantiate a point cloud from a filename on disk
+filename_dem = geoutils.examples.get_path("coromandel_lidar")
+pc = geoutils.PointCloud(filename_dem, data_column="Z")
+pc
 ```
 
 ## Create from arrays or tuples
 
-## Plotting
+A {class}`~geoutils.PointCloud` is created from three 1D arrays, from a Nx3 or 3xN array, or from an iterable of 3-tuples by calling the class 
+methods {func}`~geoutils.PointCloud.from_xyz`, {func}`~geoutils.PointCloud.from_array` or {func}`~geoutils.PointCloud.from_tuples` respectively.
 
-## Gridding
+```{code-cell} ipython3
+# From three 1D arrays
+pc1 = geoutils.PointCloud.from_xyz(x=np.array([1, 4]), y=np.array([2, 5]), z=np.array([3, 6]), crs=4326)
+# From a Nx3 array
+pc2 = geoutils.PointCloud.from_array(np.array([[1, 2, 3], [4, 5, 6]]), crs=4326)
+# From a iterable of 3-tuples
+pc3 = geoutils.PointCloud.from_tuples([(1, 2, 3), (4, 5, 6)], crs=4326)
+```
+
+## Gridding to a raster
+
+Gridding a {class}`~geoutils.PointCloud` into a specific grid can be done through the {func}`~geoutils.PointCloud.grid` function, that applies a 
+gridding scheme according to a given methods (inverse-distance weighting, delauney triangle interpolation).
+
+```{code-cell} ipython3
+# Grid the point cloud on a 100x100 grid on its extent
+coords = (np.linspace(pc.bounds.left, pc.bounds.right, 100), np.linspace(pc.bounds.bottom, pc.bounds.top, 100))
+rst = pc.grid(grid_coords=coords)
+```
 
 ## Arithmetic
 
+
+A {class}`~geoutils.PointCloud` can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
+{func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will output one or two {class}
+`Rasters<geoutils.PointCloud>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
+The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
+
+```{code-cell} ipython3
+# Add 1 and divide point cloud by 2
+(pc1 + 1)/2
+```
+
+A {class}`~geoutils.PointCloud` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}
+`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
+{func}`<<operator.lt>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.PointCloudMask`.
+
+```{code-cell} ipython3
+# What are point cloud pixels are larger than 20?
+pc1 > 20
+```
+
+See {ref}`core-py-ops` for more details.
+
 ## Array interface
 
+A {class}`~geoutils.PointCloud` can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another
+{class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number.
+The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
+
+```{code-cell} ipython3
+# Compute the element-wise square-root
+np.sqrt(pc1)
+```
+
+Logical comparison functions will cast to a {class}`~geoutils.PointCloudMask`.
+
+```{code-cell} ipython3
+# Is the pointcloud close to another one within tolerance?
+
+np.isclose(pc1, pc1+0.05, atol=0.1)
+```
+
+See {ref}`core-array-funcs` for more details.
+
 ## Statistics
+
+Statistics of a point cloud, optionally subsetting to an inlier mask, can be computed using {func}`~geoutils.PointCloud.get_stats`.
+
+```{code-cell} ipython3
+# Get mean, max and STD of the point cloud
+pc.get_stats(["mean", "max", "std"])
+```
+
+A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid values, and returns either a point 
+cloud or an array:
+
+```{code-cell} ipython3
+# Get 500 random points in the point cloud
+pc_sub = pc.subsample(500)
+```
+
+See {ref}`stats` for more details.
