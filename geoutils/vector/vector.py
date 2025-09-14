@@ -90,7 +90,7 @@ class Vector:
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
         """
 
-        self._name: str | None
+        self._name: str | None = None
         self._ds: gpd.GeoDataFrame | None = None
 
         # If Vector is passed, simply point back to Vector

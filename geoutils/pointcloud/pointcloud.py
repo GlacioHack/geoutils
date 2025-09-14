@@ -597,7 +597,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
 
         # Build geodataframe
-        gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=x, y=y, crs=crs), data={data_column: z})
+        gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), crs=crs),
+                               data={data_column: np.atleast_1d(z)})
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy

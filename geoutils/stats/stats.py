@@ -110,7 +110,7 @@ def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict
         )
 
     # If there are no valid data points, set all statistics to NaN
-    if np.count_nonzero(mask) == 0:
+    if np.count_nonzero(~mask) == 0:
         logging.warning("Empty raster, returns Nan for all stats")
         for key in stats_dict:
             stats_dict[key] = np.nan

@@ -27,6 +27,9 @@ from geoutils.raster import Raster, RasterMask  # noqa isort:skip
 from geoutils.vector import Vector  # noqa isort:skip
 from geoutils.pointcloud import PointCloud, PointCloudMask  # noqa isort:skip
 
+# To-be-deprecated
+from geoutils.raster import Mask  # noqa isort:skip
+
 try:
     from geoutils._version import __version__ as __version__  # noqa
 except ImportError:  # pragma: no cover

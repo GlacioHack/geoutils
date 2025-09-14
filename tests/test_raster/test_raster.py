@@ -1997,6 +1997,10 @@ class TestMask:
         mask2 = gu.RasterMask(mask)
         assert mask.raster_equal(mask2)
 
+        # Check that the old Mask class still works, but raises a deprecationg warning
+        with pytest.warns(DeprecationWarning):
+            gu.Mask(example)
+
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_repr_str(self, example: str) -> None:
         """Test the representation of a raster works"""

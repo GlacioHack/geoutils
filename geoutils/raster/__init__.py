@@ -25,4 +25,7 @@ from geoutils.raster.multiraster import *  # noqa
 from geoutils.raster.satimg import *  # noqa
 from geoutils.raster.tiling import *  # noqa
 
+# To-be-deprecated
+from geoutils.raster.raster import Mask  # noqa
+
 __all__ = ["RasterType", "Raster"]
