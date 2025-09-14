@@ -676,7 +676,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             if isinstance(index, PointCloudMask):
                 ind = index.data
             else:
-                ind = index
+                ind = index  # type: ignore
             return PointCloud(super().__getitem__(ind), data_column=self.data_column)
 
         # Otherwise, use index and leave it to GeoPandas

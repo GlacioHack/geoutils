@@ -640,14 +640,26 @@ class TestInterpolate:
         # Lower right pixel
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.reduce_points((x, y), as_array=True) == r.reduce_points((lon, lat), input_latlon=True, as_array=True) == r.data[-1, -1]
+        assert (
+            r.reduce_points((x, y), as_array=True)
+            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+            == r.data[-1, -1]
+        )
 
         # One pixel above
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.reduce_points((x, y), as_array=True) == r.reduce_points((lon, lat), input_latlon=True, as_array=True) == r.data[-2, -1]
+        assert (
+            r.reduce_points((x, y), as_array=True)
+            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+            == r.data[-2, -1]
+        )
 
         # One pixel left
         x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
         lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert r.reduce_points((x, y), as_array=True) == r.reduce_points((lon, lat), input_latlon=True, as_array=True) == r.data[-1, -2]
+        assert (
+            r.reduce_points((x, y), as_array=True)
+            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+            == r.data[-1, -2]
+        )
