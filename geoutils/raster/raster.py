@@ -469,7 +469,7 @@ class Raster:
                 self._transform = ds.transform
                 self._crs = ds.crs
                 # Allow user to manually override the nodata value which may be specified in the file.
-                if nodata != None:
+                if nodata is not None:
                     self._nodata = nodata
                 else:
                     self._nodata = ds.nodata
