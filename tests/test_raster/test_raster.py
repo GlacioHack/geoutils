@@ -100,6 +100,10 @@ class TestRaster:
         ):
             gu.Raster(1)  # type: ignore
 
+        # Test that user-provided nodata value gets set
+        r6 = gu.Raster(example, nodata=255)
+        assert r6._nodata == 255
+
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_repr_str(self, example: str) -> None:
         """Test the representation of a raster works"""
