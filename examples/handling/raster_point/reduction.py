@@ -1,6 +1,6 @@
 """
-Reduction from window
-=====================
+Reduce raster around points
+===========================
 
 This example demonstrates the reduction of windowed raster values around a point using :func:`~geoutils.Raster.value_at_coords`.
 """
@@ -29,30 +29,27 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.bounds.left + 50, rast.bounds.right - 50, 50)
 y_coords = rng.uniform(rast.bounds.bottom + 50, rast.bounds.top - 50, 50)
 
-vals = rast.reduce_points((x_coords, y_coords))
+pc = rast.reduce_points((x_coords, y_coords))
 
 # %%
-# Replace by Vector function once done
-ds = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=x_coords, y=y_coords), crs=rast.crs)
-ds["vals"] = vals
-ds.plot(column="vals", cmap="terrain", legend=True, vmin=np.nanmin(rast), vmax=np.nanmax(rast))
+# We plot the resulting point cloud
+pc.plot(ax="new", cmap="terrain", cbar_title="Elevation (m)")
 
 # %%
 # By default, :func:`~geoutils.Raster.value_at_coords` extracts the closest pixel value. But it can also be passed a window size and reductor function to
 # extract an average value or other statistic based on neighbouring pixels.
 
-vals_reduced = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
+pc_reduced = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 
-np.nanmean(vals - vals_reduced)
+np.nanmean(pc - pc_reduced)
 
 # %%
 # The mean difference in extracted values is quite significant at 0.3 meters!
-# We can visualize how the sampling took place in window.
+# We can visualize how the sampling took place in the windows.
 
-# Replace by Vector fonction once done
 coords = rast.coords(grid=True)
-x_closest = rast.copy(new_array=coords[0]).reduce_points((x_coords, y_coords)).squeeze()
-y_closest = rast.copy(new_array=coords[1]).reduce_points((x_coords, y_coords)).squeeze()
+x_closest = rast.copy(new_array=coords[0]).reduce_points((x_coords, y_coords), as_array=True).squeeze()
+y_closest = rast.copy(new_array=coords[1]).reduce_points((x_coords, y_coords), as_array=True).squeeze()
 from shapely.geometry import box
 
 geometry = [
@@ -60,5 +57,5 @@ geometry = [
     for x, y in zip(x_closest, y_closest)
 ]
 ds = gpd.GeoDataFrame(geometry=geometry, crs=rast.crs)
-ds["vals"] = vals_reduced
+ds["vals"] = pc_reduced.data
 ds.plot(column="vals", cmap="terrain", legend=True, vmin=np.nanmin(rast), vmax=np.nanmax(rast))

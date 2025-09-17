@@ -1,6 +1,6 @@
 """
-Interpolation from grid
-=======================
+Interpolate raster at points
+============================
 
 This example demonstrates the 2D interpolation of raster values to points using :func:`~geoutils.Raster.interp_points`.
 """
@@ -19,27 +19,23 @@ rast = rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 2000,
 rast.plot(cmap="terrain")
 
 # %%
-# We generate a random subsample of 100 points to interpolate, and extract the coordinates.
+# We generate a random subsample of 100 coordinates to interpolate.
 
-import geopandas as gpd
 import numpy as np
 
-# Replace by Raster function once done (valid coords)
 rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.bounds.left + 50, rast.bounds.right - 50, 50)
 y_coords = rng.uniform(rast.bounds.bottom + 50, rast.bounds.top - 50, 50)
 
-vals = rast.interp_points(points=(x_coords, y_coords))
+pc = rast.interp_points(points=(x_coords, y_coords))
 
 # %%
-# Replace by Vector function once done
-ds = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x=x_coords, y=y_coords), crs=rast.crs)
-ds["vals"] = vals
-ds.plot(column="vals", cmap="terrain", legend=True, vmin=np.nanmin(rast), vmax=np.nanmax(rast), marker="x")
+# We plot the resulting point cloud
+pc.plot(ax="new", cmap="terrain", marker="x", cbar_title="Elevation (m)")
 
 # %%
 # .. important::
-#       The interpretation of where raster values are located differ, see XXX. The parameter ``shift_area_or_point`` (off by default) can be turned on to ensure
+#       The interpretation of where raster values are located can differ. The parameter ``shift_area_or_point`` (off by default) can be turned on to ensure
 #       that the pixel interpretation of your dataset is correct.
 
 # %%
@@ -51,8 +47,8 @@ rast.area_or_point = "Point"
 # %%
 # We can interpolate again by shifting according to our interpretation, and changing the resampling algorithm (default to "linear").
 
-vals_shifted = rast.interp_points(points=(x_coords, y_coords), shift_area_or_point=True, method="quintic")
-np.nanmean(vals - vals_shifted)
+pc_shifted = rast.interp_points(points=(x_coords, y_coords), shift_area_or_point=True, method="quintic")
+np.nanmean(pc - pc_shifted)
 
 # %%
-# The mean difference in interpolated values is quite significant, with a 2 meter bias!
+# The mean difference in interpolated values is quite significant, with a 2-meter bias!

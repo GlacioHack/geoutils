@@ -33,10 +33,10 @@ pyplot.rcParams['savefig.dpi'] = 600
 pyplot.rcParams['font.size'] = 9
 ```
 
-## The core {class}`~geoutils.Raster` and {class}`~geoutils.Vector` classes
+## The core {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects
 
 In GeoUtils, geospatial handling is object-based and revolves around {class}`~geoutils.Raster` and {class}`~geoutils.Vector`.
-These link to either **on-disk** or **in-memory** datasets, opened by calling the object with a file path.
+These link to either **in-memory** or **on-disk** datasets, opened by calling the object from a filepath for the latter.
 
 ```{code-cell} ipython3
 import geoutils as gu
@@ -195,10 +195,10 @@ import numpy as np
 rast = (rast - np.min(rast)) / (np.max(rast) - np.min(rast))
 ```
 
-## Casting to {class}`~geoutils.Mask`, indexing and overload
+## Casting to {class}`~geoutils.RasterMask`, indexing and overload
 
 All {class}`~geoutils.Raster` objects also support Python logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.Mask`, a boolean raster that inherits all methods from {class}`~geoutils.Raster`.
+{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.RasterMask`, a boolean raster that inherits all methods from {class}`~geoutils.Raster`.
 
 ```{code-cell} ipython3
 # Get mask of an AOI: infrared index above 0.6, at least 200 m from glaciers
@@ -213,7 +213,7 @@ values_aoi = rast[mask_aoi]
 ```
 
 Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
-{class}`~geoutils.Mask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
+{class}`~geoutils.RasterMask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{code-cell} ipython3
 # Polygonize areas where mask is True
@@ -243,8 +243,8 @@ os.remove("myaoi.gpkg")
 
 ## Parsing sensor metadata
 
-In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a `{class}`~geoutils.Raster`
-, which tentatively parses metadata recognized from the filename or auxiliary files.
+In our case, `rast` would be better opened using the ``parse_sensor_metadata`` argument of a {class}`~geoutils.Raster`,
+which tentatively parses metadata recognized from the filename or auxiliary files.
 
 ```{code-cell} ipython3
 # Name of the image we used

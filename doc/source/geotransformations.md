@@ -14,7 +14,7 @@ kernelspec:
 # Transformations
 
 In GeoUtils, **for all geospatial data objects, georeferenced transformations are exposed through the same functions**
-{func}`~geoutils.Raster.reproject`, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.shift`. Additionally,
+{func}`~geoutils.Raster.reproject`, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.translate`. Additionally,
 for convenience and consistency during analysis, most operations can be passed a {class}`~geoutils.Raster` or
 {class}`~geoutils.Vector` as a reference to match.
 In that case, no other argument is necessary. For more details, see {ref}`core-match-ref`.

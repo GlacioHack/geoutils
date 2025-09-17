@@ -182,7 +182,7 @@ By default, the value of index of the {class}`~geoutils.Vector`'s {attr}`~geouti
 
 ```{note}
 If an `out_value` of `0` (default) and `in_value` value of `1` are passed (i.e., boolean output), {func}`~geoutils.Vector.rasterize` will automatically cast
-the output to a {class}`~geoutils.Mask`.
+the output to a {class}`~geoutils.RasterMask`.
 ```
 
 To define the grid on which to rasterize, a reference {class}`~geoutils.Raster` to match can be passed. Alternatively, a {attr}`~geoutils.Raster.res` or
@@ -194,9 +194,9 @@ rasterized_vect = vect.rasterize(rast)
 rasterized_vect
 ```
 
-## Create a {class}`~geoutils.Mask`
+## Create a {class}`~geoutils.RasterMask`
 
-Creating a {class}`~geoutils.Mask` from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask` function, which converts vector
+Creating a {class}`~geoutils.RasterMask` from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask` function, which converts vector
 geometries into boolean gridded values for all features.
 
 Similarly as for {func}`~geoutils.Vector.rasterize`, the function expects parameters to define the grid on which to rasterize the output. A reference

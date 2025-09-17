@@ -32,6 +32,7 @@ original_sha256 = {
     "everest_rgi_outlines": "d1a5bcd4bd4731a24c2398c016a6f5a8064160fedd5bab10609adacda9ba41ef",
     "exploradores_aster_dem": "dcb0d708d042553cdd2bb4fd82c55b5674a5e0bd6ea46f1a021b396b7d300033",
     "exploradores_rgi_outlines": "19c2dac089ce57373355213fdf2fd72f601bf97f21b04c4920edb1e4384ae2b2",
+    "coromandel_lidar": "2f1fff1bb84860a8438e14d39e14bf974236dc6345e64649a131507d0ed844f3",
 }
 
 

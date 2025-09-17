@@ -156,3 +156,4 @@ doc/source/sg_execution_times.rst
 # Files that should have been deleted by Sphinx at end of build (but can exist if build fails)
 examples/io/open_save/myraster.tif
 examples/io/open_save/myvector.gpkg
+examples/io/open_save/mypc.gpkg

@@ -41,6 +41,7 @@ _FILEPATHS_DATA = {
     "exploradores_rgi_outlines": os.path.join(
         _EXAMPLES_DIRECTORY, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg"
     ),
+    "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz"),
 }
 
 available = list(_FILEPATHS_DATA.keys())
@@ -57,7 +58,7 @@ def download_examples(overwrite: bool = False) -> None:
         return
 
     # Static commit hash to be bumped every time it needs to be.
-    commit = "3121f37e8de767cb7ea21cbd93b4dd59a81b1ced"
+    commit = "7f778649a5d058c68605ad1297859b7582144ea6"
     # The URL from which to download the repository
     url = f"https://github.com/GlacioHack/geoutils-data/tarball/main#commit={commit}"
 
@@ -78,7 +79,7 @@ def download_examples(overwrite: bool = False) -> None:
             tar.extractall(tmp_dir)
 
         # Find the first directory in the temp_dir (should only be one) and construct the example data dir paths.
-        for dir_name in ["Everest_Landsat", "Exploradores_ASTER"]:
+        for dir_name in ["Everest_Landsat", "Exploradores_ASTER", "Coromandel_Lidar"]:
             tmp_dir_name = os.path.join(
                 tmp_dir,
                 [dirname for dirname in os.listdir(tmp_dir) if os.path.isdir(os.path.join(tmp_dir, dirname))][0],
@@ -87,7 +88,7 @@ def download_examples(overwrite: bool = False) -> None:
             )
 
             # Copy the temporary extracted data to the example directory.
-            shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name))
+            shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name), dirs_exist_ok=True)
 
 
 def get_path(name: str) -> str:
