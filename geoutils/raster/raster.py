@@ -3530,7 +3530,6 @@ class Raster:
         else:
             return gu.PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
 
-
     @overload
     def filter(
         self: RasterType,
