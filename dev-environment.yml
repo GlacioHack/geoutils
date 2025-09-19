@@ -22,6 +22,7 @@ dependencies:
 
   # Optional dependencies
   - scikit-image
+  - numba
 
   # Test dependencies
   - gdal  # To test functionalities against GDAL
