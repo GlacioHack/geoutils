@@ -107,6 +107,17 @@ def gaussian_filter(array: NDArrayNum, sigma: float, **kwargs: Any) -> NDArrayNu
 
 @jit(nopython=True, parallel=True)  # type: ignore
 def median_filter_numba(array: NDArrayNum, window_size: int) -> NDArrayNum:
+    """
+    Apply a median filter to a raster that may contain NaNs, using numbas's implementation.
+
+    :param array: The input array to be filtered.
+    :param window_size: The size of the window to use (must be odd).
+
+    :returns: The filtered array (same shape as input).
+    """
+
+    if window_size % 2 == 0:
+        raise ValueError("window_size must be odd")
 
     # Get input shapes
     N1, N2 = array.shape
@@ -132,11 +143,15 @@ def median_filter(array: NDArrayNum, window_size: int, engine: Literal["scipy", 
     Apply a median filter to a raster that may contain NaNs, using scipy's implementation.
 
     :param array: The input array to be filtered.
-    :param window_size: The size of the window to use.
+    :param window_size: The size of the window to use (must be odd).
     :param engine: Filtering engine to use, either "scipy" or "numba".
 
     :returns: The filtered array (same shape as input).
     """
+
+    if window_size % 2 == 0:
+        raise ValueError("window_size must be odd")
+
     if array.ndim == 2:
         return _apply_median_filter_2d(array, window_size, engine)
     elif array.ndim == 3:
@@ -154,8 +169,6 @@ def _apply_median_filter_2d(array: NDArrayNum, window_size: int, engine: Literal
     :param engine: Filtering engine to use, either "scipy" or "numba".
     :returns: Filtered array of the same shape as input.
     """
-    if window_size % 2 == 0:
-        raise ValueError("window_size must be odd")
 
     if engine == "scipy":
         return scipy_generic_filter(array, np.nanmedian, size=window_size, mode="constant", cval=np.nan)
@@ -183,11 +196,13 @@ def mean_filter(array: NDArrayNum, kernel_size: int = 5, **kwargs: Any) -> NDArr
     return generic_filter(array, scipy.ndimage.convolve, **{"weights": kernel, **kwargs})  # type: ignore
 
 
-def min_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
+def min_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     """
     Apply a minimum filter to a raster that may contain NaNs, using scipy's implementation.
 
     :param array: The input array to be filtered.
+    :param size:  the shape that is taken from the input array, at every element position,
+    to define the input to the filter function
 
     :returns: The filtered array (same shape as input).
     """
@@ -198,16 +213,18 @@ def min_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
     nans = np.isnan(array)
     # We replace temporarily NaNs by infinite values during filtering to avoid spreading NaNs
     array_nans_replaced = np.where(nans, np.inf, array)
-    array_nans_replaced_f = scipy.ndimage.minimum_filter(array_nans_replaced, **kwargs)
+    array_nans_replaced_f = scipy.ndimage.minimum_filter(array_nans_replaced, size=size, **kwargs)
     # In the end, we want the filtered array without infinite values, so we put back NaNs
     return np.where(nans, array, array_nans_replaced_f)
 
 
-def max_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
+def max_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     """
     Apply a maximum filter to a raster that may contain NaNs, using scipy's implementation.
 
     :param array: the input array to be filtered.
+    :param size:  the shape that is taken from the input array, at every element position,
+    to define the input to the filter function
 
     :returns: the filtered array (same shape as input).
     """
@@ -218,7 +235,7 @@ def max_filter(array: NDArrayNum, **kwargs: Any) -> NDArrayNum:
     nans = np.isnan(array)
     # We replace temporarily NaNs by negative infinite values during filtering to avoid spreading NaNs
     array_nans_replaced = np.where(nans, -np.inf, array)
-    array_nans_replaced_f = scipy.ndimage.maximum_filter(array_nans_replaced, **kwargs)
+    array_nans_replaced_f = scipy.ndimage.maximum_filter(array_nans_replaced, size=size, **kwargs)
     # In the end we want the filtered array without negative infinite values, so we put back NaNs
     return np.where(nans, array, array_nans_replaced_f)
 
