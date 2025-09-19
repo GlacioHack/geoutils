@@ -2,7 +2,7 @@
 Reduce raster around points
 ===========================
 
-This example demonstrates the reduction of windowed raster values around a point using :func:`~geoutils.Raster.value_at_coords`.
+This example demonstrates the reduction of windowed raster values around a point using :func:`~geoutils.Raster.reduce_points`.
 """
 
 # %%
@@ -36,7 +36,7 @@ pc = rast.reduce_points((x_coords, y_coords))
 pc.plot(ax="new", cmap="terrain", cbar_title="Elevation (m)")
 
 # %%
-# By default, :func:`~geoutils.Raster.value_at_coords` extracts the closest pixel value. But it can also be passed a window size and reductor function to
+# By default, :func:`~geoutils.Raster.reduce_points` extracts the closest pixel value. But it can also be passed a window size and reductor function to
 # extract an average value or other statistic based on neighbouring pixels.
 
 pc_reduced = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
@@ -47,6 +47,7 @@ np.nanmean(pc - pc_reduced)
 # The mean difference in extracted values is quite significant at 0.3 meters!
 # We can visualize how the sampling took place in the windows.
 
+# Replace by Vector function once done
 coords = rast.coords(grid=True)
 x_closest = rast.copy(new_array=coords[0]).reduce_points((x_coords, y_coords), as_array=True).squeeze()
 y_closest = rast.copy(new_array=coords[1]).reduce_points((x_coords, y_coords), as_array=True).squeeze()
