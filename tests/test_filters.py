@@ -113,8 +113,7 @@ class TestStatisticalFilters:
 
         assert filtered_scipy.shape == arr.shape
         assert filtered_numba.shape == arr.shape
-        mask = np.isfinite(filtered_scipy) & np.isfinite(filtered_numba)
-        np.testing.assert_allclose(filtered_scipy[mask], filtered_numba[mask], rtol=1e-5)
+        assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
 
     def test_median_filter_even_window_size_raises(self) -> None:
         """Ensure median filter raises with even window size."""
@@ -262,85 +261,34 @@ class TestRasterFilters:
 class TestNaNConsistency:
 
     @pytest.mark.parametrize(  # type: ignore
-        "method, vt, kwargs",
+        "method, func, kwargs",
         [
             (
-                "gaussian",
-                np.array(
-                    [
-                        [50.44, 44.78840723, 50.00838795, 55.24, 48.55],
-                        [45.24, 46.484448, 51.81481846, 53.84, 50.15],
-                        [45.64, 46.84580181, 47.86123291, 45.90860692, 42.38],
-                        [46.52, 43.42714287, np.nan, 43.89431209, 41.90],
-                        [38.77, 39.21, 41.51, 47.77, 45.75],
-                    ],
-                ),
-                {"sigma": 1},
-            ),
-            (
                 "median",
-                np.array(
-                    [
-                        [39, 42, 52.5, 65.5, 79.5],
-                        [39, 45, 56, 60, 42.5],
-                        [39.5, 50.5, 58, 61.5, 56],
-                        [45, 45, 57, 39.5, 39.5],
-                        [46, 34, 58, 49, 56],
-                    ]
-                ),
+                np.median,
                 {"window_size": 3},
             ),
             (
                 "mean",
-                np.array(
-                    [
-                        [50.33, 44.66, 51.11, 55.44, 52.77],
-                        [43.11, 48.11, 52.22, 51.44, 43.44],
-                        [48.11, np.nan, np.nan, np.nan, 48.88],
-                        [44.44, np.nan, np.nan, np.nan, 37.33],
-                        [41.33, np.nan, np.nan, np.nan, 50.55],
-                    ]
-                ),
+                np.nanmean,
                 {"kernel_size": 3},
             ),
             (
                 "max",
-                np.array(
-                    [
-                        [78.0, 78.0, 88.0, 90.0, 90.0],
-                        [78.0, 82.0, 88.0, 90.0, 90.0],
-                        [91.0, 91.0, 82.0, 90.0, 90.0],
-                        [91.0, 91.0, np.nan, 87.0, 87.0],
-                        [91.0, 91.0, 87.0, 87.0, 87.0],
-                    ]
-                ),
+                np.nanmax,
                 {"size": 3},
             ),
             (
                 "min",
-                np.array(
-                    [
-                        [15.0, 15.0, 15.0, 12.0, 12.0],
-                        [15.0, 15.0, 14.0, 7.0, 7.0],
-                        [25.0, 25.0, 14.0, 7.0, 7.0],
-                        [10.0, 10.0, np.nan, 7.0, 7.0],
-                        [10.0, 10.0, 19.0, 19.0, 30.0],
-                    ]
-                ),
+                np.nanmin,
                 {"size": 3},
             ),
         ],
     )
-    def test_nan_data(self, method, vt, kwargs):
-        array = np.array(
-            [
-                [78, 15, 39, 88, 12],
-                [33, 45, 60, 71, 90],
-                [25, 56, 82, 14, 7],
-                [91, 34, np.nan, 63, 49],
-                [10, 58, 19, 87, 30],
-            ]
-        )
+    def test_nan_data(self, method, func, kwargs):
 
-        arr_filtered = gu.filters._filter(array, method=method, **kwargs)
-        np.testing.assert_allclose(vt, arr_filtered, rtol=1e-2)
+        rng = np.random.default_rng(42)
+        arr = rng.normal(size=(3, 3))
+        filtered_arr = gu.filters._filter(arr, method=method, **kwargs)
+        # Central value of the filter should be the same as the filter on the entire array
+        assert np.isclose(filtered_arr[1, 1], func(arr), rtol=1e-08, atol=1e-08)

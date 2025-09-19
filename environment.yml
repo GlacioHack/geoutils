@@ -16,4 +16,3 @@ dependencies:
   - rioxarray=0.*
   - affine
   - shapely
-  - numba
