@@ -88,6 +88,10 @@ class RasterBase:
         self._downsample: int | float = 1
         self._profile: dict[str, Any] | None = None
 
+    def from_array(self):
+        """Placeholder method for subclasses."""
+        raise NotImplementedError("This method is meant to be subclassed.")
+
     @property
     def _is_xr(self) -> bool:
         """Whether the underlying object is a Xarray Dataset through accessor, or not."""
@@ -1195,7 +1199,7 @@ class RasterBase:
 
     def reduce_points(
         self,
-        points: tuple[ArrayLike, ArrayLike] | gu.PointCloud,
+        points: tuple[ArrayLike, ArrayLike] | PointCloud,
         reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
         window: int | None = None,
         input_latlon: bool = False,
