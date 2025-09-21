@@ -165,7 +165,7 @@ A {class}`~geoutils.Raster` can be applied any pythonic arithmetic operation ({f
 ```
 
 A {class}`~geoutils.Raster` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.Mask`.
+{func}`<<operator.lt>`) with another {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.RasterMask`.
 
 ```{code-cell} ipython3
 # What raster pixels are less than 100?
@@ -184,7 +184,7 @@ A {class}`~geoutils.Raster` can be applied any NumPy universal functions and mos
 np.sqrt(rast)
 ```
 
-Logical comparison functions will cast to a {class}`~geoutils.Mask`.
+Logical comparison functions will cast to a {class}`~geoutils.RasterMask`.
 
 ```{code-cell} ipython3
 # Is the raster close to another within tolerance?
@@ -241,9 +241,46 @@ passed.
 Resampling methods are listed in **[the dedicated section of Rasterio's API](https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling)**.
 ```
 
+[//]: # (```{note})
+
+[//]: # (Reprojecting a {class}`~geoutils.Raster` can be done out-of-memory in multiprocessing by passing a)
+
+[//]: # ({class}`~geoutils.raster.MultiprocConfig` parameter to the {func}`~geoutils.Raster.reproject` function.)
+
+[//]: # (In this case, the reprojected raster is saved on disk under the specify path in {class}`~geoutils.raster.MultiprocConfig` &#40;or a temporary file&#41; and the raster metadata are loaded from the file.)
+
+[//]: # (```)
+
+[//]: # ()
+[//]: # (```{code-cell} ipython3)
+
+[//]: # (# Same example out-of-memory)
+
+[//]: # (from geoutils.raster import MultiprocConfig, ClusterGenerator)
+
+[//]: # (cluster = ClusterGenerator&#40;"multi", nb_workers=4&#41;)
+
+[//]: # (mp_config = MultiprocConfig&#40;chunk_size=200, cluster=None&#41;  # Pass a cluster to perform reprojection in multiprocessing)
+
+[//]: # (rast_reproj = rast.reproject&#40;)
+
+[//]: # (    res=0.1,)
+
+[//]: # (    bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},)
+
+[//]: # (    resampling="cubic",)
+
+[//]: # (    multiproc_config=mp_config&#41;)
+
+[//]: # (rast_reproj)
+
+[//]: # (```)
+
 ## Crop
 
 Cropping a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`.
+Additionally, you can use the {func}`~geoutils.Raster.icrop` method to crop the raster using pixel coordinates instead of geographic bounds.
+Both cropping methods can be used before loading the raster's data into memory. This optimization can prevent loading unnecessary parts of the data, which is particularly useful when working with large rasters.
 
 ```{important}
 As with all geospatial handling methods, the {func}`~geoutils.Raster.crop` function can be passed only a {class}`~geoutils.Raster` or {class}`~geoutils.Vector`
@@ -254,12 +291,22 @@ See {ref}`core-match-ref` for more details.
 
 The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default,
 {func}`~geoutils.Raster.crop` returns a new Raster.
+The {func}`~geoutils.Raster.icrop` function accepts only a bounding box in pixel coordinates (colmin, rowmin, colmax, rowmax) and crop the raster accordingly.
+By default, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.icrop` return a new Raster unless the inplace parameter is set to True, in which case the cropping operation is performed directly on the original raster object.
 For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
 
+### Example for {func}`~geoutils.Raster.crop`
 ```{code-cell} ipython3
 # Crop raster to smaller bounds
-rast_crop = rast.crop(crop_geom=(0.3, 0.3, 1, 1))
+rast_crop = rast.crop(bbox=(0.3, 0.3, 1, 1))
 print(rast_crop.bounds)
+```
+
+### Example for {func}`~geoutils.Raster.icrop`
+```{code-cell} ipython3
+# Crop raster using pixel coordinates
+rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
+print(rast_icrop.bounds)
 ```
 
 ## Polygonize
@@ -268,7 +315,7 @@ Polygonizing a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Ra
 {class}`~geoutils.Vector`.
 
 ```{note}
-For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels. See
+For a {class}`~geoutils.RasterMask`, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels. See
 {ref}`mask-class-poly-overloaded`.
 ```
 
@@ -284,7 +331,7 @@ Computing proximity from a {class}`~geoutils.Raster` is done through by the {fun
 to any target pixels in the {class}`~geoutils.Raster`.
 
 ```{note}
-For a {class}`~geoutils.Mask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels. See
+For a {class}`~geoutils.RasterMask`, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels. See
 {ref}`mask-class-prox-overloaded`.
 ```
 
@@ -346,3 +393,22 @@ rast_reproj.to_pointcloud()
 # Export to xarray data array
 rast_reproj.to_xarray()
 ```
+
+## Statistics
+
+Statistics of a raster, optionally subsetting to an inlier mask, can be computed using {func}`~geoutils.Raster.get_stats`.
+
+```{code-cell} ipython3
+# Get mean, max and STD of the raster
+rast.get_stats(["mean", "max", "std"])
+```
+
+A raster can also be quickly subsampled using {func}`~geoutils.Raster.subsample`, which can consider only valid values, and return either a point cloud or an
+array:
+
+```{code-cell} ipython3
+# Get 500 random points
+pc_sub = rast.subsample(500)
+```
+
+See {ref}`stats` for more details.

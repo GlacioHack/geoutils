@@ -90,6 +90,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.crop
+    Raster.icrop
     Raster.reproject
     Raster.polygonize
     Raster.proximity
@@ -104,6 +105,15 @@ documentation.
     :toctree: gen_modules/
 
     Raster.plot
+```
+
+### Get statistics
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Raster.get_stats
 ```
 
 ### Get or update data methods
@@ -212,10 +222,10 @@ And reverse operations.
     Raster.__array_function__
 ```
 
-## Mask
+## Raster mask
 
 ```{eval-rst}
-.. minigallery:: geoutils.Mask
+.. minigallery:: geoutils.RasterMask
       :add-heading:
 ```
 
@@ -225,7 +235,7 @@ And reverse operations.
 .. autosummary::
     :toctree: gen_modules/
 
-    Mask
+    RasterMask
 ```
 
 ### Overloaded Raster methods
@@ -234,10 +244,10 @@ And reverse operations.
 .. autosummary::
     :toctree: gen_modules/
 
-    Mask.crop
-    Mask.reproject
-    Mask.polygonize
-    Mask.proximity
+    RasterMask.crop
+    RasterMask.reproject
+    RasterMask.polygonize
+    RasterMask.proximity
 ```
 
 ## Multiple rasters
@@ -250,6 +260,21 @@ And reverse operations.
     raster.stack_rasters
     raster.merge_rasters
 ```
+
+[//]: # (## Multiprocessing)
+
+[//]: # ()
+[//]: # (```{eval-rst})
+
+[//]: # (.. autosummary::)
+
+[//]: # (    :toctree: gen_modules/)
+
+[//]: # ()
+[//]: # (    raster.MultiprocConfig)
+
+[//]: # ()
+[//]: # (```)
 
 ## Vector
 
@@ -363,7 +388,6 @@ This first category of attributes and methods return a geometric output converte
     :toctree: gen_modules/
 
     Vector.boundary
-    Vector.unary_union
     Vector.centroid
     Vector.convex_hull
     Vector.envelope
@@ -383,7 +407,9 @@ This first category of attributes and methods return a geometric output converte
     Vector.difference
     Vector.symmetric_difference
     Vector.union
+    Vector.union_all
     Vector.intersection
+    Vector.intersection_all
     Vector.clip_by_rect
     Vector.buffer
     Vector.simplify
@@ -392,16 +418,39 @@ This first category of attributes and methods return a geometric output converte
     Vector.rotate
     Vector.scale
     Vector.skew
+    Vector.concave_hull
+    Vector.delaunay_triangles
+    Vector.voronoi_polygons
+    Vector.minimum_rotated_rectangle
+    Vector.minimum_bounding_circle
+    Vector.extract_unique_points
+    Vector.remove_repeated_points
+    Vector.offset_curve
+    Vector.reverse
+    Vector.segmentize
+    Vector.polygonize
+    Vector.transform
+    Vector.force_2d
+    Vector.force_3d
+    Vector.line_merge
+    Vector.shortest_line
+    Vector.interpolate
+    Vector.shared_paths
     Vector.dissolve
     Vector.explode
     Vector.sjoin
     Vector.sjoin_nearest
     Vector.overlay
     Vector.clip
+    Vector.snap
     Vector.to_crs
     Vector.set_crs
+    Vector.get_geometry
     Vector.set_geometry
     Vector.rename_geometry
+    Vector.set_precision
+    Vector.get_precision
+    Vector.get_coordinates
     Vector.cx
 ```
 
@@ -427,6 +476,8 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     Vector.is_empty
     Vector.is_ring
     Vector.is_simple
+    Vector.is_ccw
+    Vector.is_closed
     Vector.has_z
 ```
 
@@ -438,7 +489,6 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
 
     Vector.contains
     Vector.geom_equals
-    Vector.geom_almost_equals
     Vector.crosses
     Vector.disjoint
     Vector.intersects
@@ -448,6 +498,21 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
     Vector.covers
     Vector.covered_by
     Vector.distance
+    Vector.is_valid_reason
+    Vector.count_coordinates
+    Vector.count_geometries
+    Vector.count_interior_rings
+    Vector.get_precision
+    Vector.minimum_clearance
+    Vector.minimum_bounding_radius
+    Vector.contains_properly
+    Vector.dwithin
+    Vector.hausdorff_distance
+    Vector.frechet_distance
+    Vector.hilbert_distance
+    Vector.relate
+    Vector.relate_pattern
+    Vector.project
 ```
 
 
@@ -466,13 +531,16 @@ To ensure those are up-to-date with GeoPandas, alternatively call those from {at
     Vector.from_features
     Vector.from_postgis
     Vector.from_dict
+    Vector.from_arrow
     Vector.to_file
     Vector.to_feather
     Vector.to_parquet
+    Vector.to_arrow
     Vector.to_wkt
     Vector.to_wkb
     Vector.to_json
     Vector.to_postgis
+    Vector.to_geo_dict
     Vector.to_csv
 ```
 
@@ -492,4 +560,115 @@ To ensure those are up-to-date with GeoPandas, alternatively call those from {at
 ```{seealso}
 The methods above are described in [GeoPandas GeoSeries's API](https://geopandas.org/en/stable/docs/reference/geoseries.html) and [Shapely object's
 documentation](https://shapely.readthedocs.io/en/stable/properties.html).
+```
+
+## Point cloud
+
+```{eval-rst}
+.. minigallery:: geoutils.PointCloud
+      :add-heading:
+```
+
+### Opening a file
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud
+    PointCloud.info
+```
+
+### Main attributes
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.ds
+    PointCloud.data_column
+    PointCloud.data
+    PointCloud.crs
+```
+
+### Other attributes
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.point_count
+```
+
+
+### Create and convert from data
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.from_xyz
+    PointCloud.from_array
+    PointCloud.from_tuples
+    PointCloud.to_xyz
+    PointCloud.to_array
+    PointCloud.to_tuples
+
+```
+
+### Geospatial
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.crop
+    PointCloud.reproject
+    PointCloud.translate
+```
+
+### Interface with raster
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.grid
+```
+
+### Statistics
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.get_stats
+    PointCloud.subsample
+```
+
+### Testing methods
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.pointcloud_equal
+    PointCloud.georeferenced_coords_equal
+```
+
+
+## Point cloud mask
+
+```{eval-rst}
+.. minigallery:: geoutils.PointCloudMask
+      :add-heading:
+```
+
+### Opening a file
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloudMask
 ```

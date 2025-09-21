@@ -1,10 +1,30 @@
+# Copyright (c) 2025 GeoUtils developers
+#
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Functionalities for gridding points (point cloud to raster)."""
 
 import warnings
 from typing import Literal
 
+import affine
 import geopandas as gpd
 import numpy as np
+import rasterio as rio
 from scipy.interpolate import griddata
 
 from geoutils._typing import NDArrayNum
@@ -16,7 +36,7 @@ def _grid_pointcloud(
     data_column_name: str = "b1",
     resampling: Literal["nearest", "linear", "cubic"] = "linear",
     dist_nodata_pixel: float = 1.0,
-) -> NDArrayNum:
+) -> tuple[NDArrayNum, affine.Affine]:
     """
     Grid point cloud (possibly irregular coordinates) to raster (regular grid) using delaunay triangles interpolation.
 
@@ -65,7 +85,9 @@ def _grid_pointcloud(
 
     # Get the nearest point for each grid point
     grid_pc = gpd.GeoDataFrame(
-        data={"placeholder": np.ones(len(xx.ravel()))}, geometry=gpd.points_from_xy(x=xx.ravel(), y=yy.ravel())
+        data={"placeholder": np.ones(len(xx.ravel()))},
+        geometry=gpd.points_from_xy(x=xx.ravel(), y=yy.ravel()),
+        crs=pc.crs,
     )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, message="Geometry is in a geographic CRS.*")
@@ -88,4 +110,7 @@ def _grid_pointcloud(
     # Flip Y axis of grid
     aligned_dem = np.flip(aligned_dem, axis=0)
 
-    return aligned_dem
+    # 3/ Derive output transform from input grid
+    transform_from_coords = rio.transform.from_origin(min(grid_coords[0]), max(grid_coords[1]), res_x, res_y)
+
+    return aligned_dem, transform_from_coords

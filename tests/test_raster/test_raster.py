@@ -97,6 +97,10 @@ class TestRaster:
         ):
             gu.Raster(1)  # type: ignore
 
+        # Test that user-provided nodata value gets set
+        r6 = gu.Raster(example, nodata=255)
+        assert r6._nodata == 255
+
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_repr_str(self, example: str) -> None:
         """Test the representation of a raster works"""
@@ -348,7 +352,7 @@ class TestRaster:
         assert isinstance(rio_ds, rio.io.DatasetReader)
 
         # Check that all attributes are equal
-        rio_attrs_conserved = [attr for attr in _default_rio_attrs if attr not in ["name", "driver"]]
+        rio_attrs_conserved = [attr for attr in _default_rio_attrs if attr not in ["name", "driver", "profile"]]
         for attr in rio_attrs_conserved:
             assert rst.__getattribute__(attr) == rio_ds.__getattribute__(attr)
 
@@ -417,7 +421,8 @@ class TestRaster:
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]
+        "dtype",
+        ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "float32", "float64", "longdouble"],
     )  # type: ignore
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
@@ -431,7 +436,7 @@ class TestRaster:
             there is no mask defined at all, e.g. for classic array with NaNs),
         4. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array,
         5. Raises an error if the new data does not have the right shape,
-        6. Raises an error if the new data does not have the dtype of the Raster.
+        6. Does not raise an error if the new data does not have the dtype of the Raster.
         7. Raises a warning if the new data has the nodata value in the masked array, but unmasked.
         """
 
@@ -567,21 +572,14 @@ class TestRaster:
             assert np.array_equal(r3.data.data, arr_with_unmasked_nodata, equal_nan=True)
             assert np.array_equal(r3.data.mask, np.logical_or(mask, ~np.isfinite(arr_with_unmasked_nodata)))
 
-        # Check that setting data with a different data type results in an error
+        # Check that setting data with a different data type works
         rst = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=nodata)
         if "int" in dtype:
             new_dtype = "float32"
         else:
             new_dtype = "uint8"
 
-        with pytest.raises(
-            ValueError,
-            match=re.escape(
-                "New data must be of the same type as existing data: {}. Use copy() to set a new array "
-                "with different dtype, or astype() to change type.".format(str(np.dtype(dtype)))
-            ),
-        ):
-            rst.data = rst.data.astype(new_dtype)
+        rst.data = rst.data.astype(new_dtype)
 
         # Check that setting data with a different shape results in an error
         new_shape = (1, 25)
@@ -968,9 +966,8 @@ class TestRaster:
 
         # Open data, modify, and copy
         r = gu.Raster(example)
-        r.data += 5
+        r.data = r.data + 5
         r2 = r.copy()
-
         # Objects should be different (not pointing to the same memory)
         assert r is not r2
 
@@ -983,9 +980,9 @@ class TestRaster:
         # Check a temporary memory file different than original disk file was created
         assert r2.name != r.name
 
-        # Check all attributes except name and driver
+        # Check all attributes except name, driver and profile
         default_attrs = _default_rio_attrs.copy()
-        for attr in ["name", "driver"]:
+        for attr in ["name", "driver", "profile"]:
             default_attrs.remove(attr)
         attrs = default_attrs
         for attr in attrs:
@@ -998,7 +995,7 @@ class TestRaster:
         assert np.array_equal(r.data.mask, r2.data.mask)
 
         # -- Third test: if r.data is modified, it does not affect r2.data --
-        r.data += 5
+        r.data = r.data + 1
         assert not np.array_equal(r.data.data, r2.data.data, equal_nan=True)
 
         # -- Fourth test: check the new array parameter works with either ndarray filled with NaNs, or masked arrays --
@@ -1032,13 +1029,13 @@ class TestRaster:
         assert r2.dtype == new_dtype
 
         # However, the new nodata will differ if casting was done
-        if np.promote_types(r.dtype, new_dtype) != new_dtype:
+        if np.promote_types(r.dtype, new_dtype) != new_dtype and r.nodata is not None:
             assert r2.nodata != r.nodata
         else:
             assert r2.nodata == r.nodata
 
         # The copy should fail if the data type is not compatible
-        if np.promote_types(r.dtype, new_dtype) != new_dtype:
+        if np.promote_types(r.dtype, new_dtype) != new_dtype and r.nodata is not None:
             with pytest.raises(ValueError, match="Nodata value *"):
                 r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
         else:
@@ -1055,16 +1052,16 @@ class TestRaster:
         assert not r.is_modified
 
         # This should not trigger the hash
-        r.data = r.data + 0
+        r.load()
         assert not r.is_modified
 
-        # This one neither
-        r.data += 0
+        # This should not trigger the hash either
+        r.data = r.data + np.array([0], dtype=r.dtype)
         assert not r.is_modified
 
         # This will
         r = gu.Raster(example)
-        r.data = r.data + 5
+        r = r + 5
         assert r.is_modified
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
@@ -1133,7 +1130,7 @@ class TestRaster:
         # Create a boolean array of the same shape, and a mask of the same transform/crs
         rng = np.random.default_rng(42)
         arr = rng.integers(low=0, high=2, size=rst.shape, dtype=bool)
-        mask = gu.Mask.from_array(data=arr, transform=rst.transform, crs=rst.crs)
+        mask = gu.RasterMask.from_array(data=arr, transform=rst.transform, crs=rst.crs)
 
         # Check that indexing works with both of those
         vals_arr = rst[arr]
@@ -1569,8 +1566,9 @@ class TestRaster:
         assert _default_nodata("int8") == np.iinfo("int8").min
         assert _default_nodata("uint16") == np.iinfo("uint16").max
         assert _default_nodata("int16") == np.iinfo("int16").min
-        assert _default_nodata("uint32") == 99999
-        for dtype in ["int32", "float32", "float64", "longdouble"]:
+        for dtype in ["uint32", "uint64"]:
+            assert _default_nodata(dtype) == 99999
+        for dtype in ["int32", "int64", "float32", "float64", "longdouble"]:
             assert _default_nodata(dtype) == -99999
 
         # Check it works with most frequent np.dtypes too
@@ -1773,6 +1771,12 @@ class TestRaster:
         assert img.raster_equal(saved)
         assert saved.tags["Type"] == "test"
 
+        # Test saving file in COG format
+        img.save(temp_file, driver="COG")
+        saved = gu.Raster(temp_file)
+        assert img.raster_equal(saved)
+        assert saved.tags["LAYOUT"] == "COG"
+
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
         img.save(temp_file, nodata=0)
         saved = gu.Raster(temp_file)
@@ -1926,12 +1930,12 @@ class TestRaster:
             red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
-        # Modify the red band and make sure it propagates to the original img (it's not a copy)
-        red.data += 1
         assert np.array_equal(
             red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
+        # Modify the red band and make sure it propagates to the original img (it's not a copy)
+        red.data = red.data + 1
         # Copy the bands instead of pointing to the same memory.
         red_c = img.split_bands(copy=True, bands=1)[0]
 
@@ -1939,7 +1943,7 @@ class TestRaster:
         assert not np.shares_memory(red_c.data, img.data)
 
         # Modify the copy, and make sure the original data is not modified.
-        red_c.data += 1
+        red_c.data = red_c.data + 1
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
@@ -1975,17 +1979,17 @@ class TestMask:
 
         # A warning should be raised when the raster is a multi-band
         if "RGB" not in os.path.basename(example):
-            mask = gu.Mask(example)
+            mask = gu.RasterMask(example)
         else:
             with pytest.warns(
                 UserWarning, match="Multi-band raster provided to create a Mask, only the first band will be used."
             ):
-                mask = gu.Mask(example)
+                mask = gu.RasterMask(example)
 
         # Check the masked array type
         assert mask.data.dtype == "bool"
         # Check output is the correct instance
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         # Check the dtypes metadata
         assert mask.dtype == "bool"
         # Check the nodata
@@ -1994,8 +1998,12 @@ class TestMask:
         assert mask.count == 1
 
         # Check that a mask object is sent back from its own init
-        mask2 = gu.Mask(mask)
+        mask2 = gu.RasterMask(mask)
         assert mask.raster_equal(mask2)
+
+        # Check that the old Mask class still works, but raises a deprecationg warning
+        with pytest.warns(DeprecationWarning):
+            gu.Mask(example)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_repr_str(self, example: str) -> None:
@@ -2004,7 +2012,7 @@ class TestMask:
         warnings.filterwarnings("ignore", message="Multi-band raster provided to create a Mask*")
 
         # For data not loaded by default
-        r = gu.Mask(example)
+        r = gu.RasterMask(example)
 
         r_repr = r.__repr__()
         r_str = r.__str__()
@@ -2026,7 +2034,7 @@ class TestMask:
 
         mask_rst = gu.Raster.from_array(data=self.mask_ma, transform=self.transform, crs=None, nodata=None)
 
-        assert isinstance(mask_rst, gu.Mask)
+        assert isinstance(mask_rst, gu.RasterMask)
         assert mask_rst.transform == self.transform
         assert mask_rst.crs is None
         assert mask_rst.nodata is None
@@ -2053,7 +2061,7 @@ class TestMask:
 
         # Logical operations should cast to a Mask object, preserving the mask
         mask = getattr(rst, op)(1)
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         assert np.array_equal(mask.data.data, getattr(rst.data.data, op)(1))
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
@@ -2068,42 +2076,42 @@ class TestMask:
 
         # Equality
         mask = rst == 1
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         assert np.array_equal(mask.data.data, rst.data.data == 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Non-equality
         mask = rst != 1
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         assert np.array_equal(mask.data.data, rst.data.data != 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Lower than
         mask = rst < 1
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         assert np.array_equal(mask.data.data, rst.data.data < 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Lower equal
         mask = rst <= 1
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         assert np.array_equal(mask.data.data, rst.data.data <= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Greater than
         mask = rst > 1
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         assert np.array_equal(mask.data.data, rst.data.data > 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Greater equal
         mask = rst >= 1
-        assert isinstance(mask, gu.Mask)
+        assert isinstance(mask, gu.RasterMask)
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_save(self, mask: gu.Mask) -> None:
+    def test_save(self, mask: gu.RasterMask) -> None:
         """Test saving for masks"""
 
         # Temporary folder
@@ -2112,7 +2120,7 @@ class TestMask:
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
         mask.save(temp_file)
-        saved = gu.Mask(temp_file)
+        saved = gu.RasterMask(temp_file)
 
         # A raster (or mask) in-memory has more information than on disk, we need to update it before checking equality
         # The values in its .data.data that are masked in .data.mask are not necessarily equal to the nodata value
@@ -2201,7 +2209,7 @@ class TestArithmetic:
         assert r1.raster_equal(r2)
 
         # Change data
-        r2.data += 1
+        r2.data = r2.data + 1
         assert not r1.raster_equal(r2)
 
         # Change mask (False by default)
@@ -2261,7 +2269,7 @@ class TestArithmetic:
         assert r1.georeferenced_grid_equal(r2)
 
         # Change data
-        r2.data += 1
+        r2.data = r2.data + 1
         assert r1.georeferenced_grid_equal(r2)
 
         # Change mask (False by default)
@@ -2409,14 +2417,10 @@ class TestArithmetic:
 
         # Test with a float value
         r3 = getattr(r1, op)(floatval)
-        dtype = np.dtype(rio.dtypes.get_minimum_dtype(floatval))
         assert isinstance(r3, gu.Raster)
-        assert r3.data.dtype == dtype
-        assert np.all(r3.data == getattr(r1.data, op)(np.array(floatval).astype(dtype)))
-        if np.sum(r3.data.mask) == 0:
-            assert r3.nodata is None
-        else:
-            assert r3.nodata == _default_nodata(dtype)
+        # Behaviour is more complex for scalars since NumPy 2.0,
+        # so simply comparing it is consistent with that of masked arrays
+        assert r3.raster_equal(self.from_array(getattr(r1.data, op)(floatval), rst_ref=r1))
 
     reflective_ops = [["__add__", "__radd__"], ["__mul__", "__rmul__"]]
 
@@ -2762,12 +2766,12 @@ class TestArrayInterface:
     # All universal functions of NumPy, about 90 in 2022. See list: https://numpy.org/doc/stable/reference/ufuncs.html
     ufuncs_str = [
         ufunc
-        for ufunc in np.core.umath.__all__
+        for ufunc in np._core.umath.__all__
         if (
             ufunc[0] != "_"
             and ufunc.islower()
             and "err" not in ufunc
-            and ufunc not in ["e", "pi", "frompyfunc", "euler_gamma"]
+            and ufunc not in ["e", "pi", "frompyfunc", "euler_gamma", "vecdot", "vecmat"]
         )
     ]
 

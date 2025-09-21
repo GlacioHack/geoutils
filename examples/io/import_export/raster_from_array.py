@@ -47,6 +47,6 @@ rast = gu.Raster.from_array(data=ma, transform=transform, crs=crs, nodata=255)
 rast
 
 # %%
-# The different functionalities of GeoUtils will respect :class:`~geoutils.Raster.nodata` values, starting with :func:`~geoutils.Raster.show`,
+# The different functionalities of GeoUtils will respect :class:`~geoutils.Raster.nodata` values, starting with :func:`~geoutils.Raster.plot`,
 # which will ignore them during plotting (transparent).
 rast.plot(cmap="copper")

@@ -110,6 +110,7 @@ georeferencing
 geotransformations
 raster_vector_point
 distance_ops
+stats
 ```
 
 ```{toctree}
@@ -128,7 +129,14 @@ analysis_examples/index
 api
 cli
 config
+```
+
+```{toctree}
+:caption: Project information
+:maxdepth: 2
+
 background
+license
 ```
 
 # Indices and tables

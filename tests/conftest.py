@@ -1,6 +1,6 @@
 """Configuration of pytest."""
 
-from pytest import DoctestItem
+from _pytest.doctest import DoctestItem
 
 
 # To order test modules logically during execution
@@ -20,8 +20,8 @@ def pytest_collection_modifyitems(items):  # type: ignore
     module_names = list(module_mapping.values())
     module_items = list(module_mapping.keys())
 
-    module_items_reordered = [it for k, it in enumerate(module_items) if module_names[k] != "test_delayed"] + [
-        it for k, it in enumerate(module_items) if module_names[k] == "test_delayed"
+    module_items_reordered = [it for k, it in enumerate(module_items) if module_names[k] != "test_dask"] + [
+        it for k, it in enumerate(module_items) if module_names[k] == "test_dask"
     ]
 
     # And write back items in that order, with doctests first

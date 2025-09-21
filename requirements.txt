@@ -6,10 +6,10 @@ matplotlib==3.*
 pyproj==3.*
 rasterio>=1.3,<2
 pandas>=1,<3
-numpy==1.*
+numpy>=1,<3
 scipy==1.*
 tqdm
 xarray
 rioxarray==0.*
-geocube
-dask
+affine
+shapely

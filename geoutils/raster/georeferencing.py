@@ -1,3 +1,21 @@
+# Copyright (c) 2025 GeoUtils developers
+#
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Functions for manipulating georeferencing of the raster objects.
 """
@@ -155,7 +173,7 @@ def _outside_image(
     """See description of Raster.outside_image."""
 
     if not index:
-        xi, xj = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
+        yj, xi = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
 
     if np.any(np.array((xi, yj)) < 0):
         return True
@@ -224,6 +242,8 @@ def _default_nodata(dtype: DTypeLike) -> int:
         "int16": -32768,
         "uint32": 99999,
         "int32": -99999,
+        "uint64": 99999,
+        "int64": -99999,
         "float16": -99999,
         "float32": -99999,
         "float64": -99999,
