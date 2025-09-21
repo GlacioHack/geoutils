@@ -46,7 +46,6 @@ from geoutils.raster.georeferencing import _cast_pixel_interpretation
 # 1/ REPROJECT
 ##############
 
-
 def _reproject(
     source_raster: gu.Raster,
     ref: gu.Raster,
@@ -111,6 +110,8 @@ def _reproject(
 
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
 
+    # --- Run the reprojection of data --- #
+
     if multiproc_config is not None:
         _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
         return False, None, None, None, None
@@ -121,15 +122,24 @@ def _reproject(
                 "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
                 "with `force_source_nodata`."
             )
-        src_arr = source_raster.data.filled(src_nodata)
-        # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        dst_arr = _rio_reproject(src_arr, reproj_kwargs=reproj_kwargs)
-        # Set mask
-        dst_arr = np.ma.masked_array(dst_arr.astype(dtype), fill_value=nodata)
-        if nodata is not None:
-            dst_arr.mask = dst_arr == nodata
-        return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
 
+        # If input is Xarray, use NaNs for nodata
+        if source_raster._is_xr:
+            src_arr = source_raster.data
+            src_arr[np.isnan(src_arr)] = src_nodata
+            dst_arr, transformed = _rio_reproject(src_arr=src_arr, reproj_kwargs=reproj_kwargs)
+            dst_arr[dst_arr == nodata] = np.nan
+        # Otherwise, use masked array
+        else:
+            src_arr = source_raster.data.filled(src_nodata)
+            # All masked values must be set to a nodata value for rasterio's reproject to work properly
+            dst_arr = _rio_reproject(src_arr, reproj_kwargs=reproj_kwargs)
+            # Set mask
+            dst_arr = np.ma.masked_array(dst_arr.astype(dtype), fill_value=nodata)
+            if nodata is not None:
+                dst_arr.mask = dst_arr == nodata
+
+        return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
 
 #########
 # 2/ CROP
@@ -161,7 +171,7 @@ def _crop(
             xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
             xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
     else:
-        raise ValueError("cropGeom must be a Raster, Vector, or list of coordinates.")
+        raise ValueError("'crop_geom' must be a Raster, Vector, or list of coordinates.")
 
     if mode == "match_pixel":
         # Finding the intersection of requested bounds and original bounds, cropped to image shape
