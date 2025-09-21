@@ -21,6 +21,7 @@ dependencies:
   - pip
 
   # Optional dependencies
+  - laspy
   - scikit-image
 
   # Test dependencies
@@ -51,4 +52,4 @@ dependencies:
   - typing-extensions
 
   - pip:
-    - -e ./
+      - -e ./

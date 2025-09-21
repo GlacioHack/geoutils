@@ -89,10 +89,10 @@ sphinx_gallery_conf = {
             os.path.join(example_path, "io", "open_save"),
             os.path.join(example_path, "io", "import_export"),
             os.path.join(example_path, "handling", "georeferencing"),
-            os.path.join(example_path, "handling", "interface"),
+            os.path.join(example_path, "handling", "raster_vector"),
+            os.path.join(example_path, "handling", "raster_point"),
             os.path.join(example_path, "analysis", "array_numerics"),
-            os.path.join(example_path, "analysis", "geospatial"),
-            os.path.join(example_path, "analysis", "point_extraction"),
+            os.path.join(example_path, "analysis", "distance_ops"),
         ]
     ),
     "within_subsection_order": ExampleTitleSortKey,
@@ -124,7 +124,9 @@ plot_formats = [(".png", 500)]
 # To avoid long path names in inheritance diagrams
 inheritance_alias = {
     "geoutils.raster.raster.Raster": "geoutils.Raster",
-    "geoutils.raster.raster.Mask": "geoutils.Mask",
+    "geoutils.raster.raster.RasterMask": "geoutils.RasterMask",
+    "geoutils.pointcloud.pointcloud.PointCloud": "geoutils.PointCloud",
+    "geoutils.pointcloud.pointcloud.PointCloudMask": "geoutils.PointCloudMask",
     "geoutils.vector.Vector": "geoutils.Vector",
     "xdem.dem.DEM": "xdem.DEM",
 }

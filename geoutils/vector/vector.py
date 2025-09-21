@@ -23,7 +23,6 @@ Module for Vector class.
 from __future__ import annotations
 
 import pathlib
-import warnings
 from collections import abc
 from os import PathLike
 from typing import (
@@ -46,7 +45,7 @@ import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas._typing import WriteBuffer
-from rasterio.crs import CRS
+from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
@@ -68,7 +67,7 @@ VectorType = TypeVar("VectorType", bound="Vector")
 
 class Vector:
     """
-    The georeferenced vector
+    The georeferenced vector.
 
      Main attributes:
         ds: :class:`geopandas.GeoDataFrame`
@@ -82,37 +81,105 @@ class Vector:
     See the API for more details.
     """
 
-    def __init__(self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry):
+    def __init__(
+        self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
+    ):
         """
         Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
         """
 
-        # If filename is passed
-        if isinstance(filename_or_dataset, (str, pathlib.Path)):
-            with warnings.catch_warnings():
-                # This warning shows up in numpy 1.21 (2021-07-09)
-                warnings.filterwarnings("ignore", ".*attribute.*array_interface.*Polygon.*")
-                ds = gpd.read_file(filename_or_dataset)
-            self._ds = ds
-            self._name: str | gpd.GeoDataFrame | None = filename_or_dataset
-        # If GeoPandas or Shapely object is passed
-        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
-            self._name = None
-            if isinstance(filename_or_dataset, gpd.GeoDataFrame):
-                self._ds = filename_or_dataset
-            elif isinstance(filename_or_dataset, gpd.GeoSeries):
-                self._ds = gpd.GeoDataFrame(geometry=filename_or_dataset)
-            else:
-                self._ds = gpd.GeoDataFrame({"geometry": [filename_or_dataset]}, crs=None)
+        self._name: str | None = None
+        self._ds: gpd.GeoDataFrame | None = None
+
         # If Vector is passed, simply point back to Vector
-        elif isinstance(filename_or_dataset, Vector):
+        if isinstance(filename_or_dataset, Vector):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
             return
+        # If filename is passed
+        elif isinstance(filename_or_dataset, (str, pathlib.Path)):
+            ds = gpd.read_file(filename_or_dataset)
+        # If GeoPandas or Shapely object is passed
+        elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
+            if isinstance(filename_or_dataset, gpd.GeoDataFrame):
+                ds = filename_or_dataset
+            elif isinstance(filename_or_dataset, gpd.GeoSeries):
+                ds = gpd.GeoDataFrame(geometry=filename_or_dataset)
+            else:
+                ds = gpd.GeoDataFrame({"geometry": [filename_or_dataset]}, crs=None)
         else:
-            raise TypeError("Filename argument should be a string, Path or geopandas.GeoDataFrame.")
+            raise TypeError("Filename argument should be a string, path or geodataframe.")
+
+        # Set geodataframe
+        self.ds = ds
+
+        # Write name attribute
+        if isinstance(filename_or_dataset, str):
+            self._name = filename_or_dataset
+        if isinstance(filename_or_dataset, pathlib.Path):
+            self._name = filename_or_dataset.name
+
+    @property
+    def crs(self) -> CRS:
+        """Coordinate reference system of the vector."""
+        return self.ds.crs
+
+    @property
+    def ds(self) -> gpd.GeoDataFrame:
+        """Geodataframe of the vector."""
+        return self._ds
+
+    @ds.setter
+    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
+        """Set a new geodataframe."""
+
+        if isinstance(new_ds, gpd.GeoDataFrame):
+            self._ds = new_ds
+        elif isinstance(new_ds, gpd.GeoSeries):
+            self._ds = gpd.GeoDataFrame(geometry=new_ds)
+        else:
+            raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
+
+    def vector_equal(self, other: gu.Vector, **kwargs: Any) -> bool:
+        """
+        Check if two vectors are equal.
+
+        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
+        """
+
+        try:
+            assert_geodataframe_equal(self.ds, other.ds, **kwargs)
+            vector_eq = True
+        except AssertionError:
+            vector_eq = False
+
+        return vector_eq
+
+    @property
+    def name(self) -> str | None:
+        """Name on disk, if it exists."""
+        return self._name
+
+    @property
+    def geometry(self) -> gpd.GeoSeries:
+        return self.ds.geometry
+
+    @property
+    def columns(self) -> pd.Index:
+        return self.ds.columns
+
+    @property
+    def index(self) -> pd.Index:
+        return self.ds.index
+
+    def copy(self: VectorType) -> VectorType:
+        """Return a copy of the vector."""
+        # Utilise the copy method of GeoPandas
+        new_vector = self.__new__(type(self))
+        new_vector.__init__(self.ds.copy())  # type: ignore
+        return new_vector  # type: ignore
 
     def __repr__(self) -> str:
         """Convert vector to string representation."""
@@ -291,9 +358,6 @@ class Vector:
             legend_kwds=legend_kwds,
             **kwargs,
         )
-
-        cax
-
         plt.sca(ax0)
 
         # If returning axes
@@ -886,40 +950,6 @@ class Vector:
         )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_crs(self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False) -> Vector | None:
-
-        if inplace:
-            self.ds = self.ds.to_crs(crs=crs, epsg=epsg)
-            return None
-        else:
-            return self._override_gdf_output(self.ds.to_crs(crs=crs, epsg=epsg))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def set_crs(
-        self, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False, allow_override: bool = False
-    ) -> Vector | None:
-
-        if inplace:
-            self.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
-            return None
-        else:
-            return self._override_gdf_output(self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def set_precision(
-        self,
-        grid_size: float = 0.0,
-        mode: str = "valid_output",
-        inplace: bool = False,
-    ) -> Vector | None:
-
-        if inplace:
-            self.ds = self.ds.set_precision(grid_size=grid_size, mode=mode)
-            return None
-        else:
-            return self._override_gdf_output(self.ds.set_precision(grid_size=grid_size, mode=mode))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
     def set_geometry(self, col: str, drop: bool = False, inplace: bool = False, crs: CRS = None) -> Vector | None:
 
         if inplace:
@@ -928,6 +958,54 @@ class Vector:
         else:
             return self._override_gdf_output(self.ds.set_geometry(col=col, drop=drop, crs=crs))
 
+    # Subsection of methods that shouldn't override the output for Vector subclasses
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_crs(
+        self: VectorType, crs: CRS | None = None, epsg: int | None = None, inplace: bool = False
+    ) -> VectorType | None:
+
+        if inplace:
+            self.ds = self.ds.to_crs(crs=crs, epsg=epsg)
+            return None
+        else:
+            copy = self.copy()
+            copy.ds = self.ds.to_crs(crs=crs, epsg=epsg)
+            return copy
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def set_crs(
+        self: VectorType,
+        crs: CRS | None = None,
+        epsg: int | None = None,
+        inplace: bool = False,
+        allow_override: bool = False,
+    ) -> VectorType | None:
+
+        if inplace:
+            self.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
+            return None
+        else:
+            copy = self.copy()
+            copy.ds = self.ds.set_crs(crs=crs, epsg=epsg, allow_override=allow_override)
+            return copy
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def set_precision(
+        self: VectorType,
+        grid_size: float = 0.0,
+        mode: str = "valid_output",
+        inplace: bool = False,
+    ) -> VectorType | None:
+
+        if inplace:
+            self.ds = self.ds.set_precision(grid_size=grid_size, mode=mode)
+            return None
+        else:
+            copy = self.copy()
+            copy.ds = self.ds.set_precision(grid_size=grid_size, mode=mode)
+            return copy
+
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def rename_geometry(self, col: str, inplace: bool = False) -> Vector | None:
 
@@ -935,13 +1013,15 @@ class Vector:
             self.ds = self.ds.set_geometry(col=col)
             return None
         else:
-            return self._override_gdf_output(self.ds.rename_geometry(col=col))
+            copy = self.copy()
+            copy.ds = self.ds.rename_geometry(col=col)
+            return copy
 
     # -----------------------------------
     # GeoDataFrame: other functionalities
     # -----------------------------------
 
-    def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Vector:
+    def __getitem__(self, key: gu.Raster | Vector | list[float] | tuple[float, ...] | Any) -> Any:
         """
         Index the geodataframe.
         """
@@ -1152,64 +1232,8 @@ class Vector:
     # --------------------------------
 
     @property
-    def crs(self) -> rio.crs.CRS:
-        """Coordinate reference system of the vector."""
-        return self.ds.crs
-
-    @property
-    def ds(self) -> gpd.GeoDataFrame:
-        """Geodataframe of the vector."""
-        return self._ds
-
-    @ds.setter
-    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
-        """Set a new geodataframe."""
-
-        if isinstance(new_ds, gpd.GeoDataFrame):
-            self._ds = new_ds
-        elif isinstance(new_ds, gpd.GeoSeries):
-            self._ds = gpd.GeoDataFrame(geometry=new_ds)
-        else:
-            raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
-
-    def vector_equal(self, other: Vector, **kwargs: Any) -> bool:
-        """
-        Check if two vectors are equal.
-
-        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
-        """
-
-        try:
-            assert_geodataframe_equal(self.ds, other.ds, **kwargs)
-            vector_eq = True
-        except AssertionError:
-            vector_eq = False
-
-        return vector_eq
-
-    @property
-    def name(self) -> str | None:
-        """Name on disk, if it exists."""
-        return self._name
-
-    @property
-    def geometry(self) -> gpd.GeoSeries:
-        return self.ds.geometry
-
-    @property
     def active_geometry_name(self) -> str:
         return self.ds.active_geometry_name
-
-    @property
-    def index(self) -> pd.Index:
-        return self.ds.index
-
-    def copy(self: VectorType) -> VectorType:
-        """Return a copy of the vector."""
-        # Utilise the copy method of GeoPandas
-        new_vector = self.__new__(type(self))
-        new_vector.__init__(self.ds.copy())  # type: ignore
-        return new_vector  # type: ignore
 
     @overload
     def crop(
@@ -1341,7 +1365,9 @@ class Vector:
             self.ds = new_ds
             return None
         else:
-            return Vector(new_ds)
+            copy = self.copy()
+            copy.ds = new_ds
+            return copy
 
     @overload
     def translate(
@@ -1407,70 +1433,72 @@ class Vector:
     @overload
     def create_mask(
         self,
-        raster: str | gu.Raster | None = None,
+        ref: gu.PointCloud | gu.Raster | None = None,
         crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
+        res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
+        points: tuple[NDArrayNum, NDArrayNum] = None,
         *,
         as_array: Literal[False] = False,
-    ) -> gu.Mask: ...
+    ) -> gu.PointCloudMask | gu.RasterMask: ...
 
     @overload
     def create_mask(
         self,
-        raster: str | gu.Raster | None = None,
+        ref: gu.Raster | gu.PointCloud | None = None,
         crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
+        res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
+        points: tuple[NDArrayNum, NDArrayNum] = None,
         *,
         as_array: Literal[True],
-    ) -> NDArrayNum: ...
+    ) -> NDArrayBool: ...
 
     def create_mask(
         self,
-        raster: gu.Raster | None = None,
+        ref: gu.Raster | gu.PointCloud | None = None,
         crs: CRS | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
+        res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        buffer: int | float | np.integer[Any] | np.floating[Any] = 0,
+        points: tuple[NDArrayNum, NDArrayNum] = None,
         as_array: bool = False,
-    ) -> gu.Mask | NDArrayBool:
+    ) -> gu.RasterMask | gu.PointCloudMask | NDArrayBool:
         """
-        Create a mask from the vector features.
+        Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
+        feature, False if not).
 
-        **Match-reference:** a raster can be passed to match its resolution, bounds and CRS when creating the mask.
+        For a raster reference, creates a raster mask with the resolution, bounds and CRS of the reference raster.
+        For a point cloud reference, creates a point mask with the coordinates and CRS of the reference point cloud.
 
-        Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
-        Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
+        Alternatively, for a raster mask, one can specify a grid to rasterize on based on bounds, resolution and CRS.
+        For a point mask, one can specify the points coordinates and CRS.
 
-        Vector features which fall outside the bounds of the raster file are not written to the new mask file.
+        :param ref: Reference raster or pointcloud to use during masking.
+        :param res: (Only for raster masking) Spatial resolution of mask. Required if no reference is passed.
+        :param points: (Only for point cloud masking) Point X/Y coordinates of mask. Required if no reference is passed.
+        :param bounds: (Only for raster masking) Bounds of mask (left, bottom, right, top). Optional, defaults to this
+            vector's bounds. Only used if no reference is passed.
+        :param crs: Coordinate reference system for output mask. Optional, defaults to this vector's crs. Only used if
+            no reference is passed.
+        :param as_array: Whether to return mask as a boolean array.
 
-        :param raster: Reference raster to match during rasterization.
-        :param crs: A pyproj or rasterio CRS object (Default to raster.crs if not None then self.crs)
-        :param xres: Output raster spatial resolution in x. Only is raster is None.
-        :param yres: Output raster spatial resolution in y. Only if raster is None. (Default to xres)
-        :param bounds: Output raster bounds (left, bottom, right, top). Only if raster is None (Default to self bounds)
-        :param buffer: Size of buffer to be added around the features, in the raster's projection units.
-            If a negative value is set, will erode the features.
-        :param as_array: Return mask as a boolean array
-
-        :returns: A Mask object contain a boolean array
+        :returns: A raster or point cloud mask.
         """
 
-        mask, transform, crs = _create_mask(
-            gdf=self.ds, raster=raster, crs=crs, xres=xres, yres=yres, bounds=bounds, buffer=buffer, as_array=as_array
-        )
+        # Create mask
+        mask, transform, crs, pts = _create_mask(gdf=self.ds, ref=ref, crs=crs, res=res, points=points, bounds=bounds)
 
         # Return output as mask or as array
         if as_array:
             return mask.squeeze()
         else:
-            return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+            # If pts is None, the output is a point cloud mask
+            if pts is not None:
+                return gu.PointCloud.from_xyz(x=pts.x.values, y=pts.y.values, z=mask, crs=crs)
+            # Otherwise, the transform is not None
+            else:
+                assert transform is not None  # For mypy
+                return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     def rasterize(
         self,
@@ -1481,7 +1509,7 @@ class Vector:
         bounds: tuple[float, float, float, float] | None = None,
         in_value: int | float | abc.Iterable[int | float] | None = None,
         out_value: int | float = 0,
-    ) -> gu.Raster | gu.Mask:
+    ) -> gu.Raster | gu.RasterMask:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
 

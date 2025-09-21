@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Sampling tools for arrays and rasters."""
+"""Module for array sampling statistics."""
 
 from __future__ import annotations
 

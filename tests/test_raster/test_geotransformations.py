@@ -330,13 +330,13 @@ class TestRasterGeotransformations:
         r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.stats.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtype)
-        rand_indices = gu.raster.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = gu.stats.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
@@ -583,7 +583,7 @@ class TestRasterGeotransformations:
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
-        rand_indices = gu.raster.subsample_array(r_gaps.data, nsamples, return_indices=True)
+        rand_indices = gu.stats.subsample_array(r_gaps.data, nsamples, return_indices=True)
         r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
@@ -672,7 +672,7 @@ class TestMaskGeotransformations:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_crop(self, mask: gu.Mask) -> None:
+    def test_crop(self, mask: gu.RasterMask) -> None:
         # Test with same bounds -> should be the same #
 
         mask_orig = mask.copy()
@@ -681,7 +681,7 @@ class TestMaskGeotransformations:
         assert mask_cropped.raster_equal(mask)
 
         # Check if instance is respected
-        assert isinstance(mask_cropped, gu.Mask)
+        assert isinstance(mask_cropped, gu.RasterMask)
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
         # Check the original mask was not modified during cropping
@@ -766,7 +766,7 @@ class TestMaskGeotransformations:
         # assert mask_cropped.raster_equal(mask_orig)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_reproject(self, mask: gu.Mask) -> None:
+    def test_reproject(self, mask: gu.RasterMask) -> None:
         # Test 1: with a classic resampling (bilinear)
 
         # Reproject mask - resample to 100 x 100 grid
@@ -774,7 +774,7 @@ class TestMaskGeotransformations:
         mask_reproj = mask.reproject(grid_size=(100, 100), force_source_nodata=2)
 
         # Check instance is respected
-        assert isinstance(mask_reproj, gu.Mask)
+        assert isinstance(mask_reproj, gu.RasterMask)
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
         # Check the original mask was not modified during reprojection

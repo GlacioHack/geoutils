@@ -136,14 +136,14 @@ class TestGeoreferencing:
             list_z_ind.append(z_ind)
 
         # First order interpolation
-        rpts = r.interp_points((xrand, yrand), method="linear")
+        rpts = r.interp_points((xrand, yrand), method="linear", as_array=True)
         # The values interpolated should be equal
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
         # Test there is no failure with random coordinates (edge effects, etc)
         xrand = rng.uniform(low=xmin, high=xmax, size=(1000,))
         yrand = rng.uniform(low=ymin, high=ymax, size=(1000,))
-        r.interp_points((xrand, yrand))
+        r.interp_points((xrand, yrand), as_array=True)
 
         # Second, test after a crop: the Raster now has an Area interpretation, those should fall right on the integer
         # pixel indexes
@@ -166,7 +166,7 @@ class TestGeoreferencing:
             z_ind = img[int(i[k]), int(j[k])]
             list_z_ind.append(z_ind)
 
-        rpts = r.interp_points((xrand, yrand), method="linear")
+        rpts = r.interp_points((xrand, yrand), method="linear", as_array=True)
 
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 

@@ -75,7 +75,7 @@ np.modf(rast)
 ```
 
 Similar to with Python operators, NumPy's [logical comparison functions](https://numpy.org/doc/stable/reference/ufuncs.html#comparison-functions) cast
-{class}`Rasters<geoutils.Raster>` to a {class}`~geoutils.Mask`.
+{class}`Rasters<geoutils.Raster>` to a {class}`~geoutils.RasterMask`.
 
 ```{code-cell} ipython3
 # Universal function with a single input and two outputs
