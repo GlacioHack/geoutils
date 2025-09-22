@@ -2027,8 +2027,8 @@ class Raster:
             f"Nodata value:         {self.nodata}\n",
             f"Pixel interpretation: {self.area_or_point}\n",
             "Pixel size:           {}, {}\n".format(*self.res),
-            "Upper left corner:    {}, {}\n".format(*self.bounds[:2]),
-            "Lower right corner:   {}, {}\n".format(*self.bounds[2:]),
+            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}\n",
+            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}\n",
         ]
 
         if stats:
@@ -2435,7 +2435,7 @@ class Raster:
         """
         Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
-        :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowax).
+        :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowmax).
         :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
 
         :returns: Cropped raster or None (if inplace=True).
