@@ -26,6 +26,7 @@ from typing import Any, Literal
 import numpy as np
 import scipy
 from scipy.ndimage import generic_filter as scipy_generic_filter
+from scipy.ndimage import uniform_filter
 
 from geoutils._typing import NDArrayNum
 
@@ -93,20 +94,27 @@ def gaussian_filter(array: NDArrayNum, sigma: float, **kwargs: Any) -> NDArrayNu
 
     # Boolean mask: True where NaN
     mask = np.isnan(array)
-    mask = np.asarray(mask, dtype=bool)
-    # Replace NaNs with 0 for convolution
+    mask_f = (~mask).astype(float)
+
+    # Replace NaNs with 0
     arr_filled = np.where(mask, 0, array)
 
-    # Apply gaussian filter to values and to mask
+    # Apply gaussian filter to values and mask
     filtered = scipy.ndimage.gaussian_filter(arr_filled, sigma, **kwargs)
+    normalization = scipy.ndimage.gaussian_filter(mask_f, sigma, **kwargs)
 
-    filtered[mask] = np.nan
+    # Avoid division by zero
+    with np.errstate(invalid="ignore", divide="ignore"):
+        filtered /= normalization
+
+    # Where normalization is zero, set result to NaN
+    filtered[normalization == 0] = np.nan
 
     return filtered
 
 
 @jit(nopython=True, parallel=True)  # type: ignore
-def median_filter_numba(array: NDArrayNum, window_size: int) -> NDArrayNum:
+def median_filter_numba(array: NDArrayNum, size: int) -> NDArrayNum:
     """
     Apply a median filter to a raster that may contain NaNs, using numbas's implementation.
 
@@ -116,15 +124,15 @@ def median_filter_numba(array: NDArrayNum, window_size: int) -> NDArrayNum:
     :returns: The filtered array (same shape as input).
     """
 
-    if window_size % 2 == 0:
+    if size % 2 == 0:
         raise ValueError("window_size must be odd")
 
     # Get input shapes
     N1, N2 = array.shape
 
     # Define ranges to loop through given padding
-    row_range = N1 - window_size + 1
-    col_range = N2 - window_size + 1
+    row_range = N1 - size + 1
+    col_range = N2 - size + 1
 
     # Allocate an output array
     outputs = np.full((row_range, col_range), fill_value=np.nan, dtype=np.float32)
@@ -133,29 +141,29 @@ def median_filter_numba(array: NDArrayNum, window_size: int) -> NDArrayNum:
     for row in prange(row_range):
         for col in prange(col_range):
 
-            outputs[row, col] = np.nanmedian(array[row : row + window_size, col : col + window_size])
+            outputs[row, col] = np.nanmedian(array[row : row + size, col : col + size])
 
     return outputs
 
 
-def median_filter(array: NDArrayNum, window_size: int, engine: Literal["scipy", "numba"] = "numba") -> NDArrayNum:
+def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"] = "numba") -> NDArrayNum:
     """
     Apply a median filter to a raster that may contain NaNs, using scipy's implementation.
 
     :param array: The input array to be filtered.
-    :param window_size: The size of the window to use (must be odd).
+    :param size: The size of the window to use (must be odd).
     :param engine: Filtering engine to use, either "scipy" or "numba".
 
     :returns: The filtered array (same shape as input).
     """
 
-    if window_size % 2 == 0:
-        raise ValueError("window_size must be odd")
+    if size % 2 == 0:
+        raise ValueError("size must be odd")
 
     if array.ndim == 2:
-        return _apply_median_filter_2d(array, window_size, engine)
+        return _apply_median_filter_2d(array, size, engine)
     elif array.ndim == 3:
-        return np.stack([_apply_median_filter_2d(slice_, window_size, engine) for slice_ in array])
+        return np.stack([_apply_median_filter_2d(slice_, size, engine) for slice_ in array])
     else:
         raise ValueError("Input array must be 2D or 3D.")
 
@@ -180,20 +188,28 @@ def _apply_median_filter_2d(array: NDArrayNum, window_size: int, engine: Literal
         return median_filter_numba(array, window_size)
 
 
-def mean_filter(array: NDArrayNum, kernel_size: int = 5, **kwargs: Any) -> NDArrayNum:
+def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:
     """
-    Apply a mean filter to a raster that may contain NaNs.
+    Apply a mean filter to a 2D array that may contain NaNs.
 
-    :param array: The input array to be filtered.
-    :param kernel_size: The size of the kernel.
-
-    :returns: The filtered array (same shape as input).
+    :param array: 2D input array
+    :param size: size of the square kernel
+    :return: filtered array with same shape
     """
+    if np.ndim(array) != 2:
+        raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
 
-    if np.ndim(array) not in [2]:
-        raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D array.")
-    kernel = np.ones((kernel_size, kernel_size)) / kernel_size**2
-    return generic_filter(array, scipy.ndimage.convolve, **{"weights": kernel, **kwargs})  # type: ignore
+    mask = ~np.isnan(array)
+    array_filled = np.where(mask, array, 0)
+    sum_vals = uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
+    count_vals = uniform_filter(mask.astype(float), size=size, mode="constant", cval=0.0)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean_vals = sum_vals / count_vals
+
+    mean_vals[count_vals == 0] = np.nan
+
+    return mean_vals
 
 
 def min_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
@@ -242,11 +258,10 @@ def max_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
 
 def distance_filter(array: NDArrayNum, radius: float, outlier_threshold: float) -> NDArrayNum:
     """
-    Filter out pixels whose value is distantly more than a set threshold from the average value of all neighbor \
-pixels within a given radius.
+    Filter out pixels whose value is distant more than a set threshold from the average value of all neighbor \
+    pixels within a given radius.
     Filtered pixels are set to NaN.
-
-    TO DO: Add an option on how the "average" value should be calculated, i.e. using a Gaussian, median etc filter.
+    For npw, we use the gaussian filter for calculated the average value
 
     :param array: the input array to be filtered.
     :param radius: the radius in which the average value is calculated (for Gaussian filter, this is sigma).
