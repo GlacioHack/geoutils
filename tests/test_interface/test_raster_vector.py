@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import warnings
 import re
+import warnings
 
 import geopandas as gpd
 import numpy as np
@@ -227,6 +227,7 @@ class TestMaskVectorInterface:
         assert isinstance(vect, gu.Vector)
 
         # Check a warning is raised when using a non-boolean value
-        with pytest.warns(UserWarning, match=re.escape(("Raster mask (boolean type) passed, using target value of 1 ("
-                                                    "True)."))):
+        with pytest.warns(
+            UserWarning, match=re.escape("Raster mask (boolean type) passed, using target value of 1 (" "True).")
+        ):
             mask.polygonize(target_values=2)

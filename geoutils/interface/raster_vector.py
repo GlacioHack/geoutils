@@ -45,8 +45,9 @@ def _polygonize(
 
     # If target values is passed but does not correspond to 0 or 1, raise a warning
     if source_raster.is_mask:
-        if target_values != "all" and (not isinstance(target_values, (int, np.integer, float, np.floating)) or \
-                target_values not in [0, 1]):
+        if target_values != "all" and (
+            not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]
+        ):
             warnings.warn("Raster mask (boolean type) passed, using target value of 1 (True).")
         target_values = True
 

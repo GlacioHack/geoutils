@@ -52,7 +52,6 @@ from geoutils._config import config
 from geoutils._typing import (
     ArrayLike,
     DTypeLike,
-    MArrayBool,
     MArrayNum,
     NDArrayBool,
     NDArrayNum,
@@ -3943,6 +3942,4 @@ class Mask(Raster):
         **kwargs: Any,
     ) -> None:
 
-        super().__init__(*args, **kwargs, is_mask=True)
-
-
+        super().__init__(*args, **kwargs, is_mask=True)  # type: ignore

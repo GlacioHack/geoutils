@@ -339,7 +339,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
         convert_bool = True
         # Convert to uint8 for nearest, float otherwise
         if reproj_kwargs["resampling"] in [Resampling.nearest, "nearest"]:
-           src_arr = src_arr.astype("uint8")  # type: ignore
+            src_arr = src_arr.astype("uint8")  # type: ignore
         else:
             warnings.warn(
                 "Reprojecting a raster mask (boolean type) with a resampling method other than 'nearest', "

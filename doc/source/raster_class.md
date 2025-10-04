@@ -37,8 +37,8 @@ A first category includes georeferencing attributes directly derived from {attr}
 A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.bands` and
 {attr}`~geoutils.Raster.dtype`. The two former refer to the number of bands loaded in a {class}`~geoutils.Raster`, and the band indexes.
 
-The {attr}`~geoutils.Raster.is_mask` describes if the raster is a mask (i.e. a boolean raster), which overrides the behaviour of some methods to facilitate 
-their manipulation, as boolean data types are not natively supported by raster filetypes or many operations despite their usefulness for analysis (see 
+The {attr}`~geoutils.Raster.is_mask` describes if the raster is a mask (i.e. a boolean raster), which overrides the behaviour of some methods to facilitate
+their manipulation, as boolean data types are not natively supported by raster filetypes or many operations despite their usefulness for analysis (see
 {ref}`mask-type` section for details).
 
 
@@ -420,9 +420,9 @@ See {ref}`stats` for more details.
 (mask-type)=
 # The georeferenced raster mask (boolean {class}`~geoutils.Raster`)
 
-A raster mask is a boolean {class}`~geoutils.Raster` (True or False). 
+A raster mask is a boolean {class}`~geoutils.Raster` (True or False).
 
-While boolean data types are typically not supported in raster filetypes or in-memory operations, they are incredibly useful for various logical and 
+While boolean data types are typically not supported in raster filetypes or in-memory operations, they are incredibly useful for various logical and
 arithmetical operation in geospatial analysis, so GeoUtils facilitates their manipulation to support these operations natively and implicitly.
 
 ```{note}
@@ -494,7 +494,7 @@ mask
 
 ## Create from {class}`~geoutils.Vector`
 
-Raster masks can also be created from a {class}`~geoutils.Vector` using {class}`~geoutils.Vector.create_mask`, which rasterizes 
+Raster masks can also be created from a {class}`~geoutils.Vector` using {class}`~geoutils.Vector.create_mask`, which rasterizes
 all input geometries to a boolean array through {class}`~geoutils.Vector.rasterize`.
 
 Georeferencing attributes to create the {class}`~geoutils.Raster` mask can also be passed individually, using `bounds`, `crs`, `xres` and `yres`.

@@ -196,7 +196,7 @@ rasterized_vect
 
 ## Create a raster mask
 
-Creating a raster mask, i.e. a boolean {class}`~geoutils.Raster`, from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask` 
+Creating a raster mask, i.e. a boolean {class}`~geoutils.Raster`, from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask`
 function, which converts vector geometries into boolean gridded values for all features.
 
 Similarly as for {func}`~geoutils.Vector.rasterize`, the function expects parameters to define the grid on which to rasterize the output. A reference

@@ -795,7 +795,5 @@ class TestMaskGeotransformations:
 
         # Test 2: should raise a warning when the resampling differs from nearest
 
-        with pytest.warns(
-            UserWarning,
-            match="Reprojecting a raster mask .*"):
+        with pytest.warns(UserWarning, match="Reprojecting a raster mask .*"):
             mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)

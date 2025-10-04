@@ -198,7 +198,7 @@ rast = (rast - np.min(rast)) / (np.max(rast) - np.min(rast))
 ## Casting to raster mask, indexing and overload
 
 All {class}`~geoutils.Raster` objects also support Python logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a raster mask, i.e. a boolean 
+{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a raster mask, i.e. a boolean
 {class}`~geoutils.Raster`.
 
 ```{code-cell} ipython3
@@ -213,7 +213,7 @@ Raster masks can then be used for indexing a {class}`~geoutils.Raster`, which re
 values_aoi = rast[mask_aoi]
 ```
 
-Raster masks also have simplified {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>` rendering many arguments implicit. 
+Raster masks also have simplified {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>` rendering many arguments implicit.
 For instance, using {func}`~geoutils.Raster.polygonize` with a raster mask is straightforward, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{code-cell} ipython3
