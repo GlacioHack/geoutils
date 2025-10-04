@@ -791,7 +791,7 @@ class TestMaskGeotransformations:
             mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), force_source_nodata=2, resampling="nearest")
         mask_uint8_reproj = mask_uint8_reproj.astype("bool")
 
-        assert mask_reproj.raster_equal(mask_uint8_reproj, warn_failure_reason=True)
+        assert mask_reproj.raster_equal(mask_uint8_reproj, strict_masked=False)
 
         # Test 2: should raise a warning when the resampling differs from nearest
 

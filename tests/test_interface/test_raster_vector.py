@@ -132,6 +132,8 @@ class TestRasterVectorInterface:
         # For an in_value of 1 and out_value of 0 (default)
         burned_mask = vct.rasterize(raster=rst, in_value=1)
         assert isinstance(burned_mask, gu.Raster)
+        # Convert to boolean
+        burned_mask = burned_mask.astype(bool)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
         assert burned_mask.raster_equal(vct.create_mask(rst))
