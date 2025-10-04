@@ -67,12 +67,20 @@ def _proximity_from_vector_or_raster(
         mask_boundary = gu.Vector(boundary_shp).create_mask(raster, as_array=True)
 
     else:
+        # Get raster array
+        raster_arr = raster.get_nanarray()
+
+        # If input is a mask, target is implicit, and array needs to be converted to uint8
+        if target_values is None and raster.is_mask:
+            target_values = [1]
+            raster_arr = raster_arr.astype("uint8")
+
         # We mask target pixels
         if target_values is not None:
-            mask_boundary = np.logical_or.reduce([raster.get_nanarray() == target_val for target_val in target_values])
+            mask_boundary = np.logical_or.reduce([raster_arr == target_val for target_val in target_values])
         # Otherwise, all non-zero values are considered targets
         else:
-            mask_boundary = raster.get_nanarray().astype(bool)
+            mask_boundary = raster_arr.astype(bool)
 
     # 2/ Now, we compute the distance matrix relative to the masked geometry type
     if distance_unit.lower() == "georeferenced":

@@ -30,7 +30,8 @@ vect_rasterized.plot(ax="new")
 
 # %%
 # .. note::
-#         This is equivalent to using :func:`~geoutils.Vector.rasterize` with ``in_value=1`` and ``out_value=0`` and will return a :class:`~geoutils.Mask`.
+#         This is equivalent to using :func:`~geoutils.Vector.rasterize` with ``in_value=1`` and ``out_value=0`` and
+#         will return a boolean :class:`~geoutils.Raster`.
 
 vect_rasterized
 

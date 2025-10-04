@@ -81,7 +81,7 @@ plt.tight_layout()
 
 {func}`geoutils.Vector.create_mask`
 
-Mask creation from a vector **is a rasterization of all vector features that only categorizes geometry intersection as a boolean mask**
+Raster mask creation from a vector **is a rasterization of all vector features that only categorizes geometry intersection as a boolean mask**
 (if any feature falls in a given pixel or not), and is therefore independent of any vector attribute values.
 
 ```{code-cell} ipython3
@@ -105,7 +105,7 @@ _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
 
-It returns a {class}`~geoutils.RasterMask`, a georeferenced boolean raster (or optionally, a boolean NumPy array), which
+It returns a raster mask, a georeferenced boolean {class}`~geoutils.Raster` (or optionally, a boolean NumPy array), which
 can both be used for indexing or index assignment of a raster.
 
 ```{code-cell} ipython3
@@ -118,7 +118,7 @@ np.mean(rast[mask])
 {func}`geoutils.Raster.polygonize`
 
 Polygonization of a raster **consists of delimiting contiguous raster pixels with the same target values into vector polygon
-geometries**. By default, all raster values are used as targets. When using polygonize on a {class}`~geoutils.RasterMask`,
+geometries**. By default, all raster values are used as targets. When using polygonize on a raster mask, i.e. a boolean {class}`~geoutils.Raster`,
 the targets are implicitly the valid values of the mask.
 
 ```{code-cell} ipython3

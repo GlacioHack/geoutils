@@ -236,6 +236,7 @@ def _default_nodata(dtype: DTypeLike) -> int:
     Set the default nodata value for any given dtype, when this is not provided.
     """
     default_nodata_lookup = {
+        "bool": None,
         "uint8": 255,
         "int8": -128,
         "uint16": 65535,

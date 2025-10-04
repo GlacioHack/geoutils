@@ -215,7 +215,7 @@ class TestDistance:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_proximity_mask(self, mask: gu.RasterMask) -> None:
+    def test_proximity_mask(self, mask: gu.Raster) -> None:
         mask_orig = mask.copy()
         # Run default
         rast = mask.proximity()
@@ -226,5 +226,3 @@ class TestDistance:
 
         # Check that output is cast back into a raster
         assert isinstance(rast, gu.Raster)
-        # A mask is a raster, so also need to check this
-        assert not isinstance(rast, gu.RasterMask)

@@ -195,25 +195,26 @@ import numpy as np
 rast = (rast - np.min(rast)) / (np.max(rast) - np.min(rast))
 ```
 
-## Casting to {class}`~geoutils.RasterMask`, indexing and overload
+## Casting to raster mask, indexing and overload
 
 All {class}`~geoutils.Raster` objects also support Python logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a {class}`~geoutils.RasterMask`, a boolean raster that inherits all methods from {class}`~geoutils.Raster`.
+{func}`<<operator.lt>`), or more complex NumPy logical functions. Those operations automatically casts them into a raster mask, i.e. a boolean 
+{class}`~geoutils.Raster`.
 
 ```{code-cell} ipython3
 # Get mask of an AOI: infrared index above 0.6, at least 200 m from glaciers
 mask_aoi = np.logical_and(rast > 0.6, rast_proximity_to_vec > 200)
 ```
 
-Masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a {class}`~numpy.ma.MaskedArray` of indexed values.
+Raster masks can then be used for indexing a {class}`~geoutils.Raster`, which returns a {class}`~numpy.ma.MaskedArray` of indexed values.
 
 ```{code-cell} ipython3
 # Index raster with mask to extract a 1-D array
 values_aoi = rast[mask_aoi]
 ```
 
-Masks also have simplified, overloaded {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>`. Using {func}`~geoutils.Raster.polygonize` with a
-{class}`~geoutils.RasterMask` is straightforward, for instance, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
+Raster masks also have simplified {class}`~geoutils.Raster` methods due to their boolean {class}`dtype<numpy.dtype>` rendering many arguments implicit. 
+For instance, using {func}`~geoutils.Raster.polygonize` with a raster mask is straightforward, to retrieve a {class}`~geoutils.Vector` of the area-of-interest:
 
 ```{code-cell} ipython3
 # Polygonize areas where mask is True

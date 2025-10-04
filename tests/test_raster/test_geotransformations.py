@@ -672,7 +672,7 @@ class TestMaskGeotransformations:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_crop(self, mask: gu.RasterMask) -> None:
+    def test_crop(self, mask: gu.Raster) -> None:
         # Test with same bounds -> should be the same #
 
         mask_orig = mask.copy()
@@ -681,7 +681,7 @@ class TestMaskGeotransformations:
         assert mask_cropped.raster_equal(mask)
 
         # Check if instance is respected
-        assert isinstance(mask_cropped, gu.RasterMask)
+        assert isinstance(mask_cropped, gu.Raster)
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
         # Check the original mask was not modified during cropping
@@ -766,15 +766,15 @@ class TestMaskGeotransformations:
         # assert mask_cropped.raster_equal(mask_orig)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_reproject(self, mask: gu.RasterMask) -> None:
+    def test_reproject(self, mask: gu.Raster) -> None:
         # Test 1: with a classic resampling (bilinear)
 
         # Reproject mask - resample to 100 x 100 grid
         mask_orig = mask.copy()
-        mask_reproj = mask.reproject(grid_size=(100, 100), force_source_nodata=2)
+        mask_reproj = mask.reproject(grid_size=(100, 100), force_source_nodata=2, resampling="nearest")
 
         # Check instance is respected
-        assert isinstance(mask_reproj, gu.RasterMask)
+        assert isinstance(mask_reproj, gu.Raster) and mask_reproj.is_mask
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
         # Check the original mask was not modified during reprojection
@@ -782,21 +782,20 @@ class TestMaskGeotransformations:
 
         # Check inplace behaviour works
         mask_tmp = mask.copy()
-        mask_tmp.reproject(grid_size=(100, 100), force_source_nodata=2, inplace=True)
+        mask_tmp.reproject(grid_size=(100, 100), force_source_nodata=2, inplace=True, resampling="nearest")
         assert mask_tmp.raster_equal(mask_reproj)
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
-        mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), force_source_nodata=2)
-        mask_uint8_reproj.data = mask_uint8_reproj.data.astype("bool")
+        with pytest.warns(UserWarning):
+            mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), force_source_nodata=2, resampling="nearest")
+        mask_uint8_reproj = mask_uint8_reproj.astype("bool")
 
-        assert mask_reproj.raster_equal(mask_uint8_reproj)
+        assert mask_reproj.raster_equal(mask_uint8_reproj, warn_failure_reason=True)
 
         # Test 2: should raise a warning when the resampling differs from nearest
 
         with pytest.warns(
             UserWarning,
-            match="Reprojecting a mask with a resampling method other than 'nearest', "
-            "the boolean array will be converted to float during interpolation.",
-        ):
+            match="Reprojecting a raster mask .*"):
             mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)

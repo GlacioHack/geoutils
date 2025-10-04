@@ -145,7 +145,7 @@ class TestPointCloud:
         # Create a boolean array of the same shape, and a mask of the same transform/crs
         rng = np.random.default_rng(42)
         arr = rng.integers(low=0, high=2, size=pc.point_count, dtype=bool)
-        mask = gu.PointCloudMask.from_xyz(x=pc.geometry.x.values, y=pc.geometry.y.values, z=arr, crs=pc.crs)
+        mask = gu.PointCloud.from_xyz(x=pc.geometry.x.values, y=pc.geometry.y.values, z=arr, crs=pc.crs)
 
         # Check that indexing works with both of those
         vals_arr = pc[arr]
