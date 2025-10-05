@@ -90,6 +90,13 @@ def download_examples(overwrite: bool = False) -> None:
             # Copy the temporary extracted data to the example directory.
             shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name), dirs_exist_ok=True)
 
+    # Overwrite files for tests
+    for fn in _FILEPATHS_DATA.values():
+        if ".tif" in os.path.basename(fn):
+            import geoutils as gu
+            rst = gu.Raster(fn)
+            rst = rst.icrop(bbox=(0, 0, 46, 54))
+            rst.save(fn)
 
 def get_path(name: str) -> str:
     """

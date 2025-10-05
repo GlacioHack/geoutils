@@ -23,14 +23,6 @@ from geoutils.raster.distributed_computing.dask import (
     delayed_subsample,
 )
 
-@pytest.fixture(scope="module")  # type: ignore
-def cluster():
-    """Fixture to use a single cluster for the entire module (otherwise raise runtime errors)."""
-    # Need cluster to be single-threaded to use dask-memusage confidently
-    dask_cluster = LocalCluster(n_workers=1, threads_per_worker=1, dashboard_address=None)
-    yield dask_cluster
-    dask_cluster.close()
-
 def _build_dst_transform_shifted_newres(
     src_transform: rio.transform.Affine,
     src_shape: tuple[int, int],
