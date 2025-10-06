@@ -6,6 +6,7 @@ import os
 import sys
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable
+import warnings
 
 import dask.array as da
 import numpy as np
@@ -108,7 +109,8 @@ class TestDelayed:
     @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
     @pytest.mark.parametrize("subsample_size", [2, 100, 100000])  # type: ignore
     def test_delayed_subsample__output(
-        self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int
+        self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int],
+            subsample_size: int
     ):
         """
         Checks for delayed subsampling function for output accuracy.
@@ -117,6 +119,7 @@ class TestDelayed:
         - Input array shape,
         - Number of subsampled points.
         """
+        warnings.filterwarnings("ignore", category=UserWarning, message="Subsample value*")
 
         # 1/ We run the delayed function after re-chunking
         darr = darr.rechunk(chunksizes_in_mem)

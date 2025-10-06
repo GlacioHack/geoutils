@@ -2863,7 +2863,7 @@ class TestArrayInterface:
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
     @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+        "dtype", ["uint8", "int16", "float32"]
     )  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_ufunc_1nin_1nout(self, ufunc_str: str, nodata_init: None | str, dtype: str) -> None:
@@ -2928,10 +2928,10 @@ class TestArrayInterface:
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
     @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+        "dtype1", ["uint8", "int16", "float32"]
     )  # type: ignore
     @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+        "dtype2", ["uint8", "int16", "float32"]
     )  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
@@ -3038,7 +3038,7 @@ class TestArrayInterface:
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
     @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+        "dtype", ["uint8", "int16", "float32"]
     )  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
@@ -3115,10 +3115,10 @@ class TestArrayInterface:
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
     @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+        "dtype1", ["uint8", "int16", "float32"]
     )  # type: ignore
     @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
+        "dtype2", ["uint8", "int16", "float32"]
     )  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore

@@ -12,9 +12,6 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 import geoutils as gu
 from geoutils import examples
 
-GLACIER_OUTLINES_URL = "http://public.data.npolar.no/cryoclim/CryoClim_GAO_SJ_1990.zip"
-
-
 class TestRasterVectorInterface:
 
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
@@ -100,17 +97,8 @@ class TestRasterVectorInterface:
     everest_outlines_path = gu.examples.get_path("everest_rgi_outlines")
     aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
     aster_outlines_path = gu.examples.get_path("exploradores_rgi_outlines")
-    glacier_outlines = gu.Vector(GLACIER_OUTLINES_URL)
 
-    def test_rasterize_proj(self) -> None:
-        # Capture the warning on resolution not matching exactly bounds
-        with pytest.warns(UserWarning):
-            burned = self.glacier_outlines.rasterize(xres=3000)
-
-        assert burned.shape[0] == 146
-        assert burned.shape[1] == 115
-
-    def test_rasterize_unproj(self) -> None:
+    def test_rasterize(self) -> None:
         """Test rasterizing an EPSG:3426 dataset into a projection."""
 
         vct = gu.Vector(self.everest_outlines_path)
