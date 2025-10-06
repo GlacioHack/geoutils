@@ -13,10 +13,10 @@ import geoutils as gu
 
 class TestGeotransformations:
 
-    landsat_b4_crop_path = gu.examples.get_path("everest_landsat_b4_cropped")
-    everest_outlines_path = gu.examples.get_path("everest_rgi_outlines")
-    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = gu.examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
+    everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
     def test_reproject(self) -> None:
         """Test that the reproject function works as intended"""

@@ -1,4 +1,25 @@
 # """Configuration file for Pytest."""
+
+# import pytest
+# from dask.distributed import Client, LocalCluster
+#
+# # Configure a session-scoped fixture for a Dask cluster
+# @pytest.fixture(scope="session")
+# def dask_client():
+#     """
+#     Sets up a Dask LocalCluster and Client once for the entire test session.
+#     """
+#     # Initialize the cluster and client
+#     cluster = LocalCluster(n_workers=2, processes=True, threads_per_worker=1)
+#     client = Client(cluster)
+#
+#     # Yield the client to the tests
+#     yield client
+#
+#     # Teardown: close the client and cluster after all tests are run
+#     client.close()
+#     cluster.close()
+
 # import pytest
 # import os
 # from distributed import Client, LocalCluster

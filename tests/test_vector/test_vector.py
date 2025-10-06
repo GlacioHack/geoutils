@@ -22,10 +22,10 @@ import geoutils as gu
 
 
 class TestVector:
-    landsat_b4_crop_path = gu.examples.get_path("everest_landsat_b4_cropped")
-    everest_outlines_path = gu.examples.get_path("everest_rgi_outlines")
-    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = gu.examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
+    everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
     def test_init(self) -> None:
         """Test class initiation works as intended"""
@@ -131,9 +131,9 @@ class TestGeoPandasMethods:
     synthvec2 = gu.Vector(gdf2)
 
     # Use two real-life vectors, reduce size to 2 polygons for speed of tests
-    realvec1 = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
+    realvec1 = gu.Vector(gu.examples.get_path_test("exploradores_rgi_outlines"))
     realvec1.ds = realvec1.ds[0:2]
-    realvec2 = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+    realvec2 = gu.Vector(gu.examples.get_path_test("everest_rgi_outlines"))
     realvec2.ds = realvec2.ds[0:2]
 
     # Properties and methods derived from Shapely or GeoPandas

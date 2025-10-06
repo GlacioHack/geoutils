@@ -24,6 +24,8 @@ import tarfile
 import tempfile
 import urllib.request
 
+import geoutils as gu
+
 # Define the location of the data in the example directory
 _EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
 
@@ -44,8 +46,32 @@ _FILEPATHS_DATA = {
     "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz"),
 }
 
+_FILEPATHS_TEST = {k: os.path.join(os.path.dirname(v),
+                                   os.path.splitext(os.path.basename(v))[0] + "_test" +
+                                   os.path.splitext(os.path.basename(v))[1])
+                   for k, v in _FILEPATHS_DATA.items()}
+
 available = list(_FILEPATHS_DATA.keys())
 
+def reduce_data_for_tests() -> None:
+
+    # Create reduced files for tests
+    for k in _FILEPATHS_DATA.keys():
+
+        # Get input and output filenames
+        fn_data = _FILEPATHS_DATA[k]
+        fn_test = _FILEPATHS_TEST[k]
+
+        # For rasters, crop
+        if ".tif" in os.path.basename(fn_data):
+            rst = gu.Raster(fn_data)
+            rst = rst.icrop(bbox=(0, 0, 48, 52))
+            rst.save(fn_test)
+        # For vectors, keep first 5 shapes
+        if ".gpkg" in os.path.basename(fn_data):
+            vct = gu.Vector(fn_data)
+            vct.ds = vct.ds[0:5]
+            vct.save(fn_test)
 
 def download_examples(overwrite: bool = False) -> None:
     """
@@ -90,13 +116,7 @@ def download_examples(overwrite: bool = False) -> None:
             # Copy the temporary extracted data to the example directory.
             shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name), dirs_exist_ok=True)
 
-    # Overwrite files for tests
-    # for fn in _FILEPATHS_DATA.values():
-    #     if ".tif" in os.path.basename(fn):
-    #         import geoutils as gu
-    #         rst = gu.Raster(fn)
-    #         rst = rst.icrop(bbox=(0, 0, 46, 54))
-    #         rst.save(fn)
+    reduce_data_for_tests()
 
 def get_path(name: str) -> str:
     """
@@ -110,3 +130,16 @@ def get_path(name: str) -> str:
         return _FILEPATHS_DATA[name]
     else:
         raise ValueError('Data name should be one of "' + '" , "'.join(list(_FILEPATHS_DATA.keys())) + '".')
+
+def get_path_test(name: str) -> str:
+    """
+    Get path of test data (reduced size). List of available files can be found in "examples.available".
+
+    :param name: Name of test data.
+    :return:
+    """
+    if name in list(_FILEPATHS_TEST.keys()):
+        download_examples()
+        return _FILEPATHS_TEST[name]
+    else:
+        raise ValueError('Data name should be one of "' + '" , "'.join(list(_FILEPATHS_TEST.keys())) + '".')

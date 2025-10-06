@@ -54,8 +54,8 @@ def _custom_func_mask(raster: RasterType) -> gu.RasterMask:
 
 
 class TestMultiproc:
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
     num_workers = min(2, cpu_count())  # Safer limit for CI
     cluster = ClusterGenerator("test", nb_workers=num_workers)

@@ -33,7 +33,7 @@ class RealImageStack:
 
         warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
 
-        img = cls(examples.get_path(image))
+        img = cls(examples.get_path_test(image))
         self.img = img
 
         # Find the easting midpoint of the img
@@ -334,12 +334,12 @@ class TestMultiRaster:
     # three overlapping rasters
     # TODO: add a case with different CRS - issue raised #310
     raster_groups = [
-        [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("everest_landsat_b4_cropped")],
-        [gu.examples.get_path("everest_landsat_rgb"), gu.examples.get_path("everest_landsat_b4_cropped")],
+        [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("everest_landsat_b4_cropped")],
+        [gu.examples.get_path_test("everest_landsat_rgb"), gu.examples.get_path_test("everest_landsat_b4_cropped")],
         [
-            gu.examples.get_path("everest_landsat_b4"),
-            gu.examples.get_path("everest_landsat_rgb"),
-            gu.examples.get_path("everest_landsat_b4_cropped"),
+            gu.examples.get_path_test("everest_landsat_b4"),
+            gu.examples.get_path_test("everest_landsat_rgb"),
+            gu.examples.get_path_test("everest_landsat_b4_cropped"),
         ],
     ]
 
@@ -394,7 +394,7 @@ class TestMultiRaster:
                 assert rst.nodata == rst2.nodata
 
     raster_groups = [
-        [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")],
+        [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")],
     ]
 
     @pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore

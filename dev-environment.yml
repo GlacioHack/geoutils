@@ -29,6 +29,10 @@ dependencies:
   - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixtures
+  - pytest-instafail
+  - pytest-socket
+  - pytest-cov
+  - coveralls
   - pyyaml
   - flake8
   - pylint

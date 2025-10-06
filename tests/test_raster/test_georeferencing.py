@@ -9,10 +9,10 @@ from geoutils import examples
 
 class TestGeoreferencing:
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_ij2xy(self, example: str) -> None:

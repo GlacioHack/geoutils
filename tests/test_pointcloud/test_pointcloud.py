@@ -38,7 +38,7 @@ class TestPointCloud:
     )
 
     # 3/ LAS file
-    fn_las = gu.examples.get_path("coromandel_lidar")
+    fn_las = gu.examples.get_path_test("coromandel_lidar")
 
     # 4/ Non-point vector (for error raising)
     poly = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])

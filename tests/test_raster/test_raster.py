@@ -29,12 +29,12 @@ DO_PLOT = False
 
 
 class TestRaster:
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
@@ -1858,6 +1858,7 @@ class TestRaster:
         rst2 = rst.from_array(data=rst.data, crs=rst.crs, transform=rst.transform, nodata=-99999)
         assert rst2.nodata == _default_nodata(rst.data.dtype)
 
+    @pytest.mark.skip(reason="Outdated: Linting is checked through pre-commit")
     def test_type_hints(self) -> None:
         """Test that pylint doesn't raise errors on valid code."""
         # Create a temporary directory and a temporary filename
@@ -1873,7 +1874,7 @@ class TestRaster:
             [
                 "'''Sample code that should conform to pylint's standards.'''",  # Add docstring
                 "import geoutils as gu",  # Import geoutils
-                "raster = gu.Raster(gu.examples.get_path('landsat_B4'))",  # Load a raster
+                "raster = gu.Raster(gu.examples.get_path_test('landsat_B4'))",  # Load a raster
             ]
             + [  # The below statements should not raise a 'no-member' (E1101) error.
                 f"{attribute.upper()} = raster.{attribute}" for attribute in attributes
@@ -1951,12 +1952,12 @@ class TestRaster:
 
 class TestMask:
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     # Synthetic data
     width = height = 5

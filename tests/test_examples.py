@@ -15,13 +15,13 @@ from geoutils import examples
     "example", ["everest_landsat_b4", "everest_landsat_b4_cropped", "everest_landsat_rgb", "exploradores_aster_dem"]
 )  # type: ignore
 def test_read_paths_raster(example: str) -> None:
-    assert isinstance(gu.Raster(examples.get_path(example)), gu.Raster)
+    assert isinstance(gu.Raster(examples.get_path_test(example)), gu.Raster)
 
 
 @pytest.mark.parametrize("example", ["everest_rgi_outlines", "exploradores_rgi_outlines"])  # type: ignore
 def test_read_paths_vector(example: str) -> None:
     warnings.simplefilter("error")
-    assert isinstance(gu.Vector(examples.get_path(example)), gu.Vector)
+    assert isinstance(gu.Vector(examples.get_path_test(example)), gu.Vector)
 
 
 # Original sha256 obtained with `sha256sum filename`
@@ -42,7 +42,7 @@ def test_data_integrity(example: str) -> None:
     Test that input data is not corrupted by checking sha265 sum
     """
     # Read file as bytes
-    fbytes = open(examples.get_path(example), "rb").read()
+    fbytes = open(examples.get_path_test(example), "rb").read()
 
     # Get sha256
     file_sha256 = hashlib.sha256(fbytes).hexdigest()

@@ -22,10 +22,10 @@ from geoutils.projtools import reproject_to_latlon
 
 class TestInterpolate:
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
     def test_dist_nodata_spread(self) -> None:
         """Test distance of nodata spreading computation based on interpolation order."""

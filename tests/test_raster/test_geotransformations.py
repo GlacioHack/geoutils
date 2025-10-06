@@ -20,12 +20,12 @@ DO_PLOT = False
 
 class TestRasterGeotransformations:
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
@@ -659,10 +659,10 @@ class TestRasterGeotransformations:
 
 class TestMaskGeotransformations:
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     # Mask without nodata
     mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125

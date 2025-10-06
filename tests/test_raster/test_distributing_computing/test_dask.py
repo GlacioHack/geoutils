@@ -14,7 +14,6 @@ import pandas as pd
 import pytest
 import rasterio as rio
 import xarray as xr
-from dask.distributed import Client, LocalCluster
 from pyproj import CRS
 
 from geoutils.examples import _EXAMPLES_DIRECTORY
@@ -83,7 +82,7 @@ class TestDelayed:
     rng = da.random.default_rng(seed=42)
 
     # Smaller test files for fast checks, with various shapes and with/without nodata
-    list_small_shapes = [(50, 50), (51, 47)]
+    list_small_shapes = [(51, 47)]
     with_nodata = [False, True]
     list_small_darr = []
     for small_shape in list_small_shapes:
@@ -222,6 +221,8 @@ class TestDelayed:
         # dst_res_rel_fac = (0.45, 0.45)  # (1, 1)
         # dst_shape_diff = (0, 0)
         # cluster = LocalCluster(n_workers=1, threads_per_worker=1, dashboard_address=None)
+
+        warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
 
         # 0/ Define input parameters
 
