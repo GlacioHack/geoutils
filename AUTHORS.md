@@ -11,39 +11,47 @@ contributions are subject to the project's copyright under the terms of the
 
 This file keeps track of authors contributions.
 
-## Development Lead
+
+## Maintainers / Steering committee
 
 ---
 
-- **Romain Hugonnet** [@rhugonnet](https://github.com/rhugonnet) <romain.hugonnet@gmail.com>
-- **Amaury Dehecq** [@adehecq](https://github/adehecq)
-- **Erik Schytt Mannerfelt** [@erikmannerfelt](https://github/erikmannerfelt)
-- **Andrew Tedstone** [@atedstone](https://github/atedstone)
+| Full name                        | GitHub                                     | Affiliation                    | Email                                   |
+|----------------------------------|--------------------------------------------|--------------------------------|-----------------------------------------|
+| **Romain Hugonnet**              | [@rhugonnet](https://github.com/rhugonnet) | University of Alaska Fairbanks | [📧](mailto:romain.hugonnet@gmail.com)  |
+| **Amaury Dehecq**                | [@adehecq](https://github.com/adehecq)     | Université Grenoble Alpes, IRD | N/A                                     |
+| **Andrew Tedstone**              | [@atedstone](https://github/atedstone)   | University of Lausanne      | [📧](mailto:alice.de-bardonneche-richard@cs-soprasteria.com) |
+| **Valentine Bellet**             | [@belletva](https://github.com/belletva)   | CNES (French Space Agency)     | [📧](mailto:valentine.bellet@cnes.fr)   |
+| **Alice de Bardonnèche-Richard** | [@adebardo](https://github.com/adebardo)   | CS Group                       | [📧](mailto:alice.de-bardonneche-richard@cs-soprasteria.com) |
+
+## Emeritus maintainers
+
+---
+
+| Full name                  | GitHub | Affiliation                | Email                                                        |
+|----------------------------|------|----------------------------|--------------------------------------------------------------|
+| **Erik Schytt Mannerfelt** | [@erikmannerfelt](https://github.com/erikmannerfelt) | University of Oslo         | N/A                                                          |
+| **Emmanuel Dubois**        | [@duboise-cnes](https://github.com/duboise-cnes) | CNES (French Space Agency) | [📧](mailto:emmanuel.dubois@cnes.fr)                         |
 
 ## Contributors
 
 ---
 
+- **Valentin Schaffner** [@vschaffn](https://github/vschaffn)
 - **Bob McNabb** [@iamdonovan](https://github/iamdonovan)
 - **Eli Schwat** [@elischwat](https://github.com/elischwat)
-- **Valentin Schaffner** [@vschaffn](https://github/vschaffn)
-- **Alice De Bardonnèche-Richard** [@adebardo](https://github/adebardo) <alice.de-bardonneche-richard@cs-soprasteria.com>
 - **Marine Bouchet** [@marinebcht](https://github.com/marinebcht)
-- **Emmanuel Dubois** [@duboise-cnes](https://github/duboise-cnes) <emmanuel.dubois@cnes.fr>
 - **Amelie Froessl** [@ameliefroessl](https://github.com/ameliefroessl)
 - **Friedrich Knuth** [@friedrichknuth](https://github/friedrichknuth)
 - **Adrien Wehrlé** [@AdrienWehrle](https://github.com/AdrienWehrle)
 - **Fabien Maussion** [@fmaussion](https://github.com/fmaussion)
 - **Johannes Landmann** [@jlandmann](https://github/jlandmann)
 
-
-Update here with new contributors.
-
-## Original Developers/Designers/Supporters
+## Original creators
 
 ---
 
-- **Romain Hugonnet** [@rhugonnet](https://github.com/rhugonnet) <romain.hugonnet@gmail.com>
+- **Romain Hugonnet** [@rhugonnet](https://github.com/rhugonnet)
 - **Amaury Dehecq** [@adehecq](https://github/adehecq)
 - **Erik Schytt Mannerfelt** [@erikmannerfelt](https://github/erikmannerfelt)
 - **Andrew Tedstone** [@atedstone](https://github/atedstone)
