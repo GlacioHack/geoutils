@@ -16,12 +16,12 @@ This file keeps track of authors contributions.
 
 ---
 
-| Full name                        | GitHub                                     | Affiliation                    | Email                                   |
-|----------------------------------|--------------------------------------------|--------------------------------|-----------------------------------------|
-| **Romain Hugonnet**              | [@rhugonnet](https://github.com/rhugonnet) | University of Alaska Fairbanks | [📧](mailto:romain.hugonnet@gmail.com)  |
-| **Amaury Dehecq**                | [@adehecq](https://github.com/adehecq)     | Université Grenoble Alpes, IRD | N/A                                     |
-| **Andrew Tedstone**              | [@atedstone](https://github/atedstone)   | University of Lausanne      | [📧](mailto:alice.de-bardonneche-richard@cs-soprasteria.com) |
-| **Valentine Bellet**             | [@belletva](https://github.com/belletva)   | CNES (French Space Agency)     | [📧](mailto:valentine.bellet@cnes.fr)   |
+| Full name                        | GitHub                                     | Affiliation                    | Email                                                        |
+|----------------------------------|--------------------------------------------|--------------------------------|--------------------------------------------------------------|
+| **Romain Hugonnet**              | [@rhugonnet](https://github.com/rhugonnet) | University of Alaska Fairbanks | [📧](mailto:romain.hugonnet@gmail.com)                       |
+| **Amaury Dehecq**                | [@adehecq](https://github.com/adehecq)     | Université Grenoble Alpes, IRD | N/A                                                          |
+| **Andrew Tedstone**              | [@atedstone](https://github/atedstone)   | University of Lausanne      | N/A                                                          |
+| **Valentine Bellet**             | [@belletva](https://github.com/belletva)   | CNES (French Space Agency)     | [📧](mailto:valentine.bellet@cnes.fr)                        |
 | **Alice de Bardonnèche-Richard** | [@adebardo](https://github.com/adebardo)   | CS Group                       | [📧](mailto:alice.de-bardonneche-richard@cs-soprasteria.com) |
 
 ## Emeritus maintainers
