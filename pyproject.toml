@@ -17,7 +17,4 @@ target_version = ['py310']
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules -W error::UserWarning"
-testpaths = [
-	"tests",
-	"geoutils"
-]
+testpaths = ["tests", "geoutils"]

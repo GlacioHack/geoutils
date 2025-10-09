@@ -64,7 +64,7 @@ def _get_subsample_size_from_user_input(
             if not silence_max_subsample:
                 warnings.warn(
                     f"Subsample value of {subsample} is larger than the number of valid pixels of {total_nb_valids},"
-                    f"using all valid pixels as a subsample.",
+                    f" using all valid pixels as a subsample.",
                     category=UserWarning,
                 )
     else:

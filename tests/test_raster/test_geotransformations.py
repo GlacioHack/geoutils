@@ -20,12 +20,12 @@ DO_PLOT = False
 
 class TestRasterGeotransformations:
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
@@ -42,8 +42,6 @@ class TestRasterGeotransformations:
 
         img1 = gu.Raster(self.landsat_b4_path)
         img2 = gu.Raster(self.landsat_b4_crop_path)
-        # Set img2 pixel interpretation as "Point" to match "img1" and avoid any warnings
-        img2.set_area_or_point("Point", shift_area_or_point=False)
         img1.set_nodata(0)
         img2.set_nodata(0)
 
@@ -214,7 +212,8 @@ class TestRasterGeotransformations:
 
         # Second, we check that bound reprojection is done automatically if the CRS differ
         r_cropped2 = r.crop(outlines)
-        assert list(r_cropped2.bounds) == list(new_bounds)
+        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bounds_projected(out_crs=r.crs))
+        assert list(r_cropped2.bounds) == list(r_cropped2_bbox_reproj.bounds)
 
         # -- Test crop works as expected even if transform has been modified, e.g. through downsampling -- #
         # Test that with downsampling, cropping to same bounds result in same raster
@@ -659,10 +658,10 @@ class TestRasterGeotransformations:
 
 class TestMaskGeotransformations:
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     # Mask without nodata
     mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125

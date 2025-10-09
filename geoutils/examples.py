@@ -44,7 +44,16 @@ _FILEPATHS_DATA = {
     "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz"),
 }
 
+_FILEPATHS_TEST = {
+    k: os.path.join(
+        os.path.dirname(v),
+        os.path.splitext(os.path.basename(v))[0] + "_test" + os.path.splitext(os.path.basename(v))[1],
+    )
+    for k, v in _FILEPATHS_DATA.items()
+}
+
 available = list(_FILEPATHS_DATA.keys())
+available_test = list(_FILEPATHS_TEST.keys())
 
 
 def download_examples(overwrite: bool = False) -> None:
@@ -58,7 +67,7 @@ def download_examples(overwrite: bool = False) -> None:
         return
 
     # Static commit hash to be bumped every time it needs to be.
-    commit = "7f778649a5d058c68605ad1297859b7582144ea6"
+    commit = "e758274647a8dd2656d73c3026c90cc77cab8a86"
     # The URL from which to download the repository
     url = f"https://github.com/GlacioHack/geoutils-data/tarball/main#commit={commit}"
 
@@ -103,3 +112,17 @@ def get_path(name: str) -> str:
         return _FILEPATHS_DATA[name]
     else:
         raise ValueError('Data name should be one of "' + '" , "'.join(list(_FILEPATHS_DATA.keys())) + '".')
+
+
+def get_path_test(name: str) -> str:
+    """
+    Get path of test data (reduced size). List of available files can be found in "examples.available".
+
+    :param name: Name of test data.
+    :return:
+    """
+    if name in list(_FILEPATHS_TEST.keys()):
+        download_examples()
+        return _FILEPATHS_TEST[name]
+    else:
+        raise ValueError('Data name should be one of "' + '" , "'.join(list(_FILEPATHS_TEST.keys())) + '".')

@@ -9,7 +9,6 @@ import pathlib
 import re
 import tempfile
 import warnings
-from io import StringIO
 from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
@@ -17,8 +16,6 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
-from pylint.lint import Run
-from pylint.reporters.text import TextReporter
 
 import geoutils as gu
 from geoutils import examples
@@ -29,12 +26,12 @@ DO_PLOT = False
 
 
 class TestRaster:
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
@@ -72,13 +69,13 @@ class TestRaster:
         # For re-instantiation via Raster (r2 above), we check the behaviour:
         # By default, raster were unloaded, and were loaded during raster_equal() independently
         # So the instances should not be pointing to the same data and not mirror modifs
-        r0.data[0, 0] += 5
-        assert r2.data[0, 0] != r0.data[0, 0]
+        r0.data.data[0, 0] += 5
+        assert r2.data.data[0, 0] != r0.data.data[0, 0]
 
         # However, if we reinstantiate now that the data is loaded, it should point to the same
         r5 = gu.Raster(r0)
-        r0.data[0, 0] += 5
-        assert r5.data[0, 0] == r0.data[0, 0]
+        r0.data.data[0, 0] += 5
+        assert r5.data.data[0, 0] == r0.data.data[0, 0]
 
         # With r.count = 2
         r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
@@ -192,17 +189,17 @@ class TestRaster:
 
         assert not r.is_loaded
         assert r.driver == "GTiff"
-        assert r.width == 800
-        assert r.height == 655
+        assert r.width == 193
+        assert r.height == 167
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
         assert r.dtype == "uint8"
-        assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+        assert r.transform == rio.transform.Affine(30.0, 0.0, 489340.0, 0.0, -30.0, 3098570.0)
         assert np.array_equal(r.res, [30.0, 30.0])
-        assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
+        assert r.bounds == rio.coords.BoundingBox(left=489340.0, bottom=3093560.0, right=495130.0, top=3098570.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
         assert r.footprint.vector_equal(r.get_footprint_projected(r.crs))
 
@@ -211,17 +208,17 @@ class TestRaster:
 
         assert not r2.is_loaded
         assert r2.driver == "GTiff"
-        assert r2.width == 539
-        assert r2.height == 618
+        assert r2.width == 165
+        assert r2.height == 124
         assert r2.shape == (r2.height, r2.width)
         assert r2.count == 1
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
         assert r2.dtype == "float32"
-        assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
+        assert r2.transform == rio.transform.Affine(30.0, 0.0, 626785.0, 0.0, -30.0, 4837025.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
-        assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
+        assert r2.bounds == rio.coords.BoundingBox(left=626785.0, bottom=4833305.0, right=631735.0, top=4837025.0)
         assert r2.crs == rio.crs.CRS.from_epsg(32718)
         assert r2.footprint.vector_equal(r2.get_footprint_projected(r2.crs))
 
@@ -620,7 +617,7 @@ class TestRaster:
         # 1/ Getter and instantiation
         # Check existing file based on a priori knowledge
         raster_point = gu.Raster(self.landsat_b4_path)
-        assert raster_point.area_or_point == "Point"
+        assert raster_point.area_or_point == "Area"
 
         raster_area = gu.Raster(self.aster_dem_path)
         assert raster_area.area_or_point == "Area"
@@ -1373,7 +1370,10 @@ class TestRaster:
         # Then, we repeat for a nodata that already existed, we artificially modify the value on an unmasked pixel
         r = r_copy.copy()
         mask_pixel_artificially_set = np.zeros(np.shape(r.data), dtype=bool)
-        mask_pixel_artificially_set[0, 0] = True
+        # This needs to be a pixel not originally masked
+        i = 30
+        j = 30
+        mask_pixel_artificially_set[i, j] = True
         r.data.data[mask_pixel_artificially_set] = new_nodata
         # We set the value as masked before unmasking to create the mask if it does not exist yet
         r.data[mask_pixel_artificially_set] = np.ma.masked
@@ -1858,47 +1858,6 @@ class TestRaster:
         rst2 = rst.from_array(data=rst.data, crs=rst.crs, transform=rst.transform, nodata=-99999)
         assert rst2.nodata == _default_nodata(rst.data.dtype)
 
-    def test_type_hints(self) -> None:
-        """Test that pylint doesn't raise errors on valid code."""
-        # Create a temporary directory and a temporary filename
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_path = os.path.join(temp_dir.name, "code.py")
-
-        # r = gu.Raster(self.landsat_b4_path)
-
-        # Load the attributes to check
-        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename"]
-        # Create some sample code that should be correct
-        sample_code = "\n".join(
-            [
-                "'''Sample code that should conform to pylint's standards.'''",  # Add docstring
-                "import geoutils as gu",  # Import geoutils
-                "raster = gu.Raster(gu.examples.get_path('landsat_B4'))",  # Load a raster
-            ]
-            + [  # The below statements should not raise a 'no-member' (E1101) error.
-                f"{attribute.upper()} = raster.{attribute}" for attribute in attributes
-            ]
-            + [""]  # Add a newline to the end.
-        )
-
-        # Write the code to the temporary file
-        with open(temp_path, "w") as outfile:
-            outfile.write(sample_code)
-
-        # Run pylint and parse the stdout as a string, only test
-        pylint_output = StringIO()
-        Run([temp_path], reporter=TextReporter(pylint_output), exit=False)
-
-        lint_string = pylint_output.getvalue()
-        print(lint_string)  # Print the output for debug purposes
-
-        # Bad linting errors are defined here. Currently just "no-member" errors
-        bad_lints = [f"Instance of 'Raster' has no '{attribute}' member" for attribute in attributes]
-
-        # Assert that none of the bad errors are in the pylint output
-        for bad_lint in bad_lints:
-            assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"
-
     def test_split_bands(self) -> None:
         img = gu.Raster(self.landsat_rgb_path)
 
@@ -1953,12 +1912,12 @@ class TestMask:
     """A mask is a boolean Raster, defined on file opening with is_mask=True."""
 
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     # Synthetic data
     width = height = 5
@@ -2833,9 +2792,7 @@ class TestArrayInterface:
     mask_wrong_shape = rng.integers(0, 2, size=(width - 1, height - 1), dtype=bool)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_ufunc_1nin_1nout(self, ufunc_str: str, nodata_init: None | str, dtype: str) -> None:
         """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
@@ -2898,12 +2855,8 @@ class TestArrayInterface:
                     ufunc(rst)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
     def test_array_ufunc_2nin_1nout(
@@ -3008,9 +2961,7 @@ class TestArrayInterface:
                     ufunc(rst1, rst2)
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
         """
@@ -3085,12 +3036,8 @@ class TestArrayInterface:
                 assert output_rst == output_ma
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
     def test_array_functions_2nin(

@@ -22,6 +22,7 @@ dependencies:
 
   # Optional dependencies
   - laspy
+  - lazrs-python # For LAZ files
   - scikit-image
 
   # Test dependencies
@@ -29,9 +30,12 @@ dependencies:
   - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixtures
+  - pytest-instafail
+  - pytest-socket
+  - pytest-cov
+  - coveralls
   - pyyaml
   - flake8
-  - pylint
   - netcdf4  # To write synthetic data with chunksizes
   - dask-memusage
   - pre-commit
