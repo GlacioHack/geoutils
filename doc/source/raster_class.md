@@ -190,7 +190,7 @@ A {class}`~geoutils.Raster` can be applied any NumPy universal functions and mos
 np.sqrt(rast)
 ```
 
-Logical comparison functions will cast to a raster mask, i.e. a boolean {class}`~geoutils.Raster`.
+Logical comparison functions will cast to a raster mask, i.e. a boolean {class}`~geoutils.Raster` (True or False).
 
 ```{code-cell} ipython3
 # Is the raster close to another within tolerance?
@@ -425,22 +425,17 @@ A raster mask is a boolean {class}`~geoutils.Raster` (True or False).
 While boolean data types are typically not supported in raster filetypes or in-memory operations, they are incredibly useful for various logical and
 arithmetical operation in geospatial analysis, so GeoUtils facilitates their manipulation to support these operations natively and implicitly.
 
-```{note}
-There is no {class}`~geoutils.Raster.nodata` value defined in a boolean {class}`~geoutils.Raster`, as it only take binary values. However, the
-{class}`numpy.ma.MaskedArray` still has a {class}`~geoutils.Raster.data.mask` for invalid values.
+```{important}
+Most raster file formats such a [GeoTIFFs](https://gdal.org/drivers/raster/gtiff.html) **do not support {class}`bool` array {class}`dtype<numpy.dtype>`
+on-disk**, and **most of Rasterio functionalities also do not support {class}`bool` {class}`dtype<numpy.dtype>`**.
+
+To address this, during opening, saving and other geospatial handling operations, raster masks are automatically converted to and from {class}`numpy.uint8`.
+The {class}`~geoutils.Raster.nodata` of a boolean {class}`~geoutils.Raster` can now be defined to save to a file, and defaults to `255`.
 ```
 
 ## Open, cast and save
 
 A raster mask can be opened from a file through instantiation with {class}`~geoutils.Raster` with the argument `is_mask=True`.
-
-```{important}
-Most raster file formats such a [GeoTIFFs](https://gdal.org/drivers/raster/gtiff.html) **do not support {class}`bool` array {class}`dtype<numpy.dtype>`
-on-disk**, and **most of Rasterio functionalities also do not support {class}`bool` {class}`dtype<numpy.dtype>`**.
-
-To address this, during opening, saving and geospatial handling operations, raster masks are automatically converted to and from {class}`numpy.uint8`.
-The {class}`~geoutils.Raster.nodata` of a boolean {class}`~geoutils.Raster` can now be defined to save to a file, and defaults to `255`.
-```
 
 On opening, all data will be forced to a {class}`bool` {class}`numpy.dtype`.
 
@@ -524,7 +519,7 @@ Raster masks support Python's logical bitwise operators ({func}`~ <operator.inve
 ## Indexing and assignment
 
 Raster masks can be used for indexing and index assignment operations ({func}`[] <operator.getitem>`, {func}`[]= <operator.setitem>`) with a
-{class}`Rasters<geoutils.Raster>`.
+{class}`Raster<geoutils.Raster>`.
 
 ```{important}
 When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the indexed values of the {class}`~geoutils.Raster` **excluding those masked in its

@@ -199,7 +199,7 @@ documentation.
 
 And reverse operations.
 
-### Logical operators casting to boolean
+### Logical operators casting to mask (boolean raster)
 
 ```{eval-rst}
 .. autosummary::

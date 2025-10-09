@@ -40,9 +40,7 @@ It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector
 main attribute** {attr}`~geoutils.PointCloud.data_column` that identifies the name of the main data associated to the
 point geometries.
 
-Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and
-
-New methods specific to point clouds are detailed further below.
+Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
 {attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~xdem.Vector.reproject` and {func}`~xdem.Vector.crop`.
