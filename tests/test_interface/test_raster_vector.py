@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 
 import geopandas as gpd
@@ -77,7 +78,7 @@ class TestRasterVectorInterface:
         mask = vector.create_mask(res=1.01)
 
         # Check that by default, create_mask returns a Mask
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
 
         # Check that an error is raised if xres is not passed
         with pytest.raises(
@@ -128,9 +129,11 @@ class TestRasterVectorInterface:
         burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
         assert isinstance(burned_in2_out1, gu.Raster)
 
-        # For an in_value of 1 and out_value of 0 (default), it returns a mask
+        # For an in_value of 1 and out_value of 0 (default)
         burned_mask = vct.rasterize(raster=rst, in_value=1)
-        assert isinstance(burned_mask, gu.RasterMask)
+        assert isinstance(burned_mask, gu.Raster)
+        # Convert to boolean
+        burned_mask = burned_mask.astype(bool)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
         assert burned_mask.raster_equal(vct.create_mask(rst))
@@ -209,7 +212,7 @@ class TestMaskVectorInterface:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_polygonize(self, mask: gu.RasterMask) -> None:
+    def test_polygonize(self, mask: gu.Raster) -> None:
         mask_orig = mask.copy()
         # Run default
         vect = mask.polygonize()
@@ -226,5 +229,7 @@ class TestMaskVectorInterface:
         assert isinstance(vect, gu.Vector)
 
         # Check a warning is raised when using a non-boolean value
-        with pytest.warns(UserWarning, match="In-value converted to 1 for polygonizing boolean mask."):
+        with pytest.warns(
+            UserWarning, match=re.escape("Raster mask (boolean type) passed, using target value of 1 (" "True).")
+        ):
             mask.polygonize(target_values=2)

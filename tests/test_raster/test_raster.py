@@ -1130,7 +1130,7 @@ class TestRaster:
         # Create a boolean array of the same shape, and a mask of the same transform/crs
         rng = np.random.default_rng(42)
         arr = rng.integers(low=0, high=2, size=rst.shape, dtype=bool)
-        mask = gu.RasterMask.from_array(data=arr, transform=rst.transform, crs=rst.crs)
+        mask = gu.Raster.from_array(data=arr, transform=rst.transform, crs=rst.crs)
 
         # Check that indexing works with both of those
         vals_arr = rst[arr]
@@ -1950,6 +1950,8 @@ class TestRaster:
 
 
 class TestMask:
+    """A mask is a boolean Raster, defined on file opening with is_mask=True."""
+
     # Paths to example data
     landsat_b4_path = examples.get_path("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
@@ -1977,64 +1979,33 @@ class TestMask:
     def test_init(self, example: str) -> None:
         """Test that Mask subclass initialization function as intended."""
 
-        # A warning should be raised when the raster is a multi-band
-        if "RGB" not in os.path.basename(example):
-            mask = gu.RasterMask(example)
-        else:
-            with pytest.warns(
-                UserWarning, match="Multi-band raster provided to create a Mask, only the first band will be used."
-            ):
-                mask = gu.RasterMask(example)
+        # Open a raster
+        mask = gu.Raster(example, is_mask=True)
 
         # Check the masked array type
         assert mask.data.dtype == "bool"
         # Check output is the correct instance
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster)
+        assert mask.is_mask
         # Check the dtypes metadata
         assert mask.dtype == "bool"
         # Check the nodata
         assert mask.nodata is None
-        # Check the nbands metadata
-        assert mask.count == 1
 
         # Check that a mask object is sent back from its own init
-        mask2 = gu.RasterMask(mask)
+        mask2 = gu.Raster(mask)
         assert mask.raster_equal(mask2)
 
         # Check that the old Mask class still works, but raises a deprecationg warning
         with pytest.warns(DeprecationWarning):
             gu.Mask(example)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
-    def test_repr_str(self, example: str) -> None:
-        """Test the representation of a raster works"""
-
-        warnings.filterwarnings("ignore", message="Multi-band raster provided to create a Mask*")
-
-        # For data not loaded by default
-        r = gu.RasterMask(example)
-
-        r_repr = r.__repr__()
-        r_str = r.__str__()
-
-        # Check that the class is printed correctly
-        assert r_repr[0:4] == "Mask"
-
-        # Check that all main attribute names are printed
-        attrs_shown = ["data", "transform", "crs"]
-        assert all(attr + "=" in r_repr for attr in attrs_shown)
-
-        # Check nodata is removed
-        assert "nodata=" not in r_repr
-
-        assert r_str == r.data.__str__()
-
     def test_from_array(self) -> None:
         """Test that Raster.__init__ casts to Mask with dict input of from_array() and a boolean data array."""
 
         mask_rst = gu.Raster.from_array(data=self.mask_ma, transform=self.transform, crs=None, nodata=None)
 
-        assert isinstance(mask_rst, gu.RasterMask)
+        assert isinstance(mask_rst, gu.Raster) and mask_rst.is_mask
         assert mask_rst.transform == self.transform
         assert mask_rst.crs is None
         assert mask_rst.nodata is None
@@ -2061,7 +2032,7 @@ class TestMask:
 
         # Logical operations should cast to a Mask object, preserving the mask
         mask = getattr(rst, op)(1)
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, getattr(rst.data.data, op)(1))
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
@@ -2076,42 +2047,42 @@ class TestMask:
 
         # Equality
         mask = rst == 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data == 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Non-equality
         mask = rst != 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data != 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Lower than
         mask = rst < 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data < 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Lower equal
         mask = rst <= 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data <= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Greater than
         mask = rst > 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data > 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Greater equal
         mask = rst >= 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_save(self, mask: gu.RasterMask) -> None:
+    def test_save(self, mask: gu.Raster) -> None:
         """Test saving for masks"""
 
         # Temporary folder
@@ -2120,7 +2091,7 @@ class TestMask:
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
         mask.save(temp_file)
-        saved = gu.RasterMask(temp_file)
+        saved = gu.Raster(temp_file, is_mask=True)
 
         # A raster (or mask) in-memory has more information than on disk, we need to update it before checking equality
         # The values in its .data.data that are masked in .data.mask are not necessarily equal to the nodata value

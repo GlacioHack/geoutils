@@ -332,6 +332,25 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
 def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:
     """Rasterio reprojection wrapper."""
 
+    # For a boolean type
+    convert_bool = False
+    if np.dtype(src_arr.dtype) == np.bool_:
+        # To convert back later
+        convert_bool = True
+        # Convert to uint8 for nearest, float otherwise
+        if reproj_kwargs["resampling"] in [Resampling.nearest, "nearest"]:
+            src_arr = src_arr.astype("uint8")  # type: ignore
+        else:
+            warnings.warn(
+                "Reprojecting a raster mask (boolean type) with a resampling method other than 'nearest', "
+                "results in the boolean array being converted to float during reprojection."
+            )
+            src_arr = src_arr.astype("float32")  # type: ignore
+
+        # Convert automated output dtype to the input dtype
+        if np.dtype(reproj_kwargs["dtype"]) == np.bool_:
+            reproj_kwargs["dtype"] = src_arr.dtype
+
     # Check if multiband
     is_multiband = len(src_arr.shape) > 2
 
@@ -365,5 +384,9 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 
     # Run reprojection
     _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
+
+    # If output needs to be converted back to boolean
+    if convert_bool:
+        dst_arr = dst_arr.astype(bool)
 
     return dst_arr

@@ -43,6 +43,14 @@ def _polygonize(
 ) -> gu.Vector:
     """Polygonize a raster. See Raster.polygonize() for details."""
 
+    # If target values is passed but does not correspond to 0 or 1, raise a warning
+    if source_raster.is_mask:
+        if target_values != "all" and (
+            not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]
+        ):
+            warnings.warn("Raster mask (boolean type) passed, using target value of 1 (True).")
+        target_values = True
+
     # Mask a unique value set by a number
     if isinstance(target_values, (int, float, np.integer, np.floating)):
         if np.sum(source_raster.data == target_values) == 0:
@@ -180,13 +188,7 @@ def _rasterize(
     else:
         raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
-    # We return a mask if there is a single value to burn and this value is 1
-    if isinstance(in_value, (int, np.integer, float, np.floating)) and in_value == 1:
-        output = gu.RasterMask.from_array(data=mask, transform=transform, crs=crs, nodata=None)
-
-    # Otherwise we return a Raster if there are several values to burn
-    else:
-        output = gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+    output = gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     return output
 

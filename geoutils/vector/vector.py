@@ -1440,7 +1440,7 @@ class Vector:
         points: tuple[NDArrayNum, NDArrayNum] = None,
         *,
         as_array: Literal[False] = False,
-    ) -> gu.PointCloudMask | gu.RasterMask: ...
+    ) -> gu.PointCloudMask | gu.Raster: ...
 
     @overload
     def create_mask(
@@ -1462,7 +1462,7 @@ class Vector:
         bounds: tuple[float, float, float, float] | None = None,
         points: tuple[NDArrayNum, NDArrayNum] = None,
         as_array: bool = False,
-    ) -> gu.RasterMask | gu.PointCloudMask | NDArrayBool:
+    ) -> gu.Raster | gu.PointCloudMask | NDArrayBool:
         """
         Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
         feature, False if not).
@@ -1509,7 +1509,7 @@ class Vector:
         bounds: tuple[float, float, float, float] | None = None,
         in_value: int | float | abc.Iterable[int | float] | None = None,
         out_value: int | float = 0,
-    ) -> gu.Raster | gu.RasterMask:
+    ) -> gu.Raster:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
 

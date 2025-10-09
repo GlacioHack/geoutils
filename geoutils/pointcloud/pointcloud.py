@@ -451,6 +451,12 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         else:
             return self._nb_points
 
+    @property
+    def is_mask(self) -> bool:
+        """Whether the point cloud mask is a mask (boolean type)."""
+
+        return np.dtype(self.data.dtype) == np.bool_
+
     def load(self, columns: Literal["all", "main"] | list[str] = "main") -> None:
         """
         Load point cloud from disk (only supported for LAS files).
@@ -605,7 +611,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
         if np.atleast_1d(z)[0].dtype == bool:
-            return PointCloudMask(filename_or_dataset=gdf, data_column=data_column)  # type: ignore
+            return PointCloud(filename_or_dataset=gdf, data_column=data_column)  # type: ignore
         # Otherwise, keep as a given PointCloudType subclass
         else:
             return cls(filename_or_dataset=gdf, data_column=data_column)
@@ -663,17 +669,17 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         return list(zip(self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values))
 
-    def __getitem__(self, index: PointCloudMask | NDArrayBool | Any) -> PointCloud | Any:
+    def __getitem__(self, index: PointCloud | NDArrayBool | Any) -> PointCloud | Any:
         """
         Index the point cloud.
 
         In addition to all index types supported by GeoPandas, also supports a point cloud mask of same georeferencing.
         """
 
-        if isinstance(index, PointCloudMask) or isinstance(index, np.ndarray):
+        if isinstance(index, PointCloud) or isinstance(index, np.ndarray):
             # If input is mask with the same shape and georeferencing, convert to ndarray
             _cast_numeric_array_pointcloud(self, index, operation_name="an indexing operation")  # type: ignore
-            if isinstance(index, PointCloudMask):
+            if isinstance(index, PointCloud):
                 ind = index.data
             else:
                 ind = index  # type: ignore
@@ -1077,7 +1083,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Element-wise equality of two point clouds, or a point cloud and a numpy array, or a point cloud and single
         number.
 
-        This operation casts the result into a Mask.
+        This operation casts the result into a mask (boolean Raster).
 
         If other is a point cloud, it must have the same shape, coordinates and crs as self.
         If other is a np.ndarray, it must have the same shape.
@@ -1092,7 +1098,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Element-wise negation of two point clouds, or a point cloud and a numpy array, or a point cloud and single
         number.
 
-        This operation casts the result into a Mask.
+        This operation casts the result into a mask (boolean Raster).
 
         If other is a point cloud, it must have the same shape, coordinates and crs as self.
         If other is a np.ndarray, it must have the same shape.
@@ -1107,7 +1113,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Element-wise lower than comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
 
-        This operation casts the result into a Mask.
+        This operation casts the result into a mask (boolean Raster).
 
         If other is a point cloud, it must have the same shape, coordinates and crs as self.
         If other is a np.ndarray, it must have the same shape.
@@ -1122,7 +1128,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Element-wise lower or equal comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
 
-        This operation casts the result into a Mask.
+        This operation casts the result into a mask (boolean Raster).
 
         If other is a point cloud, it must have the same shape, coordinates and crs as self.
         If other is a np.ndarray, it must have the same shape.
@@ -1137,7 +1143,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Element-wise greater than comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
 
-        This operation casts the result into a Mask.
+        This operation casts the result into a mask (boolean Raster).
 
         If other is a point cloud, it must have the same shape, coordinates and crs as self.
         If other is a np.ndarray, it must have the same shape.
@@ -1152,7 +1158,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Element-wise greater or equal comparison of two point clouds, or a point cloud and a numpy array,
         or a point cloud and single number.
 
-        This operation casts the result into a Mask.
+        This operation casts the result into a mask (boolean Raster).
 
         If other is a point cloud, it must have the same shape, coordinates and crs as self.
         If other is a np.ndarray, it must have the same shape.
@@ -1161,6 +1167,52 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = self.data >= other_data
         return self.copy(new_array=out_data)
+
+    def __and__(self: PointCloud, other: PointCloud | NDArrayBool) -> PointCloud:
+        """Bitwise and between masks, or a mask and an array."""
+        other_data = _cast_numeric_array_pointcloud(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )
+
+        return self.copy(self.data & other_data)  # type: ignore
+
+    def __rand__(self: PointCloud, other: PointCloud | NDArrayBool) -> PointCloud:
+        """Bitwise and between masks, or a mask and an array."""
+
+        return self.__and__(other)
+
+    def __or__(self: PointCloud, other: PointCloud | NDArrayBool) -> PointCloud:
+        """Bitwise or between masks, or a mask and an array."""
+
+        other_data = _cast_numeric_array_pointcloud(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )
+
+        return self.copy(self.data | other_data)  # type: ignore
+
+    def __ror__(self: PointCloud, other: PointCloud | NDArrayBool) -> PointCloud:
+        """Bitwise or between masks, or a mask and an array."""
+
+        return self.__or__(other)
+
+    def __xor__(self: PointCloud, other: PointCloud | NDArrayBool) -> PointCloud:
+        """Bitwise xor between masks, or a mask and an array."""
+
+        other_data = _cast_numeric_array_pointcloud(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )
+
+        return self.copy(self.data ^ other_data)  # type: ignore
+
+    def __rxor__(self: PointCloud, other: PointCloud | NDArrayBool) -> PointCloud:
+        """Bitwise xor between masks, or a mask and an array."""
+
+        return self.__xor__(other)
+
+    def __invert__(self: PointCloud) -> PointCloud:
+        """Bitwise inversion of a mask."""
+
+        return self.copy(~self.data)
 
     def pointcloud_equal(self, other: PointCloud, **kwargs: Any) -> bool:
         """
@@ -1352,93 +1404,3 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         )
 
         return gu.Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=nodata)
-
-
-class PointCloudMask(PointCloud):
-    """
-    The georeferenced point cloud mask.
-
-    A point cloud mask is a point cloud with a boolean data column (True or False), that can serve to index or assign
-    values to other point clouds of the same georeferenced points.
-
-    Subclasses :class:`geoutils.PointCloud`.
-
-     Main attributes:
-         ds: :class:`geopandas.GeoDataFrame`
-             Geodataframe of the point cloud.
-         data_column: str
-             Name of point cloud data column.
-         crs: :class:`pyproj.crs.CRS`
-             Coordinate reference system of the point cloud.
-         bounds: :class:`rio.coords.BoundingBox`
-             Coordinate bounds of the point cloud.
-
-    All other attributes are derivatives of those attributes, or read from the file on disk.
-    See the API for more details.
-    """
-
-    def __init__(
-        self,
-        filename_or_dataset: PointCloud | str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-        **kwargs: Any,
-    ) -> None:
-
-        self._data: NDArrayNum | NDArrayBool | None = None  # type: ignore
-
-        # If a Mask is passed, simply point back to Mask
-        if isinstance(filename_or_dataset, PointCloudMask):
-            for key in filename_or_dataset.__dict__:
-                setattr(self, key, filename_or_dataset.__dict__[key])
-            return
-        # Else rely on parent Raster class options (including raised errors)
-        else:
-            super().__init__(filename_or_dataset, **kwargs)
-
-            # Convert masked array to boolean
-            self._data = self.data.astype(bool)  # type: ignore
-
-    def __and__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
-        """Bitwise and between masks, or a mask and an array."""
-        other_data = _cast_numeric_array_pointcloud(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
-        )
-
-        return self.copy(self.data & other_data)  # type: ignore
-
-    def __rand__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
-        """Bitwise and between masks, or a mask and an array."""
-
-        return self.__and__(other)
-
-    def __or__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
-        """Bitwise or between masks, or a mask and an array."""
-
-        other_data = _cast_numeric_array_pointcloud(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
-        )
-
-        return self.copy(self.data | other_data)  # type: ignore
-
-    def __ror__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
-        """Bitwise or between masks, or a mask and an array."""
-
-        return self.__or__(other)
-
-    def __xor__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
-        """Bitwise xor between masks, or a mask and an array."""
-
-        other_data = _cast_numeric_array_pointcloud(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
-        )
-
-        return self.copy(self.data ^ other_data)  # type: ignore
-
-    def __rxor__(self: PointCloudMask, other: PointCloudMask | NDArrayBool) -> PointCloudMask:
-        """Bitwise xor between masks, or a mask and an array."""
-
-        return self.__xor__(other)
-
-    def __invert__(self: PointCloudMask) -> PointCloudMask:
-        """Bitwise inversion of a mask."""
-
-        return self.copy(~self.data)
