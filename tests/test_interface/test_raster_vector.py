@@ -12,6 +12,7 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 import geoutils as gu
 from geoutils import examples
 
+
 class TestRasterVectorInterface:
 
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
@@ -107,7 +108,7 @@ class TestRasterVectorInterface:
         # Use Web Mercator at 30 m.
         # Capture the warning on resolution not matching exactly bounds
         with pytest.warns(UserWarning):
-            burned = vct.rasterize(xres=30, crs=3857)
+            vct.rasterize(xres=30, crs=3857)
 
         # Typically, rasterize returns a raster
         burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)

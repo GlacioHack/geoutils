@@ -2,26 +2,21 @@
 
 from __future__ import annotations
 
-import os
-import sys
-from tempfile import NamedTemporaryFile
-from typing import Any, Callable
 import warnings
 
 import dask.array as da
 import numpy as np
-import pandas as pd
 import pytest
 import rasterio as rio
 import xarray as xr
 from pyproj import CRS
 
-from geoutils.examples import _EXAMPLES_DIRECTORY
 from geoutils.raster.distributed_computing.dask import (
     delayed_interp_points,
     delayed_reproject,
     delayed_subsample,
 )
+
 
 def _build_dst_transform_shifted_newres(
     src_transform: rio.transform.Affine,
@@ -108,8 +103,7 @@ class TestDelayed:
     @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
     @pytest.mark.parametrize("subsample_size", [2, 100, 100000])  # type: ignore
     def test_delayed_subsample__output(
-        self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int],
-            subsample_size: int
+        self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int
     ):
         """
         Checks for delayed subsampling function for output accuracy.

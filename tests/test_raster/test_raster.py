@@ -9,7 +9,6 @@ import pathlib
 import re
 import tempfile
 import warnings
-from io import StringIO
 from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
@@ -17,8 +16,6 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
-from pylint.lint import Run
-from pylint.reporters.text import TextReporter
 
 import geoutils as gu
 from geoutils import examples
@@ -1861,48 +1858,6 @@ class TestRaster:
         rst2 = rst.from_array(data=rst.data, crs=rst.crs, transform=rst.transform, nodata=-99999)
         assert rst2.nodata == _default_nodata(rst.data.dtype)
 
-    @pytest.mark.skip(reason="Outdated: Linting is checked through pre-commit")
-    def test_type_hints(self) -> None:
-        """Test that pylint doesn't raise errors on valid code."""
-        # Create a temporary directory and a temporary filename
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_path = os.path.join(temp_dir.name, "code.py")
-
-        # r = gu.Raster(self.landsat_b4_path)
-
-        # Load the attributes to check
-        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename"]
-        # Create some sample code that should be correct
-        sample_code = "\n".join(
-            [
-                "'''Sample code that should conform to pylint's standards.'''",  # Add docstring
-                "import geoutils as gu",  # Import geoutils
-                "raster = gu.Raster(gu.examples.get_path_test('landsat_B4'))",  # Load a raster
-            ]
-            + [  # The below statements should not raise a 'no-member' (E1101) error.
-                f"{attribute.upper()} = raster.{attribute}" for attribute in attributes
-            ]
-            + [""]  # Add a newline to the end.
-        )
-
-        # Write the code to the temporary file
-        with open(temp_path, "w") as outfile:
-            outfile.write(sample_code)
-
-        # Run pylint and parse the stdout as a string, only test
-        pylint_output = StringIO()
-        Run([temp_path], reporter=TextReporter(pylint_output), exit=False)
-
-        lint_string = pylint_output.getvalue()
-        print(lint_string)  # Print the output for debug purposes
-
-        # Bad linting errors are defined here. Currently just "no-member" errors
-        bad_lints = [f"Instance of 'Raster' has no '{attribute}' member" for attribute in attributes]
-
-        # Assert that none of the bad errors are in the pylint output
-        for bad_lint in bad_lints:
-            assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"
-
     def test_split_bands(self) -> None:
         img = gu.Raster(self.landsat_rgb_path)
 
@@ -2866,9 +2821,7 @@ class TestArrayInterface:
     mask_wrong_shape = rng.integers(0, 2, size=(width - 1, height - 1), dtype=bool)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int16", "float32"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_ufunc_1nin_1nout(self, ufunc_str: str, nodata_init: None | str, dtype: str) -> None:
         """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
@@ -2931,12 +2884,8 @@ class TestArrayInterface:
                     ufunc(rst)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int16", "float32"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int16", "float32"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
     def test_array_ufunc_2nin_1nout(
@@ -3041,9 +2990,7 @@ class TestArrayInterface:
                     ufunc(rst1, rst2)
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int16", "float32"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
         """
@@ -3118,12 +3065,8 @@ class TestArrayInterface:
                 assert output_rst == output_ma
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int16", "float32"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int16", "float32"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
     def test_array_functions_2nin(

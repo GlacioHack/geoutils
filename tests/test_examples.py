@@ -51,6 +51,7 @@ def test_data_integrity__examples(example: str) -> None:
 
     assert file_sha256 == original_sha256_examples[example]
 
+
 original_sha256_test = {
     "everest_landsat_b4": "5aa1a0a1c17efd211e42218ab5e2f3e0e404b96ba5055ac5eebef756ad5c65bc",
     "everest_landsat_b4_cropped": "4244767c31c51f7c7b5fb8eb48df7d6394aa707deb9fe699d5672ff9d2507aef",
@@ -60,6 +61,7 @@ original_sha256_test = {
     "exploradores_rgi_outlines": "2f0281b00a49ad2f0874fb4ee54df1e0d11ad073f826d9ca713430588c15fa15",
     "coromandel_lidar": "95af5de14205c712e7674723d00119f4fa6239a65fb2aa3f7035254ace3194ae",
 }
+
 
 @pytest.mark.parametrize("example_test", examples.available_test)  # type: ignore
 def test_data_integrity__tests(example_test: str) -> None:

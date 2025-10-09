@@ -10,7 +10,7 @@ import pytest
 import geoutils as gu
 from geoutils import examples
 from geoutils._typing import NDArrayNum
-from scipy.stats.mstats import mquantiles
+
 
 class TestStats:
 
@@ -103,5 +103,6 @@ class TestStats:
         nan_arr = raster.get_nanarray()
         if nan_arr.ndim == 3:
             nan_arr = nan_arr[0, :, :]
-        assert raster.get_stats(stats_name="iqr") == pytest.approx(np.nanpercentile(nan_arr, 75)
-                                                                   - np.nanpercentile(nan_arr, 25))
+        assert raster.get_stats(stats_name="iqr") == pytest.approx(
+            np.nanpercentile(nan_arr, 75) - np.nanpercentile(nan_arr, 25)
+        )

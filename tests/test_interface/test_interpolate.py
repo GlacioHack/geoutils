@@ -346,7 +346,7 @@ class TestInterpolate:
         r = r.astype(np.float32)
 
         # Create a NaN at a given pixel (we know the landsat example has no NaNs to begin with)
-        i0, j0 = (30, 30)  # This needs to be an area without NaN (and surroudings) in all test example
+        i0, j0 = (30, 30)  # This needs to be an area without NaN (and surroundings) in all test example
         r[i0, j0] = np.nan
 
         # Create a big NaN area in the middle (for more complex NaN propagation below)

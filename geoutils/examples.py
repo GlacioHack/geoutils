@@ -24,8 +24,6 @@ import tarfile
 import tempfile
 import urllib.request
 
-import geoutils as gu
-
 # Define the location of the data in the example directory
 _EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
 
@@ -46,13 +44,17 @@ _FILEPATHS_DATA = {
     "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz"),
 }
 
-_FILEPATHS_TEST = {k: os.path.join(os.path.dirname(v),
-                                   os.path.splitext(os.path.basename(v))[0] + "_test" +
-                                   os.path.splitext(os.path.basename(v))[1])
-                   for k, v in _FILEPATHS_DATA.items()}
+_FILEPATHS_TEST = {
+    k: os.path.join(
+        os.path.dirname(v),
+        os.path.splitext(os.path.basename(v))[0] + "_test" + os.path.splitext(os.path.basename(v))[1],
+    )
+    for k, v in _FILEPATHS_DATA.items()
+}
 
 available = list(_FILEPATHS_DATA.keys())
 available_test = list(_FILEPATHS_TEST.keys())
+
 
 def download_examples(overwrite: bool = False) -> None:
     """
@@ -97,6 +99,7 @@ def download_examples(overwrite: bool = False) -> None:
             # Copy the temporary extracted data to the example directory.
             shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name), dirs_exist_ok=True)
 
+
 def get_path(name: str) -> str:
     """
     Get path of example data. List of available files can be found in "examples.available".
@@ -109,6 +112,7 @@ def get_path(name: str) -> str:
         return _FILEPATHS_DATA[name]
     else:
         raise ValueError('Data name should be one of "' + '" , "'.join(list(_FILEPATHS_DATA.keys())) + '".')
+
 
 def get_path_test(name: str) -> str:
     """
