@@ -274,20 +274,20 @@ class TestInterpolate:
         jtest = 10
         x, y = r.ij2xy(itest, jtest)
         val = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", as_array=True)[0]
-        val_img = r.data[itest, jtest]
+        val_img = r.get_nanarray()[itest, jtest]
         # For a point exactly at a grid coordinate, only nearest and linear will match
         # (cubic modifies values at a grid coordinate)
         if method in ["nearest", "linear"]:
-            assert val_img == val
+            assert val_img == pytest.approx(val, nan_ok=True)
 
         # Check the result is exactly the same for both methods
         val2 = r.interp_points((x, y), method=method, force_scipy_function="interpn", as_array=True)[0]
-        assert val2 == pytest.approx(val)
+        assert val2 == pytest.approx(val, nan_ok=True)
 
         # Check that interp convert to latlon
         lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
         val_latlon = r.interp_points((lat, lon), method=method, input_latlon=True, as_array=True)[0]
-        assert val == pytest.approx(val_latlon, abs=0.0001)
+        assert val == pytest.approx(val_latlon, abs=0.0001, nan_ok=True)
 
         # 2/ Test for multiple points
         i = np.random.default_rng(42).integers(1, 49, size=10)
@@ -346,11 +346,11 @@ class TestInterpolate:
         r = r.astype(np.float32)
 
         # Create a NaN at a given pixel (we know the landsat example has no NaNs to begin with)
-        i0, j0 = (10, 10)
+        i0, j0 = (30, 30)  # This needs to be an area without NaN (and surroudings) in all test example
         r[i0, j0] = np.nan
 
-        # Create a big NaN area in the bottom right (for more complex NaN propagation below)
-        r[80:90, 80:90] = np.nan
+        # Create a big NaN area in the middle (for more complex NaN propagation below)
+        r[40:50, 40:50] = np.nan
 
         # All surrounding pixels with distance half the method order rounded up should be NaNs
         order = method_to_order[method]
@@ -371,7 +371,8 @@ class TestInterpolate:
 
         assert all(np.isnan(np.atleast_1d(vals))) and all(np.isnan(np.atleast_1d(vals2)))
 
-        # Same check forrandom coordinates within half a pixel of the above coordinates (falling exactly on grid points)
+        # Same check for random coordinates within half a pixel of the above coordinates (falling exactly on grid
+        # points)
         xoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
         yoffset = np.random.default_rng(42).uniform(low=-0.5, high=0.5, size=len(x))
 
@@ -539,16 +540,11 @@ class TestInterpolate:
         # array([[[237, 194, 239],
         #          [250, 173, 164],
         #          [255, 192, 128]]]
-        itest0 = 120
-        jtest0 = 451
-        # This is the center of the pixel
-        xtest0 = 496975.0
-        ytest0 = 3099095.0
+        itest0 = 19
+        jtest0 = 21
 
-        # Verify coordinates match indexes
-        x_out, y_out = r.ij2xy(itest0, jtest0, force_offset="center")
-        assert x_out == xtest0
-        assert y_out == ytest0
+        # Get coordinates at indices
+        xtest0, ytest0 = r.ij2xy(itest0, jtest0, force_offset="center")
 
         # Check that the value at this coordinate is the same as when indexing
         z_val = r.reduce_points((xtest0, ytest0), as_array=True)
@@ -619,8 +615,8 @@ class TestInterpolate:
         # -- Tests 4: check that passing an array-like object works
 
         # For simple coordinates
-        x_coords = [xtest0, xtest0 + 100]
-        y_coords = [ytest0, ytest0 - 100]
+        x_coords = [xtest0, xtest0 + 10]
+        y_coords = [ytest0, ytest0 - 10]
         vals = r_multi.reduce_points((x_coords, y_coords), as_array=True)
         val0, win0 = r_multi.reduce_points((x_coords[0], y_coords[0]), return_window=True, as_array=True)
         val1, win1 = r_multi.reduce_points((x_coords[1], y_coords[1]), return_window=True, as_array=True)

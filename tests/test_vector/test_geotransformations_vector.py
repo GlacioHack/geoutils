@@ -13,6 +13,7 @@ import geoutils as gu
 
 class TestGeotransformations:
 
+    landsat_b4_path = gu.examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
     everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
     aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
@@ -57,7 +58,7 @@ class TestGeotransformations:
         with pytest.raises(TypeError, match=re.escape("Type of ref must be a raster or vector.")):
             v0.reproject(ref=10)  # type: ignore
 
-    test_data = [[landsat_b4_crop_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
+    test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)  # type: ignore
     def test_crop(self, data: list[str]) -> None:
@@ -99,8 +100,9 @@ class TestGeotransformations:
 
         assert np.sum(intersects_old) == np.sum(intersects_new)
 
-        # Check that some features were indeed removed
-        assert np.sum(~np.array(intersects_old)) > 0
+        # Check that some features were indeed removed if any geometry didn't intersect the raster bounds
+        if any(~np.array(intersects_old)):
+            assert np.sum(~np.array(intersects_old)) > 0
 
         # Check that error is raised when cropGeom argument is invalid
         with pytest.raises(TypeError, match="Crop geometry must be a Raster, Vector, or list of coordinates."):

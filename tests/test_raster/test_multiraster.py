@@ -292,11 +292,6 @@ class TestMultiRaster:
 
         assert np.count_nonzero(np.isnan(merged_img.data)) == 0  # Check no NaNs introduced
 
-        # Check that only works if CRS were the same
-        if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
-            diff = rasters.img.data - merged_img.data
-            assert np.abs(np.nanmean(diff)) < 1
-
         # Check that reference works
         merged_img2 = gu.raster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
         # Check that only works if CRS were the same

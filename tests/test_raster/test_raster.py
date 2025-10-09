@@ -72,13 +72,13 @@ class TestRaster:
         # For re-instantiation via Raster (r2 above), we check the behaviour:
         # By default, raster were unloaded, and were loaded during raster_equal() independently
         # So the instances should not be pointing to the same data and not mirror modifs
-        r0.data[0, 0] += 5
-        assert r2.data[0, 0] != r0.data[0, 0]
+        r0.data.data[0, 0] += 5
+        assert r2.data.data[0, 0] != r0.data.data[0, 0]
 
         # However, if we reinstantiate now that the data is loaded, it should point to the same
         r5 = gu.Raster(r0)
-        r0.data[0, 0] += 5
-        assert r5.data[0, 0] == r0.data[0, 0]
+        r0.data.data[0, 0] += 5
+        assert r5.data.data[0, 0] == r0.data.data[0, 0]
 
         # With r.count = 2
         r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
@@ -192,17 +192,17 @@ class TestRaster:
 
         assert not r.is_loaded
         assert r.driver == "GTiff"
-        assert r.width == 800
-        assert r.height == 655
+        assert r.width == 193
+        assert r.height == 167
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
         assert r.dtype == "uint8"
-        assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+        assert r.transform == rio.transform.Affine(30.0, 0.0, 489340.0, 0.0, -30.0, 3098570.0)
         assert np.array_equal(r.res, [30.0, 30.0])
-        assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
+        assert r.bounds == rio.coords.BoundingBox(left=489340.0, bottom=3093560.0, right=495130.0, top=3098570.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
         assert r.footprint.vector_equal(r.get_footprint_projected(r.crs))
 
@@ -211,17 +211,17 @@ class TestRaster:
 
         assert not r2.is_loaded
         assert r2.driver == "GTiff"
-        assert r2.width == 539
-        assert r2.height == 618
+        assert r2.width == 165
+        assert r2.height == 124
         assert r2.shape == (r2.height, r2.width)
         assert r2.count == 1
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
         assert r2.dtype == "float32"
-        assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
+        assert r2.transform == rio.transform.Affine(30.0, 0.0, 626785.0, 0.0, -30.0, 4837025.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
-        assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
+        assert r2.bounds == rio.coords.BoundingBox(left=626785.0, bottom=4833305.0, right=631735.0, top=4837025.0)
         assert r2.crs == rio.crs.CRS.from_epsg(32718)
         assert r2.footprint.vector_equal(r2.get_footprint_projected(r2.crs))
 
@@ -620,7 +620,7 @@ class TestRaster:
         # 1/ Getter and instantiation
         # Check existing file based on a priori knowledge
         raster_point = gu.Raster(self.landsat_b4_path)
-        assert raster_point.area_or_point == "Point"
+        assert raster_point.area_or_point == "Area"
 
         raster_area = gu.Raster(self.aster_dem_path)
         assert raster_area.area_or_point == "Area"
@@ -1373,7 +1373,10 @@ class TestRaster:
         # Then, we repeat for a nodata that already existed, we artificially modify the value on an unmasked pixel
         r = r_copy.copy()
         mask_pixel_artificially_set = np.zeros(np.shape(r.data), dtype=bool)
-        mask_pixel_artificially_set[0, 0] = True
+        # This needs to be a pixel not originally masked
+        i = 30
+        j = 30
+        mask_pixel_artificially_set[i, j] = True
         r.data.data[mask_pixel_artificially_set] = new_nodata
         # We set the value as masked before unmasking to create the mask if it does not exist yet
         r.data[mask_pixel_artificially_set] = np.ma.masked

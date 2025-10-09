@@ -95,9 +95,9 @@ class TestGeoreferencing:
     def test_xy2ij(self) -> None:
         """Test xy2ij with shift_area_or_point argument, and compare to interp_points function for consistency."""
 
-        # First, we try on a Raster with a Point interpretation in its "AREA_OR_POINT" metadata: values interpolated
-        # at the center of pixel
+        # First, we try on a Raster with a Point interpretation: values interpolated at the center of pixel
         r = gu.Raster(self.landsat_b4_path)
+        r.set_area_or_point("Point")
         assert r.area_or_point == "Point"
         xmin, ymin, xmax, ymax = r.bounds
 

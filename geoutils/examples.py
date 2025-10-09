@@ -52,26 +52,7 @@ _FILEPATHS_TEST = {k: os.path.join(os.path.dirname(v),
                    for k, v in _FILEPATHS_DATA.items()}
 
 available = list(_FILEPATHS_DATA.keys())
-
-def reduce_data_for_tests() -> None:
-
-    # Create reduced files for tests
-    for k in _FILEPATHS_DATA.keys():
-
-        # Get input and output filenames
-        fn_data = _FILEPATHS_DATA[k]
-        fn_test = _FILEPATHS_TEST[k]
-
-        # For rasters, crop
-        if ".tif" in os.path.basename(fn_data):
-            rst = gu.Raster(fn_data)
-            rst = rst.icrop(bbox=(0, 0, 48, 52))
-            rst.save(fn_test)
-        # For vectors, keep first 5 shapes
-        if ".gpkg" in os.path.basename(fn_data):
-            vct = gu.Vector(fn_data)
-            vct.ds = vct.ds[0:5]
-            vct.save(fn_test)
+available_test = list(_FILEPATHS_TEST.keys())
 
 def download_examples(overwrite: bool = False) -> None:
     """
@@ -84,7 +65,7 @@ def download_examples(overwrite: bool = False) -> None:
         return
 
     # Static commit hash to be bumped every time it needs to be.
-    commit = "7f778649a5d058c68605ad1297859b7582144ea6"
+    commit = "e758274647a8dd2656d73c3026c90cc77cab8a86"
     # The URL from which to download the repository
     url = f"https://github.com/GlacioHack/geoutils-data/tarball/main#commit={commit}"
 
@@ -115,8 +96,6 @@ def download_examples(overwrite: bool = False) -> None:
 
             # Copy the temporary extracted data to the example directory.
             shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name), dirs_exist_ok=True)
-
-    reduce_data_for_tests()
 
 def get_path(name: str) -> str:
     """

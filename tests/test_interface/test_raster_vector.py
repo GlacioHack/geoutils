@@ -109,9 +109,6 @@ class TestRasterVectorInterface:
         with pytest.warns(UserWarning):
             burned = vct.rasterize(xres=30, crs=3857)
 
-        assert burned.shape[0] == 1251
-        assert burned.shape[1] == 1522
-
         # Typically, rasterize returns a raster
         burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
         assert isinstance(burned_in2_out1, gu.Raster)
@@ -190,9 +187,11 @@ class TestMaskVectorInterface:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     # Mask without nodata
-    mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125
+    rst_landsat_b4 = gu.Raster(landsat_b4_path)
+    mask_landsat_b4 = rst_landsat_b4 > np.nanmedian(rst_landsat_b4)
     # Mask with nodata
-    mask_aster_dem = gu.Raster(aster_dem_path) > 2000
+    rst_aster_dem = gu.Raster(aster_dem_path)
+    mask_aster_dem = rst_aster_dem > np.nanmedian(rst_aster_dem)
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 

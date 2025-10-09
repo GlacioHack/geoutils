@@ -130,11 +130,10 @@ class TestGeoPandasMethods:
     gdf2 = gpd.GeoDataFrame({"geometry": [lines]}, crs="EPSG:4326")
     synthvec2 = gu.Vector(gdf2)
 
-    # Use two real-life vectors, reduce size to 2 polygons for speed of tests
-    realvec1 = gu.Vector(gu.examples.get_path_test("exploradores_rgi_outlines"))
-    realvec1.ds = realvec1.ds[0:2]
-    realvec2 = gu.Vector(gu.examples.get_path_test("everest_rgi_outlines"))
-    realvec2.ds = realvec2.ds[0:2]
+    # Use a real-life vector, divided in 2 for speed of tests
+    realvec = gu.Vector(gu.examples.get_path_test("everest_rgi_outlines"))
+    realvec1 = realvec[0:2]
+    realvec2 = realvec[2:4]
 
     # Properties and methods derived from Shapely or GeoPandas
     # List of properties and methods with non-geometric output that are implemented in GeoUtils
