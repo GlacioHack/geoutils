@@ -2028,12 +2028,11 @@ class Raster:
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        # If no name is passed, derive all statistics
-        # TODO: All stats are computed even when only one or an independent user-callable is asked for
-        #  Need to modify code to remove this requirement
-        if stats_name is None or isinstance(stats_name, list):
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
             return _my_statistics_case(data=data, stats_name=stats_name, counts=counts)  # type: ignore
         else:
+            # Single attribute to compute
             if isinstance(stats_name, str):
                 return get_single_stat(stats_name, data, counts)  # type: ignore
             elif callable(stats_name):
