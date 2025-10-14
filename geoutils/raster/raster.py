@@ -90,7 +90,7 @@ from geoutils.raster.satimg import (
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _my_statistics
+from geoutils.stats.stats import _my_statistics_case, get_single_stat
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -2031,9 +2031,13 @@ class Raster:
         # If no name is passed, derive all statistics
         # TODO: All stats are computed even when only one or an independent user-callable is asked for
         #  Need to modify code to remove this requirement
-        stats_dict = _my_statistics(data=data, stats_name=stats_name, counts=counts)
-
-        return stats_dict
+        if stats_name is None or isinstance(stats_name, list):
+            return _my_statistics_case(data=data, stats_name=stats_name, counts=counts)  # type: ignore
+        else:
+            if isinstance(stats_name, str):
+                return get_single_stat(stats_name, data, counts)  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...

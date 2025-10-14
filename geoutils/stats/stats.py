@@ -21,7 +21,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 from scipy.stats import iqr
@@ -57,23 +58,32 @@ _STATS_ALIASES = {
     "percentageinlierpoints": "Percentage inlier points",
 }
 
-"""stats_dict_2 = {
-    "Mean": np.ma.mean,
-    "Median": np.ma.median,
-    "Max": np.ma.max,
-    "Min": np.ma.min,
-    "Sum": np.ma.sum,
-    "Sum of squares": sum_square,
-    "90th percentile": percentile_90th,
-    "LE90": linear_error,
-    "IQR": my_iqr,
-    "NMAD": nmad,
-    "RMSE": rmse,
-    "Standard deviation": np.ma.std,
-    "Valid count": valid_count,
-    "Total count": total_count,
-    "Percentage valid points": percentage_valid_points,
-}"""
+
+STATS_LIST = [
+    "Mean",
+    "Median",
+    "Max",
+    "Min",
+    "Sum",
+    "Sum of squares",
+    "90th percentile",
+    "IQR",
+    "LE90",
+    "NMAD",
+    "RMSE",
+    "Standard deviation",
+    "Valid count",
+    "Total count",
+    "Percentage valid points",
+]
+
+
+STATS_LIST_MASK = [
+    "Valid inlier count",
+    "Total inlier count",
+    "Percentage inlier points",
+    "Percentage valid inlier points",
+]
 
 
 def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
@@ -136,13 +146,88 @@ def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict
     return stats_dict
 
 
-def _my_statistics(
+def get_single_stat(
+    stat_name: str, data: NDArrayNum, counts: tuple[int, int] | None = None, mask: NDArrayNum = None
+) -> int | float | np.floating[Any] | None:
+
+    if stat_name not in _STATS_ALIASES.values():
+        if stat_name in _STATS_ALIASES.keys():
+            stat_name = _STATS_ALIASES[stat_name]
+
+    match stat_name:
+        case "Mean":
+            return np.ma.mean(data)
+        case "Median":
+            return np.ma.median(data)
+        case "Max":
+            return np.ma.max(data)
+        case "Min":
+            return np.ma.min(data)
+        case "Sum":
+            return np.ma.sum(data)
+        case "Sum of squares":
+            return np.ma.max(data)
+        case "90th percentile":
+            if np.ma.isMaskedArray(data):
+                mdata = np.ma.filled(data.astype(float), np.nan)
+                return linear_error(mdata, interval=90)
+            else:
+                return np.nanpercentile(data, 90)
+        case "LE90":
+            if np.ma.isMaskedArray(data):
+                mdata = np.ma.filled(data.astype(float), np.nan)
+                return linear_error(mdata, interval=90)
+            else:
+                return linear_error(data, interval=90)
+        case "IQR":
+            if np.ma.isMaskedArray(data):
+                mdata = np.ma.filled(data.astype(float), np.nan)
+                return iqr(mdata, nan_policy="omit")
+            else:
+                return iqr(data, nan_policy="omit")
+        case "NMAD":
+            return nmad(data)
+        case "RMSE":
+            return np.sqrt(np.ma.mean(np.square(data)))
+        case "Standard deviation":
+            return np.ma.std(data)
+        case "NMAD":
+            return nmad(data)
+        case "Valid count":
+            valid_count = np.count_nonzero(mask) if counts is None else counts[0]
+            return valid_count
+        case "Total count":
+            return data.size
+        case "Percentage valid points":
+            valid_count = np.count_nonzero(mask) if counts is None else counts[0]  # todo
+            return (valid_count / data.size) * 100
+        case "Valid inlier count":
+            return np.count_nonzero(mask)
+        case "Total inlier count":
+            if counts is not None:
+                return counts[1]
+            else:
+                return None
+        case "Percentage inlier points":
+            if counts is not None:
+                return (np.count_nonzero(mask) / counts[0]) * 100  # todo
+            else:
+                return None
+        case "Percentage valid inlier points":
+            if counts is not None:
+                return (np.count_nonzero(mask) / counts[1]) * 100 if counts[1] != 0 else 0  # todo
+            else:
+                return None
+        case _:
+            logging.warning("Statistic name '%s' is not recognized", stat_name)
+            return np.float32(np.nan)
+
+
+def _my_statistics_case(
     data: NDArrayNum,
-    stats_name: (
-        str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
-    ) = None,
+    stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     counts: tuple[int, int] | None = None,
-) -> np.floating[Any] | dict[str, np.floating[Any]]:
+) -> np.floating[Any] | dict[str, np.floating[Any] | int | float]:
     """
     Calculate common statistics for an N-D array.
 
@@ -154,115 +239,54 @@ def _my_statistics(
 
     # Pre-computing depending on nature of array
     # TODO: Array is duplicated into filled array with NaN at every call, doubling memory usage
-    print("input _3", stats_name)
     if np.ma.isMaskedArray(data):
         mask = ~np.ma.getmaskarray(data)
-        mdata = np.ma.filled(data.astype(float), np.nan)
     else:
         mask = np.isfinite(data)
-        mdata = data
-    # Valid count
-    # Other stats
 
     stats_dict = {}
-    print(_STATS_ALIASES.keys())
 
-    def test(
-        name: str,
-        stats_name: (
-            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
-        ) = None,
-    ) -> str:
-        print(stats_name, type(stats_name))
-        if stats_name is None:
-            return name
-        if isinstance(stats_name, list):
-            if name in stats_name:
-                return name
-            elif list(_STATS_ALIASES.keys())[list(_STATS_ALIASES.values()).index(name)] in stats_name:
-                return list(_STATS_ALIASES.keys())[list(_STATS_ALIASES.values()).index(name)]
-        if isinstance(stats_name, str):
-            if stats_name == name:
-                return name
-            elif list(_STATS_ALIASES.keys())[list(_STATS_ALIASES.values()).index(name)] in stats_name:
-                return list(_STATS_ALIASES.keys())[list(_STATS_ALIASES.values()).index(name)]
-        return ""
+    if isinstance(stats_name, list):
+        stats = stats_name  # type: ignore
+    elif stats_name is None:
+        stats = [
+            "Mean",
+            "Median",
+            "Max",
+            "Min",
+            "Sum",
+            "Sum of squares",
+            "90th percentile",
+            "IQR",
+            "LE90",
+            "NMAD",
+            "RMSE",
+            "Standard deviation",
+            "Valid count",
+            "Total count",
+            "Percentage valid points",
+        ]  # type: ignore # todo
 
-    if test("Mean", stats_name):
-        stats_dict.update({test("Mean", stats_name): np.ma.mean(data)})
-    if test("Median", stats_name):
-        stats_dict.update({test("Median", stats_name): np.ma.median(data)})
-    if test("Max", stats_name):
-        stats_dict.update({test("Max", stats_name): np.ma.max(data)})
-    if test("Min", stats_name):
-        stats_dict.update({test("Min", stats_name): np.ma.min(data)})
-    if test("Sum", stats_name):
-        stats_dict.update({test("Sum", stats_name): np.ma.sum(data)})
-    if test("Sum of squares", stats_name):
-        stats_dict.update({test("Sum of squares", stats_name): np.ma.sum(np.square(data))})
-    if test("90th percentile", stats_name):
-        stats_dict.update({test("90th percentile", stats_name): np.nanpercentile(mdata, 90)})
-    if test("LE90", stats_name):
-        stats_dict.update({test("LE90", stats_name): linear_error(mdata, interval=90)})
-    if test("IQR", stats_name):
-        stats_dict.update({test("IQR", stats_name): iqr(mdata, nan_policy="omit")})
-    if test("NMAD", stats_name):
-        stats_dict.update({test("NMAD", stats_name): nmad(data)})
-    if test("RMSE", stats_name):
-        stats_dict.update({test("RMSE", stats_name): np.sqrt(np.ma.mean(np.square(data)))})
-    if test("LE90", stats_name):
-        stats_dict.update({test("LE90", stats_name): np.ma.std(data)})
-    if test("Standard deviation", stats_name):
-        stats_dict.update({test("Standard deviation", stats_name): np.ma.std(data)})
-    if test("Valid count", stats_name):
-        valid_count = np.count_nonzero(mask) if counts is None else counts[0]
-        stats_dict.update({test("Valid count", stats_name): valid_count})
-    if test("Total count", stats_name):
-        stats_dict.update({test("Total count", stats_name): data.size})
-    if test("Percentage valid points", stats_name):
-        valid_count = np.count_nonzero(mask) if counts is None else counts[0]  # todo
-        stats_dict.update({test("Percentage valid points", stats_name): (valid_count / data.size) * 100})
-
-    # If inlier mask was passed
-    if counts is not None:
-        valid_inlier_count = np.count_nonzero(mask)
-        if test("Valid inlier count", stats_name):
-            stats_dict.update({test("Valid inlier count", stats_name): valid_inlier_count})
-        if test("Total inlier count", stats_name):
-            stats_dict.update({test("Total inlier count", stats_name): counts[1]})
-        if test("Percentage inlier points", stats_name):
-            stats_dict.update({test("Percentage inlier points", stats_name): (valid_inlier_count / counts[0]) * 100})
-        if test("Percentage valid inlier points", stats_name):
-            stats_dict.update(
-                {
-                    test("Percentage valid inlier points", stats_name): (
-                        (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0
-                    )
-                }
-            )
-
-    if stats_name is not None:
-        if isinstance(stats_name, list):
-            for name in stats_name:
-                if callable(name):
-                    stats_dict.update({name.__name__: name(data)})
-        elif callable(stats_name):
-            return stats_name(data)
+        if counts is not None:
+            stats += [
+                "Valid inlier count",
+                "Total inlier count",
+                "Percentage inlier points",
+                "Percentage valid inlier points",
+            ]  # todo
 
     # If there are no valid data points, set all statistics to NaN
     if np.count_nonzero(mask) == 0:
         logging.warning("Empty raster, returns Nan for all stats")
-        for key in stats_dict:
-            stats_dict[key] = np.nan
+        stats_dict = {stat_name: np.nan for stat_name in stats}
 
-    if isinstance(stats_name, str):
-        if stats_dict == {}:
-            logging.warning("Statistic name '%s' is not recognized", stats_name)
-            return np.float32(np.nan)
-        else:
-            return stats_dict[stats_name]
     else:
-        return stats_dict
+        for stat_name in stats:
+            if isinstance(stat_name, str):
+                stats_dict[stat_name] = get_single_stat(stat_name, data, counts, mask)  # type: ignore
+            elif callable(stat_name):
+                stats_dict[stat_name.__name__] = stat_name(data)  # type: ignore
+    return stats_dict  # type: ignore
 
 
 def _get_single_stat(
