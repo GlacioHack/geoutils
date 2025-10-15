@@ -90,7 +90,7 @@ from geoutils.raster.satimg import (
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
+from geoutils.stats.stats import _my_statistics_case, get_single_stat
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -2028,37 +2028,15 @@ class Raster:
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        # If no name is passed, derive all statistics
-        # TODO: All stats are computed even when only one or an independent user-callable is asked for
-        #  Need to modify code to remove this requirement
-        stats_dict = _statistics(data=data, counts=counts)
-        if stats_name is None:
-            return stats_dict
-
-        if counts is None:
-            ignore_aliases = [
-                "validinliercount",
-                "totalinliercount",
-                "percentagevalidinlierpoints",
-                "percentageinlierpoints",
-            ]
-            stats_aliases = {k: _STATS_ALIASES[k] for k in _STATS_ALIASES.keys() if k not in ignore_aliases}
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _my_statistics_case(data=data, stats_name=stats_name, counts=counts)  # type: ignore
         else:
-            stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
-        else:
-            if callable(stats_name):
-                return stats_name(data)
-            else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return get_single_stat(stats_name, data, counts)  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
