@@ -73,7 +73,6 @@ from geoutils.projtools import (
     reproject_from_latlon,
     reproject_points,
 )
-from geoutils.raster.array import get_array_and_mask, get_mask_from_array
 from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _bounds,
@@ -3628,17 +3627,28 @@ class Raster:
         :raises ValueError: If the filter name is not one of the predefined options.
         :raises TypeError: If `method` is neither a string nor a callable.
         """
-        array = get_array_and_mask(self.data)[0]
-        array = _filter(array, method, **kwargs)
-        mask = get_mask_from_array(array)
-        array[mask] = self.nodata
-        masked_array = np.ma.masked_array(array, mask)
-        masked_array.set_fill_value(self.nodata)
+        # Convert data to float to avoid integer issues with nodata
+        array = self.data.astype(float)
+
+        # Mask nodata values
+        masked_array = np.ma.masked_equal(array, self.nodata)
+
+        # Fill masked values with nodata for filtering, to match SciPy behavior
+        filled_array = masked_array.filled(self.nodata)
+
+        # Apply filter
+        filtered_array = _filter(filled_array, method, **kwargs)
+
+        # Mask nodata again after filtering
+        final_masked = np.ma.masked_equal(filtered_array, self.nodata)
+        final_masked.set_fill_value(self.nodata)
+        final_masked = final_masked.astype(float)
+
         if inplace:
-            self._data = masked_array
+            self._data = final_masked
             return None
         else:
-            return self.from_array(masked_array, self.transform, self.crs, self.nodata, self.area_or_point)
+            return self.from_array(final_masked, self.transform, self.crs, self.nodata, self.area_or_point)
 
     def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """

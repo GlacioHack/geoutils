@@ -17,7 +17,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Filters to remove outliers and reduce noise in rasters."""
+"""
+Filters class to remove outliers and reduce noise in rasters.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -25,10 +28,15 @@ from typing import Any, Literal
 
 import numpy as np
 import scipy
-from scipy.ndimage import generic_filter as scipy_generic_filter
+from packaging.version import Version
 from scipy.ndimage import uniform_filter
 
 from geoutils._typing import NDArrayNum
+
+if Version(scipy.__version__) > Version("1.16.0"):
+    generic_filter_scipy = scipy.ndimage.vectorized_filter
+else:
+    generic_filter_scipy = scipy.ndimage.generic_filter
 
 try:
     from numba import jit, prange
@@ -48,34 +56,53 @@ except ImportError:
         return decorator
 
 
-def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], **kwargs: dict[str, Any]) -> NDArrayNum:
+def _nan_filter(array: NDArrayNum, func: Callable[..., NDArrayNum], size: int) -> NDArrayNum:
     """
-    Apply a filter to the array. See description of raster.filter.
+    Apply a NaN-aware local filter that ignores NaNs within the window.
+    :param array: array to filter
+    :param func: function to apply to array
+
+    Returns NaN only if *all* values in the local window are NaN.
     """
+    if array.ndim != 2:
+        raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
+
+    def tests_on_nans(data: NDArrayNum) -> float | object:
+        """
+        Process NaNs values for filtering
+        :param data: array containing all data
+        """
+        valid = data[~np.isnan(data)]
+        return np.nan if valid.size == 0 else func(valid)
+
+    return generic_filter_scipy(array, tests_on_nans, size=size, mode="constant", cval=np.nan)
+
+
+def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], **kwargs: Any) -> NDArrayNum:
+    """
+    Dispatch filter application by method name or custom callable.
+    :param array: array to filter
+    :param method: filter method name or callable
+    """
+    filter_map: dict[str, Callable[..., NDArrayNum]] = {
+        "gaussian": gaussian_filter,
+        "median": lambda arr, size=3, **_: _nan_filter(arr, np.nanmedian, size),
+        "mean": lambda arr, size=3, **_: _nan_filter(arr, np.nanmean, size),
+        "max": lambda arr, size=3, **_: _nan_filter(arr, np.nanmax, size),
+        "min": lambda arr, size=3, **_: _nan_filter(arr, np.nanmin, size),
+        "distance": distance_filter,
+    }
 
     if isinstance(method, str):
-        filter_map: dict[str, Callable[..., NDArrayNum]] = {
-            "gaussian": gaussian_filter,
-            "median": median_filter,
-            "mean": mean_filter,
-            "max": max_filter,
-            "min": min_filter,
-            "distance": distance_filter,
-        }
-
         if method not in filter_map:
-            raise ValueError(f"Unsupported filter method '{method}'. " f"Available methods: {list(filter_map.keys())}")
-
-        filter_func = filter_map[method]
-
+            raise ValueError(f"Unsupported filter method '{method}'. Available: {list(filter_map)}")
+        func = filter_map[method]
     elif callable(method):
-        filter_func = method
+        func = method
     else:
         raise TypeError("`method` must be a string or a callable.")
 
-    # Apply filter
-    filtered_data = filter_func(array, **kwargs)
-    return filtered_data
+    return func(array, **kwargs)
 
 
 def gaussian_filter(array: NDArrayNum, sigma: float, **kwargs: Any) -> NDArrayNum:
@@ -119,13 +146,13 @@ def median_filter_numba(array: NDArrayNum, size: int) -> NDArrayNum:
     Apply a median filter to a raster that may contain NaNs, using numbas's implementation.
 
     :param array: The input array to be filtered.
-    :param window_size: The size of the window to use (must be odd).
+    :param size: The size of the window to use (must be odd).
 
     :returns: The filtered array (same shape as input).
     """
 
     if size % 2 == 0:
-        raise ValueError("window_size must be odd")
+        raise ValueError("`size` must be odd.")
 
     # Get input shapes
     N1, N2 = array.shape
@@ -146,7 +173,7 @@ def median_filter_numba(array: NDArrayNum, size: int) -> NDArrayNum:
     return outputs
 
 
-def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"] = "numba") -> NDArrayNum:
+def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"] = "scipy") -> NDArrayNum:
     """
     Apply a median filter to a raster that may contain NaNs, using scipy's implementation.
 
@@ -158,34 +185,32 @@ def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"
     """
 
     if size % 2 == 0:
-        raise ValueError("size must be odd")
+        raise ValueError("`size` must be odd.")
 
     if array.ndim == 2:
         return _apply_median_filter_2d(array, size, engine)
     elif array.ndim == 3:
         return np.stack([_apply_median_filter_2d(slice_, size, engine) for slice_ in array])
-    else:
-        raise ValueError("Input array must be 2D or 3D.")
+    raise ValueError("Input array must be 2D or 3D.")
 
 
-def _apply_median_filter_2d(array: NDArrayNum, window_size: int, engine: Literal["scipy", "numba"]) -> NDArrayNum:
+def _apply_median_filter_2d(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"]) -> NDArrayNum:
     """
     Apply a 2D median filter on an array that may contain NaNs.
 
     :param array: 2D input array to filter, may contain NaNs.
-    :param window_size: Size of the median filter window (must be odd).
+    :param size: Size of the median filter window (must be odd).
     :param engine: Filtering engine to use, either "scipy" or "numba".
     :returns: Filtered array of the same shape as input.
     """
 
     if engine == "scipy":
-        return scipy_generic_filter(array, np.nanmedian, size=window_size, mode="constant", cval=np.nan)
-    else:
-        if not _has_numba:
-            raise ValueError("Optional dependency needed. Install 'numba'.")
-        hw = int((window_size - 1) / 2)
-        array = np.pad(array, pad_width=((hw, hw), (hw, hw)), constant_values=np.nan)
-        return median_filter_numba(array, window_size)
+        return generic_filter_scipy(array, np.nanmedian, size=size, mode="constant", cval=np.nan)
+    if not _has_numba:
+        raise ValueError("Install 'numba' for accelerated filtering.")
+    hw = int((size - 1) / 2)
+    array = np.pad(array, pad_width=((hw, hw), (hw, hw)), constant_values=np.nan)
+    return median_filter_numba(array, size)
 
 
 def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:
@@ -194,19 +219,24 @@ def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:
 
     :param array: 2D input array
     :param size: size of the square kernel
+    :no_data: no data value
     :return: filtered array with same shape
     """
-    if np.ndim(array) != 2:
+    if array.ndim != 2:
         raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
 
+    # Mask nodata values
     mask = ~np.isnan(array)
     array_filled = np.where(mask, array, 0)
+    # Compute sum over the kernel
     sum_vals = uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
+    # Count of valid (non-nodata) pixels in the kernel
     count_vals = uniform_filter(mask.astype(float), size=size, mode="constant", cval=0.0)
 
     with np.errstate(invalid="ignore", divide="ignore"):
         mean_vals = sum_vals / count_vals
 
+    # Where no valid pixels, set to nodata
     mean_vals[count_vals == 0] = np.nan
 
     return mean_vals
@@ -223,7 +253,7 @@ def min_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     :returns: The filtered array (same shape as input).
     """
     # Check that array dimension is 2 or 3
-    if np.ndim(array) not in [2, 3]:
+    if array.ndim not in [2, 3]:
         raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
 
     nans = np.isnan(array)
@@ -245,7 +275,7 @@ def max_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     :returns: the filtered array (same shape as input).
     """
     # Check that array dimension is 2 or 3
-    if np.ndim(array) not in [2, 3]:
+    if array.ndim not in [2, 3]:
         raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
 
     nans = np.isnan(array)
@@ -294,7 +324,7 @@ def distance_filter(array: NDArrayNum, radius: float, outlier_threshold: float) 
 def generic_filter(
     array: NDArrayNum,
     filter_function: Callable[..., NDArrayNum],
-    **kwargs: dict[Any, Any] | int,
+    **kwargs: Any,
 ) -> NDArrayNum:
     """
     Apply a filter from a function.
@@ -305,7 +335,6 @@ def generic_filter(
     :returns: the filtered array (same shape as input).
     """
     # Check that array dimension is 2 or 3
-    if np.ndim(array) not in [2, 3]:
+    if array.ndim not in [2, 3]:
         raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
-
     return filter_function(array, **kwargs)
