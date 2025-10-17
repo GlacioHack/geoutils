@@ -67,7 +67,7 @@ def _nan_filter(array: NDArrayNum, func: Callable[..., NDArrayNum], size: int) -
     if array.ndim != 2:
         raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
 
-    def tests_on_nans(data: NDArrayNum) -> float | object:
+    def tests_on_nans(data: NDArrayNum, *, axis: int | tuple[int, ...] | None = None) -> float | object:
         """
         Process NaNs values for filtering
         :param data: array containing all data
