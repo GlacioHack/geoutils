@@ -175,12 +175,18 @@ def median_filter_numba(array: NDArrayNum, size: int) -> NDArrayNum:
 
 def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"] = "scipy") -> NDArrayNum:
     """
-    Apply a median filter to a raster that may contain NaNs, using scipy's implementation.
+    Apply a median filter to a raster that may contain NaNs.
+
+    For 2D arrays, the filter is applied over both dimensions.
+    For 3D arrays, the filter is applied independently to each 2D slice
+    (i.e., only along the horizontal dimensions, not across the third dimension).
+
+    This differs from scipy's built-in median_filter, which applies
+    the filter across all dimensions by default.
 
     :param array: The input array to be filtered.
-    :param size: The size of the window to use (must be odd).
+    :param size: The size of the filtering window (must be odd).
     :param engine: Filtering engine to use, either "scipy" or "numba".
-
     :returns: The filtered array (same shape as input).
     """
 
