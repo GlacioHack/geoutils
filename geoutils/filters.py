@@ -73,7 +73,7 @@ def _nan_filter(array: NDArrayNum, func: Callable[..., NDArrayNum], size: int) -
         :param data: array containing all data
         """
         flat_data = np.ravel(data)
-        valid = data[~np.isnan(flat_data)]
+        valid = flat_data[~np.isnan(flat_data)]
         return np.nan if valid.size == 0 else func(valid)
 
     return generic_filter_scipy(array, tests_on_nans, size=size, mode="constant", cval=np.nan)
