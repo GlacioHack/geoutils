@@ -79,7 +79,7 @@ def _nan_filter(array: NDArrayNum, func: Callable[..., NDArrayNum], size: int) -
         return np.nan if valid.size == 0 else func(valid)
 
     if _has_vectorized_filter:
-        return generic_filter_scipy(tests_on_nans, array, size=size, mode="constant", cval=np.nan)
+        return generic_filter_scipy(array, tests_on_nans, size=size, mode="constant", cval=np.nan)
     else:
 
         def wrapper_scipy(flat_values: NDArrayNum) -> float | object:
