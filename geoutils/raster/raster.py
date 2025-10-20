@@ -90,7 +90,7 @@ from geoutils.raster.satimg import (
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _my_statistics_case, get_single_stat
+from geoutils.stats.stats import _my_statistics_partial
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -2028,13 +2028,22 @@ class Raster:
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
+        # Pre-computing depending on nature of array
+        # TODO: Array is duplicated into filled array with NaN at every call, doubling memory usage
+        if np.ma.isMaskedArray(data):
+            mask = ~np.ma.getmaskarray(data)
+        else:
+            mask = np.isfinite(data)
+
+        mask_count_nonzero = np.count_nonzero(mask)
+
         # Given list or all attributes to compute if None
         if isinstance(stats_name, list) or stats_name is None:
-            return _my_statistics_case(data=data, stats_name=stats_name, counts=counts)  # type: ignore
+            return _my_statistics_partial(data, stats_name, counts, mask_count_nonzero)  # type: ignore
         else:
             # Single attribute to compute
             if isinstance(stats_name, str):
-                return get_single_stat(stats_name, data, counts)  # type: ignore
+                return _my_statistics_partial(data, stats_name, counts, mask_count_nonzero)[stats_name]  # type: ignore
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
 
