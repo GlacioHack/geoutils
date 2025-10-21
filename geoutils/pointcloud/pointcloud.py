@@ -40,7 +40,7 @@ from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Numb
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
+from geoutils.stats.stats import _my_statistics_case, get_single_stat
 
 try:
     import laspy
@@ -1285,25 +1285,16 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             self.load()
 
         data = self.data
-        stats_dict = _statistics(data=data)
-        if stats_name is None:
-            return stats_dict
 
-        stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(self.data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _my_statistics_case(data=data, stats_name=stats_name)  # type: ignore
         else:
-            if callable(stats_name):
-                return stats_name(self.data)
-            else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return get_single_stat(stats_name, data)  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
 
     @overload
     def subsample(
