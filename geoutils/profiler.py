@@ -1,7 +1,7 @@
-# Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
+# Copyright (c) 2025 GeoUtils developers
 #
-# This file is part of the xDEM project:
-# https://github.com/glaciohack/xdem
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 # limitations under the License.
 
 """Contains profiling functions."""
+
 import logging
 import os
 import time
@@ -39,9 +40,7 @@ except ImportError:
 
 class Profiler:
     """
-    Main profiler class for xDEM
-
-
+    Main profiler class for Geoutils
     """
 
     enabled = False
@@ -111,7 +110,7 @@ class Profiler:
         """
         Generate Profiling summary
 
-        :param output: xDEM's output directory
+        :param output: Output directory path
         """
         if not Profiler.enabled:
             return
@@ -286,7 +285,7 @@ class Profiler:
 
 def profile(name: str, interval: int | float = 0.05, memprof: bool = False):  # type: ignore
     """
-    xDEM profiling decorator
+    Geoutils profiling decorator
 
     To profile other functions and add them to the summary graphs and data, simply add the @profile decorator before
     them, providing a descriptive name. If you also want to track memory usage over time for a specific function call,
@@ -298,7 +297,7 @@ def profile(name: str, interval: int | float = 0.05, memprof: bool = False):  # 
     :param memprof: whether to profile the memory consumption
 
     :example:
-        from xdem.profiler import Profiler
+        from geoutils.profiler import Profiler
 
         @profile("my profiled function", memprof=True, interval=0.5)  # type: ignore
         def my_function():
