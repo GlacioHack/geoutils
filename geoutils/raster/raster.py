@@ -65,6 +65,7 @@ from geoutils.interface.raster_point import (
 )
 from geoutils.interface.raster_vector import _polygonize
 from geoutils.misc import deprecate
+from geoutils.profiler import profile
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -371,6 +372,7 @@ class Raster:
     See the API for more details.
     """
 
+    @profile("raster.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: (
@@ -2971,7 +2973,7 @@ class Raster:
             raster = Raster(raster, load_data=False)
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)
+        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)  # type: ignore
 
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")

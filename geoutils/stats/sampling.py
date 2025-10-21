@@ -25,6 +25,7 @@ from typing import Literal, overload
 import numpy as np
 
 from geoutils._typing import MArrayNum, NDArrayNum
+from geoutils.profiler import profile
 from geoutils.raster.array import get_mask_from_array
 
 
@@ -57,6 +58,7 @@ def subsample_array(
 ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
 
+@profile("stats.subsample_array", memprof=True)  # type: ignore
 def subsample_array(
     array: NDArrayNum | MArrayNum,
     subsample: float | int,
