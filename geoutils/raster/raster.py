@@ -682,7 +682,7 @@ class Raster:
         return self._name
 
     @property
-    def profile(self) -> dict[str, Any] | None:
+    def profile_raster(self) -> dict[str, Any] | None:
         """Basic metadata and creation options of this dataset.
         May be passed as keyword arguments to rasterio.open()
         to create a clone of this dataset."""
@@ -1987,6 +1987,7 @@ class Raster:
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
+    @profile("raster.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -3887,6 +3888,7 @@ class Raster:
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
+    @profile("raster.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
