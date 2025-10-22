@@ -283,7 +283,7 @@ class Profiler:
         fig.write_html(path_fig)
 
 
-def profile(name: str, interval: int | float = 0.05, memprof: bool = False):  # type: ignore
+def profile_tool(name: str, interval: int | float = 0.05, memprof: bool = False):  # type: ignore
     """
     Geoutils profiling decorator
 
@@ -309,7 +309,7 @@ def profile(name: str, interval: int | float = 0.05, memprof: bool = False):  # 
         Inner function
         """
 
-        def wrapper_profile(*args, **kwargs):  # type: ignore
+        def wrapper_profile_tool(*args, **kwargs):  # type: ignore
             """
             Profiling wrapper
 
@@ -366,7 +366,7 @@ def profile(name: str, interval: int | float = 0.05, memprof: bool = False):  # 
             Profiler.add_profiling_info(func_data)
             return res
 
-        return wrapper_profile
+        return wrapper_profile_tool
 
     return decorator_generator
 

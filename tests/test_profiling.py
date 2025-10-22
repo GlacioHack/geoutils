@@ -19,7 +19,7 @@ class TestProfiling:
     @pytest.mark.parametrize(
         "profiling_configuration", [(False, False), (True, False), (False, True), (True, True)]
     )  # type: ignore
-    @pytest.mark.parametrize("profiling_function", ["load", "get_stats"])  # type: ignore
+    @pytest.mark.parametrize("profiling_function", ["load", "get_stats", "subsample"])  # type: ignore
     def test_profiling_configuration(self, profiling_configuration, profiling_function, tmp_path) -> None:
         """
         Test the all combinaisons of profiling with three examples of profiled functions.
@@ -32,6 +32,8 @@ class TestProfiling:
         dem = gu.Raster(examples.get_path_test("everest_landsat_b4"))
         if profiling_function == "get_stats":
             dem.get_stats()
+        if profiling_function == "subsample":
+            gu.Raster.subsample(dem, 2)
 
         Profiler.generate_summary(tmp_path)
 
@@ -49,6 +51,8 @@ class TestProfiling:
                 # check data in pickle
                 df = pd.read_pickle(op.join(tmp_path, "raw_data.pickle"))
                 if profiling_function == "get_stats":
+                    assert len(df) == 3
+                elif profiling_function == "subsample":
                     assert len(df) == 2
                 else:
                     assert len(df) == 1
@@ -64,6 +68,9 @@ class TestProfiling:
                 assert op.isfile(op.join(tmp_path, "memory_raster.__init__.html"))
                 if profiling_function == "get_stats":
                     assert op.isfile(op.join(tmp_path, "memory_stats._statistics.html"))
+                    assert op.isfile(op.join(tmp_path, "memory_raster.get_stats.html"))
+                elif profiling_function == "sampling":
+                    assert op.isfile(op.join(tmp_path, "memory_raster.subsample.html"))
             else:
                 assert not len(glob.glob(op.join(tmp_path, "*.html")))
 
@@ -104,4 +111,4 @@ class TestProfiling:
 
         Profiler.reset_selection_functions()
         dem.get_stats()
-        assert len(Profiler.get_profiling_info()) == 2
+        assert len(Profiler.get_profiling_info()) == 3

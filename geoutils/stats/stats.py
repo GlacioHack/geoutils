@@ -27,7 +27,7 @@ import numpy as np
 from scipy.stats import iqr
 
 from geoutils._typing import NDArrayNum
-from geoutils.profiler import profile
+from geoutils.profiler import profile_tool
 from geoutils.stats.estimators import linear_error, nmad
 
 _STATS_ALIASES = {
@@ -59,7 +59,7 @@ _STATS_ALIASES = {
 }
 
 
-@profile("stats._statistics", memprof=True)  # type: ignore
+@profile_tool("stats._statistics", memprof=True)  # type: ignore
 def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
     """
     Calculate common statistics for an N-D array.

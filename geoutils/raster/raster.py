@@ -65,7 +65,7 @@ from geoutils.interface.raster_point import (
 )
 from geoutils.interface.raster_vector import _polygonize
 from geoutils.misc import deprecate
-from geoutils.profiler import profile
+from geoutils.profiler import profile_tool
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -372,7 +372,7 @@ class Raster:
     See the API for more details.
     """
 
-    @profile("raster.__init__", memprof=True)  # type: ignore
+    @profile_tool("raster.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: (
@@ -682,7 +682,7 @@ class Raster:
         return self._name
 
     @property
-    def profile_raster(self) -> dict[str, Any] | None:
+    def profile(self) -> dict[str, Any] | None:
         """Basic metadata and creation options of this dataset.
         May be passed as keyword arguments to rasterio.open()
         to create a clone of this dataset."""
@@ -1987,7 +1987,7 @@ class Raster:
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
-    @profile("raster.get_stats", memprof=True)  # type: ignore
+    @profile_tool("raster.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -3514,6 +3514,7 @@ class Raster:
         **kwargs: Any,
     ) -> NDArrayNum | gu.PointCloud: ...
 
+    @profile_tool("raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
@@ -3888,7 +3889,7 @@ class Raster:
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
-    @profile("raster.subsample", memprof=True)  # type: ignore
+    @profile_tool("raster.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
