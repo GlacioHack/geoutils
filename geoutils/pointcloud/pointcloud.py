@@ -281,7 +281,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     See the API for more details.
     """
 
-    @profile_tool("pointcloud.__init__", memprof=True)  # type: ignore
+    @profile_tool("pointcloud.pointcloud.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
@@ -1263,7 +1263,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
-    @profile_tool("pointcloud.get_stats", memprof=True)  # type: ignore
+    @profile_tool("pointcloud.pointcloud.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -1334,7 +1334,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
-    @profile_tool("pointcloud.subsample", memprof=True)  # type: ignore
+    @profile_tool("pointcloud.pointcloud.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
@@ -1356,7 +1356,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
 
-    @profile_tool("pointcloud.grid", memprof=True)  # type: ignore
+    @profile_tool("pointcloud.pointcloud.grid", memprof=True)  # type: ignore
     def grid(
         self,
         ref: gu.Raster | None = None,
