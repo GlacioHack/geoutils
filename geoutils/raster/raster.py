@@ -372,7 +372,7 @@ class Raster:
     See the API for more details.
     """
 
-    @profile_tool("raster.__init__", memprof=True)  # type: ignore
+    @profile_tool("raster.raster.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: (
@@ -1987,7 +1987,7 @@ class Raster:
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
-    @profile_tool("raster.get_stats", memprof=True)  # type: ignore
+    @profile_tool("raster.raster.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -2440,6 +2440,7 @@ class Raster:
         inplace: bool = False,
     ) -> RasterType | None: ...
 
+    @profile_tool("raster.raster.crop", memprof=True)  # type: ignore
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
@@ -2491,6 +2492,7 @@ class Raster:
         inplace: Literal[False] = False,
     ) -> RasterType: ...
 
+    @profile_tool("raster.raster.icrop", memprof=True)  # type: ignore
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -2555,6 +2557,7 @@ class Raster:
         multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
+    @profile_tool("raster.raster.reproject", memprof=True)  # type: ignore
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -3514,7 +3517,7 @@ class Raster:
         **kwargs: Any,
     ) -> NDArrayNum | gu.PointCloud: ...
 
-    @profile_tool("raster.interp_points", memprof=True)  # type: ignore
+    @profile_tool("raster.raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
@@ -3889,7 +3892,7 @@ class Raster:
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
-    @profile_tool("raster.subsample", memprof=True)  # type: ignore
+    @profile_tool("raster.raster.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,

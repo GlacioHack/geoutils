@@ -59,7 +59,7 @@ _STATS_ALIASES = {
 }
 
 
-@profile_tool("stats._statistics", memprof=True)  # type: ignore
+@profile_tool("stats.stats._statistics", memprof=True)  # type: ignore
 def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
     """
     Calculate common statistics for an N-D array.

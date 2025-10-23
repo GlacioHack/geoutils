@@ -112,7 +112,7 @@ class Profiler:
 
         :param output: Output directory path
         """
-        if not Profiler.enabled:
+        if not Profiler.enabled or len(Profiler._profiling_info) == 0:
             return
 
         if Profiler.save_raw_data or Profiler.save_graphs:
@@ -120,7 +120,6 @@ class Profiler:
 
         if Profiler.save_raw_data:
             Profiler._profiling_info.to_pickle(os.path.join(output, "raw_data.pickle"))
-        print(Profiler._profiling_info)
         Profiler._profiling_info["text_display"] = (
             Profiler._profiling_info["name"] + " (" + Profiler._profiling_info["time"].round(2).astype(str) + " s)"
         )
@@ -173,10 +172,10 @@ class Profiler:
         Profiler._profiling_info = pd.DataFrame(columns=Profiler.columns)
 
     @staticmethod
+    @staticmethod
     def plot_trace_for_call(uuid_function: str, data_name: str, path_fig: str) -> None:
         """
         Plot memory (or any resource tracked) usage over time for a function call, with markers for its subcalls.
-
         :param uuid_function: UUID of the parent function call
         :param data_name: The name of the data to plot (if cpu consumption were to be added for example)
         :param path_fig: The path to save the output plot
@@ -191,6 +190,7 @@ class Profiler:
         call_start_time = parent_row["call_time"]
         times = [data[0] - call_start_time for data in parent_row[data_name]]
         values = [data[1] for data in parent_row[data_name]]
+        print(time, values)
 
         # Collect subcalls (direct children)
         subcalls = Profiler._profiling_info[Profiler._profiling_info["uuid_parent"] == uuid_function]
@@ -208,8 +208,8 @@ class Profiler:
             sub_t = row["call_time"] - call_start_time
             sub_name = row["name"]
 
-            # start function
             y_position = base_y + current_offset
+
             fig.add_trace(
                 go.Scatter(
                     x=[sub_t],
@@ -229,38 +229,6 @@ class Profiler:
                 type="line",
                 x0=sub_t,
                 x1=sub_t,
-                y0=min(values),
-                y1=y_position,
-                line={
-                    "color": "black",
-                    "width": 1,
-                    "dash": "dot",
-                },
-            )
-
-            # Increment offset for end function
-            current_offset += offset_step
-            y_position = base_y + current_offset
-
-            fig.add_trace(
-                go.Scatter(
-                    x=[sub_t + row["time"]],
-                    y=[y_position],
-                    mode="markers+text",
-                    marker={
-                        "color": "black",
-                        "size": 8,
-                    },
-                    text=["end " + sub_name],
-                    textposition="middle right",  # text right next to marker at same height
-                    showlegend=False,
-                )
-            )
-
-            fig.add_shape(
-                type="line",
-                x0=sub_t + row["time"],
-                x1=sub_t + row["time"],
                 y0=min(values),
                 y1=y_position,
                 line={
