@@ -226,8 +226,11 @@ def _apply_median_filter_2d(array: NDArrayNum, size: int, engine: Literal["scipy
     :returns: Filtered array of the same shape as input.
     """
 
+    nans = np.isnan(array)
+
     if engine == "scipy":
-        return generic_filter_scipy(array, np.nanmedian, size=size, mode="constant", cval=np.nan)
+        median_vals = generic_filter_scipy(array, np.nanmedian, size=size, mode="constant", cval=np.nan)
+        return np.where(nans, array, median_vals)
     if not _has_numba:
         raise ValueError("Install 'numba' for accelerated filtering.")
     hw = int((size - 1) / 2)
@@ -248,6 +251,7 @@ def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:
         raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
 
     # Mask nodata values
+    nans = np.isnan(array)
     mask = ~np.isnan(array)
     array_filled = np.where(mask, array, 0)
     # Compute sum over the kernel
@@ -258,10 +262,7 @@ def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:
     with np.errstate(invalid="ignore", divide="ignore"):
         mean_vals = sum_vals / count_vals
 
-    # Where no valid pixels, set to nodata
-    mean_vals[count_vals == 0] = np.nan
-
-    return mean_vals
+    return np.where(nans, array, mean_vals)
 
 
 def min_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
@@ -281,7 +282,9 @@ def min_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     nans = np.isnan(array)
     # We replace temporarily NaNs by infinite values during filtering to avoid spreading NaNs
     array_nans_replaced = np.where(nans, np.inf, array)
-    array_nans_replaced_f = scipy.ndimage.minimum_filter(array_nans_replaced, size=size, **kwargs)
+    array_nans_replaced_f = scipy.ndimage.minimum_filter(
+        array_nans_replaced, size=size, mode="constant", cval=np.inf, **kwargs
+    )
     # In the end, we want the filtered array without infinite values, so we put back NaNs
     return np.where(nans, array, array_nans_replaced_f)
 
@@ -303,7 +306,9 @@ def max_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     nans = np.isnan(array)
     # We replace temporarily NaNs by negative infinite values during filtering to avoid spreading NaNs
     array_nans_replaced = np.where(nans, -np.inf, array)
-    array_nans_replaced_f = scipy.ndimage.maximum_filter(array_nans_replaced, size=size, **kwargs)
+    array_nans_replaced_f = scipy.ndimage.maximum_filter(
+        array_nans_replaced, size=size, mode="constant", cval=-np.inf, **kwargs
+    )
     # In the end we want the filtered array without negative infinite values, so we put back NaNs
     return np.where(nans, array, array_nans_replaced_f)
 

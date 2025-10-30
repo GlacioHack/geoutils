@@ -5,13 +5,6 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 import scipy
-from scipy.ndimage import (
-    gaussian_filter,
-    maximum_filter,
-    median_filter,
-    minimum_filter,
-    uniform_filter,
-)
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
@@ -223,53 +216,6 @@ class TestRasterFilters:  # type: ignore
 
     aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
 
-    @pytest.mark.parametrize(
-        "method, kwargs, func",
-        [
-            ("gaussian", {"sigma": 1}, gaussian_filter),
-            ("max", {"size": 3}, maximum_filter),
-            ("min", {"size": 3}, minimum_filter),
-        ],
-    )  # type: ignore
-    def test_raster_filter_against_reference(self, method: str, kwargs: dict[str, int], func) -> None:
-        """Test raster filter results against SciPy reference implementation."""
-        raster = gu.Raster(self.aster_dem_path)
-
-        filtered_raster = raster.filter(method, inplace=False, **kwargs)
-        expected = np.ma.masked_array(func(np.ma.filled(raster.data, raster.nodata), **kwargs), mask=raster.data.mask)
-        # Compare results
-        assert isinstance(filtered_raster, gu.Raster)
-        assert filtered_raster.shape == raster.shape
-        np.testing.assert_allclose(filtered_raster.data, expected, rtol=1e-1, atol=1e-1)
-
-    def test_raster_filter_median_against_reference(self) -> None:
-        """Test raster filter results against SciPy reference implementation."""
-        raster = gu.Raster(self.aster_dem_path)
-
-        filtered_raster = raster.filter("median", inplace=False, **{"size": 3})
-        expected = np.ma.masked_array(
-            median_filter(np.ma.filled(raster.data, raster.nodata), **{"size": 3}), mask=raster.data.mask
-        )
-        # Compare results
-        assert isinstance(filtered_raster, gu.Raster)
-        assert filtered_raster.shape == raster.shape
-        mask = ~np.ma.getmaskarray(filtered_raster.data)
-        np.testing.assert_allclose(filtered_raster.data[mask], expected[mask], rtol=1e-2, atol=1e-2)
-
-    def test_raster_filter_mean_against_reference(self) -> None:
-        """Test raster filter results against SciPy reference implementation."""
-        raster = gu.Raster(self.aster_dem_path)
-
-        filtered_raster = raster.filter("median", inplace=False, **{"size": 3})
-        expected = np.ma.masked_array(
-            uniform_filter(np.ma.filled(raster.data, raster.nodata), **{"size": 3}), mask=raster.data.mask
-        )
-        # Compare results
-        assert isinstance(filtered_raster, gu.Raster)
-        assert filtered_raster.shape == raster.shape
-        mask = ~np.ma.getmaskarray(filtered_raster.data)
-        np.testing.assert_allclose(filtered_raster.data[mask], expected[mask], rtol=1e-2, atol=1e-2)
-
     def test_raster_filter_callable(self) -> None:
         """Apply a custom callable as a filter on a Raster object."""
 
@@ -303,37 +249,103 @@ class TestRasterFilters:  # type: ignore
             raster.filter(12345, inplace=False)
 
 
-class TestNaNConsistency:
+class TestSyntheticsNansFilters:  # type: ignore
+    """
+    Test the filters with NaNs.
+    """
 
-    @pytest.mark.parametrize(  # type: ignore
-        "method, func, kwargs",
-        [
-            (
-                "median",
-                np.median,
-                {"size": 3},
-            ),
-            (
-                "mean",
-                np.nanmean,
-                {"size": 3},
-            ),
-            (
-                "max",
-                np.nanmax,
-                {"size": 3},
-            ),
-            (
-                "min",
-                np.nanmin,
-                {"size": 3},
-            ),
-        ],
-    )
-    def test_nan_data(self, method, func, kwargs):
+    array = np.array([[1, 1, 1, 1, 1], [2, 2, np.nan, 2, 2], [3, 3, 3, 3, 3], [4, 4, 4, np.nan, 4], [5, 5, 5, 5, 5]])
 
-        rng = np.random.default_rng(42)
-        arr = rng.normal(size=(3, 3))
-        filtered_arr = gu.filters._filter(arr, method=method, **kwargs)
-        # Central value of the filter should be the same as the filter on the entire array
-        assert np.isclose(filtered_arr[1, 1], func(arr), rtol=1e-08, atol=1e-08)
+    def test_min_filter_with_nan(self) -> None:
+        """
+        Test min filter with synthetics data containing NaNs
+        """
+        gt = np.array([[1, 1, 1, 1, 1], [1, 1, np.nan, 1, 1], [2, 2, 2, 2, 2], [3, 3, 3, np.nan, 3], [4, 4, 4, 4, 4]])
+        test = gu.filters.min_filter(self.array, size=3)
+
+        np.testing.assert_array_equal(gt, test)
+
+    def test_max_filter_with_nan(self) -> None:
+        """
+        Test max filter with synthetics data containing NaNs
+        """
+
+        gt = np.array([[2, 2, 2, 2, 2], [3, 3, np.nan, 3, 3], [4, 4, 4, 4, 4], [5, 5, 5, np.nan, 5], [5, 5, 5, 5, 5]])
+        test = gu.filters.max_filter(self.array, size=3)
+
+        np.testing.assert_array_equal(gt, test)
+
+    def test_mean_filter_with_nan(self) -> None:
+        """
+        Test mean filter with synthetics data containing NaNs
+        """
+
+        gt = np.array(
+            [
+                [1.5, 1.4, 1.4, 1.4, 1.5],
+                [2, 2, np.nan, 2, 2],
+                [3, 3.125, 3, 3.0, 2.8],
+                [4, 4, 4, np.nan, 4],
+                [4.5, 4.5, 4.6, 4.6, 4.66666667],
+            ]
+        )
+        test = gu.filters.mean_filter(self.array, size=3)
+
+        np.testing.assert_allclose(gt, test)
+
+    def test_median_filter_with_nan(self) -> None:
+        """
+        Test median filter with synthetics data containing NaNs
+        """
+
+        gt = np.array(
+            [
+                [1.5, 1, 1, 1, 1.5],
+                [2, 2, np.nan, 2, 2],
+                [3, 3, 3, 3, 3],
+                [4, 4, 4, np.nan, 4],
+                [4.5, 4.5, 5, 5, 5],
+            ]
+        )
+        test = gu.filters.median_filter(self.array, size=3)
+
+        np.testing.assert_allclose(gt, test)
+
+    def test_gaussian_filter_with_nan(self) -> None:
+        """
+        Test gaussian filter with synthetics data (from scipy documentation) containing NaNs
+        """
+
+        array = np.array(
+            [
+                [0.0, 2.0, 4.0, 6.0, 8.0],
+                [10.0, 12.0, np.nan, 16.0, 18.0],
+                [20.0, 22.0, 24.0, 26.0, 28.0],
+                [30.0, 32.0, 34.0, np.nan, 38.0],
+                [40.0, 42.0, 44.0, 46.0, 48.0],
+            ]
+        )
+
+        test = gu.filters.gaussian_filter(array, sigma=1)
+
+        # position (2,2)
+        window = np.array([[12, np.nan, 16], [22, 24, 26], [32, 34, np.nan]])
+        kernel = np.array([[1, np.nan, 1], [2, 4, 2], [1, 2, np.nan]])
+        approx_gt = np.nansum(window * kernel) / np.nansum(kernel)
+        np.testing.assert_allclose(approx_gt, test[2, 2], rtol=1e-1)
+
+        # position (1, 3)
+        window = np.array(
+            [
+                [20.0, 22.0, 24],
+                [
+                    30.0,
+                    32.0,
+                    34.0,
+                ],
+                [40.0, 42.0, 44.0],
+            ]
+        )
+        kernel = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])
+        approx_gt = np.nansum(window * kernel) / np.nansum(kernel)
+        np.testing.assert_allclose(approx_gt, test[2, 2], rtol=1e-1)
