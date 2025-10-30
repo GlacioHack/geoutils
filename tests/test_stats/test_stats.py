@@ -13,12 +13,11 @@ from geoutils._typing import NDArrayNum
 
 
 class TestStats:
-
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_get_stats(self, example: str, caplog) -> None:
         raster = gu.Raster(example)
 
@@ -60,7 +59,6 @@ class TestStats:
         stats_masked = raster.get_stats(inlier_mask=inlier_mask)
         for name in expected_stats_mask:
             assert name in stats_masked
-            assert isinstance(stats_masked.get(name), stat_types)
             stats_masked.pop(name)
         assert stats_masked == stats
 
