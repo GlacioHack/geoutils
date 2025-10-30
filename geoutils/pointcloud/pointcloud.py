@@ -40,7 +40,7 @@ from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Numb
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _my_statistics
+from geoutils.stats.stats import _statistics
 
 try:
     import laspy
@@ -1288,11 +1288,11 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         # Given list or all attributes to compute if None
         if isinstance(stats_name, list) or stats_name is None:
-            return _my_statistics(data, stats_name)  # type: ignore
+            return _statistics(data, stats_name)  # type: ignore
         else:
             # Single attribute to compute
             if isinstance(stats_name, str):
-                return _my_statistics(data, stats_name)  # type: ignore
+                return _statistics(data, stats_name)  # type: ignore
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
 
