@@ -90,7 +90,7 @@ from geoutils.raster.satimg import (
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _my_statistics_partial
+from geoutils.stats.stats import _my_statistics
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -2039,11 +2039,11 @@ class Raster:
 
         # Given list or all attributes to compute if None
         if isinstance(stats_name, list) or stats_name is None:
-            return _my_statistics_partial(data, stats_name, counts, mask_count_nonzero)  # type: ignore
+            return _my_statistics(data, stats_name, counts, mask_count_nonzero)  # type: ignore
         else:
             # Single attribute to compute
             if isinstance(stats_name, str):
-                return _my_statistics_partial(data, stats_name, counts, mask_count_nonzero)[stats_name]  # type: ignore
+                return _my_statistics(data, stats_name, counts, mask_count_nonzero)[stats_name]  # type: ignore
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
 

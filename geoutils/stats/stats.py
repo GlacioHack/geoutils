@@ -85,7 +85,7 @@ STATS_LIST_MASK = [
 ]
 
 
-def _my_statistics_partial(
+def _my_statistics(
     data: NDArrayNum,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     counts: tuple[int, int] | None = None,
@@ -170,65 +170,6 @@ def _my_statistics_partial(
 
             if stats_name is None:
                 res_dict.update(dict_c)
-
+            else:
+                res_dict.update({k: dict_c[k] for k in dict_c.keys()})
     return res_dict
-
-
-"""def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict[str, np.floating[Any]]:
-    ""
-    Calculate common statistics for an N-D array.
-
-    :param data: Array on which to compute statistics.
-    :param counts: Tuple with number of finite data points in array and number of valid points in inlier_mask.
-
-    :returns: A dictionary containing the calculated statistics for the selected band.
-    ""
-
-    # Pre-computing depending on nature of array
-    # TODO: Array is duplicated into filled array with NaN at every call, doubling memory usage
-    if np.ma.isMaskedArray(data):
-        mask = ~np.ma.getmaskarray(data)
-        mdata = np.ma.filled(data.astype(float), np.nan)
-    else:
-        mask = np.isfinite(data)
-        mdata = data
-    # Valid count
-    valid_count = np.count_nonzero(mask) if counts is None else counts[0]
-    # Other stats
-    stats_dict = {
-        "Mean": np.ma.mean(data),
-        "Median": np.ma.median(data),
-        "Max": np.ma.max(data),
-        "Min": np.ma.min(data),
-        "Sum": np.ma.sum(data),
-        "Sum of squares": np.ma.sum(np.square(data)),
-        "90th percentile": np.nanpercentile(mdata, 90),
-        "LE90": linear_error(mdata, interval=90),
-        "IQR": iqr(mdata, nan_policy="omit"),  # ignore masked value (nan),
-        "NMAD": nmad(data),
-        "RMSE": np.sqrt(np.ma.mean(np.square(data))),
-        "Standard deviation": np.ma.std(data),
-        "Valid count": valid_count,
-        "Total count": data.size,
-        "Percentage valid points": (valid_count / data.size) * 100,
-    }
-
-    # If inlier mask was passed
-    if counts is not None:
-        valid_inlier_count = np.count_nonzero(mask)
-        stats_dict.update(
-            {
-                "Valid inlier count": valid_inlier_count,
-                "Total inlier count": counts[1],
-                "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
-                "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0,
-            }
-        )
-
-    # If there are no valid data points, set all statistics to NaN
-    if np.count_nonzero(mask) == 0:
-        logging.warning("Empty raster, returns Nan for all stats")
-        for key in stats_dict:
-            stats_dict[key] = np.nan
-
-    return stats_dict"""
