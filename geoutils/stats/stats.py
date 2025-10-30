@@ -50,13 +50,21 @@ _STATS_ALIASES = {
     "rms": "RMSE",
     "std": "Standard deviation",
     "standarddeviation": "Standard deviation",
+    "standard_deviation": "Standard deviation",
     "validcount": "Valid count",
+    "valid_count": "Valid count",
     "totalcount": "Total count",
+    "total_count": "Total count",
     "percentagevalidpoints": "Percentage valid points",
+    "percentage_valid_points": "Percentage valid points",
     "validinliercount": "Valid inlier count",
+    "valid_inlier_count": "Valid inlier count",
     "totalinliercount": "Total inlier count",
+    "total_inlier_count": "Total inlier count",
     "percentagevalidinlierpoints": "Percentage valid inlier points",
+    "percentage_valid_inlier_points": "Percentage valid inlier points",
     "percentageinlierpoints": "Percentage inlier points",
+    "percentage_inlier_points": "Percentage inlier points",
 }
 
 STATS_LIST = [
