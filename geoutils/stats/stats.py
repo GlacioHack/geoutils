@@ -93,7 +93,7 @@ STATS_LIST_MASK = [
 ]
 
 
-def _my_statistics(
+def _statistics(
     data: NDArrayNum,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     counts: tuple[int, int] | None = None,
