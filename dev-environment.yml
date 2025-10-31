@@ -24,6 +24,7 @@ dependencies:
   - laspy
   - lazrs-python # For LAZ files
   - scikit-image
+  - numba
 
   # Test dependencies
   - gdal  # To test functionalities against GDAL
