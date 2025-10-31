@@ -10,7 +10,7 @@ from geoutils.stats import linear_error, nmad
 
 
 class TestEstimators:
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_raster = Raster(landsat_b4_path)
 
     def test_nmad(self) -> None:

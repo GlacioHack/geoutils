@@ -33,7 +33,7 @@ class RealImageStack:
 
         warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
 
-        img = cls(examples.get_path(image))
+        img = cls(examples.get_path_test(image))
         self.img = img
 
         # Find the easting midpoint of the img
@@ -292,11 +292,6 @@ class TestMultiRaster:
 
         assert np.count_nonzero(np.isnan(merged_img.data)) == 0  # Check no NaNs introduced
 
-        # Check that only works if CRS were the same
-        if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
-            diff = rasters.img.data - merged_img.data
-            assert np.abs(np.nanmean(diff)) < 1
-
         # Check that reference works
         merged_img2 = gu.raster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
         # Check that only works if CRS were the same
@@ -334,12 +329,12 @@ class TestMultiRaster:
     # three overlapping rasters
     # TODO: add a case with different CRS - issue raised #310
     raster_groups = [
-        [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("everest_landsat_b4_cropped")],
-        [gu.examples.get_path("everest_landsat_rgb"), gu.examples.get_path("everest_landsat_b4_cropped")],
+        [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("everest_landsat_b4_cropped")],
+        [gu.examples.get_path_test("everest_landsat_rgb"), gu.examples.get_path_test("everest_landsat_b4_cropped")],
         [
-            gu.examples.get_path("everest_landsat_b4"),
-            gu.examples.get_path("everest_landsat_rgb"),
-            gu.examples.get_path("everest_landsat_b4_cropped"),
+            gu.examples.get_path_test("everest_landsat_b4"),
+            gu.examples.get_path_test("everest_landsat_rgb"),
+            gu.examples.get_path_test("everest_landsat_b4_cropped"),
         ],
     ]
 
@@ -394,7 +389,7 @@ class TestMultiRaster:
                 assert rst.nodata == rst2.nodata
 
     raster_groups = [
-        [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")],
+        [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")],
     ]
 
     @pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore

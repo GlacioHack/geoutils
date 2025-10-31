@@ -40,9 +40,7 @@ It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector
 main attribute** {attr}`~geoutils.PointCloud.data_column` that identifies the name of the main data associated to the
 point geometries.
 
-Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and
-
-New methods specific to point clouds are detailed further below.
+Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
 {attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~xdem.Vector.reproject` and {func}`~xdem.Vector.crop`.
@@ -115,7 +113,7 @@ The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the 
 
 A {class}`~geoutils.PointCloud` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`,
 {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, {func}`<<operator.lt>`) with another {class}`~geoutils.PointCloud`,
-{class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.PointCloudMask`.
+{class}`~numpy.ndarray` or number. It will cast to a boolean {class}`~geoutils.PointCloud`.
 
 ```{code-cell} ipython3
 # What are point cloud pixels are larger than 20?
@@ -135,7 +133,7 @@ The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the 
 np.sqrt(pc1)
 ```
 
-Logical comparison functions will cast to a {class}`~geoutils.PointCloudMask`.
+Logical comparison functions will cast to a boolean {class}`~geoutils.PointCloud`.
 
 ```{code-cell} ipython3
 # Is the pointcloud close to another one within tolerance?

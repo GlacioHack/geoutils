@@ -16,12 +16,12 @@ from geoutils import examples
 
 
 class TestProjTools:
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     def test_latlon_to_utm(self) -> None:
         # First: Check errors are raised when format is invalid
@@ -168,7 +168,7 @@ class TestProjTools:
         assert out_bounds2 == out_bounds
 
         # Check with gpd.GeoDataFrame
-        outlines = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+        outlines = gu.Vector(gu.examples.get_path_test("everest_rgi_outlines"))
         outlines = gu.Vector(outlines.ds.to_crs(img1.crs))  # reproject to img1's CRS
         out_bounds = pt.merge_bounds((img1, outlines.ds))
 

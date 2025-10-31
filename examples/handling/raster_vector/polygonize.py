@@ -2,7 +2,7 @@
 Polygonize a raster
 ===================
 
-This example demonstrates the polygonizing of a raster using :func:`geoutils.Raster.polygonize` and :func:`geoutils.Mask.polygonize`.
+This example demonstrates the polygonizing of a raster using :func:`geoutils.Raster.polygonize`.
 """
 
 # %%
@@ -33,11 +33,12 @@ rast_polygonized = rast.polygonize((2500, 3000))
 rast_polygonized.plot(ax="new")
 
 # %%
-# An even simpler way to do this is to compute a :func:`~geoutils.Mask` to polygonize using logical comparisons on the :func:`~geoutils.Raster`.
+# An even simpler way to do this is to compute a boolean :func:`~geoutils.Raster` to polygonize using logical
+# comparisons on the :func:`~geoutils.Raster`.
 
 rast_polygonized = ((2500 < rast) & (rast < 3000)).polygonize()
 rast_polygonized.plot(ax="new")
 
 # %%
 # .. note::
-#           See :ref:`core-py-ops` for more details on casting to :func:`~geoutils.Mask`.
+#           See :ref:`core-py-ops` for more details on casting to boolean :func:`~geoutils.Raster`.

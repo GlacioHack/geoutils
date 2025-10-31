@@ -154,7 +154,7 @@ def _apply_func_block(
         _remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
 
     # If the raster is a mask, convert to uint8 before saving and force nodata to 255
-    if isinstance(result_tile, gu.RasterMask):
+    if isinstance(result_tile, gu.Raster) and result_tile.is_mask:
         result_tile.astype("uint8", inplace=True)
         result_tile.set_nodata(255)
 
@@ -235,7 +235,7 @@ def _write_multiproc_result(
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
                 result_tile, dst_tile = config.cluster.get_res(results)
-                is_mask = isinstance(result_tile, gu.RasterMask)
+                is_mask = isinstance(result_tile, gu.Raster) and result_tile.is_mask
 
                 # Define the window in the output file where the tile should be written
                 dst_window = rio.windows.Window(
@@ -257,7 +257,7 @@ def _write_multiproc_result(
         except Exception as e:
             raise RuntimeError(f"Error retrieving raster tiles from multiprocessing tasks: {e}")
     if is_mask:
-        return gu.RasterMask(config.outfile)
+        return gu.Raster(config.outfile, as_mask=True)
     return gu.Raster(config.outfile)
 
 

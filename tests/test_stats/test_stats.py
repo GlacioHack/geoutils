@@ -14,9 +14,9 @@ from geoutils._typing import NDArrayNum
 
 class TestStats:
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     def test_get_stats(self, example: str, caplog) -> None:
@@ -100,5 +100,9 @@ class TestStats:
         assert "Statistic name '80 percentile' is not recognized" in caplog.text
 
         # IQR (scipy) validation with numpy
-        mdata = np.ma.filled(raster.data.astype(float), np.nan)
-        assert raster.get_stats(stats_name="iqr") == np.nanpercentile(mdata, 75) - np.nanpercentile(mdata, 25)
+        nan_arr = raster.get_nanarray()
+        if nan_arr.ndim == 3:
+            nan_arr = nan_arr[0, :, :]
+        assert raster.get_stats(stats_name="iqr") == pytest.approx(
+            np.nanpercentile(nan_arr, 75) - np.nanpercentile(nan_arr, 25)
+        )

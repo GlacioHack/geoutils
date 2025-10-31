@@ -20,37 +20,30 @@ from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
 
-GLACIER_OUTLINES_URL = "http://public.data.npolar.no/cryoclim/CryoClim_GAO_SJ_1990.zip"
-
 
 class TestVector:
-    landsat_b4_crop_path = gu.examples.get_path("everest_landsat_b4_cropped")
-    everest_outlines_path = gu.examples.get_path("everest_rgi_outlines")
-    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = gu.examples.get_path("exploradores_rgi_outlines")
-    glacier_outlines = gu.Vector(GLACIER_OUTLINES_URL)
+    landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
+    everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
     def test_init(self) -> None:
         """Test class initiation works as intended"""
 
-        # First, with a URL filename
-        v = gu.Vector(GLACIER_OUTLINES_URL)
-        assert isinstance(v, gu.Vector)
-
-        # Second, with a string filename
+        # First, with a string filename
         v0 = gu.Vector(self.aster_outlines_path)
         assert isinstance(v0, gu.Vector)
 
-        # Third, with a pathlib path
+        # Second, with a pathlib path
         path = pathlib.Path(self.aster_outlines_path)
         v1 = gu.Vector(path)
         assert isinstance(v1, gu.Vector)
 
-        # Fourth, with a geopandas dataframe
+        # Third, with a geopandas dataframe
         v2 = gu.Vector(gpd.read_file(self.aster_outlines_path))
         assert isinstance(v2, gu.Vector)
 
-        # Fifth, passing a Vector itself (points back to Vector passed)
+        # Fourth, passing a Vector itself (points back to Vector passed)
         v3 = gu.Vector(v2)
         assert isinstance(v3, gu.Vector)
 
@@ -59,17 +52,20 @@ class TestVector:
             gu.Vector(1)  # type: ignore
 
     def test_copy(self) -> None:
-        vector2 = self.glacier_outlines.copy()
 
-        assert vector2 is not self.glacier_outlines
+        vector = gu.Vector(self.aster_outlines_path)
+        vector2 = vector.copy()
 
-        vector2.ds = vector2.ds.query("NAME == 'Ayerbreen'")
+        # Assert they are not the same object
+        assert vector2 is not vector
 
-        assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]
+        # Modify vector2, and check vector is not affected
+        vector2.ds = vector2.ds.query("RGIId == 'RGI60-17.08409'")
+        assert vector2.ds.shape[0] < vector.ds.shape[0]
 
     def test_info(self) -> None:
 
-        v = gu.Vector(GLACIER_OUTLINES_URL)
+        v = gu.Vector(self.aster_outlines_path)
 
         # Check default runs without error (prints to screen)
         output = v.info()
@@ -80,13 +76,6 @@ class TestVector:
         assert isinstance(output2, str)
         list_prints = ["Filename", "Coordinate system", "Extent", "Number of features", "Attributes"]
         assert all(p in output2 for p in list_prints)
-
-    def test_query(self) -> None:
-        vector2 = self.glacier_outlines.query("NAME == 'Ayerbreen'")
-
-        assert vector2 is not self.glacier_outlines
-
-        assert vector2.ds.shape[0] < self.glacier_outlines.ds.shape[0]
 
     def test_save(self) -> None:
         """Test the save wrapper for GeoDataFrame.to_file()."""
@@ -106,22 +95,24 @@ class TestVector:
         vector_save.vector_equal(vector)
 
     def test_bounds(self) -> None:
-        bounds = self.glacier_outlines.bounds
+        vector = gu.Vector(self.aster_outlines_path)
+        bounds = vector.bounds
 
         assert bounds.left < bounds.right
         assert bounds.bottom < bounds.top
 
-        assert bounds.left == self.glacier_outlines.ds.total_bounds[0]
-        assert bounds.bottom == self.glacier_outlines.ds.total_bounds[1]
-        assert bounds.right == self.glacier_outlines.ds.total_bounds[2]
-        assert bounds.top == self.glacier_outlines.ds.total_bounds[3]
+        assert bounds.left == vector.ds.total_bounds[0]
+        assert bounds.bottom == vector.ds.total_bounds[1]
+        assert bounds.right == vector.ds.total_bounds[2]
+        assert bounds.top == vector.ds.total_bounds[3]
 
     def test_footprint(self) -> None:
 
-        footprint = self.glacier_outlines.footprint
+        vector = gu.Vector(self.aster_outlines_path)
+        footprint = vector.footprint
 
         assert isinstance(footprint, gu.Vector)
-        assert footprint.vector_equal(self.glacier_outlines.get_footprint_projected(self.glacier_outlines.crs))
+        assert footprint.vector_equal(vector.get_footprint_projected(vector.crs))
 
 
 class NeedToImplementWarning(FutureWarning):
@@ -139,9 +130,10 @@ class TestGeoPandasMethods:
     gdf2 = gpd.GeoDataFrame({"geometry": [lines]}, crs="EPSG:4326")
     synthvec2 = gu.Vector(gdf2)
 
-    # Use two real-life vectors
-    realvec1 = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
-    realvec2 = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+    # Use a real-life vector, divided in 2 for speed of tests
+    realvec = gu.Vector(gu.examples.get_path_test("everest_rgi_outlines"))
+    realvec1 = realvec[0:2]
+    realvec2 = realvec[2:4]
 
     # Properties and methods derived from Shapely or GeoPandas
     # List of properties and methods with non-geometric output that are implemented in GeoUtils

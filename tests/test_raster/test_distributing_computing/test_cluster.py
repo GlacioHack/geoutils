@@ -18,7 +18,7 @@ def sample_function(x: float, y: float) -> float:
 
 # Function to simulate a long-running task
 def long_running_task(x: float) -> float:
-    time.sleep(1)
+    time.sleep(0.01)
     return x * 2
 
 

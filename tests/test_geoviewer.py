@@ -17,7 +17,7 @@ import geoviewer  # noqa
 
 
 @pytest.mark.parametrize(
-    "filename", [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")]
+    "filename", [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")]
 )  # type: ignore
 @pytest.mark.parametrize(
     "option",
@@ -68,7 +68,7 @@ def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: 
 
 
 @pytest.mark.parametrize(
-    "filename", [gu.examples.get_path("everest_landsat_b4"), gu.examples.get_path("exploradores_aster_dem")]
+    "filename", [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")]
 )  # type: ignore
 @pytest.mark.parametrize(
     "args",
@@ -102,7 +102,7 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
         geoviewer.main([filename, *option])
 
 
-@pytest.mark.parametrize("filename", [gu.examples.get_path("everest_landsat_rgb")])  # type: ignore
+@pytest.mark.parametrize("filename", [gu.examples.get_path_test("everest_landsat_rgb")])  # type: ignore
 @pytest.mark.parametrize(
     "option",
     (
@@ -151,7 +151,7 @@ def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: 
 @pytest.mark.parametrize(
     "filename",
     [
-        gu.examples.get_path("everest_landsat_rgb"),
+        gu.examples.get_path_test("everest_landsat_rgb"),
     ],
 )  # type: ignore
 @pytest.mark.parametrize(
