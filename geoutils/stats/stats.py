@@ -95,23 +95,33 @@ STATS_LIST_MASK = [
 
 def _statistics(
     data: NDArrayNum,
+    mask_count_nonzero: int,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     counts: tuple[int, int] | None = None,
-    mask_count_nonzero: int = None,
 ) -> dict[str, float]:
+    """
+    Calculate common statistics for an N-D array.
+
+    :param data: Array on which to compute statistics.
+    :param stats_name: list of names of the statistics to retrieve. If None, all statistics are returned.
+            Accepted names include:
+            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
+            `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
+            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
+            Custom callables can also be provided.
+    :param counts: Tuple with number of finite data points in array and number of valid points in inlier_mask.
+    :param mask_count_nonzero: Number of valid points in the array.
+
+    :returns: A dictionary containing the calculated statistics for the selected band.
+    """
+
     if np.ma.isMaskedArray(data):
-        mask = ~np.ma.getmaskarray(data)
         mdata = np.ma.filled(data.astype(float), np.nan)
     else:
-        mask = np.isfinite(data)
         mdata = data
-
-    if isinstance(stats_name, str):
-        stats_name = [stats_name]
 
     # If there are no valid data points, set all statistics to NaN
     if mask_count_nonzero == 0:
-        print(stats_name)
         logging.warning("Empty raster, returns Nan for all stats")
         if stats_name is None:
             res_dict = {stat_name: np.nan for stat_name in STATS_LIST + STATS_LIST_MASK}  # type: ignore
@@ -120,7 +130,7 @@ def _statistics(
 
     else:
         # Valid count
-        valid_count = np.count_nonzero(mask) if counts is None else counts[0]
+        valid_count = mask_count_nonzero if counts is None else counts[0]
 
         stats_dict = {
             "Mean": partial(np.ma.mean, data),
@@ -145,35 +155,34 @@ def _statistics(
             res_dict = {k: stats_dict[k]() for k in stats_dict.keys() if callable(stats_dict[k])}
         else:
             for stat_name in stats_name:
+                # compute stat if in stats_dict keys
                 if isinstance(stat_name, str) and stat_name in stats_dict.keys() and callable(stats_dict[stat_name]):
                     res_dict[stat_name] = stats_dict[stat_name]()  # type: ignore
+
+                # compute stat if in _STATS_ALIASES keys
                 elif (
                     isinstance(stat_name, str)
                     and stat_name in _STATS_ALIASES.keys()
                     and callable(stats_dict[_STATS_ALIASES[stat_name]])
                 ):
                     res_dict[stat_name] = stats_dict[_STATS_ALIASES[stat_name]]()  # type: ignore
+
+                # compute stat if callable
                 elif callable(stat_name):
                     res_dict[stat_name.__name__] = stat_name(data)  # type: ignore
+
+                # stat not recognized
                 else:
                     logging.warning("Statistic name '%s' is not recognized", stat_name)
                     res_dict[stat_name] = np.float32(np.nan)  # type: ignore
 
-        list_counts_stats = [
-            "Valid inlier count",
-            "Total inlier count",
-            "Percentage inlier points",
-            "Percentage valid inlier points",
-        ]
-
         # If inlier mask was passed
-        if counts is not None and (stats_name is None or list(set(list_counts_stats).intersection(stats_name))):
-            valid_inlier_count = np.count_nonzero(mask)
+        if counts is not None and (stats_name is None or list(set(STATS_LIST_MASK).intersection(stats_name))):
             dict_c = {
-                "Valid inlier count": valid_inlier_count,
+                "Valid inlier count": mask_count_nonzero,
                 "Total inlier count": counts[1],
-                "Percentage inlier points": (valid_inlier_count / counts[0]) * 100,
-                "Percentage valid inlier points": (valid_inlier_count / counts[1]) * 100 if counts[1] != 0 else 0,
+                "Percentage inlier points": (mask_count_nonzero / counts[0]) * 100,
+                "Percentage valid inlier points": (mask_count_nonzero / counts[1]) * 100 if counts[1] != 0 else 0,
             }
 
             if stats_name is None:

@@ -2028,8 +2028,7 @@ class Raster:
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        # Pre-computing depending on nature of array
-        # TODO: Array is duplicated into filled array with NaN at every call, doubling memory usage
+        # Pre-computing mask depending on nature of array
         if np.ma.isMaskedArray(data):
             mask = ~np.ma.getmaskarray(data)
         else:
@@ -2039,11 +2038,11 @@ class Raster:
 
         # Given list or all attributes to compute if None
         if isinstance(stats_name, list) or stats_name is None:
-            return _statistics(data, stats_name, counts, mask_count_nonzero)  # type: ignore
+            return _statistics(data, mask_count_nonzero, stats_name, counts)  # type: ignore
         else:
             # Single attribute to compute
             if isinstance(stats_name, str):
-                return _statistics(data, stats_name, counts, mask_count_nonzero)[stats_name]  # type: ignore
+                return _statistics(data, mask_count_nonzero, [stats_name], counts)[stats_name]  # type: ignore
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
 
