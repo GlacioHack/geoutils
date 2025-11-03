@@ -16,8 +16,6 @@ dependencies:
   - rioxarray=0.*
   - affine
   - shapely
-  - psutil
-  - plotly
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
@@ -26,6 +24,8 @@ dependencies:
   - laspy
   - lazrs-python # For LAZ files
   - scikit-image
+  - psutil
+  - plotly
 
   # Test dependencies
   - gdal  # To test functionalities against GDAL
