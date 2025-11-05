@@ -1285,15 +1285,14 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             self.load()
 
         data = self.data
-        size = np.count_nonzero(np.isfinite(data))
 
         # Given list or all attributes to compute if None
         if isinstance(stats_name, list) or stats_name is None:
-            return _statistics(data, size, stats_name)  # type: ignore
+            return _statistics(data, stats_name)  # type: ignore
         else:
             # Single attribute to compute
             if isinstance(stats_name, str):
-                return _statistics(data, size, stats_name)[stats_name]  # type: ignore
+                return _statistics(data, [stats_name])[stats_name]  # type: ignore
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
 
