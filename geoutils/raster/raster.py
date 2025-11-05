@@ -2024,7 +2024,7 @@ class Raster:
             if isinstance(inlier_mask, Raster) and inlier_mask.is_mask:
                 inlier_points = np.count_nonzero(inlier_mask.data)
             else:
-                inlier_points = np.count_nonzero(inlier_mask)
+                inlier_points = np.count_nonzero(inlier_mask)  # type: ignore
             dem_masked = self.copy()
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))

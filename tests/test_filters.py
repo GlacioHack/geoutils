@@ -7,6 +7,7 @@ import pytest
 import scipy
 
 import geoutils as gu
+from geoutils import Raster
 from geoutils._typing import NDArrayNum
 from geoutils.raster import get_array_and_mask
 
@@ -222,16 +223,13 @@ class TestRasterFilters:  # type: ignore
         def double_filter(arr: NDArrayNum) -> NDArrayNum:
             return arr * 2
 
-        raster = gu.Raster(self.aster_dem_path)
+        data = np.array([[1, 1, 1, 1, 1], [2, 2, np.nan, 2, 2], [3, 3, 3, 3, 3], [4, 4, 4, np.nan, 4], [5, 5, 5, 5, 5]])
+        transform = (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+        raster = Raster.from_array(data, transform, 32645, np.nan)
         filtered = raster.filter(double_filter, inplace=False)
         expected_raster = raster.copy()
         expected_raster.data *= 2
-        np.testing.assert_allclose(
-            np.round(filtered.data.data, 2),
-            np.round(expected_raster.data.data, 2),
-            rtol=1e-1,
-            atol=1e-1,
-        )
+        np.testing.assert_allclose(filtered.data.data, expected_raster.data.data)
 
     def test_raster_filter_inplace(self) -> None:
         """Check that in-place filtering modifies the original raster."""
@@ -334,7 +332,7 @@ class TestSyntheticsNansFilters:  # type: ignore
         approx_gt = np.nansum(window * kernel) / np.nansum(kernel)
         np.testing.assert_allclose(approx_gt, test[2, 2], rtol=1e-1)
 
-        # position (1, 3)
+        # position (3, 1)
         window = np.array(
             [
                 [20.0, 22.0, 24],
@@ -348,4 +346,4 @@ class TestSyntheticsNansFilters:  # type: ignore
         )
         kernel = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])
         approx_gt = np.nansum(window * kernel) / np.nansum(kernel)
-        np.testing.assert_allclose(approx_gt, test[2, 2], rtol=1e-1)
+        np.testing.assert_allclose(approx_gt, test[3, 1], rtol=1e-1)

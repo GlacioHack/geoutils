@@ -170,21 +170,21 @@ def median_filter_numba(array: NDArrayNum, size: int) -> NDArrayNum:
     if size % 2 == 0:
         raise ValueError("`size` must be odd.")
 
-    # Get input shapes
     N1, N2 = array.shape
+    pad = size // 2
 
-    # Define ranges to loop through given padding
-    row_range = N1 - size + 1
-    col_range = N2 - size + 1
+    padded = np.full((N1 + 2 * pad, N2 + 2 * pad), np.nan, dtype=array.dtype)
 
-    # Allocate an output array
-    outputs = np.full((row_range, col_range), fill_value=np.nan, dtype=np.float32)
+    for row in range(N1):
+        for col in range(N2):
+            padded[row + pad, col + pad] = array[row, col]
 
-    # Loop over every pixel concurrently by using prange
-    for row in prange(row_range):
-        for col in prange(col_range):
+    outputs = np.full((N1, N2), np.nan, dtype=array.dtype)
 
-            outputs[row, col] = np.nanmedian(array[row : row + size, col : col + size])
+    for row in prange(N1):
+        for col in prange(N2):
+            window = padded[row : row + size, col : col + size]
+            outputs[row, col] = np.nanmedian(window)
 
     return outputs
 
@@ -233,9 +233,8 @@ def _apply_median_filter_2d(array: NDArrayNum, size: int, engine: Literal["scipy
         return np.where(nans, array, median_vals)
     if not _has_numba:
         raise ValueError("Install 'numba' for accelerated filtering.")
-    hw = int((size - 1) / 2)
-    array = np.pad(array, pad_width=((hw, hw), (hw, hw)), constant_values=np.nan)
-    return median_filter_numba(array, size)
+    median_vals = median_filter_numba(array, size)
+    return np.where(nans, array, median_vals)
 
 
 def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:
