@@ -64,6 +64,7 @@ jobs:
         python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "gdal" "environment.yml"
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
+    # If/else equivalent to install base environment, or base+optionnal
     - name: Install project environment (base)
       if: ${{ matrix.dep-level == 'base' }}
       run: pip install -e .[test]

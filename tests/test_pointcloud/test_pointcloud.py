@@ -54,6 +54,10 @@ class TestPointCloud:
         assert pc.data_column == "b1"
         assert_geodataframe_equal(pc.ds, self.gdf1)
 
+    def test_init__las(self) -> None:
+        # Import optional laspy or skip test
+        pytest.importorskip("laspy")
+
         # 2/ For a point cloud from LAS/LAZ file
         pc = PointCloud(self.fn_las, data_column="Z")
 
@@ -71,13 +75,16 @@ class TestPointCloud:
         with pytest.raises(ValueError, match="This vector file contains non-point geometries*"):
             PointCloud(self.gdf3, data_column="z")
 
-    def test_load(self) -> None:
+    def test_load__las(self) -> None:
         """
         Test loading of a point cloud (only possible with a LAS file).
 
         This test also serves to test the overridden methods "crs", "bounds", "nb_points", "nongeo_columns" in relation
         to loading.
         """
+
+        # Import optional laspy or skip test
+        pytest.importorskip("laspy")
 
         # 1/ Check unloaded and loaded attributes are all the same
 
@@ -120,6 +127,9 @@ class TestPointCloud:
 
     def test_load__errors(self) -> None:
         """Test errors raised by loading."""
+
+        # Import optional laspy or skip test
+        pytest.importorskip("laspy")
 
         pc = PointCloud(self.fn_las, data_column="Z")
         pc.load()
