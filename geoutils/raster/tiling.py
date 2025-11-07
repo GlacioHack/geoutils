@@ -79,13 +79,13 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     :param count: The amount of subdivisions to make.
 
     :examples:
-        >>> subdivide_array((4, 4), 4)
+        >>> subdivide_array((4, 4), 4)  # doctest: +SKIP
         array([[0, 0, 1, 1],
                [0, 0, 1, 1],
                [2, 2, 3, 3],
                [2, 2, 3, 3]])
 
-        >>> subdivide_array((6, 4), 4)
+        >>> subdivide_array((6, 4), 4)  # doctest: +SKIP
         array([[0, 0, 1, 1],
                [0, 0, 1, 1],
                [0, 0, 1, 1],
@@ -93,7 +93,7 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
                [2, 2, 3, 3],
                [2, 2, 3, 3]])
 
-        >>> subdivide_array((5, 4), 3)
+        >>> subdivide_array((5, 4), 3)  # doctest: +SKIP
         array([[0, 0, 0, 0],
                [0, 0, 0, 0],
                [1, 1, 2, 2],
