@@ -11,7 +11,7 @@ on:
 
 jobs:
   test:
-    name: ${{ matrix.os }}, python ${{ matrix.python-version }}
+    name: ${{ matrix.os }}, python ${{ matrix.python-version }}, ${{ matrix.dep-level }}
     runs-on: ${{ matrix.os }}
 
     strategy:
