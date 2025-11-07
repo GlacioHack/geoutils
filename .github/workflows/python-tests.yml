@@ -70,7 +70,7 @@ jobs:
 
     - name: Install project environment (optional)
       if: ${{ matrix.dep-level != 'base' }}
-      run: pip install -e .[test, ${{ matrix.dep-level }}]
+      run: pip install -e .[test,${{ matrix.dep-level }}]
 
     - name: Check import works
       run: python -c "import geoutils"
