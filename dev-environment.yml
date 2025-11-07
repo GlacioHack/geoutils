@@ -37,7 +37,6 @@ dependencies:
   - pyyaml
   - flake8
   - netcdf4  # To write synthetic data with chunksizes
-  - dask-memusage
   - pre-commit
 
   # Doc dependencies
