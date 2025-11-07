@@ -65,7 +65,7 @@ jobs:
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
     - name: Install project
-      run: pip install -e . --no-dependencies
+      run: pip install . --no-dependencies
 
     - name: Check import works
       run: python -c "import geoutils"
