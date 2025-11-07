@@ -347,3 +347,23 @@ class TestSyntheticsNansFilters:  # type: ignore
         kernel = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])
         approx_gt = np.nansum(window * kernel) / np.nansum(kernel)
         np.testing.assert_allclose(approx_gt, test[3, 1], rtol=1e-1)
+
+
+@pytest.mark.parametrize(  # type: ignore
+    "method, np_filter",
+    [
+        ("mean", np.nanmean),
+        ("median", np.nanmedian),
+        ("max", np.nanmax),
+        ("min", np.nanmin),
+    ],
+)
+def test_filter_against_center_value(method, np_filter) -> None:
+    """
+    Test filter against the center value of a function
+    """
+    arr = np.random.normal(size=(3, 3))
+
+    arr_filtered = gu.filters._filter(arr, method=method, size=3)
+
+    np.testing.assert_array_equal(np_filter(arr), arr_filtered[1, 1])
