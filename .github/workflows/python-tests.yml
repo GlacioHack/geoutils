@@ -65,11 +65,11 @@ jobs:
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
     - name: Install project environment (base)
-      if: ${{ matrix.dep-level == "base" }}
+      if: ${{ matrix.dep-level == 'base' }}
       run: pip install -e .[test]
 
     - name: Install project environment (optional)
-      if: ${{ matrix.dep-level != "base" }}
+      if: ${{ matrix.dep-level != 'base' }}
       run: pip install -e .[test, ${{ matrix.dep-level }}]
 
     - name: Check import works
