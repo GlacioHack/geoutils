@@ -316,6 +316,9 @@ class TestPointCloud:
 
     def test_to_las(self) -> None:
 
+        # Import optional laspy or skip test
+        pytest.importorskip("laspy")
+
         # 1/ For a X/Y/Z point cloud with no auxiliary data
         pc1 = PointCloud(self.gdf1, data_column="b1")
 
