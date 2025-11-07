@@ -64,18 +64,16 @@ jobs:
         python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "gdal" "environment.yml"
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
-    - name: Install project
-      run: pip install . --no-dependencies
+    - name: Install project environment (base)
+      if: ${{ matrix.dep-level }} == "base"
+      run: pip install -e .[test]
+
+    - name: Install project environment (optional)
+      if: ${{ matrix.dep-level }} != "base"
+      run: pip install -e .[test, ${{ matrix.dep-level }}]
 
     - name: Check import works
       run: python -c "import geoutils"
-
-    - name: Install test dependencies
-      run: pip install .[test]
-
-    - name: Install optional dependencies
-      if: ${{ matrix.dep-level }} == "opt"
-      run: pip install .[opt]
 
       # Stop the build if there are Python syntax errors or undefined names
     - name: Lint with flake8
