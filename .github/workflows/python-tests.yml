@@ -74,7 +74,7 @@ jobs:
       run: pip install .[test]
 
     - name: Install optional dependencies
-      if: matrix.dep-level == "opt"
+      if: ${{ matrix.dep-level }} == "opt"
       run: pip install .[opt]
 
       # Stop the build if there are Python syntax errors or undefined names
