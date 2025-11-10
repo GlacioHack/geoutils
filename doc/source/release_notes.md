@@ -4,12 +4,12 @@ Below, the release notes for all minor versions and our roadmap to a first major
 
 ## 0.2.0
 
-GeoUtils version 0.2 is the **second minor release** since the creation of the project. It is the result of months of work to 
-consolidate the point cloud features towards a stable API that interfaces well with other objects. Parallel work on scalability 
+GeoUtils version 0.2 is the **second minor release** since the creation of the project. It is the result of months of work to
+consolidate the point cloud features towards a stable API that interfaces well with other objects. Parallel work on scalability
 with Dask and Multiprocessing is ongoing, and should soon be released in a 0.3.
 
 GeoUtils 0.2 adds:
-- **A point cloud object** with its own specific methods (e.g, gridding), that can be used as match-reference for other operations (e.g., interpolating at points), and supports arithmetics (e.g., indexing, sum, NumPy stats) and geometric (masking) functionalities with API common to `Raster` objects,
+- **A point cloud object** with its own specific methods (e.g, gridding), that can be used as match-reference for other operations (e.g., interpolating at points), and supports arithmetic (e.g., indexing, NumPy stats) and geometric (e.g., masking) functionalities with the same API as for `Raster` objects,
 - **Preliminary statistics** features common to rasters and point clouds, which will be expanded with binning and spatial statistics.
 
 A few changes might be required to adapt from previous versions:
