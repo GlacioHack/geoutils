@@ -27,6 +27,10 @@ GeoUtils aims to support these features, as well the reading and writing of poin
 geoparquet) usually used for **sparse point clouds**, and from point-cloud-type files (e.g., LAS, LAZ, COPC) usually
 used for **dense point clouds**.
 
+```{warning}
+Support for LAS files is still preliminary and loads all data in memory for most operations. We are working on adding support for implicit chunked reading. 
+```
+
 Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
 
 (pc-obj-def)=

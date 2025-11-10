@@ -6,7 +6,7 @@ Prefer to **grasp GeoUtils' core concepts by comparing with other Python package
 
 ## What is GeoUtils?
 
-GeoUtils<sup>1</sup> is a **[Python](https://www.python.org/) package for the handling and analysis of georeferenced data**, developed with the objective of
+GeoUtils<sup>1</sup> is a **[Python](https://www.python.org/) package for the analysis of georeferenced data**, developed with the objective of
 making such analysis accessible, efficient and reliable.
 
 ```{margin}
@@ -20,14 +20,12 @@ functions that require many steps to perform with other packages, and which are 
 GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for surface applications that rely on
 moderate- to high-resolution data** (requiring reprojection, re-gridding, point interpolation, and other types of fine-grid analysis).
 
-## Why use GeoUtils?
-
 GeoUtils is built on top of [Rasterio](https://rasterio.readthedocs.io/en/latest/), [GeoPandas](https://geopandas.org/en/stable/docs.html)
 and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenced operations, and relies on [NumPy](https://numpy.org/doc/stable/),
 [SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/) for scientific computing to provide:
-- A **common and consistent framework** for efficient raster and vector handling,
+- A **common and consistent framework** for efficient raster, vector and point data handling,
 - A structure following the **principal of least knowledge**<sup>2</sup> to foster accessibility,
-- A **pythonic arithmetic** and **NumPy interfacing** for robust numerical computing.
+- A **pythonic arithmetic** and **NumPy interfacing** for numerical computing.
 
 ```{margin}
 <sup>2</sup>Or the [Law of Demeter](https://en.wikipedia.org/wiki/Law_of_Demeter) for software development.
@@ -40,10 +38,68 @@ In particular, GeoUtils:
 - Re-implements **several of [GDAL](https://gdal.org/)'s features** missing in other packages (e.g., proximity, gdalDEM),
 - Naturally handles **different `dtype` and `nodata`** values through its NumPy masked-array interface.
 
-
 ```{note}
-More on these core features of GeoUtils in the {ref}`feature-overview`, or {ref}`core-index` for details.
+We are working on adding Dask support through an Xarray accessor for our next release.
 ```
+
+## Who is behind GeoUtils?
+
+GeoUtils was created by a group of researchers with expertise in geospatial data analysis for the cryosphere.
+Nowadays, its development is **jointly led by researchers in geospatial analysis** (including funding from NASA and SNSF) **and
+engineers from CNES** (French Space Agency).
+
+Most contributors and users are scientists or industrials working in **various fields of Earth observation**.
+
+::::{grid}
+:reverse:
+
+:::{grid-item}
+:columns: 4
+:child-align: center
+
+```{image} ./_static/nasa_logo.svg
+    :width: 200px
+    :class: dark-light
+```
+
+:::
+
+:::{grid-item}
+:columns: 4
+:child-align: center
+
+```{image} ./_static/snsf_logo.svg
+    :width: 220px
+    :class: only-light
+```
+
+```{image} ./_static/snsf_logo_dark.svg
+    :width: 220px
+    :class: only-dark
+```
+
+:::
+
+:::{grid-item}
+:columns: 4
+:child-align: center
+
+```{image} ./_static/cnes_logo.svg
+    :width: 200px
+    :class: only-light
+```
+
+```{image} ./_static/cnes_logo_dark.svg
+    :width: 200px
+    :class: only-dark
+```
+
+:::
+
+
+::::
+
+More details about the people behind GeoUtils, funding sources, and the package's objectives can be found on the **{ref}`credits` pages**.
 
 ## Why the need for GeoUtils?
 
