@@ -9,5 +9,4 @@ Prefer to learn by running examples? Explore our example galleries on {ref}`exam
 raster_class
 vector_class
 pointcloud_class
-mask_class
 ```

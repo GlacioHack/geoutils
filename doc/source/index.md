@@ -136,7 +136,7 @@ release_notes
 :caption: Project information
 :maxdepth: 2
 
-background
+credits
 license
 ```
 
