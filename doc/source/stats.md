@@ -17,7 +17,7 @@ kernelspec:
 GeoUtils supports statistical analysis tailored to geospatial objects.
 
 For a {class}`~geoutils.Raster` or a {class}`~geoutils.PointCloud`, the statistics are naturally performed on the {attr}`~geoutils.Raster.data` attribute
-which is clearly defined. 
+which is clearly defined.
 
 [//]: # (For a {class}`~geoutils.Vector`, statistics have to be performed on a specific column.)
 
