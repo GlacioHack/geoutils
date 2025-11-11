@@ -26,7 +26,7 @@ GeoUtils is a Python package for **accessible** and **consistent** geospatial an
 
 ```{important}
 :class: margin
-GeoUtils ``v0.2`` is released with more consistent point cloud support! We are working Xarray and GeoPandas accessors for our data objects.
+GeoUtils ``v0.2`` is released with more consistent point cloud support! We are working on Xarray and GeoPandas accessors for all data objects, as well as other scalability features.
 ```
 
 GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages
@@ -137,7 +137,6 @@ release_notes
 :maxdepth: 2
 
 credits
-license
 ```
 
 # Indices and tables
