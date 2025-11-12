@@ -69,15 +69,15 @@ def _nan_filter(array: NDArrayNum, func: Callable[..., NDArrayNum], size: int) -
     if array.ndim != 2:
         raise ValueError(f"Expected 2D array, got shape {array.shape}")
 
-    def patch_func(patch: NDArrayNum) -> NDArrayNum | float:
+    def patch_func(patch: NDArrayNum, **kwargs: Any) -> NDArrayNum | float:
         patch_flat = np.ravel(patch)
         valid = patch_flat[~np.isnan(patch_flat)]
         if valid.size == 0:
             return np.nan
         try:
-            return func(valid)
+            return func(valid, **kwargs)
         except TypeError:
-            return func(valid, axis=None)
+            return func(valid)
 
     if _has_vectorized_filter:
         return generic_filter_scipy(array, patch_func, footprint=np.ones((size, size)))
