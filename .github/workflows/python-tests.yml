@@ -11,13 +11,14 @@ on:
 
 jobs:
   test:
-    name: ${{ matrix.os }}, python ${{ matrix.python-version }}
+    name: ${{ matrix.os }}, python ${{ matrix.python-version }}, ${{ matrix.dep-level }}
     runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
         os: ["ubuntu-latest", "macos-latest"]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
+        dep-level: ["base", "opt"]
 
     defaults:
       run:
@@ -47,9 +48,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ env.CONDA }}/envs
-        key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
+        key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dep-level }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 1 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -60,35 +61,26 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
-        python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "graphviz" "environment.yml"
+        python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "gdal" "environment.yml"
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
-    - name: Install project
-      run: pip install -e . --no-dependencies
+    # If/else equivalent to install base environment, or base+optional
+    - name: Install project environment (base)
+      if: ${{ matrix.dep-level == 'base' }}
+      run: pip install -e .[test]
 
-    - name: Check import works with base environment
+    - name: Install project environment (optional)
+      if: ${{ matrix.dep-level != 'base' }}
+      run: pip install -e .[test,${{ matrix.dep-level }}]
+
+    - name: Check import works
       run: python -c "import geoutils"
 
-    # This time, the trick below is necessary because: 1/ "conda update" does not support a file -f as argument
-    # and also 2/ "conda env update" does not support --freeze-installed or --no-update-deps
-    - name: Update environment with development packages if cache does not exist
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-        pkgs_conda_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'conda')"`
-        pkgs_pip_dev=`python -c "import geoutils; geoutils.misc.diff_environment_yml('environment.yml', 'dev-environment.yml', 'pip')"`
-        mamba install $pkgs_conda_dev --freeze-installed
-        if [[ "$pkgs_pip_dev" != "None" ]]; then
-          pip install --user $pkgs_pip_dev
-        fi
-
-    # Stop the build if there are Python syntax errors or undefined names
+      # Stop the build if there are Python syntax errors or undefined names
     - name: Lint with flake8
       run: |
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
-    - name: Setup pip dependencies
-      run: pip install pytest-cov coveralls
 
     - name: Print conda environment (for debugging)
       run: |
@@ -100,6 +92,7 @@ jobs:
 
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2
+      continue-on-error: true
       with:
         github-token: ${{ secrets.github_token }}
         flag-name: run-${{ join(matrix.*, '-') }}
