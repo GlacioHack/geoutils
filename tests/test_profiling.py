@@ -104,7 +104,6 @@ class TestProfiling:
         dem = gu.Raster(examples.get_path_test("everest_landsat_b4"))
 
         dem.get_stats()
-        print(Profiler.get_profiling_info())
         assert len(Profiler.get_profiling_info()) == 1
 
         Profiler.selection_functions(["raster.raster.__init__"])
