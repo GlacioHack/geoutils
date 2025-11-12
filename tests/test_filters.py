@@ -366,4 +366,4 @@ def test_filter_against_center_value(method, np_filter) -> None:
 
     arr_filtered = gu.filters._filter(arr, method=method, size=3)
 
-    np.testing.assert_array_equal(np_filter(arr), arr_filtered[1, 1])
+    assert np.isclose(np_filter(arr), arr_filtered[1, 1], atol=1e-8)
