@@ -58,33 +58,6 @@ except ImportError:
         return decorator
 
 
-def _nan_filter(array: NDArrayNum, func: Callable[..., NDArrayNum], size: int) -> NDArrayNum:
-    """
-    Apply a NaN-aware local filter that ignores NaNs within the window.
-    :param array: array to filter
-    :param func: function to apply to array
-
-    Returns NaN only if *all* values in the local window are NaN.
-    """
-    if array.ndim != 2:
-        raise ValueError(f"Expected 2D array, got shape {array.shape}")
-
-    def patch_func(patch: NDArrayNum, **kwargs: Any) -> NDArrayNum | float:
-        patch_flat = np.ravel(patch)
-        valid = patch_flat[~np.isnan(patch_flat)]
-        if valid.size == 0:
-            return np.nan
-        try:
-            return func(valid, **kwargs)
-        except TypeError:
-            return func(valid)
-
-    if _has_vectorized_filter:
-        return generic_filter_scipy(array, patch_func, footprint=np.ones((size, size)))
-
-    return generic_filter_scipy(array, patch_func, size=size, mode="constant", cval=np.nan)
-
-
 def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any) -> NDArrayNum:
     """
     Dispatch filter application by method name or custom callable.
@@ -93,10 +66,10 @@ def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: in
     """
     filter_map: dict[str, Callable[..., NDArrayNum]] = {
         "gaussian": gaussian_filter,
-        "median": lambda arr, size=size, **_: _nan_filter(arr, np.nanmedian, size),
-        "mean": lambda arr, size=size, **_: _nan_filter(arr, np.nanmean, size),
-        "max": lambda arr, size=size, **_: _nan_filter(arr, np.nanmax, size),
-        "min": lambda arr, size=size, **_: _nan_filter(arr, np.nanmin, size),
+        "median": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmedian, size),
+        "mean": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmean, size),
+        "max": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmax, size),
+        "min": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmin, size),
         "distance": distance_filter,
     }
 
