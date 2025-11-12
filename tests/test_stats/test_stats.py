@@ -40,7 +40,7 @@ expected_stats_mask = [
 stat_types = (int, float, np.integer, np.floating)
 
 
-def compare_dict(dict1, dict2):
+def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
     assert len(dict1.keys()) == len(dict1.keys())
     for key in dict1.keys():
         assert key in dict2
