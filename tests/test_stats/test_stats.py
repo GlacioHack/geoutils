@@ -177,10 +177,12 @@ class TestStats:
             "RMSE": np.float64(9.220541807365446),
             "Standard deviation": np.float64(79.44349437534403),
             "Valid count": np.int64(524000),
-            "Total count": 524000,
+            "Total count": np.int64(524000),
             "Percentage valid points": np.float64(100.0),
         }
+        print( rast.get_stats(["Percentage valid points", "Total count"]))
         assert res_stats == rast.get_stats()
+        print (l)
 
         # Verify raster stats with a mask
         res_stats_mask = {
@@ -197,7 +199,7 @@ class TestStats:
             "RMSE": np.float64(10.118943490060417),
             "Standard deviation": np.float64(64.98157041836747),
             "Valid count": np.int64(524000),
-            "Total count": 524000,
+            "Total count": np.int64(524000),
             "Percentage valid points": np.float64(100.0),
             "Valid inlier count": np.int64(241198),
             "Total inlier count": np.int64(241198),
