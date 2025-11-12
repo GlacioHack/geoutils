@@ -180,9 +180,7 @@ class TestStats:
             "Total count": np.int64(524000),
             "Percentage valid points": np.float64(100.0),
         }
-        print( rast.get_stats(["Percentage valid points", "Total count"]))
         assert res_stats == rast.get_stats()
-        print (l)
 
         # Verify raster stats with a mask
         res_stats_mask = {
