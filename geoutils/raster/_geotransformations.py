@@ -377,9 +377,9 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
             "YSCALE": 1,
         }
     )
-    # If Rasterio has old enough version, force tolerance to 0 to avoid deformations on chunks
+    # If Rasterio has old enough version, force tolerance to 0 to avoid deformations on chunks, if not user-specified
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
-    if Version(rio.__version__) > Version("1.4.3"):
+    if Version(rio.__version__) > Version("1.4.3") and "tolerance" not in reproj_kwargs.keys():
         reproj_kwargs.update({"tolerance": 0})
 
     # Run reprojection
