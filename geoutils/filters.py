@@ -66,10 +66,10 @@ def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: in
     """
     filter_map: dict[str, Callable[..., NDArrayNum]] = {
         "gaussian": gaussian_filter,
-        "median": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmedian, size),
-        "mean": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmean, size),
-        "max": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmax, size),
-        "min": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmin, size),
+        "median": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmedian, size=size),
+        "mean": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmean, size=size),
+        "max": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmax, size=size),
+        "min": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmin, size=size),
         "distance": distance_filter,
     }
 
