@@ -163,7 +163,7 @@ def _load_laspy_metadata(
 def _write_laspy(
     filename: str | pathlib.Path,
     pc: gpd.GeoDataFrame,
-    data_column: str,
+    data_column: str | None,
     version: Any = None,
     point_format: Any = None,
     offsets: tuple[float, float, float] = None,
@@ -191,7 +191,10 @@ def _write_laspy(
     # The las x,y,z will be automatically scaled into X,Y,Z based on the header scales
     las.x = pc.geometry.x.values
     las.y = pc.geometry.y.values
-    las.z = pc[data_column].values
+    if data_column is not None:
+        las.z = pc[data_column].values
+    else:
+        las.z = pc.geometry.z.values
 
     # Add auxiliary columns
     for c in aux_columns:
@@ -296,8 +299,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         self._ds: gpd.GeoDataFrame | None = None
         self._name: str | None = None
         self._crs: CRS | None = None
+        self._data_column: str | None = None
         self._bounds: BoundingBox
-        self._data_column: str = None
         self._data: NDArrayNum
         self._nb_points: int
         self.__nongeo_columns: pd.Index
@@ -336,7 +339,6 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         # Set data column name based on user input
         self.set_data_column(new_data_column=data_column)
-
 
     # TODO: Could also move to Vector directly?
     ##############################################
@@ -457,8 +459,10 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                     self._data_column = None
                     return
                 else:
-                    warnings.warn(f"Overridding 3D points with with data column '{new_data_column}'. Set data_column "
-                                  f"to None to use the 3D point geometries instead.")
+                    warnings.warn(
+                        f"Overriding 3D points with with data column '{new_data_column}'. Set data_column "
+                        f"to None to use the 3D point geometries instead."
+                    )
 
         # If point geometries are 2D and the data column is undefined
         if new_data_column is None:
@@ -587,7 +591,11 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         # Send to from_xyz
         has_z = all(p.has_z for p in self.ds.geometry)  # If points are 3D, copy with 3D points
         cp = self.from_xyz(
-            x=self.geometry.x.values, y=self.geometry.y.values, z=data, crs=self.crs, data_column=self.data_column,
+            x=self.geometry.x.values,
+            y=self.geometry.y.values,
+            z=data,
+            crs=self.crs,
+            data_column=self.data_column,
             use_z=has_z,
         )
 
@@ -625,9 +633,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         )
 
     @classmethod
-    def from_xyz(cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str = "z", use_z: bool=False) \
-            -> (
-            PointCloud):
+    def from_xyz(
+        cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str | None = None, use_z: bool = False
+    ) -> PointCloud:
         """
         Create point cloud from three 1D array-like coordinates for X/Y/Z.
 
@@ -638,8 +646,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param y: Y coordinates of point cloud.
         :param z: Z values of point cloud.
         :param crs: Coordinate reference system.
-        :param data_column: Data column of point cloud.
-        :param use_z: Whether to use Z point coordinates instead of the default data column.
+        :param data_column: Data column name to associated to 2D point geometries.
+        :param use_z: Use Z coordinates in 3D point geometries instead of a data column.
 
         :return Point cloud.
         """

@@ -43,7 +43,8 @@ class TestPointCloud:
     gdf3 = gpd.GeoDataFrame(
         data=arr_points2[:, 3:],
         columns=["b2"],
-        geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1], z=arr_points[:, 2]), crs=4326
+        geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1], z=arr_points[:, 2]),
+        crs=4326,
     )
 
     # 4/ LAS file
@@ -253,7 +254,7 @@ class TestPointCloud:
             pc.set_data_column("column_that_does_not_exist")
 
         # If a data column name is passed for 3D points
-        with pytest.warns(UserWarning, match="Overridding 3D points with*"):
+        with pytest.warns(UserWarning, match="Overriding 3D points with*"):
             pc4 = PointCloud(self.gdf3, data_column="b2")
             assert pc4.data_column == "b2"
             assert np.array_equal(pc4.data, self.gdf3["b2"].values)
