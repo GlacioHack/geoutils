@@ -33,7 +33,7 @@ from geoutils._typing import NDArrayNum
 def _grid_pointcloud(
     pc: gpd.GeoDataFrame,
     grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
-    data_column_name: str = "b1",
+    data_column_name: str | None = None,
     resampling: Literal["nearest", "linear", "cubic"] = "linear",
     dist_nodata_pixel: float = 1.0,
 ) -> tuple[NDArrayNum, affine.Affine]:
@@ -46,7 +46,7 @@ def _grid_pointcloud(
 
     :param pc: Point cloud.
     :param grid_coords: Regular raster grid coordinates in X and Y (i.e. equally spaced, independently for each axis).
-    :param data_column_name: Name of data column for point cloud (only if passed as a geodataframe).
+    :param data_column_name: Name of data column for point cloud (if 2D point geometries are used).
     :param resampling: Resampling method within delauney triangles (defaults to linear).
     :param dist_nodata_pixel: Distance from the point cloud after which grid cells are filled by nodata values,
         expressed in number of pixels.
@@ -74,7 +74,7 @@ def _grid_pointcloud(
     # Use griddata on all points
     aligned_dem = griddata(
         points=(pc.geometry.x.values, pc.geometry.y.values),
-        values=pc[data_column_name].values,
+        values=pc[data_column_name].values if data_column_name is not None else pc.geometry.z.values,
         xi=(xx, yy),
         method=resampling,
         rescale=True,  # Rescale inputs to unit cube to avoid precision issues
