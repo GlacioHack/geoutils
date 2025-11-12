@@ -40,6 +40,15 @@ expected_stats_mask = [
 stat_types = (int, float, np.integer, np.floating)
 
 
+def compare_dict(dict1, dict2):
+    assert len(dict1.keys()) == len(dict1.keys())
+    for key in dict1.keys():
+        assert key in dict2
+        if dict1[key] is not np.nan:
+            assert dict1[key] == dict2[key]
+        else:
+            assert dict2[key] is np.nan
+
 class TestStats:
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
@@ -180,7 +189,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(100.0),
         }
-        assert res_stats == rast.get_stats()
+        compare_dict(res_stats, rast.get_stats())
 
         # Verify raster stats with a mask
         res_stats_mask = {
@@ -204,7 +213,7 @@ class TestStats:
             "Percentage inlier points": np.float64(46.03015267175572),
             "Percentage valid inlier points": np.float64(100.0),
         }
-        assert res_stats_mask == rast.get_stats(inlier_mask=inlier_mask)
+        compare_dict(res_stats_mask, rast.get_stats(inlier_mask=inlier_mask))
 
         # Verify cropped raster
         nrows, ncols = rast.shape
@@ -226,7 +235,7 @@ class TestStats:
             "Total count": 273000,
             "Percentage valid points": np.float64(100.0),
         }
-        assert res_stats_crop == rast_crop.get_stats()
+        compare_dict(res_stats_crop, rast_crop.get_stats())
 
         # Verify reprojected raster
         rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
@@ -247,7 +256,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(40.36774809160305),
         }
-        assert res_stats_crop_proj == rast_crop_proj.get_stats()
+        compare_dict(res_stats_crop_proj, rast_crop_proj.get_stats())
 
         # Verify stats of a masked raster
         rast.set_mask(inlier_mask)
@@ -268,7 +277,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(53.96984732824428),
         }
-        assert stats_masked_rast == rast.get_stats()
+        compare_dict(stats_masked_rast, rast.get_stats())
 
         # Verify stats of a masked raster with the other part covered by the inler_mask (=> empty raster)
         stats_masked_rast_masked = {
@@ -292,7 +301,7 @@ class TestStats:
             "Percentage inlier points": np.nan,
             "Percentage valid inlier points": np.nan,
         }
-        assert stats_masked_rast_masked == rast.get_stats(inlier_mask=inlier_mask)
+        compare_dict(stats_masked_rast_masked, rast.get_stats(inlier_mask=inlier_mask))
 
     def test_pointcloud_get_stats_values(self) -> None:
         """
@@ -320,7 +329,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(100.0),
         }
-        assert rast_stats_pc == rast_pc.get_stats()
+        compare_dict(rast_stats_pc, rast_pc.get_stats())
 
         # Verify cropped raster pc
         nrows, ncols = rast.shape
@@ -343,7 +352,7 @@ class TestStats:
             "Total count": 273000,
             "Percentage valid points": np.float64(100.0),
         }
-        assert rast_stats_crop_pc == rast_crop_pc.get_stats()
+        compare_dict(rast_stats_crop_pc, rast_crop_pc.get_stats())
 
         # Verify reprojected raster pc
         rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
@@ -365,4 +374,4 @@ class TestStats:
             "Total count": 211527,
             "Percentage valid points": np.float64(100.0),
         }
-        assert rast_stats_crop_proj_pc == rast_crop_proj_pc.get_stats()
+        compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.get_stats())
