@@ -61,7 +61,7 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
-        python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "gdal" "environment.yml"
+        python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "gdal, plotly" "environment.yml"
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
     # If/else equivalent to install base environment, or base+optional
