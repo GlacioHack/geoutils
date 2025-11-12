@@ -176,8 +176,8 @@ class TestStats:
             "NMAD": np.float64(94.8864),
             "RMSE": np.float64(9.220541807365446),
             "Standard deviation": np.float64(79.44349437534403),
-            "Valid count": np.int64(524000),
-            "Total count": np.int64(524000),
+            "Valid count": 524000,
+            "Total count": 524000,
             "Percentage valid points": np.float64(100.0),
         }
         assert res_stats == rast.get_stats()
@@ -196,8 +196,8 @@ class TestStats:
             "NMAD": np.float32(54.856197),
             "RMSE": np.float64(10.118943490060417),
             "Standard deviation": np.float64(64.98157041836747),
-            "Valid count": np.int64(524000),
-            "Total count": np.int64(524000),
+            "Valid count": 524000,
+            "Total count": 524000,
             "Percentage valid points": np.float64(100.0),
             "Valid inlier count": np.int64(241198),
             "Total inlier count": np.int64(241198),
@@ -222,8 +222,8 @@ class TestStats:
             "NMAD": np.float64(105.26459999999999),
             "RMSE": np.float64(9.153915273540871),
             "Standard deviation": np.float64(79.32951386752386),
-            "Valid count": np.int64(273000),
-            "Total count": np.int64(273000),
+            "Valid count": 273000,
+            "Total count": 273000,
             "Percentage valid points": np.float64(100.0),
         }
         assert res_stats_crop == rast_crop.get_stats()
@@ -243,8 +243,8 @@ class TestStats:
             "NMAD": np.float32(66.716995),
             "RMSE": np.float64(10.38534653788665),
             "Standard deviation": np.float64(62.319986152883956),
-            "Valid count": np.int64(211527),
-            "Total count": np.int64(524000),
+            "Valid count": 211527,
+            "Total count": 524000,
             "Percentage valid points": np.float64(40.36774809160305),
         }
         assert res_stats_crop_proj == rast_crop_proj.get_stats()
@@ -264,8 +264,8 @@ class TestStats:
             "NMAD": np.float32(99.3342),
             "RMSE": np.float64(8.37853254688833),
             "Standard deviation": np.float64(79.45825061580675),
-            "Valid count": np.int64(282802),
-            "Total count": np.int64(524000),
+            "Valid count": 282802,
+            "Total count": 524000,
             "Percentage valid points": np.float64(53.96984732824428),
         }
         assert stats_masked_rast == rast.get_stats()
@@ -316,8 +316,8 @@ class TestStats:
             "NMAD": np.float64(94.8864),
             "RMSE": np.float64(9.220541807365446),
             "Standard deviation": np.float64(79.44349437534403),
-            "Valid count": np.int64(524000),
-            "Total count": np.int64(524000),
+            "Valid count": 524000,
+            "Total count": 524000,
             "Percentage valid points": np.float64(100.0),
         }
         assert rast_stats_pc == rast_pc.get_stats()
@@ -339,8 +339,8 @@ class TestStats:
             "NMAD": np.float64(105.26459999999999),
             "RMSE": np.float64(9.153915273540871),
             "Standard deviation": np.float64(79.32951386752386),
-            "Valid count": np.int64(273000),
-            "Total count": np.int64(273000),
+            "Valid count": 273000,
+            "Total count": 273000,
             "Percentage valid points": np.float64(100.0),
         }
         assert rast_stats_crop_pc == rast_crop_pc.get_stats()
@@ -361,8 +361,8 @@ class TestStats:
             "NMAD": np.float64(66.717),
             "RMSE": np.float64(10.38534653788665),
             "Standard deviation": np.float64(62.319986152883956),
-            "Valid count": np.int64(211527),
-            "Total count": np.int64(211527),
+            "Valid count": 211527,
+            "Total count": 211527,
             "Percentage valid points": np.float64(100.0),
         }
         assert rast_stats_crop_proj_pc == rast_crop_proj_pc.get_stats()
