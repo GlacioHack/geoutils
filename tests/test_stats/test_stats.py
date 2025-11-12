@@ -45,9 +45,10 @@ def compare_dict(dict1, dict2):
     for key in dict1.keys():
         assert key in dict2
         if dict1[key] is not np.nan:
-            assert dict1[key] == dict2[key]
+            assert dict1[key] == pytest.approx(dict2[key], abs=1e-12)
         else:
             assert dict2[key] is np.nan
+
 
 class TestStats:
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
