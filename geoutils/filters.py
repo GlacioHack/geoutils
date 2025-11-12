@@ -67,34 +67,25 @@ def _nan_filter(array: NDArrayNum, func: Callable[..., NDArrayNum], size: int) -
     Returns NaN only if *all* values in the local window are NaN.
     """
     if array.ndim != 2:
-        raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
+        raise ValueError(f"Expected 2D array, got shape {array.shape}")
 
-    def tests_on_nans(data: NDArrayNum, *, axis: int | tuple[int, ...] | None = None) -> float | object:
-        """
-        Process NaNs values for filtering
-        :param data: array containing all data
-        """
-        flat_data = np.ravel(data)
-        valid = flat_data[~np.isnan(flat_data)]
+    def patch_func(patch: NDArrayNum) -> NDArrayNum | float:
+        patch_flat = np.ravel(patch)
+        valid = patch_flat[~np.isnan(patch_flat)]
         if valid.size == 0:
             return np.nan
         try:
-            return func(valid, axis=axis)
-        except TypeError:
             return func(valid)
+        except TypeError:
+            return func(valid, axis=None)
 
     if _has_vectorized_filter:
-        return generic_filter_scipy(array, tests_on_nans, size=size, mode="constant", cval=np.nan)
-    else:
+        return generic_filter_scipy(array, patch_func, footprint=np.ones((size, size)))
 
-        def wrapper_scipy(flat_values: NDArrayNum) -> float | object:
-            patch = np.reshape(flat_values, (size,) * array.ndim)
-            return tests_on_nans(patch)
-
-        return generic_filter_scipy(array, wrapper_scipy, size=size, mode="constant", cval=np.nan)
+    return generic_filter_scipy(array, patch_func, size=size, mode="constant", cval=np.nan)
 
 
-def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], **kwargs: Any) -> NDArrayNum:
+def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any) -> NDArrayNum:
     """
     Dispatch filter application by method name or custom callable.
     :param array: array to filter
@@ -102,10 +93,10 @@ def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], **kwargs
     """
     filter_map: dict[str, Callable[..., NDArrayNum]] = {
         "gaussian": gaussian_filter,
-        "median": lambda arr, size=3, **_: _nan_filter(arr, np.nanmedian, size),
-        "mean": lambda arr, size=3, **_: _nan_filter(arr, np.nanmean, size),
-        "max": lambda arr, size=3, **_: _nan_filter(arr, np.nanmax, size),
-        "min": lambda arr, size=3, **_: _nan_filter(arr, np.nanmin, size),
+        "median": lambda arr, size=size, **_: _nan_filter(arr, np.nanmedian, size),
+        "mean": lambda arr, size=size, **_: _nan_filter(arr, np.nanmean, size),
+        "max": lambda arr, size=size, **_: _nan_filter(arr, np.nanmax, size),
+        "min": lambda arr, size=size, **_: _nan_filter(arr, np.nanmin, size),
         "distance": distance_filter,
     }
 

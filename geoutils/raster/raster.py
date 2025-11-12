@@ -3597,6 +3597,7 @@ class Raster:
         method: str | Callable[..., NDArrayNum],
         *,
         inplace: Literal[False] = False,
+        size: int = 3,
         **kwargs: dict[str, Any],
     ) -> RasterType: ...
 
@@ -3606,6 +3607,7 @@ class Raster:
         method: str | Callable[..., NDArrayNum],
         *,
         inplace: Literal[True],
+        size: int = 3,
         **kwargs: dict[str, Any],
     ) -> None: ...
 
@@ -3613,6 +3615,7 @@ class Raster:
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
         inplace: bool = False,
+        size: int = 3,
         **kwargs: dict[str, Any],
     ) -> RasterType | None:
         """
@@ -3621,6 +3624,7 @@ class Raster:
         :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
                        for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
         :param inplace: Whether to modify the raster in-place.
+        :param size: window size for filter
 
         :return: A new Raster instance with the filtered data (or None if inplace)
 
@@ -3637,7 +3641,7 @@ class Raster:
         filled_array = masked_array.filled(self.nodata)
 
         # Apply filter
-        filtered_array = _filter(filled_array, method, **kwargs)
+        filtered_array = _filter(filled_array, method, size, **kwargs)
 
         # Mask nodata again after filtering
         final_masked = np.ma.masked_equal(filtered_array, self.nodata)
