@@ -21,14 +21,14 @@ from geoutils._typing import NDArrayNum
 
 class TestPointCloud:
 
-    # 1/ Synthetic point cloud with no auxiliary column
+    # 1/ Synthetic 2D points with main column and no auxiliary column
     rng = np.random.default_rng(42)
     arr_points = rng.integers(low=1, high=1000, size=(100, 3)) + rng.normal(0, 0.15, size=(100, 3))
     gdf1 = gpd.GeoDataFrame(
         data={"b1": arr_points[:, 2]}, geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1]), crs=4326
     )
 
-    # 2/ Synthetic point cloud with auxiliary column
+    # 2/ Synthetic 2D points with main column and with auxiliary column
     arr_points2 = rng.integers(low=1, high=1000, size=(100, 4)) + rng.normal(0, 0.15, size=(100, 4))
     gdf2 = gpd.GeoDataFrame(
         data=arr_points2[:, 2:],
@@ -37,31 +37,53 @@ class TestPointCloud:
         crs=4326,
     )
 
-    # 3/ LAS file
+    # 3/ Synthetic 3D points and with auxiliary column
+    rng = np.random.default_rng(42)
+    arr_points = rng.integers(low=1, high=1000, size=(100, 3)) + rng.normal(0, 0.15, size=(100, 3))
+    gdf3 = gpd.GeoDataFrame(
+        data=arr_points2[:, 3:],
+        columns=["b2"],
+        geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1], z=arr_points[:, 2]), crs=4326
+    )
+
+    # 4/ LAS file
     fn_las = gu.examples.get_path_test("coromandel_lidar")
 
-    # 4/ Non-point vector (for error raising)
+    # 5/ Non-point vector (for error raising)
     poly = Polygon([(5, 5), (6, 5), (6, 6), (5, 6)])
-    gdf3 = gpd.GeoDataFrame({"geometry": [poly]}, crs="EPSG:4326")
+    gdf4 = gpd.GeoDataFrame({"geometry": [poly]}, crs="EPSG:4326")
 
     def test_init(self) -> None:
         """Test instantiation of a point cloud."""
 
-        # 1/ For a single column point cloud
+        # 1/ For a single column point cloud with 2D geometries
         pc = PointCloud(self.gdf1, data_column="b1")
 
         # Assert that both the dataframe and data column name are equal
         assert pc.data_column == "b1"
         assert_geodataframe_equal(pc.ds, self.gdf1)
 
+        # 2/ For a point cloud with 3D geometries, no need to pass a data column
+        pc = PointCloud(self.gdf3)
+
+        # Assert that both the dataframe and data column name are equal
+        assert pc.data_column is None
+        assert_geodataframe_equal(pc.ds, self.gdf3)
+
     def test_init__las(self) -> None:
         # Import optional laspy or skip test
         pytest.importorskip("laspy")
 
-        # 2/ For a point cloud from LAS/LAZ file
-        pc = PointCloud(self.fn_las, data_column="Z")
+        # 1/ For a point cloud from LAS/LAZ file, no need to pass a data column to get the default Z
+        pc = PointCloud(self.fn_las)
 
         assert pc.data_column == "Z"
+        assert not pc.is_loaded
+
+        # 2/ But we can still specify another one
+        pc = PointCloud(self.fn_las, data_column="number_of_returns")
+
+        assert pc.data_column == "number_of_returns"
         assert not pc.is_loaded
 
     def test_init__errors(self) -> None:
@@ -73,7 +95,11 @@ class TestPointCloud:
 
         # If vector is not only comprised of points
         with pytest.raises(ValueError, match="This vector file contains non-point geometries*"):
-            PointCloud(self.gdf3, data_column="z")
+            PointCloud(self.gdf4, data_column="z")
+
+        # If the data column is not defined and the geometries are 2D
+        with pytest.raises(ValueError, match="A data column name must be passed for a point cloud with 2D.*"):
+            PointCloud(self.gdf1)
 
     def test_load__las(self) -> None:
         """
@@ -88,7 +114,7 @@ class TestPointCloud:
 
         # 1/ Check unloaded and loaded attributes are all the same
 
-        pc = PointCloud(self.fn_las, data_column="Z")
+        pc = PointCloud(self.fn_las)
 
         # Check point cloud is not loaded, and fetch before metadata
         assert not pc.is_loaded
@@ -113,13 +139,13 @@ class TestPointCloud:
         assert before_columns == after_columns
 
         # 2/ Check default column argument
-        pc = PointCloud(self.fn_las, data_column="Z")
+        pc = PointCloud(self.fn_las)
         pc.load()
 
         assert pc._nongeo_columns == ["Z"]
 
         # 3/ Check implicit loading when calling a function requiring .ds
-        pc = PointCloud(self.fn_las, data_column="Z")
+        pc = PointCloud(self.fn_las)
         assert not pc.is_loaded
 
         pc.buffer(distance=0.1)
@@ -131,14 +157,14 @@ class TestPointCloud:
         # Import optional laspy or skip test
         pytest.importorskip("laspy")
 
-        pc = PointCloud(self.fn_las, data_column="Z")
+        pc = PointCloud(self.fn_las)
         pc.load()
 
         # Error if already loaded
         with pytest.raises(ValueError, match="Data are already loaded."):
             pc.load()
 
-        pc = PointCloud(self.fn_las, data_column="Z")
+        pc = PointCloud(self.fn_las)
         pc._name = None
         with pytest.raises(AttributeError, match="Cannot load as filename is not set anymore.*"):
             pc.load()
@@ -193,16 +219,27 @@ class TestPointCloud:
         # Assert column is set properly at instantiation
         pc = PointCloud(self.gdf1, data_column="b1")
         assert pc.data_column == "b1"
+        assert np.array_equal(pc.data, self.gdf1["b1"].values)
 
         # And can be reset to another name if it exists
         pc2 = PointCloud(self.gdf2, data_column="b1")
         assert pc2.data_column == "b1"
+        assert np.array_equal(pc2.data, self.gdf2["b1"].values)
+
         # First syntax
         pc2.data_column = "b2"
         assert pc2.data_column == "b2"
+        assert np.array_equal(pc2.data, self.gdf2["b2"].values)
+
         # Equivalent syntax
         pc2.set_data_column("b1")
         assert pc2.data_column == "b1"
+        assert np.array_equal(pc2.data, self.gdf2["b1"].values)
+
+        # Assert no data column is set for 3D points, using the Z coordinates instead
+        pc3 = PointCloud(self.gdf3)
+        assert pc3.data_column is None
+        assert np.array_equal(pc3.data, self.gdf3.geometry.z.values)
 
     def test_data_column__errors(self) -> None:
         """Test errors raised during setting of data column."""
@@ -214,6 +251,27 @@ class TestPointCloud:
         # Equivalent syntax
         with pytest.raises(ValueError, match="Data column column_that_does_not_exist not found*"):
             pc.set_data_column("column_that_does_not_exist")
+
+        # If a data column name is passed for 3D points
+        with pytest.warns(UserWarning, match="Overridding 3D points with*"):
+            pc4 = PointCloud(self.gdf3, data_column="b2")
+            assert pc4.data_column == "b2"
+            assert np.array_equal(pc4.data, self.gdf3["b2"].values)
+
+    def test_data(self) -> None:
+        """Test the setting and getting of the main data, depending on input geometry."""
+
+        # For a point cloud using 2D geometries + a main data column
+        pc = PointCloud(self.gdf1, data_column="b1")
+        assert np.array_equal(pc.data, self.gdf1["b1"].values)
+        pc += 1
+        assert np.array_equal(pc.data, self.gdf1["b1"].values + 1)
+
+        # For a point cloud using 3D geometries
+        pc2 = PointCloud(self.gdf3)
+        assert np.array_equal(pc2.data, self.gdf3.geometry.z.values)
+        pc2 += 1
+        assert np.array_equal(pc2.data, self.gdf3.geometry.z.values + 1)
 
     def test_from_array(self) -> None:
         """Test building point cloud from array."""
@@ -328,7 +386,7 @@ class TestPointCloud:
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.las")
         pc1.to_las(temp_file)
-        saved1 = gu.PointCloud(temp_file, data_column="Z")
+        saved1 = gu.PointCloud(temp_file)
 
         # Check loaded point cloud is equal to saved one
         atol = 0.1
@@ -342,7 +400,7 @@ class TestPointCloud:
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test2.las")
         pc2.to_las(temp_file)
-        saved2 = gu.PointCloud(temp_file, data_column="Z")
+        saved2 = gu.PointCloud(temp_file)
         saved2.load(["Z", "b2"])
 
         # Check loaded point cloud is equal to saved one
