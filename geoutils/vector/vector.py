@@ -44,6 +44,7 @@ import pandas as pd
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
@@ -60,8 +61,6 @@ from geoutils.projtools import (
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.geotransformations import _reproject
-
-from packaging.version import Version
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -368,6 +367,7 @@ class Vector:
         else:
             return None
 
+    @copy_doc(gpd.GeoDataFrame, "Vector")
     def to_file(
         self,
         filename: str | pathlib.Path,
@@ -376,31 +376,19 @@ class Vector:
         index: bool | None = None,
         **kwargs: Any,
     ) -> None:
-        """
-        Write the vector to file.
-
-        This function is a simple wrapper of :func:`geopandas.GeoDataFrame.to_file`. See there for details.
-
-        :param filename: Filename to write the file to.
-        :param driver: Driver to write file with.
-        :param schema: Dictionary passed to Fiona to better control how the file is written.
-        :param index: Whether to write the index or not.
-
-        :returns: None.
-        """
-
         self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
 
     @deprecate(
-        removal_version=Version("0.3.0"), details="The function save() will be soon deprecated, use .to_file() instead."
+        removal_version=Version("0.3.0"),
+        details="The function .save() will be soon deprecated, use .to_file() instead.",
     )  # type: ignore
     def save(
-            self,
-            filename: str | pathlib.Path,
-            driver: str | None = None,
-            schema: dict[str, Any] | None = None,
-            index: bool | None = None,
-            **kwargs: Any,
+        self,
+        filename: str | pathlib.Path,
+        driver: str | None = None,
+        schema: dict[str, Any] | None = None,
+        index: bool | None = None,
+        **kwargs: Any,
     ) -> None:
         self.to_file(filename, driver, schema, index, **kwargs)
 
@@ -1115,11 +1103,6 @@ class Vector:
     def from_dict(cls, data: dict[str, Any], geometry: Any = None, crs: CRS | None = None, **kwargs: Any) -> Vector:
 
         return cls(gpd.GeoDataFrame.from_dict(data=data, geometry=geometry, crs=crs, **kwargs))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
-
-        return self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def to_feather(
