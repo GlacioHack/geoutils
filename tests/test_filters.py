@@ -114,6 +114,9 @@ class TestStatisticalFilters:
 
     def test_median_filter_nan_consistency(self) -> None:
         """Test that different median filter engines return consistent results with NaNs."""
+
+        pytest.importorskip("numba")
+
         arr = np.array([[1, 2, np.nan], [4, np.nan, 6], [7, 8, 9]], dtype=np.float32)
         filtered_scipy = gu.filters.median_filter(arr, size=3, engine="scipy")
         filtered_numba = gu.filters.median_filter(arr, size=3, engine="numba")
