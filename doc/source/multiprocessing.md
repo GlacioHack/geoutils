@@ -121,8 +121,8 @@ To include tile location (col_min, col_max, row_min, row_max) in the results, se
 
 ## Choosing the right function
 
-| Use case                                      | Function |
-|-----------------------------------------------|---------------------------------------------------------------------------------------------------|
-| Apply processing and save results as a raster | {func}`~geoutils.raster.map_overlap_multiproc_save` |
-| Extract statistics or features into a list    | {func}`~geoutils.raster.map_multiproc_collect` |
+| Use case                                      | Function                                                               |
+|-----------------------------------------------|------------------------------------------------------------------------|
+| Apply processing and save results as a raster | {func}`~geoutils.raster.map_overlap_multiproc_to_file`                 |
+| Extract statistics or features into a list    | {func}`~geoutils.raster.map_multiproc_collect`                         |
 | Track tile locations with extracted data      | {func}`~geoutils.raster.map_multiproc_collect` with `return_tile=True` |

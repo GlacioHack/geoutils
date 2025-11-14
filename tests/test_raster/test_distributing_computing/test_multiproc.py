@@ -19,7 +19,7 @@ from geoutils.raster.distributed_computing import (
     ClusterGenerator,
     MultiprocConfig,
     map_multiproc_collect,
-    map_overlap_multiproc_save,
+    map_overlap_multiproc_to_file,
 )
 from geoutils.raster.distributed_computing.multiproc import (
     _apply_func_block,
@@ -115,7 +115,7 @@ class TestMultiproc:
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
     @pytest.mark.parametrize("cluster", [None, cluster])
-    def test_map_overlap_multiproc_save(self, example, tile_size, cluster):
+    def test_map_overlap_multiproc_to_file(self, example, tile_size, cluster):
         """
         Test the multiprocessing map function with a simple operation returning a raster.
         """
@@ -127,7 +127,7 @@ class TestMultiproc:
         addition = 5
         factor = 0.5
         # Apply the multiproc map function
-        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster = map_overlap_multiproc_to_file(_custom_func, raster, config, addition, factor, depth=depth)
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded
@@ -148,13 +148,13 @@ class TestMultiproc:
 
         # With a tempfile :
         config = MultiprocConfig(tile_size)
-        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster = map_overlap_multiproc_to_file(_custom_func, raster, config, addition, factor, depth=depth)
         output_raster_saved = Raster(config.outfile)
         assert output_raster_saved.raster_equal(output_raster)
 
         if raster.count == 1:
             # With a wrapper returning a Mask
-            output_mask = map_overlap_multiproc_save(_custom_func_mask, raster, config, depth=depth)
+            output_mask = map_overlap_multiproc_to_file(_custom_func_mask, raster, config, depth=depth)
             assert np.array_equal(raster.get_mask(), output_mask.data)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
