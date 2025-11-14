@@ -156,7 +156,7 @@ def _statistics(
 
         res_dict = {}
         if stats_name is None:
-            res_dict = {k: stats_dict[k]() for k in stats_dict.keys() if callable(stats_dict[k])}
+            res_dict = {k: stats_dict[k]() for k in stats_dict.keys()}
         else:
             for stat_name in stats_name:
                 # Compute stat if in stats_dict keys
