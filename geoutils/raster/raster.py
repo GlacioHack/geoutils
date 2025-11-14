@@ -2721,7 +2721,7 @@ class Raster:
             raster_copy.transform = translated_transform
             return raster_copy
 
-    def save(
+    def to_file(
         self,
         filename: str | pathlib.Path | IO[bytes],
         driver: str = "GTiff",
@@ -2837,6 +2837,25 @@ class Raster:
                     warnings.warn("A geotransform previously set is going to be cleared due to the setting of GCPs.")
 
                 dst.gcps = (rio_gcps, gcps_crs)
+
+    @deprecate(
+        removal_version=Version("0.3.0"), details="The function save() will be soon deprecated, use .to_file() instead."
+    )  # type: ignore
+    def save(
+            self,
+            filename: str | pathlib.Path | IO[bytes],
+            driver: str = "GTiff",
+            dtype: DTypeLike | None = None,
+            nodata: Number | None = None,
+            compress: str = "deflate",
+            tiled: bool = False,
+            blank_value: int | float | None = None,
+            co_opts: dict[str, str] | None = None,
+            metadata: dict[str, Any] | None = None,
+            gcps: list[tuple[float, ...]] | None = None,
+            gcps_crs: CRS | None = None,
+    ) -> None:
+        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
 
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:

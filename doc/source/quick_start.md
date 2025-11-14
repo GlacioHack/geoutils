@@ -94,7 +94,7 @@ calc_rast.plot(cmap='Spectral', cbar_title='My calculation')
 vect_buff.plot(calc_rast, fc='none', ec='k', lw=0.5)
 
 # Save to file
-calc_rast.save("mycalc.tif")
+calc_rast.to_file("mycalc.tif")
 ```
 
 ```{code-cell} ipython3

@@ -52,7 +52,7 @@ import geoutils as gu
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils.misc import copy_doc
+from geoutils.misc import copy_doc, deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -60,6 +60,8 @@ from geoutils.projtools import (
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.geotransformations import _reproject
+
+from packaging.version import Version
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -366,7 +368,7 @@ class Vector:
         else:
             return None
 
-    def save(
+    def to_file(
         self,
         filename: str | pathlib.Path,
         driver: str | None = None,
@@ -388,6 +390,19 @@ class Vector:
         """
 
         self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+
+    @deprecate(
+        removal_version=Version("0.3.0"), details="The function save() will be soon deprecated, use .to_file() instead."
+    )  # type: ignore
+    def save(
+            self,
+            filename: str | pathlib.Path,
+            driver: str | None = None,
+            schema: dict[str, Any] | None = None,
+            index: bool | None = None,
+            **kwargs: Any,
+    ) -> None:
+        self.to_file(filename, driver, schema, index, **kwargs)
 
     ############################################################################
     # Overridden and wrapped methods from GeoPandas API to logically cast outputs

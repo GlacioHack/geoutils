@@ -76,7 +76,7 @@ def filter(raster: RasterType, size: int) -> RasterType:
     return raster
 
 size = 1
-raster_filtered = map_overlap_multiproc_save(filter, filename_rast, config_basic, size, depth=size+1)
+raster_filtered = map_overlap_multiproc_to_file(filter, filename_rast, config_basic, size, depth=size+1)
 raster_filtered
 ```
 
