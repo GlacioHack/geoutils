@@ -161,7 +161,7 @@ def _apply_func_block(
     return result_tile, tile
 
 
-def map_overlap_multiproc_to_file(
+def map_overlap_multiproc_save(
     func: Callable[..., gu.Raster],
     raster_path: str | gu.Raster,
     config: MultiprocConfig,
