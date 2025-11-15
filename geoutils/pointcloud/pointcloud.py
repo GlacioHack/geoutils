@@ -589,14 +589,13 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             data = self.data.copy()
 
         # Send to from_xyz
-        has_z = all(p.has_z for p in self.ds.geometry)  # If points are 3D, copy with 3D points
         cp = self.from_xyz(
             x=self.geometry.x.values,
             y=self.geometry.y.values,
             z=data,
             crs=self.crs,
             data_column=self.data_column,
-            use_z=has_z,
+            use_z=self._has_z and self.data_column is None,
         )
 
         return cp
@@ -646,8 +645,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param y: Y coordinates of point cloud.
         :param z: Z values of point cloud.
         :param crs: Coordinate reference system.
-        :param data_column: Data column name to associated to 2D point geometries.
-        :param use_z: Use Z coordinates in 3D point geometries instead of a data column.
+        :param data_column: Data column name to associate to 2D point geometries.
+        :param use_z: Use 3D point geometries with Z coordinates instead of a data column.
 
         :return Point cloud.
         """
@@ -673,7 +672,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             return cls(filename_or_dataset=gdf, data_column=data_column)
 
     @classmethod
-    def from_array(cls, data: NDArrayNum, crs: CRS, data_column: str = "z") -> PointCloud:
+    def from_array(cls, data: NDArrayNum, crs: CRS, data_column: str | None = None, use_z: bool = False) -> PointCloud:
         """
         Create point cloud from a 3 x N or N x 3 array of X coordinates, Y coordinates and Z values.
 
@@ -692,11 +691,11 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         if data.shape[0] != 3:
             data = data.T
 
-        return cls.from_xyz(x=data[0, :], y=data[1, :], z=data[2, :], crs=crs, data_column=data_column)
+        return cls.from_xyz(x=data[0, :], y=data[1, :], z=data[2, :], crs=crs, data_column=data_column, use_z=use_z)
 
     @classmethod
     def from_tuples(
-        cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str = "z"
+        cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = None, use_z: bool = False
     ) -> PointCloud:
         """
         Create point cloud from an iterable of 3-tuples (X coordinate, Y coordinate, Z value).
@@ -708,22 +707,22 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :return Point cloud.
         """
 
-        return cls.from_array(np.array(tuples_xyz), crs=crs, data_column=data_column)
+        return cls.from_array(np.array(tuples_xyz), crs=crs, data_column=data_column, use_z=use_z)
 
     def to_xyz(self) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
         """Convert point cloud to three 1D arrays of coordinates for X/Y/Z."""
 
-        return self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values
+        return self.geometry.x.values, self.geometry.y.values, self.data
 
     def to_array(self) -> NDArrayNum:
         """Convert point cloud to a 3 x N array of X coordinates, Y coordinates and Z values."""
 
-        return np.stack((self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values), axis=0)
+        return np.stack((self.geometry.x.values, self.geometry.y.values, self.data), axis=0)
 
     def to_tuples(self) -> Iterable[tuple[Number, Number, Number]]:
         """Convert point cloud to a list of 3-tuples (X coordinate, Y coordinate, Z value)."""
 
-        return list(zip(self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values))
+        return list(zip(self.geometry.x.values, self.geometry.y.values, self.data))
 
     def __getitem__(self, index: PointCloud | NDArrayBool | Any) -> PointCloud | Any:
         """

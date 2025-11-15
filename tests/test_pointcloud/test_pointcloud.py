@@ -311,6 +311,13 @@ class TestPointCloud:
         )
         assert pc_from_xyz.pointcloud_equal(pc1)
 
+        # Build with the use_z option to compare to 3D points
+        pc3 = PointCloud(self.gdf3)
+        pc3_from_xyz = PointCloud.from_xyz(
+            x=self.arr_points[:, 0], y=self.arr_points[:, 1], z=self.arr_points[:, 2], crs=4326, use_z=True
+        )
+        assert pc3_from_xyz.pointcloud_equal(pc3)
+
         # Test with lists
         pc_from_xyz = PointCloud.from_xyz(
             x=list(self.arr_points[:, 0]),
