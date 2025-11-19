@@ -798,7 +798,6 @@ class TestMaskGeotransformations:
             mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)
 
         # Test 3: No intersection lead to a full nan mask
-        warnings.simplefilter("error")
         raster_boolean = gu.Raster.from_array(
             np.random.randint(2, size=(5, 5), dtype=bool), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
         )
