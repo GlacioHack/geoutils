@@ -657,6 +657,7 @@ class TestRasterGeotransformations:
 
         # -- Check projection is case of boolean values -- #
         # dem with no intersection
+        warnings.simplefilter("error")
         raster_boolean = gu.Raster.from_array(
             np.random.randint(2, size=(5, 5), dtype=bool), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
         )
