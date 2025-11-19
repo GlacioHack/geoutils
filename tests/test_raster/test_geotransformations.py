@@ -655,6 +655,19 @@ class TestRasterGeotransformations:
         r2_reproj = r2.reproject(res=r2.res[0] * 2)
         assert r2_reproj.area_or_point == "Point"
 
+        # -- Check projection is case of boolean values -- #
+        # dem with no intersection
+        raster_boolean = gu.Raster.from_array(
+            np.random.randint(2, size=(5, 5), dtype=bool), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
+        )
+        ref_dem = gu.Raster.from_array(
+            np.random.randint(100, size=(5, 5), dtype="uint8"),
+            transform=rio.transform.from_origin(10, 20, 1, 1),
+            crs=4326,
+        )
+        res_boolean = raster_boolean.reproject(ref_dem, resampling="nearest")
+        assert res_boolean.get_stats(stats_name="mean") is np.nan
+
 
 class TestMaskGeotransformations:
     # Paths to example data

@@ -333,10 +333,8 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     """Rasterio reprojection wrapper."""
 
     # For a boolean type
-    convert_bool = False
     if np.dtype(src_arr.dtype) == np.bool_:
         # To convert back later
-        convert_bool = True
         # Convert to uint8 for nearest, float otherwise
         if reproj_kwargs["resampling"] in [Resampling.nearest, "nearest"]:
             src_arr = src_arr.astype("uint8")  # type: ignore
@@ -384,9 +382,5 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 
     # Run reprojection
     _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
-
-    # If output needs to be converted back to boolean
-    if convert_bool:
-        dst_arr = dst_arr.astype(bool)
 
     return dst_arr
