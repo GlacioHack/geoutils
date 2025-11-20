@@ -1746,7 +1746,7 @@ class TestRaster:
         assert True
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_save(self, example: str) -> None:
+    def test_to_file(self, example: str) -> None:
         # Read single band raster
         img = gu.Raster(example)
 
@@ -1755,30 +1755,30 @@ class TestRaster:
 
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
-        img.save(temp_file)
+        img.to_file(temp_file)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
 
         # Try to save with a pathlib path (create a new temp file for Windows)
         path = pathlib.Path(temp_file)
-        img.save(path)
+        img.to_file(path)
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
-        img.save(temp_file, co_opts=co_opts, metadata=metadata)
+        img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
         assert saved.tags["Type"] == "test"
 
         # Test saving file in COG format
-        img.save(temp_file, driver="COG")
+        img.to_file(temp_file, driver="COG")
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
         assert saved.tags["LAYOUT"] == "COG"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
-        img.save(temp_file, nodata=0)
+        img.to_file(temp_file, nodata=0)
         saved = gu.Raster(temp_file)
         assert np.ma.allequal(img.data, saved.data)
         assert saved.nodata == 0
@@ -1787,17 +1787,17 @@ class TestRaster:
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
         if img.nodata is not None:
-            img.save(temp_file)
+            img.to_file(temp_file)
             saved = gu.Raster(temp_file)
             assert np.array_equal(img.data.mask, saved.data.mask)
 
         # Test that a warning is raised if nodata is not set and a mask exists (defined above)
         if img.nodata is None:
             with pytest.warns(UserWarning):
-                img.save(TemporaryFile())
+                img.to_file(TemporaryFile())
 
         # Test with blank argument
-        img.save(temp_file, blank_value=0)
+        img.to_file(temp_file, blank_value=0)
         saved = gu.Raster(temp_file)
 
         assert np.array_equal(saved.data.data, np.zeros(np.shape(saved.data)))
@@ -2041,7 +2041,7 @@ class TestMask:
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_save(self, mask: gu.Raster) -> None:
+    def test_to_file(self, mask: gu.Raster) -> None:
         """Test saving for masks"""
 
         # Temporary folder
@@ -2049,7 +2049,7 @@ class TestMask:
 
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
-        mask.save(temp_file)
+        mask.to_file(temp_file)
         saved = gu.Raster(temp_file, is_mask=True)
 
         # A raster (or mask) in-memory has more information than on disk, we need to update it before checking equality

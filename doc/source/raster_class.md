@@ -87,11 +87,11 @@ print(rast.info(stats=True))
 Calling {class}`~geoutils.Raster.info()` with `stats=True` automatically loads the array in-memory, like any other operation calling {attr}`~geoutils.Raster.data`.
 ```
 
-A {class}`~geoutils.Raster` is saved to file by calling {func}`~geoutils.Raster.save` with a {class}`str` or a {class}`pathlib.Path`.
+A {class}`~geoutils.Raster` is saved to file by calling {func}`~geoutils.Raster.to_file` with a {class}`str` or a {class}`pathlib.Path`.
 
 ```{code-cell} ipython3
 # Save raster to disk
-rast.save("myraster.tif")
+rast.to_file("myraster.tif")
 ```
 ```{code-cell} ipython3
 :tags: [remove-cell]

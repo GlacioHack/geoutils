@@ -2,7 +2,7 @@
 Open/save a raster
 ==================
 
-This example demonstrates the instantiation of a raster through :class:`~geoutils.Raster` and saving with :func:`~geoutils.Raster.save`.
+This example demonstrates the instantiation of a raster through :class:`~geoutils.Raster` and saving with :func:`~geoutils.Raster.to_file`.
 """
 
 # %%
@@ -43,5 +43,5 @@ rast.load()
 rast
 
 # %%
-# Finally, a raster is saved using :func:`~geoutils.Raster.save`:
-rast.save("myraster.tif")
+# Finally, a raster is saved using :func:`~geoutils.Raster.to_file`:
+rast.to_file("myraster.tif")
