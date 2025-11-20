@@ -53,6 +53,7 @@ from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
 from geoutils.misc import copy_doc
+from geoutils.profiler import profile_tool
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -81,6 +82,7 @@ class Vector:
     See the API for more details.
     """
 
+    @profile_tool("vector.vector.__init__", memprof=True)  # type: ignore
     def __init__(
         self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
     ):
@@ -1262,6 +1264,7 @@ class Vector:
         inplace: bool = False,
     ) -> VectorType | None: ...
 
+    @profile_tool("vector.vector.crop", memprof=True)  # type: ignore
     def crop(
         self: VectorType,
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
@@ -1335,6 +1338,7 @@ class Vector:
         inplace: bool = False,
     ) -> Vector | None: ...
 
+    @profile_tool("vector.vector.reproject", memprof=True)  # type: ignore
     def reproject(
         self: Vector,
         ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
@@ -1500,6 +1504,7 @@ class Vector:
                 assert transform is not None  # For mypy
                 return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
+    @profile_tool("vector.vector.rasterize", memprof=True)  # type: ignore
     def rasterize(
         self,
         raster: gu.Raster | None = None,

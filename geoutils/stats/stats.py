@@ -30,7 +30,9 @@ import scipy
 from scipy.stats import iqr
 
 from geoutils._typing import NDArrayNum
+from geoutils.profiler import profile_tool
 from geoutils.stats.estimators import linear_error, nmad, rmse, rmse_masked, sum_square
+
 
 _STATS_ALIASES = {
     "mean": "Mean",
