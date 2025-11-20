@@ -97,6 +97,7 @@ documentation.
     Raster.proximity
     Raster.interp_points
     Raster.reduce_points
+    Raster.filter
 ```
 
 ### Plotting
