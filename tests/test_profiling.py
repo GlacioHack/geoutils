@@ -7,11 +7,12 @@ import os.path as op
 
 import pandas as pd
 import pytest
-
 import geoutils as gu
+
 from geoutils import examples
 from geoutils.profiler import Profiler
 
+pytest.importorskip("plotly") 
 
 class TestProfiling:
 
