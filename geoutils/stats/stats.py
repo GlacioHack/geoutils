@@ -26,10 +26,11 @@ from functools import partial
 from typing import Any
 
 import numpy as np
+import scipy
 from scipy.stats import iqr
 
 from geoutils._typing import NDArrayNum
-from geoutils.stats.estimators import linear_error, nmad
+from geoutils.stats.estimators import linear_error, nmad, rmse, rmse_masked, sum_square
 
 _STATS_ALIASES = {
     "mean": "Mean",
@@ -116,12 +117,54 @@ def _statistics(
     # Count non zero and not masked pixels in the input data
     # and fill masked value with NaN to preprocess pixels before numpy computation
     if np.ma.isMaskedArray(data):
-        mask = ~np.ma.getmaskarray(data)
-        mdata = np.ma.filled(data.astype(float), np.nan)
+        final_count_nonzero = np.count_nonzero(~np.ma.getmaskarray(data))
+
+        # Compute valid count from non zero and not masked pixels in the input data
+        # beforehand saved in counts[0] in case of a inler_mask parameter in get_stats()
+
+        valid_count = final_count_nonzero if counts is None else counts[0]
+        stats_dict = {
+            "Mean": np.ma.mean,
+            "Median": np.ma.median,
+            "Max": np.ma.max,
+            "Min": np.ma.min,
+            "Sum": np.ma.sum,
+            "Sum of squares": sum_square,
+            "90th percentile": partial(lambda x: scipy.stats.mstats.mquantiles(x, prob=0.9)[0]),
+            "LE90": partial(linear_error, interval=90),
+            "IQR": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
+            "NMAD": nmad,
+            "RMSE": rmse_masked,
+            "Standard deviation": np.ma.std,
+            "Valid count": valid_count,
+            "Total count": data.size,
+            "Percentage valid points": (valid_count / data.size) * 100,
+        }
+
     else:
-        mask = np.isfinite(data)
-        mdata = data
-    final_count_nonzero = np.count_nonzero(mask)
+        final_count_nonzero = np.count_nonzero(np.isfinite(data))
+        # Compute valid count from non zero and not masked pixels in the input data
+        # beforehand saved in counts[0] in case of a inler_mask parameter in get_stats()
+
+        valid_count = final_count_nonzero if counts is None else counts[0]
+
+        stats_dict = {
+            "Mean": np.nanmean,
+            "Median": np.nanmedian,
+            "Max": np.nanmax,
+            "Min": np.nanmin,
+            "Sum": np.nansum,
+            "Sum of squares": sum_square,
+            "90th percentile": partial(np.nanpercentile, q=90),
+            "LE90": partial(linear_error, interval=90),
+            "IQR": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
+            "NMAD": nmad,
+            "RMSE": rmse,
+            "Standard deviation": np.nanstd,
+            "Valid count": valid_count,
+            "Total count": data.size,
+            "Percentage valid points": (valid_count / data.size) * 100,
+        }
 
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
@@ -132,45 +175,27 @@ def _statistics(
             res_dict = {stat_name: np.nan for stat_name in stats_name}  # type: ignore
 
     else:
-
-        # Compute valid count from non zero and not masked pixels in the input data
-        # beforehand saved in counts[0] in case of a inler_mask parameter in get_stats()
-        valid_count = final_count_nonzero if counts is None else counts[0]
-        stats_dict = {
-            "Mean": partial(np.ma.mean, data),
-            "Median": partial(np.ma.median, data),
-            "Max": partial(np.ma.max, data),
-            "Min": partial(np.ma.min, data),
-            "Sum": partial(np.ma.sum, data),
-            "Sum of squares": partial(lambda x: np.ma.sum(np.square(x)), data),
-            "90th percentile": partial(lambda x: np.nanpercentile(x, 90), mdata),
-            "LE90": partial(linear_error, mdata, interval=90),
-            "IQR": partial(iqr, mdata, nan_policy="omit"),  # ignore masked value (nan),
-            "NMAD": partial(nmad, data),
-            "RMSE": partial(lambda x: np.sqrt(np.ma.mean(np.square(x))), data),
-            "Standard deviation": partial(np.ma.std, data),
-            "Valid count": partial(lambda x: x, valid_count),
-            "Total count": partial(lambda x: x.size, data),
-            "Percentage valid points": partial(lambda x: (valid_count / x.size) * 100, data),
-        }
-
-        res_dict = {}
+        res_dict = stats_dict
         if stats_name is None:
-            res_dict = {k: stats_dict[k]() for k in stats_dict.keys()}
+            for key in stats_dict.keys():
+                if callable(stats_dict[key]):
+                    stats_dict[key] = stats_dict[key](data)
         else:
             for stat_name in stats_name:
+
                 # Compute stat if in stats_dict keys
-                if isinstance(stat_name, str) and stat_name in stats_dict.keys() and callable(stats_dict[stat_name]):
-                    res_dict[stat_name] = stats_dict[stat_name]()  # type: ignore
+                if isinstance(stat_name, str) and stat_name in stats_dict.keys():
+                    if callable(stats_dict[stat_name]):
+                        res_dict[stat_name] = stats_dict[stat_name](data)  # type: ignore
+                    else:
+                        res_dict[stat_name] = stats_dict[stat_name]
 
                 # Compute stat if in _STATS_ALIASES keys
-                elif (
-                    isinstance(stat_name, str)
-                    and stat_name in _STATS_ALIASES.keys()
-                    and callable(stats_dict[_STATS_ALIASES[stat_name]])
-                ):
-                    res_dict[stat_name] = stats_dict[_STATS_ALIASES[stat_name]]()  # type: ignore
-
+                elif isinstance(stat_name, str) and stat_name in _STATS_ALIASES.keys():
+                    if callable(stats_dict[_STATS_ALIASES[stat_name]]):
+                        res_dict[stat_name] = stats_dict[_STATS_ALIASES[stat_name]](data)  # type: ignore
+                    else:
+                        res_dict[stat_name] = stats_dict[stat_name]
                 # Compute stat if callable
                 elif callable(stat_name):
                     res_dict[stat_name.__name__] = stat_name(data)  # type: ignore
