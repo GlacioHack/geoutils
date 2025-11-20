@@ -69,3 +69,36 @@ def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:
         mdata = data
     le = np.nanpercentile(mdata, 50 + interval / 2) - np.nanpercentile(mdata, 50 - interval / 2)
     return le
+
+
+def sum_square(data: NDArrayNum) -> np.floating[Any]:
+    """
+    Calculate the sum of the square of array.
+
+    :param data: A masked array of data, typically representing the differences (errors) in elevation or
+    another quantity.
+    :return: sum square
+    """
+    return np.ma.sum(np.square(data))
+
+
+def rmse_masked(data: NDArrayNum) -> np.floating[Any]: # TODO
+    """
+    Calculate the RMSE of masked with the possibility of some nan values.
+
+    :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
+    another quantity.
+    :return: rmse
+    """
+    return np.sqrt(np.ma.mean(np.square(data)))
+
+
+def rmse(data: NDArrayNum) -> np.floating[Any]:
+    """
+    Calculate the RMSE of masked with the possibility of some nan values.
+
+    :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
+    another quantity.
+    :return: rmse
+    """
+    return np.sqrt(np.nanmean(np.square(data)))

@@ -66,6 +66,7 @@ class TestStats:
         # Full stats
         stats = raster.get_stats()
         for name in expected_stats:
+            print ("#", name, stats.get(name))
             assert name in stats
             assert isinstance(stats.get(name), stat_types)
 
@@ -119,6 +120,7 @@ class TestStats:
         assert raster.get_stats(stats_name="iqr") == pytest.approx(
             np.nanpercentile(nan_arr, 75) - np.nanpercentile(nan_arr, 25)
         )
+
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_get_stats_raster_pointcloud(self, example: str, caplog) -> None:
