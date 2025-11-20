@@ -12,6 +12,8 @@ import geoutils as gu
 from geoutils import examples
 from geoutils.profiler import Profiler
 
+pytest.importorskip("plotly")  # import for CI
+
 
 class TestProfiling:
 
