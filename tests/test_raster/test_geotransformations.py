@@ -797,14 +797,39 @@ class TestMaskGeotransformations:
         with pytest.warns(UserWarning, match="Reprojecting a raster mask .*"):
             mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)
 
-        # Test 3: No intersection lead to a full nan mask
-        raster_boolean = gu.Raster.from_array(
-            np.random.randint(2, size=(5, 5), dtype=bool), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
-        )
-        ref_dem = gu.Raster.from_array(
-            np.random.randint(100, size=(5, 5), dtype="uint8"),
-            transform=rio.transform.from_origin(10, 20, 1, 1),
+        # Test 3: Nan Handling
+
+        dem_bool = gu.Raster.from_array(
+            np.random.randint(2, size=(100, 100), dtype=bool),
+            transform=rio.transform.from_origin(0, 100, 1, 1),
             crs=4326,
         )
-        with pytest.warns(RuntimeWarning, match="All-NaN slice encountered"):
-            raster_boolean.reproject(ref_dem, resampling="nearest")
+        ref_dem = gu.Raster.from_array(
+            np.random.randint(100, size=(100, 100), dtype="uint8"),
+            transform=rio.transform.from_origin(0, 100, 1, 1),
+            crs=4326,
+        )
+
+        # non masked dem with no intersection
+        dem_bool_crop = dem_bool.icrop((0, 0, 20, 20))
+        ref_dem_crop = ref_dem.icrop((40, 40, 60, 60))
+
+        assert not dem_bool_crop.get_footprint_projected(ref_dem_crop.crs).intersects(
+            ref_dem_crop.get_footprint_projected(ref_dem_crop.crs)
+        )[0]
+
+        res = dem_bool_crop.reproject(ref_dem_crop, resampling="nearest")
+        assert isinstance(res, gu.raster.raster.Raster)
+        assert res.get_stats(stats_name="Valid count") is np.nan
+
+        # non masked dem with no intersection
+
+        # dem_bool_crop_10 = dem_bool.icrop((5, 5, 20, 20))
+        # dem_bool_crop_20 = dem_bool.icrop((0, 0, 20, 20))
+        # dem_bool_crop_20_with_nan = dem_bool_crop_10.reproject(dem_bool_crop_20, resampling="nearest")
+        # res =  dem_bool_crop_20_with_nan.reproject(ref_dem_crop, resampling="nearest")
+
+        # non masked dem with intersection
+
+        # reference_dem_crop = ref_dem.icrop((10, 10, 30, 30))
+        # res = dem_bool_crop_20_with_nan.reproject(ref_dem_crop, resampling="nearest")
