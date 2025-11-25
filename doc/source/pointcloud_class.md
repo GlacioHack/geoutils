@@ -55,8 +55,8 @@ The complete list of {class}`~geoutils.Vector` attributes and methods can be fou
 
 ## Open and save
 
-A {class}`~geoutils.PointCloud` is opened by instantiating {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
-a {class}`geopandas.GeoSeries` or a {class}`shapely.Geometry`, as for a {class}`~geoutils.Raster`.
+A {class}`~geoutils.PointCloud` is opened by instantiating the class with a {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
+a {class}`geopandas.GeoSeries` or a {class}`shapely.Geometry`.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
