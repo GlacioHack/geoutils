@@ -23,7 +23,7 @@ Functionalities for geotransformations of raster objects.
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Any
 
 import affine
 import numpy as np
@@ -62,6 +62,7 @@ def _reproject(
     n_threads: int = 0,
     memory_limit: int = 64,
     multiproc_config: gu.raster.MultiprocConfig | None = None,
+    **kwargs: Any,
 ) -> tuple[bool, MArrayNum | None, affine.Affine | None, CRS | None, int | float | None]:
     """
     Reproject raster. See Raster.reproject() for details.
@@ -110,6 +111,8 @@ def _reproject(
     # 4/ Perform reprojection
 
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
+    # Add kwargs
+    reproj_kwargs.update(kwargs)
 
     if multiproc_config is not None:
         _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)

@@ -2531,6 +2531,7 @@ class Raster:
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
+        **kwargs: Any,
     ) -> RasterType: ...
 
     @overload
@@ -2551,6 +2552,7 @@ class Raster:
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
+        **kwargs: Any,
     ) -> None: ...
 
     def reproject(
@@ -2569,6 +2571,7 @@ class Raster:
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
+        **kwargs: Any,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -2623,6 +2626,7 @@ class Raster:
             n_threads=n_threads,
             memory_limit=memory_limit,
             multiproc_config=multiproc_config,
+            **kwargs
         )
 
         # If return copy is True (target georeferenced grid was the same as input)
