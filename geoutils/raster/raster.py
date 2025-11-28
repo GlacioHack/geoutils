@@ -23,6 +23,7 @@ Module for Raster class.
 
 from __future__ import annotations
 
+import logging
 import math
 import pathlib
 import warnings
@@ -66,6 +67,7 @@ from geoutils.interface.raster_point import (
 )
 from geoutils.interface.raster_vector import _polygonize
 from geoutils.misc import deprecate
+from geoutils.profiler import profile_tool
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -91,7 +93,7 @@ from geoutils.raster.satimg import (
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
+from geoutils.stats.stats import _statistics
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -372,6 +374,7 @@ class Raster:
     See the API for more details.
     """
 
+    @profile_tool("raster.raster.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: (
@@ -1986,6 +1989,7 @@ class Raster:
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
+    @profile_tool("raster.raster.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -2008,7 +2012,7 @@ class Raster:
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
-            in inlier_mask). DO NOT USE.
+            in inlier_mask), initialize in case of a inlier_mask. DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         # Force load if not loaded
@@ -2026,40 +2030,22 @@ class Raster:
             else:
                 inlier_points = np.count_nonzero(inlier_mask)  # type: ignore
             dem_masked = self.copy()
+
+            # Mask pixels from the inlier_mask
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        # If no name is passed, derive all statistics
-        # TODO: All stats are computed even when only one or an independent user-callable is asked for
-        #  Need to modify code to remove this requirement
-        stats_dict = _statistics(data=data, counts=counts)
-        if stats_name is None:
-            return stats_dict
-
-        if counts is None:
-            ignore_aliases = [
-                "validinliercount",
-                "totalinliercount",
-                "percentagevalidinlierpoints",
-                "percentageinlierpoints",
-            ]
-            stats_aliases = {k: _STATS_ALIASES[k] for k in _STATS_ALIASES.keys() if k not in ignore_aliases}
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _statistics(data, stats_name, counts)  # type: ignore
         else:
-            stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
-        else:
-            if callable(stats_name):
-                return stats_name(data)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
             else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
+                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
@@ -2438,6 +2424,7 @@ class Raster:
         inplace: bool = False,
     ) -> RasterType | None: ...
 
+    @profile_tool("raster.raster.crop", memprof=True)  # type: ignore
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
@@ -2489,6 +2476,7 @@ class Raster:
         inplace: Literal[False] = False,
     ) -> RasterType: ...
 
+    @profile_tool("raster.raster.icrop", memprof=True)  # type: ignore
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -2553,6 +2541,7 @@ class Raster:
         multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
+    @profile_tool("raster.raster.reproject", memprof=True)  # type: ignore
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -2992,7 +2981,7 @@ class Raster:
             raster = Raster(raster, load_data=False)
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)
+        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)  # type: ignore
 
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
@@ -3532,6 +3521,7 @@ class Raster:
         **kwargs: Any,
     ) -> NDArrayNum | gu.PointCloud: ...
 
+    @profile_tool("raster.raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
@@ -3969,6 +3959,7 @@ class Raster:
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
+    @profile_tool("raster.raster.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
