@@ -97,6 +97,7 @@ documentation.
     Raster.proximity
     Raster.interp_points
     Raster.reduce_points
+    Raster.filter
 ```
 
 ### Plotting
@@ -139,7 +140,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.load
-    Raster.save
+    Raster.to_file
     Raster.to_pointcloud
     Raster.from_pointcloud_regular
     Raster.to_rio_dataset

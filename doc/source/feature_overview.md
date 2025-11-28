@@ -229,11 +229,11 @@ vect_aoi.plot(fc='none', ec='k', lw=0.75)
 
 ## Saving to file
 
-Finally, for saving a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` to file, simply call the {func}`~geoutils.Raster.save` function.
+Finally, for saving a {class}`~geoutils.Raster` or {class}`~geoutils.Vector` to file, simply call the {func}`~geoutils.Raster.to_file` function.
 
 ```{code-cell} ipython3
 # Save our AOI vector
-vect_aoi.save("myaoi.gpkg")
+vect_aoi.to_file("myaoi.gpkg")
 ```
 
 ```{code-cell} ipython3

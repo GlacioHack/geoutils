@@ -32,7 +32,7 @@ def run_gdal_proximity(
     # (avoids the nightmare of setting nodata, transform, crs in GDAL format...)
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = os.path.join(temp_dir, "input.tif")
-        input_raster.save(temp_path)
+        input_raster.to_file(temp_path)
         ds_raster_in = gdal.Open(temp_path, gdalconst.GA_ReadOnly)
 
         # Define GDAL options

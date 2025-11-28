@@ -77,7 +77,7 @@ class TestVector:
         list_prints = ["Filename", "Coordinate system", "Extent", "Number of features", "Attributes"]
         assert all(p in output2 for p in list_prints)
 
-    def test_save(self) -> None:
+    def test_to_file(self) -> None:
         """Test the save wrapper for GeoDataFrame.to_file()."""
 
         vector = gu.Vector(self.aster_outlines_path)
@@ -87,7 +87,7 @@ class TestVector:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
 
         # Save and check the file exists
-        vector.save(temp_file)
+        vector.to_file(temp_file)
         assert os.path.exists(temp_file)
 
         # Open and check the object is the same
