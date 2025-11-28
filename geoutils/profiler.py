@@ -322,7 +322,6 @@ def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False
 
             func_name = name
             if Profiler.selection_activated and name not in Profiler.functions_selected:
-                print(Profiler.selection_activated, Profiler.functions_selected, name)
                 return func(*args, **kwargs)
 
             uuid_function = str(uuid.uuid4())
