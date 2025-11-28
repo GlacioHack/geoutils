@@ -281,7 +281,7 @@ class Profiler:
         fig.write_html(path_fig)
 
 
-def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False):  # type: ignore
+def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  # type: ignore
     """
     Geoutils profiling decorator
 
@@ -297,7 +297,7 @@ def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False
     :example:
         from geoutils.profiler import Profiler
 
-        @profile_tool("my profiled function", memprof=True, interval=0.05)  # type: ignore
+        @Profiler.profile("my profiled function", memprof=True, interval=0.05)  # type: ignore
         def my_function():
 
     """
@@ -307,7 +307,7 @@ def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False
         Inner function
         """
 
-        def wrapper_profile_tool(*args, **kwargs):  # type: ignore
+        def wrapper_profile(*args, **kwargs):  # type: ignore
             """
             Profiling wrapper
 
@@ -364,7 +364,7 @@ def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False
             Profiler.add_profiling_info(func_data)
             return res
 
-        return wrapper_profile_tool
+        return wrapper_profile
 
     return decorator_generator
 
