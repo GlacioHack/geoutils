@@ -121,13 +121,12 @@ def _reproject(
                 "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
                 "with `force_source_nodata`."
             )
-        src_arr = source_raster.data.filled(src_nodata)
         # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        dst_arr = _rio_reproject(src_arr, reproj_kwargs=reproj_kwargs)
+        dst_arr, dst_mask = _rio_reproject(src_arr=source_raster.data.data, src_mask=source_raster.data.mask,
+                                 reproj_kwargs=reproj_kwargs)
         # Set mask
-        dst_arr = np.ma.masked_array(dst_arr.astype(dtype), fill_value=nodata)
-        if nodata is not None:
-            dst_arr.mask = dst_arr == nodata
+        dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=nodata)
+
         return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
 
 
