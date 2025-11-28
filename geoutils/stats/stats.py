@@ -26,8 +26,8 @@ from typing import Any
 import numpy as np
 from scipy.stats import iqr
 
-from geoutils._typing import NDArrayNum
 import geoutils.profiler as Profiler
+from geoutils._typing import NDArrayNum
 from geoutils.stats.estimators import linear_error, nmad
 
 _STATS_ALIASES = {

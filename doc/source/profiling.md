@@ -32,7 +32,7 @@ After this, if `save_graphs` or `save_raw_data` are True, every profiled functio
 
 The function `generate_summary(output)` saves the profiling information in the `output` directory.
 
-- When `save_graphs` is enabled, the graphs as listed as before are exported. 
+- When `save_graphs` is enabled, the graphs as listed as before are exported.
 - when `save_raw_data` is enabled, GeoUtils saves all stored information as a .pickle file containing a {class}`~pandas.DataFrame` with the following structure:
 
 | Name              | Description                                                                                                                                       |
@@ -50,8 +50,8 @@ If no profiled function has been called, `generate_summary(output)` generate no 
 ## The profiled functions
 
 Currently, some processes are already profiled by GeoUtils with a memory consumption report each 0.05 seconds.
-- {func}`geoutils.Raster`, {func}`geoutils.Raster.get_stats`, {func}`geoutils.Raster.crop`, {func}`geoutils.Raster.icrop`, {func}`geoutils.Raster.reproject`, {func}`geoutils.Raster.interp_points` and {func}`geoutils.Raster.subsample` 
-- {func}`geoutils.PointCloud`, {func}`geoutils.PointCloud.get_stats`, {func}`geoutils.PointCloud.subsample` an {func}`geoutils.PointCloud.grid` 
+- {func}`geoutils.Raster`, {func}`geoutils.Raster.get_stats`, {func}`geoutils.Raster.crop`, {func}`geoutils.Raster.icrop`, {func}`geoutils.Raster.reproject`, {func}`geoutils.Raster.interp_points` and {func}`geoutils.Raster.subsample`
+- {func}`geoutils.PointCloud`, {func}`geoutils.PointCloud.get_stats`, {func}`geoutils.PointCloud.subsample` an {func}`geoutils.PointCloud.grid`
 - {func}`geoutils.Vector`, {func}`geoutils.Vector.crop`, {func}`geoutils.Vector.reproject`, {func}`geoutils.Vector.rasterize`
 - all existing geo-transformations like `_reproject()`, `_crop()` and `_translate()` for `Raster`,` PointCloud` and `Vector `
 - `subsample_array()` and  `_statistics()` in `Geoutils.stats`

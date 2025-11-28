@@ -49,11 +49,11 @@ from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
+import geoutils.profiler as Profiler
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils.misc import copy_doc, deprecate
-import geoutils.profiler as Profiler
+from geoutils.misc import copy_doc
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,

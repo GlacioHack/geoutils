@@ -36,9 +36,9 @@ from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
+import geoutils.profiler as Profiler
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
-import geoutils.profiler as Profiler
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
 from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics

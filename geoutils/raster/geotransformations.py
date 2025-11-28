@@ -32,8 +32,8 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
-from geoutils._typing import DTypeLike, MArrayNum
 import geoutils.profiler as Profiler
+from geoutils._typing import DTypeLike, MArrayNum
 from geoutils.raster._geotransformations import (
     _get_reproj_params,
     _is_reproj_needed,

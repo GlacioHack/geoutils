@@ -48,6 +48,7 @@ from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
 
 import geoutils as gu
+import geoutils.profiler as Profiler
 from geoutils._config import config
 from geoutils._typing import (
     ArrayLike,
@@ -66,7 +67,6 @@ from geoutils.interface.raster_point import (
 )
 from geoutils.interface.raster_vector import _polygonize
 from geoutils.misc import deprecate
-import geoutils.profiler as Profiler
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,

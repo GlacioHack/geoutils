@@ -27,8 +27,8 @@ import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
-from geoutils._typing import NDArrayNum, Number
 import geoutils.profiler as Profiler
+from geoutils._typing import NDArrayNum, Number
 from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
 
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
