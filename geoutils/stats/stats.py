@@ -26,12 +26,12 @@ from functools import partial
 from typing import Any
 
 import numpy as np
-import scipy
 from scipy.stats import iqr
+from scipy.stats.mstats import mquantiles
 
 from geoutils._typing import NDArrayNum
 from geoutils.profiler import profile_tool
-from geoutils.stats.estimators import linear_error, nmad, rmse, rmse_masked, sum_square
+from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
 
 _STATS_ALIASES = {
     "mean": "Mean",
@@ -135,11 +135,11 @@ def _statistics(
             "Min": np.ma.min,
             "Sum": np.ma.sum,
             "Sum of squares": sum_square,
-            "90th percentile": partial(lambda x: scipy.stats.mstats.mquantiles(x, prob=0.9)[0]),
+            "90th percentile": partial(lambda x: mquantiles(x, prob=0.9)[0]),
             "LE90": partial(linear_error, interval=90),
             "IQR": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
             "NMAD": nmad,
-            "RMSE": rmse_masked,
+            "RMSE": rmse,
             "Standard deviation": np.ma.std,
             "Valid count": valid_count,
             "Total count": data.size,

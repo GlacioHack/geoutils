@@ -52,8 +52,8 @@ import geoutils as gu
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
+from geoutils.misc import copy_doc
 from geoutils.profiler import profile_tool
-from geoutils.misc import copy_doc, deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
