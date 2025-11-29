@@ -35,7 +35,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
-from geoutils._typing import DTypeLike, NDArrayNum, NDArrayBool
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
@@ -329,7 +329,9 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
     )
 
 
-def _rio_reproject(src_arr: NDArrayNum | NDArrayBool, src_mask: NDArrayBool, reproj_kwargs: dict[str, Any]) -> tuple[NDArrayNum | NDArrayBool, NDArrayBool]:
+def _rio_reproject(
+    src_arr: NDArrayNum | NDArrayBool, src_mask: NDArrayBool, reproj_kwargs: dict[str, Any]
+) -> tuple[NDArrayNum | NDArrayBool, NDArrayBool]:
     """Rasterio reprojection wrapper.
 
     :param src_arr: Source array for data.
