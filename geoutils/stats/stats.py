@@ -24,6 +24,7 @@ import logging
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from scipy.stats import iqr
 
 from geoutils._typing import NDArrayNum
@@ -120,7 +121,7 @@ def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict
 
 def _get_single_stat(
     stats_dict: dict[str, np.floating[Any]], stats_aliases: dict[str, str], stat_name: str
-) -> np.floating[Any]:
+) -> pd.DataFrame:
     """
     Retrieve a single statistic based on a flexible name or alias.
 
@@ -138,3 +139,39 @@ def _get_single_stat(
     else:
         logging.warning("Statistic name '%s' is not recognized", stat_name)
         return np.float32(np.nan)
+
+def _grouped_stats(arrays: list[NDArrayNum], bins: list[NDArrayNum], values: dict[str, NDArrayNum],
+                   statistics: list[str]):
+    """
+    Get statistics grouped (=binned) by other variables, whether categorical or continuous.
+
+    :param arrays: Arrays to group by.
+    :param bins: Bins to use.
+    :param values: Values to group, can be a dictionary .
+    :param statistics: List or dict of statistics to compute, e.g. ["mean", "std"].
+    """
+    if len(arrays) != len(bins):
+        raise ValueError("One bins array must be provided per input array.")
+
+    n = len(arrays[0])
+    if values:
+        for v in values.values():
+            if len(v) != n:
+                raise ValueError("All value arrays must match the length of the input arrays.")
+
+    # Build dataframe of arrays to bin with, and values to bin
+    df = pd.DataFrame({f"a{i}": arr for i, arr in enumerate(arrays)})
+    for k, v in values.items():
+        df[k] = v
+
+    # Apply binning
+    for i, b in enumerate(bins):
+        df[f"bin{i}"] = pd.cut(df[f"a{i}"], bins=b, include_lowest=True)
+    group_keys = [f"bin{i}" for i in range(len(arrays))]
+
+    # Perform aggregation
+    grouped = df.groupby(group_keys)
+    result = grouped[list(values.keys())].agg(statistics)
+
+    return result
+
