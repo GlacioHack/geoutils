@@ -335,8 +335,8 @@ def _rio_reproject(
     """Rasterio reprojection wrapper.
 
     :param src_arr: Source array for data.
+    :param src_mask: Source array for mask, only required if array is not float.
     :param reproj_kwargs: Reprojection parameter dictionary.
-    :param src_mask: (Optional) Source array for mask, only required if array is not float.
     """
 
     # For a boolean type
