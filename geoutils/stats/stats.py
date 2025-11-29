@@ -140,7 +140,7 @@ def _get_single_stat(
         logging.warning("Statistic name '%s' is not recognized", stat_name)
         return np.float32(np.nan)
 
-def _grouped_stats(arrays: list[NDArrayNum], bins: list[NDArrayNum], values: dict[str, NDArrayNum],
+def _grouped_stats(arrays: dict[str, NDArrayNum], bins: list[NDArrayNum], values: dict[str, NDArrayNum],
                    statistics: list[str]):
     """
     Get statistics grouped (=binned) by other variables, whether categorical or continuous.
@@ -153,21 +153,17 @@ def _grouped_stats(arrays: list[NDArrayNum], bins: list[NDArrayNum], values: dic
     if len(arrays) != len(bins):
         raise ValueError("One bins array must be provided per input array.")
 
-    n = len(arrays[0])
-    if values:
-        for v in values.values():
-            if len(v) != n:
-                raise ValueError("All value arrays must match the length of the input arrays.")
-
     # Build dataframe of arrays to bin with, and values to bin
-    df = pd.DataFrame({f"a{i}": arr for i, arr in enumerate(arrays)})
+    df = pd.DataFrame(data=arrays)
     for k, v in values.items():
         df[k] = v
 
     # Apply binning
+    group_keys = []
     for i, b in enumerate(bins):
-        df[f"bin{i}"] = pd.cut(df[f"a{i}"], bins=b, include_lowest=True)
-    group_keys = [f"bin{i}" for i in range(len(arrays))]
+        k = list(arrays.keys())[i]
+        df[f"bin_{k}"] = pd.cut(df[k], bins=b, include_lowest=True)
+        group_keys.append(f"bin_{k}")
 
     # Perform aggregation
     grouped = df.groupby(group_keys)
@@ -175,3 +171,11 @@ def _grouped_stats(arrays: list[NDArrayNum], bins: list[NDArrayNum], values: dic
 
     return result
 
+
+arrays = {"slope": np.random.normal(size=100), "aspect": np.random.normal(size=100)}
+values = {"band1": np.random.normal(size=100), "band2": np.random.normal(size=100)}
+statistics = ["mean", "std"]
+bins = [np.linspace(-2, 2, 10), 10]
+
+df = _grouped_stats(arrays, bins, values, statistics)
+df
