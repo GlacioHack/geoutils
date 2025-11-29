@@ -385,7 +385,8 @@ def _reproject_per_block(
     if "dtype" not in kwargs:
         kwargs.update({"dtype": comb_src_arr.dtype})
 
-    dst_arr, dst_mask = _rio_reproject(comb_src_arr, reproj_kwargs=kwargs)  # type: ignore
+    src_mask = comb_src_arr == kwargs["src_nodata"]
+    dst_arr, dst_mask = _rio_reproject(src_arr=comb_src_arr, src_mask=src_mask, reproj_kwargs=kwargs)  # type: ignore
     if np.issubdtype(dst_arr.dtype, np.floating):
         dst_arr[dst_mask] = np.nan
 

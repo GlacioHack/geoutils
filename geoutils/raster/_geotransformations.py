@@ -357,7 +357,8 @@ def _rio_reproject(src_arr: NDArrayNum | NDArrayBool, src_mask: NDArrayBool, rep
             reproj_kwargs["dtype"] = src_arr.dtype
 
     # Fill with nodata values on mask
-    src_arr[src_mask] = reproj_kwargs["src_nodata"]
+    if reproj_kwargs["src_nodata"] is not None:
+        src_arr[src_mask] = reproj_kwargs["src_nodata"]
 
     # Check if multiband
     is_multiband = len(src_arr.shape) > 2
@@ -394,7 +395,10 @@ def _rio_reproject(src_arr: NDArrayNum | NDArrayBool, src_mask: NDArrayBool, rep
     _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
 
     # Get output mask
-    dst_mask = dst_arr == reproj_kwargs["dst_nodata"]
+    if reproj_kwargs["dst_nodata"] is not None:
+        dst_mask = dst_arr == reproj_kwargs["dst_nodata"]
+    else:
+        dst_mask = np.zeros(src_arr.shape, dtype=bool)
 
     # If output needs to be converted back to boolean
     if convert_bool:
