@@ -30,7 +30,7 @@ After this, if `save_graphs` or `save_raw_data` are True, every profiled functio
 
 ## Saved profiling data
 
-The function `generate_summary(output)` saves the profiling information in the `output` directory.
+The function `generate_summary(output)` saves the profiling information in the output path directory given in input (output_profiling if not specified)
 
 - When `save_graphs` is enabled, the graphs as listed as before are exported.
 - when `save_raw_data` is enabled, GeoUtils saves all stored information as a .pickle file containing a {class}`~pandas.DataFrame` with the following structure:
