@@ -44,6 +44,7 @@ class TestProfiling:
             Profiler.generate_summary(tmp_path)
             output_path = tmp_path
         else:
+            os.chdir(tmp_path)
             Profiler.generate_summary()
             output_path = "output_profiling"
 
@@ -87,9 +88,6 @@ class TestProfiling:
         else:
             # if profiling is deactivated : nothing generated in output dir
             assert not len(glob.glob(op.join(output_path, "*")))
-
-        if not output_given:
-            os.remove(output_path)
 
     def test_profiling_functions_management(self) -> None:
         """
