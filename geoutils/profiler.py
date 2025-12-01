@@ -106,12 +106,15 @@ class Profiler:
         }
 
     @staticmethod
-    def generate_summary(output: str) -> None:
+    def generate_summary(output: str = None) -> None:
         """
         Generate Profiling summary
 
-        :param output: Output directory path
+        :param output: Output directory path, if None output is "output_profiling" in the current directory
         """
+        if output is None:
+            output = "output_profiling"
+
         if not Profiler.enabled or len(Profiler._profiling_info) == 0:
             return
 

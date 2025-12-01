@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import os
 import os.path as op
 
 import pandas as pd
@@ -19,15 +20,17 @@ class TestProfiling:
 
     # Test that there's no crash when giving profiling configuration
     @pytest.mark.parametrize(
-        "profiling_configuration", [(False, False), (True, False), (False, True), (True, True)]
+        "profiling_configuration",
+        [(False, False, True), (True, False, True), (False, True, True), (True, True, True), (True, True, False)],
     )  # type: ignore
-    @pytest.mark.parametrize("profiling_function", ["load", "get_stats", "subsample"])  # type: ignore
+    @pytest.mark.parametrize("profiling_function", ["load", "get_stats", "subsample", "output_given"])  # type: ignore
     def test_profiling_configuration(self, profiling_configuration, profiling_function, tmp_path) -> None:
         """
         Test the all combinaisons of profiling with three examples of profiled functions.
         """
         s_gr = profiling_configuration[0]
         s_rd = profiling_configuration[1]
+        output_given = profiling_configuration[2]
 
         Profiler.enable(save_graphs=s_gr, save_raw_data=s_rd)
 
@@ -37,21 +40,26 @@ class TestProfiling:
         if profiling_function == "subsample":
             gu.Raster.subsample(dem, 2)
 
-        Profiler.generate_summary(tmp_path)
+        if output_given:
+            Profiler.generate_summary(tmp_path)
+            output_path = tmp_path
+        else:
+            Profiler.generate_summary()
+            output_path = "output_profiling"
 
         # if profiling is activate
         if s_rd or s_gr:
 
             # in each case, output dir exist
-            assert op.isdir(tmp_path)
+            assert op.isdir(output_path)
 
             # if save_raw_data:
             if s_rd:
                 # check pickle
-                assert op.isfile(op.join(tmp_path, "raw_data.pickle"))
+                assert op.isfile(op.join(output_path, "raw_data.pickle"))
 
                 # check data in pickle
-                df = pd.read_pickle(op.join(tmp_path, "raw_data.pickle"))
+                df = pd.read_pickle(op.join(output_path, "raw_data.pickle"))
                 if profiling_function == "get_stats":
                     assert len(df) == 3
                 elif profiling_function == "subsample":
@@ -60,25 +68,28 @@ class TestProfiling:
                     assert len(df) == 1
 
             else:
-                assert not op.isfile(op.join(tmp_path, "raw_data.pickle"))
+                assert not op.isfile(op.join(output_path, "raw_data.pickle"))
 
             # if save_graphs:
             if s_gr:
                 # check if all output graphs (time_graph + mem graph/profiled function called)
                 # are generated
-                assert op.isfile(op.join(tmp_path, "time_graph.html"))
-                assert op.isfile(op.join(tmp_path, "memory_raster.raster.__init__.html"))
+                assert op.isfile(op.join(output_path, "time_graph.html"))
+                assert op.isfile(op.join(output_path, "memory_raster.raster.__init__.html"))
                 if profiling_function == "get_stats":
-                    assert op.isfile(op.join(tmp_path, "memory_stats.stats._statistics.html"))
-                    assert op.isfile(op.join(tmp_path, "memory_raster.raster.get_stats.html"))
+                    assert op.isfile(op.join(output_path, "memory_stats.stats._statistics.html"))
+                    assert op.isfile(op.join(output_path, "memory_raster.raster.get_stats.html"))
                 elif profiling_function == "sampling":
-                    assert op.isfile(op.join(tmp_path, "memory_raster.raster.subsample.html"))
+                    assert op.isfile(op.join(output_path, "memory_raster.raster.subsample.html"))
             else:
-                assert not len(glob.glob(op.join(tmp_path, "*.html")))
+                assert not len(glob.glob(op.join(output_path, "*.html")))
 
         else:
             # if profiling is deactivated : nothing generated in output dir
-            assert not len(glob.glob(op.join(tmp_path, "*")))
+            assert not len(glob.glob(op.join(output_path, "*")))
+
+        if not output_given:
+            os.remove(output_path)
 
     def test_profiling_functions_management(self) -> None:
         """
