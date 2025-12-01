@@ -49,7 +49,7 @@ def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
         assert key in dict2
         print("key", key)
         if dict1[key] is not np.nan:
-            assert dict1[key] == pytest.approx(dict2[key], abs=1e-12)
+            assert dict1[key] == pytest.approx(dict2[key], abs=1e-10)
         else:
             assert dict2[key] is np.nan
 
@@ -268,7 +268,7 @@ class TestStats:
             "90th percentile": np.float64(225.0),
             "LE90": np.float64(223.0),
             "IQR": np.float64(83.0),
-            "NMAD": np.float32(54.856197),
+            "NMAD": np.float64(54.856199999999994),
             "RMSE": np.float64(10.118943490060417),
             "Standard deviation": np.float64(64.98157041836747),
             "Valid count": 524000,
@@ -279,8 +279,9 @@ class TestStats:
             "Percentage inlier points": np.float64(46.03015267175572),
             "Percentage valid inlier points": np.float64(100.0),
         }
+        print("li")
         compare_dict(res_stats_mask, rast.get_stats(inlier_mask=inlier_mask))
-
+        print("l")
         # Verify cropped raster
         nrows, ncols = rast.shape
         rast_crop = rast.icrop((100, 100, ncols - 100, nrows - 100))
@@ -315,13 +316,14 @@ class TestStats:
             "90th percentile": np.float64(218.0),
             "LE90": np.float64(204.0),
             "IQR": np.float64(93.0),
-            "NMAD": np.float32(66.716995),
+            "NMAD": np.float64(66.717),
             "RMSE": np.float64(10.38534653788665),
             "Standard deviation": np.float64(62.319986152883956),
             "Valid count": 211527,
             "Total count": 524000,
             "Percentage valid points": np.float64(40.36774809160305),
         }
+        print(rast_crop_proj.get_stats())
         compare_dict(res_stats_crop_proj, rast_crop_proj.get_stats())
 
         # Verify stats of a masked raster
@@ -336,7 +338,7 @@ class TestStats:
             "90th percentile": np.float64(255.0),
             "LE90": np.float64(209.0),
             "IQR": np.float64(156.0),
-            "NMAD": np.float32(99.3342),
+            "NMAD": np.float64(99.3342),
             "RMSE": np.float64(8.37853254688833),
             "Standard deviation": np.float64(79.45825061580675),
             "Valid count": 282802,

@@ -23,7 +23,6 @@ from typing import Any
 import numpy as np
 
 from geoutils._typing import NDArrayNum
-from geoutils.raster.array import get_array_and_mask
 
 
 def nmad(data: NDArrayNum, nfact: float = 1.4826) -> np.floating[Any]:
@@ -39,10 +38,9 @@ def nmad(data: NDArrayNum, nfact: float = 1.4826) -> np.floating[Any]:
     :returns nmad: (normalized) median absolute deviation of data.
     """
     if isinstance(data, np.ma.masked_array):
-        data_arr = get_array_and_mask(data)[0]
+        return nfact * np.ma.median(np.abs(data - np.ma.median(data)))
     else:
-        data_arr = np.asarray(data)
-    return nfact * np.nanmedian(np.abs(data_arr - np.nanmedian(data_arr)))
+        return nfact * np.nanmedian(np.abs(data - np.nanmedian(data)))
 
 
 def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:

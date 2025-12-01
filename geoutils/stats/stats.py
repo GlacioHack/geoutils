@@ -243,9 +243,12 @@ def _statistics(
         }
 
         if stats_name is None:
+            # Add all stats
             res_dict.update(dict_c)
         else:
+            # Add all stats if the name is on the list
             res_dict.update({k: dict_c[k] for k in list(set(STATS_LIST_MASK).intersection(stats_name))})
+            # and the stats from alias stats
             res_dict.update(
                 {
                     k: dict_c[_ALIAS_STATS_LIST_MASK[k]]
