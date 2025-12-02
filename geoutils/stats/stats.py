@@ -141,9 +141,6 @@ def _statistics(
             "NMAD": nmad,
             "RMSE": rmse,
             "Standard deviation": np.ma.std,
-            "Valid count": valid_count,
-            "Total count": data.size,
-            "Percentage valid points": (valid_count / data.size) * 100 if data.size else np.nan,
         }  # type: ignore
 
     else:
@@ -167,10 +164,16 @@ def _statistics(
             "NMAD": nmad,
             "RMSE": rmse,
             "Standard deviation": np.nanstd,
+        }  # type: ignore
+
+    # Pixels counts
+    stats_dict.update(
+        {
             "Valid count": valid_count,
             "Total count": data.size,
             "Percentage valid points": (valid_count / data.size) * 100 if data.size else np.nan,
-        }  # type: ignore
+        }
+    )
 
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
