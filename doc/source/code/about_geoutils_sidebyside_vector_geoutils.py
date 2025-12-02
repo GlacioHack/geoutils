@@ -4,8 +4,8 @@ import geoutils
 
 landsat_b4_path = geoutils.examples.get_path("everest_landsat_b4")
 everest_outlines_path = geoutils.examples.get_path("everest_rgi_outlines")
-geoutils.Raster(landsat_b4_path).save("myraster.tif")
-geoutils.Vector(everest_outlines_path).save("myvector.gpkg")
+geoutils.Raster(landsat_b4_path).to_file("myraster.tif")
+geoutils.Vector(everest_outlines_path).to_file("myvector.gpkg")
 ####
 
 import geoutils as gu

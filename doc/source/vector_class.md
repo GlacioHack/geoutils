@@ -59,11 +59,11 @@ Detailed information on the {class}`~geoutils.Vector` is printed using {func}`~g
 vect.info()
 ```
 
-A {class}`~geoutils.Vector` is saved to file by calling {func}`~geoutils.Raster.save` with a {class}`str` or a {class}`pathlib.Path`.
+A {class}`~geoutils.Vector` is saved to file by calling {func}`~geoutils.Raster.to_file` with a {class}`str` or a {class}`pathlib.Path`.
 
 ```{code-cell} ipython3
 # Save vector to disk
-vect.save("myvector.gpkg")
+vect.to_file("myvector.gpkg")
 ```
 ```{code-cell} ipython3
 :tags: [remove-cell]

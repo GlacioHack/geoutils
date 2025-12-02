@@ -58,7 +58,7 @@ rast.info()
 The {class}`~geoutils.Raster` is not a composition of either a {class}`rasterio.io.DatasetReader`, a {class}`rasterio.io.MemoryFile` or a {class}`rasterio.io.DatasetWriter`.
 It is only linked to those objects to initiate a {class}`~geoutils.Raster` instance which first loads the metadata (notably the three main metadata attributes
 {attr}`~geoutils.Raster.crs`, {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.nodata`).
-Then, explicitly or implicitly, it can also {class}`~geoutils.Raster.load` the array data when an **on-disk** dataset exists, or {class}`~geoutils.Raster.save` the **in-memory**
+Then, explicitly or implicitly, it can also {class}`~geoutils.Raster.load` the array data when an **on-disk** dataset exists, or {class}`~geoutils.Raster.to_file` the **in-memory**
 dataset to a file.
 ```
 
