@@ -44,6 +44,7 @@ import pandas as pd
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
@@ -52,7 +53,7 @@ import geoutils as gu
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils.misc import copy_doc
+from geoutils.misc import copy_doc, deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -366,6 +367,21 @@ class Vector:
         else:
             return None
 
+    @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_file(
+        self,
+        filename: str | pathlib.Path,
+        driver: str | None = None,
+        schema: dict[str, Any] | None = None,
+        index: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+
+    @deprecate(
+        removal_version=Version("0.3.0"),
+        details="The function .save() will be soon deprecated, use .to_file() instead.",
+    )  # type: ignore
     def save(
         self,
         filename: str | pathlib.Path,
@@ -374,20 +390,7 @@ class Vector:
         index: bool | None = None,
         **kwargs: Any,
     ) -> None:
-        """
-        Write the vector to file.
-
-        This function is a simple wrapper of :func:`geopandas.GeoDataFrame.to_file`. See there for details.
-
-        :param filename: Filename to write the file to.
-        :param driver: Driver to write file with.
-        :param schema: Dictionary passed to Fiona to better control how the file is written.
-        :param index: Whether to write the index or not.
-
-        :returns: None.
-        """
-
-        self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+        self.to_file(filename, driver, schema, index, **kwargs)
 
     ############################################################################
     # Overridden and wrapped methods from GeoPandas API to logically cast outputs
@@ -1100,11 +1103,6 @@ class Vector:
     def from_dict(cls, data: dict[str, Any], geometry: Any = None, crs: CRS | None = None, **kwargs: Any) -> Vector:
 
         return cls(gpd.GeoDataFrame.from_dict(data=data, geometry=geometry, crs=crs, **kwargs))
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
-
-        return self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def to_feather(

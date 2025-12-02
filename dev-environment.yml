@@ -24,6 +24,7 @@ dependencies:
   - laspy
   - lazrs-python # For LAZ files
   - scikit-image
+  - numba
 
   # Test dependencies
   - gdal  # To test functionalities against GDAL
@@ -37,7 +38,6 @@ dependencies:
   - pyyaml
   - flake8
   - netcdf4  # To write synthetic data with chunksizes
-  - dask-memusage
   - pre-commit
 
   # Doc dependencies
