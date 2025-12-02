@@ -61,7 +61,7 @@ class TestEstimators:
         le90_masked = linear_error(masked_data, interval=90)
         le50_masked = linear_error(masked_data, interval=50)
 
-        assert le90_masked == 4.5
+        assert le90_masked == pytest.approx(4.5)
         assert le50_masked == 2.5
 
     def test_rmse(self) -> None:

@@ -21,6 +21,7 @@
 from typing import Any
 
 import numpy as np
+from scipy.stats.mstats import mquantiles
 
 from geoutils._typing import NDArrayNum
 
@@ -61,12 +62,15 @@ def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:
     if not (0 < interval <= 100):
         raise ValueError("Interval must be between 0 and 100")
 
+    max = 50 + interval / 2
+    min = 50 - interval / 2
     if isinstance(data, np.ma.masked_array):
-        mdata = np.ma.filled(data.astype(float), np.nan)
+        return (
+            mquantiles(data, prob=max / 100, alphap=1, betap=1)[0]
+            - mquantiles(data, prob=min / 100, alphap=1, betap=1)[0]
+        )
     else:
-        mdata = data
-    le = np.nanpercentile(mdata, 50 + interval / 2) - np.nanpercentile(mdata, 50 - interval / 2)
-    return le
+        return np.nanpercentile(data, max) - np.nanpercentile(data, min)
 
 
 def sum_square(data: NDArrayNum) -> np.floating[Any]:

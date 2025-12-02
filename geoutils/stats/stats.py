@@ -135,7 +135,7 @@ def _statistics(
             "Min": np.ma.min,
             "Sum": np.ma.sum,
             "Sum of squares": sum_square,
-            "90th percentile": partial(lambda x: mquantiles(x, prob=0.9)[0]),
+            "90th percentile": partial(lambda x: mquantiles(x, prob=0.9, alphap=1, betap=1)[0]),
             "LE90": partial(linear_error, interval=90),
             "IQR": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
             "NMAD": nmad,
