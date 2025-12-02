@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import logging
 import os.path
 import pathlib
 import warnings
@@ -38,9 +39,10 @@ from shapely.geometry.base import BaseGeometry
 import geoutils as gu
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
+from geoutils.profiler import profile_tool
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
+from geoutils.stats.stats import _statistics
 
 try:
     import laspy
@@ -280,6 +282,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     See the API for more details.
     """
 
+    @profile_tool("pointcloud.pointcloud.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
@@ -1261,6 +1264,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
+    @profile_tool("pointcloud.pointcloud.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -1285,25 +1289,18 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             self.load()
 
         data = self.data
-        stats_dict = _statistics(data=data)
-        if stats_name is None:
-            return stats_dict
 
-        stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(self.data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _statistics(data, stats_name)  # type: ignore
         else:
-            if callable(stats_name):
-                return stats_name(self.data)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return _statistics(data, [stats_name])[stats_name]  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
             else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
+                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
 
     @overload
     def subsample(
@@ -1331,6 +1328,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
+    @profile_tool("pointcloud.pointcloud.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
@@ -1352,6 +1350,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
 
+    @profile_tool("pointcloud.pointcloud.grid", memprof=True)  # type: ignore
     def grid(
         self,
         ref: gu.Raster | None = None,

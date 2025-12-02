@@ -21,9 +21,9 @@
 from typing import Any
 
 import numpy as np
+from scipy.stats.mstats import mquantiles
 
 from geoutils._typing import NDArrayNum
-from geoutils.raster.array import get_array_and_mask
 
 
 def nmad(data: NDArrayNum, nfact: float = 1.4826) -> np.floating[Any]:
@@ -39,10 +39,9 @@ def nmad(data: NDArrayNum, nfact: float = 1.4826) -> np.floating[Any]:
     :returns nmad: (normalized) median absolute deviation of data.
     """
     if isinstance(data, np.ma.masked_array):
-        data_arr = get_array_and_mask(data)[0]
+        return nfact * np.ma.median(np.abs(data - np.ma.median(data)))
     else:
-        data_arr = np.asarray(data)
-    return nfact * np.nanmedian(np.abs(data_arr - np.nanmedian(data_arr)))
+        return nfact * np.nanmedian(np.abs(data - np.nanmedian(data)))
 
 
 def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:
@@ -63,9 +62,39 @@ def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:
     if not (0 < interval <= 100):
         raise ValueError("Interval must be between 0 and 100")
 
+    max = 50 + interval / 2
+    min = 50 - interval / 2
     if isinstance(data, np.ma.masked_array):
-        mdata = np.ma.filled(data.astype(float), np.nan)
+        return (
+            mquantiles(data, prob=max / 100, alphap=1, betap=1) - mquantiles(data, prob=min / 100, alphap=1, betap=1)
+        )[0]
     else:
-        mdata = data
-    le = np.nanpercentile(mdata, 50 + interval / 2) - np.nanpercentile(mdata, 50 - interval / 2)
-    return le
+        return np.nanpercentile(data, max) - np.nanpercentile(data, min)
+
+
+def sum_square(data: NDArrayNum) -> np.floating[Any]:
+    """
+    Calculate the sum of the square of a data array.
+
+    :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
+    another quantity.
+    :return: sum square
+    """
+    if np.ma.isMaskedArray(data):
+        return np.ma.sum(np.square(data))
+    else:
+        return np.nansum(np.square(data))
+
+
+def rmse(data: NDArrayNum) -> np.floating[Any]:
+    """
+    Calculate the RMSE of a data array.
+
+    :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
+    another quantity.
+    :return: rmse
+    """
+    if np.ma.isMaskedArray(data):
+        return np.sqrt(np.ma.mean(np.square(data)))
+    else:
+        return np.sqrt(np.nanmean(np.square(data)))
