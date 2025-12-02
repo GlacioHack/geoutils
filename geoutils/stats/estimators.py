@@ -65,10 +65,7 @@ def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:
     max = 50 + interval / 2
     min = 50 - interval / 2
     if isinstance(data, np.ma.masked_array):
-        return (
-            mquantiles(data, prob=max / 100, alphap=1, betap=1)[0]
-            - mquantiles(data, prob=min / 100, alphap=1, betap=1)[0]
-        )
+        return (mquantiles(data, prob=max / 100, alphap=1, betap=1) - mquantiles(data, prob=min / 100, alphap=1, betap=1))[0]
     else:
         return np.nanpercentile(data, max) - np.nanpercentile(data, min)
 
