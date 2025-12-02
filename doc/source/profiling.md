@@ -7,7 +7,7 @@ The profiling functionalities rely on psutil and plotly, which can be installed 
 
 With the profiling activated with the graphs output, two kinds of .HTML graphs will be created by default :
 * an icicle graph `time_graph.html`, showing the time spent in each step of the entire process
-* a graph `memory_[function].html` for each decorated functions used, showing the memory consumption of xDEM at regular intervals during the execution
+* a graph `memory_[function].html` for each decorated functions used, showing the memory consumption of GeoUtils at regular intervals during the execution
 
 ## Configuration and parameters
 
@@ -39,7 +39,7 @@ The function `generate_summary(output)` saves the profiling information in the o
 |-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | **level**         | Depth of the function call in the profiling stack                                                                                                 |
 | **uuid_function** | Unique universal identifier (UUID) of the function call                                                                                           |
-| **name**         | Understandable name given to the function call                                                                                                    |
+| **name**          | Understandable name given to the function call                                                                                                    |
 | **uuid_parent**   | UUID of the "parent" call (call that was running when this call was made)                                                                         |
 | **time**          | Time (in seconds) it took to execute the function                                                                                                 |
 | **call_time**     | Timestamp (in seconds) at which the call was made                                                                                                 |
