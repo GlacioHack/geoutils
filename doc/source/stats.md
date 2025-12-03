@@ -105,3 +105,23 @@ above 1).
 # Subsample 10% of the raster valid values
 rast.subsample(subsample=0.1)
 ```
+
+## Annexe 
+
+| data                             |                                            is a Masked Array                                             |                                   is not a Masked Array |
+|:---------------------------------|:--------------------------------------------------------------------------------------------------------:|--------------------------------------------------------:|
+| Mean, Median, Min, Max, Std, Sum |                                             `np.ma.XX(data)`                                             |                                          `np.nanXX(data)` |
+| 90th Percentile                  |                             `mquantiles(data, prob=0.9, alphap=1, betap=1)`                              |                            `np.nanpercentile(data, q=90)` |
+| RMSE                             |                                  `np.sqrt(np.ma.mean(np.square(data)))`                                  |                    `np.sqrt(np.nanmean(np.square(data)))` |
+| Sum Square                       |                                       `np.ma.sum(np.square(data))`                                       |                           `np.nanma.sum(np.square(data))` |
+| IQR                              |                                      `iqr(data, nan_policy="omit")`                                      |                            `iqr(data, nan_policy="omit")` | 
+| LE90                             |  `mquantiles(data, prob=0.95, alphap=1, betap=1) -<br/> mquantiles(data, prob=0.05, alphap=1, betap=1)`  |  `np.nanpercentile(data, 95) - np.nanpercentile(data, 5)` |
+| NMAD                             |                        `nfact * np.ma.median(np.abs(data - np.ma.median(data))`)                         | `nfact * np.nanmedian(np.abs(data - np.nanmedian(data)))` |
+| Valid count if no inlier_mask    |                              `np.count_nonzero(~np.ma.getmaskarray(data))`                               |                     `np.count_nonzero(np.isfinite(data))` |
+| Valid count if inlier_mask       |                              `np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))`                               |                      `np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))` |
+| Total count                      |                                               `data.size`                                                |                                               `data.size` | 
+| Percentage valid points          |                          `(valid_count / data.size)*100 if data.size else nan`                           |     `(valid_count / data.size)*100 if data.size else nan` |
+
+With `np` for `numpy`, `mquantiles` from `scipy.stats.mstats` and `iqr` from `scipy.stats`.
+
+
