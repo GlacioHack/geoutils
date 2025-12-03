@@ -107,20 +107,20 @@ def _reproject(
                 )
             return True, None, None, None, None
 
-    # 4/ Perform reprojection
+    # 4/ Check reprojection is possible (boolean raster will be converted, so no need to check)
+    if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
+        raise ValueError(
+            "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+            "with `force_source_nodata`."
+        )
 
+    # 5/ Perform reprojection
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
-
     if multiproc_config is not None:
         _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
         return False, None, None, None, None
 
     else:
-        if src_nodata is None and np.sum(source_raster.data.mask) > 0:
-            raise ValueError(
-                "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-                "with `force_source_nodata`."
-            )
         # All masked values must be set to a nodata value for rasterio's reproject to work properly
         src_arr = source_raster.data.data
         src_mask = np.ma.getmaskarray(source_raster.data)

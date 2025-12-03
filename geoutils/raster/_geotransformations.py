@@ -358,6 +358,9 @@ def _rio_reproject(
         if np.dtype(reproj_kwargs["dtype"]) == np.bool_:
             reproj_kwargs["dtype"] = src_arr.dtype
 
+        # Update nodata value, which won't exist
+        reproj_kwargs["src_nodata"] = _default_nodata(src_arr.dtype)
+
     # Fill with nodata values on mask
     if reproj_kwargs["src_nodata"] is not None:
         src_arr[src_mask] = reproj_kwargs["src_nodata"]
