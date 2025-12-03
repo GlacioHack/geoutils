@@ -795,25 +795,28 @@ class TestMaskGeotransformations:
         with pytest.warns(UserWarning, match="Reprojecting a raster mask .*"):
             mask.reproject(res=50, resampling="bilinear")
 
-    def test_reproject__no_inters(self):
+    def test_reproject__no_inters(self) -> None:
         """Test reprojection behaviour without intersection of inputs."""
 
         # Create two raster, one boolean
         dem_bool = gu.Raster.from_array(
             np.random.randint(2, size=(100, 100), dtype=bool),
             transform=rio.transform.from_origin(0, 100, 1, 1),
-            crs=4326)
+            crs=4326,
+        )
         ref_dem = gu.Raster.from_array(
             np.random.randint(100, size=(100, 100), dtype="uint8"),
             transform=rio.transform.from_origin(0, 100, 1, 1),
-            crs=4326)
+            crs=4326,
+        )
 
         # With no intersection
         dem_bool_crop = dem_bool.icrop((0, 0, 20, 20))
         ref_dem_crop = ref_dem.icrop((40, 40, 60, 60))
 
         assert not dem_bool_crop.get_footprint_projected(ref_dem_crop.crs).intersects(
-            ref_dem_crop.get_footprint_projected(ref_dem_crop.crs))[0]
+            ref_dem_crop.get_footprint_projected(ref_dem_crop.crs)
+        )[0]
 
         res = dem_bool_crop.reproject(ref_dem_crop, resampling="nearest")
         assert isinstance(res, gu.raster.raster.Raster)
