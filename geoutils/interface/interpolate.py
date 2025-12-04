@@ -251,7 +251,7 @@ def _interp_points(
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
 
-@Profiler.profile("interface.interpolate._interp_points", memprof=True)  # type: ignore
+@Profiler.profile("geoutils.interface.interpolate._interp_points", memprof=True)  # type: ignore
 def _interp_points(
     array: NDArrayNum,
     transform: rio.transform.Affine,

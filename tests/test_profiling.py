@@ -76,12 +76,12 @@ class TestProfiling:
                 # check if all output graphs (time_graph + mem graph/profiled function called)
                 # are generated
                 assert op.isfile(op.join(output_path, "time_graph.html"))
-                assert op.isfile(op.join(output_path, "memory_raster.raster.__init__.html"))
+                assert op.isfile(op.join(output_path, "memory_geoutils.raster.raster.__init__.html"))
                 if profiling_function == "get_stats":
-                    assert op.isfile(op.join(output_path, "memory_stats.stats._statistics.html"))
-                    assert op.isfile(op.join(output_path, "memory_raster.raster.get_stats.html"))
+                    assert op.isfile(op.join(output_path, "memory_geoutils.stats.stats._statistics.html"))
+                    assert op.isfile(op.join(output_path, "memory_geoutils.raster.raster.get_stats.html"))
                 elif profiling_function == "sampling":
-                    assert op.isfile(op.join(output_path, "memory_raster.raster.subsample.html"))
+                    assert op.isfile(op.join(output_path, "memory_geoutils.raster.raster.subsample.html"))
             else:
                 assert not len(glob.glob(op.join(output_path, "*.html")))
 
@@ -99,8 +99,8 @@ class TestProfiling:
         gu.Raster(examples.get_path_test("everest_landsat_b4"))
 
         assert len(Profiler.get_profiling_info()) == 1
-        assert len(Profiler.get_profiling_info(function_name="raster.raster.__init__")) == 1
-        assert len(Profiler.get_profiling_info(function_name="stats.stats.get_stats")) == 0
+        assert len(Profiler.get_profiling_info(function_name="geoutils.raster.raster.__init__")) == 1
+        assert len(Profiler.get_profiling_info(function_name="geoutils.stats.stats.get_stats")) == 0
         assert len(Profiler.get_profiling_info(function_name="no_name")) == 0
 
         Profiler.reset()
@@ -111,13 +111,13 @@ class TestProfiling:
         Test the selection of functions to profile (all or by theirs names).
         """
         Profiler.enable(save_graphs=False, save_raw_data=True)
-        Profiler.selection_functions(["stats.stats._statistics"])
+        Profiler.selection_functions(["geoutils.stats.stats._statistics"])
         dem = gu.Raster(examples.get_path_test("everest_landsat_b4"))
 
         dem.get_stats()
         assert len(Profiler.get_profiling_info()) == 1
 
-        Profiler.selection_functions(["raster.raster.__init__"])
+        Profiler.selection_functions(["geoutils.raster.raster.__init__"])
         dem.get_stats()
         assert len(Profiler.get_profiling_info()) == 1
 

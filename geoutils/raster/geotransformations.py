@@ -48,7 +48,7 @@ from geoutils.raster.georeferencing import _cast_pixel_interpretation
 ##############
 
 
-@Profiler.profile("raster.geotransformations._reproject", memprof=True)  # type: ignore
+@Profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)  # type: ignore
 def _reproject(
     source_raster: gu.Raster,
     ref: gu.Raster,
@@ -138,7 +138,7 @@ def _reproject(
 #########
 
 
-@Profiler.profile("raster.geotransformations._crop", memprof=True)  # type: ignore
+@Profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
 def _crop(
     source_raster: gu.Raster,
     bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
@@ -232,7 +232,7 @@ def _crop(
 ##############
 
 
-@Profiler.profile("raster.geotransformations._translate", memprof=True)  # type: ignore
+@Profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)  # type: ignore
 def _translate(
     transform: affine.Affine,
     xoff: float,
