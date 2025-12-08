@@ -106,7 +106,7 @@ above 1).
 rast.subsample(subsample=0.1)
 ```
 
-## Annexe 
+## Annexe
 
 | data                                 |                                            is a Masked Array                                             |                                   is not a Masked Array |
 |:-------------------------------------|:--------------------------------------------------------------------------------------------------------:|--------------------------------------------------------:|
@@ -114,22 +114,22 @@ rast.subsample(subsample=0.1)
 | **90th Percentile**                  |                             `mquantiles(data, prob=0.9, alphap=1, betap=1)`                              |                            `np.nanpercentile(data, q=90)` |
 | **RMSE**                             |                                  `np.sqrt(np.ma.mean(np.square(data)))`                                  |                    `np.sqrt(np.nanmean(np.square(data)))` |
 | **Sum Square**                       |                                       `np.ma.sum(np.square(data))`                                       |                           `np.nanma.sum(np.square(data))` |
-| **IQR**                              |                                      `iqr(data, nan_policy="omit")`                                      |                            `iqr(data, nan_policy="omit")` | 
+| **IQR**                              |                                      `iqr(data, nan_policy="omit")`                                      |                            `iqr(data, nan_policy="omit")` |
 | **LE90**                             |  `mquantiles(data, prob=0.95, alphap=1, betap=1) -<br/> mquantiles(data, prob=0.05, alphap=1, betap=1)`  |  `np.nanpercentile(data, 95) - np.nanpercentile(data, 5)` |
 | **NMAD**                             |                        `nfact * np.ma.median(np.abs(data - np.ma.median(data))`)                         | `nfact * np.nanmedian(np.abs(data - np.nanmedian(data)))` |
 | **Valid count if no inlier_mask**    |                              `np.count_nonzero(~np.ma.getmaskarray(data))`                               |                     `np.count_nonzero(np.isfinite(data))` |
 | **Valid count if inlier_mask**       |                              `np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))`                               |                      `np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))` |
-| **Total count**                      |                                               `data.size`                                                |                                               `data.size` | 
+| **Total count**                      |                                               `data.size`                                                |                                               `data.size` |
 | **Percentage valid points**          |                          `(valid_count / data.size)*100 if data.size else nan`                           |     `(valid_count / data.size)*100 if data.size else nan` |
 
 With `np` for `numpy`, `mquantiles` from `scipy.stats.mstats` and `iqr` from `scipy.stats`.
 If an inlier mask is passed:
 
-| data                                 |                                            is a Masked Array                                             |                         
+| data                                 |                                            is a Masked Array                                             |
 |:-----------------------------------|:----------------------------------------------------------------------------------------:|
 | **Total inlier count**             |                np.count_nonzero(np.isfinite(data))                 |
 | **Valid inlier count**             |                                        counts[1]                                         |
-| **Percentage inlier points**       |                         (total_inlier_count / counts[0]) * 100,                         | 
+| **Percentage inlier points**       |                         (total_inlier_count / counts[0]) * 100,                         |
 | **Percentage valid inlier points** | 100 if counts[1] != 0 else 0              |
 
 
@@ -141,13 +141,13 @@ If an inlier mask is passed:
       .. csv-table:: Inputs parameters for reference_elev
                :header: "Name", "Description"
                :widths: 30, 70
-               **Mean, Median, Min, Max, Std, Sum** ,  `np.ma.XX(data)`                               
-               **90th Percentile**, `mquantiles(data, prob=0.9, alphap=1, betap=1)`      
-               **RMSE**, `np.sqrt(np.ma.mean(np.square(data)))`     
-               **Sum Square**, `np.ma.sum(np.square(data))`                       
-               **IQR**, `iqr(data, nan_policy="omit")`              
-               **LE90**, `mquantiles(data, prob=0.95, alphap=1, betap=1) - mquantiles(data, prob=0.05, alphap=1, betap=1)` 
-               **NMAD**, `nfact * np.ma.median(np.abs(data - np.ma.median(data))`)                      
+               **Mean, Median, Min, Max, Std, Sum** ,  `np.ma.XX(data)`
+               **90th Percentile**, `mquantiles(data, prob=0.9, alphap=1, betap=1)`
+               **RMSE**, `np.sqrt(np.ma.mean(np.square(data)))`
+               **Sum Square**, `np.ma.sum(np.square(data))`
+               **IQR**, `iqr(data, nan_policy="omit")`
+               **LE90**, `mquantiles(data, prob=0.95, alphap=1, betap=1) - mquantiles(data, prob=0.05, alphap=1, betap=1)`
+               **NMAD**, `nfact * np.ma.median(np.abs(data - np.ma.median(data))`)
 
       .. tabs::
 
@@ -155,20 +155,19 @@ If an inlier mask is passed:
             .. csv-table:: Inputs parameters for reference_elev
                    :header: "Name", "Description"
                    :widths: 30, 70
-                   **Valid count**, `np.count_nonzero(~np.ma.getmaskarray(data))`         
-                   **Total count**, `data.size`                                                                
-                   **Percentage valid points**, `(valid_count / data.size)*100 if data.size else nan`   
+                   **Valid count**, `np.count_nonzero(~np.ma.getmaskarray(data))`
+                   **Total count**, `data.size`
+                   **Percentage valid points**, `(valid_count / data.size)*100 if data.size else nan`
 
-        .. tab:: inlier_mask 
+        .. tab:: inlier_mask
             .. csv-table:: Inputs parameters for reference_elev
                    :header: "Name", "Description"
                    :widths: 30, 70
-                   **Valid count**, `np.count_nonzero(~np.ma.getmaskarray(data))`         
-                   **Total count**, `data.size`                                                                
-                   **Percentage valid points**, `(valid_count / data.size)*100 if data.size else nan`   
-                   **Total inlier count**,  np.count_nonzero(np.isfinite(data))          
-                   **Valid inlier count**, counts[1]                              
-                   **Percentage inlier points**, (total_inlier_count / counts[0]) * 100 
-                   **Percentage valid inlier points**, 100 if counts[1] != 0 else 0 
-
+                   **Valid count**, `np.count_nonzero(~np.ma.getmaskarray(data))`
+                   **Total count**, `data.size`
+                   **Percentage valid points**, `(valid_count / data.size)*100 if data.size else nan`
+                   **Total inlier count**,  np.count_nonzero(np.isfinite(data))
+                   **Valid inlier count**, counts[1]
+                   **Percentage inlier points**, (total_inlier_count / counts[0]) * 100
+                   **Percentage valid inlier points**, 100 if counts[1] != 0 else 0
 ```
