@@ -50,12 +50,12 @@ If no profiled function has been called, `generate_summary(output)` generate no 
 ## The profiled functions
 
 Currently, some processes are already profiled by GeoUtils with a memory consumption report each 0.05 seconds.
-- {func}`geoutils.Raster`, {func}`geoutils.Raster.get_stats`, {func}`geoutils.Raster.crop`, {func}`geoutils.Raster.icrop`, {func}`geoutils.Raster.reproject`, {func}`geoutils.Raster.interp_points` and {func}`geoutils.Raster.subsample`
-- {func}`geoutils.PointCloud`, {func}`geoutils.PointCloud.get_stats`, {func}`geoutils.PointCloud.subsample` an {func}`geoutils.PointCloud.grid`
-- {func}`geoutils.Vector`, {func}`geoutils.Vector.crop`, {func}`geoutils.Vector.reproject`, {func}`geoutils.Vector.rasterize`
-- all existing geo-transformations like `_reproject()`, `_crop()` and `_translate()` for `Raster`,` PointCloud` and `Vector `
-- `subsample_array()` and  `_statistics()` in `Geoutils.stats`
-- `_interp_points()` in Geoutils.interface.interpolate
+- {func}`~geoutils.Raster`, {func}`~geoutils.Raster.get_stats`, {func}`~geoutils.Raster.crop`, {func}`~geoutils.Raster.icrop`, {func}`~geoutils.Raster.reproject`, {func}`~geoutils.Raster.interp_points` and {func}`~geoutils.Raster.subsample`
+- {func}`~geoutils.PointCloud`, {func}`~geoutils.PointCloud.get_stats`, {func}`~geoutils.PointCloud.subsample` and {func}`~geoutils.PointCloud.grid`
+- {func}`~geoutils.Vector`, {func}`~geoutils.Vector.crop`, {func}`~geoutils.Vector.reproject`, {func}`~geoutils.Vector.rasterize`
+- all existing geo-transformations like `_reproject()`, `_crop()` and `_translate()` for {class}`~geoutils.Raster`, {class}`~geoutils.PointCloud` and {class}`~geoutils.Vector`
+- `subsample_array()` and  `_statistics()` in {class}`Geoutils.stats`
+- `_interp_points()` in `Geoutils.interface.interpolate`
 
 
 ### Modifying the profiled functions
