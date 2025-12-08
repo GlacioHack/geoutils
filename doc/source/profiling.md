@@ -2,7 +2,7 @@
 
 GeoUtils has a built-in profiling tool, that can be used to provide more insight on the memory and time use of a function if needed.
 ```{warning}
-The profiling functionalities rely on psutil and plotly, which can be installed manually or using Geoutils development dependencies.
+The profiling functionalities rely on [psutil](https://psutil.readthedocs.io/en/latest/) and [plotly](https://plotly.com/), which can be installed manually or using Geoutils development dependencies.
 ```
 
 With the profiling activated with the graphs output, two kinds of .HTML graphs will be created by default :
