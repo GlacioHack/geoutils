@@ -770,7 +770,7 @@ class TestMaskGeotransformations:
 
         # Reproject mask - resample to 100 x 100 grid
         mask_orig = mask.copy()
-        mask_reproj = mask.reproject(grid_size=(100, 100), force_source_nodata=2, resampling="nearest")
+        mask_reproj = mask.reproject(grid_size=(100, 100), resampling="nearest")
 
         # Check instance is respected
         assert isinstance(mask_reproj, gu.Raster) and mask_reproj.is_mask
@@ -781,18 +781,46 @@ class TestMaskGeotransformations:
 
         # Check inplace behaviour works
         mask_tmp = mask.copy()
-        mask_tmp.reproject(grid_size=(100, 100), force_source_nodata=2, inplace=True, resampling="nearest")
+        mask_tmp.reproject(grid_size=(100, 100), inplace=True, resampling="nearest")
         assert mask_tmp.raster_equal(mask_reproj)
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
-        with pytest.warns(UserWarning):
-            mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), force_source_nodata=2, resampling="nearest")
+        mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), resampling="nearest")
         mask_uint8_reproj = mask_uint8_reproj.astype("bool")
+        # The strict comparison ensures masked data are propagated exactly the same
+        assert mask_reproj.raster_equal(mask_uint8_reproj, strict_masked=True)
 
-        assert mask_reproj.raster_equal(mask_uint8_reproj, strict_masked=False)
-
-        # Test 2: should raise a warning when the resampling differs from nearest
-
+        # Test 2: Should raise a warning when the resampling differs from nearest
         with pytest.warns(UserWarning, match="Reprojecting a raster mask .*"):
-            mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)
+            mask.reproject(res=50, resampling="bilinear")
+
+    def test_reproject__no_inters(self) -> None:
+        """Test reprojection behaviour without intersection of inputs."""
+
+        # Create two raster, one boolean
+        dem_bool = gu.Raster.from_array(
+            np.random.randint(2, size=(100, 100), dtype=bool),
+            transform=rio.transform.from_origin(0, 100, 1, 1),
+            crs=4326,
+        )
+        ref_dem = gu.Raster.from_array(
+            np.random.randint(100, size=(100, 100), dtype="uint8"),
+            transform=rio.transform.from_origin(0, 100, 1, 1),
+            crs=4326,
+        )
+
+        # With no intersection
+        dem_bool_crop = dem_bool.icrop((0, 0, 20, 20))
+        ref_dem_crop = ref_dem.icrop((40, 40, 60, 60))
+
+        assert not dem_bool_crop.get_footprint_projected(ref_dem_crop.crs).intersects(
+            ref_dem_crop.get_footprint_projected(ref_dem_crop.crs)
+        )[0]
+
+        res = dem_bool_crop.reproject(ref_dem_crop, resampling="nearest")
+        assert isinstance(res, gu.raster.raster.Raster)
+        # All output points should be masked
+        assert np.all(res.data.mask)
+        # Default data value (behind the mask) is True
+        assert np.all(res.data.data)

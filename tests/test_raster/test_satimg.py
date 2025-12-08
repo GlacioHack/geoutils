@@ -81,7 +81,7 @@ class TestSatImg:
 
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
-        rast.save(temp_file)
+        rast.to_file(temp_file)
         saved = gu.Raster(temp_file)
         saved_tags = saved.tags
         rast_tags = rast.tags

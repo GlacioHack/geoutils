@@ -58,6 +58,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.filters import _filter
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.interpolate import _interp_points
 from geoutils.interface.raster_point import (
@@ -2027,7 +2028,7 @@ class Raster:
             if isinstance(inlier_mask, Raster) and inlier_mask.is_mask:
                 inlier_points = np.count_nonzero(inlier_mask.data)
             else:
-                inlier_points = np.count_nonzero(inlier_mask)
+                inlier_points = np.count_nonzero(inlier_mask)  # type: ignore
             dem_masked = self.copy()
 
             # Mask pixels from the inlier_mask
@@ -2710,7 +2711,7 @@ class Raster:
             raster_copy.transform = translated_transform
             return raster_copy
 
-    def save(
+    def to_file(
         self,
         filename: str | pathlib.Path | IO[bytes],
         driver: str = "GTiff",
@@ -2826,6 +2827,26 @@ class Raster:
                     warnings.warn("A geotransform previously set is going to be cleared due to the setting of GCPs.")
 
                 dst.gcps = (rio_gcps, gcps_crs)
+
+    @deprecate(
+        removal_version=Version("0.3.0"),
+        details="The function .save() will be soon deprecated, use .to_file() instead.",
+    )  # type: ignore
+    def save(
+        self,
+        filename: str | pathlib.Path | IO[bytes],
+        driver: str = "GTiff",
+        dtype: DTypeLike | None = None,
+        nodata: Number | None = None,
+        compress: str = "deflate",
+        tiled: bool = False,
+        blank_value: int | float | None = None,
+        co_opts: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        gcps: list[tuple[float, ...]] | None = None,
+        gcps_crs: CRS | None = None,
+    ) -> None:
+        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
 
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
@@ -3579,6 +3600,69 @@ class Raster:
             return z
         else:
             return gu.PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
+
+    @overload
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[False] = False,
+        size: int = 3,
+        **kwargs: dict[str, Any],
+    ) -> RasterType: ...
+
+    @overload
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[True],
+        size: int = 3,
+        **kwargs: dict[str, Any],
+    ) -> None: ...
+
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        inplace: bool = False,
+        size: int = 3,
+        **kwargs: dict[str, Any],
+    ) -> RasterType | None:
+        """
+        Apply a filter to the array.
+
+        :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
+                       for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
+        :param inplace: Whether to modify the raster in-place.
+        :param size: window size for filter
+
+        :return: A new Raster instance with the filtered data (or None if inplace)
+
+        :raises ValueError: If the filter name is not one of the predefined options.
+        :raises TypeError: If `method` is neither a string nor a callable.
+        """
+        # Convert data to float to avoid integer issues with nodata
+        array = self.data.astype(float)
+
+        # Mask nodata values
+        masked_array = np.ma.masked_equal(array, self.nodata)
+
+        # Fill masked values with nodata for filtering, to match SciPy behavior
+        filled_array = masked_array.filled(self.nodata)
+
+        # Apply filter
+        filtered_array = _filter(filled_array, method, size, **kwargs)
+
+        # Mask nodata again after filtering
+        final_masked = np.ma.masked_equal(filtered_array, self.nodata)
+        final_masked.set_fill_value(self.nodata)
+        final_masked = final_masked.astype(float)
+
+        if inplace:
+            self._data = final_masked
+            return None
+        else:
+            return self.from_array(final_masked, self.transform, self.crs, self.nodata, self.area_or_point)
 
     def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """

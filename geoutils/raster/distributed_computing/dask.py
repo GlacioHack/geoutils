@@ -481,7 +481,7 @@ def delayed_reproject(
         )
     )
 
-    # 4/ Call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
+    # We call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
 
     # Add fixed arguments to keywords
     kwargs.update(
