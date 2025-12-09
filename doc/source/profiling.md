@@ -66,9 +66,9 @@ If you also want to track memory usage over time for a specific function call, s
 If the function is too fast (or slow) for the default memory sampling interval, you can modify it with *interval* (in seconds).
 
 ```{code-cell} ipython3
-from geoutils.profiler import profile_tool
+from geoutils import profiler
 
-@profile_tool("my profiled function name", memprof=True, interval=0.5)  # type: ignore
+@profiler.profile("my profiled function name", memprof=True, interval=0.5)  # type: ignore
 def my_function():
     ...
 ```

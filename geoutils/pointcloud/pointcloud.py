@@ -36,7 +36,7 @@ from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
-import geoutils.profiler as Profiler
+from geoutils import profiler
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
@@ -281,7 +281,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     See the API for more details.
     """
 
-    @Profiler.profile("geoutils.pointcloud.pointcloud.__init__", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.pointcloud.pointcloud.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
@@ -1263,7 +1263,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
-    @Profiler.profile("geoutils.pointcloud.pointcloud.get_stats", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.pointcloud.pointcloud.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -1334,7 +1334,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
-    @Profiler.profile("geoutils.pointcloud.pointcloud.subsample", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.pointcloud.pointcloud.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
@@ -1356,7 +1356,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
 
-    @Profiler.profile("geoutils.pointcloud.pointcloud.grid", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.pointcloud.pointcloud.grid", memprof=True)  # type: ignore
     def grid(
         self,
         ref: gu.Raster | None = None,

@@ -298,9 +298,9 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
     :param memprof: whether to profile the memory consumption
 
     :example:
-        from geoutils.profiler import Profiler
+        from geoutils import profiler
 
-        @Profiler.profile("my profiled function", memprof=True, interval=0.05)  # type: ignore
+        @profiler.profile("my profiled function", memprof=True, interval=0.05)  # type: ignore
         def my_function():
 
     """
