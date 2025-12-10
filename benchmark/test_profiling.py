@@ -62,7 +62,7 @@ def my_test(dem: gu.Raster):
     return peak_memory / 1024, duration
 
 
-def test_profiler_and_decorators_activated(dem):
+def test_profiler_and_decorators_activated(dem: gu.Raster):
     """
     Run my_test NTEST time and compute duration (s) and memory consumption max
     with enabled Profiler and all decorated functions activated
@@ -83,11 +83,11 @@ def test_profiler_and_decorators_activated(dem):
     profiling_info.to_csv("test_profiler_and_decorators_activated.csv")
 
 
-def test_profiler_and_decorators_not_selected(dem):
+def test_profiler_and_decorators_not_selected(dem: gu.Raster):
     """
     Run my_test NTEST time and compute duration (s) and memory consumption max
-    with enabled Profiler and all decorated functions activated
-    Save each test metrics in test_profiler_and_decorators_activated.csv
+    with enabled Profiler and all decorated functions not selected
+    Save each test metrics in test_profiler_and_decorators_not_selected.csv
     """
     columns = ["profiling", "decorators", "memory", "time"]
     profiling_info = pd.DataFrame(columns=columns)
@@ -105,7 +105,12 @@ def test_profiler_and_decorators_not_selected(dem):
     profiling_info.to_csv("test_profiler_and_decorators_not_selected.csv")
 
 
-def test_no_profiling_decorators_presents(dem):
+def test_no_profiling_decorators_presents(dem: gu.Raster):
+    """
+    Run my_test NTEST time and compute duration (s) and memory consumption max
+    with no Profiler and all decorated functions
+    Save each test metrics in test_no_profiling_decorators_presents.csv
+    """
     columns = ["profiling", "decorators", "memory", "time"]
     profiling_info = pd.DataFrame(columns=columns)
 
@@ -121,7 +126,12 @@ def test_no_profiling_decorators_presents(dem):
     profiling_info.to_csv("test_no_profiling_decorators_presents.csv")
 
 
-def test_no_profiling_no_decorators(dem):
+def test_no_profiling_no_decorators(dem: gu.Raster):
+    """
+    Run my_test NTEST time and compute duration (s) and memory consumption max
+    with no Profiler and commented decorated functions
+    Save each test metrics in test_no_profiling_no_decorators.csv
+    """
     # remove get_stats decorator
     file_get_stats = "../geoutils/raster/raster.py"
     str_dec_get_stats = '    @profiler.profile("geoutils.raster.raster.get_stats"'
