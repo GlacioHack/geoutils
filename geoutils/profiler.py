@@ -290,7 +290,7 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
 
     To profile other functions and add them to the summary graphs and data, simply add the @profile decorator before
     them, providing a descriptive name. If you also want to track memory usage over time for a specific function call,
-    set `memprof=True` in the decorator and if the function is too fast (or slow) for the default memory sampling
+    set memprof=True in the decorator and if the function is too fast (or slow) for the default memory sampling
     interval, you can modify it with the interval parameter (in seconds).
 
     :param name: name of the function in the report
