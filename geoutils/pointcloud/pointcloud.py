@@ -1275,6 +1275,45 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Retrieve specified statistics or all available statistics for the point cloud data. Allows passing custom
         callables to calculate custom stats.
 
+       Common statistics for an N-D array :
+
+        - Mean: arithmetic mean of the data, ignoring masked values.
+        - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
+        - Max: maximum value among the data, ignoring masked values.
+        - Min: minimum value among the data, ignoring masked values.
+        - Sum: sum of all data, ignoring masked values.
+        - Sum of squares: sum of the squares of all data, ignoring masked values.
+        - 90th percentile: point below which 90% of the data falls, ignoring masked values.
+        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, ignoring masked values.
+        - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset,
+        representing the range within which 90% of the data points lie. Ignore masked values.
+        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to outliers
+         compared to standard deviation. Ignore masked values.
+        - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give
+        insight into the spread of the data. Only relevant when the raster represents a difference of two objects.
+        Ignore masked values.
+        - Std (Standard deviation): measures the spread or dispersion of the data around the mean, ignoring masked values.
+        - Valid count: number of finite data points in the array. It counts the non-masked elements.
+        - Total count: total size of the raster.
+        - Percentage valid points: ratio between Valid count and Total count.
+
+        For all statistics up to "Std", functions from numpy.ma module are used (directly or in the calculation) in case
+        of a masked array, numpy module otherwise.
+
+        "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero).
+        Numpy Masked functions is used is this case or if the Point Cloud was already a masked array.
+        Percentage valid points is calculated accordingly.
+
+        If an inlier mask is passed:
+        - Total inlier count: number of data points in the inlier mask.
+        - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
+        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification statistics.
+        - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
+
+        They are all computed based on the previously stated final_count_nonzero.
+
+        Callable functions are supported as well.
+
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,

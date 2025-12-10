@@ -132,7 +132,7 @@ def _statistics(
 
     "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero), previously
     calculated in case of a Raster.get_stats() called with an inlier_mask, before the mask application.
-    Numpy Masked functions is used is this case or if the Raster was already a masked array.
+    Numpy Masked functions is used is this case or if the input was already a masked array.
     Percentage valid points is calculated accordingly.
 
     If an inlier mask is passed:
