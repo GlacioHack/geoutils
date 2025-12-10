@@ -163,9 +163,9 @@ def test_no_profiling_no_decorators(dem: gu.Raster):
 
 dem = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
-# test_profiler_and_decorators_activated(dem)
-# test_profiler_and_decorators_not_selected(dem)
-# test_no_profiling_decorators_presents(dem)
+test_profiler_and_decorators_activated(dem)
+test_profiler_and_decorators_not_selected(dem)
+test_no_profiling_decorators_presents(dem)
 test_no_profiling_no_decorators(dem)
 
 df_profiler_and_decorators_activated = pd.read_csv("test_profiler_and_decorators_activated.csv", index_col=0)
