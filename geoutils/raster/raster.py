@@ -2012,15 +2012,17 @@ class Raster:
         - Sum: sum of all data, ignoring masked values.
         - Sum of squares: sum of the squares of all data, ignoring masked values.
         - 90th percentile: point below which 90% of the data falls, ignoring masked values.
-        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, ignoring masked values.
+        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, ignoring masked
+        values.
         - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset,
         representing the range within which 90% of the data points lie. Ignore masked values.
-        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to outliers
-         compared to standard deviation. Ignore masked values.
+        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to
+        outliers compared to standard deviation. Ignore masked values.
         - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give
         insight into the spread of the data. Only relevant when the raster represents a difference of two objects.
         Ignore masked values.
-        - Std (Standard deviation): measures the spread or dispersion of the data around the mean, ignoring masked values.
+        - Std (Standard deviation): measures the spread or dispersion of the data around the mean, ignoring masked
+        values.
         - Valid count: number of finite data points in the array. It counts the non-masked elements.
         - Total count: total size of the raster.
         - Percentage valid points: ratio between Valid count and Total count.
@@ -2035,7 +2037,8 @@ class Raster:
         If an inlier mask is passed:
         - Total inlier count: number of data points in the inlier mask.
         - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
-        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification statistics.
+        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification
+        statistics.
         - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
 
         They are all computed based on the previously stated final_count_nonzero.
