@@ -31,7 +31,7 @@ from scipy.stats.mstats import mquantiles
 
 from geoutils import profiler
 from geoutils._typing import NDArrayNum
-from geoutils.stats.estimators import linear_error, nmad, sum_square, rmse
+from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
 
 _STATS_ALIASES = {
     "mean": "Mean",
