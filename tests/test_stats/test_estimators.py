@@ -3,10 +3,11 @@ Test the statistical estimator module.
 """
 
 import numpy as np
+import pytest
 import scipy
 
 from geoutils import Raster, examples
-from geoutils.stats import linear_error, nmad
+from geoutils.stats import linear_error, nmad, rmse, sum_square
 
 
 class TestEstimators:
@@ -60,5 +61,35 @@ class TestEstimators:
         le90_masked = linear_error(masked_data, interval=90)
         le50_masked = linear_error(masked_data, interval=50)
 
-        assert le90_masked == 4.5
+        assert le90_masked == pytest.approx(4.5)
         assert le50_masked == 2.5
+
+    def test_rmse(self) -> None:
+        """Test RMSE functionality runs on any type of input"""
+
+        test_data = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        # Test masked arrays with invalid data (should ignore NaNs/masked values)
+        masked_data = np.ma.masked_array(test_data, mask=[0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+        # Corresponding array
+        test_data_crop = np.array([0, 1, 2, 3, 4, 5])
+
+        rmse_data = rmse(test_data_crop)
+        rmse_masked_data = rmse(masked_data)
+
+        assert rmse_data == rmse_masked_data
+        assert rmse_data == pytest.approx(3.0276503540974917)
+
+    def test_sum_square(self) -> None:
+        """Test Sum Square functionality runs on any type of input"""
+
+        test_data = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        # Test masked arrays with invalid data (should ignore NaNs/masked values)
+        masked_data = np.ma.masked_array(test_data, mask=[0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+        # Corresponding array
+        test_data_crop = np.array([0, 1, 2, 3, 4, 5])
+
+        sum_square_data = sum_square(test_data_crop)
+        sum_square_masked_data = sum_square(masked_data)
+
+        assert sum_square_data == sum_square_masked_data
+        assert sum_square_data == 55
