@@ -29,9 +29,9 @@ import numpy as np
 from scipy.stats import iqr
 from scipy.stats.mstats import mquantiles
 
+from geoutils import profiler
 from geoutils._typing import NDArrayNum
-from geoutils.profiler import profile_tool
-from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
+from geoutils.stats.estimators import linear_error, nmad
 
 _STATS_ALIASES = {
     "mean": "Mean",
@@ -98,13 +98,12 @@ _ALIAS_STATS_LIST_MASK = {
 }
 
 
-@profile_tool("stats.stats._statistics", memprof=True)  # type: ignore
+@profiler.profile("geoutils.stats.stats._statistics", memprof=True)  # type: ignore
 def _statistics(
     data: NDArrayNum,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     counts: tuple[int, int] | None = None,
-) -> dict[str, float]:
-    """
+) -> dict[str, float]:    """
     Calculate common statistics for an N-D array :
 
     - Mean: arithmetic mean of the data, ignoring masked values.

@@ -32,8 +32,8 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
+from geoutils import profiler
 from geoutils._typing import DTypeLike, MArrayNum
-from geoutils.profiler import profile_tool
 from geoutils.raster._geotransformations import (
     _get_reproj_params,
     _is_reproj_needed,
@@ -48,7 +48,7 @@ from geoutils.raster.georeferencing import _cast_pixel_interpretation
 ##############
 
 
-@profile_tool("raster.geotransformations._reproject", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)  # type: ignore
 def _reproject(
     source_raster: gu.Raster,
     ref: gu.Raster,
@@ -138,7 +138,7 @@ def _reproject(
 #########
 
 
-@profile_tool("raster.geotransformations._crop", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
 def _crop(
     source_raster: gu.Raster,
     bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
@@ -232,7 +232,7 @@ def _crop(
 ##############
 
 
-@profile_tool("raster.geotransformations._translate", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)  # type: ignore
 def _translate(
     transform: affine.Affine,
     xoff: float,

@@ -27,8 +27,8 @@ import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
+from geoutils import profiler
 from geoutils._typing import NDArrayNum, Number
-from geoutils.profiler import profile_tool
 from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
 
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
@@ -251,7 +251,7 @@ def _interp_points(
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
 
-@profile_tool("interface.interpolate._interp_points", memprof=True)  # type: ignore
+@profiler.profile("geoutils.interface.interpolate._interp_points", memprof=True)  # type: ignore
 def _interp_points(
     array: NDArrayNum,
     transform: rio.transform.Affine,

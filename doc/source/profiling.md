@@ -1,17 +1,17 @@
 # Profiling
 
-Geoutils has a built-in profiling tool, that can be used to provide more insight on the memory and time use of a function if needed.
+GeoUtils has a built-in profiling tool, that can be used to provide more insight on the memory and time use of a function if needed.
 ```{warning}
-The profiling functionalities rely on psutil and plotly, which can be installed manually or using Geoutils development dependencies.
+The profiling functionalities rely on [psutil](https://psutil.readthedocs.io/en/latest/) and [plotly](https://plotly.com/), which can be installed manually or using Geoutils development dependencies.
 ```
 
 With the profiling activated with the graphs output, two kinds of .HTML graphs will be created by default :
 * an icicle graph `time_graph.html`, showing the time spent in each step of the entire process
-* a graph `memory_[function].html` for each decorated functions used, showing the memory consumption of xDEM at regular intervals during the execution
+* a graph `memory_[function].html` for each decorated functions used, showing the memory consumption of GeoUtils at regular intervals during the execution
 
 ## Configuration and parameters
 
-Geoutils's profiling configuration works just like a pipeline step. It is executed only if at least one of this two parameters is set to True :
+GeoUtils's profiling configuration works just like a pipeline step. It is executed only if at least one of this two parameters is set to True :
 
 | Name              | Description                       | Type | Default value | Required |
 |-------------------|-----------------------------------| ------- | ------- | ------- |
@@ -30,30 +30,33 @@ After this, if `save_graphs` or `save_raw_data` are True, every profiled functio
 
 ## Saved profiling data
 
-When *save_raw_data* is enabled, Geoutils saves the profiling information as a .pickle file containing a {class}`~pandas.DataFrame` with the following structure:
+The function `generate_summary(output)` saves the profiling information in the output path directory given in input (output_profiling if not specified).
+
+- When `save_graphs` is enabled, the graphs as listed as before are exported.
+- when `save_raw_data` is enabled, GeoUtils saves all stored information as a .pickle file containing a {class}`~pandas.DataFrame` with the following structure:
 
 | Name              | Description                                                                                                                                       |
 |-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | **level**         | Depth of the function call in the profiling stack                                                                                                 |
 | **uuid_function** | Unique universal identifier (UUID) of the function call                                                                                           |
-| **name**         | Understandable name given to the function call                                                                                                    |
+| **name**          | Understandable name given to the function call                                                                                                    |
 | **uuid_parent**   | UUID of the "parent" call (call that was running when this call was made)                                                                         |
 | **time**          | Time (in seconds) it took to execute the function                                                                                                 |
 | **call_time**     | Timestamp (in seconds) at which the call was made                                                                                                 |
 | **memory**        | Either None or a list of (timestamp memory) tuples representing memory consumption (in megabytes) at each timestamp during the function execution |
 
+If no profiled function has been called, `generate_summary(output)` generate no output.
 
 ## The profiled functions
 
-Currently, some processes are already profiled by Geoutils with a memory consumption report each 0.05 seconds.
-- initialization, get_stats(), crop(), icrop(), reproject(), interp_points() and subsample() in Geoutils.Raster
-- all geo-transformations _reproject(), _crop() and _translate() in Geoutils.raster.geotransformations
-- initialization, get_stats(), subsample() and grid() in Geoutils.PointCloud
-- initialization, crop(), reproject(), rasterize() in Geoutils.Vector
-- subsample_array() in Geoutils.stats.sampling
-- _statistics() in Geoutils.stats.statistics
-- _interp_points() in Geoutils.interface.interpolate
-- crop() and icrop() function _crop()
+Currently, some processes are already profiled by GeoUtils with a memory consumption report each 0.05 seconds.
+- {func}`~geoutils.Raster`, {func}`~geoutils.Raster.get_stats`, {func}`~geoutils.Raster.crop`, {func}`~geoutils.Raster.icrop`, {func}`~geoutils.Raster.reproject`, {func}`~geoutils.Raster.interp_points` and {func}`~geoutils.Raster.subsample`
+- {func}`~geoutils.PointCloud`, {func}`~geoutils.PointCloud.get_stats`, {func}`~geoutils.PointCloud.subsample` and {func}`~geoutils.PointCloud.grid`
+- {func}`~geoutils.Vector`, {func}`~geoutils.Vector.crop`, {func}`~geoutils.Vector.reproject`, {func}`~geoutils.Vector.rasterize`
+- all existing geo-transformations like `_reproject()`, `_crop()` and `_translate()` for {class}`~geoutils.Raster`, {class}`~geoutils.PointCloud` and {class}`~geoutils.Vector`
+- `subsample_array()` and  `_statistics()` in {class}`Geoutils.stats`
+- `_interp_points()` in `Geoutils.interface.interpolate`
+
 
 ### Modifying the profiled functions
 
@@ -63,9 +66,9 @@ If you also want to track memory usage over time for a specific function call, s
 If the function is too fast (or slow) for the default memory sampling interval, you can modify it with *interval* (in seconds).
 
 ```{code-cell} ipython3
-from geoutils.profiler import profile_tool
+from geoutils import profiler
 
-@profile_tool("my profiled function name", memprof=True, interval=0.5)  # type: ignore
+@profiler.profile("my profiled function name", memprof=True, interval=0.5)  # type: ignore
 def my_function():
     ...
 ```
@@ -84,8 +87,4 @@ Here are two examples of graphs with a personal profiled function `my_program`, 
 ![memory_my_program.html](imgs/profiling_memory_my_program.html.png)
 ![time_graph.html](imgs/profilingprofiling_time_graph.html.png)
 
-You can experiment these graphs here : [memory_my_program.html](html/profiling/memory_my_program.html) and [time_graph.html](html/profiling/time_graph.html).
-
-```{warning}
-If no profiled function has been called, `generate_summary(output)` generate no output.
-```
+You can experiment with these graphs here : [memory_my_program.html](html/profiling/memory_my_program.html) and [time_graph.html](html/profiling/time_graph.html).

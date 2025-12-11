@@ -22,6 +22,7 @@ import logging
 import os
 import time
 import uuid
+from functools import wraps
 from multiprocessing import Pipe, connection
 from threading import Thread
 from typing import Any
@@ -106,12 +107,15 @@ class Profiler:
         }
 
     @staticmethod
-    def generate_summary(output: str) -> None:
+    def generate_summary(output: str = None) -> None:
         """
         Generate Profiling summary
 
-        :param output: Output directory path
+        :param output: Output directory path, if None output is "output_profiling" in the current directory
         """
+        if output is None:
+            output = "output_profiling"
+
         if not Profiler.enabled or len(Profiler._profiling_info) == 0:
             return
 
@@ -281,7 +285,7 @@ class Profiler:
         fig.write_html(path_fig)
 
 
-def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False):  # type: ignore
+def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  # type: ignore
     """
     Geoutils profiling decorator
 
@@ -295,9 +299,9 @@ def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False
     :param memprof: whether to profile the memory consumption
 
     :example:
-        from geoutils.profiler import Profiler
+        from geoutils import profiler
 
-        @profile("my profiled function", memprof=True, interval=0.05)  # type: ignore
+        @profiler.profile("my profiled function", memprof=True, interval=0.05)  # type: ignore
         def my_function():
 
     """
@@ -307,7 +311,8 @@ def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False
         Inner function
         """
 
-        def wrapper_profile_tool(*args, **kwargs):  # type: ignore
+        @wraps(func)
+        def wrapper_profile(*args, **kwargs):  # type: ignore
             """
             Profiling wrapper
 
@@ -364,7 +369,7 @@ def profile_tool(name: str, interval: int | float = 0.005, memprof: bool = False
             Profiler.add_profiling_info(func_data)
             return res
 
-        return wrapper_profile_tool
+        return wrapper_profile
 
     return decorator_generator
 
