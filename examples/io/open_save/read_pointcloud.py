@@ -33,4 +33,4 @@ pc.plot(cbar_title="Elevation (m)")
 # %%
 # Finally, a point cloud is saved using :func:`~geoutils.Vector.save`.
 
-pc.save("mypc.gpkg")
+pc.to_file("mypc.gpkg")
