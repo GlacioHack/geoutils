@@ -23,7 +23,6 @@ Module for Vector class.
 from __future__ import annotations
 
 import pathlib
-import profile
 from collections import abc
 from os import PathLike
 from typing import (
@@ -45,7 +44,6 @@ import pandas as pd
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
