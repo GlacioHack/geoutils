@@ -25,6 +25,7 @@ import uuid
 from multiprocessing import Pipe, connection
 from threading import Thread
 from typing import Any
+from functools import wraps
 
 import pandas as pd
 
@@ -110,7 +111,7 @@ class Profiler:
         """
         Generate Profiling summary
 
-        :param output: Output directory path, if None output is "output_profiling" in the current directory
+        :param output: Output directory path, if None output is output_profiling in the current directory
         """
         if output is None:
             output = "output_profiling"
@@ -154,7 +155,7 @@ class Profiler:
     def get_profiling_info(function_name: str = None) -> pd.DataFrame:
         """
         Get profiling dataframe.
-        If function_name is filled, it returns only matching rows (empty if no "name" matches).
+        If function_name is filled, it returns only matching rows (empty if no name matches).
 
         :param function_name: function name to show the profiled information
         :return dataframe information restrains function_name if filled
@@ -300,7 +301,7 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
     :example:
         from geoutils import profiler
 
-        @profiler.profile("my profiled function", memprof=True, interval=0.05)  # type: ignore
+        @profiler.profile(my profiled function, memprof=True, interval=0.05)  # type: ignore
         def my_function():
 
     """
@@ -310,6 +311,7 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
         Inner function
         """
 
+        @wraps(func)
         def wrapper_profile(*args, **kwargs):  # type: ignore
             """
             Profiling wrapper
