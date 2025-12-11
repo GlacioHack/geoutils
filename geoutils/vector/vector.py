@@ -23,6 +23,7 @@ Module for Vector class.
 from __future__ import annotations
 
 import pathlib
+import profile
 from collections import abc
 from os import PathLike
 from typing import (
@@ -1261,7 +1262,7 @@ class Vector:
         inplace: bool = False,
     ) -> VectorType | None: ...
 
-    @profile_tool("vector.vector.crop", memprof=True)  # type: ignore
+    @profiler.profile("vector.vector.crop", memprof=True)  # type: ignore
     def crop(
         self: VectorType,
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
@@ -1335,7 +1336,7 @@ class Vector:
         inplace: bool = False,
     ) -> Vector | None: ...
 
-    @profile_tool("vector.vector.reproject", memprof=True)  # type: ignore
+    @profiler.profile("vector.vector.reproject", memprof=True)  # type: ignore
     def reproject(
         self: Vector,
         ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
@@ -1501,7 +1502,7 @@ class Vector:
                 assert transform is not None  # For mypy
                 return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
-    @profile_tool("vector.vector.rasterize", memprof=True)  # type: ignore
+    @profiler.profile("vector.vector.rasterize", memprof=True)  # type: ignore
     def rasterize(
         self,
         raster: gu.Raster | None = None,

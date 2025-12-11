@@ -31,7 +31,7 @@ from scipy.stats.mstats import mquantiles
 
 from geoutils import profiler
 from geoutils._typing import NDArrayNum
-from geoutils.stats.estimators import linear_error, nmad
+from geoutils.stats.estimators import linear_error, nmad, sum_square, rmse
 
 _STATS_ALIASES = {
     "mean": "Mean",
@@ -103,7 +103,8 @@ def _statistics(
     data: NDArrayNum,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     counts: tuple[int, int] | None = None,
-) -> dict[str, float]:    """
+) -> dict[str, float]:
+    """
     Calculate common statistics for an N-D array :
 
     - Mean: arithmetic mean of the data, ignoring masked values.
