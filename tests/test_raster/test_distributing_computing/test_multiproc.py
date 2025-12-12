@@ -253,3 +253,9 @@ class TestMultiproc:
             assert out_img_multi.count == n
             assert out_img_multi.shape == (500, 500)
             assert out_img_single.raster_equal(out_img_multi)
+
+    @pytest.mark.skip()  # type: ignore
+    def test_map_overlap_multiproc_save_bigTiff(self) -> None:
+        """
+        Test the multiprocessing map function with a simple operation returning a raster > 4go (BigTiff case)
+        """
