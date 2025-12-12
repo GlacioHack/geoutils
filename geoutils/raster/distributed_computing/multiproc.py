@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 import logging
-import struct
 import tempfile
 import warnings
 from typing import Any, Callable, Literal, overload
@@ -224,15 +223,12 @@ def map_overlap_multiproc_save(
 
     raster_output = _write_multiproc_result(tasks, config, file_metadata)
 
-    with open(config.outfile, "rb") as f:
-        header = f.read(4)
-        byteorder = {b"II": "<", b"MM": ">", b"EP": "<"}[header[:2]]
-        version = struct.unpack(byteorder + "H", header[2:4])[0]
-        if version == 43:
-            warnings.warn(
-                "Due to the size of the output raster, it has been saved in BigTIFF format.",
-                category=UserWarning,
-            )
+    # Warns User if output file is a bigTiff
+    if raster_output.isBigTiff():
+        warnings.warn(
+            "Due to the size of the output raster, it has been saved in BigTIFF format.",
+            category=UserWarning,
+        )
 
     return raster_output
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 import pathlib
+import struct
 import warnings
 from collections import abc
 from contextlib import ExitStack
@@ -3905,6 +3906,23 @@ class Raster:
         return subsample_array(
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
+
+    def isBigTiff(self) -> bool:
+        """
+        Test is the raster file name is a BigTiff or a normal Tiff.
+        In the file header, BigTIFF is declared as 0x002B (43) at offset 2 bytes as compared with the TIFF
+        version of 0x002A (42)"
+
+        :return: if the file name is a BigTiff or not
+        """
+        if self.filename and pathlib.Path(self.filename).exists():
+            with open(self.filename, "rb") as f:
+                header = f.read(4)
+                byteorder = {b"II": "<", b"MM": ">", b"EP": "<"}[header[:2]]
+                version = struct.unpack(byteorder + "H", header[2:4])[0]
+                return version == 43
+        else:
+            return False
 
 
 class Mask(Raster):
