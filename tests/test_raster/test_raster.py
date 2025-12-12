@@ -1907,6 +1907,13 @@ class TestRaster:
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
+    def test_isBigTiff(self) -> None:
+        """Test isBigTiff function"""
+
+        img = gu.Raster(self.landsat_rgb_path)
+        assert img.isBigTiff() is False
+        # TODO: test with BigTiff image
+
 
 class TestMask:
     """A mask is a boolean Raster, defined on file opening with is_mask=True."""
