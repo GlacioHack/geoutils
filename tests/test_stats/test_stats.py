@@ -279,9 +279,8 @@ class TestStats:
             "Percentage inlier points": np.float64(46.03015267175572),
             "Percentage valid inlier points": np.float64(100.0),
         }
-        print("li")
         compare_dict(res_stats_mask, rast.get_stats(inlier_mask=inlier_mask))
-        print("l")
+
         # Verify cropped raster
         nrows, ncols = rast.shape
         rast_crop = rast.icrop((100, 100, ncols - 100, nrows - 100))

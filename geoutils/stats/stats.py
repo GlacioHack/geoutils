@@ -115,24 +115,24 @@ def _statistics(
     - Sum of squares: sum of the squares of all data, ignoring masked values.
     - 90th percentile: point below which 90% of the data falls, ignoring masked values.
     - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, ignoring masked values.
-    - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset,
+    - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset, \
     representing the range within which 90% of the data points lie. Ignore masked values.
-    - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to outliers
-     compared to standard deviation. Ignore masked values.
-    - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give
-    insight into the spread of the data. Only relevant when the raster represents a difference of two objects.
+    - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to \
+    outliers compared to standard deviation. Ignore masked values.
+    - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give \
+    insight into the spread of the data. Only relevant when the raster represents a difference of two objects. \
     Ignore masked values.
     - Std (Standard deviation): measures the spread or dispersion of the data around the mean, ignoring masked values.
     - Valid count: number of finite data points in the array. It counts the non-masked elements.
     - Total count: total size of the raster.
     - Percentage valid points: ratio between Valid count and Total count.
 
-    For all statistics up to "Std", functions from numpy.ma module are used (directly or in the calculation) in case
-    of a masked array, numpy module otherwise.
+    For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
+    in case of a masked array, NumPy module otherwise.
 
     "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero), previously
-    calculated in case of a Raster.get_stats() called with an inlier_mask, before the mask application.
-    Numpy Masked functions is used is this case or if the input was already a masked array.
+    calculated in case of a Raster.get_stats() called with an inlier_mask, before the mask application. NumPy Masked
+    functions is used is this case or if the input was already a masked array.
     Percentage valid points is calculated accordingly.
 
     If an inlier mask is passed:
