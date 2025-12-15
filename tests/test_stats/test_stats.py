@@ -436,7 +436,7 @@ class TestStats:
         print("rast_crop_proj", rast_crop_proj)
         rast_crop_proj_pc = rast_crop_proj.to_pointcloud()
         print("rast_crop_proj_pc", rast_crop_proj_pc)
-        print("len rast_crop_proj_pc", len(rast_crop_proj_pc))
+        print("len rast_crop_proj_pc", len(rast_crop_proj_pc["b1"]))
         print(rast_crop_proj_pc["b1"].min())
         print(rast_crop_proj_pc["b1"].max())
         print(rast_crop_proj_pc["b1"].mean())
