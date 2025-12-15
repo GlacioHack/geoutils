@@ -402,8 +402,14 @@ class TestStats:
 
         # Verify cropped raster pc
         nrows, ncols = rast.shape
+        print("shape avant:", nrows, ncols)
         rast_crop = rast.icrop((100, 100, ncols - 100, nrows - 100))
+        print("shape apres:", rast_crop.shape)
+
         rast_crop_pc = rast_crop.to_pointcloud()
+        print("b1:", rast_crop_pc["b1"])
+        print("len(b1):", len(rast_crop_pc["b1"]))
+        print("b1.mean:", rast_crop_pc["b1"].mean())
         rast_stats_crop_pc = {
             "Mean": np.float64(148.69901465201465),
             "Median": np.float64(133.0),
