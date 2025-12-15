@@ -49,7 +49,7 @@ def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
         assert key in dict2
         print("key", key)
         if dict1[key] is not np.nan:
-            assert dict1[key] == pytest.approx(dict2[key], abs=1e-10)
+            assert dict2[key] == pytest.approx(dict1[key], abs=1e-10)
         else:
             assert dict2[key] is np.nan
 
@@ -380,6 +380,7 @@ class TestStats:
         rast = gu.Raster(filename_rast)
         rast_pc = rast.to_pointcloud()
 
+        print("test 1")
         # Verify pc stats
         rast_stats_pc = {
             "Mean": np.float64(144.04460496183205),
@@ -399,6 +400,7 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_pc, rast_pc.get_stats())
+        print("test 2")
 
         # Verify cropped raster pc
         nrows, ncols = rast.shape
@@ -407,9 +409,7 @@ class TestStats:
         print("shape apres:", rast_crop.shape)
 
         rast_crop_pc = rast_crop.to_pointcloud()
-        print("b1:", rast_crop_pc["b1"])
-        print("len(b1):", len(rast_crop_pc["b1"]))
-        print("b1.mean:", rast_crop_pc["b1"].mean())
+
         rast_stats_crop_pc = {
             "Mean": np.float64(148.69901465201465),
             "Median": np.float64(133.0),
@@ -428,10 +428,19 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_crop_pc, rast_crop_pc.get_stats())
+        print("test 3")
 
         # Verify reprojected raster pc
         rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
+        print("shape apres:", rast_crop_proj.shape)
+        print("rast_crop_proj", rast_crop_proj)
         rast_crop_proj_pc = rast_crop_proj.to_pointcloud()
+        print("rast_crop_proj_pc", rast_crop_proj_pc)
+        print("len rast_crop_proj_pc", len(rast_crop_proj_pc))
+        print(rast_crop_proj_pc["b1"].min())
+        print(rast_crop_proj_pc["b1"].max())
+        print(rast_crop_proj_pc["b1"].mean())
+
         rast_stats_crop_proj_pc = {
             "Mean": np.float64(117.80631314205752),
             "Median": np.float64(107.0),
