@@ -2038,7 +2038,7 @@ class Raster:
         - Total inlier count: number of data points in the inlier mask.
         - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
         - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification
-            statistics.
+        statistics.
         - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
 
         They are all computed based on the previously stated final_count_nonzero.

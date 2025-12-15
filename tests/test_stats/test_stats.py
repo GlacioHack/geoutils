@@ -434,7 +434,7 @@ class TestStats:
         rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
         for data in [ rast_crop_proj, rast_crop, rast] :
             print("# data shape:", data.shape, data.shape[0] * rast_crop.shape[1], "->", len(data.to_pointcloud()["b1"]))
-            print ("    ", data.to_pointcloud()["b1"].min(), "to", data.to_pointcloud()["b1"].max())
+            print("    ", data.to_pointcloud()["b1"].min(), "to", data.to_pointcloud()["b1"].max())
 
         print("rast_crop_proj", rast_crop_proj)
         rast_crop_proj_pc = rast_crop_proj.to_pointcloud()
@@ -443,7 +443,7 @@ class TestStats:
         print(rast_crop_proj_pc["b1"].min())
         print(rast_crop_proj_pc["b1"].max())
         print(rast_crop_proj_pc["b1"].mean())
-        print (l)
+
         rast_stats_crop_proj_pc = {
             "Mean": np.float64(117.80631314205752),
             "Median": np.float64(107.0),
