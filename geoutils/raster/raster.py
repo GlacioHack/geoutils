@@ -4025,7 +4025,7 @@ class Raster:
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
 
-    def isBigTiff(self) -> bool:
+    def _is_bigtiff(self) -> bool:
         """
         Test is the raster file name is a BigTiff or a normal Tiff.
         In the file header, BigTIFF is declared as 0x002B (43) at offset 2 bytes as compared with the TIFF
