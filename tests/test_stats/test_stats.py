@@ -380,7 +380,6 @@ class TestStats:
         rast = gu.Raster(filename_rast)
         rast_pc = rast.to_pointcloud()
 
-        print("test 1")
         # Verify pc stats
         rast_stats_pc = {
             "Mean": np.float64(144.04460496183205),
@@ -400,14 +399,10 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_pc, rast_pc.get_stats())
-        print("test 2")
 
         # Verify cropped raster pc
         nrows, ncols = rast.shape
-        print("shape avant:", nrows, ncols)
         rast_crop = rast.icrop((100, 100, ncols - 100, nrows - 100))
-        print("shape apres:", rast_crop.shape)
-
         rast_crop_pc = rast_crop.to_pointcloud()
 
         rast_stats_crop_pc = {
@@ -428,21 +423,15 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_crop_pc, rast_crop_pc.get_stats())
-        print("test 3")
 
         # Verify reprojected raster pc
         rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
-        for data in [ rast_crop_proj, rast_crop, rast] :
-            print("# data shape:", data.shape, data.shape[0] * rast_crop.shape[1], "->", len(data.to_pointcloud()["b1"]))
+        for data in [rast_crop_proj, rast_crop, rast]:
+            print(
+                "# data shape:", data.shape, data.shape[0] * rast_crop.shape[1], "->", len(data.to_pointcloud()["b1"])
+            )
             print("    ", data.to_pointcloud()["b1"].min(), "to", data.to_pointcloud()["b1"].max())
-
-        print("rast_crop_proj", rast_crop_proj)
         rast_crop_proj_pc = rast_crop_proj.to_pointcloud()
-        print("rast_crop_proj_pc", rast_crop_proj_pc)
-        print("len rast_crop_proj_pc", len(rast_crop_proj_pc["b1"]))
-        print(rast_crop_proj_pc["b1"].min())
-        print(rast_crop_proj_pc["b1"].max())
-        print(rast_crop_proj_pc["b1"].mean())
 
         rast_stats_crop_proj_pc = {
             "Mean": np.float64(117.80631314205752),
@@ -462,4 +451,3 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.get_stats())
-
