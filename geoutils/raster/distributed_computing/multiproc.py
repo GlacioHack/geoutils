@@ -224,7 +224,7 @@ def map_overlap_multiproc_save(
     raster_output = _write_multiproc_result(tasks, config, file_metadata)
 
     # Warns User if output file is a bigTiff
-    if raster_output.isBigTiff():
+    if raster_output._is_bigtiff():
         warnings.warn(
             "Due to the size of the output raster, it has been saved in BigTIFF format.",
             category=UserWarning,
