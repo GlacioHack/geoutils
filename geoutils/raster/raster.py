@@ -4027,12 +4027,12 @@ class Raster:
 
     def _is_bigtiff(self) -> bool:
         """
-        Test is the raster file name is a BigTIFF (True) or a normal TIFF (False).
+        Test is the raster file name exists and if it is a BigTIFF (True) or a normal TIFF (False).
 
         In the file header, first two byte indicate the byte order: "II" for little endian and "MM" for big endian.
         The next two-byte word contains the format version number: 42 for TIFF format and 43 for BigTIFF format.
 
-        :return: if the file name is a BigTiff or not
+        :return: if the filename exists and if its is a BigTIFF or not
         """
         if self.filename and pathlib.Path(self.filename).exists():
             with open(self.filename, "rb") as f:
