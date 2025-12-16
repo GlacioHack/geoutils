@@ -1908,11 +1908,10 @@ class TestRaster:
         )
 
     def test__is_bigtiff(self) -> None:
-        """Test isBigTiff function"""
-
+        """Test _is_bigtiff function"""
         img = gu.Raster(self.landsat_rgb_path)
         assert img._is_bigtiff() is False
-        # TODO: test with BigTiff image
+        # TODO: test with BigTIFF image
 
 
 class TestMask:
