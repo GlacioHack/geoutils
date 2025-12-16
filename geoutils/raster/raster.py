@@ -3909,17 +3909,18 @@ class Raster:
 
     def _is_bigtiff(self) -> bool:
         """
-        Test is the raster file name is a BigTiff or a normal Tiff.
-        In the file header, BigTIFF is declared as 0x002B (43) at offset 2 bytes as compared with the TIFF
-        version of 0x002A (42)"
+        Test is the raster file name is a BigTIFF (True) or a normal TIFF (False).
+
+        In the file header, first two byte indicate the byte order: "II" for little endian and "MM" for big endian.
+        The next two-byte word contains the format version number: 42 for TIFF format and 43 for BigTIFF format.
 
         :return: if the file name is a BigTiff or not
         """
         if self.filename and pathlib.Path(self.filename).exists():
             with open(self.filename, "rb") as f:
                 header = f.read(4)
-                byteorder = {b"II": "<", b"MM": ">", b"EP": "<"}[header[:2]]
-                version = struct.unpack(byteorder + "H", header[2:4])[0]
+                byteorder = {b"II": "<", b"MM": ">"}[header[:2]]
+                version = struct.unpack(byteorder + "h", header[2:])[0]
                 return version == 43
         else:
             return False
