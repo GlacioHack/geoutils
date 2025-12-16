@@ -257,5 +257,5 @@ class TestMultiproc:
     @pytest.mark.skip()  # type: ignore
     def test_map_overlap_multiproc_save_bigTiff(self) -> None:
         """
-        Test the multiprocessing map function with a simple operation returning a raster > 4go (BigTiff case)
+        Test the multiprocessing map function with a simple operation returning a raster > 4go (BigTIFF format)
         """
