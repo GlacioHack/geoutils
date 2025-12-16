@@ -48,6 +48,7 @@ from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
 
 import geoutils as gu
+from geoutils import profiler
 from geoutils._config import config
 from geoutils._typing import (
     ArrayLike,
@@ -372,6 +373,7 @@ class Raster:
     See the API for more details.
     """
 
+    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: (
@@ -1986,6 +1988,7 @@ class Raster:
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
+    @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -2438,6 +2441,7 @@ class Raster:
         inplace: bool = False,
     ) -> RasterType | None: ...
 
+    @profiler.profile("geoutils.raster.raster.crop", memprof=True)  # type: ignore
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
@@ -2489,6 +2493,7 @@ class Raster:
         inplace: Literal[False] = False,
     ) -> RasterType: ...
 
+    @profiler.profile("geoutils.raster.raster.icrop", memprof=True)  # type: ignore
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -2553,6 +2558,7 @@ class Raster:
         multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
+    @profiler.profile("geoutils.raster.raster.reproject", memprof=True)  # type: ignore
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -2992,7 +2998,7 @@ class Raster:
             raster = Raster(raster, load_data=False)
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)
+        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)  # type: ignore
 
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
@@ -3532,6 +3538,7 @@ class Raster:
         **kwargs: Any,
     ) -> NDArrayNum | gu.PointCloud: ...
 
+    @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
@@ -3969,6 +3976,7 @@ class Raster:
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
+    @profiler.profile("geoutils.raster.raster.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
