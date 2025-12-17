@@ -1105,6 +1105,11 @@ class Vector:
         return cls(gpd.GeoDataFrame.from_dict(data=data, geometry=geometry, crs=crs, **kwargs))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
+    def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
+
+        return self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+
+    @copy_doc(gpd.GeoDataFrame, "Vector")
     def to_feather(
         self, path: Any, index: Any = None, compression: Any = None, schema_version: Any = None, **kwargs: Any
     ) -> None:
@@ -1260,7 +1265,7 @@ class Vector:
         inplace: bool = False,
     ) -> VectorType | None: ...
 
-    @profiler.profile("vector.vector.crop", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.vector.vector.crop", memprof=True)  # type: ignore
     def crop(
         self: VectorType,
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
@@ -1334,7 +1339,7 @@ class Vector:
         inplace: bool = False,
     ) -> Vector | None: ...
 
-    @profiler.profile("vector.vector.reproject", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.vector.vector.reproject", memprof=True)  # type: ignore
     def reproject(
         self: Vector,
         ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
@@ -1500,7 +1505,7 @@ class Vector:
                 assert transform is not None  # For mypy
                 return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
-    @profiler.profile("vector.vector.rasterize", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)  # type: ignore
     def rasterize(
         self,
         raster: gu.Raster | None = None,

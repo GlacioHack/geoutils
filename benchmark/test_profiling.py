@@ -12,7 +12,10 @@ there are geoutils.raster.raster.get_stats and geoutils.raster.raster.get_stats 
 Package time and tracemalloc are used to compare duration and memory used for each subtests.
 Each test saves its results in a CSV to reduce memory comsumption from dataframe operation.
 
-WARNING: Take care of the last one that comments and decomments raster.get_stats() and _statistics() from stats.py decorators.
+WARNING: Take care of the last one that comments and decomments :
+- @profiler.profile("geoutils.raster.raster.get_stats" ... decorator
+- @profiler.profile("geoutils.stats.stats._statistics" ... decorator
+WARNING: The last test only work with an Geoutils editable installation
 WARNING: This benchmark work from benchmark directory
 """
 

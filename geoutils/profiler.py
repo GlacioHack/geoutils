@@ -320,7 +320,6 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
 
             :return: func(*args, **kwargs)
             """
-
             # if profiling is disabled, remove overhead
 
             if not Profiler.enabled:
