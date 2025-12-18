@@ -24,6 +24,7 @@ import logging
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from scipy.stats import iqr
 
 from geoutils import profiler
@@ -122,7 +123,7 @@ def _statistics(data: NDArrayNum, counts: tuple[int, int] | None = None) -> dict
 
 def _get_single_stat(
     stats_dict: dict[str, np.floating[Any]], stats_aliases: dict[str, str], stat_name: str
-) -> np.floating[Any]:
+) -> pd.DataFrame:
     """
     Retrieve a single statistic based on a flexible name or alias.
 
@@ -140,3 +141,43 @@ def _get_single_stat(
     else:
         logging.warning("Statistic name '%s' is not recognized", stat_name)
         return np.float32(np.nan)
+
+def _grouped_stats(arrays: dict[str, NDArrayNum], bins: list[NDArrayNum], values: dict[str, NDArrayNum],
+                   statistics: list[str]):
+    """
+    Get statistics grouped (=binned) by other variables, whether categorical or continuous.
+
+    :param arrays: Arrays to group by.
+    :param bins: Bins to use.
+    :param values: Values to group, can be a dictionary .
+    :param statistics: List or dict of statistics to compute, e.g. ["mean", "std"].
+    """
+    if len(arrays) != len(bins):
+        raise ValueError("One bins array must be provided per input array.")
+
+    # Build dataframe of arrays to bin with, and values to bin
+    df = pd.DataFrame(data=arrays)
+    for k, v in values.items():
+        df[k] = v
+
+    # Apply binning
+    group_keys = []
+    for i, b in enumerate(bins):
+        k = list(arrays.keys())[i]
+        df[f"bin_{k}"] = pd.cut(df[k], bins=b, include_lowest=True)
+        group_keys.append(f"bin_{k}")
+
+    # Perform aggregation
+    grouped = df.groupby(group_keys)
+    result = grouped[list(values.keys())].agg(statistics)
+
+    return result
+
+
+arrays = {"slope": np.random.normal(size=100), "aspect": np.random.normal(size=100)}
+values = {"band1": np.random.normal(size=100), "band2": np.random.normal(size=100)}
+statistics = ["mean", "std"]
+bins = [np.linspace(-2, 2, 10), 10]
+
+df = _grouped_stats(arrays, bins, values, statistics)
+df
