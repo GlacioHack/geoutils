@@ -1907,11 +1907,14 @@ class TestRaster:
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
-    def test__is_bigtiff(self) -> None:
-        """Test _is_bigtiff function"""
+    @pytest.mark.skip()  # type: ignore
+    def test__is_bigtiff_true(self) -> None:
+        """Test _is_bigtiff function for BigTIFF"""
+
+    def test__is_bigtiff_false(self) -> None:
+        """Test _is_bigtiff function for classic TIFF"""
         img = gu.Raster(self.landsat_rgb_path)
         assert img._is_bigtiff() is False
-        # TODO: test with BigTIFF image
 
 
 class TestMask:
