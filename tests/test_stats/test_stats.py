@@ -6,10 +6,22 @@ from typing import Any
 
 import numpy as np
 import pytest
+import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
 from geoutils._typing import NDArrayNum
+
+
+def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
+    assert len(dict1.keys()) == len(dict1.keys())
+    for key in dict1.keys():
+        assert key in dict2
+        print("key", key)
+        if dict1[key] is not np.nan:
+            assert dict2[key] == pytest.approx(dict1[key], abs=1e-10)
+        else:
+            assert dict2[key] is np.nan
 
 
 class TestStats:
@@ -106,3 +118,54 @@ class TestStats:
         assert raster.get_stats(stats_name="iqr") == pytest.approx(
             np.nanpercentile(nan_arr, 75) - np.nanpercentile(nan_arr, 25)
         )
+
+    def test_raster_get_stats_values(self) -> None:
+        """
+        Verify the output statistics values of a raster.
+        """
+        filename_rast = gu.examples.get_path("everest_landsat_b4")
+        filename_vect = gu.examples.get_path("everest_rgi_outlines")
+        rast = gu.Raster(filename_rast)
+        vect = gu.Vector(filename_vect)
+        inlier_mask = ~vect.create_mask(rast)
+
+        # Verify raster stats
+        res_stats = {
+            "Mean": np.float64(144.04460496183205),
+        }
+        compare_dict(res_stats, rast.get_stats())
+
+        # Verify raster stats with a mask
+        res_stats_mask = {
+            "Mean": np.float64(110.49218069801574),
+        }
+        compare_dict(res_stats_mask, rast.get_stats(inlier_mask=inlier_mask))
+
+        # Verify cropped raster
+        nrows, ncols = rast.shape
+        rast_crop = rast.icrop((100, 100, ncols - 100, nrows - 100))
+        res_stats_crop = {
+            "Mean": np.float64(148.69901465201465),
+        }
+        compare_dict(res_stats_crop, rast_crop.get_stats())
+
+        # Verify reprojected raster
+        rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
+        res_stats_crop_proj = {
+            "Mean": np.float64(117.80631314205752),
+        }
+        print(rast_crop_proj.get_stats())
+        compare_dict(res_stats_crop_proj, rast_crop_proj.get_stats())
+
+        # Verify stats of a masked raster
+        rast.set_mask(inlier_mask)
+        stats_masked_rast = {
+            "Mean": np.float64(172.66101371277432),
+        }
+        compare_dict(stats_masked_rast, rast.get_stats())
+
+        # Verify stats of a masked raster with the other part covered by the inler_mask (=> empty raster)
+        stats_masked_rast_masked = {
+            "Mean": np.nan,
+        }
+        compare_dict(stats_masked_rast_masked, rast.get_stats(inlier_mask=inlier_mask))
