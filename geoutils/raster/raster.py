@@ -23,6 +23,7 @@ Module for Raster class.
 
 from __future__ import annotations
 
+import logging
 import math
 import pathlib
 import warnings
@@ -48,6 +49,7 @@ from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
 
 import geoutils as gu
+from geoutils import profiler
 from geoutils._config import config
 from geoutils._typing import (
     ArrayLike,
@@ -57,6 +59,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.filters import _filter
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.interpolate import _interp_points
 from geoutils.interface.raster_point import (
@@ -90,7 +93,7 @@ from geoutils.raster.satimg import (
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
+from geoutils.stats.stats import _statistics
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -371,6 +374,7 @@ class Raster:
     See the API for more details.
     """
 
+    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: (
@@ -1985,6 +1989,7 @@ class Raster:
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
+    @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -1998,6 +2003,49 @@ class Raster:
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
 
+        Common statistics are :
+
+        - Mean: arithmetic mean of the data, ignoring masked values.
+        - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
+        - Max: maximum value among the data, ignoring masked values.
+        - Min: minimum value among the data, ignoring masked values.
+        - Sum: sum of all data, ignoring masked values.
+        - Sum of squares: sum of the squares of all data, ignoring masked values.
+        - 90th percentile: point below which 90% of the data falls, ignoring masked values.
+        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, \
+        ignoring masked values.
+        - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset, \
+          representing the range within which 90% of the data points lie. Ignore masked values.
+        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, \
+        less sensitive to outliers compared to standard deviation. Ignore masked values.
+        - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give \
+          insight into the spread of the data. Only relevant when the raster represents a difference of two objects. \
+          Ignore masked values.
+        - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
+        ignoring masked values.
+        - Valid count: number of finite data points in the array. It counts the non-masked elements.
+        - Total count: total size of the raster.
+        - Percentage valid points: ratio between Valid count and Total count.
+
+        For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
+        in case of a masked array, NumPy module otherwise.
+
+        "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero),
+        calculated before the mask application in case of an inlier_mask. NumPy Masked functions are used is this case
+        or if the Raster was already a masked array. "Percentage valid points" is calculated accordingly.
+
+        If an inlier mask is passed:
+
+        - Total inlier count: number of data points in the inlier mask.
+        - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
+        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification \
+        statistics.
+        - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
+
+        They are all computed based on the previously stated final_count_nonzero.
+
+        Callable functions are supported as well.
+
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
@@ -2007,7 +2055,7 @@ class Raster:
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
-            in inlier_mask). DO NOT USE.
+            in inlier_mask), initialize in case of a inlier_mask. DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         # Force load if not loaded
@@ -2023,42 +2071,24 @@ class Raster:
             if isinstance(inlier_mask, Raster) and inlier_mask.is_mask:
                 inlier_points = np.count_nonzero(inlier_mask.data)
             else:
-                inlier_points = np.count_nonzero(inlier_mask)
+                inlier_points = np.count_nonzero(inlier_mask)  # type: ignore
             dem_masked = self.copy()
+
+            # Mask pixels from the inlier_mask
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        # If no name is passed, derive all statistics
-        # TODO: All stats are computed even when only one or an independent user-callable is asked for
-        #  Need to modify code to remove this requirement
-        stats_dict = _statistics(data=data, counts=counts)
-        if stats_name is None:
-            return stats_dict
-
-        if counts is None:
-            ignore_aliases = [
-                "validinliercount",
-                "totalinliercount",
-                "percentagevalidinlierpoints",
-                "percentageinlierpoints",
-            ]
-            stats_aliases = {k: _STATS_ALIASES[k] for k in _STATS_ALIASES.keys() if k not in ignore_aliases}
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _statistics(data, stats_name, counts)  # type: ignore
         else:
-            stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
-        else:
-            if callable(stats_name):
-                return stats_name(data)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
             else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
+                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
@@ -2437,6 +2467,7 @@ class Raster:
         inplace: bool = False,
     ) -> RasterType | None: ...
 
+    @profiler.profile("geoutils.raster.raster.crop", memprof=True)  # type: ignore
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
@@ -2488,6 +2519,7 @@ class Raster:
         inplace: Literal[False] = False,
     ) -> RasterType: ...
 
+    @profiler.profile("geoutils.raster.raster.icrop", memprof=True)  # type: ignore
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -2552,6 +2584,7 @@ class Raster:
         multiproc_config: MultiprocConfig | None = None,
     ) -> None: ...
 
+    @profiler.profile("geoutils.raster.raster.reproject", memprof=True)  # type: ignore
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -2721,7 +2754,7 @@ class Raster:
             raster_copy.transform = translated_transform
             return raster_copy
 
-    def save(
+    def to_file(
         self,
         filename: str | pathlib.Path | IO[bytes],
         driver: str = "GTiff",
@@ -2837,6 +2870,26 @@ class Raster:
                     warnings.warn("A geotransform previously set is going to be cleared due to the setting of GCPs.")
 
                 dst.gcps = (rio_gcps, gcps_crs)
+
+    @deprecate(
+        removal_version=Version("0.3.0"),
+        details="The function .save() will be soon deprecated, use .to_file() instead.",
+    )  # type: ignore
+    def save(
+        self,
+        filename: str | pathlib.Path | IO[bytes],
+        driver: str = "GTiff",
+        dtype: DTypeLike | None = None,
+        nodata: Number | None = None,
+        compress: str = "deflate",
+        tiled: bool = False,
+        blank_value: int | float | None = None,
+        co_opts: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        gcps: list[tuple[float, ...]] | None = None,
+        gcps_crs: CRS | None = None,
+    ) -> None:
+        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
 
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
@@ -2971,7 +3024,7 @@ class Raster:
             raster = Raster(raster, load_data=False)
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)
+        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)  # type: ignore
 
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
@@ -3511,6 +3564,7 @@ class Raster:
         **kwargs: Any,
     ) -> NDArrayNum | gu.PointCloud: ...
 
+    @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
@@ -3589,6 +3643,69 @@ class Raster:
             return z
         else:
             return gu.PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
+
+    @overload
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[False] = False,
+        size: int = 3,
+        **kwargs: dict[str, Any],
+    ) -> RasterType: ...
+
+    @overload
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[True],
+        size: int = 3,
+        **kwargs: dict[str, Any],
+    ) -> None: ...
+
+    def filter(
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        inplace: bool = False,
+        size: int = 3,
+        **kwargs: dict[str, Any],
+    ) -> RasterType | None:
+        """
+        Apply a filter to the array.
+
+        :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
+                       for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
+        :param inplace: Whether to modify the raster in-place.
+        :param size: window size for filter
+
+        :return: A new Raster instance with the filtered data (or None if inplace)
+
+        :raises ValueError: If the filter name is not one of the predefined options.
+        :raises TypeError: If `method` is neither a string nor a callable.
+        """
+        # Convert data to float to avoid integer issues with nodata
+        array = self.data.astype(float)
+
+        # Mask nodata values
+        masked_array = np.ma.masked_equal(array, self.nodata)
+
+        # Fill masked values with nodata for filtering, to match SciPy behavior
+        filled_array = masked_array.filled(self.nodata)
+
+        # Apply filter
+        filtered_array = _filter(filled_array, method, size, **kwargs)
+
+        # Mask nodata again after filtering
+        final_masked = np.ma.masked_equal(filtered_array, self.nodata)
+        final_masked.set_fill_value(self.nodata)
+        final_masked = final_masked.astype(float)
+
+        if inplace:
+            self._data = final_masked
+            return None
+        else:
+            return self.from_array(final_masked, self.transform, self.crs, self.nodata, self.area_or_point)
 
     def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
         """
@@ -3885,6 +4002,7 @@ class Raster:
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
+    @profiler.profile("geoutils.raster.raster.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,

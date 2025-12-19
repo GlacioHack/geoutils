@@ -44,15 +44,17 @@ import pandas as pd
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
+from geoutils import profiler
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils.misc import copy_doc
+from geoutils.misc import copy_doc, deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -81,6 +83,7 @@ class Vector:
     See the API for more details.
     """
 
+    @profiler.profile("geoutils.vector.vector.__init__", memprof=True)  # type: ignore
     def __init__(
         self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
     ):
@@ -366,6 +369,10 @@ class Vector:
         else:
             return None
 
+    @deprecate(
+        removal_version=Version("0.3.0"),
+        details="The function .save() will be soon deprecated, use .to_file() instead.",
+    )  # type: ignore
     def save(
         self,
         filename: str | pathlib.Path,
@@ -1262,6 +1269,7 @@ class Vector:
         inplace: bool = False,
     ) -> VectorType | None: ...
 
+    @profiler.profile("geoutils.vector.vector.crop", memprof=True)  # type: ignore
     def crop(
         self: VectorType,
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
@@ -1335,6 +1343,7 @@ class Vector:
         inplace: bool = False,
     ) -> Vector | None: ...
 
+    @profiler.profile("geoutils.vector.vector.reproject", memprof=True)  # type: ignore
     def reproject(
         self: Vector,
         ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
@@ -1500,6 +1509,7 @@ class Vector:
                 assert transform is not None  # For mypy
                 return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
+    @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)  # type: ignore
     def rasterize(
         self,
         raster: gu.Raster | None = None,

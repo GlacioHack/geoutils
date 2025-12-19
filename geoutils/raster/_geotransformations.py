@@ -35,7 +35,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
-from geoutils._typing import DTypeLike, NDArrayNum
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
@@ -329,8 +329,15 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
     )
 
 
-def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:
-    """Rasterio reprojection wrapper."""
+def _rio_reproject(
+    src_arr: NDArrayNum | NDArrayBool, src_mask: NDArrayBool, reproj_kwargs: dict[str, Any]
+) -> tuple[NDArrayNum | NDArrayBool, NDArrayBool]:
+    """Rasterio reprojection wrapper.
+
+    :param src_arr: Source array for data.
+    :param src_mask: Source array for mask, only required if array is not float.
+    :param reproj_kwargs: Reprojection parameter dictionary.
+    """
 
     # For a boolean type
     convert_bool = False
@@ -350,6 +357,13 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
         # Convert automated output dtype to the input dtype
         if np.dtype(reproj_kwargs["dtype"]) == np.bool_:
             reproj_kwargs["dtype"] = src_arr.dtype
+
+        # Update nodata value, which won't exist
+        reproj_kwargs["src_nodata"] = _default_nodata(src_arr.dtype)
+
+    # Fill with nodata values on mask
+    if reproj_kwargs["src_nodata"] is not None:
+        src_arr[src_mask] = reproj_kwargs["src_nodata"]
 
     # Check if multiband
     is_multiband = len(src_arr.shape) > 2
@@ -385,8 +399,14 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     # Run reprojection
     _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
 
+    # Get output mask
+    if reproj_kwargs["dst_nodata"] is not None:
+        dst_mask = dst_arr == reproj_kwargs["dst_nodata"]
+    else:
+        dst_mask = np.zeros(src_arr.shape, dtype=bool)
+
     # If output needs to be converted back to boolean
     if convert_bool:
         dst_arr = dst_arr.astype(bool)
 
-    return dst_arr
+    return dst_arr, dst_mask

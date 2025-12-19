@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import logging
 import os.path
 import pathlib
 import warnings
@@ -36,11 +37,12 @@ from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
+from geoutils import profiler
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
+from geoutils.stats.stats import _statistics
 
 try:
     import laspy
@@ -283,6 +285,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     See the API for more details.
     """
 
+    @profiler.profile("geoutils.pointcloud.pointcloud.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
@@ -1316,6 +1319,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
+    @profiler.profile("geoutils.pointcloud.pointcloud.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
@@ -1325,6 +1329,48 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         """
         Retrieve specified statistics or all available statistics for the point cloud data. Allows passing custom
         callables to calculate custom stats.
+
+        Common statistics for an N-D array :
+
+        - Mean: arithmetic mean of the data, ignoring masked values.
+        - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
+        - Max: maximum value among the data, ignoring masked values.
+        - Min: minimum value among the data, ignoring masked values.
+        - Sum: sum of all data, ignoring masked values.
+        - Sum of squares: sum of the squares of all data, ignoring masked values.
+        - 90th percentile: point below which 90% of the data falls, ignoring masked values.
+        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset,
+        ignoring masked values.
+        - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset,
+        representing the range within which 90% of the data points lie. Ignore masked values.
+        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to
+        outliers compared to standard deviation. Ignore masked values.
+        - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give
+        insight into the spread of the data. Only relevant when the raster represents a difference of two objects.
+        Ignore masked values.
+        - Std (Standard deviation): measures the spread or dispersion of the data around the mean,
+        ignoring masked values.
+        - Valid count: number of finite data points in the array. It counts the non-masked elements.
+        - Total count: total size of the raster.
+        - Percentage valid points: ratio between Valid count and Total count.
+
+        For all statistics up to "Std", functions from numpy.ma module are used (directly or in the calculation) in case
+        of a masked array, numpy module otherwise.
+
+        "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero).
+        Numpy Masked functions is used is this case or if the Point Cloud was already a masked array.
+        Percentage valid points is calculated accordingly.
+
+        If an inlier mask is passed:
+        - Total inlier count: number of data points in the inlier mask.
+        - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
+        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification
+        statistics.
+        - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
+
+        They are all computed based on the previously stated final_count_nonzero.
+
+        Callable functions are supported as well.
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
@@ -1340,25 +1386,18 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             self.load()
 
         data = self.data
-        stats_dict = _statistics(data=data)
-        if stats_name is None:
-            return stats_dict
 
-        stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(self.data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _statistics(data, stats_name)  # type: ignore
         else:
-            if callable(stats_name):
-                return stats_name(self.data)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return _statistics(data, [stats_name])[stats_name]  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
             else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
+                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
 
     @overload
     def subsample(
@@ -1386,6 +1425,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
+    @profiler.profile("geoutils.pointcloud.pointcloud.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
@@ -1407,6 +1447,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
 
+    @profiler.profile("geoutils.pointcloud.pointcloud.grid", memprof=True)  # type: ignore
     def grid(
         self,
         ref: gu.Raster | None = None,
