@@ -23,6 +23,7 @@ Module for Raster class.
 
 from __future__ import annotations
 
+import logging
 import math
 import pathlib
 import warnings
@@ -92,7 +93,7 @@ from geoutils.raster.satimg import (
     parse_and_convert_metadata_from_filename,
 )
 from geoutils.stats.sampling import subsample_array
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
+from geoutils.stats.stats import _statistics
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -2002,6 +2003,49 @@ class Raster:
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
 
+        Common statistics are :
+
+        - Mean: arithmetic mean of the data, ignoring masked values.
+        - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
+        - Max: maximum value among the data, ignoring masked values.
+        - Min: minimum value among the data, ignoring masked values.
+        - Sum: sum of all data, ignoring masked values.
+        - Sum of squares: sum of the squares of all data, ignoring masked values.
+        - 90th percentile: point below which 90% of the data falls, ignoring masked values.
+        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, \
+        ignoring masked values.
+        - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset, \
+          representing the range within which 90% of the data points lie. Ignore masked values.
+        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, \
+        less sensitive to outliers compared to standard deviation. Ignore masked values.
+        - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give \
+          insight into the spread of the data. Only relevant when the raster represents a difference of two objects. \
+          Ignore masked values.
+        - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
+        ignoring masked values.
+        - Valid count: number of finite data points in the array. It counts the non-masked elements.
+        - Total count: total size of the raster.
+        - Percentage valid points: ratio between Valid count and Total count.
+
+        For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
+        in case of a masked array, NumPy module otherwise.
+
+        "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero),
+        calculated before the mask application in case of an inlier_mask. NumPy Masked functions are used is this case
+        or if the Raster was already a masked array. "Percentage valid points" is calculated accordingly.
+
+        If an inlier mask is passed:
+
+        - Total inlier count: number of data points in the inlier mask.
+        - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
+        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification \
+        statistics.
+        - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
+
+        They are all computed based on the previously stated final_count_nonzero.
+
+        Callable functions are supported as well.
+
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
@@ -2011,7 +2055,7 @@ class Raster:
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
-            in inlier_mask). DO NOT USE.
+            in inlier_mask), initialize in case of a inlier_mask. DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         # Force load if not loaded
@@ -2029,40 +2073,22 @@ class Raster:
             else:
                 inlier_points = np.count_nonzero(inlier_mask)  # type: ignore
             dem_masked = self.copy()
+
+            # Mask pixels from the inlier_mask
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        # If no name is passed, derive all statistics
-        # TODO: All stats are computed even when only one or an independent user-callable is asked for
-        #  Need to modify code to remove this requirement
-        stats_dict = _statistics(data=data, counts=counts)
-        if stats_name is None:
-            return stats_dict
-
-        if counts is None:
-            ignore_aliases = [
-                "validinliercount",
-                "totalinliercount",
-                "percentagevalidinlierpoints",
-                "percentageinlierpoints",
-            ]
-            stats_aliases = {k: _STATS_ALIASES[k] for k in _STATS_ALIASES.keys() if k not in ignore_aliases}
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _statistics(data, stats_name, counts)  # type: ignore
         else:
-            stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
-        else:
-            if callable(stats_name):
-                return stats_name(data)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
             else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
+                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
