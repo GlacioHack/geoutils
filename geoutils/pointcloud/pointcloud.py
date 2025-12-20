@@ -404,7 +404,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     def _has_z(self) -> bool:
         """Whether the point geometries all have a Z coordinate or not."""
 
-        return all(p.has_z for p in self.ds.geometry)
+        return all(p.has_z for p in self.ds.geometry) if len(self.ds.geometry) > 0 else False
 
     @property
     def data(self) -> NDArrayNum:
@@ -455,7 +455,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     def set_data_column(self, new_data_column: str | None) -> None:
         """Set new column as point cloud data column."""
 
-        # If point geometries are 3D, only for loaded data (otherwise _has_z loads data)
+        # If point geometries are 3D, only for loaded data (otherwise _has_z would load data)
         if self.is_loaded:
             if self._has_z:
                 if new_data_column is None:
