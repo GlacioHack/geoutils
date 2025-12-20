@@ -648,7 +648,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param y: Y coordinates of point cloud.
         :param z: Z values of point cloud.
         :param crs: Coordinate reference system.
-        :param data_column: Data column name to associate to 2D point geometries.
+        :param data_column: Data column name to associate to 2D point geometries (defaults to "z" if none is passed).
         :param use_z: Use 3D point geometries with Z coordinates instead of a data column.
 
         :return Point cloud.
@@ -656,15 +656,16 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         # Build geodataframe
         if not use_z:
+            data_column = data_column if data_column is not None else "z"
             gdf = gpd.GeoDataFrame(
                 geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), crs=crs),
                 data={data_column: np.atleast_1d(z)},
             )
         else:
+            data_column = None
             gdf = gpd.GeoDataFrame(
                 geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), z=np.atleast_1d(z), crs=crs),
             )
-            data_column = None
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy

@@ -41,6 +41,13 @@ class TestPointCloud:
     rng = np.random.default_rng(42)
     arr_points = rng.integers(low=1, high=1000, size=(100, 3)) + rng.normal(0, 0.15, size=(100, 3))
     gdf3 = gpd.GeoDataFrame(
+        data=[],
+        columns=[],
+        geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1], z=arr_points[:, 2]),
+        crs=4326,
+    )
+    # To test 3D with an extra column
+    gdf32 = gpd.GeoDataFrame(
         data=arr_points2[:, 3:],
         columns=["b2"],
         geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1], z=arr_points[:, 2]),
@@ -255,9 +262,9 @@ class TestPointCloud:
 
         # If a data column name is passed for 3D points
         with pytest.warns(UserWarning, match="Overriding 3D points with*"):
-            pc4 = PointCloud(self.gdf3, data_column="b2")
+            pc4 = PointCloud(self.gdf32, data_column="b2")
             assert pc4.data_column == "b2"
-            assert np.array_equal(pc4.data, self.gdf3["b2"].values)
+            assert np.array_equal(pc4.data, self.gdf32["b2"].values)
 
     def test_data(self) -> None:
         """Test the setting and getting of the main data, depending on input geometry."""
@@ -311,13 +318,6 @@ class TestPointCloud:
         )
         assert pc_from_xyz.pointcloud_equal(pc1)
 
-        # Build with the use_z option to compare to 3D points
-        pc3 = PointCloud(self.gdf3)
-        pc3_from_xyz = PointCloud.from_xyz(
-            x=self.arr_points[:, 0], y=self.arr_points[:, 1], z=self.arr_points[:, 2], crs=4326, use_z=True
-        )
-        assert pc3_from_xyz.pointcloud_equal(pc3)
-
         # Test with lists
         pc_from_xyz = PointCloud.from_xyz(
             x=list(self.arr_points[:, 0]),
@@ -337,6 +337,13 @@ class TestPointCloud:
             data_column="b1",
         )
         assert pc_from_xyz.pointcloud_equal(pc1)
+
+        # Build with the use_z option to compare to 3D points
+        pc3 = PointCloud(self.gdf3)
+        pc3_from_xyz = PointCloud.from_xyz(
+            x=self.arr_points[:, 0], y=self.arr_points[:, 1], z=self.arr_points[:, 2], crs=4326, use_z=True
+        )
+        assert pc3_from_xyz.pointcloud_equal(pc3)
 
     def test_to_array(self) -> None:
         """Test exporting point cloud to array."""
