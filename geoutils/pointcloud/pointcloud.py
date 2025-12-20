@@ -699,7 +699,11 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
     @classmethod
     def from_tuples(
-        cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str | None = None, use_z: bool = False
+        cls,
+        tuples_xyz: Iterable[tuple[Number, Number, Number]],
+        crs: CRS,
+        data_column: str | None = None,
+        use_z: bool = False,
     ) -> PointCloud:
         """
         Create point cloud from an iterable of 3-tuples (X coordinate, Y coordinate, Z value).
