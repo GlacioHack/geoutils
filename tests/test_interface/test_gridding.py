@@ -88,8 +88,9 @@ class TestPointCloud:
         assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
 
         # Check for a different distance value
-        gridded_pc, output_transform = _grid_pointcloud(pc, grid_coords=grid_coords, dist_nodata_pixel=0.5,
-                                                        data_column_name="b1")
+        gridded_pc, output_transform = _grid_pointcloud(
+            pc, grid_coords=grid_coords, dist_nodata_pixel=0.5, data_column_name="b1"
+        )
         ind_close = np.array(list_min_dist) <= 0.5
 
         # We get the indexes for these coordinates
