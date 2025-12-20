@@ -165,7 +165,7 @@ def _load_laspy_metadata(
 def _write_laspy(
     filename: str | pathlib.Path,
     pc: gpd.GeoDataFrame,
-    data_column: str,
+    data_column: str | None,
     version: Any = None,
     point_format: Any = None,
     offsets: tuple[float, float, float] = None,
@@ -193,7 +193,10 @@ def _write_laspy(
     # The las x,y,z will be automatically scaled into X,Y,Z based on the header scales
     las.x = pc.geometry.x.values
     las.y = pc.geometry.y.values
-    las.z = pc[data_column].values
+    if data_column is not None:
+        las.z = pc[data_column].values
+    else:
+        las.z = pc.geometry.z.values
 
     # Add auxiliary columns
     for c in aux_columns:
@@ -286,21 +289,21 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-        data_column: str,
+        data_column: str | None = None,
     ):
         """
         Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
         or a Shapely geometry), or only with a point cloud file type.
 
         :param filename_or_dataset: Path to vector file, or GeoPandas dataframe or series, or Shapely geometry.
-        :param data_column: Name of main data column defining the point cloud.
+        :param data_column: Name of main data column defining the point cloud (not required for LAS/LAZ formats).
         """
 
         self._ds: gpd.GeoDataFrame | None = None
         self._name: str | None = None
         self._crs: CRS | None = None
+        self._data_column: str | None = None
         self._bounds: BoundingBox
-        self._data_column: str
         self._data: NDArrayNum
         self._nb_points: int
         self.__nongeo_columns: pd.Index
@@ -316,6 +319,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                 ".las",
                 ".laz",
             ]:
+                # No need to pass a data column for LAS/LAZ file, as Z is the logical default
+                if data_column is None:
+                    data_column = "Z"
                 # Load only metadata, and not the data
                 fn = filename_or_dataset if isinstance(filename_or_dataset, str) else filename_or_dataset.name
                 crs, nb_points, bounds, columns = _load_laspy_metadata(fn)
@@ -334,7 +340,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                         "This vector file contains non-point geometries, " "cannot be instantiated as a point cloud."
                     )
 
-        # Set data column following user input
+        # Set data column name based on user input
         self.set_data_column(new_data_column=data_column)
 
     # TODO: Could also move to Vector directly?
@@ -395,20 +401,32 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     #####################################
 
     @property
+    def _has_z(self) -> bool:
+        """Whether the point geometries all have a Z coordinate or not."""
+
+        return all(p.has_z for p in self.ds.geometry) if len(self.ds.geometry) > 0 else False
+
+    @property
     def data(self) -> NDArrayNum:
         """
         Data of the point cloud.
 
-        Points to the data column of the geodataframe, equivalent to calling self.ds[self.data_column].
+        Points to either the Z axis of the point geometries, or the associated data column of the geodataframe.
         """
         # Triggers the loading mechanism through self.ds
-        return self.ds[self.data_column].values
+        if self.data_column is not None:
+            return self.ds[self.data_column].values
+        else:
+            return self.geometry.z.values
 
     @data.setter
     def data(self, new_data: NDArrayNum) -> None:
         """Set new data for the point cloud."""
 
-        self.ds[self.data_column] = new_data
+        if self.data_column is not None:
+            self.ds[self.data_column] = new_data
+        else:
+            self.ds.geometry = gpd.points_from_xy(x=self.geometry.x, y=self.geometry.y, z=new_data, crs=self.crs)
 
     @property
     def _nongeo_columns(self) -> pd.Index:
@@ -422,22 +440,45 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             return self.__nongeo_columns
 
     @property
-    def data_column(self) -> str:
-        """Name of data column of the point cloud."""
+    def data_column(self) -> str | None:
+        """
+        Name of data column of the point cloud.
+
+        Can be None if point geometries are 3D.
+        """
         return self._data_column
 
     @data_column.setter
     def data_column(self, new_data_column: str) -> None:
         self.set_data_column(new_data_column=new_data_column)
 
-    def set_data_column(self, new_data_column: str) -> None:
+    def set_data_column(self, new_data_column: str | None) -> None:
         """Set new column as point cloud data column."""
 
+        # If point geometries are 3D, only for loaded data (otherwise _has_z would load data)
+        if self.is_loaded:
+            if self._has_z:
+                if new_data_column is None:
+                    self._data_column = None
+                    return
+                else:
+                    warnings.warn(
+                        f"Overriding 3D points with with data column '{new_data_column}'. Set data_column "
+                        f"to None to use the 3D point geometries instead."
+                    )
+
+        # If point geometries are 2D and the data column is undefined
+        if new_data_column is None:
+            raise ValueError("A data column name must be passed for a point cloud with 2D point geometries.")
+
+        # If 2D and data column is defined, check that it exists
         if new_data_column not in self._nongeo_columns:
             raise ValueError(
                 f"Data column {new_data_column} not found among columns. Available columns "
                 f"are: {', '.join(self._nongeo_columns)}."
             )
+
+        # Set data column name
         self._data_column = new_data_column
 
     @property
@@ -550,9 +591,14 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         else:
             data = self.data.copy()
 
-        # Send to from_array
+        # Send to from_xyz
         cp = self.from_xyz(
-            x=self.geometry.x.values, y=self.geometry.y.values, z=data, crs=self.crs, data_column=self.data_column
+            x=self.geometry.x.values,
+            y=self.geometry.y.values,
+            z=data,
+            crs=self.crs,
+            data_column=self.data_column,
+            use_z=self._has_z and self.data_column is None,
         )
 
         return cp
@@ -589,7 +635,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         )
 
     @classmethod
-    def from_xyz(cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str = "z") -> PointCloud:
+    def from_xyz(
+        cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str | None = None, use_z: bool = False
+    ) -> PointCloud:
         """
         Create point cloud from three 1D array-like coordinates for X/Y/Z.
 
@@ -600,16 +648,24 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param y: Y coordinates of point cloud.
         :param z: Z values of point cloud.
         :param crs: Coordinate reference system.
-        :param data_column: Data column of point cloud.
+        :param data_column: Data column name to associate to 2D point geometries (defaults to "z" if none is passed).
+        :param use_z: Use 3D point geometries with Z coordinates instead of a data column.
 
         :return Point cloud.
         """
 
         # Build geodataframe
-        gdf = gpd.GeoDataFrame(
-            geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), crs=crs),
-            data={data_column: np.atleast_1d(z)},
-        )
+        if not use_z:
+            data_column = data_column if data_column is not None else "z"
+            gdf = gpd.GeoDataFrame(
+                geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), crs=crs),
+                data={data_column: np.atleast_1d(z)},
+            )
+        else:
+            data_column = None
+            gdf = gpd.GeoDataFrame(
+                geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), z=np.atleast_1d(z), crs=crs),
+            )
 
         # If the data was transformed into boolean, re-initialize as a Mask subclass
         # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
@@ -620,7 +676,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             return cls(filename_or_dataset=gdf, data_column=data_column)
 
     @classmethod
-    def from_array(cls, data: NDArrayNum, crs: CRS, data_column: str = "z") -> PointCloud:
+    def from_array(cls, data: NDArrayNum, crs: CRS, data_column: str | None = None, use_z: bool = False) -> PointCloud:
         """
         Create point cloud from a 3 x N or N x 3 array of X coordinates, Y coordinates and Z values.
 
@@ -639,11 +695,15 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         if data.shape[0] != 3:
             data = data.T
 
-        return cls.from_xyz(x=data[0, :], y=data[1, :], z=data[2, :], crs=crs, data_column=data_column)
+        return cls.from_xyz(x=data[0, :], y=data[1, :], z=data[2, :], crs=crs, data_column=data_column, use_z=use_z)
 
     @classmethod
     def from_tuples(
-        cls, tuples_xyz: Iterable[tuple[Number, Number, Number]], crs: CRS, data_column: str = "z"
+        cls,
+        tuples_xyz: Iterable[tuple[Number, Number, Number]],
+        crs: CRS,
+        data_column: str | None = None,
+        use_z: bool = False,
     ) -> PointCloud:
         """
         Create point cloud from an iterable of 3-tuples (X coordinate, Y coordinate, Z value).
@@ -655,22 +715,22 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :return Point cloud.
         """
 
-        return cls.from_array(np.array(tuples_xyz), crs=crs, data_column=data_column)
+        return cls.from_array(np.array(tuples_xyz), crs=crs, data_column=data_column, use_z=use_z)
 
     def to_xyz(self) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
         """Convert point cloud to three 1D arrays of coordinates for X/Y/Z."""
 
-        return self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values
+        return self.geometry.x.values, self.geometry.y.values, self.data
 
     def to_array(self) -> NDArrayNum:
         """Convert point cloud to a 3 x N array of X coordinates, Y coordinates and Z values."""
 
-        return np.stack((self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values), axis=0)
+        return np.stack((self.geometry.x.values, self.geometry.y.values, self.data), axis=0)
 
     def to_tuples(self) -> Iterable[tuple[Number, Number, Number]]:
         """Convert point cloud to a list of 3-tuples (X coordinate, Y coordinate, Z value)."""
 
-        return list(zip(self.geometry.x.values, self.geometry.y.values, self.ds[self.data_column].values))
+        return list(zip(self.geometry.x.values, self.geometry.y.values, self.data))
 
     def __getitem__(self, index: PointCloud | NDArrayBool | Any) -> PointCloud | Any:
         """

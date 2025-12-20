@@ -30,7 +30,7 @@ class TestPointCloud:
         grid_coords = rst.coords(grid=False)
 
         # Grid the point cloud
-        gridded_pc, output_transform = _grid_pointcloud(pc, grid_coords=grid_coords)
+        gridded_pc, output_transform = _grid_pointcloud(pc, grid_coords=grid_coords, data_column_name="b1")
 
         # Compare back to raster, all should be very close (but not exact, some info is lost due to interpolations)
         valids = np.isfinite(gridded_pc)
@@ -78,7 +78,7 @@ class TestPointCloud:
         close_in_chull = [tup for tup in indexes_close if tup in indexes_chull]
         iclosechull, jclosehull = list(zip(*close_in_chull))
 
-        # All values close  pixel in the convex hull should be valid
+        # All values close to pixel in the convex hull should be valid
         assert all(np.isfinite(gridded_pc[iclosechull, jclosehull]))
 
         # Other values in the convex hull should not be
@@ -88,7 +88,9 @@ class TestPointCloud:
         assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
 
         # Check for a different distance value
-        gridded_pc, output_transform = _grid_pointcloud(pc, grid_coords=grid_coords, dist_nodata_pixel=0.5)
+        gridded_pc, output_transform = _grid_pointcloud(
+            pc, grid_coords=grid_coords, dist_nodata_pixel=0.5, data_column_name="b1"
+        )
         ind_close = np.array(list_min_dist) <= 0.5
 
         # We get the indexes for these coordinates

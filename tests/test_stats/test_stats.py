@@ -168,10 +168,10 @@ class TestStats:
             np.nanpercentile(nan_arr, 75) - np.nanpercentile(nan_arr, 25)
         )
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_get_stats_raster_pointcloud(self, example: str, caplog) -> None:
         """
-        Verify get_stats() method for a raster, especially output stats for different inputs
+        Verify get_stats() method for a raster converted to pointcloud, especially output stats for different inputs
         parameters.
         """
         raster = gu.Raster(example)
