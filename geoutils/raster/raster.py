@@ -2761,8 +2761,6 @@ class Raster:
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -2848,8 +2846,6 @@ class Raster:
             crs=self.crs,
             transform=self.transform,
             nodata=nodata,
-            compress=compress,
-            tiled=tiled,
             **co_opts,
         ) as dst:
             dst.write(save_data)
@@ -2882,15 +2878,13 @@ class Raster:
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
         gcps: list[tuple[float, ...]] | None = None,
         gcps_crs: CRS | None = None,
     ) -> None:
-        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
+        self.to_file(filename, driver, dtype, nodata, blank_value, co_opts, metadata, gcps, gcps_crs)
 
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:

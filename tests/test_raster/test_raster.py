@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
+from PIL import Image
 
 import geoutils as gu
 from geoutils import examples
@@ -1758,6 +1759,8 @@ class TestRaster:
         img.to_file(temp_file)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert len((Image.open(temp_file)).tile) > 1  # test no tiled output image
+        assert (Image.open(temp_file)).info["compression"] == "raw"  # test no default compression
 
         # Try to save with a pathlib path (create a new temp file for Windows)
         path = pathlib.Path(temp_file)
@@ -1769,6 +1772,8 @@ class TestRaster:
         img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert len((Image.open(temp_file)).tile) == 1  # test {TILED": "YES"}
+        assert (Image.open(temp_file)).info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
         assert saved.tags["Type"] == "test"
 
         # Test saving file in COG format
