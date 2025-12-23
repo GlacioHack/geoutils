@@ -1767,13 +1767,14 @@ class TestRaster:
         img.to_file(path)
 
         # Test additional options
-        co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
+        co_opts = {"TILED": "YES", "COMPRESS": "LZW", "BIGTIFF": "YES"}
         metadata = {"Type": "test"}
         img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
         assert len((Image.open(temp_file)).tile) == 1  # test {TILED": "YES"}
         assert (Image.open(temp_file)).info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
+        assert saved._is_bigtiff()  # test {"BIGTIFF": "YES"}
         assert saved.tags["Type"] == "test"
 
         # Test saving file in COG format
