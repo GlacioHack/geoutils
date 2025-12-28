@@ -23,26 +23,29 @@ import shutil
 import tarfile
 import tempfile
 import urllib.request
+from importlib.resources import as_file, files
 
-# Define the location of the data in the example directory
-_EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
+# This directory needs to be created within xdem/ so that it works for an installed package as well
+# importlib.resources.files helps take care of the relative path, no matter if package is dev-local or installed
+_EXAMPLES_DIRECTORY = files("geoutils").joinpath("example_data")
 
 # Absolute filepaths to the example files.
-_FILEPATHS_DATA = {
-    "everest_landsat_rgb": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat", "LE71400412000304SGS00_RGB.tif"),
-    "everest_landsat_b4": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat", "LE71400412000304SGS00_B4.tif"),
-    "everest_landsat_b4_cropped": os.path.join(
-        _EXAMPLES_DIRECTORY, "Everest_Landsat", "LE71400412000304SGS00_B4_cropped.tif"
-    ),
-    "everest_rgi_outlines": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat", "15_rgi60_glacier_outlines.gpkg"),
-    "exploradores_aster_dem": os.path.join(
-        _EXAMPLES_DIRECTORY, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z.tif"
-    ),
-    "exploradores_rgi_outlines": os.path.join(
-        _EXAMPLES_DIRECTORY, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg"
-    ),
-    "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz"),
-}
+with as_file(_EXAMPLES_DIRECTORY) as examples_directory:
+    _FILEPATHS_DATA = {
+        "everest_landsat_rgb": os.path.join(examples_directory, "Everest_Landsat", "LE71400412000304SGS00_RGB.tif"),
+        "everest_landsat_b4": os.path.join(examples_directory, "Everest_Landsat", "LE71400412000304SGS00_B4.tif"),
+        "everest_landsat_b4_cropped": os.path.join(
+            examples_directory, "Everest_Landsat", "LE71400412000304SGS00_B4_cropped.tif"
+        ),
+        "everest_rgi_outlines": os.path.join(examples_directory, "Everest_Landsat", "15_rgi60_glacier_outlines.gpkg"),
+        "exploradores_aster_dem": os.path.join(
+            examples_directory, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z.tif"
+        ),
+        "exploradores_rgi_outlines": os.path.join(
+            examples_directory, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg"
+        ),
+        "coromandel_lidar": os.path.join(examples_directory, "Coromandel_Lidar", "points.laz"),
+    }
 
 _FILEPATHS_TEST = {
     k: os.path.join(
@@ -97,7 +100,8 @@ def download_examples(overwrite: bool = False) -> None:
             )
 
             # Copy the temporary extracted data to the example directory.
-            shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name), dirs_exist_ok=True)
+            with as_file(_EXAMPLES_DIRECTORY) as ed:
+                shutil.copytree(tmp_dir_name, os.path.join(ed, dir_name), dirs_exist_ok=True)
 
 
 def get_path(name: str) -> str:

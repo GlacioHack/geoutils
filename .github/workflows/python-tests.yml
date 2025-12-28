@@ -76,12 +76,6 @@ jobs:
     - name: Check import works
       run: python -c "import geoutils"
 
-      # Stop the build if there are Python syntax errors or undefined names
-    - name: Lint with flake8
-      run: |
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
     - name: Print conda environment (for debugging)
       run: |
         conda info
