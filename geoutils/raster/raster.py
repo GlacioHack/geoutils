@@ -2774,13 +2774,12 @@ class Raster:
         the contents of self.data to disk, write this provided value to every
         pixel instead.
 
+        Compression default value is set to 'deflate' (equal to GDALs: COMPRESS=DEFLATE in co_opts).
+
         :param filename: Filename to write the file to.
         :param driver: Driver to write file with.
         :param dtype: Data type to write the image as (defaults to dtype of image data).
         :param nodata: Force a nodata value to be used (default to that of raster).
-        :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE).
-        :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
-            but increases file size.
         :param blank_value: Use to write an image out with every pixel's value.
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary,
@@ -2794,6 +2793,11 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
+
+        # Set compression default value to DEFLATE
+        if "COMPRESS" not in map(str.upper, co_opts.keys()):
+            co_opts["COMPRESS"] = "DEFLATE"
+
         meta = self.tags if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
