@@ -8,6 +8,7 @@ import tempfile
 import warnings
 
 import geopandas as gpd
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
@@ -17,6 +18,8 @@ from shapely import Polygon
 import geoutils as gu
 from geoutils import PointCloud
 from geoutils._typing import NDArrayNum
+
+DO_PLOT = False
 
 
 class TestPointCloud:
@@ -946,6 +949,62 @@ class TestArithmetic:
 
         assert isinstance(pc, gu.PointCloud)
         assert np.median(pc) == 26.0
+
+    def test_plot(self) -> None:
+        """Test the pointcloud plot."""
+
+        # Create a dummy array of unique values and the associated coordinates
+        array = np.arange(25, dtype=int)
+        coords_x = [i for _ in range(5) for i in range(5)]
+        coords_y = [i for i in range(5) for _ in range(5)]
+
+        # Create the corresponding pointcloud
+        pc = gu.PointCloud.from_xyz(x=coords_x, y=coords_y, z=array, crs=4326)
+
+        # Test default plot
+        pc.plot()
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test with new figure
+        plt.figure()
+        pc.plot()
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test with provided ax
+        ax = plt.subplot(111)
+        pc.plot(ax=ax)
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test vmin, vmax and cbar_title
+        ax = plt.subplot(111)
+        pc.plot(cmap="gray", vmin=0, vmax=20, cbar_title="Custom cbar", ax=ax)
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test save fig
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.png")
+        pc.plot(output_fig=temp_file)
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert os.path.isfile(temp_file)
 
 
 class TestArrayInterface:
