@@ -119,7 +119,9 @@ def copy_doc(
         except AttributeError:
             decorated_name = decorated.__name__
 
-        # Get parent doc
+        # Get parent doc, only if it exists
+        # ! VERY IMPORTANT ! The decorator is compiled during package import, if it fails (because a function is
+        # deprecated by an upstream package), the whole package breaks on import instead of just this function
         try:
             old_class_doc = getattr(old_class, decorated_name).__doc__
         except AttributeError:
