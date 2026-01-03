@@ -110,6 +110,7 @@ def copy_doc(
     """
 
     def decorator(decorated: Callable) -> Callable:  # type: ignore
+
         # Get name of decorated object
         # If object is a property, get name through fget
         try:
@@ -119,7 +120,12 @@ def copy_doc(
             decorated_name = decorated.__name__
 
         # Get parent doc
-        old_class_doc = getattr(old_class, decorated_name).__doc__
+        try:
+            old_class_doc = getattr(old_class, decorated_name).__doc__
+        except AttributeError:
+            decorated.__doc__ = "This function documentation does not exist in GeoPandas (likely deprecated)."
+            return decorated
+
         # Remove examples if there are any
         doc_descript = old_class_doc.split("\n\n")[0]
 
