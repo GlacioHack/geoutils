@@ -961,7 +961,7 @@ class TestArrayInterface:
             ufunc[0] != "_"
             and ufunc.islower()
             and "err" not in ufunc
-            and ufunc not in ["e", "pi", "frompyfunc", "euler_gamma", "vecdot", "vecmat", "matvec"]
+            and ufunc not in ["e", "pi", "frompyfunc", "euler_gamma", "vecdot", "vecmat", "matvec", "matmul"]
         )
     ]
 
