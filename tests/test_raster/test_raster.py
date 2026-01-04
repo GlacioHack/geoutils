@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
+from PIL import Image
 
 import geoutils as gu
 from geoutils import examples
@@ -1758,17 +1759,25 @@ class TestRaster:
         img.to_file(temp_file)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert (Image.open(temp_file)).info["compression"] == "tiff_adobe_deflate"  # test no default compression
 
         # Try to save with a pathlib path (create a new temp file for Windows)
         path = pathlib.Path(temp_file)
         img.to_file(path)
 
-        # Test additional options
-        co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
+        # Test additional option: one co_opts with tiled (with no compression)
+        co_opts = {"COMPRESS": "NONE"}
+        img.to_file(temp_file, co_opts=co_opts)
+        assert len((Image.open(temp_file)).tile) > 1  # test {TILED": "NO"} default value
+
+        # Test additional options: several co_opts with compress and bigtiff + metadata
+        co_opts = {"COMPRESS": "LZW", "BIGTIFF": "YES"}
         metadata = {"Type": "test"}
         img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert (Image.open(temp_file)).info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
+        assert saved._is_bigtiff()  # test {"BIGTIFF": "YES"}
         assert saved.tags["Type"] == "test"
 
         # Test saving file in COG format
@@ -1906,6 +1915,15 @@ class TestRaster:
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
+
+    @pytest.mark.skip()  # type: ignore
+    def test__is_bigtiff_true(self) -> None:
+        """Test _is_bigtiff function for BigTIFF"""
+
+    def test__is_bigtiff_false(self) -> None:
+        """Test _is_bigtiff function for classic TIFF"""
+        img = gu.Raster(self.landsat_rgb_path)
+        assert img._is_bigtiff() is False
 
 
 class TestMask:

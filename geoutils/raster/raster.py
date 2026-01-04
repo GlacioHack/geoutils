@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import math
 import pathlib
+import struct
 import warnings
 from collections import abc
 from contextlib import ExitStack
@@ -2760,8 +2761,6 @@ class Raster:
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -2775,13 +2774,12 @@ class Raster:
         the contents of self.data to disk, write this provided value to every
         pixel instead.
 
+        Compression default value is set to 'deflate' (equal to GDALs: COMPRESS=DEFLATE in co_opts).
+
         :param filename: Filename to write the file to.
         :param driver: Driver to write file with.
         :param dtype: Data type to write the image as (defaults to dtype of image data).
         :param nodata: Force a nodata value to be used (default to that of raster).
-        :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE).
-        :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
-            but increases file size.
         :param blank_value: Use to write an image out with every pixel's value.
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary,
@@ -2795,6 +2793,11 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
+
+        # Set compression default value to DEFLATE
+        if "COMPRESS" not in map(str.upper, co_opts.keys()):
+            co_opts["COMPRESS"] = "DEFLATE"
+
         meta = self.tags if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
@@ -2847,8 +2850,6 @@ class Raster:
             crs=self.crs,
             transform=self.transform,
             nodata=nodata,
-            compress=compress,
-            tiled=tiled,
             **co_opts,
         ) as dst:
             dst.write(save_data)
@@ -2881,15 +2882,13 @@ class Raster:
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
         gcps: list[tuple[float, ...]] | None = None,
         gcps_crs: CRS | None = None,
     ) -> None:
-        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
+        self.to_file(filename, driver, dtype, nodata, blank_value, co_opts, metadata, gcps, gcps_crs)
 
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
@@ -4023,6 +4022,24 @@ class Raster:
         return subsample_array(
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
+
+    def _is_bigtiff(self) -> bool:
+        """
+        Test is the raster file name exists and if it is a BigTIFF (True) or a normal TIFF (False).
+
+        In the file header, first two byte indicate the byte order: "II" for little endian and "MM" for big endian.
+        The next two-byte word contains the format version number: 42 for TIFF format and 43 for BigTIFF format.
+
+        :return: if the filename exists and if its is a BigTIFF or not
+        """
+        if self.filename and pathlib.Path(self.filename).exists():
+            with open(self.filename, "rb") as f:
+                header = f.read(4)
+                byteorder = {b"II": "<", b"MM": ">"}[header[:2]]
+                version = struct.unpack(byteorder + "h", header[2:])[0]
+                return version == 43
+        else:
+            return False
 
 
 class Mask(Raster):
