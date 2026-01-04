@@ -4,6 +4,7 @@ import os
 import re
 import warnings
 
+import geopandas as gpd
 import pytest
 import yaml  # type: ignore
 from packaging.version import Version
@@ -165,3 +166,20 @@ class TestMisc:
         devenv4 = {"dependencies": ["python==3.9", "numpy", "pandas", "opencv", {"pip": ["geoutils"]}]}
         with pytest.raises(ValueError, match="The following pip dependencies are listed in env but not dev-env: lol"):
             geoutils.misc.diff_environment_yml(env4, devenv4, input_dict=True, print_dep="pip")
+
+    def test_copydoc_geopandas(self) -> None:
+
+        # This function exist in geopandas, so should not fail and copy the doc with "Vector" in it
+        @geoutils.misc.copy_doc(gpd.GeoSeries, "Vector")
+        def union() -> int:
+            return 1
+
+        assert "Vector" in union.__doc__
+
+        # This function does not exist, so should not fail either (to ensure GeoUtils package import), but should
+        # have a description stating that it does not exist.
+        @geoutils.misc.copy_doc(gpd.GeoSeries, "Vector")
+        def doesnotexist() -> int:
+            return 1
+
+        assert doesnotexist.__doc__ == "This function documentation does not exist in GeoPandas (likely deprecated)."
