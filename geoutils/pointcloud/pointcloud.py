@@ -915,8 +915,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
             will create a new axis.
         :param return_axes: Whether to return axes.
-        :param savefig_fname: Path to quick save the output figure with a default DPI (300), no transparency and no
-            metadata. Use `plt.savefig()` to specify other save parameters or after other customizations.
+        :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
+            with a default DPI (300), no transparency and no metadata. Use `plt.savefig()` to specify other save
+            parameters or after other customizations.
 
         :returns: None, or (ax, caxes) if return_axes is True
         """
