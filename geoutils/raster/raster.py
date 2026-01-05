@@ -224,22 +224,25 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
+
     # If out_shape is passed, no need to account for transform and shape
     if kwargs.get("out_shape") is not None:
-        window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
             kwargs["out_shape"] = (out_count, *kwargs["out_shape"])
-    else:
-        if transform is not None and shape is not None:
-            if transform == dataset.transform:
-                row_off, col_off = 0, 0
-            else:
-                row_off, col_off = (round(val) for val in dataset.index(transform[2], abs(transform[4])))
 
-            window = rio.windows.Window(col_off, row_off, *shape[::-1])
-        elif sum(param is None for param in [shape, transform]) == 1:
-            raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
+    window = None
+
+    if transform is not None and shape is not None:
+        if transform == dataset.transform:
+            row_off, col_off = 0, 0
+        else:
+            col_off, row_off = (round(val) for val in dataset.index(transform[2], transform[4]))
+
+        window = rio.windows.Window(col_off, row_off, *shape[::-1])
+
+    if sum(param is None for param in [shape, transform]) == 1:
+        raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
 
     if indexes is None:
         if only_mask:
@@ -512,12 +515,14 @@ class Raster:
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
+            if downsample < 1:
+                raise ValueError("downsample must be >= 1.")
 
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
-                down_width = int(np.ceil(self.width / downsample))
-                down_height = int(np.ceil(self.height / downsample))
+                down_width = int(np.floor(self.width / downsample))
+                down_height = int(np.floor(self.height / downsample))
                 out_shape = (down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
