@@ -47,9 +47,9 @@ from geoutils.stats.stats import _statistics
 try:
     import laspy
 
-    has_laspy = True
+    _has_laspy = True
 except ImportError:
-    has_laspy = False
+    _has_laspy = False
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -319,6 +319,11 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                 ".las",
                 ".laz",
             ]:
+
+                if not _has_laspy:
+                    raise ImportError("Optional dependency needed. Install 'laspy' for LAS support, or "
+                                      "'laspy[lazrs]'/'laspy[laszip]' for LAZ support.")
+
                 # No need to pass a data column for LAS/LAZ file, as Z is the logical default
                 if data_column is None:
                     data_column = "Z"
