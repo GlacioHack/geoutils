@@ -3054,7 +3054,7 @@ class Raster:
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         *,
         return_axes: Literal[False] = False,
-        output_fig: str | None = None,
+        savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -3071,7 +3071,7 @@ class Raster:
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         *,
         return_axes: Literal[True],
-        output_fig: str | None = None,
+        savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]: ...
 
@@ -3086,7 +3086,7 @@ class Raster:
         add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         return_axes: bool = False,
-        output_fig: str | None = None,
+        savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
         r"""
@@ -3105,7 +3105,8 @@ class Raster:
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
             If "new", will create a new axis.
         :param return_axes: Whether to return axes.
-        :param output_fig: Path of the output figure to save if needed.
+        :param savefig_fname: Path to quick save the output figure with a default DPI (300), no transparency and no
+            metadata. Use `plt.savefig()` to specify other save parameters or after other customizations.
 
         :returns: None, or (ax, caxes) if return_axes is True.
 
@@ -3216,9 +3217,9 @@ class Raster:
         plt.sca(ax0)
         plt.tight_layout()
 
-        # if output_fig filled, save the plot
-        if output_fig:
-            plt.savefig(output_fig)
+        # if savefig_fname filled, save the plot
+        if savefig_fname:
+            plt.savefig(savefig_fname)
 
         # If returning axes
         if return_axes:

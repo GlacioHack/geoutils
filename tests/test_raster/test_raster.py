@@ -1755,7 +1755,7 @@ class TestRaster:
         # Test save fig
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.png")
-        img.plot(output_fig=temp_file)
+        img.plot(savefig_fname=temp_file)
         if DO_PLOT:
             plt.show()
         else:

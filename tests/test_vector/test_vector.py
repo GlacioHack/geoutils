@@ -153,7 +153,7 @@ class TestVector:
         # Test save fig
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.png")
-        vector.plot(output_fig=temp_file)
+        vector.plot(savefig_fname=temp_file)
         if DO_PLOT:
             plt.show()
         else:
