@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, TypeVar, ove
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin
@@ -921,6 +920,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         matplotlib = import_optional("matplotlib")
         import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         # Ensure that the vector is in the same crs as a reference
         if isinstance(ref_crs, (gu.Raster, gu.Vector, gpd.GeoDataFrame, str)):

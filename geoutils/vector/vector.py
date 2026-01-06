@@ -42,7 +42,6 @@ import numpy as np
 import pandas as pd
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
@@ -296,6 +295,7 @@ class Vector:
 
         matplotlib = import_optional("matplotlib")
         import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         # Ensure that the vector is in the same crs as a reference
         if isinstance(ref_crs, (gu.Raster, rio.io.DatasetReader, Vector, gpd.GeoDataFrame, str)):
