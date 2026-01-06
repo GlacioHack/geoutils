@@ -917,7 +917,8 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :param return_axes: Whether to return axes.
         :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
             with a default DPI (300), no transparency and no metadata. Use `plt.savefig()` to specify other save
-            parameters or after other customizations.
+            parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
+            to close the figure.
 
         :returns: None, or (ax, caxes) if return_axes is True
         """
