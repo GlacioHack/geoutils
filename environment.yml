@@ -10,7 +10,6 @@ dependencies:
   - scipy=1.*
   - xarray>2023
   - rioxarray=0.*
-  - tqdm
 
   # Already dependencies of the above
   - pyproj=3.*

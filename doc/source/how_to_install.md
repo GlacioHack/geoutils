@@ -34,3 +34,21 @@ mamba env create -f geoutils/dev-environment.yml
 ```
 
 After installing, you can check that everything is working by running the tests: `pytest -rA`.
+
+## Dependencies
+
+GeoUtils' required dependencies are:
+- [Rasterio](https://rasterio.readthedocs.io/en/stable/) (version 1.3 and above),
+- [GeoPandas](https://geopandas.org/en/stable/) (version 0.12 and above),
+- [SciPy](https://scipy.org/),
+- [Xarray](https://xarray.dev/),
+- [Rioxarray](https://corteva.github.io/rioxarray/stable/).
+
+which themselves depend notably on [NumPy](https://numpy.org/) and [pandas](https://pandas.pydata.org/).
+
+Optional dependencies are:
+- [Matplotlib](https://matplotlib.org/) for plotting,
+- [LasPy](https://laspy.readthedocs.io/en/latest/) for reading and writing LAS/LAZ/COPC point cloud files,
+- [Numba](https://numba.pydata.org/) for faster filters,
+- [Dask](https://www.dask.org/) for out-of-memory operations,
+- [Psutil](https://psutil.readthedocs.io/en/latest/) and [Plotly](https://plotly.com/) for profiling computing speed and memory.
