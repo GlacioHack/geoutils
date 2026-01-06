@@ -30,7 +30,7 @@ import warnings
 from collections import abc
 from contextlib import ExitStack
 from math import floor
-from typing import IO, Any, Callable, TypeVar, overload, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Any, Callable, TypeVar, overload
 
 import affine
 import geopandas as gpd
@@ -49,6 +49,7 @@ from rasterio.plot import show as rshow
 import geoutils as gu
 from geoutils import profiler
 from geoutils._config import config
+from geoutils._misc import deprecate, import_optional
 from geoutils._typing import (
     ArrayLike,
     DTypeLike,
@@ -65,7 +66,6 @@ from geoutils.interface.raster_point import (
     _regular_pointcloud_to_raster,
 )
 from geoutils.interface.raster_vector import _polygonize
-from geoutils._misc import deprecate, import_optional
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,

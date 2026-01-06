@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 import warnings
-import pytest
-
-pytest.importorskip("dask")
 
 import numpy as np
+import pytest
 import rasterio as rio
 import xarray as xr
 from pyproj import CRS
-import dask.array as da
 
 from geoutils.raster.distributed_computing.dask import (
     delayed_interp_points,
     delayed_reproject,
     delayed_subsample,
 )
+
+# Skip the whole module if Dask is not installed
+pytest.importorskip("dask")
+
+import dask.array as da  # noqa
+
 
 def _build_dst_transform_shifted_newres(
     src_transform: rio.transform.Affine,

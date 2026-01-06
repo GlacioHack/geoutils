@@ -31,6 +31,7 @@ import pandas as pd
 
 from geoutils._misc import import_optional
 
+
 class Profiler:
     """
     Main profiler class for Geoutils

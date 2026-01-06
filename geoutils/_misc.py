@@ -29,7 +29,8 @@ from packaging.version import Version
 
 import geoutils
 
-def import_optional(import_name: str, package_name: str | None = None, extra_name: str = "opt"):
+
+def import_optional(import_name: str, package_name: str | None = None, extra_name: str = "opt") -> Any:
     """
     Helper function to consistently import and raise errors for an optional dependency.
 
@@ -49,6 +50,7 @@ def import_optional(import_name: str, package_name: str | None = None, extra_nam
             f"Optional dependency '{package_name}' required. "
             f"Install it directly or through: pip install geoutils[{extra_name}]."
         ) from e
+
 
 def deprecate(removal_version: Version | None = None, details: str | None = None):  # type: ignore
     """
@@ -189,7 +191,7 @@ def diff_environment_yml(
     :param input_dict: Whether to consider the input as a dict (for testing purposes).
     """
 
-    import_optional("yaml", package_name="pyyaml")
+    yaml = import_optional("yaml", package_name="pyyaml")
 
     if not input_dict:
         # Load the yml as dictionaries

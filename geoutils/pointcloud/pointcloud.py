@@ -23,7 +23,7 @@ import logging
 import os.path
 import pathlib
 import warnings
-from typing import Any, Callable, Iterable, Literal, TypeVar, overload, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, TypeVar, overload
 
 import geopandas as gpd
 import numpy as np
@@ -36,8 +36,8 @@ from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
 from geoutils import profiler
-from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils._misc import import_optional
+from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array

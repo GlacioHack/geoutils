@@ -26,6 +26,7 @@ import pathlib
 from collections import abc
 from os import PathLike
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generator,
     Hashable,
@@ -34,7 +35,6 @@ from typing import (
     Sequence,
     TypeVar,
     overload,
-    TYPE_CHECKING,
 )
 
 import geopandas as gpd
@@ -50,10 +50,10 @@ from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
 from geoutils import profiler
+from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -67,6 +67,7 @@ if TYPE_CHECKING:
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
+
 
 class Vector:
     """

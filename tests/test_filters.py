@@ -126,13 +126,14 @@ class TestStatisticalFilters:
         assert filtered_numba.shape == arr.shape
         assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
 
-    @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")
+    @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")  # type: ignore
     def test_filter_numba__missing_dep(self) -> None:
         """Test that when numba is missing, the proper import error is raised."""
 
         arr = np.array([[1, 2, np.nan], [4, np.nan, 6], [7, 8, 9]], dtype=np.float32)
 
         from geoutils.filters import median_filter
+
         with pytest.raises(ImportError, match="Optional dependency 'numba' required.*"):
             median_filter(arr, size=3, engine="numba")
 

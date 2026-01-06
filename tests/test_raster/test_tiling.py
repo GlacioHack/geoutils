@@ -33,7 +33,9 @@ class TestTiling:
         with pytest.raises(ValueError, match=r"Shape.*smaller than.*"):
             gu.raster.subdivide_array((5, 2), 15)
 
-    @pytest.mark.skipif(find_spec("skimage") is not None, reason="Only runs if scikit-image is missing.")
+    @pytest.mark.skipif(
+        find_spec("skimage") is not None, reason="Only runs if scikit-image is missing."  # type: ignore
+    )
     def test_subdivide_array__missing_dep(self) -> None:
         """Test that the proper error is raised when skimage is not installed."""
 

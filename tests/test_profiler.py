@@ -17,12 +17,15 @@ from geoutils.profiler import Profiler
 
 class TestProfiling:
 
-    @pytest.mark.skipif(find_spec("psutil") is not None and find_spec("plotly") is not None,
-                        reason="Only runs if psutil or plotly is missing.")
+    @pytest.mark.skipif(
+        find_spec("psutil") is not None and find_spec("plotly") is not None,
+        reason="Only runs if psutil or plotly is missing.",  # type: ignore
+    )
     def test_profiling__missing_dep(self) -> None:
         """Test that the profiling functions fail with expected error when psutil is missing."""
 
         from geoutils.profiler import Profiler
+
         with pytest.raises(ImportError, match="Optional dependency 'psutil' required.*"):
             Profiler.enable()
 
@@ -32,7 +35,9 @@ class TestProfiling:
         [(False, False, True), (True, False, True), (False, True, True), (True, True, True), (True, True, False)],
     )  # type: ignore
     @pytest.mark.parametrize("profiling_function", ["load", "get_stats", "subsample", "output_given"])  # type: ignore
-    def test_profiling_configuration(self, profiling_configuration: tuple[bool, bool, bool], profiling_function: str, tmp_path: str) -> None:
+    def test_profiling_configuration(
+        self, profiling_configuration: tuple[bool, bool, bool], profiling_function: str, tmp_path: str
+    ) -> None:
         """
         Test the all combinaisons of profiling with three examples of profiled functions.
         """

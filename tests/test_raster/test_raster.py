@@ -9,8 +9,8 @@ import pathlib
 import re
 import tempfile
 import warnings
-from tempfile import TemporaryFile
 from importlib.util import find_spec
+from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1752,7 +1752,9 @@ class TestRaster:
             plt.close()
         assert True
 
-    @pytest.mark.skipif(find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing.")
+    @pytest.mark.skipif(
+        find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing."
+    )  # type: ignore
     def test_plot__missing_dep(self) -> None:
         """Test proper error is raised when matplotlib is not installed."""
 

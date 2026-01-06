@@ -95,7 +95,7 @@ class TestPointCloud:
         assert pc.data_column == "number_of_returns"
         assert not pc.is_loaded
 
-    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")
+    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")  # type: ignore
     def test_init_las__missing_dep(self) -> None:
         """Check that an absent laspy dependency raises the proper error."""
 
@@ -432,7 +432,7 @@ class TestPointCloud:
         assert np.allclose(pc2.data, saved2.data, atol=atol)
         assert np.allclose(pc2["b2"].values, saved2["b2"].values, atol=atol)
 
-    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")
+    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")  # type: ignore
     def test_to_las__missing_dep(self) -> None:
         """Check to_las() raises the proper error if laspy is not installed."""
 

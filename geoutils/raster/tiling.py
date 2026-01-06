@@ -25,8 +25,8 @@ import sys
 import numpy as np
 
 import geoutils as gu
-from geoutils._typing import NDArrayNum
 from geoutils._misc import import_optional
+from geoutils._typing import NDArrayNum
 
 
 def _get_closest_rectangle(size: int) -> tuple[int, int]:
@@ -233,5 +233,7 @@ def plot_tiling(raster: gu.Raster, tiling_grid: NDArrayNum) -> None:
         row_min, row_max, col_min, col_max = tile
         x_min, y_min = raster.transform * (col_min, row_min)  # Bottom-left corner
         x_max, y_max = raster.transform * (col_max, row_max)  # Top-right corne
-        rect = mpl.patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5)
+        rect = mpl.patches.Rectangle(
+            (x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5
+        )
         ax.add_patch(rect)

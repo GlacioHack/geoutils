@@ -10,7 +10,8 @@ import yaml  # type: ignore
 from packaging.version import Version
 
 import geoutils
-from geoutils._misc import deprecate, copy_doc, diff_environment_yml
+from geoutils._misc import copy_doc, deprecate, diff_environment_yml
+
 
 class TestMisc:
     def test_environment_files(self) -> None:

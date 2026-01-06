@@ -31,8 +31,8 @@ import scipy
 from packaging.version import Version
 from scipy.ndimage import uniform_filter
 
-from geoutils._typing import NDArrayNum
 from geoutils._misc import import_optional
+from geoutils._typing import NDArrayNum
 
 if Version(scipy.__version__) > Version("1.16.0"):
     generic_filter_scipy = scipy.ndimage.vectorized_filter
@@ -43,6 +43,7 @@ else:
 
 try:
     from numba import jit, prange
+
     _HAS_NUMBA = True
 except ImportError:
     _HAS_NUMBA = False
