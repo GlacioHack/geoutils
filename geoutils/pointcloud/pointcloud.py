@@ -321,8 +321,10 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             ]:
 
                 if not _has_laspy:
-                    raise ImportError("Optional dependency needed. Install 'laspy' for LAS support, or "
-                                      "'laspy[lazrs]'/'laspy[laszip]' for LAZ support.")
+                    raise ImportError(
+                        "Optional dependency needed. Install 'laspy' for LAS support, or "
+                        "'laspy[lazrs]'/'laspy[laszip]' for LAZ support."
+                    )
 
                 # No need to pass a data column for LAS/LAZ file, as Z is the logical default
                 if data_column is None:
