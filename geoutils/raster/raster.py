@@ -2775,6 +2775,7 @@ class Raster:
         pixel instead.
 
         Compression default value is set to 'deflate' (equal to GDALs: COMPRESS=DEFLATE in co_opts).
+        Tiled default value is set to 'NO' as the GDAL default value.
 
         :param filename: Filename to write the file to.
         :param driver: Driver to write file with.
