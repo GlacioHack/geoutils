@@ -44,7 +44,7 @@ GeoUtils' required dependencies are:
 - [Xarray](https://xarray.dev/),
 - [Rioxarray](https://corteva.github.io/rioxarray/stable/).
 
-which themselves depend notably on [NumPy](https://numpy.org/) and [pandas](https://pandas.pydata.org/).
+which themselves depend notably on [NumPy](https://numpy.org/), [pandas](https://pandas.pydata.org/), [pyproj](https://pyproj4.github.io/pyproj/stable/) and [pyogrio](https://pyogrio.readthedocs.io/en/latest/).
 
 Optional dependencies are:
 - [Matplotlib](https://matplotlib.org/) for plotting,
