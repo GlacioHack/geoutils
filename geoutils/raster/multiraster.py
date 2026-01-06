@@ -26,7 +26,6 @@ from typing import Any, Callable
 import numpy as np
 import rasterio as rio
 import rasterio.warp
-from tqdm import tqdm
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
@@ -187,7 +186,7 @@ def stack_rasters(
     # Make a data list and add all the reprojected rasters into it.
     data: list[NDArrayNum] = []
 
-    for raster in tqdm(rasters, disable=not progress):
+    for raster in rasters:
         # Check that data is loaded, otherwise temporarily load it
         if not raster.is_loaded:
             raster.load()

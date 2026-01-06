@@ -25,16 +25,31 @@ import functools
 import warnings
 from typing import Any, Callable
 
-try:
-    import yaml  # type: ignore
-
-    _has_yaml = True
-except ImportError:
-    _has_yaml = False
-
 from packaging.version import Version
 
 import geoutils
+
+
+def import_optional(import_name: str, package_name: str | None = None, extra_name: str = "opt") -> Any:
+    """
+    Helper function to consistently import and raise errors for an optional dependency.
+
+    :param import_name: Name of the dependency to import.
+    :param package_name: Name of the package to install (optional, only if different from import name e.g.
+        "pyyaml" package is imported as "import yaml".).
+    :param extra_name: Name of the extra tag to install the optional dependency from GeoUtils.
+    """
+
+    if package_name is None:
+        package_name = import_name
+
+    try:
+        return __import__(import_name)
+    except ImportError as e:
+        raise ImportError(
+            f"Optional dependency '{package_name}' required. "
+            f"Install it directly or through: pip install geoutils[{extra_name}]."
+        ) from e
 
 
 def deprecate(removal_version: Version | None = None, details: str | None = None):  # type: ignore
@@ -176,8 +191,7 @@ def diff_environment_yml(
     :param input_dict: Whether to consider the input as a dict (for testing purposes).
     """
 
-    if not _has_yaml:
-        raise ValueError("Test dependency needed. Install 'pyyaml'")
+    yaml = import_optional("yaml", package_name="pyyaml")
 
     if not input_dict:
         # Load the yml as dictionaries

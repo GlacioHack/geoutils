@@ -29,14 +29,7 @@ from typing import Any
 
 import pandas as pd
 
-try:
-    import plotly.express as px  # type: ignore
-    import plotly.graph_objects as go  # type: ignore
-    import psutil  # type: ignore
-
-    _HAS_PLOTLY_PSUTIL = True
-except ImportError:
-    _HAS_PLOTLY_PSUTIL = False
+from geoutils._misc import import_optional
 
 
 class Profiler:
@@ -56,20 +49,22 @@ class Profiler:
     @staticmethod
     def enable(save_graphs: bool = False, save_raw_data: bool = False) -> None:
         """
-        Enables the profiler if save_graphs or save_raw_data is activate
+        Enables the profiler if save_graphs or save_raw_data is activated.
 
-        :param save_graphs: save the default graphs generated
-        :param save_raw_data: save the raw data on calls as a .pickle file
+        :param save_graphs: Save the default graphs generated.
+        :param save_raw_data: Save the raw data on calls as a .pickle file.
         """
-        if _HAS_PLOTLY_PSUTIL:
-            Profiler.save_graphs = save_graphs
-            Profiler.save_raw_data = save_raw_data
-            Profiler.enabled = Profiler.save_graphs or Profiler.save_raw_data
 
-            # Reset profiling information as a new Profiler is enabled
-            Profiler.reset()
-        else:
-            pass
+        # To immediately raise errors if they are not installed
+        import_optional("plotly")
+        import_optional("psutil")
+
+        Profiler.save_graphs = save_graphs
+        Profiler.save_raw_data = save_raw_data
+        Profiler.enabled = Profiler.save_graphs or Profiler.save_raw_data
+
+        # Reset profiling information as a new Profiler is enabled
+        Profiler.reset()
 
     @staticmethod
     def selection_functions(functions: list[str]) -> None:
@@ -113,6 +108,10 @@ class Profiler:
 
         :param output: Output directory path, if None output is "output_profiling" in the current directory
         """
+
+        import_optional("plotly")
+        import plotly.express as px
+
         if output is None:
             output = "output_profiling"
 
@@ -183,6 +182,9 @@ class Profiler:
         :param data_name: The name of the data to plot (if cpu consumption were to be added for example)
         :param path_fig: The path to save the output plot
         """
+
+        import_optional("plotly")
+        import plotly.graph_objects as go
 
         # Get the parent call entry
         parent_row = Profiler._profiling_info[Profiler._profiling_info["uuid_function"] == uuid_function]
@@ -388,6 +390,8 @@ class MemProf(Thread):
         :param pipe: The pipe used to send the end monitoring signal
         :param interval: Time interval (seconds) between memory measurements
         """
+        psutil = import_optional("psutil")
+
         super().__init__()
         self.pipe = pipe
         self.interval = interval

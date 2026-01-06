@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import warnings
+from importlib.util import find_spec
 
 import geopandas as gpd
 import numpy as np
@@ -78,7 +79,7 @@ class TestPointCloud:
         assert pc.data_column is None
         assert_geodataframe_equal(pc.ds, self.gdf3)
 
-    def test_init__las(self) -> None:
+    def test_init_las(self) -> None:
         # Import optional laspy or skip test
         pytest.importorskip("laspy")
 
@@ -93,6 +94,13 @@ class TestPointCloud:
 
         assert pc.data_column == "number_of_returns"
         assert not pc.is_loaded
+
+    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")  # type: ignore
+    def test_init_las__missing_dep(self) -> None:
+        """Check that an absent laspy dependency raises the proper error."""
+
+        with pytest.raises(ImportError, match="Optional dependency 'laspy' required.*"):
+            PointCloud(self.fn_las)
 
     def test_init__errors(self) -> None:
         """Test errors raised by point cloud instantiation."""
@@ -423,6 +431,13 @@ class TestPointCloud:
         assert np.allclose(pc2.geometry.y.values, saved2.geometry.y.values, atol=atol)
         assert np.allclose(pc2.data, saved2.data, atol=atol)
         assert np.allclose(pc2["b2"].values, saved2["b2"].values, atol=atol)
+
+    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")  # type: ignore
+    def test_to_las__missing_dep(self) -> None:
+        """Check to_las() raises the proper error if laspy is not installed."""
+
+        with pytest.raises(ImportError, match="Optional dependency 'laspy' required.*"):
+            PointCloud(self.fn_las)
 
     @pytest.mark.parametrize(
         "method", ["reproject", "crop", "translate", "set_precision", "to_crs", "set_crs", "rename_geometry"]

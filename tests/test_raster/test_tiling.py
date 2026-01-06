@@ -14,7 +14,6 @@ class TestTiling:
 
     def test_subdivide_array(self) -> None:
         # Import optional scikit-image or skip test
-        pytest.importorskip("skimage")
 
         test_shape = (6, 4)
         test_count = 4

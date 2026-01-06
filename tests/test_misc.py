@@ -10,7 +10,7 @@ import yaml  # type: ignore
 from packaging.version import Version
 
 import geoutils
-import geoutils.misc
+from geoutils._misc import copy_doc, deprecate, diff_environment_yml
 
 
 class TestMisc:
@@ -80,7 +80,7 @@ class TestMisc:
             removal_version = None
 
         # Define a function with no use that is marked as deprecated.
-        @geoutils.misc.deprecate(removal_version, details=details)  # type: ignore
+        @deprecate(removal_version, details=details)  # type: ignore
         def useless_func() -> int:
             return 1
 
@@ -123,14 +123,14 @@ class TestMisc:
         devenv = {"dependencies": ["python==3.9", "numpy", "pandas", "opencv"]}
 
         # This should print the difference between the two
-        geoutils.misc.diff_environment_yml(env, devenv, input_dict=True, print_dep="conda")
+        diff_environment_yml(env, devenv, input_dict=True, print_dep="conda")
 
         # Capture the stdout and check it is indeed the right diff
         captured = capsys.readouterr().out
         assert captured == "opencv\n"
 
         # This should print the difference including pip
-        geoutils.misc.diff_environment_yml(env, devenv, input_dict=True, print_dep="both")
+        diff_environment_yml(env, devenv, input_dict=True, print_dep="both")
 
         captured = capsys.readouterr().out
         assert captured == "opencv\nNone\n"
@@ -139,38 +139,38 @@ class TestMisc:
         devenv2 = {"dependencies": ["python==3.9", "numpy", "pandas", "opencv", {"pip": ["geoutils", "-e ./"]}]}
 
         # The diff function should not account for -e ./ that is the local install for developers
-        geoutils.misc.diff_environment_yml(env2, devenv2, input_dict=True, print_dep="both")
+        diff_environment_yml(env2, devenv2, input_dict=True, print_dep="both")
         captured = capsys.readouterr().out
 
         assert captured == "opencv\ngeoutils\n"
 
         # This should print only pip
-        geoutils.misc.diff_environment_yml(env2, devenv2, input_dict=True, print_dep="pip")
+        diff_environment_yml(env2, devenv2, input_dict=True, print_dep="pip")
         captured = capsys.readouterr().out
 
         assert captured == "geoutils\n"
 
         # This should raise an error because print_dep is not well defined
         with pytest.raises(ValueError, match='The argument "print_dep" can only be "conda", "pip" or "both".'):
-            geoutils.misc.diff_environment_yml(env2, devenv2, input_dict=True, print_dep="lol")
+            diff_environment_yml(env2, devenv2, input_dict=True, print_dep="lol")
 
         # When the dependencies are not defined in dev-env but in env, it should raise an error
         # For normal dependencies
         env3 = {"dependencies": ["python==3.9", "numpy", "pandas", "lol"]}
         devenv3 = {"dependencies": ["python==3.9", "numpy", "pandas", "opencv", {"pip": ["geoutils"]}]}
         with pytest.raises(ValueError, match="The following dependencies are listed in env but not dev-env: lol"):
-            geoutils.misc.diff_environment_yml(env3, devenv3, input_dict=True, print_dep="pip")
+            diff_environment_yml(env3, devenv3, input_dict=True, print_dep="pip")
 
         # For pip dependencies
         env4 = {"dependencies": ["python==3.9", "numpy", "pandas", {"pip": ["lol"]}]}
         devenv4 = {"dependencies": ["python==3.9", "numpy", "pandas", "opencv", {"pip": ["geoutils"]}]}
         with pytest.raises(ValueError, match="The following pip dependencies are listed in env but not dev-env: lol"):
-            geoutils.misc.diff_environment_yml(env4, devenv4, input_dict=True, print_dep="pip")
+            diff_environment_yml(env4, devenv4, input_dict=True, print_dep="pip")
 
     def test_copydoc_geopandas(self) -> None:
 
         # This function exist in geopandas, so should not fail and copy the doc with "Vector" in it
-        @geoutils.misc.copy_doc(gpd.GeoSeries, "Vector")
+        @copy_doc(gpd.GeoSeries, "Vector")
         def union() -> int:
             return 1
 
@@ -178,7 +178,7 @@ class TestMisc:
 
         # This function does not exist, so should not fail either (to ensure GeoUtils package import), but should
         # have a description stating that it does not exist.
-        @geoutils.misc.copy_doc(gpd.GeoSeries, "Vector")
+        @copy_doc(gpd.GeoSeries, "Vector")
         def doesnotexist() -> int:
             return 1
 

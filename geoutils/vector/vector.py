@@ -26,6 +26,7 @@ import pathlib
 from collections import abc
 from os import PathLike
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generator,
     Hashable,
@@ -37,13 +38,10 @@ from typing import (
 )
 
 import geopandas as gpd
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
@@ -51,10 +49,10 @@ from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
 from geoutils import profiler
+from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils.misc import copy_doc, deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -62,6 +60,9 @@ from geoutils.projtools import (
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.geotransformations import _reproject
+
+if TYPE_CHECKING:
+    import matplotlib
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -291,6 +292,10 @@ class Vector:
 
         :returns: None, or (ax, caxes) if return_axes is True
         """
+
+        matplotlib = import_optional("matplotlib")
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         # Ensure that the vector is in the same crs as a reference
         if isinstance(ref_crs, (gu.Raster, rio.io.DatasetReader, Vector, gpd.GeoDataFrame, str)):
