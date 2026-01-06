@@ -16,7 +16,6 @@ class TestTiling:
 
     def test_subdivide_array(self) -> None:
         # Import optional scikit-image or skip test
-        pytest.importorskip("skimage")
 
         test_shape = (6, 4)
         test_count = 4
@@ -32,15 +31,6 @@ class TestTiling:
 
         with pytest.raises(ValueError, match=r"Shape.*smaller than.*"):
             gu.raster.subdivide_array((5, 2), 15)
-
-    @pytest.mark.skipif(
-        find_spec("skimage") is not None, reason="Only runs if scikit-image is missing."  # type: ignore
-    )
-    def test_subdivide_array__missing_dep(self) -> None:
-        """Test that the proper error is raised when skimage is not installed."""
-
-        with pytest.raises(ImportError, match="Optional dependency 'scikit-image' required.*"):
-            gu.raster.subdivide_array((5,), 2)
 
     @pytest.mark.parametrize("overlap", [0, 5])  # type: ignore
     def test_tiling(self, overlap: int) -> None:

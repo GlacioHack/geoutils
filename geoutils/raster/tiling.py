@@ -23,6 +23,7 @@ import math
 import sys
 
 import numpy as np
+from scipy.ndimage import zoom
 
 import geoutils as gu
 from geoutils._misc import import_optional
@@ -75,7 +76,7 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     If 'count' is divisible by the product of 'shape', the amount of cells in each block will be equal.
     If 'count' is not divisible, the amount of cells in each block will be very close to equal.
 
-    :param shape: The shape of a array to be subdivided.
+    :param shape: The shape of array to be subdivided.
     :param count: The amount of subdivisions to make.
 
     :examples:
@@ -106,8 +107,6 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     :returns: An array of shape 'shape' with 'count' unique indices.
     """
 
-    skimage = import_optional("skimage", package_name="scikit-image")
-
     # Check if system is 64bit or 32bit and catch potential numpy overflow because MSVC `long` is int32_t
     if sys.maxsize > 2**32:
         size = np.prod(shape, dtype=np.int64)
@@ -124,8 +123,11 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     rect = _get_closest_rectangle(count)
     small_indices = np.pad(np.arange(count), np.prod(rect) - count, mode="edge")[: int(np.prod(rect))].reshape(rect)
 
+    # Compute zoom factors
+    zoom_factors = np.array(shape) / np.array(small_indices.shape)
+
     # Upscale the grid to fit the output shape using nearest neighbour scaling.
-    indices = skimage.transform.resize(small_indices, shape, order=0, preserve_range=True).astype(int)
+    indices = zoom(small_indices, zoom=zoom_factors, order=0).astype(int)
 
     return indices.reshape(shape)
 

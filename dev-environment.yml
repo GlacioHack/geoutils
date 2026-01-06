@@ -21,11 +21,10 @@ dependencies:
   - matplotlib=3.* # For plotting
   - laspy # For LAS file support
   - lazrs-python # For LAZ file support
-  - scikit-image # For specific image ops
   - psutil # For profiler
   - plotly # For profiler
   - numba # For filters
-  - dask # For out-of-memory
+  - dask # For out-of-memory operations
 
   # Test dependencies
   - gdal  # To test functionalities against GDAL
