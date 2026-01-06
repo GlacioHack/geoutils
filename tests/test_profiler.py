@@ -26,7 +26,7 @@ class TestProfiling:
 
         from geoutils.profiler import Profiler
 
-        with pytest.raises(ImportError, match="Optional dependency 'psutil' required.*"):
+        with pytest.raises(ImportError, match="Optional dependency 'plotly' required.*"):
             Profiler.enable()
 
     # Test that there's no crash when giving profiling configuration
