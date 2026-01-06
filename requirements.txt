@@ -6,7 +6,6 @@ rasterio>=1.3,<1.4.4
 scipy==1.*
 xarray>2023
 rioxarray==0.*
-tqdm
 pyproj==3.*
 pandas>=1,<3
 numpy>=1,<3

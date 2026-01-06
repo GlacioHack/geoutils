@@ -14,11 +14,13 @@ from pyproj import CRS
 pytest.importorskip("dask")
 
 import dask.array as da  # noqa
-from geoutils.raster.distributed_computing.dask import (
+
+from geoutils.raster.distributed_computing.dask import (  # noqa
     delayed_interp_points,
     delayed_reproject,
     delayed_subsample,
-) # noqa
+)
+
 
 def _build_dst_transform_shifted_newres(
     src_transform: rio.transform.Affine,
