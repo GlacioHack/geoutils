@@ -3092,6 +3092,8 @@ class Raster:
         This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
         you give this method will be passed to it.
 
+        # Modification #
+
         :param bands: Bands to plot, from 1 to self.count (default is all).
         :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
         :param vmin: Colorbar minimum value. Default is data min.
