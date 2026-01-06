@@ -40,7 +40,6 @@ import rasterio.windows
 import rioxarray
 import xarray as xr
 from affine import Affine
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -3119,6 +3118,7 @@ class Raster:
 
         matplotlib = import_optional("matplotlib")
         import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         # If data is not loaded, need to load it
         if not self.is_loaded:
