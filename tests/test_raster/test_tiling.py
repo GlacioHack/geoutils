@@ -1,5 +1,7 @@
 """Test tiling tools for arrays and rasters."""
 
+from importlib.util import find_spec
+
 import numpy as np
 import pytest
 
@@ -30,6 +32,13 @@ class TestTiling:
 
         with pytest.raises(ValueError, match=r"Shape.*smaller than.*"):
             gu.raster.subdivide_array((5, 2), 15)
+
+    @pytest.mark.skipif(find_spec("skimage") is not None, reason="Only runs if scikit-image is missing.")
+    def test_subdivide_array__missing_dep(self) -> None:
+        """Test that the proper error is raised when skimage is not installed."""
+
+        with pytest.raises(ImportError, match="Optional dependency 'scikit-image' required.*"):
+            gu.raster.subdivide_array((5,), 2)
 
     @pytest.mark.parametrize("overlap", [0, 5])  # type: ignore
     def test_tiling(self, overlap: int) -> None:

@@ -30,12 +30,10 @@ import warnings
 from collections import abc
 from contextlib import ExitStack
 from math import floor
-from typing import IO, Any, Callable, TypeVar, overload
+from typing import IO, Any, Callable, TypeVar, overload, TYPE_CHECKING
 
 import affine
 import geopandas as gpd
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import rasterio as rio
 import rasterio.windows
@@ -67,7 +65,7 @@ from geoutils.interface.raster_point import (
     _regular_pointcloud_to_raster,
 )
 from geoutils.interface.raster_vector import _polygonize
-from geoutils.misc import deprecate
+from geoutils._misc import deprecate, import_optional
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -100,6 +98,9 @@ try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal  # type: ignore
+
+if TYPE_CHECKING:
+    import matplotlib
 
 RasterType = TypeVar("RasterType", bound="Raster")
 
@@ -3115,6 +3116,10 @@ class Raster:
             mpl_kws = {'cmap':'seismic'}
             myimage.plot(ax=ax1, mpl_kws)
         """
+
+        matplotlib = import_optional("matplotlib")
+        import matplotlib.pyplot as plt
+
         # If data is not loaded, need to load it
         if not self.is_loaded:
             self.load()

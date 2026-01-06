@@ -34,11 +34,10 @@ from typing import (
     Sequence,
     TypeVar,
     overload,
+    TYPE_CHECKING,
 )
 
 import geopandas as gpd
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rasterio as rio
@@ -54,7 +53,7 @@ from geoutils import profiler
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils.misc import copy_doc, deprecate
+from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -63,9 +62,11 @@ from geoutils.projtools import (
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.geotransformations import _reproject
 
+if TYPE_CHECKING:
+    import matplotlib
+
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
-
 
 class Vector:
     """
@@ -291,6 +292,9 @@ class Vector:
 
         :returns: None, or (ax, caxes) if return_axes is True
         """
+
+        matplotlib = import_optional("matplotlib")
+        import matplotlib.pyplot as plt
 
         # Ensure that the vector is in the same crs as a reference
         if isinstance(ref_crs, (gu.Raster, rio.io.DatasetReader, Vector, gpd.GeoDataFrame, str)):

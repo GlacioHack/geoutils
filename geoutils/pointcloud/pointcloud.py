@@ -23,11 +23,9 @@ import logging
 import os.path
 import pathlib
 import warnings
-from typing import Any, Callable, Iterable, Literal, TypeVar, overload
+from typing import Any, Callable, Iterable, Literal, TypeVar, overload, TYPE_CHECKING
 
 import geopandas as gpd
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -39,17 +37,14 @@ from shapely.geometry.base import BaseGeometry
 import geoutils as gu
 from geoutils import profiler
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils._misc import import_optional
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
 from geoutils.stats.stats import _statistics
 
-try:
-    import laspy
-
-    _has_laspy = True
-except ImportError:
-    _has_laspy = False
+if TYPE_CHECKING:
+    import matplotlib
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -124,6 +119,8 @@ PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
 def _load_laspy_data(filename: str, columns: list[str]) -> gpd.GeoDataFrame:
     """Load point cloud data from LAS/LAZ/COPC file as a geodataframe."""
 
+    laspy = import_optional("laspy")
+
     # Read file
     las = laspy.read(filename)
 
@@ -146,6 +143,8 @@ def _load_laspy_metadata(
     filename: str,
 ) -> tuple[CRS, int, BoundingBox, pd.Index]:
     """Load point cloud metadata from LAS/LAZ/COPC file."""
+
+    laspy = import_optional("laspy")
 
     with laspy.open(filename) as f:
 
@@ -173,6 +172,8 @@ def _write_laspy(
     **kwargs: Any,
 ) -> None:
     """Write a point cloud geodataframe to a LAS/LAZ/COPC file."""
+
+    laspy = import_optional("laspy")
 
     # Initiate header with user arguments
     header = laspy.LasHeader(version=version, point_format=point_format)
@@ -319,12 +320,6 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
                 ".las",
                 ".laz",
             ]:
-
-                if not _has_laspy:
-                    raise ImportError(
-                        "Optional dependency needed. Install 'laspy' for LAS support, or "
-                        "'laspy[lazrs]'/'laspy[laszip]' for LAZ support."
-                    )
 
                 # No need to pass a data column for LAS/LAZ file, as Z is the logical default
                 if data_column is None:
@@ -923,6 +918,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
 
         :returns: None, or (ax, caxes) if return_axes is True
         """
+
+        matplotlib = import_optional("matplotlib")
+        import matplotlib.pyplot as plt
 
         # Ensure that the vector is in the same crs as a reference
         if isinstance(ref_crs, (gu.Raster, gu.Vector, gpd.GeoDataFrame, str)):

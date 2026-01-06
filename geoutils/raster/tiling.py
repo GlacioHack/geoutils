@@ -23,10 +23,10 @@ import math
 import sys
 
 import numpy as np
-from matplotlib.patches import Rectangle
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
+from geoutils._misc import import_optional
 
 
 def _get_closest_rectangle(size: int) -> tuple[int, int]:
@@ -105,10 +105,8 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
 
     :returns: An array of shape 'shape' with 'count' unique indices.
     """
-    try:
-        import skimage.transform
-    except ImportError:
-        raise ImportError("Missing optional dependency, skimage.transform, required by this function.")
+
+    skimage = import_optional("skimage", package_name="scikit-image")
 
     # Check if system is 64bit or 32bit and catch potential numpy overflow because MSVC `long` is int32_t
     if sys.maxsize > 2**32:
@@ -228,10 +226,12 @@ def plot_tiling(raster: gu.Raster, tiling_grid: NDArrayNum) -> None:
     :param raster: The raster to plot with its tiling.
     :param tiling_grid: tiling given by compute_tiling.
     """
+    mpl = import_optional("matplotlib")
+
     ax, caxes = raster.plot(return_axes=True)
     for tile in tiling_grid.reshape(-1, 4):
         row_min, row_max, col_min, col_max = tile
         x_min, y_min = raster.transform * (col_min, row_min)  # Bottom-left corner
         x_max, y_max = raster.transform * (col_max, row_max)  # Top-right corne
-        rect = Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5)
+        rect = mpl.patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5)
         ax.add_patch(rect)

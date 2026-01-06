@@ -10,6 +10,7 @@ import re
 import tempfile
 import warnings
 from tempfile import TemporaryFile
+from importlib.util import find_spec
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1661,6 +1662,9 @@ class TestRaster:
         """
         Test cbar matches plot height.
         """
+
+        pytest.importorskip("matplotlib")
+
         # Plot raster with cbar
         r0 = gu.Raster(example)
         fig, ax = plt.subplots(figsize=(figsize, figsize))
@@ -1686,6 +1690,9 @@ class TestRaster:
         assert h == pytest.approx(h_cbar)
 
     def test_plot(self) -> None:
+
+        pytest.importorskip("matplotlib")
+
         # Read single band raster and RGB raster
         img = gu.Raster(self.landsat_b4_path)
         img_RGB = gu.Raster(self.landsat_rgb_path)
@@ -1744,6 +1751,15 @@ class TestRaster:
         else:
             plt.close()
         assert True
+
+    @pytest.mark.skipif(find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing.")
+    def test_plot__missing_dep(self) -> None:
+        """Test proper error is raised when matplotlib is not installed."""
+
+        img = gu.Raster(self.landsat_b4_path)
+
+        with pytest.raises(ImportError, match="Optional dependency 'matplotlib' required.*"):
+            img.plot()
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_to_file(self, example: str) -> None:
