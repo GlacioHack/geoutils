@@ -2778,6 +2778,8 @@ class Raster:
         Tiled default value is set to 'NO' as the GDAL default value.
         Raster is saved as a BigTIFF if the output file might exceed 4GB and as classical TIFF otherwise.
 
+        Example: dem.to_file(to_file, co_opts={'TILED':'YES', 'COMPRESS':'LZW'})
+
         :param filename: Filename to write the file to.
         :param driver: Driver to write file with.
         :param dtype: Data type to write the image as (defaults to dtype of image data).
