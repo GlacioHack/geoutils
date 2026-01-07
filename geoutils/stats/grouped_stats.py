@@ -59,7 +59,7 @@ def from_raster_to_flattened(dict_raster: dict[str, Any]) -> dict[str, Any]:
     return dict_arrays
 
 
-def is_interval(bin_value: list[Any] | Raster) -> bool:
+def is_interval(bin_value: RasterType | list[int] | object) -> bool:
     """
     Verifying the interval coherence if binning is a list
     :param bin_value: Bin value
@@ -83,7 +83,7 @@ def is_interval(bin_value: list[Any] | Raster) -> bool:
 
 def grouped_stats(
     groupby_vars: dict[str, RasterType],
-    bins: dict[str, RasterType],
+    bins: dict[str, RasterType | list[int] | object],
     aggregated_vars: dict[str, NDArrayNum],
     statistics: list[str],
     save_csv: str | Path | None = None,
