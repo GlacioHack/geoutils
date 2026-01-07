@@ -2776,6 +2776,7 @@ class Raster:
 
         Compression default value is set to 'deflate' (equal to GDALs: COMPRESS=DEFLATE in co_opts).
         Tiled default value is set to 'NO' as the GDAL default value.
+        Raster is saved as a BigTIFF if the output file might exceed 4GB and as classical TIFF otherwise.
 
         :param filename: Filename to write the file to.
         :param driver: Driver to write file with.
@@ -2795,9 +2796,13 @@ class Raster:
         if co_opts is None:
             co_opts = {}
 
-        # Set compression default value to DEFLATE
+        # Set COMPRESS default value to DEFLATE
         if "COMPRESS" not in map(str.upper, co_opts.keys()):
             co_opts["COMPRESS"] = "DEFLATE"
+
+        # Set BIGTIFF default value to IF_SAFER, to save the output image as a BigTIFF if it might exceed 4GB.
+        if "BIGTIFF" not in map(str.upper, co_opts.keys()):
+            co_opts["BIGTIFF"] = "IF_SAFER"
 
         meta = self.tags if self.tags is not None else {}
         if metadata is not None:

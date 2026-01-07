@@ -1760,6 +1760,7 @@ class TestRaster:
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
         assert (Image.open(temp_file)).info["compression"] == "tiff_adobe_deflate"  # test no default compression
+        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
 
         # Try to save with a pathlib path (create a new temp file for Windows)
         path = pathlib.Path(temp_file)
@@ -1769,6 +1770,8 @@ class TestRaster:
         co_opts = {"COMPRESS": "NONE"}
         img.to_file(temp_file, co_opts=co_opts)
         assert len((Image.open(temp_file)).tile) > 1  # test {TILED": "NO"} default value
+        saved = gu.Raster(temp_file)
+        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
 
         # Test additional options: several co_opts with compress and bigtiff + metadata
         co_opts = {"COMPRESS": "LZW", "BIGTIFF": "YES"}
