@@ -93,6 +93,30 @@ inlier_mask = rast > 1500
 rast.get_stats(inlier_mask=inlier_mask)
 ```
 
+## Grouped statistics
+
+GeoUtils provides support for grouped statistics, allowing statistics to be computed independently over subsets of data
+defined by one or more grouping bins. This is particularly useful when analyzing how statistical properties vary
+across classes, bins, or segmentation derived from the data itself.
+
+Example of grouped statistics according elevation values
+```{code-cell} ipython3
+from geoutils.stats import grouped_stats
+
+group_by = {"rast": rast}
+bins = {"rast": [100, 1000, 2000, 3000, np.inf]}
+to_aggregate = {"rast": rast}
+statistics = ["mean", "min", "max"]
+
+df = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
+df
+```
+
+```{warning}
+Bins can be presented in different ways. It is possible to integrate an interval of minimum 3 values, a mask or a
+segmentation map in raster format.
+```
+
 ## Subsampling
 
 The {func}`~geoutils.Raster.subsample` method allows to efficiently extract a valid random subsample from a raster or a point cloud. It can conveniently

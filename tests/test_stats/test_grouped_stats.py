@@ -86,7 +86,7 @@ def test_is_interval() -> None:
             ValueError,
             "If bins is an interval, it must be a 1-dimensional array",
         ),
-        ([0, "a", 20, 40, np.inf], TypeError, "Bins must be a List[Any] of number"),
+        ([0, "a", 20, 40, np.inf], TypeError, "Bins must be a list of number"),
         ([0], ValueError, "Bins must be of size > 2"),
         ([0, 5, -2, 40, np.inf], ValueError, "Values must be strictly increasing."),
     ],
