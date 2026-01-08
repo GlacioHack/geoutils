@@ -512,6 +512,8 @@ class Raster:
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
+            if downsample < 1:
+                raise ValueError("downsample must be >=1.")
 
             if downsample == 1:
                 out_shape = (self.height, self.width)
