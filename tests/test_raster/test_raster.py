@@ -866,6 +866,8 @@ class TestRaster:
         # -- Check that error is raised when downsampling value is not valid --
         with pytest.raises(TypeError, match="downsample must be of type int or float."):
             gu.Raster(example, downsample=[1, 1])  # type: ignore
+        with pytest.raises(ValueError, match="downsample must be >=1."):
+            gu.Raster(example, downsample=0)  # type: ignore
 
     def test_add_sub(self) -> None:
         """
