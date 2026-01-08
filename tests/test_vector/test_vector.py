@@ -10,6 +10,7 @@ import warnings
 
 import geopandas as gpd
 import geopandas.base
+import matplotlib.pyplot as plt
 import pyproj
 import pytest
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
@@ -19,6 +20,8 @@ from shapely.geometry.linestring import LineString
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
+
+DO_PLOT = False
 
 
 class TestVector:
@@ -113,6 +116,49 @@ class TestVector:
 
         assert isinstance(footprint, gu.Vector)
         assert footprint.vector_equal(vector.get_footprint_projected(vector.crs))
+
+    def test_plot(self) -> None:
+        """Test the vector plot."""
+
+        # Load vector example
+        vector = gu.Vector(self.aster_outlines_path)
+
+        # Test default plot
+        vector.plot()
+
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test with new figure
+        plt.figure()
+        vector.plot()
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test with provided ax
+        ax = plt.subplot(111)
+        vector.plot(ax=ax)
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert True
+
+        # Test save fig
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.png")
+        vector.plot(savefig_fname=temp_file)
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert os.path.isfile(temp_file)
 
 
 class NeedToImplementWarning(FutureWarning):
