@@ -193,6 +193,7 @@ class TestPointCloud:
         # Open a point cloud
         # We need to do a deep copy to avoid modifying the original object
         pc = PointCloud(self.gdf1.copy(deep=True), data_column="b1")
+        pc_orig = pc.copy()
 
         # Create a boolean array of the same shape, and a mask of the same transform/crs
         rng = np.random.default_rng(42)
@@ -208,8 +209,18 @@ class TestPointCloud:
         assert isinstance(vals_mask, PointCloud)
         assert vals_mask.pointcloud_equal(vals_arr)
 
-        # Now, we test index assignment
-        pc2 = pc.copy()
+        # Check for 3D point cloud
+
+        pc3d = PointCloud(self.gdf3.copy(deep=True))
+        vals_arr = pc3d[arr]
+        vals_mask = pc3d[mask]
+
+        assert isinstance(vals_arr, PointCloud)
+        assert isinstance(vals_mask, PointCloud)
+        assert vals_mask.pointcloud_equal(vals_arr)
+
+        # 2/ Now, we test index assignment
+        pc2 = pc_orig.copy()
 
         # It should work with a number, or a 1D array of the same length as the indexed one
         pc["b1"] = 1.0
@@ -217,6 +228,16 @@ class TestPointCloud:
 
         # The point clouds should be the same
         assert pc2.pointcloud_equal(pc)
+
+        # It should also work with a boolean point cloud of the same length as the indexes one
+        pc3 = pc_orig.copy()
+        pc3[pc3 > 500] = np.nan
+        assert all(np.isnan(pc3.data[pc3.data > 500]))
+
+        # It should work for 3D point inputs
+        pc3d = PointCloud(self.gdf3.copy(deep=True))
+        pc3d[pc3d > 500] = np.nan
+        assert all(np.isnan(pc3d.data[pc3d.data > 500]))
 
         # -- Finally, we check that errors are raised for both indexing and index assignment --
 

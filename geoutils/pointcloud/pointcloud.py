@@ -740,14 +740,16 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         In addition to all index types supported by GeoPandas, also supports a point cloud mask of same georeferencing.
         """
 
-        if isinstance(index, PointCloud) or isinstance(index, np.ndarray):
-            # If input is mask with the same shape and georeferencing, convert to ndarray
+        # If input is mask with the same shape and georeferencing
+        if isinstance(index, PointCloud) or (isinstance(index, np.ndarray) and len(index) == self.point_count):
             _cast_numeric_array_pointcloud(self, index, operation_name="an indexing operation")  # type: ignore
             if isinstance(index, PointCloud):
                 ind = index.data
             else:
                 ind = index  # type: ignore
-            return PointCloud(super().__getitem__(ind), data_column=self.data_column)
+            ind = ind.astype(bool)  # In case the 3D Z column was used, it can only be stored as floating
+
+            return PointCloud(self.ds.loc[ind], data_column=self.data_column)
 
         # Otherwise, use index and leave it to GeoPandas
         else:
@@ -759,8 +761,29 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         Perform index assignment on the point cloud.
         """
 
-        # Let the vector class do the job
-        super().__setitem__(index, assign)
+        # If input is mask with the same shape and georeferencing
+        if isinstance(index, PointCloud) or (isinstance(index, np.ndarray) and len(index) == self.point_count):
+            _cast_numeric_array_pointcloud(self, index, operation_name="an indexing operation")  # type: ignore
+            # Get index
+            if isinstance(index, PointCloud):
+                ind = index.data
+            else:
+                ind = index  # type: ignore
+            ind = ind.astype(bool)  # In case the 3D Z column was used, it can only be stored as floating
+            # Assign
+            if self._has_z:
+                print(ind)
+                new_geo = gpd.points_from_xy(
+                    x=self.geometry.x.values[ind], y=self.geometry.y.values[ind], z=assign, crs=self.crs
+                )
+                self.ds.loc[ind, "geometry"] = new_geo
+            else:
+                print(self.data_column)
+                self.ds.loc[ind, [self.data_column]] = assign
+
+        else:
+            # Let the vector class do the job
+            super().__setitem__(index, assign)
 
         return None
 
