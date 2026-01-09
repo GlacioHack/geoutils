@@ -773,10 +773,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             # Assign
             if self._has_z:
                 print(ind)
-                new_geo = gpd.points_from_xy(x=self.geometry.x.values[ind],
-                                             y=self.geometry.y.values[ind],
-                                             z=assign,
-                                             crs=self.crs)
+                new_geo = gpd.points_from_xy(
+                    x=self.geometry.x.values[ind], y=self.geometry.y.values[ind], z=assign, crs=self.crs
+                )
                 self.ds.loc[ind, "geometry"] = new_geo
             else:
                 print(self.data_column)
