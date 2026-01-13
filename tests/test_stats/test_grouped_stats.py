@@ -38,8 +38,7 @@ def mask_raster(tmp_path, transform):  # type: ignore
         ]
     )
     mask = Raster.from_array(data_mask, transform, 32645)
-    mask.to_file(tmp_path / "mask_test.tif")
-    return Raster(tmp_path / "mask_test.tif", is_mask=True)
+    return mask
 
 
 @pytest.fixture
