@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import warnings
 
-import dask.array as da
 import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
 from pyproj import CRS
 
-from geoutils.raster.distributed_computing.dask import (
+# Skip the whole module if Dask is not installed
+pytest.importorskip("dask")
+
+import dask.array as da  # noqa
+
+from geoutils.raster.distributed_computing.dask import (  # noqa
     delayed_interp_points,
     delayed_reproject,
     delayed_subsample,

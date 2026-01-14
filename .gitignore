@@ -147,7 +147,7 @@ doc/source/analysis_examples/
 doc/source/gen_modules/
 
 # Directories where example data is downloaded
-examples/data/
+geoutils/example_data/
 
 # Directory where myst_nb executes jupyter code
 doc/jupyter_execute/

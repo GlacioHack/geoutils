@@ -4,27 +4,28 @@ channels:
 dependencies:
   - python>=3.10,<3.15
   - geopandas>=0.12.0
-  - matplotlib=3.*
   - pyproj=3.*
-  - rasterio>=1.3,<2
+  - rasterio>=1.3,<1.4.4
   - pandas>=1,<3
   - numpy>=1,<3
   - scipy=1.*
-  - tqdm
-  - xarray>2023,<=2025.04
-  - dask
+  - xarray>2023
   - rioxarray=0.*
   - affine
   - shapely
+  - pyogrio
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
   - pip
 
   # Optional dependencies
-  - laspy
-  - lazrs-python # For LAZ files
-  - scikit-image
-  - numba
+  - matplotlib=3.* # For plotting
+  - laspy # For LAS file support
+  - lazrs-python # For LAZ file support
+  - psutil # For profiler
+  - plotly # For profiler
+  - numba # For filters
+  - dask # For out-of-memory operations
 
   # Test dependencies
   - gdal  # To test functionalities against GDAL

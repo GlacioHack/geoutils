@@ -202,7 +202,7 @@ def delayed_subsample(
     list_delayed_valids = [
         da.from_delayed(_delayed_nb_valids(b), shape=(1, 1), dtype=np.dtype("int32")) for b in blocks
     ]
-    nb_valids_per_block = np.concatenate([dask.compute(*list_delayed_valids)])
+    nb_valids_per_block = np.concatenate([dask.compute(*list_delayed_valids)]).squeeze()
 
     # Sum to get total number of valid points
     total_nb_valids = np.sum(nb_valids_per_block)
@@ -229,8 +229,9 @@ def delayed_subsample(
             if len(ind_per_block[i]) > 0
         ]
         # Cast output to the right expected dtype and length, then compute and concatenate
+        print(nb_valids_per_block)
         list_subsamples_delayed = [
-            da.from_delayed(s, shape=(nb_valids_per_block[i]), dtype=darr.dtype) for i, s in enumerate(list_subsamples)
+            da.from_delayed(s, shape=(nb_valids_per_block[i],), dtype=darr.dtype) for i, s in enumerate(list_subsamples)
         ]
         subsamples = np.concatenate(dask.compute(*list_subsamples_delayed), axis=0)
 
@@ -481,7 +482,7 @@ def delayed_reproject(
         )
     )
 
-    # 4/ Call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
+    # We call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
 
     # Add fixed arguments to keywords
     kwargs.update(

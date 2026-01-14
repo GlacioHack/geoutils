@@ -31,6 +31,7 @@ import scipy
 from packaging.version import Version
 from scipy.ndimage import uniform_filter
 
+from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 
 if Version(scipy.__version__) > Version("1.16.0"):
@@ -43,9 +44,9 @@ else:
 try:
     from numba import jit, prange
 
-    _has_numba = True
+    _HAS_NUMBA = True
 except ImportError:
-    _has_numba = False
+    _HAS_NUMBA = False
 
     def jit(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
@@ -61,8 +62,9 @@ except ImportError:
 def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any) -> NDArrayNum:
     """
     Dispatch filter application by method name or custom callable.
-    :param array: array to filter
-    :param method: filter method name or callable
+
+    :param array: Array to filter.
+    :param method: Filter method name or callable.
     """
     filter_map: dict[str, Callable[..., NDArrayNum]] = {
         "gaussian": gaussian_filter,
@@ -195,10 +197,14 @@ def _apply_median_filter_2d(array: NDArrayNum, size: int, engine: Literal["scipy
     if engine == "scipy":
         median_vals = generic_filter_scipy(array, np.nanmedian, size=size, mode="constant", cval=np.nan)
         return np.where(nans, array, median_vals)
-    if not _has_numba:
-        raise ValueError("Install 'numba' for accelerated filtering.")
-    median_vals = median_filter_numba(array, size)
-    return np.where(nans, array, median_vals)
+
+    else:
+        if not _HAS_NUMBA:
+            # Call import simply to raise an error consistent with other optional imports
+            import_optional("numba")
+
+        median_vals = median_filter_numba(array, size)
+        return np.where(nans, array, median_vals)
 
 
 def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:

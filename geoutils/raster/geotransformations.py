@@ -32,6 +32,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
+from geoutils import profiler
 from geoutils._typing import DTypeLike, MArrayNum
 from geoutils.raster._geotransformations import (
     _get_reproj_params,
@@ -47,6 +48,7 @@ from geoutils.raster.georeferencing import _cast_pixel_interpretation
 ##############
 
 
+@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)  # type: ignore
 def _reproject(
     source_raster: gu.Raster,
     ref: gu.Raster,
@@ -107,27 +109,27 @@ def _reproject(
                 )
             return True, None, None, None, None
 
-    # 4/ Perform reprojection
+    # 4/ Check reprojection is possible (boolean raster will be converted, so no need to check)
+    if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
+        raise ValueError(
+            "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+            "with `force_source_nodata`."
+        )
 
+    # 5/ Perform reprojection
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
-
     if multiproc_config is not None:
         _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
         return False, None, None, None, None
 
     else:
-        if src_nodata is None and np.sum(source_raster.data.mask) > 0:
-            raise ValueError(
-                "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-                "with `force_source_nodata`."
-            )
-        src_arr = source_raster.data.filled(src_nodata)
         # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        dst_arr = _rio_reproject(src_arr, reproj_kwargs=reproj_kwargs)
+        src_arr = source_raster.data.data
+        src_mask = np.ma.getmaskarray(source_raster.data)
+        dst_arr, dst_mask = _rio_reproject(src_arr=src_arr, src_mask=src_mask, reproj_kwargs=reproj_kwargs)
         # Set mask
-        dst_arr = np.ma.masked_array(dst_arr.astype(dtype), fill_value=nodata)
-        if nodata is not None:
-            dst_arr.mask = dst_arr == nodata
+        dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=nodata)
+
         return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
 
 
@@ -136,6 +138,7 @@ def _reproject(
 #########
 
 
+@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
 def _crop(
     source_raster: gu.Raster,
     bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
@@ -229,6 +232,7 @@ def _crop(
 ##############
 
 
+@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)  # type: ignore
 def _translate(
     transform: affine.Affine,
     xoff: float,

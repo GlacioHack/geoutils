@@ -32,4 +32,4 @@ vect.plot(column="Area", cbar_title="Area (km²)")
 # %%
 # Finally, a vector is saved using :func:`~geoutils.Vector.save`.
 
-vect.save("myvector.gpkg")
+vect.to_file("myvector.gpkg")
