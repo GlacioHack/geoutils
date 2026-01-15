@@ -1,3 +1,4 @@
+from pathlib import PosixPath
 from typing import Any, Dict, List
 
 import numpy as np
@@ -12,7 +13,7 @@ from geoutils.stats import grouped_stats
 
 @pytest.fixture
 def transform():  # type: ignore
-    return (30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+    return 30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0
 
 
 @pytest.fixture
@@ -178,3 +179,24 @@ def test_intersection_stats(
 
     assert df_test.loc[(pd.Interval(10.0, np.inf), 2), ("raster", "mean")] == (16 + 12 + 17 + 18) / 4
     assert df_test.loc[(pd.Interval(10.0, np.inf), 2), ("raster", "min")] == 12
+
+
+def test_savings_csv_and_tiff(
+    slope_raster: Raster,
+    aggregated_vars: Dict[str, Any],
+    segm_raster: Raster,
+    statistics: List[Any],
+    tmp_path: PosixPath,
+) -> None:
+    group_by_test = {"slope1": slope_raster, "slope2": slope_raster}
+    bins_test = {"slope1": [0, 5, 10, np.inf], "slope2": segm_raster}
+
+    _ = grouped_stats.grouped_stats(
+        group_by_test, bins_test, aggregated_vars, statistics, save_csv=tmp_path, save_masks=tmp_path
+    )
+
+    for interval in ["-0.001_5.0", "10.0_inf", "5.0_10.0"]:
+        assert tmp_path / "groupbyslope1" / f"slope1_{interval}.tif"
+    for seg in [1, 2, 3]:
+        assert tmp_path / "groupbyslope2" / f"slope2_{seg}.tif"
+    assert tmp_path / "grouped_stats.csv"
