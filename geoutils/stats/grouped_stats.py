@@ -23,6 +23,7 @@ This module allows the user to process grouped statistics easily
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +104,14 @@ def grouped_stats(
     if set(groupby_vars) != set(bins):
         raise ValueError("One bins/mask/segmentation entry per input array required.")
 
+    new_bins = {}
+    for key, value in bins.items():
+        if isinstance(value, str):
+            new_bins[key] = Raster(value)
+            logging.info(f"No need to save {value} again")
+        else:
+            new_bins[key] = value
+
     crs, shape, transform = init_binnings_attributes(next(iter(groupby_vars.values())))
 
     # panda dataframe works on arrays
@@ -116,20 +125,20 @@ def grouped_stats(
     for groupby_key in groupby_vars.keys():
         group_col = f"groupby_{groupby_key}"
 
-        bins_array = bins[groupby_key]
+        bins_array = new_bins[groupby_key]
 
         # is interval
         if is_interval(bins_array):
-            df[group_col] = pd.cut(df[groupby_key], bins=bins_array, include_lowest=True)
+            cut = pd.cut(df[groupby_key], bins=bins_array, include_lowest=True)
+            df[group_col] = cut
 
-            if save_masks:
-                outdir = Path(save_masks) / group_col
-                outdir.mkdir(parents=True, exist_ok=True)
-
-                # Vectorized creation of masks
-                for interval in df[group_col].cat.categories:
-                    mask = df[group_col].values == interval
-                    fname = f"{group_col}_{interval.left}_{interval.right}.tif"
+            if save_masks and not isinstance(bins[groupby_key], str):
+                for interval in cut.cat.categories:
+                    mask_flat = (cut == interval).to_numpy()
+                    mask = mask_flat.reshape(shape)
+                    outdir = Path(save_masks) / group_col
+                    outdir.mkdir(parents=True, exist_ok=True)
+                    fname = f"{groupby_key}_{interval.left}_{interval.right}.tif"
                     Raster.from_array(mask.reshape(shape), transform=transform, crs=crs).save(outdir / fname)
 
         elif isinstance(bins_array, Raster):
@@ -139,9 +148,26 @@ def grouped_stats(
             # binary mask
             if bins_array.is_mask:
                 df[group_col] = pd.Categorical(data, categories=[False, True])
+                if save_masks and not isinstance(bins[groupby_key], str):
+                    mask = data.reshape(shape).astype("uint8")
+                    fname = f"{groupby_key}_mask.tif"
+                    outdir = Path(save_masks) / group_col
+                    outdir.mkdir(parents=True, exist_ok=True)
+                    Raster.from_array(mask.reshape(shape), transform=transform, crs=crs).save(outdir / fname)
             # segmentation
             else:
                 df[group_col] = pd.Categorical(data)
+
+                if save_masks and not isinstance(bins[groupby_key], str):
+                    labels = np.unique(data[~np.isnan(data)])
+                    for lbl in labels:
+                        mask_flat = data == lbl
+                        mask = mask_flat.reshape(shape)
+
+                        fname = f"{groupby_key}_seg_{int(lbl)}.tif"
+                        outdir = Path(save_masks) / group_col
+                        outdir.mkdir(parents=True, exist_ok=True)
+                        Raster.from_array(mask.reshape(shape), transform=transform, crs=crs).save(outdir / fname)
         else:
             raise NotImplementedError("This type of bins does not yet work")
 
@@ -152,7 +178,7 @@ def grouped_stats(
     result = df.groupby(groupby_keys, observed=True, dropna=False)[list(aggregated_vars.keys())].agg(statistics)
 
     if save_csv:
-        csv_file = Path(save_csv)
+        csv_file = Path(save_csv) / "grouped_stats.csv"
         csv_file.parent.mkdir(parents=True, exist_ok=True)
         result.reset_index().to_csv(csv_file, index=False)
 

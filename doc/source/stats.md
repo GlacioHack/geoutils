@@ -123,8 +123,7 @@ from geoutils.stats import grouped_stats
 
 group_by = {"rast": rast}
 elev_mask = rast > 2000
-print(f"Is elev_mask a mask ? {elev_mask.is_mask}")
-bins = {"rast": mask}
+bins = {"rast": elev_mask}
 to_aggregate = {"rast": rast}
 statistics = ["mean", "min", "max"]
 
