@@ -1754,6 +1754,16 @@ class TestRaster:
             plt.close()
         assert True
 
+        # Test save fig
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.png")
+        img.plot(savefig_fname=temp_file)
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert os.path.isfile(temp_file)
+
     @pytest.mark.skipif(
         find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing."
     )  # type: ignore
