@@ -72,6 +72,7 @@ documentation.
 .. autosummary::
     :toctree: gen_modules/
 
+    Raster.is_mask
     Raster.count_on_disk
     Raster.bands_on_disk
     Raster.is_loaded
@@ -96,6 +97,7 @@ documentation.
     Raster.proximity
     Raster.interp_points
     Raster.reduce_points
+    Raster.filter
 ```
 
 ### Plotting
@@ -138,7 +140,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.load
-    Raster.save
+    Raster.to_file
     Raster.to_pointcloud
     Raster.from_pointcloud_regular
     Raster.to_rio_dataset
@@ -198,7 +200,7 @@ documentation.
 
 And reverse operations.
 
-### Logical operator casting to Mask
+### Logical operators casting to mask (boolean raster)
 
 ```{eval-rst}
 .. autosummary::
@@ -220,34 +222,6 @@ And reverse operations.
 
     Raster.__array_ufunc__
     Raster.__array_function__
-```
-
-## Raster mask
-
-```{eval-rst}
-.. minigallery:: geoutils.RasterMask
-      :add-heading:
-```
-
-### Opening a file
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    RasterMask
-```
-
-### Overloaded Raster methods
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    RasterMask.crop
-    RasterMask.reproject
-    RasterMask.polygonize
-    RasterMask.proximity
 ```
 
 ## Multiple rasters
@@ -654,21 +628,4 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 
     PointCloud.pointcloud_equal
     PointCloud.georeferenced_coords_equal
-```
-
-
-## Point cloud mask
-
-```{eval-rst}
-.. minigallery:: geoutils.PointCloudMask
-      :add-heading:
-```
-
-### Opening a file
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    PointCloudMask
 ```

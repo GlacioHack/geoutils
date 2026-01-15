@@ -69,14 +69,13 @@ If an unmasked {class}`~numpy.ndarray` is passed, it will internally be cast int
 {class}`~geoutils.Raster.nodata` values. Additionally, the {attr}`~geoutils.Raster.dtype` are also reconciled as they would for {class}`~numpy.ndarray`,
 following [standard NumPy coercion rules](https://numpy.org/doc/stable/reference/generated/numpy.find_common_type.html).
 
-## Logical comparisons cast to {class}`~geoutils.RasterMask`
+## Logical comparisons cast to a raster mask
 
 Logical comparison operators ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
 {func}`<<operator.lt>`) can be used on a {class}`~geoutils.Raster`, also in combination with any other {class}`~geoutils.Raster`, {class}`~numpy.ndarray` or
 number.
 
-Those operation always return a {class}`~geoutils.RasterMask`, a subclass of {class}`~geoutils.Raster` with a boolean {class}`~numpy.ma.MaskedArray`
-as {class}`~geoutils.Raster.data`.
+Those operation always return a raster mask i.e. a {class}`~geoutils.Raster` with a boolean {class}`~numpy.ma.MaskedArray` as {class}`~geoutils.Raster.data`.
 
 ```{code-cell} ipython3
 # Logical comparison with a number
@@ -85,14 +84,14 @@ mask
 ```
 
 ```{note}
-A {class}`~geoutils.RasterMask`'s {attr}`~geoutils.Raster.data` remains a {class}`~numpy.ma.MaskedArray`. Therefore, it still maps invalid values through its
-{attr}`~numpy.ma.MaskedArray.mask`, but has no associated {attr}`~geoutils.Raster.nodata`.
+A boolean {class}`~geoutils.Raster`'s {attr}`~geoutils.Raster.data` remains a {class}`~numpy.ma.MaskedArray`. Therefore, it still maps invalid values
+through its {attr}`~numpy.ma.MaskedArray.mask`, but has no associated {attr}`~geoutils.Raster.nodata`.
 ```
 
-## Logical bitwise operations on {class}`~geoutils.RasterMask`
+## Logical bitwise operations on raster masks
 
 Logical bitwise operators ({func}`~ <operator.invert>`, {func}`& <operator.and_>`, {func}`| <operator.or_>`, {func}`^ <operator.xor>`) can be used to
-combine a {class}`~geoutils.RasterMask` with another {class}`~geoutils.RasterMask`, and always output a {class}`~geoutils.RasterMask`.
+combine a boolean {class}`~geoutils.Raster` with another boolean {class}`~geoutils.Raster`, and always output a boolean {class}`~geoutils.Raster`.
 
 ```{code-cell} ipython3
 # Logical bitwise operation between masks
@@ -102,17 +101,18 @@ mask
 
 (py-ops-indexing)=
 
-## Indexing a {class}`~geoutils.Raster` with a {class}`~geoutils.RasterMask`
+## Indexing a {class}`~geoutils.Raster` with a raster mask
 
 Finally, indexing and index assignment operations ({func}`[] <operator.getitem>`, {func}`[]= <operator.setitem>`) are both supported by
 {class}`Rasters<geoutils.Raster>`.
 
-For indexing, they can be passed either a {class}`~geoutils.RasterMask` with the same georeferencing, or a boolean {class}`~numpy.ndarray` of the same shape.
+For indexing, they can be passed either a boolean {class}`~geoutils.Raster` with the same georeferencing, or a boolean {class}`~numpy.ndarray` of the same
+shape.
 For assignment, either a {class}`~geoutils.Raster` with the same georeferencing, or any {class}`~numpy.ndarray` of the same shape is expected.
 
-When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the indexed values of the {class}`~geoutils.RasterMask` **excluding those masked in its
-{class}`~geoutils.Raster.data`'s {class}`~numpy.ma.MaskedArray` (for instance, nodata values present during a previous logical comparison)**. To bypass this
-behaviour, simply index without the mask using {attr}`Mask.data.data`.
+When indexing, a flattened {class}`~numpy.ma.MaskedArray` is returned with the indexed values of the boolean {class}`~geoutils.Raster` **excluding those masked
+in its {class}`~geoutils.Raster.data`'s {class}`~numpy.ma.MaskedArray` (for instance, nodata values present during a previous logical comparison)**. To bypass this
+behaviour, simply index without the mask using {attr}`Raster.data.data`.
 
 ```{code-cell} ipython3
 # Indexing the raster with the previous mask

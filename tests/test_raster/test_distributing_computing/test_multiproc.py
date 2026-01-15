@@ -48,14 +48,14 @@ def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
 
 
 # Define a simple function which return a Mask
-def _custom_func_mask(raster: RasterType) -> gu.RasterMask:
+def _custom_func_mask(raster: RasterType) -> gu.Raster:
     mask_array = raster.get_mask()
-    return gu.RasterMask.from_array(mask_array, raster.transform, raster.crs)
+    return gu.Raster.from_array(mask_array, raster.transform, raster.crs)
 
 
 class TestMultiproc:
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
     num_workers = min(2, cpu_count())  # Safer limit for CI
     cluster = ClusterGenerator("test", nb_workers=num_workers)
@@ -92,13 +92,13 @@ class TestMultiproc:
         assert raster_tile_with_padding.raster_equal(raster_tile)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
-    @pytest.mark.parametrize("padding", [0, 1, 10])  # type: ignore
+    @pytest.mark.parametrize("padding", [0, 1, 3])  # type: ignore
     def test_apply_func_block(self, example, padding):
         """
         Test applying a function to a raster tile and handling padding removal.
         """
         raster = Raster(example)
-        tile = np.array([100, 200, 100, 200])  # [rowmin, rowmax, colmin, colmax]
+        tile = np.array([10, 20, 10, 20])  # [rowmin, rowmax, colmin, colmax]
         size = 2
 
         # Apply map_block
@@ -158,7 +158,7 @@ class TestMultiproc:
             assert np.array_equal(raster.get_mask(), output_mask.data)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
-    @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
+    @pytest.mark.parametrize("tile_size", [10, 20])  # type: ignore
     @pytest.mark.parametrize("cluster", [None, cluster])
     @pytest.mark.parametrize("return_tile", [False, True])
     def test_map_multiproc_collect(self, example, tile_size, cluster, return_tile):
@@ -183,14 +183,14 @@ class TestMultiproc:
         # Compare tiled_stats with the stats on full raster
         total_stats = _custom_func_stats(raster)
 
-        tiled_count = sum([stats["valid_count"] for stats in list_stats])
-        tiled_mean = sum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count
+        tiled_count = np.nansum([stats["valid_count"] for stats in list_stats])
+        tiled_mean = np.nansum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
         assert total_stats["valid_count"] == tiled_count
 
     @pytest.mark.skip()
     @pytest.mark.parametrize("example", [aster_dem_path])  # type: ignore
-    @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
+    @pytest.mark.parametrize("tile_size", [10, 20])  # type: ignore
     @pytest.mark.parametrize("cluster", [None, cluster])  # type: ignore
     def test_multiproc_reproject(self, example, tile_size, cluster):
         """Test for multiproc_reproject"""
@@ -253,3 +253,9 @@ class TestMultiproc:
             assert out_img_multi.count == n
             assert out_img_multi.shape == (500, 500)
             assert out_img_single.raster_equal(out_img_multi)
+
+    @pytest.mark.skip()  # type: ignore
+    def test_map_overlap_multiproc_save_bigTiff(self) -> None:
+        """
+        Test the multiprocessing map function with a simple operation returning a raster > 4go (BigTIFF format)
+        """

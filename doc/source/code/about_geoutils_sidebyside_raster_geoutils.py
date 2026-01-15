@@ -4,8 +4,8 @@ import geoutils
 
 landsat_b4_path = geoutils.examples.get_path("everest_landsat_b4")
 landsat_b4_crop_path = geoutils.examples.get_path("everest_landsat_b4_cropped")
-geoutils.Raster(landsat_b4_path).save("myraster1.tif")
-geoutils.Raster(landsat_b4_crop_path).save("myraster2.tif")
+geoutils.Raster(landsat_b4_path).to_file("myraster1.tif")
+geoutils.Raster(landsat_b4_crop_path).to_file("myraster2.tif")
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
@@ -28,7 +28,7 @@ rast1_reproj = rast1.reproject(ref=rast2)
 rast_result = (1 + rast2) / rast1_reproj
 
 # Saving
-rast_result.save("myresult.tif")
+rast_result.to_file("myresult.tif")
 
 ####
 # Part not shown in the docs, to clean up

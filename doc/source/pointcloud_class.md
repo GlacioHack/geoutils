@@ -27,6 +27,10 @@ GeoUtils aims to support these features, as well the reading and writing of poin
 geoparquet) usually used for **sparse point clouds**, and from point-cloud-type files (e.g., LAS, LAZ, COPC) usually
 used for **dense point clouds**.
 
+```{warning}
+Support for LAS files is still preliminary and loads all data in memory for most operations. We are working on adding operations with chunked reading.
+```
+
 Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
 
 (pc-obj-def)=
@@ -40,9 +44,7 @@ It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector
 main attribute** {attr}`~geoutils.PointCloud.data_column` that identifies the name of the main data associated to the
 point geometries.
 
-Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and
-
-New methods specific to point clouds are detailed further below.
+Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
 {attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~xdem.Vector.reproject` and {func}`~xdem.Vector.crop`.
@@ -53,8 +55,8 @@ The complete list of {class}`~geoutils.Vector` attributes and methods can be fou
 
 ## Open and save
 
-A {class}`~geoutils.PointCloud` is opened by instantiating {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
-a {class}`geopandas.GeoSeries` or a {class}`shapely.Geometry`, as for a {class}`~geoutils.Raster`.
+A {class}`~geoutils.PointCloud` is opened by instantiating the class with a {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
+a {class}`geopandas.GeoSeries` or a {class}`shapely.Geometry`.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -115,7 +117,7 @@ The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the 
 
 A {class}`~geoutils.PointCloud` can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`,
 {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`, {func}`<<operator.lt>`) with another {class}`~geoutils.PointCloud`,
-{class}`~numpy.ndarray` or number. It will cast to a {class}`~geoutils.PointCloudMask`.
+{class}`~numpy.ndarray` or number. It will cast to a boolean {class}`~geoutils.PointCloud`.
 
 ```{code-cell} ipython3
 # What are point cloud pixels are larger than 20?
@@ -135,7 +137,7 @@ The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the 
 np.sqrt(pc1)
 ```
 
-Logical comparison functions will cast to a {class}`~geoutils.PointCloudMask`.
+Logical comparison functions will cast to a boolean {class}`~geoutils.PointCloud`.
 
 ```{code-cell} ipython3
 # Is the pointcloud close to another one within tolerance?

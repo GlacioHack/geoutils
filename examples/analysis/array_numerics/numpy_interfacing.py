@@ -37,7 +37,7 @@ aspect.plot(cmap="twilight", cbar_title="Aspect (degrees)")
 #        For rigorous slope and aspect calculation (matching that of GDAL), **check-out our sister package** `xDEM <https://xdem.readthedocs.io/en/latest/index.html>`_.
 #
 # We use NumPy logical operations to isolate the terrain oriented South and above three thousand meters. The rasters will be logically cast to a
-# :class:`Mask<geoutils.Mask>`.
+# boolean :class:`Raster<geoutils.Raster>`.
 
 mask = np.logical_and.reduce((aspect > -45, aspect < 45, rast > 3000))
 mask

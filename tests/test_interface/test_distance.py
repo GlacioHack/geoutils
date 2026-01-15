@@ -32,7 +32,7 @@ def run_gdal_proximity(
     # (avoids the nightmare of setting nodata, transform, crs in GDAL format...)
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = os.path.join(temp_dir, "input.tif")
-        input_raster.save(temp_path)
+        input_raster.to_file(temp_path)
         ds_raster_in = gdal.Open(temp_path, gdalconst.GA_ReadOnly)
 
         # Define GDAL options
@@ -55,10 +55,10 @@ def run_gdal_proximity(
 
 class TestDistance:
 
-    landsat_b4_path = gu.examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = gu.examples.get_path("everest_landsat_b4_cropped")
-    everest_outlines_path = gu.examples.get_path("everest_rgi_outlines")
-    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
+    landsat_b4_path = gu.examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
+    everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
 
     def test_proximity_vector(self) -> None:
         """
@@ -215,7 +215,7 @@ class TestDistance:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_proximity_mask(self, mask: gu.RasterMask) -> None:
+    def test_proximity_mask(self, mask: gu.Raster) -> None:
         mask_orig = mask.copy()
         # Run default
         rast = mask.proximity()
@@ -226,5 +226,3 @@ class TestDistance:
 
         # Check that output is cast back into a raster
         assert isinstance(rast, gu.Raster)
-        # A mask is a raster, so also need to check this
-        assert not isinstance(rast, gu.RasterMask)

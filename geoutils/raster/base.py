@@ -6,6 +6,7 @@ import math
 import warnings
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 
+import struct
 from affine import Affine
 import geopandas as gpd
 import numpy as np
@@ -15,7 +16,6 @@ from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
-from geoutils import projtools
 from geoutils._config import config
 from geoutils._typing import ArrayLike, DTypeLike, MArrayNum, NDArrayNum, NDArrayBool, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -25,7 +25,7 @@ from geoutils.interface.raster_point import (
     _regular_pointcloud_to_raster,
 )
 from geoutils.interface.raster_vector import _polygonize
-from geoutils.misc import deprecate
+from geoutils._misc import deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -562,6 +562,24 @@ class RasterBase:
         to create a clone of this dataset."""
         return self._profile
 
+    def _is_bigtiff(self) -> bool:
+        """
+        Test is the raster file name exists and if it is a BigTIFF (True) or a normal TIFF (False).
+
+        In the file header, first two byte indicate the byte order: "II" for little endian and "MM" for big endian.
+        The next two-byte word contains the format version number: 42 for TIFF format and 43 for BigTIFF format.
+
+        :return: if the filename exists and if its is a BigTIFF or not
+        """
+        if self.filename and pathlib.Path(self.filename).exists():
+            with open(self.filename, "rb") as f:
+                header = f.read(4)
+                byteorder = {b"II": "<", b"MM": ">"}[header[:2]]
+                version = struct.unpack(byteorder + "h", header[2:])[0]
+                return version == 43
+        else:
+            return False
+
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None:
         ...
@@ -593,8 +611,8 @@ class RasterBase:
             f"Nodata value:         {self.nodata}\n",
             f"Pixel interpretation: {self.area_or_point}\n",
             "Pixel size:           {}, {}\n".format(*self.res),
-            "Upper left corner:    {}, {}\n".format(*self.bounds[:2]),
-            "Lower right corner:   {}, {}\n".format(*self.bounds[2:]),
+            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}\n",
+            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}\n",
         ]
 
         if stats:
@@ -631,7 +649,7 @@ class RasterBase:
     def get_stats(
         self,
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
-        inlier_mask: RasterMask | NDArrayBool | None = None,
+        inlier_mask: RasterType | NDArrayBool | None = None,
         band: int = 1,
         counts: tuple[int, int] | None = None,
     ) -> np.floating[Any]: ...
@@ -640,23 +658,67 @@ class RasterBase:
     def get_stats(
         self,
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
-        inlier_mask: RasterMask | NDArrayBool | None = None,
+        inlier_mask: RasterType | NDArrayBool | None = None,
         band: int = 1,
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
+    @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)  # type: ignore
     def get_stats(
         self,
         stats_name: (
             str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
-        inlier_mask: RasterMask | NDArrayBool | None = None,
+        inlier_mask: RasterType | NDArrayBool | None = None,
         band: int = 1,
         counts: tuple[int, int] | None = None,
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
+
+        Common statistics are :
+
+        - Mean: arithmetic mean of the data, ignoring masked values.
+        - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
+        - Max: maximum value among the data, ignoring masked values.
+        - Min: minimum value among the data, ignoring masked values.
+        - Sum: sum of all data, ignoring masked values.
+        - Sum of squares: sum of the squares of all data, ignoring masked values.
+        - 90th percentile: point below which 90% of the data falls, ignoring masked values.
+        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, \
+        ignoring masked values.
+        - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset, \
+          representing the range within which 90% of the data points lie. Ignore masked values.
+        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, \
+        less sensitive to outliers compared to standard deviation. Ignore masked values.
+        - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give \
+          insight into the spread of the data. Only relevant when the raster represents a difference of two objects. \
+          Ignore masked values.
+        - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
+        ignoring masked values.
+        - Valid count: number of finite data points in the array. It counts the non-masked elements.
+        - Total count: total size of the raster.
+        - Percentage valid points: ratio between Valid count and Total count.
+
+        For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
+        in case of a masked array, NumPy module otherwise.
+
+        "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero),
+        calculated before the mask application in case of an inlier_mask. NumPy Masked functions are used is this case
+        or if the Raster was already a masked array. "Percentage valid points" is calculated accordingly.
+
+        If an inlier mask is passed:
+
+        - Total inlier count: number of data points in the inlier mask.
+        - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
+        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification \
+        statistics.
+        - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
+
+        They are all computed based on the previously stated final_count_nonzero.
+
+        Callable functions are supported as well.
 
         :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
             Accepted names include:
@@ -667,7 +729,7 @@ class RasterBase:
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
-            in inlier_mask). DO NOT USE.
+            in inlier_mask), initialize in case of an inlier_mask. DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
         # Force load if not loaded
@@ -680,46 +742,27 @@ class RasterBase:
         # Derive inlier mask
         if inlier_mask is not None:
             valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
-            if isinstance(inlier_mask, RasterMask):
+            if isinstance(inlier_mask, Raster) and inlier_mask.is_mask:
                 inlier_points = np.count_nonzero(inlier_mask.data)
             else:
-                inlier_points = np.count_nonzero(inlier_mask)
+                inlier_points = np.count_nonzero(inlier_mask)  # type: ignore
             dem_masked = self.copy()
+
+            # Mask pixels from the inlier_mask
             dem_masked.set_mask(~inlier_mask)
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
-        # If no name is passed, derive all statistics
-        # TODO: All stats are computed even when only one or an independent user-callable is asked for
-        #  Need to modify code to remove this requirement
-        stats_dict = _statistics(data=data, counts=counts)
-        if stats_name is None:
-            return stats_dict
-
-        if counts is None:
-            ignore_aliases = [
-                "validinliercount",
-                "totalinliercount",
-                "percentagevalidinlierpoints",
-                "percentageinlierpoints",
-            ]
-            stats_aliases = {k: _STATS_ALIASES[k] for k in _STATS_ALIASES.keys() if k not in ignore_aliases}
+        # Given list or all attributes to compute if None
+        if isinstance(stats_name, list) or stats_name is None:
+            return _statistics(data, stats_name, counts)  # type: ignore
         else:
-            stats_aliases = _STATS_ALIASES
-
-        if isinstance(stats_name, list):
-            result = {}
-            for name in stats_name:
-                if callable(name):
-                    result[name.__name__] = name(data)
-                else:
-                    result[name] = _get_single_stat(stats_dict, stats_aliases, name)
-            return result
-        else:
-            if callable(stats_name):
-                return stats_name(data)
+            # Single attribute to compute
+            if isinstance(stats_name, str):
+                return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
+            elif callable(stats_name):
+                return stats_name(data)  # type: ignore
             else:
-                return _get_single_stat(stats_dict, stats_aliases, stats_name)
-
+                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
 
     def raster_equal(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False) -> bool:
         """
@@ -853,9 +896,14 @@ class RasterBase:
         (xmin, ymin, xmax, ymax) in self's coordinate system.
 
         """
+        from geoutils import projtools
+
+        # If input raster is string, open as Raster
+        if isinstance(raster, str):
+            raster = Raster(raster, load_data=False)
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)
+        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)  # type: ignore
 
         # Calculate intersection of bounding boxes
         intersection = projtools.merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
@@ -903,6 +951,7 @@ class RasterBase:
         inplace: bool = False,
     ) -> RasterType | None: ...
 
+    @profiler.profile("geoutils.raster.raster.crop", memprof=True)  # type: ignore
     def crop(
         self: RasterType,
         bbox: RasterType | Vector | list[float] | tuple[float, ...],
@@ -956,6 +1005,7 @@ class RasterBase:
     ) -> RasterType:
         ...
 
+    @profiler.profile("geoutils.raster.raster.icrop", memprof=True)  # type: ignore
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -965,7 +1015,7 @@ class RasterBase:
         """
         Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
-        :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowax).
+        :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowmax).
         :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
 
         :returns: Cropped raster or None (if inplace=True).
@@ -1022,6 +1072,7 @@ class RasterBase:
     ) -> None:
         ...
 
+    @profiler.profile("geoutils.raster.raster.reproject", memprof=True)  # type: ignore
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -1199,7 +1250,7 @@ class RasterBase:
 
     def reduce_points(
         self,
-        points: tuple[ArrayLike, ArrayLike] | PointCloud,
+        points: tuple[ArrayLike, ArrayLike] | gu.PointCloud,
         reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
         window: int | None = None,
         input_latlon: bool = False,
@@ -1244,9 +1295,9 @@ class RasterBase:
 
         """
 
-        if isinstance(points, PointCloud):
+        if isinstance(points, gu.PointCloud):
             # TODO: Check conversion is not done for nothing?
-            points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs,self.crs)
+            points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
             # Otherwise
         else:
             if input_latlon:
@@ -1256,10 +1307,10 @@ class RasterBase:
 
         # Check for array-like inputs
         if (
-                not isinstance(x, (float, np.floating, int, np.integer))
-                and isinstance(y, (float, np.floating, int, np.integer))
-                or isinstance(x, (float, np.floating, int, np.integer))
-                and not isinstance(y, (float, np.floating, int, np.integer))
+            not isinstance(x, (float, np.floating, int, np.integer))
+            and isinstance(y, (float, np.floating, int, np.integer))
+            or isinstance(x, (float, np.floating, int, np.integer))
+            and not isinstance(y, (float, np.floating, int, np.integer))
         ):
             raise TypeError("Coordinates must be both numbers or both array-like.")
 
@@ -1301,8 +1352,8 @@ class RasterBase:
             list_windows = []
 
         # Convert to latlon if asked
-        if input_latlon:
-            x, y = reproject_from_latlon((y, x), self.crs)  # type: ignore
+        # if input_latlon:
+        #     x, y = reproject_from_latlon((y, x), self.crs)  # type: ignore
 
         # Convert coordinates to pixel space
         rows, cols = rio.transform.rowcol(self.transform, x, y, op=math.floor)
@@ -1337,9 +1388,9 @@ class RasterBase:
 
             if self.is_loaded:
                 if self.count == 1:
-                    data = self.data[row: row + height, col: col + width]
+                    data = self.data[row : row + height, col : col + width]
                 else:
-                    data = self.data[slice(None) if band is None else band - 1, row: row + height, col: col + width]
+                    data = self.data[slice(None) if band is None else band - 1, row : row + height, col : col + width]
                 if not masked:
                     data = data.astype(np.float32).filled(np.nan)
                 value = format_value(data)
@@ -1393,6 +1444,7 @@ class RasterBase:
             return (output_val, output_win)
         else:
             return output_val
+
     def xy2ij(
         self,
         x: ArrayLike,
@@ -1494,10 +1546,9 @@ class RasterBase:
 
         :param xi: Indices (or coordinates) of x direction to check.
         :param yj: Indices (or coordinates) of y direction to check.
-        :param index: Interpret xi and yj as raster indices (default is ``True``). If False, assumes xi and yj are
-            coordinates.
+        :param index: Interpret ij as raster indices (default is ``True``). If False, assumes ij is coordinates.
 
-        :returns is_outside: ``True`` if xi/yj is outside the raster extent.
+        :returns is_outside: ``True`` if ij is outside the image.
         """
 
         return _outside_image(
@@ -1552,6 +1603,7 @@ class RasterBase:
     ) -> NDArrayNum | PointCloud:
         ...
 
+    @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloud,
@@ -1652,8 +1704,7 @@ class RasterBase:
             as_array: Literal[False] = False,
             random_state: int | np.random.Generator | None = None,
             force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def to_pointcloud(
@@ -1668,8 +1719,7 @@ class RasterBase:
             as_array: Literal[True],
             random_state: int | np.random.Generator | None = None,
             force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> PointCloud:
-        ...
+    ) -> Vector: ...
 
     @overload
     def to_pointcloud(
@@ -1684,8 +1734,7 @@ class RasterBase:
             as_array: bool = False,
             random_state: int | np.random.Generator | None = None,
             force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | PointCloud:
-        ...
+    ) -> NDArrayNum | gu.Vector: ...
 
     def to_pointcloud(
             self,
@@ -1698,7 +1747,7 @@ class RasterBase:
             as_array: bool = False,
             random_state: int | np.random.Generator | None = None,
             force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | PointCloud:
+    ) -> NDArrayNum | gu.PointCloud:
         """
         Convert raster to point cloud.
 
@@ -1799,9 +1848,9 @@ class RasterBase:
         return cls.from_array(data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point)
 
     def polygonize(
-        self,
-        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
-        data_column_name: str = "id",
+            self,
+            target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
+            data_column_name: str = "id",
     ) -> Vector:
         """
         Polygonize the raster into a vector.
@@ -1872,7 +1921,7 @@ class RasterBase:
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum: ...
+) -> NDArrayNum: ...
 
     @overload
     def subsample(

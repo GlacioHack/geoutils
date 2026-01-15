@@ -23,7 +23,6 @@ from __future__ import annotations
 import warnings
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import shapely
 from scipy.spatial import Voronoi
@@ -83,12 +82,6 @@ def _buffer_without_overlap(
     bound_poly = bounds2poly(gdf)
     bound_poly = bound_poly.buffer(buffer_size)
     voronoi_all = _generate_voronoi_with_bounds(gdf, bound_poly)
-    if plot:
-        plt.figure(figsize=(16, 4))
-        ax1 = plt.subplot(141)
-        voronoi_all.plot(ax=ax1)
-        gdf.plot(fc="none", ec="k", ax=ax1)
-        ax1.set_title("Voronoi polygons, cropped")
 
     # Extract Voronoi polygons only within the buffer area
     voronoi_diff = voronoi_all.intersection(buffer.geometry[0])
@@ -98,34 +91,12 @@ def _buffer_without_overlap(
     voronoi_gdf = gpd.GeoDataFrame(geometry=voronoi_diff.explode(index_parts=True))  # requires geopandas>=0.10
     joined_voronoi = gpd.tools.sjoin(gdf, voronoi_gdf, how="right")
 
-    # Plot results -> some polygons are duplicated
-    if plot:
-        ax2 = plt.subplot(142, sharex=ax1, sharey=ax1)
-        joined_voronoi.plot(ax=ax2, column="index_left", alpha=0.5, ec="k")
-        gdf.plot(ax=ax2, column=gdf.index.values)
-        ax2.set_title("Buffer with duplicated polygons")
-
     # Find non unique Voronoi polygons, and retain only first one
     _, indexes = np.unique(joined_voronoi.index, return_index=True)
     unique_voronoi = joined_voronoi.iloc[indexes]
 
-    # Plot results -> unique polygons only
-    if plot:
-        ax3 = plt.subplot(143, sharex=ax1, sharey=ax1)
-        unique_voronoi.plot(ax=ax3, column="index_left", alpha=0.5, ec="k")
-        gdf.plot(ax=ax3, column=gdf.index.values)
-        ax3.set_title("Buffer with unique polygons")
-
     # Dissolve all polygons by original index
     merged_voronoi = unique_voronoi.dissolve(by="index_left")
-
-    # Plot
-    if plot:
-        ax4 = plt.subplot(144, sharex=ax1, sharey=ax1)
-        gdf.plot(ax=ax4, column=gdf.index.values)
-        merged_voronoi.plot(column=merged_voronoi.index.values, ax=ax4, alpha=0.5)
-        ax4.set_title("Final buffer")
-        plt.show()
 
     # Reverse-project to the original CRS if metric is True
     if metric:

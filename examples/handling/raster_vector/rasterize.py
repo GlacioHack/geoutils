@@ -41,7 +41,7 @@ vect_rasterized.plot(ax="new")
 #
 # .. note::
 #         If the rasterized ``in_value`` is fixed to 1 and ``out_value`` to 0 (default), then :func:`~geoutils.Vector.rasterize` is creating a boolean mask.
-#         This is equivalent to using :func:`~geoutils.Vector.create_mask`, and will return a :class:`~geoutils.Mask`.
+#         This is equivalent to using :func:`~geoutils.Vector.create_mask`, and will return a boolean :class:`~geoutils.Raster`.
 
 vect_rasterized
 

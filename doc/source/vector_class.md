@@ -59,11 +59,11 @@ Detailed information on the {class}`~geoutils.Vector` is printed using {func}`~g
 vect.info()
 ```
 
-A {class}`~geoutils.Vector` is saved to file by calling {func}`~geoutils.Raster.save` with a {class}`str` or a {class}`pathlib.Path`.
+A {class}`~geoutils.Vector` is saved to file by calling {func}`~geoutils.Raster.to_file` with a {class}`str` or a {class}`pathlib.Path`.
 
 ```{code-cell} ipython3
 # Save vector to disk
-vect.save("myvector.gpkg")
+vect.to_file("myvector.gpkg")
 ```
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -182,7 +182,7 @@ By default, the value of index of the {class}`~geoutils.Vector`'s {attr}`~geouti
 
 ```{note}
 If an `out_value` of `0` (default) and `in_value` value of `1` are passed (i.e., boolean output), {func}`~geoutils.Vector.rasterize` will automatically cast
-the output to a {class}`~geoutils.RasterMask`.
+the output to a raster mask, i.e a boolean {class}`~geoutils.Raster`.
 ```
 
 To define the grid on which to rasterize, a reference {class}`~geoutils.Raster` to match can be passed. Alternatively, a {attr}`~geoutils.Raster.res` or
@@ -194,10 +194,10 @@ rasterized_vect = vect.rasterize(rast)
 rasterized_vect
 ```
 
-## Create a {class}`~geoutils.RasterMask`
+## Create a raster mask
 
-Creating a {class}`~geoutils.RasterMask` from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask` function, which converts vector
-geometries into boolean gridded values for all features.
+Creating a raster mask, i.e. a boolean {class}`~geoutils.Raster`, from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask`
+function, which converts vector geometries into boolean gridded values for all features.
 
 Similarly as for {func}`~geoutils.Vector.rasterize`, the function expects parameters to define the grid on which to rasterize the output. A reference
 {class}`~geoutils.Raster` to match can be passed or, alternatively, individual parameters.

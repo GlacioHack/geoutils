@@ -27,34 +27,29 @@ import pathlib
 import warnings
 from collections import abc
 from contextlib import ExitStack
-from typing import IO, Any, Callable, overload
-from packaging.version import Version
 
-import matplotlib
-import matplotlib.pyplot as plt
+from typing import IO, TYPE_CHECKING, Any, Callable, TypeVar, overload
+
 import numpy as np
 import rasterio as rio
 import rasterio.windows
 import rioxarray
 import xarray as xr
 from affine import Affine
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+from packaging.version import Version
 from rasterio.crs import CRS
-from rasterio.enums import Resampling
 from rasterio.plot import show as rshow
 
-import geoutils as gu
+from geoutils import profiler
+from geoutils._misc import deprecate, import_optional
 from geoutils._typing import (
     DTypeLike,
-    MArrayBool,
     MArrayNum,
     NDArrayBool,
     NDArrayNum,
     Number,
 )
 from geoutils.raster.base import RasterBase, RasterType
-from geoutils.misc import deprecate
-from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
@@ -65,13 +60,17 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.stats.stats import _STATS_ALIASES, _get_single_stat, _statistics
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal  # type: ignore
+
+if TYPE_CHECKING:
+    import matplotlib
+
+RasterType = TypeVar("RasterType", bound="Raster")
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -161,6 +160,7 @@ _default_rio_attrs = [
 def _load_rio(
     dataset: rio.io.DatasetReader,
     only_mask: bool = False,
+    convert_to_mask: bool = False,
     indexes: int | list[int] | None = None,
     masked: bool = False,
     transform: Affine | None = None,
@@ -175,6 +175,7 @@ def _load_rio(
 
     :param dataset: Dataset to read (opened with :func:`rasterio.open`).
     :param only_mask: Read only the dataset mask.
+    :param convert_to_mask: Whether to convert to mask after reading.
     :param indexes: Band(s) to load. Note that rasterio begins counting at 1, not 0.
     :param masked: Whether the mask should be read (if any exists) to use the nodata to mask values.
     :param transform: Create a window from the given transform (to read only parts of the raster)
@@ -219,6 +220,10 @@ def _load_rio(
             data = dataset.read_masks(indexes=indexes, window=window, **kwargs)
         else:
             data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
+
+    if convert_to_mask:
+        return data.astype(bool)
+
     return data
 
 
@@ -338,12 +343,14 @@ class Raster(RasterBase):
     See the API for more details.
     """
 
+    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)  # type: ignore
     def __init__(
         self,
         filename_or_dataset: (
             str | pathlib.Path | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any]
         ),
         bands: int | list[int] | None = None,
+        is_mask: bool = False,
         load_data: bool = False,
         parse_sensor_metadata: bool = False,
         silent: bool = True,
@@ -368,6 +375,7 @@ class Raster(RasterBase):
         self._nodata = force_nodata
         self._bands = bands
         self._masked = True
+        self._is_mask: bool = is_mask
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
@@ -457,6 +465,8 @@ class Raster(RasterBase):
             # Downsampled image size
             if not isinstance(downsample, (int, float)):
                 raise TypeError("downsample must be of type int or float.")
+            if downsample < 1:
+                raise ValueError("downsample must be >=1.")
 
             if downsample == 1:
                 out_shape = (self.height, self.width)
@@ -479,6 +489,7 @@ class Raster(RasterBase):
                     ds,
                     indexes=bands,
                     masked=self._masked,
+                    convert_to_mask=is_mask,
                     out_shape=out_shape,
                     out_count=count,
                 )  # type: ignore
@@ -602,6 +613,7 @@ class Raster(RasterBase):
                 dataset,
                 indexes=list(valid_bands),
                 masked=self._masked,
+                convert_to_mask=self._is_mask,
                 transform=self.transform,
                 shape=self.shape,
                 out_shape=self._out_shape,
@@ -662,31 +674,16 @@ class Raster(RasterBase):
         if cast_nodata:
             nodata = _cast_nodata(data.dtype, nodata)
 
-        # If the data was transformed into boolean, re-initialize as a Mask subclass
-        # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
-        if data.dtype == bool:
-            return RasterMask(
-                {
-                    "data": data,
-                    "transform": transform,
-                    "crs": crs,
-                    "nodata": nodata,
-                    "area_or_point": area_or_point,
-                    "tags": tags,
-                }
-            )  # type: ignore
-        # Otherwise, keep as a given RasterType subclass
-        else:
-            return cls(
-                {
-                    "data": data,
-                    "transform": transform,
-                    "crs": crs,
-                    "nodata": nodata,
-                    "area_or_point": area_or_point,
-                    "tags": tags,
-                }
-            )
+        return cls(
+            {
+                "data": data,
+                "transform": transform,
+                "crs": crs,
+                "nodata": nodata,
+                "area_or_point": area_or_point,
+                "tags": tags,
+            }
+        )
 
     def to_rio_dataset(self) -> rio.io.DatasetReader:
         """Export to a Rasterio in-memory dataset."""
@@ -798,7 +795,7 @@ class Raster(RasterBase):
 
         return str(s)
 
-    def __getitem__(self, index: RasterMask | NDArrayBool | Any) -> NDArrayNum | Raster:
+    def __getitem__(self, index: Raster | NDArrayBool | Any) -> NDArrayNum | Raster:
         """
         Index the raster.
 
@@ -806,15 +803,20 @@ class Raster(RasterBase):
         boolean array of the same shape as the raster.
         """
 
-        if isinstance(index, (RasterMask, np.ndarray)):
+        if isinstance(index, (Raster, np.ndarray)):
             _cast_numeric_array_raster(self, index, operation_name="an indexing operation")  # type: ignore
 
         # If input is Mask with the same shape and georeferencing
-        if isinstance(index, RasterMask):
-            if self.count == 1:
-                return self.data[index.data.squeeze()]
+        if isinstance(index, Raster):
+            if not index.is_mask:
+                ind = index.astype(bool)
+                warnings.warn(message="Input raster was cast to boolean for indexing.", category=UserWarning)
             else:
-                return self.data[:, index.data.squeeze()]
+                ind = index
+            if self.count == 1:
+                return self.data[ind.data.squeeze()]
+            else:
+                return self.data[:, ind.data.squeeze()]
         # If input is array with the same shape
         elif isinstance(index, np.ndarray):
             if str(index.dtype) != "bool":
@@ -829,7 +831,7 @@ class Raster(RasterBase):
         else:
             return self.data[index]
 
-    def __setitem__(self, index: RasterMask | NDArrayBool | Any, assign: NDArrayNum | Number) -> None:
+    def __setitem__(self, index: Raster | NDArrayBool | Any, assign: NDArrayNum | Number) -> None:
         """
         Perform index assignment on the raster.
 
@@ -838,11 +840,14 @@ class Raster(RasterBase):
         """
 
         # First, check index
-        if isinstance(index, (RasterMask, np.ndarray)):
+        if isinstance(index, (Raster, np.ndarray)):
             _cast_numeric_array_raster(self, index, operation_name="an index assignment operation")  # type: ignore
 
         # If input is Mask with the same shape and georeferencing
-        if isinstance(index, RasterMask):
+        if isinstance(index, Raster):
+            if not index.is_mask:
+                index = index.astype(bool)
+                warnings.warn(message="Input raster was cast to boolean for indexing.", category=UserWarning)
             ind = index.data.data
             use_all_bands = False
         # If input is array with the same shape
@@ -1154,6 +1159,52 @@ class Raster(RasterBase):
         out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
         return out_mask
 
+    def __and__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
+        """Bitwise and between masks, or a mask and an array."""
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
+
+        return self.copy(self_data & other_data)  # type: ignore
+
+    def __rand__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
+        """Bitwise and between masks, or a mask and an array."""
+
+        return self.__and__(other)
+
+    def __or__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
+        """Bitwise or between masks, or a mask and an array."""
+
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
+
+        return self.copy(self_data | other_data)  # type: ignore
+
+    def __ror__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
+        """Bitwise or between masks, or a mask and an array."""
+
+        return self.__or__(other)
+
+    def __xor__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
+        """Bitwise xor between masks, or a mask and an array."""
+
+        self_data, other_data = _cast_numeric_array_raster(
+            self, other, operation_name="an arithmetic operation"  # type: ignore
+        )[0:2]
+
+        return self.copy(self_data ^ other_data)  # type: ignore
+
+    def __rxor__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
+        """Bitwise xor between masks, or a mask and an array."""
+
+        return self.__xor__(other)
+
+    def __invert__(self: RasterType) -> RasterType:
+        """Bitwise inversion of a mask."""
+
+        return self.copy(~self.data)
+
     @overload
     def astype(
         self: RasterType, dtype: DTypeLike, convert_nodata: bool = True, *, inplace: Literal[False] = False
@@ -1181,16 +1232,19 @@ class Raster(RasterBase):
 
         :returns: Raster with updated dtype (or None if inplace).
         """
-        # Check that dtype is supported by rasterio
-        if not rio.dtypes.check_dtype(dtype):
-            raise TypeError(f"{dtype} is not supported by rasterio")
 
-        # Check that data type change will not result in a loss of information
-        if not rio.dtypes.can_cast_dtype(self.data, dtype):
-            warnings.warn(
-                "dtype conversion will result in a loss of information. "
-                f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data."
-            )
+        # Check for all data type except boolean, that we support in addition to other types
+        if np.dtype(dtype) != np.bool_:
+            # Check that dtype is supported by rasterio
+            if not rio.dtypes.check_dtype(dtype):
+                raise TypeError(f"{dtype} is not supported by rasterio")
+
+            # Check that data type change will not result in a loss of information
+            if not rio.dtypes.can_cast_dtype(self.data, dtype):
+                warnings.warn(
+                    "dtype conversion will result in a loss of information. "
+                    f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data."
+                )
 
         out_data = self.data.astype(dtype)
 
@@ -1346,7 +1400,7 @@ class Raster(RasterBase):
             )
             self._data[self._data.data == self.nodata] = np.ma.masked
 
-    def set_mask(self, mask: NDArrayBool | RasterMask) -> None:
+    def set_mask(self, mask: NDArrayBool | Raster) -> None:
         """
         Set a mask on the raster array.
 
@@ -1358,8 +1412,8 @@ class Raster(RasterBase):
         :param mask: The raster array mask.
         """
         # Check that mask is a Numpy array
-        if not isinstance(mask, (np.ndarray, RasterMask)):
-            raise ValueError("mask must be a numpy array or a Mask.")
+        if not isinstance(mask, (np.ndarray, Raster)):
+            raise ValueError("mask must be a numpy array or a raster.")
 
         # Check that new_data has correct shape
         if self.is_loaded:
@@ -1368,7 +1422,7 @@ class Raster(RasterBase):
             raise AttributeError("self.data must be loaded first, with e.g. self.load()")
 
         # If the mask is a Mask instance, pass the boolean array
-        if isinstance(mask, RasterMask):
+        if isinstance(mask, Raster) and mask.is_mask:
             mask_arr = mask.data.filled(False)
         else:
             mask_arr = mask
@@ -1655,7 +1709,7 @@ class Raster(RasterBase):
         else:
             return outputs
 
-    def save(
+    def to_file(
         self,
         filename: str | pathlib.Path | IO[bytes],
         driver: str = "GTiff",
@@ -1772,6 +1826,26 @@ class Raster(RasterBase):
 
                 dst.gcps = (rio_gcps, gcps_crs)
 
+    @deprecate(
+        removal_version=Version("0.3.0"),
+        details="The function .save() will be soon deprecated, use .to_file() instead.",
+    )  # type: ignore
+    def save(
+        self,
+        filename: str | pathlib.Path | IO[bytes],
+        driver: str = "GTiff",
+        dtype: DTypeLike | None = None,
+        nodata: Number | None = None,
+        compress: str = "deflate",
+        tiled: bool = False,
+        blank_value: int | float | None = None,
+        co_opts: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        gcps: list[tuple[float, ...]] | None = None,
+        gcps_crs: CRS | None = None,
+    ) -> None:
+        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
+
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
         """
@@ -1839,6 +1913,7 @@ class Raster(RasterBase):
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         *,
         return_axes: Literal[False] = False,
+        savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -1855,6 +1930,7 @@ class Raster(RasterBase):
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         *,
         return_axes: Literal[True],
+        savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]: ...
 
@@ -1869,6 +1945,7 @@ class Raster(RasterBase):
         add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         return_axes: bool = False,
+        savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
         r"""
@@ -1887,6 +1964,10 @@ class Raster(RasterBase):
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
             If "new", will create a new axis.
         :param return_axes: Whether to return axes.
+        :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
+            with a default DPI (300), no transparency and no metadata. Use `plt.savefig()` to specify other save
+            parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
+            to close the figure.
 
         :returns: None, or (ax, caxes) if return_axes is True.
 
@@ -1900,6 +1981,11 @@ class Raster(RasterBase):
             mpl_kws = {'cmap':'seismic'}
             myimage.plot(ax=ax1, mpl_kws)
         """
+
+        matplotlib = import_optional("matplotlib")
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+
         # If data is not loaded, need to load it
         if not self.is_loaded:
             self.load()
@@ -1992,6 +2078,10 @@ class Raster(RasterBase):
         plt.sca(ax0)
         plt.tight_layout()
 
+        # if savefig_fname filled, save the plot
+        if savefig_fname:
+            plt.savefig(savefig_fname)
+
         # If returning axes
         if return_axes:
             return ax0, cax
@@ -2038,9 +2128,11 @@ class Raster(RasterBase):
 
 
 
-class RasterMask(Raster):
+class Mask(Raster):
     """
     The georeferenced raster mask.
+
+    DEPRECATED: USE RASTER(IS_MASK=TRUE) INSTEAD.
 
     A raster mask is a raster with a boolean array (True or False), that can serve to index or assign values to other
     rasters with the same georeferenced grid.
@@ -2062,371 +2154,13 @@ class RasterMask(Raster):
     See the API for more details.
     """
 
+    @deprecate(
+        removal_version=Version("0.3.0"), details="The Mask class is deprecated, use Raster(is_mask=True) instead."
+    )  # type: ignore
     def __init__(
         self,
-        filename_or_dataset: str | RasterType | rio.io.DatasetReader | rio.io.MemoryFile | dict[str, Any],
+        *args: Any,
         **kwargs: Any,
     ) -> None:
 
-        self._data: MArrayNum | MArrayBool | None = None  # type: ignore
-
-        # If a Mask is passed, simply point back to Mask
-        if isinstance(filename_or_dataset, RasterMask):
-            for key in filename_or_dataset.__dict__:
-                setattr(self, key, filename_or_dataset.__dict__[key])
-            return
-        # Else rely on parent Raster class options (including raised errors)
-        else:
-            super().__init__(filename_or_dataset, **kwargs)
-
-            # If nbands larger than one, use only first band and raise a warning
-            if self.count > 1:
-                warnings.warn(
-                    category=UserWarning,
-                    message="Multi-band raster provided to create a Mask, only the first band will be used.",
-                )
-                self._data = self.data[0, :, :]
-
-            # Force dtypes
-            self._dtypes = (bool,)
-
-            # Fix nodata to None
-            self._nodata = None
-
-            # Convert masked array to boolean
-            self._data = self.data.astype(bool)  # type: ignore
-
-    def __repr__(self) -> str:
-        """Convert mask to string representation."""
-
-        # If data not loaded, return and string and avoid calling .data
-        if not self.is_loaded:
-            str_data = "not_loaded"
-        else:
-            str_data = "\n       ".join(self.data.__str__().split("\n"))
-
-        # Over-ride Raster's method to remove nodata value (always None)
-        s = (
-            "Mask(\n"
-            + "  data="
-            + str_data
-            + "\n  transform="
-            + "\n            ".join(self.transform.__str__().split("\n"))
-            + "\n  crs="
-            + self.crs.__str__()
-            + ")"
-        )
-
-        return str(s)
-
-    def _repr_html_(self) -> str:
-        """Convert mask to HTML representation for notebooks and doc"""
-
-        # If data not loaded, return and string and avoid calling .data
-        if not self.is_loaded:
-            str_data = "<i>not_loaded</i>"
-        else:
-            str_data = "\n       ".join(self.data.__str__().split("\n"))
-
-        # Over-ride Raster's method to remove nodata value (always None)
-        # Use <pre> to keep white spaces, <span> to keep line breaks
-        s = (
-            '<pre><span style="white-space: pre-wrap"><b><em>Mask</em></b>(\n'
-            + "  <b>data=</b>"
-            + str_data
-            + "\n  <b>transform=</b>"
-            + "\n            ".join(self.transform.__str__().split("\n"))
-            + "\n  <b>crs=</b>"
-            + self.crs.__str__()
-            + ")</span></pre>"
-        )
-
-        return str(s)
-
-    @overload
-    def reproject(
-        self: RasterMask,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | abc.Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.nearest,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: Literal[False] = False,
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterMask: ...
-
-    @overload
-    def reproject(
-        self: RasterMask,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | abc.Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.nearest,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: Literal[True],
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
-    ) -> None: ...
-
-    @overload
-    def reproject(
-        self: RasterMask,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | abc.Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.nearest,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: bool = False,
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterMask | None: ...
-
-    def reproject(
-        self: RasterMask,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | abc.Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.nearest,
-        force_source_nodata: int | float | None = None,
-        inplace: bool = False,
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterMask | None:
-        # Depending on resampling, adjust to rasterio supported types
-        if resampling in [Resampling.nearest, "nearest"]:
-            self._data = self.data.astype("uint8")  # type: ignore
-        else:
-            warnings.warn(
-                "Reprojecting a mask with a resampling method other than 'nearest', "
-                "the boolean array will be converted to float during interpolation."
-            )
-            self._data = self.data.astype("float32")  # type: ignore
-
-        # Call Raster.reproject()
-        output = super().reproject(
-            ref=ref,  # type: ignore
-            crs=crs,
-            res=res,
-            grid_size=grid_size,
-            bounds=bounds,
-            nodata=nodata,
-            dtype=dtype,
-            resampling=resampling,
-            inplace=False,
-            force_source_nodata=force_source_nodata,
-            silent=silent,
-            n_threads=n_threads,
-            memory_limit=memory_limit,
-        )
-
-        # Transform output back to a boolean array
-        output._data = output.data.astype(bool)  # type: ignore
-
-        # Transform self back to boolean array
-        self._data = self.data.astype(bool)  # type: ignore
-
-        if inplace:
-            self._transform = output._transform  # type: ignore
-            self._crs = output._crs  # type: ignore
-            # Little trick to force the shape, same as in Raster.reproject()
-            self._data = output._data  # type: ignore
-            self.data = output._data  # type: ignore
-            return None
-        else:
-            return output
-
-    # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
-    # Then the final overload must be duplicated
-    @overload
-    def crop(
-        self: RasterMask,
-        bbox: RasterMask | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        *,
-        inplace: Literal[False] = False,
-    ) -> RasterMask: ...
-
-    @overload
-    def crop(
-        self: RasterMask,
-        bbox: RasterMask | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        *,
-        inplace: Literal[True],
-    ) -> None: ...
-
-    @overload
-    def crop(
-        self: RasterMask,
-        bbox: RasterMask | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        *,
-        inplace: bool = False,
-    ) -> RasterMask | None: ...
-
-    def crop(
-        self: RasterMask,
-        bbox: RasterMask | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
-        *,
-        inplace: bool = False,
-    ) -> RasterMask | None:
-        # If there is resampling involved during cropping, encapsulate type as in reproject()
-        if mode == "match_extent":
-            raise ValueError(NotImplementedError)
-            # self._data = self.data.astype("float32")
-            # if inplace:
-            #     super().crop(bbox=bbox, mode=mode, inplace=inplace)
-            #     self._data = self.data.astype(bool)
-            #     return None
-            # else:
-            #     output = super().crop(bbox=bbox, mode=mode, inplace=inplace)
-            #     output._data = output.data.astype(bool)
-            #     return output
-        # Otherwise, run a classic crop
-        else:
-            return super().crop(bbox=bbox, mode=mode, inplace=inplace)
-
-    def polygonize(
-        self,
-        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = 1,
-        data_column_name: str = "id",
-    ) -> gu.Vector:
-        # If target values is passed but does not correspond to 0 or 1, raise a warning
-        if not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]:
-            warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
-            target_values = 1
-
-        # Convert to unsigned integer and pass to parent method
-        self._data = self.data.astype("uint8")  # type: ignore
-
-        # Get output from parent method
-        output = super().polygonize(target_values=target_values)
-
-        # Convert array back to boolean
-        self._data = self.data.astype(bool)  # type: ignore
-
-        return output
-
-    def proximity(
-        self,
-        vector: gu.Vector | None = None,
-        target_values: list[float] | None = None,
-        geometry_type: str = "boundary",
-        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
-        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
-    ) -> Raster:
-        # By default, target True values of the mask
-        if vector is None and target_values is None:
-            target_values = [1]
-
-        # TODO: Adapt target_value into int | list in Raster.proximity
-        # If target values is passed but does not correspond to 0 or 1, raise a warning
-        # if target_values is not None and not isinstance(target_values, (int, np.integer,
-        # float, np.floating)) or target_values not in [0, 1]:
-        #     warnings.warn("In-value converted to 1 for polygonizing boolean mask.")
-        #     target_values = [1]
-
-        # Need to cast output to Raster before computing proximity, as output will not be boolean
-        # (super() would instantiate Mask() again)
-        raster = Raster(
-            {
-                "data": self.data.astype("uint8"),
-                "transform": self.transform,
-                "crs": self.crs,
-                "nodata": self.nodata,
-                "area_or_point": self.area_or_point,
-                "tags": self.tags,
-            }
-        )
-        return raster.proximity(
-            vector=vector,
-            target_values=target_values,
-            geometry_type=geometry_type,
-            in_or_out=in_or_out,
-            distance_unit=distance_unit,
-        )
-
-    def __and__(self: RasterMask, other: RasterMask | NDArrayBool) -> RasterMask:
-        """Bitwise and between masks, or a mask and an array."""
-        self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
-        )[0:2]
-
-        return self.copy(self_data & other_data)  # type: ignore
-
-    def __rand__(self: RasterMask, other: RasterMask | NDArrayBool) -> RasterMask:
-        """Bitwise and between masks, or a mask and an array."""
-
-        return self.__and__(other)
-
-    def __or__(self: RasterMask, other: RasterMask | NDArrayBool) -> RasterMask:
-        """Bitwise or between masks, or a mask and an array."""
-
-        self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
-        )[0:2]
-
-        return self.copy(self_data | other_data)  # type: ignore
-
-    def __ror__(self: RasterMask, other: RasterMask | NDArrayBool) -> RasterMask:
-        """Bitwise or between masks, or a mask and an array."""
-
-        return self.__or__(other)
-
-    def __xor__(self: RasterMask, other: RasterMask | NDArrayBool) -> RasterMask:
-        """Bitwise xor between masks, or a mask and an array."""
-
-        self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
-        )[0:2]
-
-        return self.copy(self_data ^ other_data)  # type: ignore
-
-    def __rxor__(self: RasterMask, other: RasterMask | NDArrayBool) -> RasterMask:
-        """Bitwise xor between masks, or a mask and an array."""
-
-        return self.__xor__(other)
-
-    def __invert__(self: RasterMask) -> RasterMask:
-        """Bitwise inversion of a mask."""
-
-        return self.copy(~self.data)
-
-
-class Mask(RasterMask):
-    """Deprecated raster mask class, used RasterMask."""
-
-    @deprecate(
-        removal_version=Version("0.3.0"), details="The Mask class is deprecated, use RasterMask instead."
-    )  # type: ignore
-    def __init__(self, *args: Any) -> None:
-        super().__init__(*args)
+        super().__init__(*args, **kwargs, is_mask=True)  # type: ignore

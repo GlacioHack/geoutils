@@ -124,9 +124,7 @@ plot_formats = [(".png", 500)]
 # To avoid long path names in inheritance diagrams
 inheritance_alias = {
     "geoutils.raster.raster.Raster": "geoutils.Raster",
-    "geoutils.raster.raster.RasterMask": "geoutils.RasterMask",
     "geoutils.pointcloud.pointcloud.PointCloud": "geoutils.PointCloud",
-    "geoutils.pointcloud.pointcloud.PointCloudMask": "geoutils.PointCloudMask",
     "geoutils.vector.Vector": "geoutils.Vector",
     "xdem.dem.DEM": "xdem.DEM",
 }
@@ -199,11 +197,11 @@ html_theme_options = {
         "binderhub_url": "https://mybinder.org/",
         "notebook_interface": "jupyterlab",  # For launching Binder in Jupyterlab to open MD files as notebook (downloads them otherwise)
     },
-    "announcement": (
-        "⚠️ Our 0.1 release refactored several early-development functions for long-term stability, "
-        'to update your code see <a href="https://github.com/GlacioHack/geoutils/releases/tag/v0.1.0">here</a>. ⚠️'
-        "<br>Future changes will come with deprecation warnings! 🙂"
-    ),
+    # "announcement": (
+    #     "⚠️ Our 0.1 release refactored several early-development functions for long-term stability, "
+    #     'to update your code see <a href="https://github.com/GlacioHack/geoutils/releases/tag/v0.1.0">here</a>. ⚠️'
+    #     "<br>Future changes will come with deprecation warnings! 🙂"
+    # ),
     "show_toc_level": 3,
     # "logo_only": True,
     # "icon_links": [

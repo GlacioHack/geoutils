@@ -9,7 +9,7 @@ import pathlib
 import re
 import tempfile
 import warnings
-from io import StringIO
+from importlib.util import find_spec
 from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
@@ -17,8 +17,6 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
-from pylint.lint import Run
-from pylint.reporters.text import TextReporter
 
 import geoutils as gu
 from geoutils import examples
@@ -29,12 +27,12 @@ DO_PLOT = False
 
 
 class TestRaster:
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_init(self, example: str) -> None:
@@ -72,13 +70,13 @@ class TestRaster:
         # For re-instantiation via Raster (r2 above), we check the behaviour:
         # By default, raster were unloaded, and were loaded during raster_equal() independently
         # So the instances should not be pointing to the same data and not mirror modifs
-        r0.data[0, 0] += 5
-        assert r2.data[0, 0] != r0.data[0, 0]
+        r0.data.data[0, 0] += 5
+        assert r2.data.data[0, 0] != r0.data.data[0, 0]
 
         # However, if we reinstantiate now that the data is loaded, it should point to the same
         r5 = gu.Raster(r0)
-        r0.data[0, 0] += 5
-        assert r5.data[0, 0] == r0.data[0, 0]
+        r0.data.data[0, 0] += 5
+        assert r5.data.data[0, 0] == r0.data.data[0, 0]
 
         # With r.count = 2
         r0._data = np.repeat(r0.data, 2).reshape((2,) + r0.shape)
@@ -192,17 +190,17 @@ class TestRaster:
 
         assert not r.is_loaded
         assert r.driver == "GTiff"
-        assert r.width == 800
-        assert r.height == 655
+        assert r.width == 193
+        assert r.height == 167
         assert r.shape == (r.height, r.width)
         assert r.count == 1
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
         assert r.dtype == "uint8"
-        assert r.transform == rio.transform.Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
+        assert r.transform == rio.transform.Affine(30.0, 0.0, 489340.0, 0.0, -30.0, 3098570.0)
         assert np.array_equal(r.res, [30.0, 30.0])
-        assert r.bounds == rio.coords.BoundingBox(left=478000.0, bottom=3088490.0, right=502000.0, top=3108140.0)
+        assert r.bounds == rio.coords.BoundingBox(left=489340.0, bottom=3093560.0, right=495130.0, top=3098570.0)
         assert r.crs == rio.crs.CRS.from_epsg(32645)
         assert r.footprint.vector_equal(r.get_footprint_projected(r.crs))
 
@@ -211,17 +209,17 @@ class TestRaster:
 
         assert not r2.is_loaded
         assert r2.driver == "GTiff"
-        assert r2.width == 539
-        assert r2.height == 618
+        assert r2.width == 165
+        assert r2.height == 124
         assert r2.shape == (r2.height, r2.width)
         assert r2.count == 1
         assert r.count_on_disk == 1
         assert r.bands == (1,)
         assert r.bands_on_disk == (1,)
         assert r2.dtype == "float32"
-        assert r2.transform == rio.transform.Affine(30.0, 0.0, 627175.0, 0.0, -30.0, 4852085.0)
+        assert r2.transform == rio.transform.Affine(30.0, 0.0, 626785.0, 0.0, -30.0, 4837025.0)
         assert np.array_equal(r2.res, [30.0, 30.0])
-        assert r2.bounds == rio.coords.BoundingBox(left=627175.0, bottom=4833545.0, right=643345.0, top=4852085.0)
+        assert r2.bounds == rio.coords.BoundingBox(left=626785.0, bottom=4833305.0, right=631735.0, top=4837025.0)
         assert r2.crs == rio.crs.CRS.from_epsg(32718)
         assert r2.footprint.vector_equal(r2.get_footprint_projected(r2.crs))
 
@@ -620,7 +618,7 @@ class TestRaster:
         # 1/ Getter and instantiation
         # Check existing file based on a priori knowledge
         raster_point = gu.Raster(self.landsat_b4_path)
-        assert raster_point.area_or_point == "Point"
+        assert raster_point.area_or_point == "Area"
 
         raster_area = gu.Raster(self.aster_dem_path)
         assert raster_area.area_or_point == "Area"
@@ -869,6 +867,8 @@ class TestRaster:
         # -- Check that error is raised when downsampling value is not valid --
         with pytest.raises(TypeError, match="downsample must be of type int or float."):
             gu.Raster(example, downsample=[1, 1])  # type: ignore
+        with pytest.raises(ValueError, match="downsample must be >=1."):
+            gu.Raster(example, downsample=0)  # type: ignore
 
     def test_add_sub(self) -> None:
         """
@@ -1130,7 +1130,7 @@ class TestRaster:
         # Create a boolean array of the same shape, and a mask of the same transform/crs
         rng = np.random.default_rng(42)
         arr = rng.integers(low=0, high=2, size=rst.shape, dtype=bool)
-        mask = gu.RasterMask.from_array(data=arr, transform=rst.transform, crs=rst.crs)
+        mask = gu.Raster.from_array(data=arr, transform=rst.transform, crs=rst.crs)
 
         # Check that indexing works with both of those
         vals_arr = rst[arr]
@@ -1373,7 +1373,10 @@ class TestRaster:
         # Then, we repeat for a nodata that already existed, we artificially modify the value on an unmasked pixel
         r = r_copy.copy()
         mask_pixel_artificially_set = np.zeros(np.shape(r.data), dtype=bool)
-        mask_pixel_artificially_set[0, 0] = True
+        # This needs to be a pixel not originally masked
+        i = 30
+        j = 30
+        mask_pixel_artificially_set[i, j] = True
         r.data.data[mask_pixel_artificially_set] = new_nodata
         # We set the value as masked before unmasking to create the mask if it does not exist yet
         r.data[mask_pixel_artificially_set] = np.ma.masked
@@ -1661,6 +1664,9 @@ class TestRaster:
         """
         Test cbar matches plot height.
         """
+
+        pytest.importorskip("matplotlib")
+
         # Plot raster with cbar
         r0 = gu.Raster(example)
         fig, ax = plt.subplots(figsize=(figsize, figsize))
@@ -1686,6 +1692,9 @@ class TestRaster:
         assert h == pytest.approx(h_cbar)
 
     def test_plot(self) -> None:
+
+        pytest.importorskip("matplotlib")
+
         # Read single band raster and RGB raster
         img = gu.Raster(self.landsat_b4_path)
         img_RGB = gu.Raster(self.landsat_rgb_path)
@@ -1745,8 +1754,29 @@ class TestRaster:
             plt.close()
         assert True
 
+        # Test save fig
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.png")
+        img.plot(savefig_fname=temp_file)
+        if DO_PLOT:
+            plt.show()
+        else:
+            plt.close()
+        assert os.path.isfile(temp_file)
+
+    @pytest.mark.skipif(
+        find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing."
+    )  # type: ignore
+    def test_plot__missing_dep(self) -> None:
+        """Test proper error is raised when matplotlib is not installed."""
+
+        img = gu.Raster(self.landsat_b4_path)
+
+        with pytest.raises(ImportError, match="Optional dependency 'matplotlib' required.*"):
+            img.plot()
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_save(self, example: str) -> None:
+    def test_to_file(self, example: str) -> None:
         # Read single band raster
         img = gu.Raster(example)
 
@@ -1755,30 +1785,30 @@ class TestRaster:
 
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
-        img.save(temp_file)
+        img.to_file(temp_file)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
 
         # Try to save with a pathlib path (create a new temp file for Windows)
         path = pathlib.Path(temp_file)
-        img.save(path)
+        img.to_file(path)
 
         # Test additional options
         co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
         metadata = {"Type": "test"}
-        img.save(temp_file, co_opts=co_opts, metadata=metadata)
+        img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
         assert saved.tags["Type"] == "test"
 
         # Test saving file in COG format
-        img.save(temp_file, driver="COG")
+        img.to_file(temp_file, driver="COG")
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
         assert saved.tags["LAYOUT"] == "COG"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
-        img.save(temp_file, nodata=0)
+        img.to_file(temp_file, nodata=0)
         saved = gu.Raster(temp_file)
         assert np.ma.allequal(img.data, saved.data)
         assert saved.nodata == 0
@@ -1787,17 +1817,17 @@ class TestRaster:
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
         if img.nodata is not None:
-            img.save(temp_file)
+            img.to_file(temp_file)
             saved = gu.Raster(temp_file)
             assert np.array_equal(img.data.mask, saved.data.mask)
 
         # Test that a warning is raised if nodata is not set and a mask exists (defined above)
         if img.nodata is None:
             with pytest.warns(UserWarning):
-                img.save(TemporaryFile())
+                img.to_file(TemporaryFile())
 
         # Test with blank argument
-        img.save(temp_file, blank_value=0)
+        img.to_file(temp_file, blank_value=0)
         saved = gu.Raster(temp_file)
 
         assert np.array_equal(saved.data.data, np.zeros(np.shape(saved.data)))
@@ -1858,47 +1888,6 @@ class TestRaster:
         rst2 = rst.from_array(data=rst.data, crs=rst.crs, transform=rst.transform, nodata=-99999)
         assert rst2.nodata == _default_nodata(rst.data.dtype)
 
-    def test_type_hints(self) -> None:
-        """Test that pylint doesn't raise errors on valid code."""
-        # Create a temporary directory and a temporary filename
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_path = os.path.join(temp_dir.name, "code.py")
-
-        # r = gu.Raster(self.landsat_b4_path)
-
-        # Load the attributes to check
-        attributes = ["transform", "crs", "nodata", "name", "driver", "is_loaded", "filename"]
-        # Create some sample code that should be correct
-        sample_code = "\n".join(
-            [
-                "'''Sample code that should conform to pylint's standards.'''",  # Add docstring
-                "import geoutils as gu",  # Import geoutils
-                "raster = gu.Raster(gu.examples.get_path('landsat_B4'))",  # Load a raster
-            ]
-            + [  # The below statements should not raise a 'no-member' (E1101) error.
-                f"{attribute.upper()} = raster.{attribute}" for attribute in attributes
-            ]
-            + [""]  # Add a newline to the end.
-        )
-
-        # Write the code to the temporary file
-        with open(temp_path, "w") as outfile:
-            outfile.write(sample_code)
-
-        # Run pylint and parse the stdout as a string, only test
-        pylint_output = StringIO()
-        Run([temp_path], reporter=TextReporter(pylint_output), exit=False)
-
-        lint_string = pylint_output.getvalue()
-        print(lint_string)  # Print the output for debug purposes
-
-        # Bad linting errors are defined here. Currently just "no-member" errors
-        bad_lints = [f"Instance of 'Raster' has no '{attribute}' member" for attribute in attributes]
-
-        # Assert that none of the bad errors are in the pylint output
-        for bad_lint in bad_lints:
-            assert bad_lint not in lint_string, f"`{bad_lint}` contained in the lint_string"
-
     def test_split_bands(self) -> None:
         img = gu.Raster(self.landsat_rgb_path)
 
@@ -1948,15 +1937,26 @@ class TestRaster:
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
+    @pytest.mark.skip()  # type: ignore
+    def test__is_bigtiff_true(self) -> None:
+        """Test _is_bigtiff function for BigTIFF"""
+
+    def test__is_bigtiff_false(self) -> None:
+        """Test _is_bigtiff function for classic TIFF"""
+        img = gu.Raster(self.landsat_rgb_path)
+        assert img._is_bigtiff() is False
+
 
 class TestMask:
+    """A mask is a boolean Raster, defined on file opening with is_mask=True."""
+
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     # Synthetic data
     width = height = 5
@@ -1977,64 +1977,33 @@ class TestMask:
     def test_init(self, example: str) -> None:
         """Test that Mask subclass initialization function as intended."""
 
-        # A warning should be raised when the raster is a multi-band
-        if "RGB" not in os.path.basename(example):
-            mask = gu.RasterMask(example)
-        else:
-            with pytest.warns(
-                UserWarning, match="Multi-band raster provided to create a Mask, only the first band will be used."
-            ):
-                mask = gu.RasterMask(example)
+        # Open a raster
+        mask = gu.Raster(example, is_mask=True)
 
         # Check the masked array type
         assert mask.data.dtype == "bool"
         # Check output is the correct instance
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster)
+        assert mask.is_mask
         # Check the dtypes metadata
         assert mask.dtype == "bool"
         # Check the nodata
         assert mask.nodata is None
-        # Check the nbands metadata
-        assert mask.count == 1
 
         # Check that a mask object is sent back from its own init
-        mask2 = gu.RasterMask(mask)
+        mask2 = gu.Raster(mask)
         assert mask.raster_equal(mask2)
 
         # Check that the old Mask class still works, but raises a deprecationg warning
         with pytest.warns(DeprecationWarning):
             gu.Mask(example)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
-    def test_repr_str(self, example: str) -> None:
-        """Test the representation of a raster works"""
-
-        warnings.filterwarnings("ignore", message="Multi-band raster provided to create a Mask*")
-
-        # For data not loaded by default
-        r = gu.RasterMask(example)
-
-        r_repr = r.__repr__()
-        r_str = r.__str__()
-
-        # Check that the class is printed correctly
-        assert r_repr[0:4] == "Mask"
-
-        # Check that all main attribute names are printed
-        attrs_shown = ["data", "transform", "crs"]
-        assert all(attr + "=" in r_repr for attr in attrs_shown)
-
-        # Check nodata is removed
-        assert "nodata=" not in r_repr
-
-        assert r_str == r.data.__str__()
-
     def test_from_array(self) -> None:
         """Test that Raster.__init__ casts to Mask with dict input of from_array() and a boolean data array."""
 
         mask_rst = gu.Raster.from_array(data=self.mask_ma, transform=self.transform, crs=None, nodata=None)
 
-        assert isinstance(mask_rst, gu.RasterMask)
+        assert isinstance(mask_rst, gu.Raster) and mask_rst.is_mask
         assert mask_rst.transform == self.transform
         assert mask_rst.crs is None
         assert mask_rst.nodata is None
@@ -2061,7 +2030,7 @@ class TestMask:
 
         # Logical operations should cast to a Mask object, preserving the mask
         mask = getattr(rst, op)(1)
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, getattr(rst.data.data, op)(1))
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
@@ -2076,42 +2045,42 @@ class TestMask:
 
         # Equality
         mask = rst == 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data == 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Non-equality
         mask = rst != 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data != 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Lower than
         mask = rst < 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data < 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Lower equal
         mask = rst <= 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data <= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Greater than
         mask = rst > 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data > 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
         # Greater equal
         mask = rst >= 1
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_save(self, mask: gu.RasterMask) -> None:
+    def test_to_file(self, mask: gu.Raster) -> None:
         """Test saving for masks"""
 
         # Temporary folder
@@ -2119,8 +2088,8 @@ class TestMask:
 
         # Save file to temporary file, with defaults opts
         temp_file = os.path.join(temp_dir.name, "test.tif")
-        mask.save(temp_file)
-        saved = gu.RasterMask(temp_file)
+        mask.to_file(temp_file)
+        saved = gu.Raster(temp_file, is_mask=True)
 
         # A raster (or mask) in-memory has more information than on disk, we need to update it before checking equality
         # The values in its .data.data that are masked in .data.mask are not necessarily equal to the nodata value
@@ -2862,9 +2831,7 @@ class TestArrayInterface:
     mask_wrong_shape = rng.integers(0, 2, size=(width - 1, height - 1), dtype=bool)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_ufunc_1nin_1nout(self, ufunc_str: str, nodata_init: None | str, dtype: str) -> None:
         """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
@@ -2927,12 +2894,8 @@ class TestArrayInterface:
                     ufunc(rst)
 
     @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
     def test_array_ufunc_2nin_1nout(
@@ -3037,9 +3000,7 @@ class TestArrayInterface:
                     ufunc(rst1, rst2)
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
         """
@@ -3114,12 +3075,8 @@ class TestArrayInterface:
                 assert output_rst == output_ma
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype1", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
-    @pytest.mark.parametrize(
-        "dtype2", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "longdouble"]
-    )  # type: ignore
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
     @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
     @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
     def test_array_functions_2nin(

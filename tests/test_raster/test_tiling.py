@@ -10,9 +10,11 @@ from geoutils.raster.tiling import _generate_tiling_grid
 
 class TestTiling:
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
 
     def test_subdivide_array(self) -> None:
+        # Import optional scikit-image or skip test
+
         test_shape = (6, 4)
         test_count = 4
         subdivision_grid = gu.raster.subdivide_array(test_shape, test_count)

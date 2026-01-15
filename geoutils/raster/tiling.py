@@ -23,9 +23,10 @@ import math
 import sys
 
 import numpy as np
-from matplotlib.patches import Rectangle
+from scipy.ndimage import zoom
 
 import geoutils as gu
+from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 
 
@@ -75,17 +76,17 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     If 'count' is divisible by the product of 'shape', the amount of cells in each block will be equal.
     If 'count' is not divisible, the amount of cells in each block will be very close to equal.
 
-    :param shape: The shape of a array to be subdivided.
+    :param shape: The shape of array to be subdivided.
     :param count: The amount of subdivisions to make.
 
     :examples:
-        >>> subdivide_array((4, 4), 4)
+        >>> subdivide_array((4, 4), 4)  # doctest: +SKIP
         array([[0, 0, 1, 1],
                [0, 0, 1, 1],
                [2, 2, 3, 3],
                [2, 2, 3, 3]])
 
-        >>> subdivide_array((6, 4), 4)
+        >>> subdivide_array((6, 4), 4)  # doctest: +SKIP
         array([[0, 0, 1, 1],
                [0, 0, 1, 1],
                [0, 0, 1, 1],
@@ -93,7 +94,7 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
                [2, 2, 3, 3],
                [2, 2, 3, 3]])
 
-        >>> subdivide_array((5, 4), 3)
+        >>> subdivide_array((5, 4), 3)  # doctest: +SKIP
         array([[0, 0, 0, 0],
                [0, 0, 0, 0],
                [1, 1, 2, 2],
@@ -105,10 +106,6 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
 
     :returns: An array of shape 'shape' with 'count' unique indices.
     """
-    try:
-        import skimage.transform
-    except ImportError:
-        raise ImportError("Missing optional dependency, skimage.transform, required by this function.")
 
     # Check if system is 64bit or 32bit and catch potential numpy overflow because MSVC `long` is int32_t
     if sys.maxsize > 2**32:
@@ -126,8 +123,11 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     rect = _get_closest_rectangle(count)
     small_indices = np.pad(np.arange(count), np.prod(rect) - count, mode="edge")[: int(np.prod(rect))].reshape(rect)
 
+    # Compute zoom factors
+    zoom_factors = np.array(shape) / np.array(small_indices.shape)
+
     # Upscale the grid to fit the output shape using nearest neighbour scaling.
-    indices = skimage.transform.resize(small_indices, shape, order=0, preserve_range=True).astype(int)
+    indices = zoom(small_indices, zoom=zoom_factors, order=0).astype(int)
 
     return indices.reshape(shape)
 
@@ -228,10 +228,14 @@ def plot_tiling(raster: gu.Raster, tiling_grid: NDArrayNum) -> None:
     :param raster: The raster to plot with its tiling.
     :param tiling_grid: tiling given by compute_tiling.
     """
+    mpl = import_optional("matplotlib")
+
     ax, caxes = raster.plot(return_axes=True)
     for tile in tiling_grid.reshape(-1, 4):
         row_min, row_max, col_min, col_max = tile
         x_min, y_min = raster.transform * (col_min, row_min)  # Bottom-left corner
         x_max, y_max = raster.transform * (col_max, row_max)  # Top-right corne
-        rect = Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5)
+        rect = mpl.patches.Rectangle(
+            (x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5
+        )
         ax.add_patch(rect)

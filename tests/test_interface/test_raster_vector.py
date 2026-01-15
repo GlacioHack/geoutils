@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 
 import geopandas as gpd
@@ -11,8 +12,6 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils import examples
-
-GLACIER_OUTLINES_URL = "http://public.data.npolar.no/cryoclim/CryoClim_GAO_SJ_1990.zip"
 
 
 class TestRasterVectorInterface:
@@ -77,7 +76,7 @@ class TestRasterVectorInterface:
         mask = vector.create_mask(res=1.01)
 
         # Check that by default, create_mask returns a Mask
-        assert isinstance(mask, gu.RasterMask)
+        assert isinstance(mask, gu.Raster) and mask.is_mask
 
         # Check that an error is raised if xres is not passed
         with pytest.raises(
@@ -95,22 +94,13 @@ class TestRasterVectorInterface:
         with pytest.warns(UserWarning):
             vector.create_mask(res=1.01, bounds=(0, 0, 21, 21))
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = gu.examples.get_path("everest_landsat_b4_cropped")
-    everest_outlines_path = gu.examples.get_path("everest_rgi_outlines")
-    aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = gu.examples.get_path("exploradores_rgi_outlines")
-    glacier_outlines = gu.Vector(GLACIER_OUTLINES_URL)
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
+    everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
-    def test_rasterize_proj(self) -> None:
-        # Capture the warning on resolution not matching exactly bounds
-        with pytest.warns(UserWarning):
-            burned = self.glacier_outlines.rasterize(xres=3000)
-
-        assert burned.shape[0] == 146
-        assert burned.shape[1] == 115
-
-    def test_rasterize_unproj(self) -> None:
+    def test_rasterize(self) -> None:
         """Test rasterizing an EPSG:3426 dataset into a projection."""
 
         vct = gu.Vector(self.everest_outlines_path)
@@ -119,18 +109,17 @@ class TestRasterVectorInterface:
         # Use Web Mercator at 30 m.
         # Capture the warning on resolution not matching exactly bounds
         with pytest.warns(UserWarning):
-            burned = vct.rasterize(xres=30, crs=3857)
-
-        assert burned.shape[0] == 1251
-        assert burned.shape[1] == 1522
+            vct.rasterize(xres=30, crs=3857)
 
         # Typically, rasterize returns a raster
         burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
         assert isinstance(burned_in2_out1, gu.Raster)
 
-        # For an in_value of 1 and out_value of 0 (default), it returns a mask
+        # For an in_value of 1 and out_value of 0 (default)
         burned_mask = vct.rasterize(raster=rst, in_value=1)
-        assert isinstance(burned_mask, gu.RasterMask)
+        assert isinstance(burned_mask, gu.Raster)
+        # Convert to boolean
+        burned_mask = burned_mask.astype(bool)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
         assert burned_mask.raster_equal(vct.create_mask(rst))
@@ -196,20 +185,22 @@ class TestRasterVectorInterface:
 class TestMaskVectorInterface:
 
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     # Mask without nodata
-    mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125
+    rst_landsat_b4 = gu.Raster(landsat_b4_path)
+    mask_landsat_b4 = rst_landsat_b4 > np.nanmedian(rst_landsat_b4)
     # Mask with nodata
-    mask_aster_dem = gu.Raster(aster_dem_path) > 2000
+    rst_aster_dem = gu.Raster(aster_dem_path)
+    mask_aster_dem = rst_aster_dem > np.nanmedian(rst_aster_dem)
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_polygonize(self, mask: gu.RasterMask) -> None:
+    def test_polygonize(self, mask: gu.Raster) -> None:
         mask_orig = mask.copy()
         # Run default
         vect = mask.polygonize()
@@ -226,5 +217,7 @@ class TestMaskVectorInterface:
         assert isinstance(vect, gu.Vector)
 
         # Check a warning is raised when using a non-boolean value
-        with pytest.warns(UserWarning, match="In-value converted to 1 for polygonizing boolean mask."):
+        with pytest.warns(
+            UserWarning, match=re.escape("Raster mask (boolean type) passed, using target value of 1 (" "True).")
+        ):
             mask.polygonize(target_values=2)

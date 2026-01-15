@@ -11,13 +11,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools_scm]
 version_file = "geoutils/_version.py"
 fallback_version = "0.0.1"
+# Use no-local-version by default for CI builds
+local_scheme = "no-local-version"
 
 [tool.black]
 target_version = ['py310']
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules -W error::UserWarning"
-testpaths = [
-	"tests",
-	"geoutils"
-]
+addopts = "--doctest-modules --doctest-ignore-import-errors -W error::UserWarning"
+testpaths = ["tests", "geoutils"]

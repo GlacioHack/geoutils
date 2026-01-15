@@ -26,6 +26,7 @@ import pathlib
 from collections import abc
 from os import PathLike
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generator,
     Hashable,
@@ -37,22 +38,21 @@ from typing import (
 )
 
 import geopandas as gpd
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 import geoutils as gu
+from geoutils import profiler
+from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
-from geoutils.misc import copy_doc
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -60,6 +60,9 @@ from geoutils.projtools import (
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.geotransformations import _reproject
+
+if TYPE_CHECKING:
+    import matplotlib
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
@@ -81,6 +84,7 @@ class Vector:
     See the API for more details.
     """
 
+    @profiler.profile("geoutils.vector.vector.__init__", memprof=True)  # type: ignore
     def __init__(
         self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
     ):
@@ -267,6 +271,7 @@ class Vector:
         add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
         return_axes: bool = False,
+        savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
         r"""
@@ -285,9 +290,17 @@ class Vector:
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
             will create a new axis.
         :param return_axes: Whether to return axes.
+        :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
+            with a default DPI (300), no transparency and no metadata. Use `plt.savefig()` to specify other save
+            parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
+            to close the figure.
 
         :returns: None, or (ax, caxes) if return_axes is True
         """
+
+        matplotlib = import_optional("matplotlib")
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         # Ensure that the vector is in the same crs as a reference
         if isinstance(ref_crs, (gu.Raster, rio.io.DatasetReader, Vector, gpd.GeoDataFrame, str)):
@@ -360,12 +373,20 @@ class Vector:
         )
         plt.sca(ax0)
 
+        # if savefig_fname filled, save the plot
+        if savefig_fname:
+            plt.savefig(savefig_fname)
+
         # If returning axes
         if return_axes:
             return ax0, cax
         else:
             return None
 
+    @deprecate(
+        removal_version=Version("0.3.0"),
+        details="The function .save() will be soon deprecated, use .to_file() instead.",
+    )  # type: ignore
     def save(
         self,
         filename: str | pathlib.Path,
@@ -1262,6 +1283,7 @@ class Vector:
         inplace: bool = False,
     ) -> VectorType | None: ...
 
+    @profiler.profile("geoutils.vector.vector.crop", memprof=True)  # type: ignore
     def crop(
         self: VectorType,
         crop_geom: gu.Raster | Vector | list[float] | tuple[float, ...],
@@ -1335,6 +1357,7 @@ class Vector:
         inplace: bool = False,
     ) -> Vector | None: ...
 
+    @profiler.profile("geoutils.vector.vector.reproject", memprof=True)  # type: ignore
     def reproject(
         self: Vector,
         ref: gu.Raster | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
@@ -1440,7 +1463,7 @@ class Vector:
         points: tuple[NDArrayNum, NDArrayNum] = None,
         *,
         as_array: Literal[False] = False,
-    ) -> gu.PointCloudMask | gu.RasterMask: ...
+    ) -> gu.PointCloudMask | gu.Raster: ...
 
     @overload
     def create_mask(
@@ -1462,7 +1485,7 @@ class Vector:
         bounds: tuple[float, float, float, float] | None = None,
         points: tuple[NDArrayNum, NDArrayNum] = None,
         as_array: bool = False,
-    ) -> gu.RasterMask | gu.PointCloudMask | NDArrayBool:
+    ) -> gu.Raster | gu.PointCloudMask | NDArrayBool:
         """
         Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
         feature, False if not).
@@ -1500,6 +1523,7 @@ class Vector:
                 assert transform is not None  # For mypy
                 return gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
+    @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)  # type: ignore
     def rasterize(
         self,
         raster: gu.Raster | None = None,
@@ -1509,7 +1533,7 @@ class Vector:
         bounds: tuple[float, float, float, float] | None = None,
         in_value: int | float | abc.Iterable[int | float] | None = None,
         out_value: int | float = 0,
-    ) -> gu.Raster | gu.RasterMask:
+    ) -> gu.Raster:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
 

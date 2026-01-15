@@ -23,28 +23,40 @@ import shutil
 import tarfile
 import tempfile
 import urllib.request
+from importlib.resources import as_file, files
 
-# Define the location of the data in the example directory
-_EXAMPLES_DIRECTORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "examples/data"))
+# This directory needs to be created within xdem/ so that it works for an installed package as well
+# importlib.resources.files helps take care of the relative path, no matter if package is dev-local or installed
+_EXAMPLES_DIRECTORY = files("geoutils").joinpath("example_data")
 
 # Absolute filepaths to the example files.
-_FILEPATHS_DATA = {
-    "everest_landsat_rgb": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat", "LE71400412000304SGS00_RGB.tif"),
-    "everest_landsat_b4": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat", "LE71400412000304SGS00_B4.tif"),
-    "everest_landsat_b4_cropped": os.path.join(
-        _EXAMPLES_DIRECTORY, "Everest_Landsat", "LE71400412000304SGS00_B4_cropped.tif"
-    ),
-    "everest_rgi_outlines": os.path.join(_EXAMPLES_DIRECTORY, "Everest_Landsat", "15_rgi60_glacier_outlines.gpkg"),
-    "exploradores_aster_dem": os.path.join(
-        _EXAMPLES_DIRECTORY, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z.tif"
-    ),
-    "exploradores_rgi_outlines": os.path.join(
-        _EXAMPLES_DIRECTORY, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg"
-    ),
-    "coromandel_lidar": os.path.join(_EXAMPLES_DIRECTORY, "Coromandel_Lidar", "points.laz"),
+with as_file(_EXAMPLES_DIRECTORY) as examples_directory:
+    _FILEPATHS_DATA = {
+        "everest_landsat_rgb": os.path.join(examples_directory, "Everest_Landsat", "LE71400412000304SGS00_RGB.tif"),
+        "everest_landsat_b4": os.path.join(examples_directory, "Everest_Landsat", "LE71400412000304SGS00_B4.tif"),
+        "everest_landsat_b4_cropped": os.path.join(
+            examples_directory, "Everest_Landsat", "LE71400412000304SGS00_B4_cropped.tif"
+        ),
+        "everest_rgi_outlines": os.path.join(examples_directory, "Everest_Landsat", "15_rgi60_glacier_outlines.gpkg"),
+        "exploradores_aster_dem": os.path.join(
+            examples_directory, "Exploradores_ASTER", "AST_L1A_00303182012144228_Z.tif"
+        ),
+        "exploradores_rgi_outlines": os.path.join(
+            examples_directory, "Exploradores_ASTER", "17_rgi60_glacier_outlines.gpkg"
+        ),
+        "coromandel_lidar": os.path.join(examples_directory, "Coromandel_Lidar", "points.laz"),
+    }
+
+_FILEPATHS_TEST = {
+    k: os.path.join(
+        os.path.dirname(v),
+        os.path.splitext(os.path.basename(v))[0] + "_test" + os.path.splitext(os.path.basename(v))[1],
+    )
+    for k, v in _FILEPATHS_DATA.items()
 }
 
 available = list(_FILEPATHS_DATA.keys())
+available_test = list(_FILEPATHS_TEST.keys())
 
 
 def download_examples(overwrite: bool = False) -> None:
@@ -58,7 +70,7 @@ def download_examples(overwrite: bool = False) -> None:
         return
 
     # Static commit hash to be bumped every time it needs to be.
-    commit = "7f778649a5d058c68605ad1297859b7582144ea6"
+    commit = "e758274647a8dd2656d73c3026c90cc77cab8a86"
     # The URL from which to download the repository
     url = f"https://github.com/GlacioHack/geoutils-data/tarball/main#commit={commit}"
 
@@ -88,7 +100,8 @@ def download_examples(overwrite: bool = False) -> None:
             )
 
             # Copy the temporary extracted data to the example directory.
-            shutil.copytree(tmp_dir_name, os.path.join(_EXAMPLES_DIRECTORY, dir_name), dirs_exist_ok=True)
+            with as_file(_EXAMPLES_DIRECTORY) as ed:
+                shutil.copytree(tmp_dir_name, os.path.join(ed, dir_name), dirs_exist_ok=True)
 
 
 def get_path(name: str) -> str:
@@ -103,3 +116,17 @@ def get_path(name: str) -> str:
         return _FILEPATHS_DATA[name]
     else:
         raise ValueError('Data name should be one of "' + '" , "'.join(list(_FILEPATHS_DATA.keys())) + '".')
+
+
+def get_path_test(name: str) -> str:
+    """
+    Get path of test data (reduced size). List of available files can be found in "examples.available".
+
+    :param name: Name of test data.
+    :return:
+    """
+    if name in list(_FILEPATHS_TEST.keys()):
+        download_examples()
+        return _FILEPATHS_TEST[name]
+    else:
+        raise ValueError('Data name should be one of "' + '" , "'.join(list(_FILEPATHS_TEST.keys())) + '".')

@@ -15,9 +15,9 @@ from geoutils import examples
 class TestRasterPointInterface:
 
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     def test_to_pointcloud(self) -> None:
         """Test to_pointcloud method."""

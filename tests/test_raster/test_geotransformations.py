@@ -20,12 +20,12 @@ DO_PLOT = False
 
 class TestRasterGeotransformations:
 
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_b4_crop_path = examples.get_path("everest_landsat_b4_cropped")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    aster_outlines_path = examples.get_path("exploradores_rgi_outlines")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
@@ -42,8 +42,6 @@ class TestRasterGeotransformations:
 
         img1 = gu.Raster(self.landsat_b4_path)
         img2 = gu.Raster(self.landsat_b4_crop_path)
-        # Set img2 pixel interpretation as "Point" to match "img1" and avoid any warnings
-        img2.set_area_or_point("Point", shift_area_or_point=False)
         img1.set_nodata(0)
         img2.set_nodata(0)
 
@@ -214,7 +212,8 @@ class TestRasterGeotransformations:
 
         # Second, we check that bound reprojection is done automatically if the CRS differ
         r_cropped2 = r.crop(outlines)
-        assert list(r_cropped2.bounds) == list(new_bounds)
+        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bounds_projected(out_crs=r.crs))
+        assert list(r_cropped2.bounds) == list(r_cropped2_bbox_reproj.bounds)
 
         # -- Test crop works as expected even if transform has been modified, e.g. through downsampling -- #
         # Test that with downsampling, cropping to same bounds result in same raster
@@ -659,10 +658,10 @@ class TestRasterGeotransformations:
 
 class TestMaskGeotransformations:
     # Paths to example data
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path("everest_rgi_outlines")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     # Mask without nodata
     mask_landsat_b4 = gu.Raster(landsat_b4_path) > 125
@@ -672,7 +671,7 @@ class TestMaskGeotransformations:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_crop(self, mask: gu.RasterMask) -> None:
+    def test_crop(self, mask: gu.Raster) -> None:
         # Test with same bounds -> should be the same #
 
         mask_orig = mask.copy()
@@ -681,7 +680,7 @@ class TestMaskGeotransformations:
         assert mask_cropped.raster_equal(mask)
 
         # Check if instance is respected
-        assert isinstance(mask_cropped, gu.RasterMask)
+        assert isinstance(mask_cropped, gu.Raster)
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
         # Check the original mask was not modified during cropping
@@ -766,15 +765,15 @@ class TestMaskGeotransformations:
         # assert mask_cropped.raster_equal(mask_orig)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
-    def test_reproject(self, mask: gu.RasterMask) -> None:
+    def test_reproject(self, mask: gu.Raster) -> None:
         # Test 1: with a classic resampling (bilinear)
 
         # Reproject mask - resample to 100 x 100 grid
         mask_orig = mask.copy()
-        mask_reproj = mask.reproject(grid_size=(100, 100), force_source_nodata=2)
+        mask_reproj = mask.reproject(grid_size=(100, 100), resampling="nearest")
 
         # Check instance is respected
-        assert isinstance(mask_reproj, gu.RasterMask)
+        assert isinstance(mask_reproj, gu.Raster) and mask_reproj.is_mask
         # Check the dtype of the original mask was properly reconverted
         assert mask.data.dtype == bool
         # Check the original mask was not modified during reprojection
@@ -782,21 +781,46 @@ class TestMaskGeotransformations:
 
         # Check inplace behaviour works
         mask_tmp = mask.copy()
-        mask_tmp.reproject(grid_size=(100, 100), force_source_nodata=2, inplace=True)
+        mask_tmp.reproject(grid_size=(100, 100), inplace=True, resampling="nearest")
         assert mask_tmp.raster_equal(mask_reproj)
 
         # This should be equivalent to converting the array to uint8, reprojecting, converting back
         mask_uint8 = mask.astype("uint8")
-        mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), force_source_nodata=2)
-        mask_uint8_reproj.data = mask_uint8_reproj.data.astype("bool")
+        mask_uint8_reproj = mask_uint8.reproject(grid_size=(100, 100), resampling="nearest")
+        mask_uint8_reproj = mask_uint8_reproj.astype("bool")
+        # The strict comparison ensures masked data are propagated exactly the same
+        assert mask_reproj.raster_equal(mask_uint8_reproj, strict_masked=True)
 
-        assert mask_reproj.raster_equal(mask_uint8_reproj)
+        # Test 2: Should raise a warning when the resampling differs from nearest
+        with pytest.warns(UserWarning, match="Reprojecting a raster mask .*"):
+            mask.reproject(res=50, resampling="bilinear")
 
-        # Test 2: should raise a warning when the resampling differs from nearest
+    def test_reproject__no_inters(self) -> None:
+        """Test reprojection behaviour without intersection of inputs."""
 
-        with pytest.warns(
-            UserWarning,
-            match="Reprojecting a mask with a resampling method other than 'nearest', "
-            "the boolean array will be converted to float during interpolation.",
-        ):
-            mask.reproject(res=50, resampling="bilinear", force_source_nodata=2)
+        # Create two raster, one boolean
+        dem_bool = gu.Raster.from_array(
+            np.random.randint(2, size=(100, 100), dtype=bool),
+            transform=rio.transform.from_origin(0, 100, 1, 1),
+            crs=4326,
+        )
+        ref_dem = gu.Raster.from_array(
+            np.random.randint(100, size=(100, 100), dtype="uint8"),
+            transform=rio.transform.from_origin(0, 100, 1, 1),
+            crs=4326,
+        )
+
+        # With no intersection
+        dem_bool_crop = dem_bool.icrop((0, 0, 20, 20))
+        ref_dem_crop = ref_dem.icrop((40, 40, 60, 60))
+
+        assert not dem_bool_crop.get_footprint_projected(ref_dem_crop.crs).intersects(
+            ref_dem_crop.get_footprint_projected(ref_dem_crop.crs)
+        )[0]
+
+        res = dem_bool_crop.reproject(ref_dem_crop, resampling="nearest")
+        assert isinstance(res, gu.raster.raster.Raster)
+        # All output points should be masked
+        assert np.all(res.data.mask)
+        # Default data value (behind the mask) is True
+        assert np.all(res.data.data)

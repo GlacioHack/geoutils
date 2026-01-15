@@ -4,8 +4,8 @@ import geoutils
 
 landsat_b4_path = geoutils.examples.get_path("everest_landsat_b4")
 landsat_b4_crop_path = geoutils.examples.get_path("everest_landsat_b4_cropped")
-geoutils.Raster(landsat_b4_path).save("myraster1.tif")
-geoutils.Raster(landsat_b4_crop_path).save("myraster2.tif")
+geoutils.Raster(landsat_b4_path).to_file("myraster1.tif")
+geoutils.Raster(landsat_b4_crop_path).to_file("myraster2.tif")
 ####
 
 import numpy as np
