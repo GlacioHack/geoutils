@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import warnings
 from typing import Any, Callable, Literal, overload
 
 import numpy as np
@@ -220,7 +221,16 @@ def map_overlap_multiproc_save(
         "nodata": result_tile0.nodata,
     }
 
-    return _write_multiproc_result(tasks, config, file_metadata)
+    raster_output = _write_multiproc_result(tasks, config, file_metadata)
+
+    # Warns user if output file is a BigTIFF
+    if raster_output._is_bigtiff():
+        warnings.warn(
+            "Due to the size of the output raster, it has been saved with a BigTIFF format.",
+            category=UserWarning,
+        )
+
+    return raster_output
 
 
 def _write_multiproc_result(
@@ -230,7 +240,7 @@ def _write_multiproc_result(
 ) -> gu.Raster:
 
     # Create a new raster file to save the processed results
-    with rio.open(config.outfile, "w", driver=config.driver, **file_metadata) as dst:
+    with rio.open(config.outfile, "w", driver=config.driver, **file_metadata, BIG_TIFF="IF_NEEDED") as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
