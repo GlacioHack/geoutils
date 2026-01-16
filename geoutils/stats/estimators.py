@@ -33,10 +33,10 @@ def nmad(data: NDArrayNum, nfact: float = 1.4826) -> np.floating[Any]:
     distribution (see https://en.wikipedia.org/wiki/Median_absolute_deviation#Relation_to_standard_deviation, and
     e.g. Höhle and Höhle (2009), http://dx.doi.org/10.1016/j.isprsjprs.2009.02.003)
 
-    :param data: Input array or raster
-    :param nfact: Normalization factor for the data
+    :param data: Input array or raster.
+    :param nfact: Normalization factor for the data.
 
-    :returns nmad: (normalized) median absolute deviation of data.
+    :returns nmad: (Normalized) median absolute deviation of data.
     """
     if isinstance(data, np.ma.masked_array):
         return nfact * np.ma.median(np.abs(data - np.ma.median(data)))
