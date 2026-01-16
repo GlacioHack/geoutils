@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import warnings
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
@@ -50,7 +51,8 @@ from geoutils.raster.georeferencing import (
 from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.stats.sampling import subsample_array
-
+from geoutils.stats.stats import _statistics
+from geoutils.filters import _filter
 
 RasterType = TypeVar("RasterType", bound="RasterBase")
 
@@ -308,7 +310,7 @@ class RasterBase:
                 self.data.fill_value = new_nodata
 
     def set_area_or_point(
-        self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
+            self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
     ) -> None:
         """
         Set new pixel interpretation of the raster.
@@ -335,7 +337,7 @@ class RasterBase:
 
         # Check input
         if new_area_or_point is not None and not (
-            isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]
+                isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]
         ):
             raise ValueError("New pixel interpretation must be 'Area', 'Point' or None.")
 
@@ -360,22 +362,21 @@ class RasterBase:
 
         # If shift is True, and both interpretation were different strings, a change is needed
         if (
-            shift_area_or_point
-            and isinstance(old_area_or_point, str)
-            and isinstance(new_area_or_point, str)
-            and old_area_or_point != new_area_or_point
+                shift_area_or_point
+                and isinstance(old_area_or_point, str)
+                and isinstance(new_area_or_point, str)
+                and old_area_or_point != new_area_or_point
         ):
-            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij), but because
-            # the Y axis is inverted, a minus signs is added to shift the coordinate (even if the unit is in pixel)
+            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij)
 
             # If the new one is Point, we shift back by half a pixel
             if new_area_or_point == "Point":
                 xoff = 0.5
-                yoff = -0.5
+                yoff = 0.5
             # Otherwise we shift forward half a pixel
             else:
                 xoff = -0.5
-                yoff = 0.5
+                yoff = -0.5
             # We perform the shift in place
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
@@ -1696,6 +1697,71 @@ class RasterBase:
         else:
             return gu.PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
 
+    @overload
+    def filter(
+            self: RasterType,
+            method: str | Callable[..., NDArrayNum],
+            *,
+            inplace: Literal[False] = False,
+            size: int = 3,
+            **kwargs: dict[str, Any],
+    ) -> RasterType:
+        ...
+
+    @overload
+    def filter(
+            self: RasterType,
+            method: str | Callable[..., NDArrayNum],
+            *,
+            inplace: Literal[True],
+            size: int = 3,
+            **kwargs: dict[str, Any],
+    ) -> None:
+        ...
+
+    def filter(
+            self: RasterType,
+            method: str | Callable[..., NDArrayNum],
+            inplace: bool = False,
+            size: int = 3,
+            **kwargs: dict[str, Any],
+    ) -> RasterType | None:
+        """
+        Apply a filter to the array.
+
+        :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
+                       for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
+        :param inplace: Whether to modify the raster in-place.
+        :param size: window size for filter
+
+        :return: A new Raster instance with the filtered data (or None if inplace)
+
+        :raises ValueError: If the filter name is not one of the predefined options.
+        :raises TypeError: If `method` is neither a string nor a callable.
+        """
+        # Convert data to float to avoid integer issues with nodata
+        array = self.data.astype(float)
+
+        # Mask nodata values
+        masked_array = np.ma.masked_equal(array, self.nodata)
+
+        # Fill masked values with nodata for filtering, to match SciPy behavior
+        filled_array = masked_array.filled(self.nodata)
+
+        # Apply filter
+        filtered_array = _filter(filled_array, method, size, **kwargs)
+
+        # Mask nodata again after filtering
+        final_masked = np.ma.masked_equal(filtered_array, self.nodata)
+        final_masked.set_fill_value(self.nodata)
+        final_masked = final_masked.astype(float)
+
+        if inplace:
+            self._data = final_masked
+            return None
+        else:
+            return self.from_array(final_masked, self.transform, self.crs, self.nodata, self.area_or_point)
+
     @deprecate(
         Version("0.3.0"),
         "Raster.to_points() is deprecated in favor of Raster.to_pointcloud() and will be removed in v0.3.",
@@ -1953,6 +2019,7 @@ class RasterBase:
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
+    @profiler.profile("geoutils.raster.raster.subsample", memprof=True)  # type: ignore
     def subsample(
         self,
         subsample: float | int,
