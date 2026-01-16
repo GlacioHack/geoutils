@@ -51,31 +51,33 @@ def _polygonize(
             warnings.warn("Raster mask (boolean type) passed, using target value of 1 (True).")
         target_values = True
 
+    nanarray = source_raster.get_nanarray()
+
     # Mask a unique value set by a number
     if isinstance(target_values, (int, float, np.integer, np.floating)):
-        if np.sum(source_raster.data == target_values) == 0:
+        if np.sum(nanarray == target_values) == 0:
             raise ValueError(f"no pixel with in_value {target_values}")
 
-        bool_msk = np.array(source_raster.data == target_values).astype(np.uint8)
+        bool_msk = np.array(nanarray == target_values).astype(np.uint8)
 
     # Mask values within boundaries set by a tuple
     elif isinstance(target_values, tuple):
-        if np.sum((source_raster.data > target_values[0]) & (source_raster.data < target_values[1])) == 0:
+        if np.sum((nanarray > target_values[0]) & (nanarray < target_values[1])) == 0:
             raise ValueError(f"no pixel with in_value between {target_values[0]} and {target_values[1]}")
 
-        bool_msk = ((source_raster.data > target_values[0]) & (source_raster.data < target_values[1])).astype(np.uint8)
+        bool_msk = ((nanarray > target_values[0]) & (nanarray < target_values[1])).astype(np.uint8)
 
     # Mask specific values set by a sequence
     elif isinstance(target_values, list) or isinstance(target_values, np.ndarray):
-        if np.sum(np.isin(source_raster.data, np.array(target_values))) == 0:
+        if np.sum(np.isin(nanarray, np.array(target_values))) == 0:
             raise ValueError("no pixel with in_value " + ", ".join(map("{}".format, target_values)))
 
-        bool_msk = np.isin(source_raster.data, np.array(target_values)).astype("uint8")
+        bool_msk = np.isin(nanarray, np.array(target_values)).astype("uint8")
 
     # Mask all valid values
     elif target_values == "all":
         # Using getmaskarray is necessary in case .data.mask is nomask (False)
-        bool_msk = (~np.ma.getmaskarray(source_raster.data)).astype("uint8")
+        bool_msk = (~np.ma.getmaskarray(nanarray)).astype("uint8")
 
     else:
         raise ValueError("in_value must be a number, a tuple or a sequence")
@@ -97,7 +99,7 @@ def _polygonize(
     results = (
         {"properties": {"raster_value": v}, "geometry": s}
         for i, (s, v) in enumerate(
-            shapes(source_raster.data.astype(final_dtype), mask=bool_msk, transform=source_raster.transform)
+            shapes(nanarray.astype(final_dtype), mask=bool_msk, transform=source_raster.transform)
         )
     )
 

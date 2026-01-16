@@ -4,6 +4,8 @@ from __future__ import annotations
 import warnings
 from typing import Any
 
+import pandas as pd
+from pandas.testing import assert_frame_equal
 import pytest
 from pyproj import CRS
 import numpy as np
@@ -26,9 +28,10 @@ def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = 
         ds.rst.transform == rast.transform,
         ds.rst.crs == rast.crs,
         ds.rst.nodata == rast.nodata,
+        np.array_equal(~np.isfinite(ds.rst.data), rast.data.mask)
     ]
 
-    names = ["data", "transform", "crs", "nodata"]
+    names = ["data", "transform", "crs", "nodata", "mask"]
 
     complete_equality = all(equalities)
 
@@ -41,32 +44,37 @@ def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = 
 
     return complete_equality
 
-def output_equal(output1: Any, output2: Any) -> bool:
+def assert_output_equal(output1: Any, output2: Any) -> None:
     """Return equality of different output types."""
 
     # For two vectors
     if isinstance(output1, Vector) and isinstance(output2, Vector):
-        return output1.vector_equal(output2)
+        assert output1.vector_equal(output2)
 
     # For two raster: Xarray or Raster objects
     elif isinstance(output1, Raster) and isinstance(output2, Raster):
-        return output1.raster_equal(output2)
+        assert output1.raster_equal(output2)
     elif isinstance(output1, Raster) and isinstance(output2, xr.DataArray):
-        return equal_xr_raster(ds=output2, rast=output1)
+        assert equal_xr_raster(ds=output2, rast=output1)
     elif isinstance(output1, xr.DataArray) and isinstance(output2, Raster):
-        return equal_xr_raster(ds=output1, rast=output2)
+        assert equal_xr_raster(ds=output1, rast=output2)
 
     # For arrays
     elif isinstance(output1, np.ndarray):
-        return np.array_equal(output1, output2, equal_nan=True)
+        assert np.array_equal(output1, output2, equal_nan=True)
 
     # For tuple of arrays
     elif isinstance(output1, tuple) and isinstance(output1[0], np.ndarray):
-        return np.array_equal(np.array(output1), np.array(output2), equal_nan=True)
+        assert np.array_equal(np.array(output1), np.array(output2), equal_nan=True)
 
+    # For a dictionary of numeric values
+    elif isinstance(output1, dict):
+        df1 = pd.DataFrame(index=[0], data=output1)
+        df2 = pd.DataFrame(index=[0], data=output2)
+        assert_frame_equal(df1, df2)
     # For any other object type
     else:
-        return output1 == output2
+        assert output1 == output2
 
 class TestClassVsAccessorConsistency:
     """
@@ -79,9 +87,9 @@ class TestClassVsAccessorConsistency:
     """
 
     # Run tests for different rasters
-    landsat_b4_path = examples.get_path("everest_landsat_b4")
-    aster_dem_path = examples.get_path("exploradores_aster_dem")
-    landsat_rgb_path = examples.get_path("everest_landsat_rgb")
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
     # Test common attributes
     attributes = ["crs", "transform", "nodata", "area_or_point", "res", "count", "height", "width", "footprint",
@@ -105,18 +113,17 @@ class TestClassVsAccessorConsistency:
         output_ds = getattr(getattr(ds, "rst"), attr)
 
         # Assert equality
-        if attr != "_is_xr":  # Only attribute that is (purposely) not the same, but the opposite
-            assert output_equal(output_raster, output_ds)
-        else:
+        if attr == "_is_xr":  # Only attribute that is (purposely) not the same, but the boolean opposite
             assert output_raster != output_ds
+        else:
+            assert_output_equal(output_raster, output_ds)
 
 
     # Test common methods
-    # methods_and_args = {
-    #     "reproject": {"crs": CRS.from_epsg(32610), "res": 10}}
     methods_and_args = {
         "reproject": {"crs": CRS.from_epsg(32610), "res": 10},
-        "crop": {"bbox": "random"},
+        "crop": {"bbox": "random"}, # This will be derived during the test to work on all inputs
+        "icrop": {"bbox": "random"}, # This will be derived during the test to work on all inputs
         "translate": {"xoff": 10.5, "yoff": 5},
         "xy2ij": {"x": "random", "y": "random"},  # This will be derived during the test to work on all inputs
         "ij2xy": {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]},
@@ -129,7 +136,8 @@ class TestClassVsAccessorConsistency:
         "to_pointcloud": {"subsample": 1000, "random_state": 42},
         "polygonize": {"target_values": "all"},
         "subsample": {"subsample": 1000, "random_state": 42},
-        "filter": {"method": "median", "size": 7}
+        "filter": {"method": "median", "size": 7},
+        "get_stats": {},
     }
 
     @pytest.mark.parametrize("path_raster", [aster_dem_path])  # type: ignore
@@ -161,9 +169,14 @@ class TestClassVsAccessorConsistency:
             elif "x" in self.methods_and_args[method].keys():
                 args.update({"x": interp_x, "y": interp_y})
 
-        elif "bbox" in self.methods_and_args[method].keys():
+        elif method == "crop":
             bbox = raster.bounds.left + 100, raster.bounds.bottom + 200, \
                 raster.bounds.left + 320, raster.bounds.bottom + 411
+            args = self.methods_and_args[method].copy()
+            args.update({"bbox": bbox})
+
+        elif method == "icrop":
+            bbox = 3, 5, 10, 22
             args = self.methods_and_args[method].copy()
             args.update({"bbox": bbox})
 
@@ -175,5 +188,5 @@ class TestClassVsAccessorConsistency:
         output_ds = getattr(getattr(ds, "rst"), method)(**args)
 
         # Assert equality of output
-        assert output_equal(output_raster, output_ds)
+        assert_output_equal(output_raster, output_ds)
 

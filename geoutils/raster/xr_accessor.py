@@ -6,7 +6,6 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import numpy as np
-import rasterio as rio
 from affine import Affine
 from rasterio.crs import CRS
 import rioxarray as rioxr

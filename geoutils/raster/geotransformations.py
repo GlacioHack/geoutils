@@ -109,11 +109,12 @@ def _reproject(
             return True, None, None, None, None
 
     # 4/ Check reprojection is possible (boolean raster will be converted, so no need to check)
-    if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
-        raise ValueError(
-            "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-            "with `force_source_nodata`."
-        )
+    # TODO: Fix this
+    # if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
+    #     raise ValueError(
+    #         "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+    #         "with `force_source_nodata`."
+    #     )
 
     # 5/ Perform reprojection
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
@@ -123,37 +124,35 @@ def _reproject(
 
     else:
         # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        src_arr = source_raster.data.data
-        src_mask = np.ma.getmaskarray(source_raster.data)
+        if np.ma.isMaskedArray(source_raster):
+            src_arr = source_raster.data.data
+            src_mask = np.ma.getmaskarray(source_raster.data)
+        else:
+            src_arr = source_raster.data
+            src_mask = ~np.isfinite(source_raster.data)
         dst_arr, dst_mask = _rio_reproject(src_arr=src_arr, src_mask=src_mask, reproj_kwargs=reproj_kwargs)
         # Set mask
-        dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=nodata)
+        if np.ma.isMaskedArray(source_raster.data):
+            dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=nodata)
+        else:
+            dst_arr = dst_arr
+            dst_arr[dst_mask] = np.nan
 
         return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
-
-        # If input is Xarray, use NaNs for nodata
-        # if source_raster._is_xr:
-        #     src_arr = source_raster.data
-        #     src_arr[np.isnan(src_arr)] = src_nodata
-        #     dst_arr, transformed = _rio_reproject(src_arr=src_arr, reproj_kwargs=reproj_kwargs)
-        #     dst_arr[dst_arr == nodata] = np.nan
 
 
 #########
 # 2/ CROP
 #########
 
-
 @profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
 def _crop(
     source_raster: gu.Raster,
     bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
-    mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
 ) -> tuple[MArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
 
-    assert mode in ["match_extent", "match_pixel"], "mode must be one of 'match_pixel', 'match_extent'"
     assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
 
     if isinstance(bbox, (gu.Raster, gu.Vector)):
@@ -172,63 +171,56 @@ def _crop(
     else:
         raise ValueError("'bbox' must be a Raster, Vector, or list of coordinates.")
 
-    if mode == "match_pixel":
-        # Finding the intersection of requested bounds and original bounds, cropped to image shape
-        ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)
-        self_win = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster.transform).crop(
-            *source_raster.shape
-        )
-        final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
+    # Finding the intersection of requested bounds and original bounds, cropped to image shape
+    ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)
+    self_win = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster.transform).crop(
+        *source_raster.shape
+    )
+    final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
 
-        # Update bounds and transform accordingly
-        new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=source_raster.transform)
-        tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
+    # Update bounds and transform accordingly
+    new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=source_raster.transform)
+    tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
 
-        if source_raster.is_loaded:
-            # In case data is loaded on disk, can extract directly from np array
-            (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
-            crop_img = source_raster.data[..., rowmin:rowmax, colmin:colmax]
-
-        else:
-
-            assert source_raster._disk_shape is not None  # This should not be the case, sanity check to make mypy happy
-
-            # If data was not loaded, and self's transform was updated (e.g. due to downsampling) need to
-            # get the Window corresponding to on disk data
-            ref_win_disk = rio.windows.from_bounds(
-                new_xmin, new_ymin, new_xmax, new_ymax, transform=source_raster._disk_transform
-            )
-            self_win_disk = rio.windows.from_bounds(
-                *source_raster.bounds, transform=source_raster._disk_transform
-            ).crop(*source_raster._disk_shape[1:])
-            final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
-
-            # Round up to downsampling size, to match __init__
-            final_window_disk = rio.windows.round_window_to_full_blocks(
-                final_window_disk, ((source_raster._downsample, source_raster._downsample),)
-            )
-
-            # Load data for "on_disk" window but out_shape matching in-memory transform -> enforce downsampling
-            # AD (24/04/24): Note that the same issue as #447 occurs here when final_window_disk extends beyond
-            # self's bounds. Using option `boundless=True` solves the issue but causes other tests to fail
-            # This should be fixed with #447 and previous line would be obsolete.
-            with rio.open(source_raster.filename) as raster:
-                crop_img = raster.read(
-                    indexes=source_raster._bands,
-                    masked=source_raster._masked,
-                    window=final_window_disk,
-                    out_shape=(final_window.height, final_window.width),
-                )
-
-            # Squeeze first axis for single-band
-            if crop_img.ndim == 3 and crop_img.shape[0] == 1:
-                crop_img = crop_img.squeeze(axis=0)
+    if source_raster.is_loaded:
+        # In case data is loaded on disk, can extract directly from np array
+        (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+        crop_img = source_raster.data[..., rowmin:rowmax, colmin:colmax]
 
     else:
-        bbox = rio.coords.BoundingBox(left=xmin, bottom=ymin, right=xmax, top=ymax)
-        out_rst = source_raster.reproject(bounds=bbox)  # should we instead raise an issue and point to reproject?
-        crop_img = out_rst.data
-        tfm = out_rst.transform
+
+        assert source_raster._disk_shape is not None  # This should not be the case, sanity check to make mypy happy
+
+        # If data was not loaded, and self's transform was updated (e.g. due to downsampling) need to
+        # get the Window corresponding to on disk data
+        ref_win_disk = rio.windows.from_bounds(
+            new_xmin, new_ymin, new_xmax, new_ymax, transform=source_raster._disk_transform
+        )
+        self_win_disk = rio.windows.from_bounds(
+            *source_raster.bounds, transform=source_raster._disk_transform
+        ).crop(*source_raster._disk_shape[1:])
+        final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
+
+        # Round up to downsampling size, to match __init__
+        final_window_disk = rio.windows.round_window_to_full_blocks(
+            final_window_disk, ((source_raster._downsample, source_raster._downsample),)
+        )
+
+        # Load data for "on_disk" window but out_shape matching in-memory transform -> enforce downsampling
+        # AD (24/04/24): Note that the same issue as #447 occurs here when final_window_disk extends beyond
+        # self's bounds. Using option `boundless=True` solves the issue but causes other tests to fail
+        # This should be fixed with #447 and previous line would be obsolete.
+        with rio.open(source_raster.filename) as raster:
+            crop_img = raster.read(
+                indexes=source_raster._bands,
+                masked=source_raster._masked,
+                window=final_window_disk,
+                out_shape=(final_window.height, final_window.width),
+            )
+
+        # Squeeze first axis for single-band
+        if crop_img.ndim == 3 and crop_img.shape[0] == 1:
+            crop_img = crop_img.squeeze(axis=0)
 
     return crop_img, tfm
 

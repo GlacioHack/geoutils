@@ -120,7 +120,7 @@ class RasterBase:
         :returns: Affine matrix geotransform.
         """
         if self._is_xr:
-            return self._obj.rio.transform(recalc=True)
+            return self._obj.rio.transform()
         else:
             return self._transform
 
@@ -133,14 +133,21 @@ class RasterBase:
         """
         Set the geotransform of the raster.
         """
-        if not isinstance(new_transform, Affine) or new_transform is not None:
+        if new_transform is not None and not isinstance(new_transform, Affine):
             if isinstance(new_transform, tuple):
                 new_transform = Affine(*new_transform)
             else:
                 raise TypeError("The transform argument needs to be Affine or tuple.")
 
         if self._is_xr:
-            self._obj.rio.write_transform(new_transform)
+            # Rioxarray prioritizes coordinates over transform to re-define transform,
+            # so we need to overwrite coordinates
+            # See https://github.com/corteva/rioxarray/issues/698
+            from rioxarray.rioxarray import affine_to_coords
+            coords = affine_to_coords(affine=new_transform, width=self.data.shape[1], height=self.data.shape[0])
+            self._obj["x"] = coords["x"]
+            self._obj["y"] = coords["y"]
+            self._obj.rio.write_transform(new_transform, inplace=True)
         else:
             self._transform = new_transform
 
@@ -986,7 +993,6 @@ class RasterBase:
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
     ) -> RasterType: ...
@@ -995,7 +1001,6 @@ class RasterBase:
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
     ) -> None: ...
@@ -1004,7 +1009,6 @@ class RasterBase:
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
     ) -> RasterType | None: ...
@@ -1013,7 +1017,6 @@ class RasterBase:
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
     ) -> RasterType | None:
@@ -1022,27 +1025,27 @@ class RasterBase:
 
         **Match-reference:** a reference raster or vector can be passed to match bounds during cropping.
 
-        Reprojection is done on the fly if georeferenced objects have different projections.
+        Cropping preserves the original pixel resolution, cropping to the extent that most closely aligns with the
+        current coordinates. To match the extent of another dataset exactly, use reproject().
 
         :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
             coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
-        :param mode: Whether to match within pixels or exact extent. ``'match_pixel'`` will preserve the original pixel
-            resolution, cropping to the extent that most closely aligns with the current coordinates. ``'match_extent'``
+        :param mode: Whether to match within pixels or exact extent. ``'match_pixel'``  ``'match_extent'``
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
         :param inplace: Whether to update the raster in-place.
 
         :returns: A new raster (or None if inplace).
         """
 
-        crop_img, tfm = _crop(source_raster=self, bbox=bbox, mode=mode)
+        cropped_arr, transform = _crop(source_raster=self, bbox=bbox)
 
         if inplace:
-            self._data = crop_img
-            self.transform = tfm
+            self.data = cropped_arr
+            self.set_transform(transform)
             return None
         else:
-            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
+            newraster = self.from_array(cropped_arr, transform, self.crs, self.nodata, self.area_or_point)
             return newraster
 
     @overload
@@ -1223,9 +1226,9 @@ class RasterBase:
         #         return result_raster  # type: ignore
 
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
-        assert data is not None
-        assert transformed is not None
-        assert crs is not None
+        # assert data is not None
+        # assert transformed is not None
+        # assert crs is not None
 
         # Write results to a new Raster.
         if inplace:
