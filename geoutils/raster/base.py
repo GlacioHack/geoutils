@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import warnings
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
+import pathlib
 
 import struct
 from affine import Affine
@@ -16,6 +17,8 @@ from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
+import geoutils as gu
+from geoutils import profiler
 from geoutils._config import config
 from geoutils._typing import ArrayLike, DTypeLike, MArrayNum, NDArrayNum, NDArrayBool, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -31,7 +34,9 @@ from geoutils.projtools import (
     _get_footprint_projected,
     _get_utm_ups_crs,
     reproject_from_latlon,
-    reproject_points
+    reproject_points,
+    merge_bounds,
+    align_bounds
 )
 from geoutils.raster.georeferencing import (
     _bounds,
@@ -45,8 +50,7 @@ from geoutils.raster.georeferencing import (
 from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.stats.sampling import subsample_array
-from geoutils.vector.vector import Vector
-from geoutils.pointcloud.pointcloud import PointCloud
+
 
 RasterType = TypeVar("RasterType", bound="RasterBase")
 
@@ -87,6 +91,8 @@ class RasterBase:
         self._is_modified = True
         self._downsample: int | float = 1
         self._profile: dict[str, Any] | None = None
+        self._is_mask: bool | None = None
+
 
     def from_array(self):
         """Placeholder method for subclasses."""
@@ -445,7 +451,7 @@ class RasterBase:
         return _bounds(transform=self.transform, shape=self.shape)
 
     @property
-    def footprint(self) -> Vector:
+    def footprint(self) -> gu.Vector:
         """Footprint of the raster."""
         return self.get_footprint_projected(self.crs)
 
@@ -561,6 +567,17 @@ class RasterBase:
         May be passed as keyword arguments to rasterio.open()
         to create a clone of this dataset."""
         return self._profile
+
+    @property
+    def is_mask(self) -> bool:
+        """Whether the raster array is a boolean data type (a mask)."""
+
+        # Follow user input if not loaded
+        if not self.is_loaded:
+            return self._is_mask
+        # Otherwise check data type
+        else:
+            return np.dtype(self.dtype) == np.bool_
 
     def _is_bigtiff(self) -> bool:
         """
@@ -742,7 +759,7 @@ class RasterBase:
         # Derive inlier mask
         if inlier_mask is not None:
             valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
-            if isinstance(inlier_mask, Raster) and inlier_mask.is_mask:
+            if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
                 inlier_points = np.count_nonzero(inlier_mask.data)
             else:
                 inlier_points = np.count_nonzero(inlier_mask)  # type: ignore
@@ -843,7 +860,7 @@ class RasterBase:
 
         return new_bounds
 
-    def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> Vector:
+    def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> gu.Vector:
         """
         Get raster footprint projected in a specified CRS.
 
@@ -855,7 +872,7 @@ class RasterBase:
          Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
         """
 
-        return Vector(
+        return gu.Vector(
             _get_footprint_projected(
                 bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
             )
@@ -896,17 +913,12 @@ class RasterBase:
         (xmin, ymin, xmax, ymax) in self's coordinate system.
 
         """
-        from geoutils import projtools
-
-        # If input raster is string, open as Raster
-        if isinstance(raster, str):
-            raster = Raster(raster, load_data=False)
 
         # Reproject the bounds of raster to self's
         raster_bounds_sameproj = raster.get_bounds_projected(self.crs)  # type: ignore
 
         # Calculate intersection of bounding boxes
-        intersection = projtools.merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
+        intersection = merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
 
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(math.isnan(i) for i in intersection):
@@ -915,7 +927,7 @@ class RasterBase:
 
         # if required, ensure the intersection is aligned with self's georeferences
         if match_ref:
-            intersection = projtools.align_bounds(self.transform, intersection)
+            intersection = align_bounds(self.transform, intersection)
 
         # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
         return intersection  # type: ignore
@@ -927,7 +939,7 @@ class RasterBase:
     @overload
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[False] = False,
@@ -936,7 +948,7 @@ class RasterBase:
     @overload
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: Literal[True],
@@ -945,7 +957,7 @@ class RasterBase:
     @overload
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -954,7 +966,7 @@ class RasterBase:
     @profiler.profile("geoutils.raster.raster.crop", memprof=True)  # type: ignore
     def crop(
         self: RasterType,
-        bbox: RasterType | Vector | list[float] | tuple[float, ...],
+        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
         mode: Literal["match_pixel"] | Literal["match_extent"] = "match_pixel",
         *,
         inplace: bool = False,
@@ -1153,15 +1165,16 @@ class RasterBase:
                 return self
 
         # If multiprocessing -> results on disk -> load metadata
-        if multiproc_config:
-            result_raster = Raster(multiproc_config.outfile)
-            if inplace:
-                crs = result_raster.crs
-                nodata = result_raster.nodata
-                transformed = result_raster.transform
-                data = result_raster.data
-            else:
-                return result_raster  # type: ignore
+        # TODO: Fix re-opening logic for Xarray accessor
+        # if multiproc_config:
+        #     result_raster = Raster(multiproc_config.outfile)
+        #     if inplace:
+        #         crs = result_raster.crs
+        #         nodata = result_raster.nodata
+        #         transformed = result_raster.transform
+        #         data = result_raster.data
+        #     else:
+        #         return result_raster  # type: ignore
 
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
         assert data is not None
@@ -1438,7 +1451,7 @@ class RasterBase:
 
         # Return array or pointcloud
         if not as_array:
-            output_val = PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
+            output_val = gu.PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
 
         if return_window:
             return (output_val, output_win)
@@ -1558,7 +1571,7 @@ class RasterBase:
     @overload
     def interp_points(
         self,
-        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloud,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
         method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
         band: int = 1,
@@ -1568,13 +1581,13 @@ class RasterBase:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> PointCloud:
+    ) -> gu.PointCloud:
         ...
 
     @overload
     def interp_points(
         self,
-        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloud,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
         method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
         band: int = 1,
@@ -1590,7 +1603,7 @@ class RasterBase:
     @overload
     def interp_points(
         self,
-        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloud,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
         method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
         band: int = 1,
@@ -1600,13 +1613,13 @@ class RasterBase:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> NDArrayNum | PointCloud:
+    ) -> NDArrayNum | gu.PointCloud:
         ...
 
     @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
         self,
-        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloud,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | gu.PointCloud,
         method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
         band: int = 1,
@@ -1615,7 +1628,7 @@ class RasterBase:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> NDArrayNum | PointCloud:
+    ) -> NDArrayNum | gu.PointCloud:
         """
          Interpolate raster values at a set of points.
 
@@ -1657,7 +1670,7 @@ class RasterBase:
             array = array[band - 1, :, :]
 
         # If point cloud input
-        if isinstance(points, PointCloud):
+        if isinstance(points, gu.PointCloud):
             # TODO: Check conversion is not done for nothing?
             points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
         # Otherwise
@@ -1681,7 +1694,7 @@ class RasterBase:
         if as_array:
             return z
         else:
-            return PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
+            return gu.PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
 
     @deprecate(
         Version("0.3.0"),
@@ -1719,7 +1732,7 @@ class RasterBase:
             as_array: Literal[True],
             random_state: int | np.random.Generator | None = None,
             force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> Vector: ...
+    ) -> gu.Vector: ...
 
     @overload
     def to_pointcloud(
@@ -1752,7 +1765,7 @@ class RasterBase:
         Convert raster to point cloud.
 
         A point cloud is a vector of point geometries associated to a data column, and possibly other auxiliary data
-        columns, see geoutils.PointCloud.
+        columns, see geoutils.gu.PointCloud.
 
         For a single band raster, the main data column name of the point cloud defaults to "b1" and stores values of
         that single band.
@@ -1810,7 +1823,7 @@ class RasterBase:
     @classmethod
     def from_pointcloud_regular(
             cls: type[RasterType],
-            pointcloud: gpd.GeoDataFrame | PointCloud,
+            pointcloud: gpd.GeoDataFrame | gu.PointCloud,
             grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
             transform: rio.transform.Affine = None,
             shape: tuple[int, int] = None,
@@ -1851,7 +1864,7 @@ class RasterBase:
             self,
             target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
             data_column_name: str = "id",
-    ) -> Vector:
+    ) -> gu.Vector:
         """
         Polygonize the raster into a vector.
 
@@ -1868,7 +1881,7 @@ class RasterBase:
 
     def proximity(
         self,
-        vector: Vector | None = None,
+        vector: gu.Vector | None = None,
         target_values: list[float] | None = None,
         geometry_type: str = "boundary",
         in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",

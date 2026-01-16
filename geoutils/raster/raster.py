@@ -369,13 +369,14 @@ class Raster(RasterBase):
         :param force_nodata: Force nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
 
+        # Sets attributes as None in RasterBase
         super().__init__()
 
-        self._data: MArrayNum | None = None
+        # Only attributes defined from instantiation
         self._nodata = force_nodata
         self._bands = bands
+        self._is_mask = is_mask
         self._masked = True
-        self._is_mask: bool = is_mask
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
