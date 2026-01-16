@@ -170,7 +170,7 @@ def _crop(
             xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
             xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
     else:
-        raise ValueError("'crop_geom' must be a Raster, Vector, or list of coordinates.")
+        raise ValueError("'bbox' must be a Raster, Vector, or list of coordinates.")
 
     if mode == "match_pixel":
         # Finding the intersection of requested bounds and original bounds, cropped to image shape

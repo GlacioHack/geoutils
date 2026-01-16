@@ -1467,48 +1467,6 @@ class Raster(RasterBase):
 
         return cp
 
-    @overload
-    def get_nanarray(
-        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
-    ) -> NDArrayNum: ...
-
-    @overload
-    def get_nanarray(
-        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
-    ) -> tuple[NDArrayNum, NDArrayBool]: ...
-
-    def get_nanarray(
-        self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
-    ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
-        """
-        Get NaN array from the raster.
-
-        Optionally, return the mask from the masked array.
-
-        :param floating_dtype: Floating dtype to convert to, if masked array is not of floating type.
-        :param return_mask: Whether to return the mask of valid data.
-
-        :returns Array with masked data as NaNs, (Optional) Mask of invalid data.
-        """
-
-        # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
-        if "int" in str(self.data.dtype):
-            # Get the array with masked value fill with NaNs
-            nanarray = self.data.astype(floating_dtype).filled(fill_value=np.nan).squeeze()
-        else:
-            # Same here
-            nanarray = self.data.filled(fill_value=np.nan).squeeze()
-
-        # The function np.ma.filled() only returns a copy if the array is masked, copy the array if it's not the case
-        if not np.ma.is_masked(self.data):
-            nanarray = np.copy(nanarray)
-
-        # Return the NaN array, and possibly the mask as well
-        if return_mask:
-            return nanarray, np.copy(np.ma.getmaskarray(self.data).squeeze())
-        else:
-            return nanarray
-
     def get_mask(self) -> NDArrayBool:
         """
         Get mask of invalid values from the raster.

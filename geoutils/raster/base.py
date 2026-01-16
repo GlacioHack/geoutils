@@ -933,6 +933,51 @@ class RasterBase:
         # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
         return intersection  # type: ignore
 
+    @overload
+    def get_nanarray(
+            self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
+    ) -> NDArrayNum:
+        ...
+
+    @overload
+    def get_nanarray(
+            self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
+    ) -> tuple[NDArrayNum, NDArrayBool]:
+        ...
+
+    def get_nanarray(
+            self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
+    ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
+        """
+        Get NaN array from the raster.
+
+        Optionally, return the mask from the masked array.
+
+        :param floating_dtype: Floating dtype to convert to, if masked array is not of floating type.
+        :param return_mask: Whether to return the mask of valid data.
+
+        :returns Array with masked data as NaNs, (Optional) Mask of invalid data.
+        """
+
+        if np.ma.isMaskedArray(self.data):
+            # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
+            if "int" in str(self.data.dtype):
+                # Get the array with masked value fill with NaNs
+                nanarray = self.data.astype(floating_dtype).filled(fill_value=np.nan).squeeze()
+            else:
+                # Same here
+                nanarray = self.data.filled(fill_value=np.nan).squeeze()
+
+        # The function np.ma.filled() only returns a copy if the array is masked, copy the array if it's not the case
+        else:
+            nanarray = np.copy(self.data)
+
+        # Return the NaN array, and possibly the mask as well
+        if return_mask:
+            return nanarray, np.isfinite(nanarray)
+        else:
+            return nanarray
+
     # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
     # Then the final overload must be duplicated
     # Also note that in the first overload, only "inplace: Literal[False]" does not work. The ellipsis is
@@ -1699,32 +1744,32 @@ class RasterBase:
 
     @overload
     def filter(
-            self: RasterType,
-            method: str | Callable[..., NDArrayNum],
-            *,
-            inplace: Literal[False] = False,
-            size: int = 3,
-            **kwargs: dict[str, Any],
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[False] = False,
+        size: int = 3,
+        **kwargs: dict[str, Any],
     ) -> RasterType:
         ...
 
     @overload
     def filter(
-            self: RasterType,
-            method: str | Callable[..., NDArrayNum],
-            *,
-            inplace: Literal[True],
-            size: int = 3,
-            **kwargs: dict[str, Any],
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        *,
+        inplace: Literal[True],
+        size: int = 3,
+        **kwargs: dict[str, Any],
     ) -> None:
         ...
 
     def filter(
-            self: RasterType,
-            method: str | Callable[..., NDArrayNum],
-            inplace: bool = False,
-            size: int = 3,
-            **kwargs: dict[str, Any],
+        self: RasterType,
+        method: str | Callable[..., NDArrayNum],
+        inplace: bool = False,
+        size: int = 3,
+        **kwargs: dict[str, Any],
     ) -> RasterType | None:
         """
         Apply a filter to the array.
@@ -1732,35 +1777,38 @@ class RasterBase:
         :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
                        for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
         :param inplace: Whether to modify the raster in-place.
-        :param size: window size for filter
+        :param size: Window size for filter
 
-        :return: A new Raster instance with the filtered data (or None if inplace)
+        :return: A new Raster instance with the filtered data (or None if inplace).
 
         :raises ValueError: If the filter name is not one of the predefined options.
         :raises TypeError: If `method` is neither a string nor a callable.
         """
+
         # Convert data to float to avoid integer issues with nodata
         array = self.data.astype(float)
 
         # Mask nodata values
-        masked_array = np.ma.masked_equal(array, self.nodata)
+        # masked_array = np.ma.masked_equal(array, self.nodata)
 
         # Fill masked values with nodata for filtering, to match SciPy behavior
-        filled_array = masked_array.filled(self.nodata)
+        # filled_array = masked_array.filled(self.nodata)
+        nan_array = self.get_nanarray()
 
         # Apply filter
-        filtered_array = _filter(filled_array, method, size, **kwargs)
+        filtered_array = _filter(nan_array, method, size, **kwargs)
 
         # Mask nodata again after filtering
-        final_masked = np.ma.masked_equal(filtered_array, self.nodata)
-        final_masked.set_fill_value(self.nodata)
-        final_masked = final_masked.astype(float)
+        # final_masked = np.ma.masked_equal(filtered_array, self.nodata)
+        # final_masked.set_fill_value(self.nodata)
+        # final_masked = final_masked.astype(float)
 
         if inplace:
-            self._data = final_masked
+            # TODO: NaN array must be converted to Masked in data setting?
+            self.data = filtered_array
             return None
         else:
-            return self.from_array(final_masked, self.transform, self.crs, self.nodata, self.area_or_point)
+            return self.from_array(filtered_array, self.transform, self.crs, self.nodata, self.area_or_point)
 
     @deprecate(
         Version("0.3.0"),

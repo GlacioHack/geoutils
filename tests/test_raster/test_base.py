@@ -89,8 +89,8 @@ class TestClassVsAccessorConsistency:
 
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("attr", attributes)  # type: ignore
-    def test_attributes(self, path_raster: str, attr: str) -> None:
-        """Test that attributes of the two objects are exactly the same."""
+    def test_attributes_consistency(self, path_raster: str, attr: str) -> None:
+        """Test that attributes of the two objects are exactly the same between a Raster and Xarray rst accessor."""
 
         # Open
         ds = open_raster(path_raster)
@@ -112,30 +112,31 @@ class TestClassVsAccessorConsistency:
 
 
     # Test common methods
-    methods_and_args = {
-        "reproject": {"crs": CRS.from_epsg(32610), "res": 10}}
     # methods_and_args = {
-    #     "reproject": {"crs": CRS.from_epsg(32610), "res": 10},
-    #     "crop": {"crop_geom": "random"},
-    #     "translate": {"xoff": 10.5, "yoff": 5},
-    #     "xy2ij": {"x": "random", "y": "random"},  # This will be derived during the test to work on all inputs
-    #     "ij2xy": {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]},
-    #     "coords": {"grid": True},
-    #     "get_metric_crs": {"local_crs_type": "universal"},
-    #     "reduce_points": {"points": "random"},  # This will be derived during the test to work on all inputs
-    #     "interp_points": {"points": "random"},  # This will be derived during the test to work on all inputs
-    #     "proximity": {"target_values": [100]},
-    #     "outside_image": {"xi": [-2, 10000, 10], "yj": [10, 50, 20]},
-    #     "to_pointcloud": {"subsample": 1000, "random_state": 42},
-    #     "polygonize": {"target_values": "all"},
-    #     "subsample": {"subsample": 1000, "random_state": 42},
-    # }
+    #     "reproject": {"crs": CRS.from_epsg(32610), "res": 10}}
+    methods_and_args = {
+        "reproject": {"crs": CRS.from_epsg(32610), "res": 10},
+        "crop": {"bbox": "random"},
+        "translate": {"xoff": 10.5, "yoff": 5},
+        "xy2ij": {"x": "random", "y": "random"},  # This will be derived during the test to work on all inputs
+        "ij2xy": {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]},
+        "coords": {"grid": True},
+        "get_metric_crs": {"local_crs_type": "universal"},
+        # "reduce_points": {"points": "random"},  # This will be derived during the test to work on all inputs
+        "interp_points": {"points": "random"},  # This will be derived during the test to work on all inputs
+        "proximity": {"target_values": [100]},
+        "outside_image": {"xi": [-2, 10000, 10], "yj": [10, 50, 20]},
+        "to_pointcloud": {"subsample": 1000, "random_state": 42},
+        "polygonize": {"target_values": "all"},
+        "subsample": {"subsample": 1000, "random_state": 42},
+        "filter": {"method": "median", "size": 7}
+    }
 
     @pytest.mark.parametrize("path_raster", [aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("method", list(methods_and_args.keys()))  # type: ignore
-    def test_methods(self, path_raster: str, method: str) -> None:
+    def test_methods_consistency(self, path_raster: str, method: str) -> None:
         """
-        Test that the outputs of the two objects are exactly the same
+        Test that the method output of the two objects are exactly the same between a Raster and Xarray rst accessor
         (converted for the case of a raster/vector output, as it can be a Xarray/GeoPandas object or Raster/Vector).
         """
 
@@ -160,11 +161,11 @@ class TestClassVsAccessorConsistency:
             elif "x" in self.methods_and_args[method].keys():
                 args.update({"x": interp_x, "y": interp_y})
 
-        elif "crop_geom" in self.methods_and_args[method].keys():
-            crop_geom = raster.bounds.left + 100, raster.bounds.bottom + 200, \
+        elif "bbox" in self.methods_and_args[method].keys():
+            bbox = raster.bounds.left + 100, raster.bounds.bottom + 200, \
                 raster.bounds.left + 320, raster.bounds.bottom + 411
             args = self.methods_and_args[method].copy()
-            args.update({"crop_geom": crop_geom})
+            args.update({"bbox": bbox})
 
         else:
             args = self.methods_and_args[method].copy()
