@@ -27,8 +27,7 @@ import pathlib
 import warnings
 from collections import abc
 from contextlib import ExitStack
-
-from typing import IO, TYPE_CHECKING, Any, Callable, TypeVar, overload
+from typing import IO, TYPE_CHECKING, Any, Callable, overload
 
 import numpy as np
 import rasterio as rio
@@ -42,20 +41,13 @@ from rasterio.plot import show as rshow
 
 from geoutils import profiler
 from geoutils._misc import deprecate, import_optional
-from geoutils._typing import (
-    DTypeLike,
-    MArrayNum,
-    NDArrayBool,
-    NDArrayNum,
-    Number,
-)
+from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum, Number
 from geoutils.raster.base import RasterBase, RasterType
 from geoutils.raster.georeferencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
     _default_nodata,
 )
-
 from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
@@ -69,8 +61,6 @@ except ImportError:
 
 if TYPE_CHECKING:
     import matplotlib
-
-RasterType = TypeVar("RasterType", bound="Raster")
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -965,7 +955,7 @@ class Raster(RasterBase):
 
         For when other is first item in the operation (e.g. 2 * rst).
         """
-        return self.__mul__(other)
+        return self.__mul__(other)  # type: ignore
 
     def __truediv__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
@@ -1171,7 +1161,7 @@ class Raster(RasterBase):
     def __rand__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
         """Bitwise and between masks, or a mask and an array."""
 
-        return self.__and__(other)
+        return self.__and__(other)  # type: ignore
 
     def __or__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
         """Bitwise or between masks, or a mask and an array."""
@@ -1185,7 +1175,7 @@ class Raster(RasterBase):
     def __ror__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
         """Bitwise or between masks, or a mask and an array."""
 
-        return self.__or__(other)
+        return self.__or__(other)  # type: ignore
 
     def __xor__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
         """Bitwise xor between masks, or a mask and an array."""
@@ -1199,7 +1189,7 @@ class Raster(RasterBase):
     def __rxor__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
         """Bitwise xor between masks, or a mask and an array."""
 
-        return self.__xor__(other)
+        return self.__xor__(other)  # type: ignore
 
     def __invert__(self: RasterType) -> RasterType:
         """Bitwise inversion of a mask."""
@@ -2056,7 +2046,7 @@ class Raster(RasterBase):
             return ax0, cax
         return None
 
-    def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[Raster]:
+    def split_bands(self: RasterType, copy: bool = False, bands: list[int] | int | None = None) -> list[RasterType]:
         """
         Split the bands into separate rasters.
 
@@ -2065,7 +2055,7 @@ class Raster(RasterBase):
 
         :returns: A list of Rasters for each band.
         """
-        raster_bands: list[Raster] = []
+        raster_bands: list[RasterType] = []
 
         if bands is None:
             indices = list(np.arange(1, self.count + 1))
@@ -2094,7 +2084,6 @@ class Raster(RasterBase):
                 )
 
         return raster_bands
-
 
 
 class Mask(Raster):

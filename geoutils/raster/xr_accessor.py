@@ -1,23 +1,24 @@
 """
 Module for the Xarray accessor "rst" mirroring the API of the Raster class.
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
 import numpy as np
+import rioxarray as rioxr
+import xarray as xr
 from affine import Affine
 from rasterio.crs import CRS
-import rioxarray as rioxr
 from rioxarray.rioxarray import affine_to_coords
-import xarray as xr
 
 import geoutils as gu
+from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 from geoutils.raster.base import RasterBase
 
-from geoutils._typing import NDArrayNum, NDArrayBool, MArrayNum
 
-def open_raster(filename: str, **kwargs):
+def open_raster(filename: str, **kwargs: Any) -> xr.DataArray:
 
     # Open with Rioxarray
     ds = rioxr.open_rasterio(filename, masked=False, **kwargs)
@@ -46,18 +47,18 @@ class RasterAccessor(RasterBase):
     Only methods specific to the functioning of the Xarray accessor live in this class: mostly initialization, I/O or
     copying.
     """
-    def __init__(self, xarray_obj: xr.DataArray):
+
+    def __init__(self, xarray_obj: xr.DataArray) -> None:
         """
         Instantiate the raster accessor.
         """
 
         super().__init__()
 
-        self._obj = xarray_obj
+        self._obj: xr.DataArray = xarray_obj
         self._area_or_point = self._obj.attrs.get("AREA_OR_POINT", None)
 
     def copy(self, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> xr.DataArray:
-
         """
         Copy the raster in-memory.
 
@@ -87,15 +88,17 @@ class RasterAccessor(RasterBase):
 
         return cp
 
+    @classmethod
     def from_array(
-        self,
+        cls,
         data: NDArrayNum | MArrayNum | NDArrayBool,
         transform: tuple[float, ...] | Affine,
         crs: CRS | int | None,
         nodata: int | float | None = None,
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
-        cast_nodata: bool = True,) -> xr.DataArray:
+        cast_nodata: bool = True,
+    ) -> xr.DataArray:
 
         # Add area_or_point
         if tags is None:
@@ -128,5 +131,11 @@ class RasterAccessor(RasterBase):
 
         :return:
         """
-        return gu.Raster.from_array(data=self._obj.data, crs=self.crs, transform=self.transform, nodata=self.nodata,
-                                    tags=self.tags, area_or_point=self.area_or_point)
+        return gu.Raster.from_array(
+            data=self._obj.data,
+            crs=self.crs,
+            transform=self.transform,
+            nodata=self.nodata,
+            tags=self.tags,
+            area_or_point=self.area_or_point,
+        )

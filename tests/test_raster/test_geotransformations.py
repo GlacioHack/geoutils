@@ -727,7 +727,6 @@ class TestMaskGeotransformations:
         mask_orig_pix.icrop(bbox2_pixel, inplace=True)
         assert mask_orig.raster_equal(mask_orig_pix)
 
-
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_reproject(self, mask: gu.Raster) -> None:
         # Test 1: with a classic resampling (bilinear)

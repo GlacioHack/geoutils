@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import logging
 import math
+import pathlib
+import struct
 import warnings
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
-import pathlib
 
-import struct
-from affine import Affine
 import geopandas as gpd
 import numpy as np
 import rasterio as rio
 import xarray as xr
+from affine import Affine
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -21,7 +21,16 @@ from rasterio.enums import Resampling
 import geoutils as gu
 from geoutils import profiler
 from geoutils._config import config
-from geoutils._typing import ArrayLike, DTypeLike, MArrayNum, NDArrayNum, NDArrayBool, Number
+from geoutils._misc import deprecate
+from geoutils._typing import (
+    ArrayLike,
+    DTypeLike,
+    MArrayNum,
+    NDArrayBool,
+    NDArrayNum,
+    Number,
+)
+from geoutils.filters import _filter
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.interpolate import _interp_points
 from geoutils.interface.raster_point import (
@@ -29,16 +38,16 @@ from geoutils.interface.raster_point import (
     _regular_pointcloud_to_raster,
 )
 from geoutils.interface.raster_vector import _polygonize
-from geoutils._misc import deprecate
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
+    align_bounds,
+    merge_bounds,
     reproject_from_latlon,
     reproject_points,
-    merge_bounds,
-    align_bounds
 )
+from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _bounds,
     _coords,
@@ -48,11 +57,9 @@ from geoutils.raster.georeferencing import (
     _res,
     _xy2ij,
 )
-from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.geotransformations import _crop, _reproject, _translate
 from geoutils.stats.sampling import subsample_array
 from geoutils.stats.stats import _statistics
-from geoutils.filters import _filter
 
 RasterType = TypeVar("RasterType", bound="RasterBase")
 
@@ -63,8 +70,9 @@ class RasterBase:
 
     It gathers all the functions shared by the Raster class and the 'rst' Xarray accessor.
     """
-    def __init__(self):
-        """Initialize all raster metadata as None, for it to be overridden in sublasses."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize all raster metadata as None, for it to be overridden in subclasses."""
 
         # Attribute for Xarray accessor: will stay None in Raster class
         self._obj: None | xr.DataArray = None
@@ -93,28 +101,44 @@ class RasterBase:
         self._is_modified = True
         self._downsample: int | float = 1
         self._profile: dict[str, Any] | None = None
-        self._is_mask: bool | None = None
-
-
-    def from_array(self):
-        """Placeholder method for subclasses."""
-        raise NotImplementedError("This method is meant to be subclassed.")
-
-    def copy(self):
-        """Placeholder method for subclasses."""
-        raise NotImplementedError("This method is meant to be subclassed.")
+        self._is_mask: bool = False
 
     @property
     def _is_xr(self) -> bool:
         """Whether the underlying object is a Xarray Dataset through accessor, or not."""
         return self._obj is not None
 
+    @classmethod
+    def from_array(
+        cls: type[RasterType],
+        data: NDArrayNum | NDArrayBool,
+        transform: tuple[float, ...] | Affine,
+        crs: CRS | int | None,
+        nodata: int | float | None = None,
+        area_or_point: Literal["Area", "Point"] | None = None,
+        tags: dict[str, Any] = None,
+        cast_nodata: bool = True,
+    ) -> RasterType:
+        """Placeholder method for subclasses."""
+        raise NotImplementedError("This method is meant to be subclassed.")
+
+    def copy(self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> RasterType:
+        """Placeholder method for subclasses."""
+        raise NotImplementedError("This method is meant to be subclassed.")
+
     @property
     def data(self) -> MArrayNum | xr.DataArray:
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
             return self._obj.data
         else:
             return self._data
+
+    @data.setter
+    def data(self, new_data: NDArrayNum | MArrayNum) -> None:
+        """Placeholder method for subclasses."""
+        raise NotImplementedError("This method is meant to be subclassed.")
 
     @property
     def transform(self) -> Affine:
@@ -124,6 +148,8 @@ class RasterBase:
         :returns: Affine matrix geotransform.
         """
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
             return self._obj.rio.transform()
         else:
             return self._transform
@@ -144,12 +170,15 @@ class RasterBase:
                 raise TypeError("The transform argument needs to be Affine or tuple.")
 
         if self._is_xr:
-            print("CHECK BEFORE SET TRANSFORM")
-            print(self.nodata)
+
+            # For Mypy, always verified
+            assert self._obj is not None
+
             # Rioxarray prioritizes coordinates over transform to re-define transform,
             # so we need to overwrite coordinates
             # See https://github.com/corteva/rioxarray/issues/698
             from rioxarray.rioxarray import affine_to_coords
+
             coords = affine_to_coords(affine=new_transform, width=self.data.shape[0], height=self.data.shape[1])
             self._obj["x"] = coords["x"]
             self._obj["y"] = coords["y"]
@@ -169,6 +198,9 @@ class RasterBase:
         :returns: Pyproj coordinate reference system.
         """
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
+
             return self._obj.rio.crs
         else:
             return self._crs
@@ -187,6 +219,8 @@ class RasterBase:
             new_crs = CRS.from_user_input(value=new_crs)
 
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
             self._obj.rio.set_crs(new_crs)
         else:
             self._crs = new_crs
@@ -201,6 +235,8 @@ class RasterBase:
         :returns: Nodata value.
         """
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
             return self._obj.rio.nodata
         else:
             return self._nodata
@@ -262,6 +298,8 @@ class RasterBase:
                 raise ValueError(f"Nodata value {new_nodata} incompatible with self.dtype {self.dtype}.")
 
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
             self._obj.rio.set_nodata(new_nodata)
 
         else:
@@ -288,8 +326,8 @@ class RasterBase:
                         )
                     elif update_array:
                         warnings.warn(
-                            "New nodata value cells already exist in the data array. The old nodata cells will update to "
-                            "the same new value. Use set_nodata() with update_array=False to change this behaviour.",
+                            "New nodata value cells already exist in the data array. The old nodata cells will update "
+                            "to the same new value. Use set_nodata() with update_array=False to change this behaviour.",
                             category=UserWarning,
                         )
                     elif update_mask:
@@ -327,7 +365,7 @@ class RasterBase:
                 self.data.fill_value = new_nodata
 
     def set_area_or_point(
-            self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
+        self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
     ) -> None:
         """
         Set new pixel interpretation of the raster.
@@ -354,7 +392,7 @@ class RasterBase:
 
         # Check input
         if new_area_or_point is not None and not (
-                isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]
+            isinstance(new_area_or_point, str) and new_area_or_point.lower() in ["area", "point"]
         ):
             raise ValueError("New pixel interpretation must be 'Area', 'Point' or None.")
 
@@ -379,10 +417,10 @@ class RasterBase:
 
         # If shift is True, and both interpretation were different strings, a change is needed
         if (
-                shift_area_or_point
-                and isinstance(old_area_or_point, str)
-                and isinstance(new_area_or_point, str)
-                and old_area_or_point != new_area_or_point
+            shift_area_or_point
+            and isinstance(old_area_or_point, str)
+            and isinstance(new_area_or_point, str)
+            and old_area_or_point != new_area_or_point
         ):
             # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij)
 
@@ -434,6 +472,8 @@ class RasterBase:
         :returns: Dictionary of raster metadata, potentially including sensor information.
         """
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
             return self._obj.attrs
         else:
             return self._tags
@@ -452,6 +492,8 @@ class RasterBase:
     def is_loaded(self) -> bool:
         """Whether the raster array is loaded."""
         if self._is_xr:
+            # For Mypy, always verified
+            assert self._obj is not None
             # TODO: Using unloaded functions (e.g. crop) requires to have _disk_shape defined (not supported for
             #  RasterAccessor)
             return True
@@ -617,12 +659,10 @@ class RasterBase:
             return False
 
     @overload
-    def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None:
-        ...
+    def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
 
     @overload
-    def info(self, stats: bool = False, *, verbose: Literal[False]) -> str:
-        ...
+    def info(self, stats: bool = False, *, verbose: Literal[False]) -> str: ...
 
     def info(self, stats: bool = False, verbose: bool = True) -> None | str:
         """
@@ -768,9 +808,6 @@ class RasterBase:
             in inlier_mask), initialize in case of an inlier_mask. DO NOT USE.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
-        # Force load if not loaded
-        if not self.is_loaded:
-            self.load()
 
         # Get data band
         data = self.data[band - 1, :, :] if self.count > 1 else self.data
@@ -785,7 +822,7 @@ class RasterBase:
             dem_masked = self.copy()
 
             # Mask pixels from the inlier_mask
-            dem_masked.set_mask(~inlier_mask)
+            dem_masked.data[inlier_mask] = np.nan
             return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
         # Given list or all attributes to compute if None
@@ -953,18 +990,16 @@ class RasterBase:
 
     @overload
     def get_nanarray(
-            self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
-    ) -> NDArrayNum:
-        ...
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
+    ) -> NDArrayNum: ...
 
     @overload
     def get_nanarray(
-            self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
-    ) -> tuple[NDArrayNum, NDArrayBool]:
-        ...
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
+    ) -> tuple[NDArrayNum, NDArrayBool]: ...
 
     def get_nanarray(
-            self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
     ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
         Get NaN array from the raster.
@@ -981,7 +1016,7 @@ class RasterBase:
             # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
             if "int" in str(self.data.dtype):
                 # Get the array with masked value fill with NaNs
-                nanarray = self.data.astype(floating_dtype).filled(fill_value=np.nan)
+                nanarray = self.data.astype(floating_dtype).filled(fill_value=np.nan)  # type: ignore
             else:
                 # Same here
                 nanarray = self.data.filled(fill_value=np.nan)
@@ -1065,8 +1100,7 @@ class RasterBase:
         bbox: list[int] | tuple[int, ...],
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def icrop(
@@ -1074,8 +1108,7 @@ class RasterBase:
         bbox: list[int] | tuple[int, ...],
         *,
         inplace: Literal[False] = False,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @profiler.profile("geoutils.raster.raster.icrop", memprof=True)  # type: ignore
     def icrop(
@@ -1120,8 +1153,7 @@ class RasterBase:
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def reproject(
@@ -1141,8 +1173,7 @@ class RasterBase:
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @profiler.profile("geoutils.raster.raster.reproject", memprof=True)  # type: ignore
     def reproject(
@@ -1262,8 +1293,7 @@ class RasterBase:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: Literal[False] = False,
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def translate(
@@ -1273,8 +1303,7 @@ class RasterBase:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: Literal[True],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def translate(
@@ -1284,8 +1313,7 @@ class RasterBase:
         distance_unit: Literal["georeferenced"] | Literal["pixel"] = "georeferenced",
         *,
         inplace: bool = False,
-    ) -> RasterType | None:
-        ...
+    ) -> RasterType | None: ...
 
     def translate(
         self: RasterType,
@@ -1316,6 +1344,8 @@ class RasterBase:
         else:
             raster_copy = self.copy()
             if self._is_xr:
+                # For Mypy, always verified
+                assert self._obj is not None
                 raster_copy.rst.set_transform(translated_transform)
             else:
                 raster_copy.set_transform(translated_transform)
@@ -1641,8 +1671,7 @@ class RasterBase:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> gu.PointCloud:
-        ...
+    ) -> gu.PointCloud: ...
 
     @overload
     def interp_points(
@@ -1657,8 +1686,7 @@ class RasterBase:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> NDArrayNum:
-        ...
+    ) -> NDArrayNum: ...
 
     @overload
     def interp_points(
@@ -1673,8 +1701,7 @@ class RasterBase:
         shift_area_or_point: bool | None = None,
         force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
         **kwargs: Any,
-    ) -> NDArrayNum | gu.PointCloud:
-        ...
+    ) -> NDArrayNum | gu.PointCloud: ...
 
     @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)  # type: ignore
     def interp_points(
@@ -1764,8 +1791,7 @@ class RasterBase:
         inplace: Literal[False] = False,
         size: int = 3,
         **kwargs: dict[str, Any],
-    ) -> RasterType:
-        ...
+    ) -> RasterType: ...
 
     @overload
     def filter(
@@ -1775,8 +1801,7 @@ class RasterBase:
         inplace: Literal[True],
         size: int = 3,
         **kwargs: dict[str, Any],
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def filter(
         self: RasterType,
@@ -1799,7 +1824,7 @@ class RasterBase:
         :raises TypeError: If `method` is neither a string nor a callable.
         """
 
-       # Convert to NaN array for filters
+        # Convert to NaN array for filters
         nan_array = self.get_nanarray()
 
         # Apply filter
@@ -1821,60 +1846,60 @@ class RasterBase:
 
     @overload
     def to_pointcloud(
-            self,
-            data_column_name: str = "b1",
-            data_band: int = 1,
-            auxiliary_data_bands: list[int] | None = None,
-            auxiliary_column_names: list[str] | None = None,
-            subsample: float | int = 1,
-            skip_nodata: bool = True,
-            *,
-            as_array: Literal[False] = False,
-            random_state: int | np.random.Generator | None = None,
-            force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        self,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
+        subsample: float | int = 1,
+        skip_nodata: bool = True,
+        *,
+        as_array: Literal[False] = False,
+        random_state: int | np.random.Generator | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum: ...
 
     @overload
     def to_pointcloud(
-            self,
-            data_column_name: str = "b1",
-            data_band: int = 1,
-            auxiliary_data_bands: list[int] | None = None,
-            auxiliary_column_names: list[str] | None = None,
-            subsample: float | int = 1,
-            skip_nodata: bool = True,
-            *,
-            as_array: Literal[True],
-            random_state: int | np.random.Generator | None = None,
-            force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        self,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
+        subsample: float | int = 1,
+        skip_nodata: bool = True,
+        *,
+        as_array: Literal[True],
+        random_state: int | np.random.Generator | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> gu.Vector: ...
 
     @overload
     def to_pointcloud(
-            self,
-            data_column_name: str = "b1",
-            data_band: int = 1,
-            auxiliary_data_bands: list[int] | None = None,
-            auxiliary_column_names: list[str] | None = None,
-            subsample: float | int = 1,
-            skip_nodata: bool = True,
-            *,
-            as_array: bool = False,
-            random_state: int | np.random.Generator | None = None,
-            force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        self,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
+        subsample: float | int = 1,
+        skip_nodata: bool = True,
+        *,
+        as_array: bool = False,
+        random_state: int | np.random.Generator | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum | gu.Vector: ...
 
     def to_pointcloud(
-            self,
-            data_column_name: str = "b1",
-            data_band: int = 1,
-            auxiliary_data_bands: list[int] | None = None,
-            auxiliary_column_names: list[str] | None = None,
-            subsample: float | int = 1,
-            skip_nodata: bool = True,
-            as_array: bool = False,
-            random_state: int | np.random.Generator | None = None,
-            force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        self,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        auxiliary_data_bands: list[int] | None = None,
+        auxiliary_column_names: list[str] | None = None,
+        subsample: float | int = 1,
+        skip_nodata: bool = True,
+        as_array: bool = False,
+        random_state: int | np.random.Generator | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     ) -> NDArrayNum | gu.PointCloud:
         """
         Convert raster to point cloud.
@@ -1937,14 +1962,14 @@ class RasterBase:
 
     @classmethod
     def from_pointcloud_regular(
-            cls: type[RasterType],
-            pointcloud: gpd.GeoDataFrame | gu.PointCloud,
-            grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
-            transform: rio.transform.Affine = None,
-            shape: tuple[int, int] = None,
-            nodata: int | float | None = None,
-            data_column_name: str = "b1",
-            area_or_point: Literal["Area", "Point"] = "Point",
+        cls: type[RasterType],
+        pointcloud: gpd.GeoDataFrame | gu.PointCloud,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
+        transform: rio.transform.Affine = None,
+        shape: tuple[int, int] = None,
+        nodata: int | float | None = None,
+        data_column_name: str = "b1",
+        area_or_point: Literal["Area", "Point"] = "Point",
     ) -> RasterType:
         """
         Create a raster from a point cloud with coordinates on a regular grid.
@@ -1976,9 +2001,9 @@ class RasterBase:
         return cls.from_array(data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point)
 
     def polygonize(
-            self,
-            target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
-            data_column_name: str = "id",
+        self,
+        target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
+        data_column_name: str = "id",
     ) -> gu.Vector:
         """
         Polygonize the raster into a vector.
@@ -1992,7 +2017,6 @@ class RasterBase:
         """
 
         return _polygonize(source_raster=self, target_values=target_values, data_column_name=data_column_name)
-
 
     def proximity(
         self,
@@ -2049,7 +2073,7 @@ class RasterBase:
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
-) -> NDArrayNum: ...
+    ) -> NDArrayNum: ...
 
     @overload
     def subsample(

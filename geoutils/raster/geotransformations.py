@@ -33,7 +33,7 @@ from rasterio.enums import Resampling
 
 import geoutils as gu
 from geoutils import profiler
-from geoutils._typing import DTypeLike, MArrayNum
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.raster._geotransformations import (
     _get_reproj_params,
     _is_reproj_needed,
@@ -46,6 +46,7 @@ from geoutils.raster.georeferencing import _cast_pixel_interpretation
 ##############
 # 1/ REPROJECT
 ##############
+
 
 @profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)  # type: ignore
 def _reproject(
@@ -63,7 +64,7 @@ def _reproject(
     n_threads: int = 0,
     memory_limit: int = 64,
     multiproc_config: gu.raster.MultiprocConfig | None = None,
-) -> tuple[bool, MArrayNum | None, affine.Affine | None, CRS | None, int | float | None]:
+) -> tuple[bool, NDArrayNum | NDArrayBool | None, affine.Affine | None, CRS | None, int | float | None]:
     """
     Reproject raster. See Raster.reproject() for details.
     """
@@ -147,12 +148,13 @@ def _reproject(
 # 2/ CROP
 #########
 
+
 @profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
 def _crop(
     source_raster: gu.Raster,
     bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
-) -> tuple[MArrayNum, affine.Affine]:
+) -> tuple[NDArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
 
     assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
@@ -198,9 +200,9 @@ def _crop(
         ref_win_disk = rio.windows.from_bounds(
             new_xmin, new_ymin, new_xmax, new_ymax, transform=source_raster._disk_transform
         )
-        self_win_disk = rio.windows.from_bounds(
-            *source_raster.bounds, transform=source_raster._disk_transform
-        ).crop(*source_raster._disk_shape[1:])
+        self_win_disk = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster._disk_transform).crop(
+            *source_raster._disk_shape[1:]
+        )
         final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
 
         # Round up to downsampling size, to match __init__
@@ -230,6 +232,7 @@ def _crop(
 ##############
 # 3/ TRANSLATE
 ##############
+
 
 @profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)  # type: ignore
 def _translate(

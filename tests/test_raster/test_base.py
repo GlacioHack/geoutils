@@ -1,19 +1,20 @@
 """Test RasterBase class, parent of Raster class and 'rst' Xarray accessor."""
+
 from __future__ import annotations
 
 import warnings
 from typing import Any
 
-import pandas as pd
-from pandas.testing import assert_frame_equal
-import pytest
-from pyproj import CRS
 import numpy as np
+import pandas as pd
+import pytest
 import xarray as xr
+from pandas.testing import assert_frame_equal
+from pyproj import CRS
 
-from geoutils import Vector, Raster, open_raster
-from geoutils import examples
+from geoutils import Raster, Vector, examples, open_raster
 from geoutils.raster.georeferencing import _default_nodata
+
 
 class TestRasterBase:
 
@@ -29,7 +30,7 @@ def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = 
         ds.rst.transform == rast.transform,
         ds.rst.crs == rast.crs,
         ds.rst.nodata == rast.nodata,
-        np.array_equal(~np.isfinite(ds.data), np.ma.getmaskarray(rast.data))
+        np.array_equal(~np.isfinite(ds.data), np.ma.getmaskarray(rast.data)),
     ]
 
     names = ["data", "transform", "crs", "nodata", "mask"]
@@ -50,6 +51,7 @@ def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = 
             print(f"Absolute percentile 90: {np.nanpercentile(np.abs(diff[valids]), 90)}")
 
     return complete_equality
+
 
 def assert_output_equal(output1: Any, output2: Any) -> None:
     """Return equality of different output types."""
@@ -83,6 +85,7 @@ def assert_output_equal(output1: Any, output2: Any) -> None:
     else:
         assert output1 == output2
 
+
 class TestClassVsAccessorConsistency:
     """
     Test class to check the consistency between the outputs of the Raster class and Xarray accessor for the same
@@ -99,8 +102,21 @@ class TestClassVsAccessorConsistency:
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
     # Test common attributes
-    attributes = ["crs", "transform", "nodata", "area_or_point", "res", "count", "height", "width", "footprint",
-                  "shape", "bands", "indexes", "_is_xr"]
+    attributes = [
+        "crs",
+        "transform",
+        "nodata",
+        "area_or_point",
+        "res",
+        "count",
+        "height",
+        "width",
+        "footprint",
+        "shape",
+        "bands",
+        "indexes",
+        "_is_xr",
+    ]
 
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("attr", attributes)  # type: ignore
@@ -117,7 +133,7 @@ class TestClassVsAccessorConsistency:
 
         # Get attribute for each object
         output_raster = getattr(raster, attr)
-        output_ds = getattr(getattr(ds, "rst"), attr)
+        output_ds = getattr(ds.rst, attr)
 
         # Assert equality
         if attr == "_is_xr":  # Only attribute that is (purposely) not the same, but the boolean opposite
@@ -128,8 +144,8 @@ class TestClassVsAccessorConsistency:
     # Test common methods
     methods_and_args = {
         "reproject": {"crs": CRS.from_epsg(32610), "res": 10},
-        "crop": {"bbox": "random"}, # This will be derived during the test to work on all inputs
-        "icrop": {"bbox": "random"}, # This will be derived during the test to work on all inputs
+        "crop": {"bbox": "random"},  # This will be derived during the test to work on all inputs
+        "icrop": {"bbox": "random"},  # This will be derived during the test to work on all inputs
         "translate": {"xoff": 10.5, "yoff": 5},
         "xy2ij": {"x": "random", "y": "random"},  # This will be derived during the test to work on all inputs
         "ij2xy": {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]},
@@ -147,7 +163,6 @@ class TestClassVsAccessorConsistency:
         "get_stats": {},
     }
     # methods_and_args = {"translate": {"xoff": 10.5, "yoff": 5},}
-
 
     # @pytest.mark.parametrize("path_raster", [aster_dem_path, landsat_b4_path])  # type: ignore
     @pytest.mark.parametrize("path_raster", [landsat_b4_path])  # type: ignore
@@ -185,8 +200,12 @@ class TestClassVsAccessorConsistency:
                 args.update({"x": interp_x, "y": interp_y})
 
         elif method == "crop":
-            bbox = raster.bounds.left + 100, raster.bounds.bottom + 200, \
-                raster.bounds.left + 320, raster.bounds.bottom + 411
+            bbox = (
+                raster.bounds.left + 100,
+                raster.bounds.bottom + 200,
+                raster.bounds.left + 320,
+                raster.bounds.bottom + 411,
+            )
             args = self.methods_and_args[method].copy()
             args.update({"bbox": bbox})
 
@@ -200,8 +219,7 @@ class TestClassVsAccessorConsistency:
 
         # Apply method for each class
         output_raster = getattr(raster, method)(**args)
-        output_ds = getattr(getattr(ds, "rst"), method)(**args)
+        output_ds = getattr(ds.rst, method)(**args)
 
         # Assert equality of output
         assert_output_equal(output_raster, output_ds)
-
