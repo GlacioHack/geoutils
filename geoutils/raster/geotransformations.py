@@ -109,12 +109,12 @@ def _reproject(
             return True, None, None, None, None
 
     # 4/ Check reprojection is possible (boolean raster will be converted, so no need to check)
-    # TODO: Fix this
-    # if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
-    #     raise ValueError(
-    #         "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-    #         "with `force_source_nodata`."
-    #     )
+    # TODO: Change this behaviour?
+    if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
+        raise ValueError(
+            "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+            "with `force_source_nodata`."
+        )
 
     # 5/ Perform reprojection
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
@@ -124,13 +124,15 @@ def _reproject(
 
     else:
         # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        if np.ma.isMaskedArray(source_raster):
+        if np.ma.isMaskedArray(source_raster.data):
             src_arr = source_raster.data.data
             src_mask = np.ma.getmaskarray(source_raster.data)
         else:
             src_arr = source_raster.data
             src_mask = ~np.isfinite(source_raster.data)
+
         dst_arr, dst_mask = _rio_reproject(src_arr=src_arr, src_mask=src_mask, reproj_kwargs=reproj_kwargs)
+
         # Set mask
         if np.ma.isMaskedArray(source_raster.data):
             dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=nodata)
@@ -228,7 +230,6 @@ def _crop(
 ##############
 # 3/ TRANSLATE
 ##############
-
 
 @profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)  # type: ignore
 def _translate(

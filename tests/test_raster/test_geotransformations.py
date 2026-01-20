@@ -168,34 +168,6 @@ class TestRasterGeotransformations:
         assert np.array_equal(r.data[int(rand_float) :, :].data, r_cropped.data.data, equal_nan=True)
         assert np.array_equal(r.data[int(rand_float) :, :].mask, r_cropped.data.mask)
 
-        # -- Test with mode='match_extent' -- #
-        # Test all sides at once, with rand_float less than half the smallest extent
-        # The cropped extent should exactly match the requested extent, res will be changed accordingly
-        rand_float = rng.integers(1, min(r.shape) / 2 - 1) + 0.25
-        bbox2 = [
-            bbox[0] + rand_float * r.res[0],
-            bbox[1] + rand_float * abs(r.res[1]),
-            bbox[2] - rand_float * r.res[0],
-            bbox[3] - rand_float * abs(r.res[1]),
-        ]
-
-        # Filter warning about nodata not set in reprojection (because match_extent triggers reproject)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
-            r_cropped = r.crop(bbox2, mode="match_extent")
-
-        assert list(r_cropped.bounds) == bbox2
-        # The change in resolution should be less than what would occur with +/- 1 pixel
-        assert np.all(
-            abs(np.array(r.res) - np.array(r_cropped.res)) < np.array(r.res) / np.array(r_cropped.shape)[::-1]
-        )
-
-        # Filter warning about nodata not set in reprojection (because match_extent triggers reproject)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
-            r_cropped2 = r.crop(r_cropped, mode="match_extent")
-        assert r_cropped2.raster_equal(r_cropped)
-
         # -- Test with bbox being a Vector -- #
         outlines = gu.Vector(outlines_path)
 
@@ -240,9 +212,9 @@ class TestRasterGeotransformations:
         bbox2 = [bbox[0], bbox[1], bbox[2] + rand_float * r.res[0], bbox[3]]
         r = gu.Raster(raster_path, downsample=5, load_data=False)
         assert not r.is_loaded
-        r_crop_unloaded = r.crop(bbox2, mode="match_pixel")
+        r_crop_unloaded = r.crop(bbox2)
         r.load()
-        r_crop_loaded = r.crop(bbox2, mode="match_pixel")
+        r_crop_loaded = r.crop(bbox2)
         # TODO: the following condition should be met once issue #447 is solved
         # assert r_crop_unloaded.raster_equal(r_crop_loaded)
         assert r_crop_unloaded.shape == r_crop_loaded.shape
@@ -755,14 +727,6 @@ class TestMaskGeotransformations:
         mask_orig_pix.icrop(bbox2_pixel, inplace=True)
         assert mask_orig.raster_equal(mask_orig_pix)
 
-        # Run with match_extent, check that inplace or not yields the same result
-
-        # TODO: Pretty sketchy with the current functioning of "match_extent",
-        #  should we just remove it from Raster.crop() ?
-
-        # mask_cropped = mask.crop(bbox2, inplace=False, mode="match_extent")
-        # mask_orig.crop(bbox2, mode="match_extent")
-        # assert mask_cropped.raster_equal(mask_orig)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
     def test_reproject(self, mask: gu.Raster) -> None:

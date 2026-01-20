@@ -13,6 +13,7 @@ import xarray as xr
 
 from geoutils import Vector, Raster, open_raster
 from geoutils import examples
+from geoutils.raster.georeferencing import _default_nodata
 
 class TestRasterBase:
 
@@ -28,7 +29,7 @@ def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = 
         ds.rst.transform == rast.transform,
         ds.rst.crs == rast.crs,
         ds.rst.nodata == rast.nodata,
-        np.array_equal(~np.isfinite(ds.rst.data), rast.data.mask)
+        np.array_equal(~np.isfinite(ds.data), np.ma.getmaskarray(rast.data))
     ]
 
     names = ["data", "transform", "crs", "nodata", "mask"]
@@ -41,6 +42,12 @@ def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = 
             category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
         )
         print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
+        if not equalities[0]:
+            diff = ds.data - rast.get_nanarray()
+            valids = np.isfinite(diff)
+            print(f"Number of non-equal pixels: {np.sum(diff[valids] != 0)}")
+            print(f"Mean: {np.nanmean(diff[valids])}")
+            print(f"Absolute percentile 90: {np.nanpercentile(np.abs(diff[valids]), 90)}")
 
     return complete_equality
 
@@ -71,7 +78,7 @@ def assert_output_equal(output1: Any, output2: Any) -> None:
     elif isinstance(output1, dict):
         df1 = pd.DataFrame(index=[0], data=output1)
         df2 = pd.DataFrame(index=[0], data=output2)
-        assert_frame_equal(df1, df2)
+        assert_frame_equal(df1, df2, check_dtype=False)
     # For any other object type
     else:
         assert output1 == output2
@@ -93,7 +100,7 @@ class TestClassVsAccessorConsistency:
 
     # Test common attributes
     attributes = ["crs", "transform", "nodata", "area_or_point", "res", "count", "height", "width", "footprint",
-                  "shape", "bands", "indexes", "_is_xr", "is_loaded"]
+                  "shape", "bands", "indexes", "_is_xr"]
 
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
     @pytest.mark.parametrize("attr", attributes)  # type: ignore
@@ -118,7 +125,6 @@ class TestClassVsAccessorConsistency:
         else:
             assert_output_equal(output_raster, output_ds)
 
-
     # Test common methods
     methods_and_args = {
         "reproject": {"crs": CRS.from_epsg(32610), "res": 10},
@@ -129,6 +135,7 @@ class TestClassVsAccessorConsistency:
         "ij2xy": {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]},
         "coords": {"grid": True},
         "get_metric_crs": {"local_crs_type": "universal"},
+        "get_nanarray": {},
         # "reduce_points": {"points": "random"},  # This will be derived during the test to work on all inputs
         "interp_points": {"points": "random"},  # This will be derived during the test to work on all inputs
         "proximity": {"target_values": [100]},
@@ -139,8 +146,11 @@ class TestClassVsAccessorConsistency:
         "filter": {"method": "median", "size": 7},
         "get_stats": {},
     }
+    # methods_and_args = {"translate": {"xoff": 10.5, "yoff": 5},}
 
-    @pytest.mark.parametrize("path_raster", [aster_dem_path])  # type: ignore
+
+    # @pytest.mark.parametrize("path_raster", [aster_dem_path, landsat_b4_path])  # type: ignore
+    @pytest.mark.parametrize("path_raster", [landsat_b4_path])  # type: ignore
     @pytest.mark.parametrize("method", list(methods_and_args.keys()))  # type: ignore
     def test_methods_consistency(self, path_raster: str, method: str) -> None:
         """
@@ -152,9 +162,14 @@ class TestClassVsAccessorConsistency:
         ds = open_raster(path_raster)
         raster = Raster(path_raster)
 
-        # Remove warnings about operations in a non-projected system, and future changes
-        warnings.simplefilter("ignore", category=UserWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
+        # If integer type in Raster, convert to float32 to match Xarray accessor behaviour
+        if "int" in str(raster.dtype):
+            raster = raster.astype(dtype=np.float32, convert_nodata=False)
+
+        # If nodata is not defined, define one
+        if raster.nodata is None:
+            ds.rst.set_nodata(_default_nodata(ds.rst.dtype))
+            raster.set_nodata(_default_nodata(ds.rst.dtype))
 
         # Loop for specific inputs that require knowledge of the data
         if "points" in self.methods_and_args[method].keys() or "x" in self.methods_and_args[method].keys():

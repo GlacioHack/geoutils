@@ -788,7 +788,7 @@ class TestRaster:
         # -- Then, we test with a mask returned --
         rst_arr, mask = rst.get_nanarray(return_mask=True)
 
-        assert np.array_equal(mask, np.ma.getmaskarray(rst.data).squeeze())
+        assert np.array_equal(mask, np.ma.getmaskarray(rst.data))
 
         # Also check for back-propagation here with the mask and array
         rst_arr += 5

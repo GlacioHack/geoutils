@@ -95,7 +95,7 @@ def load_multiple_rasters(
             )
             # Ensure bounds align with the original ones, to avoid resampling at this stage
             new_bounds = gu.projtools.align_bounds(rst.transform, new_bounds)
-            rst.crop(new_bounds, mode="match_pixel", inplace=True)
+            rst.crop(new_bounds, inplace=True)
 
     # Optionally, reproject all rasters to the reference grid
     if reproject:

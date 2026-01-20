@@ -22,8 +22,9 @@ def open_raster(filename: str, **kwargs):
     # Open with Rioxarray
     ds = rioxr.open_rasterio(filename, masked=False, **kwargs)
 
-    # Change all nodata to NaNs
-    ds = ds.astype(dtype=np.float32)
+    # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
+    if "int" in str(ds.data.dtype):
+        ds = ds.astype(dtype=np.float32)
     ds.data[ds.data == ds.rio.nodata] = np.nan
 
     # Remove the band dimension if there is only one
@@ -55,9 +56,36 @@ class RasterAccessor(RasterBase):
         self._obj = xarray_obj
         self._area_or_point = self._obj.attrs.get("AREA_OR_POINT", None)
 
-    def copy(self, new_array: NDArrayNum | None = None) -> xr.DataArray:
+    def copy(self, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> xr.DataArray:
 
-        return self._obj.copy(data=new_array)
+        """
+        Copy the raster in-memory.
+
+        :param new_array: New array to use in the copied raster.
+        :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
+          compatible. If False, will raise an error when incompatible.
+
+        :return: Copy of the raster.
+        """
+
+        # Define new array
+        if new_array is not None:
+            data = new_array
+        else:
+            data = self.data.copy()
+
+        # Send to from_array
+        cp = self.from_array(
+            data=data,
+            transform=self.transform,
+            crs=self.crs,
+            nodata=self.nodata,
+            area_or_point=self.area_or_point,
+            tags=self.tags,
+            cast_nodata=cast_nodata,
+        )
+
+        return cp
 
     def from_array(
         self,
@@ -88,9 +116,9 @@ class RasterAccessor(RasterBase):
         )
 
         # Set other attributes
-        out_ds.rio.write_transform(transform)
-        out_ds.rio.set_crs(crs)
-        out_ds.rio.set_nodata(nodata)
+        out_ds.rio.write_transform(transform, inplace=True)
+        out_ds.rio.set_crs(crs, inplace=True)
+        out_ds.rio.set_nodata(nodata, inplace=True)
 
         return out_ds
 

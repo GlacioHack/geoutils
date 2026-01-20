@@ -1362,9 +1362,19 @@ class Raster(RasterBase):
         # Now comes the important part, the data setting!
         # Several cases to consider:
 
-        # 1/ If the new data is not masked (either classic array or masked array with no mask, hence the use of
-        # as array) and contains non-finite values such as NaNs, define a mask
-        if not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
+        # 1/ If the new data is not a masked array and contains non-finite values such as NaNs, define a mask
+        if not np.ma.isMaskedArray(new_data):
+
+            # Have to write it this way, because wrapper np.ma.mask_invalid always creates a boolean array,
+            # instead of attributing nomask (mask = False, single boolean) when no invalids exist
+            mask = ~np.isfinite(new_data)
+            if not mask.any():
+                m = np.ma.array(new_data, mask=np.ma.nomask, copy=True, fill_value=self.nodata)
+            else:
+                m = np.ma.array(new_data, mask=mask, copy=True, fill_value=self.nodata)
+            self._data = m
+
+        elif not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
             self._data = np.ma.masked_array(
                 data=np.asarray(new_data), mask=~np.isfinite(new_data.data), fill_value=self.nodata
             )

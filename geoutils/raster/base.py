@@ -100,6 +100,10 @@ class RasterBase:
         """Placeholder method for subclasses."""
         raise NotImplementedError("This method is meant to be subclassed.")
 
+    def copy(self):
+        """Placeholder method for subclasses."""
+        raise NotImplementedError("This method is meant to be subclassed.")
+
     @property
     def _is_xr(self) -> bool:
         """Whether the underlying object is a Xarray Dataset through accessor, or not."""
@@ -140,14 +144,20 @@ class RasterBase:
                 raise TypeError("The transform argument needs to be Affine or tuple.")
 
         if self._is_xr:
+            print("CHECK BEFORE SET TRANSFORM")
+            print(self.nodata)
             # Rioxarray prioritizes coordinates over transform to re-define transform,
             # so we need to overwrite coordinates
             # See https://github.com/corteva/rioxarray/issues/698
             from rioxarray.rioxarray import affine_to_coords
-            coords = affine_to_coords(affine=new_transform, width=self.data.shape[1], height=self.data.shape[0])
+            coords = affine_to_coords(affine=new_transform, width=self.data.shape[0], height=self.data.shape[1])
             self._obj["x"] = coords["x"]
             self._obj["y"] = coords["y"]
-            self._obj.rio.write_transform(new_transform, inplace=True)
+
+            # No need to call write transform now
+            # BUG: Calling write_transform resets the nodata to "None"!
+            # self._obj.rio.write_transform(new_transform, inplace=True)
+
         else:
             self._transform = new_transform
 
@@ -442,7 +452,8 @@ class RasterBase:
     def is_loaded(self) -> bool:
         """Whether the raster array is loaded."""
         if self._is_xr:
-            # TODO: Activating this requires to have _disk_shape defined for RasterAccessor
+            # TODO: Using unloaded functions (e.g. crop) requires to have _disk_shape defined (not supported for
+            #  RasterAccessor)
             return True
             # return isinstance(self._obj.variable._data, np.ndarray)
         else:
@@ -970,10 +981,10 @@ class RasterBase:
             # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
             if "int" in str(self.data.dtype):
                 # Get the array with masked value fill with NaNs
-                nanarray = self.data.astype(floating_dtype).filled(fill_value=np.nan).squeeze()
+                nanarray = self.data.astype(floating_dtype).filled(fill_value=np.nan)
             else:
                 # Same here
-                nanarray = self.data.filled(fill_value=np.nan).squeeze()
+                nanarray = self.data.filled(fill_value=np.nan)
 
         # The function np.ma.filled() only returns a copy if the array is masked, copy the array if it's not the case
         else:
@@ -981,7 +992,7 @@ class RasterBase:
 
         # Return the NaN array, and possibly the mask as well
         if return_mask:
-            return nanarray, np.isfinite(nanarray)
+            return nanarray, ~np.isfinite(nanarray)
         else:
             return nanarray
 
@@ -1038,14 +1049,14 @@ class RasterBase:
         :returns: A new raster (or None if inplace).
         """
 
-        cropped_arr, transform = _crop(source_raster=self, bbox=bbox)
+        cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
 
         if inplace:
-            self.data = cropped_arr
-            self.set_transform(transform)
+            self._data = cropped_arr
+            self.set_transform(new_transform)
             return None
         else:
-            newraster = self.from_array(cropped_arr, transform, self.crs, self.nodata, self.area_or_point)
+            newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
             return newraster
 
     @overload
@@ -1788,30 +1799,17 @@ class RasterBase:
         :raises TypeError: If `method` is neither a string nor a callable.
         """
 
-        # Convert data to float to avoid integer issues with nodata
-        array = self.data.astype(float)
-
-        # Mask nodata values
-        # masked_array = np.ma.masked_equal(array, self.nodata)
-
-        # Fill masked values with nodata for filtering, to match SciPy behavior
-        # filled_array = masked_array.filled(self.nodata)
+       # Convert to NaN array for filters
         nan_array = self.get_nanarray()
 
         # Apply filter
         filtered_array = _filter(nan_array, method, size, **kwargs)
 
-        # Mask nodata again after filtering
-        # final_masked = np.ma.masked_equal(filtered_array, self.nodata)
-        # final_masked.set_fill_value(self.nodata)
-        # final_masked = final_masked.astype(float)
-
         if inplace:
-            # TODO: NaN array must be converted to Masked in data setting?
             self.data = filtered_array
             return None
         else:
-            return self.from_array(filtered_array, self.transform, self.crs, self.nodata, self.area_or_point)
+            return self.copy(new_array=filtered_array)
 
     @deprecate(
         Version("0.3.0"),
