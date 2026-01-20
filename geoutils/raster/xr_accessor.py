@@ -122,11 +122,11 @@ class RasterAccessor(RasterBase):
 
         return out_ds
 
-    def to_raster(self) -> RasterBase:
+    def to_geoutils(self) -> RasterBase:
         """
-        Convert to Raster object.
-        # TODO: Rioxarray uses "to_raster" to write to file... Change naming?
+        Convert to Raster object from GeoUtils.
 
         :return:
         """
-        return gu.Raster.from_array(data=self._obj.data, crs=self.crs, transform=self.transform, nodata=self.nodata)
+        return gu.Raster.from_array(data=self._obj.data, crs=self.crs, transform=self.transform, nodata=self.nodata,
+                                    tags=self.tags, area_or_point=self.area_or_point)

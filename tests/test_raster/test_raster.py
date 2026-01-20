@@ -1235,7 +1235,7 @@ class TestRaster:
             bounds_orig[2] - rand_int * r.res[0],
             bounds_orig[3] - rand_int * abs(r.res[1]),
         ]
-        r_cropped = r.crop(bounds_new, inplace=False, mode="match_pixel")
+        r_cropped = r.crop(bounds_new, inplace=False)
         intersection = r.intersection(r_cropped, match_ref=False)
         assert intersection == r_cropped.bounds
 
@@ -1247,7 +1247,7 @@ class TestRaster:
             bounds_orig[2] - rand_float * r.res[0],
             bounds_orig[3] - rand_float * abs(r.res[1]),
         ]
-        r_cropped = r.crop(bounds_new, inplace=False, mode="match_extent")
+        r_cropped = r.crop(bounds_new, inplace=False)
 
         # Case 1 - with match_ref = False -> intersection should match smaller raster bounds
         intersection = r.intersection(r_cropped, match_ref=False)
