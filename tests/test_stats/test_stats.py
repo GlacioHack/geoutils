@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from cmath import isnan
 from typing import Any
 
@@ -304,7 +305,10 @@ class TestStats:
         compare_dict(res_stats_crop, rast_crop.get_stats())
 
         # Verify reprojected raster
-        rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="New nodata.*")
+            rast_crop.set_nodata(255)  # Needs to be defined for reprojection
+        rast_crop_proj = rast_crop.reproject(rast, resampling=rio.warp.Resampling.nearest)
         res_stats_crop_proj = {
             "Mean": np.float64(117.80631314205752),
             "Median": np.float64(107.0),
@@ -322,7 +326,6 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(40.36774809160305),
         }
-        print(rast_crop_proj.get_stats())
         compare_dict(res_stats_crop_proj, rast_crop_proj.get_stats())
 
         # Verify stats of a masked raster
@@ -424,7 +427,10 @@ class TestStats:
         compare_dict(rast_stats_crop_pc, rast_crop_pc.get_stats())
 
         # Verify reprojected raster pc
-        rast_crop_proj = rast_crop.reproject(rast, nodata=255, resampling=rio.warp.Resampling.nearest)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="New nodata.*")
+            rast_crop.set_nodata(255)  # Needs to be defined for reprojection
+        rast_crop_proj = rast_crop.reproject(rast, resampling=rio.warp.Resampling.nearest)
         for data in [rast_crop_proj, rast_crop, rast]:
             print(
                 "# data shape:", data.shape, data.shape[0] * rast_crop.shape[1], "->", len(data.to_pointcloud()["b1"])
