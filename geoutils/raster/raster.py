@@ -572,9 +572,9 @@ class Raster(RasterBase):
 
         # If the new data is not masked and has non-finite values, we define a default nodata value
         if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
-                np.ma.is_masked(new_data)
-                and self.nodata is None
-                and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0
+            np.ma.is_masked(new_data)
+            and self.nodata is None
+            and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0
         ):
             warnings.warn(
                 "Setting default nodata {:.0f} to mask non-finite values found in the array, as "
@@ -627,22 +627,22 @@ class Raster(RasterBase):
             warnings.warn(
                 category=UserWarning,
                 message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
-                        "If this happened when creating or updating the array, to silence this warning, "
-                        "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
-                        "to creating or updating the raster.\n"
-                        "If this happened during a numerical operation, use astype() prior to the operation "
-                        "to convert to a data type that won't derive the nodata values (e.g., a float type).",
+                "If this happened when creating or updating the array, to silence this warning, "
+                "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
+                "to creating or updating the raster.\n"
+                "If this happened during a numerical operation, use astype() prior to the operation "
+                "to convert to a data type that won't derive the nodata values (e.g., a float type).",
             )
             self._data[self._data.data == self.nodata] = np.ma.masked
+
+    def _set_transform(self, new_transform: Affine) -> None:
+        # Overloads abstract method in RasterBase
+        self._transform = new_transform
 
     @property
     def transform(self) -> Affine:
         # Overloads abstract method in RasterBase
         return self._transform
-
-    def _set_transform(self, new_transform: Affine) -> None:
-        # Overloads abstract method in RasterBase
-        self._transform = new_transform
 
     @transform.setter
     def transform(self, new_transform: Affine) -> None:

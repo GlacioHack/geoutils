@@ -7,8 +7,8 @@ import math
 import pathlib
 import struct
 import warnings
+from abc import ABC, abstractmethod
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
-from abc import abstractmethod, ABC
 
 import geopandas as gpd
 import numpy as np
@@ -171,8 +171,7 @@ class RasterBase(ABC):
         self._set_transform(new_transform=new_transform)
 
     @abstractmethod
-    def _set_transform(self, new_transform: Affine) -> None:
-        ...
+    def _set_transform(self, new_transform: Affine) -> None: ...
 
     @property
     @abstractmethod
@@ -199,8 +198,7 @@ class RasterBase(ABC):
         self._set_crs(new_crs=new_crs)
 
     @abstractmethod
-    def _set_crs(self, new_crs: CRS) -> None:
-        ...
+    def _set_crs(self, new_crs: CRS) -> None: ...
 
     @property
     @abstractmethod
@@ -337,7 +335,6 @@ class RasterBase(ABC):
             # Update the fill value only if the data is loaded
             if self.is_loaded:
                 self.data.fill_value = new_nodata
-
 
     @property
     @abstractmethod
@@ -1314,9 +1311,15 @@ class RasterBase(ABC):
             self.set_transform(translated_transform)
             return None
         else:
-            raster_copy = self.from_array(data=self.data, transform=translated_transform, crs=self.crs,
-                                          nodata=self.nodata, tags=self.tags, area_or_point=self.area_or_point,
-                                          cast_nodata=False)
+            raster_copy = self.from_array(
+                data=self.data,
+                transform=translated_transform,
+                crs=self.crs,
+                nodata=self.nodata,
+                tags=self.tags,
+                area_or_point=self.area_or_point,
+                cast_nodata=False,
+            )
 
             return raster_copy
 

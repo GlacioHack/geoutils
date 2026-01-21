@@ -112,12 +112,12 @@ class RasterAccessor(RasterBase):
         self.set_nodata(new_nodata=new_nodata)
 
     @property
-    def tags(self) -> dict[str, Any] | None:
+    def tags(self) -> dict[str, Any]:
         # Overloads abstract method in RasterBase
         return self._obj.attrs
 
     @tags.setter
-    def tags(self, new_tags: dict[str, Any]) -> None:
+    def tags(self, new_tags: dict[str, Any] | None) -> None:
         if new_tags is None:
             new_tags = {}
         self._obj.attrs = new_tags
