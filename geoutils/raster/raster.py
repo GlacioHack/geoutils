@@ -2763,8 +2763,6 @@ class Raster:
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -2778,13 +2776,16 @@ class Raster:
         the contents of self.data to disk, write this provided value to every
         pixel instead.
 
+        Compression default value is set to 'deflate' (equal to GDALs: COMPRESS=DEFLATE in co_opts).
+        Tiled default value is set to 'NO' as the GDAL default value.
+        Raster is saved as a BigTIFF if the output file might exceed 4GB and as classical TIFF otherwise.
+
+        Example: dem.to_file(to_file, co_opts={'TILED':'YES', 'COMPRESS':'LZW'})
+
         :param filename: Filename to write the file to.
         :param driver: Driver to write file with.
         :param dtype: Data type to write the image as (defaults to dtype of image data).
         :param nodata: Force a nodata value to be used (default to that of raster).
-        :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE).
-        :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
-            but increases file size.
         :param blank_value: Use to write an image out with every pixel's value.
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary,
@@ -2798,6 +2799,15 @@ class Raster:
 
         if co_opts is None:
             co_opts = {}
+
+        # Set COMPRESS default value to DEFLATE
+        if "COMPRESS" not in map(str.upper, co_opts.keys()):
+            co_opts["COMPRESS"] = "DEFLATE"
+
+        # Set BIGTIFF default value to IF_SAFER, to save the output image as a BigTIFF if it might exceed 4GB.
+        if "BIGTIFF" not in map(str.upper, co_opts.keys()):
+            co_opts["BIGTIFF"] = "IF_SAFER"
+
         meta = self.tags if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
@@ -2850,8 +2860,6 @@ class Raster:
             crs=self.crs,
             transform=self.transform,
             nodata=nodata,
-            compress=compress,
-            tiled=tiled,
             **co_opts,
         ) as dst:
             dst.write(save_data)
@@ -2884,15 +2892,13 @@ class Raster:
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
         gcps: list[tuple[float, ...]] | None = None,
         gcps_crs: CRS | None = None,
     ) -> None:
-        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
+        self.to_file(filename, driver, dtype, nodata, blank_value, co_opts, metadata, gcps, gcps_crs)
 
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:
