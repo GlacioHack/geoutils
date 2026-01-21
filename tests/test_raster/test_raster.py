@@ -1949,9 +1949,26 @@ class TestRaster:
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
-    @pytest.mark.skip()  # type: ignore
-    def test__is_bigtiff_true(self) -> None:
+    def test__is_bigtiff_true(self, tmp_path: os.Path) -> None:
         """Test _is_bigtiff function for BigTIFF"""
+
+        with rio.open(
+            tmp_path / "fake_bigtiff.tif",
+            "w",
+            driver="GTiff",
+            width=10,
+            height=10,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=rio.transform.Affine(30.0, 0.0, 489340.0, 0.0, -30.0, 3098570.0),
+            BIGTIFF="YES",
+        ) as dst:
+            dst.write(np.zeros((1, 10, 10), dtype="uint8"))
+
+        img = gu.Raster(tmp_path / "fake_bigtiff.tif")
+
+        assert img._is_bigtiff() is True
 
     def test__is_bigtiff_false(self) -> None:
         """Test _is_bigtiff function for classic TIFF"""
