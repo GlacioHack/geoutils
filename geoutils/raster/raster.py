@@ -508,6 +508,178 @@ class Raster(RasterBase):
             sensor_meta = parse_and_convert_metadata_from_filename(self.filename, silent=silent)
             self._tags.update(sensor_meta)
 
+    @property
+    def data(self) -> MArrayNum:
+        # Overloads abstract method in RasterBase
+        if not self.is_loaded:
+            self.load()
+        return self._data  # type: ignore
+
+    @data.setter
+    def data(self, new_data: NDArrayNum | MArrayNum) -> None:
+        """
+        Set the contents of .data and possibly update .nodata.
+
+        The data setter behaviour is the following:
+
+        1. Writes the data in a masked array, whether the input is a classic array or a masked_array,
+        2. Reshapes the data to a 2D array if it is single band,
+        3. If new dtype is different from Raster and nodata is not compatible, casts the nodata value to new dtype,
+        4. Sets a new nodata value to the Raster if none is set and if the provided array contains non-finite values
+            that are unmasked (including if there is no mask at all, e.g. NaNs in a classic array),
+        5. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array. Note that
+            these values are not overwritten and can still be accessed in .data.data.
+
+        :param new_data: New data to assign to this instance of Raster.
+
+        """
+        # Check that new_data is a NumPy array
+        if not isinstance(new_data, np.ndarray):
+            raise ValueError("New data must be a numpy array.")
+
+        if new_data.ndim not in [2, 3]:
+            raise ValueError("Data array must have 2 or 3 dimensions.")
+
+        # Squeeze 3D data if the band axis is of length 1
+        if new_data.ndim == 3 and new_data.shape[0] == 1:
+            new_data = new_data.squeeze(axis=0)
+
+        # Check that new_data has correct shape
+
+        # If data is loaded
+        if self._data is not None:
+            dtype = str(self._data.dtype)
+            orig_shape = self._data.shape
+        # If filename exists
+        elif self._disk_dtype is not None:
+            dtype = self._disk_dtype
+            if self._out_count == 1:
+                orig_shape = self._out_shape
+            else:
+                orig_shape = (self._out_count, *self._out_shape)  # type: ignore
+        else:
+            dtype = str(new_data.dtype)
+            orig_shape = new_data.shape
+
+        if new_data.shape != orig_shape:
+            raise ValueError(
+                f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape}."
+            )
+
+        # Cast nodata if the new array has incompatible dtype with the old nodata value
+        # (we accept setting an array with new dtype to mirror NumPy behaviour)
+        self._nodata = _cast_nodata(new_data.dtype, self.nodata)
+
+        # If the new data is not masked and has non-finite values, we define a default nodata value
+        if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
+                np.ma.is_masked(new_data)
+                and self.nodata is None
+                and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0
+        ):
+            warnings.warn(
+                "Setting default nodata {:.0f} to mask non-finite values found in the array, as "
+                "no nodata value was defined.".format(_default_nodata(dtype)),
+                UserWarning,
+            )
+            self._nodata = _default_nodata(dtype)
+
+        # Now comes the important part, the data setting!
+        # Several cases to consider:
+
+        # 1/ If the new data is not a masked array and contains non-finite values such as NaNs, define a mask
+        if not np.ma.isMaskedArray(new_data):
+
+            # Have to write it this way, because wrapper np.ma.mask_invalid always creates a boolean array,
+            # instead of attributing nomask (mask = False, single boolean) when no invalids exist
+            mask = ~np.isfinite(new_data)
+            if not mask.any():
+                m = np.ma.array(new_data, mask=np.ma.nomask, copy=True, fill_value=self.nodata)
+            else:
+                m = np.ma.array(new_data, mask=mask, copy=True, fill_value=self.nodata)
+            self._data = m
+
+        elif not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
+            self._data = np.ma.masked_array(
+                data=np.asarray(new_data), mask=~np.isfinite(new_data.data), fill_value=self.nodata
+            )
+
+        # 2/ If the new data is masked but some non-finite values aren't masked, add them to the mask
+        elif np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0:
+            self._data = np.ma.masked_array(
+                data=new_data.data,
+                mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask),
+                fill_value=self.nodata,
+            )
+
+        # 3/ If the new data is a Masked Array, we pass data.data and data.mask independently (passing directly the
+        # masked array to data= has a strange behaviour that redefines fill_value)
+        elif np.ma.isMaskedArray(new_data):
+            self._data = np.ma.masked_array(data=new_data.data, mask=new_data.mask, fill_value=self.nodata)
+
+        # 4/ If the new data is classic ndarray
+        else:
+            self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
+
+        # Finally, mask values equal to the nodata value in case they weren't masked, but raise a warning
+        if np.count_nonzero(np.logical_and(~self._data.mask, self._data.data == self.nodata)) > 0:
+            # This can happen during a numerical operation, especially for integer values that max out with a modulo
+            # It can also happen with from_array()
+            warnings.warn(
+                category=UserWarning,
+                message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
+                        "If this happened when creating or updating the array, to silence this warning, "
+                        "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
+                        "to creating or updating the raster.\n"
+                        "If this happened during a numerical operation, use astype() prior to the operation "
+                        "to convert to a data type that won't derive the nodata values (e.g., a float type).",
+            )
+            self._data[self._data.data == self.nodata] = np.ma.masked
+
+    @property
+    def transform(self) -> Affine:
+        # Overloads abstract method in RasterBase
+        return self._transform
+
+    def _set_transform(self, new_transform: Affine) -> None:
+        # Overloads abstract method in RasterBase
+        self._transform = new_transform
+
+    @transform.setter
+    def transform(self, new_transform: Affine) -> None:
+        self.set_transform(new_transform)
+
+    def _set_crs(self, new_crs: CRS) -> None:
+        # Overloads abstract method in RasterBase
+        self._crs = new_crs
+
+    @property
+    def crs(self) -> CRS:
+        # Overloads abstract method in RasterBase
+        return self._crs
+
+    @crs.setter
+    def crs(self, new_crs: CRS) -> None:
+        self.set_crs(new_crs)
+
+    @property
+    def nodata(self) -> int | float | None:
+        # Overloads abstract method in RasterBase
+        return self._nodata
+
+    @nodata.setter
+    def nodata(self, new_nodata: int | float | None) -> None:
+        self.set_nodata(new_nodata=new_nodata)
+
+    @property
+    def tags(self) -> dict[str, Any]:
+        return self._tags
+
+    @tags.setter
+    def tags(self, new_tags: dict[str, Any]) -> None:
+        if new_tags is None:
+            new_tags = {}
+        self._tags = new_tags
+
     def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
         """
         Load only the raster mask from disk and return as independent array (not stored in any class attributes).
@@ -1269,138 +1441,6 @@ class Raster(RasterBase):
 
         return self._is_modified
 
-    @property
-    def data(self) -> MArrayNum:
-        """
-        Array of the raster.
-
-        :returns: Raster array.
-
-        """
-        if not self.is_loaded:
-            self.load()
-        return self._data  # type: ignore
-
-    @data.setter
-    def data(self, new_data: NDArrayNum | MArrayNum) -> None:
-        """
-        Set the contents of .data and possibly update .nodata.
-
-        The data setter behaviour is the following:
-
-        1. Writes the data in a masked array, whether the input is a classic array or a masked_array,
-        2. Reshapes the data to a 2D array if it is single band,
-        3. If new dtype is different from Raster and nodata is not compatible, casts the nodata value to new dtype,
-        4. Sets a new nodata value to the Raster if none is set and if the provided array contains non-finite values
-            that are unmasked (including if there is no mask at all, e.g. NaNs in a classic array),
-        5. Masks non-finite values that are unmasked, whether the input is a classic array or a masked_array. Note that
-            these values are not overwritten and can still be accessed in .data.data.
-
-        :param new_data: New data to assign to this instance of Raster.
-
-        """
-        # Check that new_data is a NumPy array
-        if not isinstance(new_data, np.ndarray):
-            raise ValueError("New data must be a numpy array.")
-
-        if new_data.ndim not in [2, 3]:
-            raise ValueError("Data array must have 2 or 3 dimensions.")
-
-        # Squeeze 3D data if the band axis is of length 1
-        if new_data.ndim == 3 and new_data.shape[0] == 1:
-            new_data = new_data.squeeze(axis=0)
-
-        # Check that new_data has correct shape
-
-        # If data is loaded
-        if self._data is not None:
-            dtype = str(self._data.dtype)
-            orig_shape = self._data.shape
-        # If filename exists
-        elif self._disk_dtype is not None:
-            dtype = self._disk_dtype
-            if self._out_count == 1:
-                orig_shape = self._out_shape
-            else:
-                orig_shape = (self._out_count, *self._out_shape)  # type: ignore
-        else:
-            dtype = str(new_data.dtype)
-            orig_shape = new_data.shape
-
-        if new_data.shape != orig_shape:
-            raise ValueError(
-                f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape}."
-            )
-
-        # Cast nodata if the new array has incompatible dtype with the old nodata value
-        # (we accept setting an array with new dtype to mirror NumPy behaviour)
-        self._nodata = _cast_nodata(new_data.dtype, self.nodata)
-
-        # If the new data is not masked and has non-finite values, we define a default nodata value
-        if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
-            np.ma.is_masked(new_data)
-            and self.nodata is None
-            and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0
-        ):
-            warnings.warn(
-                "Setting default nodata {:.0f} to mask non-finite values found in the array, as "
-                "no nodata value was defined.".format(_default_nodata(dtype)),
-                UserWarning,
-            )
-            self._nodata = _default_nodata(dtype)
-
-        # Now comes the important part, the data setting!
-        # Several cases to consider:
-
-        # 1/ If the new data is not a masked array and contains non-finite values such as NaNs, define a mask
-        if not np.ma.isMaskedArray(new_data):
-
-            # Have to write it this way, because wrapper np.ma.mask_invalid always creates a boolean array,
-            # instead of attributing nomask (mask = False, single boolean) when no invalids exist
-            mask = ~np.isfinite(new_data)
-            if not mask.any():
-                m = np.ma.array(new_data, mask=np.ma.nomask, copy=True, fill_value=self.nodata)
-            else:
-                m = np.ma.array(new_data, mask=mask, copy=True, fill_value=self.nodata)
-            self._data = m
-
-        elif not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
-            self._data = np.ma.masked_array(
-                data=np.asarray(new_data), mask=~np.isfinite(new_data.data), fill_value=self.nodata
-            )
-
-        # 2/ If the new data is masked but some non-finite values aren't masked, add them to the mask
-        elif np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0:
-            self._data = np.ma.masked_array(
-                data=new_data.data,
-                mask=np.logical_or(~np.isfinite(new_data.data), new_data.mask),
-                fill_value=self.nodata,
-            )
-
-        # 3/ If the new data is a Masked Array, we pass data.data and data.mask independently (passing directly the
-        # masked array to data= has a strange behaviour that redefines fill_value)
-        elif np.ma.isMaskedArray(new_data):
-            self._data = np.ma.masked_array(data=new_data.data, mask=new_data.mask, fill_value=self.nodata)
-
-        # 4/ If the new data is classic ndarray
-        else:
-            self._data = np.ma.masked_array(data=new_data, fill_value=self.nodata)
-
-        # Finally, mask values equal to the nodata value in case they weren't masked, but raise a warning
-        if np.count_nonzero(np.logical_and(~self._data.mask, self._data.data == self.nodata)) > 0:
-            # This can happen during a numerical operation, especially for integer values that max out with a modulo
-            # It can also happen with from_array()
-            warnings.warn(
-                category=UserWarning,
-                message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
-                "If this happened when creating or updating the array, to silence this warning, "
-                "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
-                "to creating or updating the raster.\n"
-                "If this happened during a numerical operation, use astype() prior to the operation "
-                "to convert to a data type that won't derive the nodata values (e.g., a float type).",
-            )
-            self._data[self._data.data == self.nodata] = np.ma.masked
-
     def set_mask(self, mask: NDArrayBool | Raster) -> None:
         """
         Set a mask on the raster array.
@@ -1834,9 +1874,9 @@ class Raster(RasterBase):
 
     def to_xarray(self, name: str | None = None) -> xr.DataArray:
         """
-        Convert raster to a xarray.DataArray.
+        Convert a xarray.DataArray raster.
 
-        This converts integer-type rasters into float32.
+        Integer-type rasters are cast to float32.
 
         :param name: Name attribute for the data array.
 

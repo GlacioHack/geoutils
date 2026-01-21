@@ -8,6 +8,7 @@ import pathlib
 import struct
 import warnings
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
+from abc import abstractmethod, ABC
 
 import geopandas as gpd
 import numpy as np
@@ -64,7 +65,7 @@ from geoutils.stats.stats import _statistics
 RasterType = TypeVar("RasterType", bound="RasterBase")
 
 
-class RasterBase:
+class RasterBase(ABC):
     """
     This class is non-public and made to be subclassed.
 
@@ -127,32 +128,30 @@ class RasterBase:
         raise NotImplementedError("This method is meant to be subclassed.")
 
     @property
+    @abstractmethod
     def data(self) -> MArrayNum | xr.DataArray:
-        if self._is_xr:
-            # For Mypy, always verified
-            assert self._obj is not None
-            return self._obj.data
-        else:
-            return self._data
+        """
+        Array of the raster.
+
+        :returns: Raster array.
+        """
+        ...
 
     @data.setter
-    def data(self, new_data: NDArrayNum | MArrayNum) -> None:
+    @abstractmethod
+    def data(self, new_data: NDArrayNum | MArrayNum | xr.DataArray) -> None:
         """Placeholder method for subclasses."""
-        raise NotImplementedError("This method is meant to be subclassed.")
+        ...
 
     @property
+    @abstractmethod
     def transform(self) -> Affine:
         """
         Geotransform of the raster.
 
         :returns: Affine matrix geotransform.
         """
-        if self._is_xr:
-            # For Mypy, always verified
-            assert self._obj is not None
-            return self._obj.rio.transform()
-        else:
-            return self._transform
+        ...
 
     @transform.setter
     def transform(self, new_transform: tuple[float, ...] | Affine | None) -> None:
@@ -163,47 +162,27 @@ class RasterBase:
         """
         Set the geotransform of the raster.
         """
+        # Using sub-abstractmethod to allow for consistent input check here
         if new_transform is not None and not isinstance(new_transform, Affine):
             if isinstance(new_transform, tuple):
                 new_transform = Affine(*new_transform)
             else:
                 raise TypeError("The transform argument needs to be Affine or tuple.")
+        self._set_transform(new_transform=new_transform)
 
-        if self._is_xr:
-
-            # For Mypy, always verified
-            assert self._obj is not None
-
-            # Rioxarray prioritizes coordinates over transform to re-define transform,
-            # so we need to overwrite coordinates
-            # See https://github.com/corteva/rioxarray/issues/698
-            from rioxarray.rioxarray import affine_to_coords
-
-            coords = affine_to_coords(affine=new_transform, width=self.data.shape[0], height=self.data.shape[1])
-            self._obj["x"] = coords["x"]
-            self._obj["y"] = coords["y"]
-
-            # No need to call write transform now
-            # BUG: Calling write_transform resets the nodata to "None"!
-            # self._obj.rio.write_transform(new_transform, inplace=True)
-
-        else:
-            self._transform = new_transform
+    @abstractmethod
+    def _set_transform(self, new_transform: Affine) -> None:
+        ...
 
     @property
+    @abstractmethod
     def crs(self) -> CRS:
         """
         Coordinate reference system of the raster.
 
-        :returns: Pyproj coordinate reference system.
+        :returns: Coordinate reference system.
         """
-        if self._is_xr:
-            # For Mypy, always verified
-            assert self._obj is not None
-
-            return self._obj.rio.crs
-        else:
-            return self._crs
+        ...
 
     @crs.setter
     def crs(self, new_crs: CRS | int | str | None) -> None:
@@ -214,32 +193,26 @@ class RasterBase:
         """
         Set the coordinate reference system of the raster.
         """
-
+        # Using sub-abstractmethod to allow for consistent input check here
         if new_crs is not None:
             new_crs = CRS.from_user_input(value=new_crs)
+        self._set_crs(new_crs=new_crs)
 
-        if self._is_xr:
-            # For Mypy, always verified
-            assert self._obj is not None
-            self._obj.rio.set_crs(new_crs)
-        else:
-            self._crs = new_crs
+    @abstractmethod
+    def _set_crs(self, new_crs: CRS) -> None:
+        ...
 
     @property
+    @abstractmethod
     def nodata(self) -> int | float | None:
         """
         Nodata value of the raster.
 
-        When setting with self.nodata = new_nodata, uses the default arguments of self.set_nodata().
+        When setting with self.nodata = new_nodata, uses the default arguments of set_nodata().
 
         :returns: Nodata value.
         """
-        if self._is_xr:
-            # For Mypy, always verified
-            assert self._obj is not None
-            return self._obj.rio.nodata
-        else:
-            return self._nodata
+        ...
 
     @nodata.setter
     def nodata(self, new_nodata: int | float | None) -> None:
@@ -255,6 +228,7 @@ class RasterBase:
 
         :param new_nodata: New nodata to assign to this instance of Raster.
         """
+        ...
 
         self.set_nodata(new_nodata=new_nodata)
 
@@ -364,6 +338,25 @@ class RasterBase:
             if self.is_loaded:
                 self.data.fill_value = new_nodata
 
+
+    @property
+    @abstractmethod
+    def tags(self) -> dict[str, Any]:
+        """
+        Metadata tags of the raster.
+
+        :returns: Dictionary of raster metadata, potentially including sensor information.
+        """
+        ...
+
+    @tags.setter
+    @abstractmethod
+    def tags(self, new_tags: dict[str, Any] | None) -> None:
+        """
+        Set the metadata tags of the raster.
+        """
+        ...
+
     def set_area_or_point(
         self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
     ) -> None:
@@ -465,37 +458,11 @@ class RasterBase:
         self.set_area_or_point(new_area_or_point=new_area_or_point)
 
     @property
-    def tags(self) -> dict[str, Any]:
-        """
-        Metadata tags of the raster.
-
-        :returns: Dictionary of raster metadata, potentially including sensor information.
-        """
-        if self._is_xr:
-            # For Mypy, always verified
-            assert self._obj is not None
-            return self._obj.attrs
-        else:
-            return self._tags
-
-    @tags.setter
-    def tags(self, new_tags: dict[str, Any] | None) -> None:
-        """
-        Set the metadata tags of the raster.
-        """
-
-        if new_tags is None:
-            new_tags = {}
-        self._tags = new_tags
-
-    @property
     def is_loaded(self) -> bool:
         """Whether the raster array is loaded."""
-        if self._is_xr:
-            # For Mypy, always verified
-            assert self._obj is not None
+        if self._obj is not None:
             # TODO: Using unloaded functions (e.g. crop) requires to have _disk_shape defined (not supported for
-            #  RasterAccessor)
+            #  RasterAccessor)... Should we write an equivalent?
             return True
             # return isinstance(self._obj.variable._data, np.ndarray)
         else:
@@ -824,7 +791,7 @@ class RasterBase:
             dem_masked = self.copy()
 
             # Mask pixels from the inlier_mask
-            if self._is_xr:
+            if not np.ma.isMaskedArray(dem_masked.data):
                 dem_masked[~mask] = np.nan  # type: ignore
             else:
                 dem_masked.set_mask(~mask)  # type: ignore
@@ -1347,13 +1314,10 @@ class RasterBase:
             self.set_transform(translated_transform)
             return None
         else:
-            raster_copy = self.copy()
-            if self._is_xr:
-                # For Mypy, always verified
-                assert self._obj is not None
-                raster_copy.rst.set_transform(translated_transform)
-            else:
-                raster_copy.set_transform(translated_transform)
+            raster_copy = self.from_array(data=self.data, transform=translated_transform, crs=self.crs,
+                                          nodata=self.nodata, tags=self.tags, area_or_point=self.area_or_point,
+                                          cast_nodata=False)
+
             return raster_copy
 
     def reduce_points(
