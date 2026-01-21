@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
+from PIL import Image
 
 import geoutils as gu
 from geoutils import examples
@@ -1788,17 +1789,28 @@ class TestRaster:
         img.to_file(temp_file)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert (Image.open(temp_file)).info["compression"] == "tiff_adobe_deflate"  # test no default compression
+        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
 
         # Try to save with a pathlib path (create a new temp file for Windows)
         path = pathlib.Path(temp_file)
         img.to_file(path)
 
-        # Test additional options
-        co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
+        # Test additional option: one co_opts with tiled (with no compression)
+        co_opts = {"COMPRESS": "NONE"}
+        img.to_file(temp_file, co_opts=co_opts)
+        assert len((Image.open(temp_file)).tile) > 1  # test {TILED": "NO"} default value
+        saved = gu.Raster(temp_file)
+        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
+
+        # Test additional options: several co_opts with compress and bigtiff + metadata
+        co_opts = {"COMPRESS": "LZW", "BIGTIFF": "YES"}
         metadata = {"Type": "test"}
         img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert (Image.open(temp_file)).info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
+        assert saved._is_bigtiff()  # test {"BIGTIFF": "YES"}
         assert saved.tags["Type"] == "test"
 
         # Test saving file in COG format
@@ -1937,9 +1949,26 @@ class TestRaster:
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
-    @pytest.mark.skip()  # type: ignore
-    def test__is_bigtiff_true(self) -> None:
+    def test__is_bigtiff_true(self, tmp_path: os.Path) -> None:
         """Test _is_bigtiff function for BigTIFF"""
+
+        with rio.open(
+            tmp_path / "fake_bigtiff.tif",
+            "w",
+            driver="GTiff",
+            width=10,
+            height=10,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=rio.transform.Affine(30.0, 0.0, 489340.0, 0.0, -30.0, 3098570.0),
+            BIGTIFF="YES",
+        ) as dst:
+            dst.write(np.zeros((1, 10, 10), dtype="uint8"))
+
+        img = gu.Raster(tmp_path / "fake_bigtiff.tif")
+
+        assert img._is_bigtiff() is True
 
     def test__is_bigtiff_false(self) -> None:
         """Test _is_bigtiff function for classic TIFF"""
