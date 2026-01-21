@@ -330,14 +330,23 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
 
 
 def _rio_reproject(
-    src_arr: NDArrayNum | NDArrayBool, src_mask: NDArrayBool, reproj_kwargs: dict[str, Any]
+    src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]
 ) -> tuple[NDArrayNum | NDArrayBool, NDArrayBool]:
     """Rasterio reprojection wrapper.
 
     :param src_arr: Source array for data.
-    :param src_mask: Source array for mask, only required if array is not float.
     :param reproj_kwargs: Reprojection parameter dictionary.
     """
+
+    # All masked values must be set to a nodata value for rasterio's reproject to work properly
+    if np.ma.isMaskedArray(src_arr):
+        is_input_masked = True
+        src_arr = src_arr.data
+        src_mask = np.ma.getmaskarray(src_arr)
+    else:
+        is_input_masked = False
+        src_arr = src_arr
+        src_mask = ~np.isfinite(src_arr)
 
     # For a boolean type
     convert_bool = False
@@ -408,5 +417,12 @@ def _rio_reproject(
     # If output needs to be converted back to boolean
     if convert_bool:
         dst_arr = dst_arr.astype(bool)
+
+    # Set mask
+    if is_input_masked:
+        dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=reproj_kwargs["dst_nodata"])
+    else:
+        dst_arr = dst_arr
+        dst_arr[dst_mask] = np.nan
 
     return dst_arr, dst_mask

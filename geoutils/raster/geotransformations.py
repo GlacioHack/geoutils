@@ -41,7 +41,13 @@ from geoutils.raster._geotransformations import (
     _user_input_reproject,
 )
 from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
+from geoutils.raster.distributed_computing.dask import delayed_reproject
 from geoutils.raster.georeferencing import _cast_pixel_interpretation
+
+try:
+    import dask.array as da
+except ImportError:
+    da = None
 
 ##############
 # 1/ REPROJECT
@@ -119,29 +125,30 @@ def _reproject(
 
     # 5/ Perform reprojection
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
+
+    # Cannot use Multiprocessing backend and Dask backend simultaneously
+    mp_backend = multiproc_config is not None
+    dask_backend = da is not None and isinstance(source_raster.data, da.Array)
+
+    # TODO: Allow Multiproc only for Raster object?
+    if mp_backend and dask_backend:
+        raise ValueError("Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
+                         "from reproject(). To use Multiprocessing, open the file without chunks.")
+
+    # If using Multiprocessing backend, process and return None (files written on disk)
     if multiproc_config is not None:
         _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
         return False, None, None, None, None
 
+    # If using Dask backend, process and return Dask array
+    if da is not None and isinstance(source_raster.data, da.Array):
+        dst_arr = delayed_reproject(darr=source_raster.data, **reproj_kwargs)
+
+    # If using direct reprojection, process and return NumPy array
     else:
-        # All masked values must be set to a nodata value for rasterio's reproject to work properly
-        if np.ma.isMaskedArray(source_raster.data):
-            src_arr = source_raster.data.data
-            src_mask = np.ma.getmaskarray(source_raster.data)
-        else:
-            src_arr = source_raster.data
-            src_mask = ~np.isfinite(source_raster.data)
+        dst_arr = _rio_reproject(src_arr=source_raster.data, reproj_kwargs=reproj_kwargs)
 
-        dst_arr, dst_mask = _rio_reproject(src_arr=src_arr, src_mask=src_mask, reproj_kwargs=reproj_kwargs)
-
-        # Set mask
-        if np.ma.isMaskedArray(source_raster.data):
-            dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=nodata)
-        else:
-            dst_arr = dst_arr
-            dst_arr[dst_mask] = np.nan
-
-        return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
+    return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
 
 
 #########
