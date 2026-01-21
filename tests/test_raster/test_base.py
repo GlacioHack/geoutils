@@ -16,11 +16,6 @@ from geoutils import Raster, Vector, examples, open_raster
 from geoutils.raster.georeferencing import _default_nodata
 
 
-class TestRasterBase:
-
-    pass
-
-
 def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = True) -> bool:
     """Check equality of a Raster object and Xarray object"""
 
@@ -162,10 +157,8 @@ class TestClassVsAccessorConsistency:
         "filter": {"method": "median", "size": 7},
         "get_stats": {},
     }
-    # methods_and_args = {"translate": {"xoff": 10.5, "yoff": 5},}
 
-    # @pytest.mark.parametrize("path_raster", [aster_dem_path, landsat_b4_path])  # type: ignore
-    @pytest.mark.parametrize("path_raster", [landsat_b4_path])  # type: ignore
+    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("method", list(methods_and_args.keys()))  # type: ignore
     def test_methods_consistency(self, path_raster: str, method: str) -> None:
         """

@@ -178,7 +178,7 @@ class RasterAccessor(RasterBase):
         # Build a data array
         out_ds = xr.DataArray(
             data=data,
-            coords={"x": coords["x"], "y": coords["y"]},  # Somehow need to re-order the coords...
+            coords={"x": coords["x"], "y": coords["y"]},  # Need to order the coords as X then Y in dict, or fails...
             attrs=tags,
         )
 
