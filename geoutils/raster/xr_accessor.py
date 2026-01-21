@@ -19,20 +19,18 @@ from geoutils.raster.base import RasterBase
 
 
 def open_raster(filename: str, **kwargs: Any) -> xr.DataArray:
+    """
+    Open a raster using Rioxarray, always masked and squeezed.
 
-    # Open with Rioxarray
-    ds = rioxr.open_rasterio(filename, masked=False, **kwargs)
+    :param filename: Path to the raster file to open.
+    :param kwargs: Keyword to pass to rioxarray.open().
+    """
 
-    # Cast array to float32 is its dtype is integer (cannot be filled with NaNs otherwise)
-    if "int" in str(ds.data.dtype):
-        ds = ds.astype(dtype=np.float32)
-    ds.data[ds.data == ds.rio.nodata] = np.nan
+    # Open with Rioxarray, cast to float32 if integer type
+    ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
 
     # Remove the band dimension if there is only one
     ds = ds.squeeze()  # Delete band coordinate (only one dimension)
-
-    # Store disk attributes? Didn't follow the logic in Rioxarray on this, need to get more into code details
-    ds.rst._count_on_disk = 1
 
     return ds
 
@@ -56,6 +54,7 @@ class RasterAccessor(RasterBase):
 
         self._obj: xr.DataArray = xarray_obj
         self._area_or_point = self._obj.attrs.get("AREA_OR_POINT", None)
+        self._nodata = self._obj.rio.encoded_nodata
 
     @property
     def data(self) -> xr.DataArray:
@@ -105,7 +104,13 @@ class RasterAccessor(RasterBase):
     @property
     def nodata(self) -> int | float | None:
         # Overloads abstract method in RasterBase
-        return self._obj.rio.nodata
+        # Using this logic to ensure nodata is always defined:
+        # On file opening with NaN
+        if self._obj.rio.nodata is not None and np.isnan(self._obj.rio.nodata):
+            return self._obj.rio.encoded_nodata
+        # If user has overriden the value
+        else:
+            return self._obj.rio.nodata
 
     @nodata.setter
     def nodata(self, new_nodata: int | float | None) -> None:
