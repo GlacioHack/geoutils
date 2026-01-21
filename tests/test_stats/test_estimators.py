@@ -20,7 +20,8 @@ class TestEstimators:
         # Check that the NMAD is computed the same with a masked array or NaN array, and is equal to scipy nmad
         nmad_ma = nmad(self.landsat_raster.data)
         nmad_array = nmad(self.landsat_raster.get_nanarray(floating_dtype="float64"))
-        nmad_scipy = scipy.stats.median_abs_deviation(self.landsat_raster.get_nanarray(), axis=None, scale="normal")
+        nmad_scipy = scipy.stats.median_abs_deviation(self.landsat_raster.get_nanarray(floating_dtype="float64"),
+                                                      axis=None, scale="normal")
 
         assert nmad_ma == nmad_array
         assert nmad_ma.round(2) == nmad_scipy.round(2)
