@@ -2787,8 +2787,7 @@ class Raster:
             but increases file size.
         :param blank_value: Use to write an image out with every pixel's value.
             corresponding to this value, instead of writing the image data to disk.
-        :param co_opts: GDAL creation options provided as a dictionary,
-            e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
+        :param co_opts: GDAL creation options provided as a dictionary, e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
         :param metadata: Pairs of metadata to save to disk, in addition to existing metadata in self.tags.
         :param gcps: List of gcps, each gcp being [row, col, x, y, (z)].
         :param gcps_crs: CRS of the GCPS.

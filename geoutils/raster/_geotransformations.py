@@ -373,12 +373,12 @@ def _rio_reproject(
     dst_arr = np.zeros(shape, dtype=reproj_kwargs["dtype"])
 
     # Performance keywords
-    if reproj_kwargs["n_threads"] == 0:
+    if reproj_kwargs["num_threads"] == 0:
         # Default to cpu count minus one. If the cpu count is undefined, num_threads will be 1
         cpu_count = os.cpu_count() or 2
         num_threads = cpu_count - 1
     else:
-        num_threads = reproj_kwargs["n_threads"]
+        num_threads = reproj_kwargs["num_threads"]
 
     # We force XSCALE=1 and YSCALE=1 passed to GDAL.Warp to avoid resampling deformations depending on extent/shape,
     # which leads to different results on chunks or a full array
@@ -395,6 +395,10 @@ def _rio_reproject(
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
     if Version(rio.__version__) > Version("1.4.3"):
         reproj_kwargs.update({"tolerance": 0})
+
+    # Pop dtype and dst_shape arguments that don't exist in Rasterio, and are only used above
+    reproj_kwargs.pop("dtype")
+    reproj_kwargs.pop("dst_shape")
 
     # Run reprojection
     _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
