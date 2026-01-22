@@ -785,14 +785,14 @@ class RasterBase(ABC):
                 mask = inlier_mask
             inlier_points = np.count_nonzero(mask)
 
-            dem_masked = self.copy()
+            rast = self.copy()
 
             # Mask pixels from the inlier_mask
-            if not np.ma.isMaskedArray(dem_masked.data):
-                dem_masked[~mask] = np.nan  # type: ignore
+            if not np.ma.isMaskedArray(rast.data):
+                rast[~mask] = np.nan  # type: ignore
             else:
-                dem_masked.set_mask(~mask)  # type: ignore
-            return dem_masked.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+                rast.set_mask(~mask)  # type: ignore
+            return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
         # Given list or all attributes to compute if None
         if isinstance(stats_name, list) or stats_name is None:
