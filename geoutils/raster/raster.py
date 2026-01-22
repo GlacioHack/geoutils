@@ -23,7 +23,6 @@ Module for Raster class.
 
 from __future__ import annotations
 
-import logging
 import math
 import pathlib
 import struct
@@ -2091,7 +2090,7 @@ class Raster:
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
             else:
-                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
+                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string")
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...

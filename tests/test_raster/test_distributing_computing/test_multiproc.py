@@ -3,6 +3,7 @@ Tests for multiprocessing functions
 """
 
 import os
+import warnings
 from multiprocessing import cpu_count
 from typing import Any
 
@@ -44,7 +45,9 @@ def _custom_func(raster: RasterType, addition: float, factor: float) -> RasterTy
 
 # Define a simple function which do not return a Raster
 def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
-    return raster.get_stats(stats_name=["mean", "valid_count"])
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
+        return raster.get_stats(stats_name=["mean", "valid_count"])
 
 
 # Define a simple function which return a Mask
@@ -127,6 +130,7 @@ class TestMultiproc:
         addition = 5
         factor = 0.5
         # Apply the multiproc map function
+
         output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
 
         # Ensure raster has not been loading during process
