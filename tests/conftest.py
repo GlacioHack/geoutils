@@ -1,7 +1,6 @@
 """Test configuration."""
 
 import logging
-from collections import defaultdict
 
 import pytest
 
