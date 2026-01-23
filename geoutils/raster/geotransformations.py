@@ -117,11 +117,11 @@ def _reproject(
 
     # 4/ Check reprojection is possible (boolean raster will be converted, so no need to check)
     # TODO: Change this behaviour?
-    if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
-        raise ValueError(
-            "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-            "with `force_source_nodata`."
-        )
+    # if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
+    #     raise ValueError(
+    #         "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+    #         "with `force_source_nodata`."
+    #     )
 
     # 5/ Perform reprojection
     reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
@@ -193,7 +193,12 @@ def _crop(
     new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=source_raster.transform)
     tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
 
-    if source_raster.is_loaded:
+    if source_raster._is_xr:
+
+        (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+        crop_img = source_raster._obj.isel(y=slice(rowmin, rowmax), x=slice(colmin, colmax))
+
+    elif source_raster.is_loaded:
         # In case data is loaded on disk, can extract directly from np array
         (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
         crop_img = source_raster.data[..., rowmin:rowmax, colmin:colmax]
@@ -221,7 +226,7 @@ def _crop(
         # AD (24/04/24): Note that the same issue as #447 occurs here when final_window_disk extends beyond
         # self's bounds. Using option `boundless=True` solves the issue but causes other tests to fail
         # This should be fixed with #447 and previous line would be obsolete.
-        with rio.open(source_raster.filename) as raster:
+        with rio.open(source_raster.name) as raster:
             crop_img = raster.read(
                 indexes=source_raster._bands,
                 masked=source_raster._masked,

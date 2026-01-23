@@ -495,6 +495,11 @@ def delayed_reproject(
         }
     )
 
+    # print("All source transforms")
+    # print([meta_params[i][0]["src_transform"] for i in range(len(dest2source))])
+    # print("All dest transforms")
+    # print([meta_params[i][0]["dst_transform"] for i in range(len(dest2source))])
+
     # Create a delayed object for each block, and flatten the blocks into a 1d shape
     blocks = darr.to_delayed().ravel()
     # Run the delayed reprojection, looping for each destination block

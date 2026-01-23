@@ -95,7 +95,7 @@ def _load_raster_tile(raster_unload: gu.Raster, tile: NDArrayNum) -> gu.Raster:
 
 def _remove_tile_padding(raster_shape: tuple[int, int], raster_tile: gu.Raster, tile: NDArrayNum, padding: int) -> None:
     """
-    Removes the padding added around tiles during terrain attribute computation to prevent edge effects.
+    Removes the padding added around tiles during map_overlap computation to prevent edge effects.
 
     :param raster_shape: The shape (height, width) of the raster from which tiles are extracted.
     :param raster_tile: The raster tile with possible padding that needs removal.
@@ -361,7 +361,7 @@ def map_multiproc_collect(
         return list_results
 
     except Exception as e:
-        raise RuntimeError(f"Error retrieving terrain attribute from multiprocessing tasks: {e}")
+        raise RuntimeError(f"Error retrieving raster from multiprocessing tasks: {e}")
 
 
 def _wrapper_multiproc_reproject_per_block(

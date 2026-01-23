@@ -185,14 +185,14 @@ def _raster_to_pointcloud(
 
     # If subsample is the entire array, load it to optimize speed
     if subsample == 1 and not source_raster.is_loaded:
-        source_raster.load(bands=all_bands)
+        source_raster.load()
 
     # Band indexes in the array are band number minus one
     all_indexes = [b - 1 for b in all_bands]
 
     # We do 2D subsampling on the data band only, regardless of valid masks on other bands
     if skip_nodata:
-        if source_raster.is_loaded:
+        if source_raster.is_loaded or source_raster._is_xr:
             if source_raster.count == 1:
                 self_mask = get_mask_from_array(
                     source_raster.data
@@ -220,7 +220,7 @@ def _raster_to_pointcloud(
     indices = subsample_array(array=ma_valid, subsample=subsample, random_state=random_state, return_indices=True)
 
     # If the Raster is loaded, pick from the data while ignoring the mask
-    if source_raster.is_loaded:
+    if source_raster.is_loaded or source_raster._is_xr:
         if source_raster.count == 1:
             pixel_data = source_raster.data[indices[0], indices[1]]
         else:
@@ -234,7 +234,7 @@ def _raster_to_pointcloud(
         # Further below we redefine output coordinates based on point interpretation
         x_coords, y_coords = (np.array(a) for a in source_raster.ij2xy(indices[0], indices[1], force_offset="ul"))
 
-        with rio.open(source_raster.filename) as raster:
+        with rio.open(source_raster.name) as raster:
             # Rasterio uses indexes (starts at 1)
             pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords), indexes=all_bands))).T
 

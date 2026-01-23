@@ -28,6 +28,7 @@ import warnings
 from collections import abc
 from contextlib import ExitStack
 from typing import IO, TYPE_CHECKING, Any, Callable, overload
+import copy
 
 import numpy as np
 import rasterio as rio
@@ -409,16 +410,13 @@ class Raster(RasterBase):
             with ExitStack():
                 if isinstance(filename_or_dataset, (str, pathlib.Path)):
                     ds: rio.io.DatasetReader = rio.open(filename_or_dataset)
-                    self.filename = str(filename_or_dataset)
                 elif isinstance(filename_or_dataset, rio.io.DatasetReader):
                     ds = filename_or_dataset
-                    self.filename = filename_or_dataset.files[0]
                 # This is if it's a MemoryFile
                 else:
                     ds = filename_or_dataset.open()
                     # In that case, data has to be loaded
                     load_data = True
-                    self.filename = None
 
                 self._transform = ds.transform
                 self._crs = ds.crs
@@ -490,11 +488,6 @@ class Raster(RasterBase):
             # if nodata is not None and self._data is not None:
             #     self.set_nodata(self._nodata)
 
-            # If data was loaded explicitly, initiate is_modified and save disk hash
-            if load_data and isinstance(filename_or_dataset, str):
-                self._is_modified = False
-                self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
-
         # Provide a catch in case trying to load from data array
         elif isinstance(filename_or_dataset, np.ndarray):
             raise TypeError("The filename is an array, did you mean to call Raster.from_array(...) instead?")
@@ -504,8 +497,8 @@ class Raster(RasterBase):
             raise TypeError("The filename argument is not recognised, should be a path or a Rasterio dataset.")
 
         # Parse metadata and add to tags
-        if parse_sensor_metadata and self.filename is not None:
-            sensor_meta = parse_and_convert_metadata_from_filename(self.filename, silent=silent)
+        if parse_sensor_metadata and self.name is not None:
+            sensor_meta = parse_and_convert_metadata_from_filename(self.name, silent=silent)
             self._tags.update(sensor_meta)
 
     @property
@@ -680,6 +673,121 @@ class Raster(RasterBase):
             new_tags = {}
         self._tags = new_tags
 
+    @property
+    def area_or_point(self) -> Literal["Area", "Point"]:
+        return self._area_or_point
+
+    @area_or_point.setter
+    def area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+        self.set_area_or_point(new_area_or_point=new_area_or_point)
+
+    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+        self._area_or_point = new_area_or_point
+        # Update tag only if not None
+        if new_area_or_point is not None:
+            self.tags.update({"AREA_OR_POINT": new_area_or_point})
+        else:
+            if "AREA_OR_POINT" in self.tags:
+                self.tags.pop("AREA_OR_POINT")
+
+    @property
+    def _count_on_disk(self) -> None | int:
+        if self._disk_shape is not None:
+            return self._disk_shape[0]
+        return None
+
+    @property
+    def count(self) -> int:
+        if self.is_loaded:
+            if self.data.ndim == 2:
+                return 1
+            else:
+                return int(self.data.shape[0])
+        #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
+        return self._count_on_disk  # type: ignore
+
+    @property
+    def height(self) -> int:
+        if not self.is_loaded:
+            if self._out_shape is not None:
+                return self._out_shape[0]
+            else:
+                return self._disk_shape[1]  # type: ignore
+        else:
+            # If the raster is single-band
+            if self.data.ndim == 2:
+                return int(self.data.shape[0])
+            # Or multi-band
+            else:
+                return int(self.data.shape[1])
+
+    @property
+    def width(self) -> int:
+        if not self.is_loaded:
+            if self._out_shape is not None:
+                return self._out_shape[1]
+            else:
+                return self._disk_shape[2]  # type: ignore
+        else:
+            # If the raster is single-band
+            if self.data.ndim == 2:
+                return int(self.data.shape[1])
+            # Or multi-band
+            else:
+                return int(self.data.shape[2])
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        # If a downsampling argument was defined but data not loaded yet
+        if self._out_shape is not None and not self.is_loaded:
+            return self._out_shape
+        # If data loaded or not, pass the disk/data shape through height and width
+        return self.height, self.width
+
+    @property
+    def bands(self) -> tuple[int, ...]:
+        if self._bands is not None and not self.is_loaded:
+            if isinstance(self._bands, int):
+                return (self._bands,)
+            return tuple(self._bands)
+        # if self._indexes_loaded is not None:
+        #     if isinstance(self._indexes_loaded, int):
+        #         return (self._indexes_loaded, )
+        #     return tuple(self._indexes_loaded)
+        if self.is_loaded:
+            return tuple(range(1, self.count + 1))
+        return self._bands_on_disk  # type: ignore
+
+    @property
+    def driver(self) -> str | None:
+        return self._driver
+
+    @property
+    def profile(self) -> dict[str, Any] | None:
+        """Basic metadata and creation options of this dataset.
+        May be passed as keyword arguments to rasterio.open()
+        to create a clone of this dataset."""
+        return self._profile
+
+    @property
+    def name(self) -> str | None:
+        return self._name
+
+    @property
+    def dtype(self) -> str | None:
+        if not self.is_loaded and self._disk_dtype is not None:
+            return self._disk_dtype
+        return self.data.dtype
+
+    @property
+    def is_mask(self) -> bool:
+        # Follow user input if not loaded
+        if not self.is_loaded:
+            return self._is_mask
+        # Otherwise check data type
+        else:
+            return np.dtype(self.dtype) == np.bool_
+
     def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
         """
         Load only the raster mask from disk and return as independent array (not stored in any class attributes).
@@ -693,9 +801,9 @@ class Raster(RasterBase):
         if self.is_loaded:
             raise ValueError("Data are already loaded.")
 
-        if self.filename is None:
+        if self.name is None:
             raise AttributeError(
-                "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
+                "Cannot load as name is not set anymore. Did you manually update the name attribute?"
             )
 
         out_count = self._out_count
@@ -714,7 +822,7 @@ class Raster(RasterBase):
                 out_count = len(valid_bands)
 
         # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.filename) as dataset:
+        with rio.open(self.name) as dataset:
             mask = _load_rio(
                 dataset,
                 only_mask=True,
@@ -743,14 +851,14 @@ class Raster(RasterBase):
         :param kwargs: Optional keyword arguments sent to '_load_rio()'.
 
         :raises ValueError: If the data are already loaded.
-        :raises AttributeError: If no 'filename' attribute exists.
+        :raises AttributeError: If no 'name' attribute exists.
         """
         if self.is_loaded:
             raise ValueError("Data are already loaded.")
 
-        if self.filename is None:
+        if self.name is None:
             raise AttributeError(
-                "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
+                "Cannot load as name is not set anymore. Did you manually update the name attribute?"
             )
 
         # If no index is passed, use all of them
@@ -771,7 +879,7 @@ class Raster(RasterBase):
         self._bands_loaded = valid_bands
 
         # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.filename) as dataset:
+        with rio.open(self.name) as dataset:
             self.data = _load_rio(
                 dataset,
                 indexes=list(valid_bands),
@@ -788,10 +896,6 @@ class Raster(RasterBase):
         # Set nodata value with the loaded array
         # if self._nodata is not None:
         #     self.set_nodata(nodata=self._nodata)
-
-        # To have is_modified work correctly when data is loaded implicitly (not in init)
-        self._is_modified = False
-        self._disk_hash = hash((self.data.tobytes(), self.transform, self.crs, self.nodata))
 
     @classmethod
     def from_array(
@@ -1423,24 +1527,6 @@ class Raster(RasterBase):
                 nodata = _default_nodata(dtype)
             return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=self.area_or_point)
 
-    @property
-    def is_modified(self) -> bool:
-        """Whether the array has been modified since it was loaded from disk.
-
-        :returns: True if raster has been modified.
-
-        """
-        if not self.is_loaded:
-            return False
-
-        if not self._is_modified:
-            new_hash = hash(
-                (self._data.tobytes() if self._data is not None else 0, self.transform, self.crs, self.nodata)
-            )
-            self._is_modified = not (self._disk_hash == new_hash)
-
-        return self._is_modified
-
     def set_mask(self, mask: NDArrayBool | Raster) -> None:
         """
         Set a mask on the raster array.
@@ -1478,34 +1564,52 @@ class Raster(RasterBase):
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    def copy(self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> RasterType:
+    def copy(self: RasterType,
+             new_array: NDArrayNum | None = None,
+             cast_nodata: bool = True,
+             deep: bool = True) -> (
+            RasterType):
         """
         Copy the raster in-memory.
 
         :param new_array: New array to use in the copied raster.
         :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
             compatible. If False, will raise an error when incompatible.
+        :param deep: If True, will return a deep copy of the raster.
 
         :return: Copy of the raster.
         """
-        # Define new array
+
+        # Core attributes to copy and set again
+        # TODO: Add _shape for consistency?
+        dict_copy = ["_crs", "_nodata", "_tags", "_area_or_point",
+                     "_bands", "_transform", "_masked", "_is_mask",
+                     "_disk_shape", "_disk_bands", "_disk_dtype", "_disk_transform",
+                     "_name", "_driver", "_out_shape", "_out_count", "_obj"]
+
+        # Create empty instance without calling __init__
+        cls = self.__class__
+        new_obj = cls.__new__(cls)
+
+        # Looping through non-data attributes
+        for attr_name in dict_copy:
+            # Automatically copy other attributes
+            attr_value = getattr(self, attr_name)
+            if deep:
+                setattr(new_obj, attr_name, copy.deepcopy(attr_value))
+            else:
+                setattr(new_obj, attr_name, attr_value)
+
+        # Then, set the data attribute depending on deep copy, new array or none of those, ensuring laziness
+        if deep and new_array is None:
+            new_obj._data = self._data  # NumPy array
         if new_array is not None:
-            data = new_array
+            new_obj._data = None
+            new_obj.data = new_array  # Using data.setter to trigger input checks for new array
         else:
-            data = self.data.copy()
+            new_obj._data = self._data  # Can be loaded array or None if unloaded
 
-        # Send to from_array
-        cp = self.from_array(
-            data=data,
-            transform=self.transform,
-            crs=self.crs,
-            nodata=self.nodata,
-            area_or_point=self.area_or_point,
-            tags=self.tags,
-            cast_nodata=cast_nodata,
-        )
-
-        return cp
+        return new_obj
 
     def get_mask(self) -> NDArrayBool:
         """

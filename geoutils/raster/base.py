@@ -12,6 +12,8 @@ from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 
 import geopandas as gpd
 import numpy as np
+from sqlalchemy.util import asbool
+
 import rasterio as rio
 import xarray as xr
 from affine import Affine
@@ -89,17 +91,15 @@ class RasterBase(ABC):
         self._bands: int | list[int] | None = None
         self._driver: str | None = None
         self._name: str | None = None
-        self.filename: str | None = None
         self._tags: dict[str, Any] = {}
         self._bands_loaded: int | tuple[int, ...] | None = None
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_bands: tuple[int] | None = None
-        self._disk_dtype: str | None = None
+        self._disk_dtype: np.dtype | None = None
         self._disk_transform: Affine | None = None
         self._out_count: int | None = None
         self._out_shape: tuple[int, int] | None = None
         self._disk_hash: int | None = None
-        self._is_modified = True
         self._downsample: int | float = 1
         self._profile: dict[str, Any] | None = None
         self._is_mask: bool = False
@@ -109,6 +109,7 @@ class RasterBase(ABC):
         """Whether the underlying object is a Xarray Dataset through accessor, or not."""
         return self._obj is not None
 
+    # TODO: Change to abstract method
     @classmethod
     def from_array(
         cls: type[RasterType],
@@ -123,7 +124,9 @@ class RasterBase(ABC):
         """Placeholder method for subclasses."""
         raise NotImplementedError("This method is meant to be subclassed.")
 
-    def copy(self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> RasterType:
+    # TODO: Here too
+    def copy(self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True,
+             deep: bool = True) -> RasterType:
         """Placeholder method for subclasses."""
         raise NotImplementedError("This method is meant to be subclassed.")
 
@@ -272,7 +275,7 @@ class RasterBase(ABC):
         if self._is_xr:
             # For Mypy, always verified
             assert self._obj is not None
-            self._obj.rio.set_nodata(new_nodata)
+            self._obj.rio.write_nodata(new_nodata, inplace=True)
 
         else:
             # If we update mask or array, get the masked array
@@ -397,13 +400,7 @@ class RasterBase(ABC):
         old_area_or_point = self.area_or_point
 
         # Set new interpretation
-        self._area_or_point = new_area_or_point
-        # Update tag only if not None
-        if new_area_or_point is not None:
-            self.tags.update({"AREA_OR_POINT": new_area_or_point})
-        else:
-            if "AREA_OR_POINT" in self.tags:
-                self.tags.pop("AREA_OR_POINT")
+        self._set_area_or_point(new_area_or_point=new_area_or_point)
 
         # If shift is True, and both interpretation were different strings, a change is needed
         if (
@@ -425,7 +422,12 @@ class RasterBase(ABC):
             # We perform the shift in place
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
+    @abstractmethod
+    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+        ...
+
     @property
+    @abstractmethod
     def area_or_point(self) -> Literal["Area", "Point"] | None:
         """
         Pixel interpretation of the raster.
@@ -438,7 +440,6 @@ class RasterBase(ABC):
         When setting with self.area_or_point = new_area_or_point, uses the default arguments of
         self.set_area_or_point().
         """
-        return self._area_or_point
 
     @area_or_point.setter
     def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
@@ -458,12 +459,43 @@ class RasterBase(ABC):
     def is_loaded(self) -> bool:
         """Whether the raster array is loaded."""
         if self._obj is not None:
-            # TODO: Using unloaded functions (e.g. crop) requires to have _disk_shape defined (not supported for
-            #  RasterAccessor)... Should we write an equivalent?
-            return True
-            # return isinstance(self._obj.variable._data, np.ndarray)
+            return self._obj._in_memory
         else:
             return self._data is not None
+
+    @abstractmethod
+    def load(self) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def shape(self) -> tuple[int, int]:
+        """Shape (i.e., height, width) of the raster in pixels."""
+        ...
+
+    @property
+    @abstractmethod
+    def width(self) -> int:
+        """Width of the raster in pixels."""
+        ...
+
+    @property
+    @abstractmethod
+    def height(self) -> int:
+        """Height of the raster in pixels."""
+        ...
+
+    @property
+    @abstractmethod
+    def count(self) -> int:
+        """Count of bands loaded in memory if they are, otherwise the one on disk."""
+        ...
+
+    @property
+    @abstractmethod
+    def _count_on_disk(self) -> None | int:
+        """Count of bands on disk if it exists."""
+        ...
 
     @property
     def res(self) -> tuple[float | int, float | int]:
@@ -481,92 +513,23 @@ class RasterBase(ABC):
         return self.get_footprint_projected(self.crs)
 
     @property
-    def count_on_disk(self) -> None | int:
-        """Count of bands on disk if it exists."""
-        if self._disk_shape is not None:
-            return self._disk_shape[0]
-        return None
+    @abstractmethod
+    def dtype(self) -> np.dtype:
+        """Data type of the raster."""
+        ...
 
     @property
-    def count(self) -> int:
-        """Count of bands loaded in memory if they are, otherwise the one on disk."""
-        if self.is_loaded:
-            if self.data.ndim == 2:
-                return 1
-            else:
-                return int(self.data.shape[0])
-        #  This can only happen if data is not loaded, with a DatasetReader on disk is open, never returns None
-        return self.count_on_disk  # type: ignore
-
-    @property
-    def height(self) -> int:
-        """Height of the raster in pixels."""
-        if not self.is_loaded:
-            if self._out_shape is not None:
-                return self._out_shape[0]
-            else:
-                return self._disk_shape[1]  # type: ignore
-        else:
-            # If the raster is single-band
-            if self.data.ndim == 2:
-                return int(self.data.shape[0])
-            # Or multi-band
-            else:
-                return int(self.data.shape[1])
-
-    @property
-    def width(self) -> int:
-        """Width of the raster in pixels."""
-        if not self.is_loaded:
-            if self._out_shape is not None:
-                return self._out_shape[1]
-            else:
-                return self._disk_shape[2]  # type: ignore
-        else:
-            # If the raster is single-band
-            if self.data.ndim == 2:
-                return int(self.data.shape[1])
-            # Or multi-band
-            else:
-                return int(self.data.shape[2])
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        """Shape (i.e., height, width) of the raster in pixels."""
-        # If a downsampling argument was defined but data not loaded yet
-        if self._out_shape is not None and not self.is_loaded:
-            return self._out_shape
-        # If data loaded or not, pass the disk/data shape through height and width
-        return self.height, self.width
-
-    @property
-    def dtype(self) -> str:
-        """Data type of the raster (string representation)."""
-        if not self.is_loaded and self._disk_dtype is not None:
-            return self._disk_dtype
-        return str(self.data.dtype)
-
-    @property
-    def bands_on_disk(self) -> None | tuple[int, ...]:
+    def _bands_on_disk(self) -> None | tuple[int, ...]:
         """Band indexes on disk if a file exists."""
         if self._disk_bands is not None:
             return self._disk_bands
         return None
 
     @property
+    @abstractmethod
     def bands(self) -> tuple[int, ...]:
         """Band indexes loaded in memory if they are, otherwise on disk."""
-        if self._bands is not None and not self.is_loaded:
-            if isinstance(self._bands, int):
-                return (self._bands,)
-            return tuple(self._bands)
-        # if self._indexes_loaded is not None:
-        #     if isinstance(self._indexes_loaded, int):
-        #         return (self._indexes_loaded, )
-        #     return tuple(self._indexes_loaded)
-        if self.is_loaded:
-            return tuple(range(1, self.count + 1))
-        return self.bands_on_disk  # type: ignore
+        ...
 
     @property
     def indexes(self) -> tuple[int, ...]:
@@ -577,32 +540,22 @@ class RasterBase(ABC):
         return self.bands
 
     @property
+    @abstractmethod
     def driver(self) -> str | None:
         """Driver used to read a file on disk."""
-        return self._driver
+        ...
 
     @property
+    @abstractmethod
     def name(self) -> str | None:
         """Name of the file on disk, if it exists."""
-        return self._name
+        ...
 
     @property
-    def profile(self) -> dict[str, Any] | None:
-        """Basic metadata and creation options of this dataset.
-        May be passed as keyword arguments to rasterio.open()
-        to create a clone of this dataset."""
-        return self._profile
-
-    @property
+    @abstractmethod
     def is_mask(self) -> bool:
         """Whether the raster array is a boolean data type (a mask)."""
-
-        # Follow user input if not loaded
-        if not self.is_loaded:
-            return self._is_mask
-        # Otherwise check data type
-        else:
-            return np.dtype(self.dtype) == np.bool_
+        ...
 
     def _is_bigtiff(self) -> bool:
         """
@@ -613,8 +566,8 @@ class RasterBase(ABC):
 
         :return: if the filename exists and if its is a BigTIFF or not
         """
-        if self.filename and pathlib.Path(self.filename).exists():
-            with open(self.filename, "rb") as f:
+        if self.name and pathlib.Path(self.name).exists():
+            with open(self.name, "rb") as f:
                 header = f.read(4)
                 byteorder = {b"II": "<", b"MM": ">"}[header[:2]]
                 version = struct.unpack(byteorder + "h", header[2:])[0]
@@ -640,10 +593,8 @@ class RasterBase(ABC):
         """
         as_str = [
             f"Driver:               {self.driver} \n",
-            f"Opened from file:     {self.filename} \n",
             f"Filename:             {self.name} \n",
             f"Loaded?               {self.is_loaded} \n",
-            f"Modified since load?  {self.is_modified} \n",
             f"Grid size:            {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtype}\n",
@@ -816,33 +767,53 @@ class RasterBase(ABC):
 
         :param other: Other raster.
         :param strict_masked: Whether to check if masked cells (in .data.mask) have the same value (in .data.data).
+            Only when comparing two Rasters objects with masked arrays.
         :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
         """
 
-        if not isinstance(other, RasterBase):  # TODO: Possibly add equals to SatelliteImage?
-            raise NotImplementedError("Equality with other object than Raster not supported by raster_equal.")
+        if not isinstance(other, (RasterBase, xr.DataArray)):
+            raise NotImplementedError("Equality with other object than Raster and DataArray not supported by "
+                                      "raster_equal.")
 
-        if strict_masked:
-            names = ["data.data", "data.mask", "data.fill_value", "dtype", "transform", "crs", "nodata"]
+        # Only if both inputs are Raster objects with masked arrays
+        if not isinstance(other, xr.DataArray) and not self._is_xr and strict_masked:
+            names = ["data.data", "data.mask", "dtype", "transform", "crs", "nodata"]
             equalities = [
                 np.array_equal(self.data.data, other.data.data, equal_nan=True),
                 # Use getmaskarray to avoid comparing boolean with array when mask=False
                 np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),
-                self.data.fill_value == other.data.fill_value,
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
                 self.crs == other.crs,
                 self.nodata == other.nodata,
             ]
+        # For Raster or DataArray
         else:
-            names = ["data", "data.fill_value", "dtype", "transform", "crs", "nodata"]
+            # Get attributes whether the input is a Raster or DataArray
+            dtype = other.rst.dtype if isinstance(other, xr.DataArray) else other.dtype
+            transform = other.rst.transform if isinstance(other, xr.DataArray) else other.transform
+            crs = other.rst.crs if isinstance(other, xr.DataArray) else other.crs
+            nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
+
+            # Equality whether both, one or none of the arrays are masked
+            if np.ma.isMaskedArray(self.data) and np.ma.isMaskedArray(other.data):
+                array_eq = np.ma.allequal(self.data, other.data)
+            else:
+                if np.ma.isMaskedArray(self.data):
+                    array_eq = np.array_equal(self.get_nanarray(), other.data, equal_nan=True)
+                elif np.ma.isMaskedArray(other.data):
+                    array_eq = np.array_equal(self.data, other.rst.get_nanarray(), equal_nan=True)
+                else:
+                    array_eq = np.array_equal(self.data, other.data, equal_nan=True)
+
+            # Equalities
+            names = ["data", "dtype", "transform", "crs", "nodata"]
             equalities = [
-                np.ma.allequal(self.data, other.data),
-                self.data.fill_value == other.data.fill_value,
-                self.data.dtype == other.data.dtype,
-                self.transform == other.transform,
-                self.crs == other.crs,
-                self.nodata == other.nodata,
+                array_eq,
+                self.dtype == dtype,
+                self.transform == transform,
+                self.crs == crs,
+                self.nodata == nodata,
             ]
 
         complete_equality = all(equalities)
@@ -855,16 +826,26 @@ class RasterBase(ABC):
 
         return complete_equality
 
-    def georeferenced_grid_equal(self: RasterType, raster: RasterType) -> bool:
+    def georeferenced_grid_equal(self: RasterType, other: RasterType) -> bool:
         """
         Check that raster shape, geotransform and CRS are equal.
 
-        :param raster: Another raster.
+        :param other: Another raster.
 
         :return: Whether the two objects have the same georeferenced grid.
         """
 
-        return all([self.shape == raster.shape, self.transform == raster.transform, self.crs == raster.crs])
+        # For it to work with DataArray or Raster object inputs
+        if isinstance(other, xr.DataArray):
+            transform = other.rst.transform
+            shape = other.rst.shape
+            crs = other.rst.crs
+        else:
+            transform = other.transform
+            shape = other.shape
+            crs = other.crs
+
+        return all([self.shape == shape, self.transform == transform, self.crs == crs])
 
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
@@ -1000,40 +981,10 @@ class RasterBase(ABC):
         else:
             return nanarray
 
-    # Note the star is needed because of the default argument 'mode' preceding non default arg 'inplace'
-    # Then the final overload must be duplicated
-    # Also note that in the first overload, only "inplace: Literal[False]" does not work. The ellipsis is
-    # essential, otherwise MyPy gives incompatible return type Optional[Raster].
-    @overload
-    def crop(
-        self: RasterType,
-        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        *,
-        inplace: Literal[False] = False,
-    ) -> RasterType: ...
-
-    @overload
-    def crop(
-        self: RasterType,
-        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        *,
-        inplace: Literal[True],
-    ) -> None: ...
-
-    @overload
-    def crop(
-        self: RasterType,
-        bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        *,
-        inplace: bool = False,
-    ) -> RasterType | None: ...
-
     @profiler.profile("geoutils.raster.raster.crop", memprof=True)  # type: ignore
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
-        *,
-        inplace: bool = False,
     ) -> RasterType | None:
         """
         Crop the raster to a given extent.
@@ -1048,101 +999,38 @@ class RasterBase(ABC):
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param mode: Whether to match within pixels or exact extent. ``'match_pixel'``  ``'match_extent'``
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
-        :param inplace: Whether to update the raster in-place.
 
-        :returns: A new raster (or None if inplace).
+        :returns: A new cropped raster.
         """
 
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
 
-        if inplace:
-            self._data = cropped_arr
-            self.set_transform(new_transform)
-            return None
+        if self._is_xr:
+            newraster = cropped_arr
         else:
             newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
-            return newraster
-
-    @overload
-    def icrop(
-        self: RasterType,
-        bbox: list[int] | tuple[int, ...],
-        *,
-        inplace: Literal[True],
-    ) -> None: ...
-
-    @overload
-    def icrop(
-        self: RasterType,
-        bbox: list[int] | tuple[int, ...],
-        *,
-        inplace: Literal[False] = False,
-    ) -> RasterType: ...
+        return newraster
 
     @profiler.profile("geoutils.raster.raster.icrop", memprof=True)  # type: ignore
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
-        *,
-        inplace: bool = False,
     ) -> RasterType | None:
         """
         Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
         :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowmax).
-        :param inplace: If True, modify the raster in place. Otherwise, return a new cropped raster.
 
-        :returns: Cropped raster or None (if inplace=True).
+        :returns: Cropped raster .
         """
         crop_img, tfm = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
 
-        if inplace:
-            self._data = crop_img
-            self.transform = tfm
-            return None
+        if self._is_xr:
+            newraster = crop_img
         else:
             newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
-            return newraster
 
-    @overload
-    def reproject(
-        self: RasterType,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: Literal[False] = False,
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterType: ...
-
-    @overload
-    def reproject(
-        self: RasterType,
-        ref: RasterType | str | None = None,
-        crs: CRS | str | int | None = None,
-        res: float | Iterable[float] | None = None,
-        grid_size: tuple[int, int] | None = None,
-        bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
-        nodata: int | float | None = None,
-        dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
-        force_source_nodata: int | float | None = None,
-        *,
-        inplace: Literal[True],
-        silent: bool = False,
-        n_threads: int = 0,
-        memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
-    ) -> None: ...
+        return newraster
 
     @profiler.profile("geoutils.raster.raster.reproject", memprof=True)  # type: ignore
     def reproject(
@@ -1156,12 +1044,11 @@ class RasterBase(ABC):
         dtype: DTypeLike | None = None,
         resampling: Resampling | str = Resampling.bilinear,
         force_source_nodata: int | float | None = None,
-        inplace: bool = False,
         silent: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterType | None:
+    ) -> RasterType:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
 
@@ -1189,14 +1076,13 @@ class RasterBase(ABC):
         :param resampling: A Rasterio resampling method, can be passed as a string.
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
-        :param inplace: Whether to update the raster in-place.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
         :param multiproc_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
-        :returns: Reprojected raster (or None if inplace or computed out-of-memory).
+        :returns: Reprojected raster.
 
         """
         # Reproject
@@ -1219,10 +1105,7 @@ class RasterBase(ABC):
 
         # If return copy is True (target georeferenced grid was the same as input)
         if return_copy:
-            if inplace:
-                return None
-            else:
-                return self
+            return self
 
         # If multiprocessing -> results on disk -> load metadata
         # TODO: Fix re-opening logic for Xarray accessor
@@ -1242,17 +1125,8 @@ class RasterBase(ABC):
         # assert crs is not None
 
         # Write results to a new Raster.
-        if inplace:
-            # Order is important here, because calling self.data will use nodata to mask the array properly
-            self._crs = crs
-            self._nodata = nodata
-            self._transform = transformed
-            # A little trick to force the right shape of data in, then update the mask properly through the data setter
-            self._data = data.squeeze()
-            self.data = data
-            return None
-        else:
-            return self.from_array(data, transformed, crs, nodata, self.area_or_point)
+        return self.from_array(data=data, transform=transformed, crs=crs, nodata=nodata,
+                               area_or_point=self.area_or_point, tags=self.tags)
 
     @overload
     def translate(
@@ -1311,16 +1185,13 @@ class RasterBase(ABC):
             self.set_transform(translated_transform)
             return None
         else:
-            raster_copy = self.from_array(
-                data=self.data,
-                transform=translated_transform,
-                crs=self.crs,
-                nodata=self.nodata,
-                tags=self.tags,
-                area_or_point=self.area_or_point,
-                cast_nodata=False,
-            )
-
+            raster_copy = self.copy(deep=False)  # Avoid loading
+            if self._is_xr:
+                # Safe to call the accessor in the BaseClass, because we're now working on a new DataArray object,
+                # not the accessor class itself
+                raster_copy.rst._set_transform(translated_transform)
+            else:
+                raster_copy._set_transform(translated_transform)
             return raster_copy
 
     def reduce_points(
@@ -1474,7 +1345,7 @@ class RasterBase(ABC):
             else:
                 # TODO: if we want to allow sampling multiple bands, need to do it also when data is loaded
                 # if self.count == 1:
-                with rio.open(self.filename) as raster:
+                with rio.open(self.name) as raster:
                     data = raster.read(
                         window=rio_window,
                         fill_value=self.nodata,
@@ -1487,7 +1358,7 @@ class RasterBase(ABC):
                 # else:
                 #     value = {}
                 #     win = {}
-                #     with rio.open(self.filename) as raster:
+                #     with rio.open(self.name) as raster:
                 #         for b in self.indexes:
                 #             data = raster.read(
                 #                 window=rio_window, fill_value=self.nodata, boundless=boundless,
@@ -2029,6 +1900,7 @@ class RasterBase(ABC):
         )
 
         out_nodata = _default_nodata(proximity.dtype)
+        print(out_nodata)
         return self.from_array(
             data=proximity,
             transform=self.transform,

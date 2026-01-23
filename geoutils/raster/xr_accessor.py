@@ -10,6 +10,7 @@ import numpy as np
 import rioxarray as rioxr
 import xarray as xr
 from affine import Affine
+import rasterio
 from rasterio.crs import CRS
 from rioxarray.rioxarray import affine_to_coords
 
@@ -18,7 +19,7 @@ from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 from geoutils.raster.base import RasterBase
 
 
-def open_raster(filename: str, **kwargs: Any) -> xr.DataArray:
+def open_raster(filename: str, is_mask: bool = False, **kwargs: Any) -> xr.DataArray:
     """
     Open a raster using Rioxarray, always masked and squeezed.
 
@@ -26,11 +27,17 @@ def open_raster(filename: str, **kwargs: Any) -> xr.DataArray:
     :param kwargs: Keyword to pass to rioxarray.open().
     """
 
+    # TODO: Wrap the chunk argument to accept 2D chunks? Right now need to pass 3D even for single-band raster
+
     # Open with Rioxarray, cast to float32 if integer type
     ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
 
     # Remove the band dimension if there is only one
     ds = ds.squeeze()  # Delete band coordinate (only one dimension)
+
+    # If input needs to be interpreted as a boolean mask
+    if is_mask:
+        ds = ds.astype(bool)
 
     return ds
 
@@ -47,14 +54,19 @@ class RasterAccessor(RasterBase):
 
     def __init__(self, xarray_obj: xr.DataArray) -> None:
         """
-        Instantiate the raster accessor.
+        Instantiate the raster accessor. This function is called on the first "ds.rst" call of a given DataArray.
         """
 
         super().__init__()
 
+        # Base instantiation of Xarray accessor
         self._obj: xr.DataArray = xarray_obj
-        self._area_or_point = self._obj.attrs.get("AREA_OR_POINT", None)
-        self._nodata = self._obj.rio.encoded_nodata
+
+        # We are never returning a DataArray that is unmasked, so the nodata plays a different role than in Rioxarray
+        # It is only used for file writing = always the encoded value if it exists
+        if self._obj.rio.encoded_nodata is not None:
+            # Write encoded nodata as "_FillValue" attribute
+            self._obj.rio.write_nodata(self._obj.rio.encoded_nodata, inplace=True)
 
     @property
     def data(self) -> xr.DataArray:
@@ -63,7 +75,7 @@ class RasterAccessor(RasterBase):
 
     @data.setter
     def data(self, new_data: xr.DataArray) -> None:
-        self.data = new_data
+        self._obj.data = new_data
 
     @property
     def transform(self) -> Affine:
@@ -81,13 +93,13 @@ class RasterAccessor(RasterBase):
         # See https://github.com/corteva/rioxarray/issues/698
         from rioxarray.rioxarray import affine_to_coords
 
-        coords = affine_to_coords(affine=new_transform, width=self.data.shape[0], height=self.data.shape[1])
-        self._obj["x"] = coords["x"]
-        self._obj["y"] = coords["y"]
+        # Derive coordinate from new transform
+        coords = affine_to_coords(affine=new_transform, width=self._obj.sizes["x"], height=self._obj.sizes["y"])
+        # This is lazy (doesn't load data), while calling the arrays directly is
+        self._obj = self._obj.assign_coords({"x": coords["x"], "y": coords["y"]})
 
-        # No need to call write transform now
-        # BUG: Calling write_transform resets the nodata to "None"!
-        # self._obj.rio.write_transform(new_transform, inplace=True)
+        # Need to call write transform now
+        self._obj.rio.write_transform(new_transform, inplace=True)
 
     def _set_crs(self, new_crs: CRS) -> None:
         # Overloads abstract method in RasterBase
@@ -104,17 +116,25 @@ class RasterAccessor(RasterBase):
     @property
     def nodata(self) -> int | float | None:
         # Overloads abstract method in RasterBase
-        # Using this logic to ensure nodata is always defined:
-        # On file opening with NaN
-        if self._obj.rio.nodata is not None and np.isnan(self._obj.rio.nodata):
-            return self._obj.rio.encoded_nodata
-        # If user has overriden the value
-        else:
-            return self._obj.rio.nodata
+        return self._obj.attrs.get("_FillValue", None)
 
     @nodata.setter
     def nodata(self, new_nodata: int | float | None) -> None:
-        self.set_nodata(new_nodata=new_nodata)
+        # self.set_nodata(new_nodata=new_nodata)
+        self._nodata = new_nodata
+        # Update the Xarray attributes with a new "_FillValue"
+        self._obj.rio.write_nodata(self._nodata, inplace=True)
+
+    @property
+    def area_or_point(self) -> Literal["Area", "Point"] | None:
+        return self._obj.attrs.get("AREA_OR_POINT", None)
+
+    @area_or_point.setter
+    def area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+        self.set_area_or_point(new_area_or_point=new_area_or_point)
+
+    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+        self._obj.attrs.update({"AREA_OR_POINT": new_area_or_point})
 
     @property
     def tags(self) -> dict[str, Any]:
@@ -127,7 +147,65 @@ class RasterAccessor(RasterBase):
             new_tags = {}
         self._obj.attrs = new_tags
 
-    def copy(self, new_array: NDArrayNum | None = None, cast_nodata: bool = True) -> xr.DataArray:
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._obj.rio.shape
+
+    @property
+    def width(self) -> int:
+        return self._obj.rio.width
+
+    @property
+    def height(self) -> int:
+        return self._obj.rio.height
+
+    @property
+    def count(self) -> int:
+        return self._obj.rio.count
+
+    @property
+    def _count_on_disk(self) -> None | int:
+        return None
+
+    @property
+    def bands(self) -> tuple[int, ...]:
+        if "band" not in self._obj.dims:
+            return (1,)
+        return tuple(self._obj["band"])
+
+    @property
+    def driver(self) -> str | None:
+        # Check if driver exists in encoding (inconsistent in Rioxarray)
+        xr_driver = self._obj.encoding.get("driver")
+        if xr_driver is not None:
+            driver = xr_driver
+        # Otherwise, if filename exists, get it from Rasterio directly
+        elif self.name is not None:
+            with rasterio.open(self.name) as ds:
+                driver = ds.driver
+            # Add it to encoding
+            self._obj.encoding.update({"driver": driver})
+        else:
+            driver = None
+
+        return driver
+
+    @property
+    def name(self) -> str | None:
+        return self._obj.encoding.get("source")
+    
+    @property
+    def dtype(self) -> str | None:
+        return self._obj.dtype
+
+    @property
+    def is_mask(self) -> bool:
+        return np.dtype(self.dtype) == np.bool_
+
+    def load(self) -> None:
+        self._obj.load()
+
+    def copy(self, new_array: NDArrayNum | None = None, cast_nodata: bool = True, deep: bool = True) -> xr.DataArray:
         """
         Copy the raster in-memory.
 
@@ -135,27 +213,11 @@ class RasterAccessor(RasterBase):
         :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
           compatible. If False, will raise an error when incompatible.
 
+
         :return: Copy of the raster.
         """
 
-        # Define new array
-        if new_array is not None:
-            data = new_array
-        else:
-            data = self.data.copy()
-
-        # Send to from_array
-        cp = self.from_array(
-            data=data,
-            transform=self.transform,
-            crs=self.crs,
-            nodata=self.nodata,
-            area_or_point=self.area_or_point,
-            tags=self.tags,
-            cast_nodata=cast_nodata,
-        )
-
-        return cp
+        return self._obj.copy(data=new_array, deep=deep)
 
     @classmethod
     def from_array(
@@ -189,8 +251,8 @@ class RasterAccessor(RasterBase):
 
         # Set other attributes
         out_ds.rio.write_transform(transform, inplace=True)
-        out_ds.rio.set_crs(crs, inplace=True)
-        out_ds.rio.set_nodata(nodata, inplace=True)
+        out_ds.rio.write_crs(crs, inplace=True)
+        out_ds.rio.write_nodata(nodata, inplace=True)
 
         return out_ds
 

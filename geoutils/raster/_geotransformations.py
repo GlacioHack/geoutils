@@ -29,6 +29,8 @@ from typing import Any, Iterable
 
 import affine
 import numpy as np
+import rasterio
+
 import rasterio as rio
 from packaging.version import Version
 from rasterio.crs import CRS
@@ -119,12 +121,12 @@ def _user_input_reproject(
                     f"set a different nodata with `nodata`."
                 )
 
-            elif nodata in source_raster.data:
-                warnings.warn(
-                    f"For reprojection, nodata must be set. Default chosen value {nodata} exists in "
-                    f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
-                    f"self.set_nodata()."
-                )
+            # elif nodata in source_raster.data:
+            #     warnings.warn(
+            #         f"For reprojection, nodata must be set. Default chosen value {nodata} exists in "
+            #         f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
+            #         f"self.set_nodata()."
+            #     )
 
     # Create a BoundingBox if required
     if bounds is not None:
@@ -329,9 +331,7 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
     )
 
 
-def _rio_reproject(
-    src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]
-) -> tuple[NDArrayNum | NDArrayBool, NDArrayBool]:
+def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:
     """Rasterio reprojection wrapper.
 
     :param src_arr: Source array for data.
@@ -404,8 +404,9 @@ def _rio_reproject(
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
     if Version(rio.__version__) > Version("1.4.3"):
         reproj_kwargs.update({"tolerance": 0})
+    # TODO: Figure out why those warning are raised for _dask_reproject with perfectly fine src_transforms
 
-    # Run reprojection
+    warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
     _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
 
     # Get output mask
@@ -425,4 +426,4 @@ def _rio_reproject(
         dst_arr = dst_arr
         dst_arr[dst_mask] = np.nan
 
-    return dst_arr, dst_mask
+    return dst_arr
