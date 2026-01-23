@@ -646,9 +646,11 @@ class TestRasterGeotransformations:
         r2 = r.copy()
         r2.set_area_or_point("Point", shift_area_or_point=False)
 
-        with pytest.warns(UserWarning, match="One raster has a pixel interpretation"):
-            with pytest.warns(UserWarning, match="Output projection, bounds and grid"):
-                r.reproject(r2)
+        with (
+            pytest.warns(UserWarning, match="Output projection, bounds"),
+            pytest.warns(UserWarning, match="One raster has a pixel"),
+        ):
+            r.reproject(r2)
 
         # Check that reprojecting preserves interpretation
         r_reproj = r.reproject(res=r.res[0] * 2)
