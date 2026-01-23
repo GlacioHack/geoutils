@@ -215,7 +215,7 @@ def _statistics(
 
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
-        warnings.warn("Empty raster, returns Nan for all stats")
+        warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
         if stats_name is None:
             stat_data_valid = STATS_LIST  # type: ignore
         else:
@@ -266,7 +266,7 @@ def _statistics(
                 else:
                     # if none of the above conditions are met and if stats_name is not about the inlier mask
                     if stat_name not in STATS_LIST_MASK and stat_name not in _ALIAS_STATS_LIST_MASK:
-                        warnings.warn("Statistic name " + stat_name + " is not recognized")
+                        warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
                         res_dict[stat_name] = np.float32(np.nan)  # type: ignore
 
     # If inlier mask parameter given before in get_stats() and if one of these stats is wanted

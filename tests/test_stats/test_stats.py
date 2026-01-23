@@ -84,7 +84,6 @@ class TestStats:
 
         # Empty mask (=False)
         empty_mask = np.zeros_like(inlier_mask)
-        # with caplog.at_level(logging.WARNING):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats(inlier_mask=empty_mask)

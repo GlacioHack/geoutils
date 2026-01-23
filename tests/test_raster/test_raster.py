@@ -412,7 +412,9 @@ class TestRaster:
         if np.issubdtype(rst.dtype, np.integer):
             # Set an existing nodata value, because all of our integer-type example datasets currently have "None"
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="New nodata value cells already exist.*")
+                warnings.filterwarnings(
+                    "ignore", message="New nodata value cells already exist.*", category=UserWarning
+                )
                 rst.set_nodata(new_nodata=255)
             ds = rst.to_xarray()
             rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtype)
@@ -1025,7 +1027,9 @@ class TestRaster:
 
         # This should work for all the types by default due to automatic casting
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="Unmasked values equal to the nodata value*")
+            warnings.filterwarnings(
+                "ignore", message="Unmasked values equal to the nodata value*", category=UserWarning
+            )
             r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
         assert r2.dtype == new_dtype
 
@@ -1889,7 +1893,7 @@ class TestRaster:
         """Check nodata casting of from_array that affects of all other functionalities (copy, etc)"""
 
         rst = gu.Raster(self.landsat_b4_path)
-        warnings.filterwarnings("ignore", message="New nodata value cells already exist*")
+        warnings.filterwarnings("ignore", message="New nodata value cells already exist*", category=UserWarning)
         rst.set_nodata(255)
 
         # Check that a not-compatible nodata will raise an error if casting is not true
@@ -2328,7 +2332,7 @@ class TestArithmetic:
         """
         Check that arithmetic overloading functions, with two operands, work as expected when called explicitly.
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray, single number
         r1 = self.r1
@@ -2427,7 +2431,7 @@ class TestArithmetic:
         """
         Check reflective operations
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray, single number
         rng = np.random.default_rng(42)
@@ -2492,7 +2496,7 @@ class TestArithmetic:
         """
         Test certain arithmetic overloading when called with symbols (+, -, *, /, //, %).
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray with 2D or 3D shape, single number
         r1 = self.r1
@@ -2568,7 +2572,7 @@ class TestArithmetic:
         """
         Test logical arithmetic overloading when called with symbols (==, !=, <, <=, >, >=).
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray with 2D or 3D shape, single number
         r1 = self.r1

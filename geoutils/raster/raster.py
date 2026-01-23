@@ -1212,7 +1212,7 @@ class Raster:
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
             warnings.warn(
-                category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
+                message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}.", category=UserWarning
             )
 
         return complete_equality
@@ -1583,7 +1583,8 @@ class Raster:
             if not rio.dtypes.can_cast_dtype(self.data, dtype):
                 warnings.warn(
                     "dtype conversion will result in a loss of information. "
-                    f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data."
+                    f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data.",
+                    category=UserWarning,
                 )
 
         out_data = self.data.astype(dtype)
@@ -1858,13 +1859,13 @@ class Raster:
             # This can happen during a numerical operation, especially for integer values that max out with a modulo
             # It can also happen with from_array()
             warnings.warn(
-                category=UserWarning,
                 message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
                 "If this happened when creating or updating the array, to silence this warning, "
                 "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
                 "to creating or updating the raster.\n"
                 "If this happened during a numerical operation, use astype() prior to the operation "
                 "to convert to a data type that won't derive the nodata values (e.g., a float type).",
+                category=UserWarning,
             )
             self._data[self._data.data == self.nodata] = np.ma.masked
 
@@ -2090,7 +2091,7 @@ class Raster:
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
             else:
-                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string")
+                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
 
     @overload
     def info(self, stats: bool = False, *, verbose: Literal[True] = ...) -> None: ...
@@ -2376,7 +2377,7 @@ class Raster:
             if self.count == 1:
                 first_arg = args[0].data
             else:
-                warnings.warn("Applying np.gradient to first raster band only.")
+                warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
                 first_arg = args[0].data[0, :, :]
 
         # Otherwise, we run the numpy function normally (most take masks into account)
@@ -2840,7 +2841,7 @@ class Raster:
                 # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
                 if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
                     nodata = _default_nodata(save_data.dtype)
-                    warnings.warn(f"No nodata set, will use default value of {nodata}")
+                    warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
                 save_data = save_data.filled(nodata)
 
         # Cast to 3D before saving if single band
@@ -2876,7 +2877,10 @@ class Raster:
 
                 # Warning: this will overwrite the transform
                 if dst.transform != rio.transform.Affine(1, 0, 0, 0, 1, 0):
-                    warnings.warn("A geotransform previously set is going to be cleared due to the setting of GCPs.")
+                    warnings.warn(
+                        "A geotransform previously set is going to be cleared due to the setting of GCPs.",
+                        category=UserWarning,
+                    )
 
                 dst.gcps = (rio_gcps, gcps_crs)
 
@@ -3038,7 +3042,7 @@ class Raster:
 
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(math.isnan(i) for i in intersection):
-            warnings.warn("Intersection is void")
+            warnings.warn("Intersection is void", category=UserWarning)
             return (0.0, 0.0, 0.0, 0.0)
 
         # if required, ensure the intersection is aligned with self's georeferences
