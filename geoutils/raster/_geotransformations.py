@@ -392,9 +392,9 @@ def _rio_reproject(
             "YSCALE": 1,
         }
     )
-    # If Rasterio has old enough version, force tolerance to 0 to avoid deformations on chunks
+    # If Rasterio is recent enough version, force tolerance to 0 to avoid deformations on chunks
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
-    if Version(rio.__version__) > Version("1.4.3"):
+    if Version(rio.__version__) > Version("1.5"):
         reproj_kwargs.update({"tolerance": 0})
 
     # Pop dtype and dst_shape arguments that don't exist in Rasterio, and are only used above
