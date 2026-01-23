@@ -22,14 +22,15 @@ from __future__ import annotations
 
 import copy
 import functools
-import warnings
-from typing import Any, Callable
 import logging
+import warnings
 from contextlib import contextmanager
+from typing import Any, Callable
 
 from packaging.version import Version
 
 import geoutils
+
 
 @contextmanager
 def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported"):
@@ -45,9 +46,9 @@ def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupporte
     class _Filter(logging.Filter):
         def filter(self, record):
             return not (
-                    record.name == "rasterio._env"
-                    and warn_code in record.getMessage()
-                    and param_name in record.getMessage()
+                record.name == "rasterio._env"
+                and warn_code in record.getMessage()
+                and param_name in record.getMessage()
             )
 
     flt = _Filter()

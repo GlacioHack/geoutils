@@ -35,13 +35,13 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
+from geoutils._misc import silence_rasterio_message
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
     _res,
 )
-from geoutils._misc import silence_rasterio_message
 
 ###########################
 # 1/ REPROJECT SUBFUNCTIONS
