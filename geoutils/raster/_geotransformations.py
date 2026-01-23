@@ -41,6 +41,7 @@ from geoutils.raster.georeferencing import (
     _default_nodata,
     _res,
 )
+from geoutils._misc import silence_rasterio_message
 
 ###########################
 # 1/ REPROJECT SUBFUNCTIONS
@@ -400,8 +401,11 @@ def _rio_reproject(
     reproj_kwargs.pop("dtype")
     reproj_kwargs.pop("dst_shape")
 
-    # Run reprojection
-    _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
+    # XSCALE/YSCALE have been supported for a while, but not officially exposed in the API until Rasterio 1.5,
+    # so we need to silence them in warnings to avoid noise for users
+    with silence_rasterio_message(param_name="SCALE"):
+        # Run reprojection
+        _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
 
     # Get output mask
     if reproj_kwargs["dst_nodata"] is not None:
