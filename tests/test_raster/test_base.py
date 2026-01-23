@@ -364,10 +364,24 @@ class TestClassVsAccessorConsistency:
     def test_methods__test_coverage(self):
         """Test that checks that all existing RasterBase methods are tested above."""
 
-        # Compare methods from above dictionaries to "methods" derived from class dictionary
+        # Compare tested methods from above list of tuples to all methods derived from class dictionary
         methods_1 = [m[0] for m in self.methods_and_kwargs]
         methods_2 = [m[0] for m in self.classmethods_and_kwargs]
         list_missing = [method for method in self.methods if method not in methods_1 + methods_2]
 
         if len(list_missing) != 0:
             raise AssertionError(f"RasterBase not covered by tests: {list_missing}")
+
+    chunked_methods_and_args =(
+        ("reproject", {"crs": CRS.from_epsg(32610), "res": 10}),
+    )
+    def test_methods__chunked(self):
+        """
+        Test that methods that work on chunks yield the exact same output for:
+        - In-memory,
+        - Dask backend through Xarray accessor,
+        - Multiprocessing backend through Raster class.
+
+        Also check that Dask array remains delayed before compute, and Multiprocessing output remains unloaded.
+        """
+

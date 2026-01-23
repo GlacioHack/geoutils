@@ -8,9 +8,15 @@ from geoutils import examples, open_raster
 
 class TestAccessor:
     """
-    Test for Xarray accessor mirroring Raster API.
+    Test for Xarray accessor subclass.
 
-    Note: Most tests are implemented in test_base for practicality (direct comparison with Raster).
+    Note: This test class only tests functionalities that are specific to the RasterAccessor subclass. Overridden
+    abstract methods, loading behaviour and Dask laziness are tested in test_base directly to mirror Raster tests.
+
+    This class thus tests:
+    - The open_raster function,
+    - The instantiation __init__ through ds.rst,
+    - The to_geoutils() method.
     """
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
