@@ -793,7 +793,10 @@ class TestMaskGeotransformations:
         assert mask_reproj.raster_equal(mask_uint8_reproj, strict_masked=True)
 
         # Test 2: Should raise a warning when the resampling differs from nearest
-        mask.reproject(res=50, resampling="bilinear")
+        with pytest.raises(
+            UserWarning, match=re.escape("Reprojecting a raster mask (boolean type) with a resampling method")
+        ):
+            mask.reproject(res=50, resampling="bilinear")
 
     def test_reproject__no_inters(self) -> None:
         """Test reprojection behaviour without intersection of inputs."""
