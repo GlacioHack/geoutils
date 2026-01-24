@@ -572,7 +572,7 @@ class Raster(RasterBase):
             warnings.warn(
                 "Setting default nodata {:.0f} to mask non-finite values found in the array, as "
                 "no nodata value was defined.".format(_default_nodata(dtype)),
-                UserWarning,
+                category=UserWarning,
             )
             self._nodata = _default_nodata(dtype)
 
@@ -1510,7 +1510,8 @@ class Raster(RasterBase):
             if not rio.dtypes.can_cast_dtype(self.data, dtype):
                 warnings.warn(
                     "dtype conversion will result in a loss of information. "
-                    f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data."
+                    f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data.",
+                    category=UserWarning,
                 )
 
         out_data = self.data.astype(dtype)
@@ -1750,7 +1751,7 @@ class Raster(RasterBase):
             if self.count == 1:
                 first_arg = args[0].data
             else:
-                warnings.warn("Applying np.gradient to first raster band only.")
+                warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
                 first_arg = args[0].data[0, :, :]
 
         # Otherwise, we run the numpy function normally (most take masks into account)
@@ -1818,8 +1819,6 @@ class Raster(RasterBase):
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -1833,17 +1832,19 @@ class Raster(RasterBase):
         the contents of self.data to disk, write this provided value to every
         pixel instead.
 
+        Compression default value is set to 'deflate' (equal to GDALs: COMPRESS=DEFLATE in co_opts).
+        Tiled default value is set to 'NO' as the GDAL default value.
+        Raster is saved as a BigTIFF if the output file might exceed 4GB and as classical TIFF otherwise.
+
+        Example: dem.to_file(to_file, co_opts={'TILED':'YES', 'COMPRESS':'LZW'})
+
         :param filename: Filename to write the file to.
         :param driver: Driver to write file with.
         :param dtype: Data type to write the image as (defaults to dtype of image data).
         :param nodata: Force a nodata value to be used (default to that of raster).
-        :param compress: Compression type. Defaults to 'deflate' (equal to GDALs: COMPRESS=DEFLATE).
-        :param tiled: Whether to write blocks in tiles instead of strips. Improves read performance on large files,
-            but increases file size.
         :param blank_value: Use to write an image out with every pixel's value.
             corresponding to this value, instead of writing the image data to disk.
-        :param co_opts: GDAL creation options provided as a dictionary,
-            e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
+        :param co_opts: GDAL creation options provided as a dictionary, e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
         :param metadata: Pairs of metadata to save to disk, in addition to existing metadata in self.tags.
         :param gcps: List of gcps, each gcp being [row, col, x, y, (z)].
         :param gcps_crs: CRS of the GCPS.
@@ -1853,6 +1854,15 @@ class Raster(RasterBase):
 
         if co_opts is None:
             co_opts = {}
+
+        # Set COMPRESS default value to DEFLATE
+        if "COMPRESS" not in map(str.upper, co_opts.keys()):
+            co_opts["COMPRESS"] = "DEFLATE"
+
+        # Set BIGTIFF default value to IF_SAFER, to save the output image as a BigTIFF if it might exceed 4GB.
+        if "BIGTIFF" not in map(str.upper, co_opts.keys()):
+            co_opts["BIGTIFF"] = "IF_SAFER"
+
         meta = self.tags if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
@@ -1887,7 +1897,7 @@ class Raster(RasterBase):
                 # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
                 if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
                     nodata = _default_nodata(save_data.dtype)
-                    warnings.warn(f"No nodata set, will use default value of {nodata}")
+                    warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
                 save_data = save_data.filled(nodata)
 
         # Cast to 3D before saving if single band
@@ -1905,8 +1915,6 @@ class Raster(RasterBase):
             crs=self.crs,
             transform=self.transform,
             nodata=nodata,
-            compress=compress,
-            tiled=tiled,
             **co_opts,
         ) as dst:
             dst.write(save_data)
@@ -1925,7 +1933,10 @@ class Raster(RasterBase):
 
                 # Warning: this will overwrite the transform
                 if dst.transform != rio.transform.Affine(1, 0, 0, 0, 1, 0):
-                    warnings.warn("A geotransform previously set is going to be cleared due to the setting of GCPs.")
+                    warnings.warn(
+                        "A geotransform previously set is going to be cleared due to the setting of GCPs.",
+                        category=UserWarning,
+                    )
 
                 dst.gcps = (rio_gcps, gcps_crs)
 
@@ -1939,15 +1950,13 @@ class Raster(RasterBase):
         driver: str = "GTiff",
         dtype: DTypeLike | None = None,
         nodata: Number | None = None,
-        compress: str = "deflate",
-        tiled: bool = False,
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
         gcps: list[tuple[float, ...]] | None = None,
         gcps_crs: CRS | None = None,
     ) -> None:
-        self.to_file(filename, driver, dtype, nodata, compress, tiled, blank_value, co_opts, metadata, gcps, gcps_crs)
+        self.to_file(filename, driver, dtype, nodata, blank_value, co_opts, metadata, gcps, gcps_crs)
 
     @classmethod
     def from_xarray(cls: type[RasterType], ds: xr.DataArray, dtype: DTypeLike | None = None) -> RasterType:

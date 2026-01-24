@@ -378,7 +378,7 @@ class TestSyntheticsNansFilters:  # type: ignore
         ("min", np.nanmin),
     ],
 )
-def test_filter_against_center_value(method, np_filter) -> None:
+def test_filter_against_center_value(method: str, np_filter: Callable[[NDArrayNum], NDArrayNum]) -> None:
     """
     Test filter against the center value of a function
     """

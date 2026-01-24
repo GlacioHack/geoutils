@@ -37,6 +37,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
+from geoutils._misc import silence_rasterio_message
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
@@ -246,6 +247,7 @@ def _get_target_georeferenced_grid(
 
     # --- Second, crop to requested bounds --- #
     else:
+        assert isinstance(bounds, rio.coords.BoundingBox)
         # If output size and bounds are known, can use rio.transform.from_bounds to get dst_transform
         if grid_size is not None:
             dst_transform = rio.transform.from_bounds(
@@ -382,12 +384,12 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     dst_arr = np.zeros(shape, dtype=reproj_kwargs["dtype"])
 
     # Performance keywords
-    if reproj_kwargs["n_threads"] == 0:
+    if reproj_kwargs["num_threads"] == 0:
         # Default to cpu count minus one. If the cpu count is undefined, num_threads will be 1
         cpu_count = os.cpu_count() or 2
         num_threads = cpu_count - 1
     else:
-        num_threads = reproj_kwargs["n_threads"]
+        num_threads = reproj_kwargs["num_threads"]
 
     # We force XSCALE=1 and YSCALE=1 passed to GDAL.Warp to avoid resampling deformations depending on extent/shape,
     # which leads to different results on chunks or a full array
@@ -400,14 +402,23 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
             "YSCALE": 1,
         }
     )
-    # If Rasterio has old enough version, force tolerance to 0 to avoid deformations on chunks
+    # If Rasterio is recent enough version, force tolerance to 0 to avoid deformations on chunks
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
-    if Version(rio.__version__) > Version("1.4.3"):
+    if Version(rio.__version__) > Version("1.5"):
         reproj_kwargs.update({"tolerance": 0})
-    # TODO: Figure out why those warning are raised for _dask_reproject with perfectly fine src_transforms
 
+    # Pop dtype and dst_shape arguments that don't exist in Rasterio, and are only used above
+    reproj_kwargs.pop("dtype")
+    reproj_kwargs.pop("dst_shape")
+
+    # TODO: Figure out why those warning are raised for _dask_reproject with perfectly fine src_transforms
     warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
-    _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
+
+    # XSCALE/YSCALE have been supported for a while, but not officially exposed in the API until Rasterio 1.5,
+    # so we need to silence them in warnings to avoid noise for users
+    with silence_rasterio_message(param_name="SCALE"):
+        # Run reprojection
+        _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
 
     # Get output mask
     if reproj_kwargs["dst_nodata"] is not None:

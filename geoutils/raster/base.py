@@ -755,7 +755,7 @@ class RasterBase(ABC):
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
             else:
-                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
+                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
 
     def raster_equal(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False) -> bool:
         """

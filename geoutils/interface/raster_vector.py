@@ -26,12 +26,14 @@ from typing import Iterable, Literal
 import affine
 import geopandas as gpd
 import numpy as np
+import rasterio
 import rasterio as rio
 from rasterio import features, warp
 from rasterio.crs import CRS
 from rasterio.features import shapes
 
 import geoutils as gu
+from geoutils._misc import silence_rasterio_message
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.raster.georeferencing import _bounds
 
@@ -103,7 +105,9 @@ def _polygonize(
         )
     )
 
-    gdf = gpd.GeoDataFrame.from_features(list(results))
+    # Warning that comes from GeoPandas
+    with silence_rasterio_message(param_name="MEM", warn_code="CPLE_AppDefined"):
+        gdf = gpd.GeoDataFrame.from_features(list(results))
     gdf.insert(0, data_column_name, range(0, 0 + len(gdf)))
     gdf = gdf.set_geometry(col="geometry")
     gdf = gdf.set_crs(source_raster.crs)

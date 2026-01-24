@@ -240,7 +240,7 @@ def _write_multiproc_result(
 ) -> gu.Raster:
 
     # Create a new raster file to save the processed results
-    with rio.open(config.outfile, "w", driver=config.driver, **file_metadata, BIG_TIFF="IF_NEEDED") as dst:
+    with rio.open(config.outfile, "w", driver=config.driver, **file_metadata, BIGTIFF="IF_NEEDED") as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:

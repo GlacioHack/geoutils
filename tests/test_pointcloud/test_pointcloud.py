@@ -466,7 +466,7 @@ class TestPointCloud:
     @pytest.mark.parametrize(
         "method", ["reproject", "crop", "translate", "set_precision", "to_crs", "set_crs", "rename_geometry"]
     )  # type: ignore
-    def test_cast_vector_methods__geometry_invariant(self, method: str):
+    def test_cast_vector_methods__geometry_invariant(self, method: str) -> None:
         """Test that method that don't modify geometry do cast back to a PointCloud."""
 
         pc1 = PointCloud(self.gdf1, data_column="b1")
@@ -1369,7 +1369,7 @@ class TestArrayInterface:
                 assert np.array_equal(output_pc, output_arr, equal_nan=True)
 
     @pytest.mark.parametrize("method_str", ["reduce"])  # type: ignore
-    def test_ufunc_methods(self, method_str):
+    def test_ufunc_methods(self, method_str: str) -> None:
         """
         Test that universal function methods all behave properly, don't need to test all
         nodatas and dtypes as this was done above.

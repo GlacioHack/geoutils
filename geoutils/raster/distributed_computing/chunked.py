@@ -378,7 +378,7 @@ def _reproject_per_block(
             "dst_shape": combined_meta["dst_shape"],
             "src_transform": src_transform,
             "dst_transform": dst_transform,
-            "n_threads": 1,
+            "num_threads": 1,
         }
     )
     # Define dtype if undefined

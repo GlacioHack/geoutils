@@ -124,7 +124,7 @@ def _reproject(
     #     )
 
     # 5/ Perform reprojection
-    reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
+    reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = multiproc_config is not None

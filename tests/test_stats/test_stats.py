@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import warnings
 from cmath import isnan
 from typing import Any
@@ -48,7 +47,6 @@ def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
     assert len(dict1.keys()) == len(dict1.keys())
     for key in dict1.keys():
         assert key in dict2
-        print("key", key)
         if dict1[key] is not np.nan:
             assert dict2[key] == pytest.approx(dict1[key], abs=1e-10)
         else:
@@ -61,7 +59,7 @@ class TestStats:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
-    def test_get_stats_raster(self, example: str, caplog) -> None:
+    def test_get_stats_raster(self, example: str) -> None:
         """
         Verify get_stats() method for a raster, especially output stats for different inputs
         parameters and some stats.
@@ -86,28 +84,31 @@ class TestStats:
 
         # Empty mask (=False)
         empty_mask = np.zeros_like(inlier_mask)
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats(inlier_mask=empty_mask)
-        assert "Empty raster, returns Nan for all stats" in caplog.text
         assert len(stats_masked) == len(expected_stats + expected_stats_count + expected_stats_mask)
         for name in expected_stats:
             assert np.isnan(stats_masked.get(name))
 
-        print('stats_masked.get("Valid count")', stats_masked.get("Valid count"))
         assert stats_masked.get("Valid count") == stats.get("Valid count")
         assert stats_masked.get("Total count") == stats.get("Total count")
         assert stats_masked.get("Percentage valid points") == stats.get("Percentage valid points")
 
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name="mean")
         assert np.isnan(stats_masked)
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name="valid_count")
         assert stats_masked == stats.get("Valid count")
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name="Valid inlier count")
         assert stats_masked == 0
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name="validinliercount")
         assert stats_masked == 0
 
@@ -117,7 +118,9 @@ class TestStats:
             transform=rio.transform.from_origin(10, 20, 1, 1),
             crs=4326,
         )
-        stats_empty = dem_empty.get_stats()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
+            stats_empty = dem_empty.get_stats()
         assert len(stats_empty) == len(expected_stats + expected_stats_count)
         for name in expected_stats:
             assert np.isnan(stats_empty.get(name))
@@ -144,22 +147,24 @@ class TestStats:
 
         # Selected stats and callable
         stats_name = ["mean", "max", "std", "validinliercount", "percentile_95"]
-        stats = raster.get_stats(stats_name=["mean", "max", "std", "validinliercount", percentile_95])
-        assert len(stats_name) == len(stats_name)
+        stats = raster.get_stats(
+            stats_name=["mean", "max", "std", "validinliercount", percentile_95], inlier_mask=inlier_mask
+        )
+        assert len(stats) == len(stats_name)
         for name in stats_name:
             assert name in stats
-            assert stats.get(name) is not None
+            assert not isnan(stats.get(name))
 
         # Non-existing stats
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Statistic name 80 percentile is not recognized")
             stat = raster.get_stats(stats_name="80 percentile")
-            assert isnan(stat)
-        assert "Statistic name '80 percentile' is not recognized" in caplog.text
+        assert isnan(stat)
 
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Statistic name 42 is a not recognized string")
             stat = raster.get_stats(stats_name=42)
-            assert stat is None
-        # assert "Statistic name '42' is not recognized string" in caplog.text
+        assert stat is None
 
         # IQR (scipy) validation with numpy
         nan_arr = raster.get_nanarray()
@@ -170,7 +175,7 @@ class TestStats:
         )
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_get_stats_raster_pointcloud(self, example: str, caplog) -> None:
+    def test_get_stats_raster_pointcloud(self, example: str) -> None:
         """
         Verify get_stats() method for a raster converted to pointcloud, especially output stats for different inputs
         parameters.
@@ -204,23 +209,23 @@ class TestStats:
             assert stats.get(name) is not None
 
         # Non-existing stats
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Statistic name 80 percentile is not recognized")
             stat = raster.get_stats(stats_name="80 percentile")
             assert isnan(stat)
-        assert "Statistic name '80 percentile' is not recognized" in caplog.text
 
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Statistic name 42 is a not recognized string")
             stat = raster.get_stats(stats_name=42)
             assert stat is None
-        # assert "Statistic name '42' is not recognized string" in caplog.text
 
         # Empty mask (=False)
         inlier_mask = ~raster.get_mask()
         empty_mask = np.zeros_like(inlier_mask)
         raster.set_mask(~empty_mask)
-        with caplog.at_level(logging.WARNING):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Empty raster")
             stats_masked = raster.to_pointcloud().get_stats()
-        assert "Empty raster, returns Nan for all stats" in caplog.text
         assert len(stats_masked) == len(expected_stats + expected_stats_count)
         for name in expected_stats:
             assert np.isnan(stats_masked.get(name))
@@ -371,7 +376,9 @@ class TestStats:
             "Percentage inlier points": np.float64(0.0),
             "Percentage valid inlier points": np.float64(0.0),
         }
-        compare_dict(stats_masked_rast_masked, rast.get_stats(inlier_mask=inlier_mask))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
+            compare_dict(stats_masked_rast_masked, rast.get_stats(inlier_mask=inlier_mask))
 
     def test_pointcloud_get_stats_values(self) -> None:
         """

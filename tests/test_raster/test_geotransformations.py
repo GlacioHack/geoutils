@@ -618,7 +618,7 @@ class TestRasterGeotransformations:
         r2 = r.copy()
         r2.set_area_or_point("Point", shift_area_or_point=False)
 
-        with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
+        with (pytest.warns(UserWarning, match="One raster has a pixel"),):
             r.reproject(r2)
 
         # Check that reprojecting preserves interpretation
@@ -755,7 +755,9 @@ class TestMaskGeotransformations:
         assert mask_reproj.raster_equal(mask_uint8_reproj, strict_masked=True)
 
         # Test 2: Should raise a warning when the resampling differs from nearest
-        with pytest.warns(UserWarning, match="Reprojecting a raster mask .*"):
+        with pytest.raises(
+            UserWarning, match=re.escape("Reprojecting a raster mask (boolean type) with a resampling method")
+        ):
             mask.reproject(res=50, resampling="bilinear")
 
     def test_reproject__no_inters(self) -> None:

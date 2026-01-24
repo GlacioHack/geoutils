@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
+from PIL import Image
 
 import geoutils as gu
 from geoutils import examples
@@ -339,7 +340,7 @@ class TestRaster:
         assert np.array_equal(mask_notloaded, mask_loaded)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_to_rio_dataset(self, example: str):
+    def test_to_rio_dataset(self, example: str) -> None:
         """Test the export to a rasterio dataset"""
 
         # Open raster and export to rio dataset
@@ -359,7 +360,7 @@ class TestRaster:
         assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask.squeeze())
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_to_xarray(self, example: str):
+    def test_to_xarray(self, example: str) -> None:
         """Test the export to a xarray dataset"""
 
         # Open raster and export to xarray dataset
@@ -395,7 +396,7 @@ class TestRaster:
             assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_from_xarray(self, example: str):
+    def test_from_xarray(self, example: str) -> None:
         """Test raster creation from a xarray dataset, not fully reversible with to_xarray due to float conversion"""
 
         # Open raster and export to xarray, then import to xarray dataset
@@ -411,7 +412,9 @@ class TestRaster:
         if np.issubdtype(rst.dtype, np.integer):
             # Set an existing nodata value, because all of our integer-type example datasets currently have "None"
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="New nodata value cells already exist.*")
+                warnings.filterwarnings(
+                    "ignore", message="New nodata value cells already exist.*", category=UserWarning
+                )
                 rst.set_nodata(new_nodata=255)
             ds = rst.to_xarray()
             rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtype)
@@ -1021,7 +1024,9 @@ class TestRaster:
 
         # This should work for all the types by default due to automatic casting
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="Unmasked values equal to the nodata value*")
+            warnings.filterwarnings(
+                "ignore", message="Unmasked values equal to the nodata value*", category=UserWarning
+            )
             r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
         assert r2.dtype == new_dtype
 
@@ -1644,7 +1649,7 @@ class TestRaster:
     # The multi-band example will not have a colorbar, so not used in tests
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))  # type: ignore
-    def test_plot_cbar(self, example, figsize) -> None:
+    def test_plot_cbar(self, example: str, figsize: NDArrayNum) -> None:
         """
         Test cbar matches plot height.
         """
@@ -1772,17 +1777,28 @@ class TestRaster:
         img.to_file(temp_file)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert (Image.open(temp_file)).info["compression"] == "tiff_adobe_deflate"  # test no default compression
+        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
 
         # Try to save with a pathlib path (create a new temp file for Windows)
         path = pathlib.Path(temp_file)
         img.to_file(path)
 
-        # Test additional options
-        co_opts = {"TILED": "YES", "COMPRESS": "LZW"}
+        # Test additional option: one co_opts with tiled (with no compression)
+        co_opts = {"COMPRESS": "NONE"}
+        img.to_file(temp_file, co_opts=co_opts)
+        assert len((Image.open(temp_file)).tile) > 1  # test {TILED": "NO"} default value
+        saved = gu.Raster(temp_file)
+        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
+
+        # Test additional options: several co_opts with compress and bigtiff + metadata
+        co_opts = {"COMPRESS": "LZW", "BIGTIFF": "YES"}
         metadata = {"Type": "test"}
         img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
+        assert (Image.open(temp_file)).info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
+        assert saved._is_bigtiff()  # test {"BIGTIFF": "YES"}
         assert saved.tags["Type"] == "test"
 
         # Test saving file in COG format
@@ -1861,7 +1877,7 @@ class TestRaster:
         """Check nodata casting of from_array that affects of all other functionalities (copy, etc)"""
 
         rst = gu.Raster(self.landsat_b4_path)
-        warnings.filterwarnings("ignore", message="New nodata value cells already exist*")
+        warnings.filterwarnings("ignore", message="New nodata value cells already exist*", category=UserWarning)
         rst.set_nodata(255)
 
         # Check that a not-compatible nodata will raise an error if casting is not true
@@ -1921,9 +1937,26 @@ class TestRaster:
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
-    @pytest.mark.skip()  # type: ignore
-    def test__is_bigtiff_true(self) -> None:
+    def test__is_bigtiff_true(self, tmp_path: os.Path) -> None:
         """Test _is_bigtiff function for BigTIFF"""
+
+        with rio.open(
+            tmp_path / "fake_bigtiff.tif",
+            "w",
+            driver="GTiff",
+            width=10,
+            height=10,
+            count=1,
+            dtype="uint8",
+            crs="EPSG:4326",
+            transform=rio.transform.Affine(30.0, 0.0, 489340.0, 0.0, -30.0, 3098570.0),
+            BIGTIFF="YES",
+        ) as dst:
+            dst.write(np.zeros((1, 10, 10), dtype="uint8"))
+
+        img = gu.Raster(tmp_path / "fake_bigtiff.tif")
+
+        assert img._is_bigtiff() is True
 
     def test__is_bigtiff_false(self) -> None:
         """Test _is_bigtiff function for classic TIFF"""
@@ -2283,7 +2316,7 @@ class TestArithmetic:
         """
         Check that arithmetic overloading functions, with two operands, work as expected when called explicitly.
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray, single number
         r1 = self.r1
@@ -2382,7 +2415,7 @@ class TestArithmetic:
         """
         Check reflective operations
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray, single number
         rng = np.random.default_rng(42)
@@ -2447,7 +2480,7 @@ class TestArithmetic:
         """
         Test certain arithmetic overloading when called with symbols (+, -, *, /, //, %).
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray with 2D or 3D shape, single number
         r1 = self.r1
@@ -2523,7 +2556,7 @@ class TestArithmetic:
         """
         Test logical arithmetic overloading when called with symbols (==, !=, <, <=, >, >=).
         """
-        warnings.filterwarnings("ignore", message="invalid value encountered")
+        warnings.filterwarnings("ignore", message="invalid value encountered", category=UserWarning)
 
         # Test various inputs: Raster with different dtypes, np.ndarray with 2D or 3D shape, single number
         r1 = self.r1
@@ -3113,7 +3146,7 @@ class TestArrayInterface:
                 assert np.ma.allequal(output_rst, output_ma)
 
     @pytest.mark.parametrize("method_str", ["reduce"])  # type: ignore
-    def test_ufunc_methods(self, method_str):
+    def test_ufunc_methods(self, method_str: str) -> None:
         """
         Test that universal function methods all behave properly, don't need to test all
         nodatas and dtypes as this was done above.
