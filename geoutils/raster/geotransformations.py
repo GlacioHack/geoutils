@@ -117,7 +117,7 @@ def _reproject(
         )
 
     # 5/ Perform reprojection
-    reproj_kwargs.update({"n_threads": n_threads, "warp_mem_limit": memory_limit})
+    reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
     if multiproc_config is not None:
         _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
         return False, None, None, None, None

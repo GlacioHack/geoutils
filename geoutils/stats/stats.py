@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-import logging
+import warnings
 from collections.abc import Callable
 from functools import partial
 from typing import Any
@@ -215,7 +215,7 @@ def _statistics(
 
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
-        logging.warning("Empty raster, returns Nan for all stats")
+        warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
         if stats_name is None:
             stat_data_valid = STATS_LIST  # type: ignore
         else:
@@ -247,7 +247,6 @@ def _statistics(
         else:
             res_dict = {}  # type: ignore
             for stat_name in stats_name:
-
                 # Compute stat if in stats_dict keys
                 if isinstance(stat_name, str) and stat_name in stats_dict.keys():
                     if callable(stats_dict[stat_name]):
@@ -264,10 +263,11 @@ def _statistics(
                 elif callable(stat_name):
                     res_dict[stat_name.__name__] = stat_name(data)  # type: ignore
 
-                # Stat not recognized
                 else:
-                    logging.warning("Statistic name '%s' is not recognized", stat_name)
-                    res_dict[stat_name] = np.float32(np.nan)  # type: ignore
+                    # if none of the above conditions are met and if stats_name is not about the inlier mask
+                    if stat_name not in STATS_LIST_MASK and stat_name not in _ALIAS_STATS_LIST_MASK:
+                        warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+                        res_dict[stat_name] = np.float32(np.nan)  # type: ignore
 
     # If inlier mask parameter given before in get_stats() and if one of these stats is wanted
     if counts is not None and (
