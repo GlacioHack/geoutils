@@ -212,6 +212,7 @@ def _get_target_georeferenced_grid(
                 bounds["right"],
                 bounds["top"],
             )
+    assert isinstance(bounds, rio.coords.BoundingBox)
 
     # If all georeferences are the same as input, skip calculating because of issue in
     # rio.warp.calculate_default_transform (https://github.com/rasterio/rasterio/issues/3010)

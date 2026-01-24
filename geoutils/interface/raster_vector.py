@@ -27,16 +27,16 @@ import affine
 import geopandas as gpd
 import numpy as np
 import rasterio
-
 import rasterio as rio
 from rasterio import features, warp
 from rasterio.crs import CRS
 from rasterio.features import shapes
 
 import geoutils as gu
+from geoutils._misc import silence_rasterio_message
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.raster.georeferencing import _bounds
-from geoutils._misc import silence_rasterio_message
+
 
 def _polygonize(
     source_raster: gu.Raster,

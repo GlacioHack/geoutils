@@ -69,7 +69,7 @@ class TestGeoreferencing:
         assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1]) == ([lims_ul[2]], [lims_ul[1]])
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_xy2ij_ij2xy_reversible(self, example: str):
+    def test_xy2ij_ij2xy_reversible(self, example: str) -> None:
 
         # Open raster
         rst = gu.Raster(example)

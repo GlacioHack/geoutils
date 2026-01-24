@@ -340,7 +340,7 @@ class TestRaster:
         assert np.array_equal(mask_notloaded, mask_loaded)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_to_rio_dataset(self, example: str):
+    def test_to_rio_dataset(self, example: str) -> None:
         """Test the export to a rasterio dataset"""
 
         # Open raster and export to rio dataset
@@ -360,7 +360,7 @@ class TestRaster:
         assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask.squeeze())
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_to_xarray(self, example: str):
+    def test_to_xarray(self, example: str) -> None:
         """Test the export to a xarray dataset"""
 
         # Open raster and export to xarray dataset
@@ -396,7 +396,7 @@ class TestRaster:
             assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
-    def test_from_xarray(self, example: str):
+    def test_from_xarray(self, example: str) -> None:
         """Test raster creation from a xarray dataset, not fully reversible with to_xarray due to float conversion"""
 
         # Open raster and export to xarray, then import to xarray dataset
@@ -1665,7 +1665,7 @@ class TestRaster:
     # The multi-band example will not have a colorbar, so not used in tests
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path])  # type: ignore
     @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))  # type: ignore
-    def test_plot_cbar(self, example, figsize) -> None:
+    def test_plot_cbar(self, example: str, figsize: NDArrayNum) -> None:
         """
         Test cbar matches plot height.
         """
@@ -3162,7 +3162,7 @@ class TestArrayInterface:
                 assert np.ma.allequal(output_rst, output_ma)
 
     @pytest.mark.parametrize("method_str", ["reduce"])  # type: ignore
-    def test_ufunc_methods(self, method_str):
+    def test_ufunc_methods(self, method_str: str) -> None:
         """
         Test that universal function methods all behave properly, don't need to test all
         nodatas and dtypes as this was done above.

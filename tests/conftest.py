@@ -1,6 +1,7 @@
 """Test configuration."""
 
 import logging
+from typing import Any
 
 import pytest
 
@@ -8,16 +9,16 @@ import pytest
 class LoggingWarningCollector(logging.Handler):
     """Helper class to collect logging warnings."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(level=logging.WARNING)
         self.records = []
 
-    def emit(self, record):
+    def emit(self, record: Any) -> None:
         self.records.append(record)
 
 
-@pytest.fixture(autouse=True)
-def fail_on_logging_warnings(request):
+@pytest.fixture(autouse=True)  # type: ignore
+def fail_on_logging_warnings(request: Any) -> Any:
     """Fixture used automatically in all tests to fail when a logging exceptions of WARNING or above is raised."""
 
     # The collector is required to avoid teardown, hookwrapper or plugin issues (we collect and fail later)

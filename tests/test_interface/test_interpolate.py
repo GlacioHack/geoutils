@@ -51,7 +51,7 @@ class TestInterpolate:
     )  # type: ignore
     def test_interpn_interpolator_accuracy(
         self, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    ):
+    ) -> None:
         """Test that _interpn_interpolator (used by interp_points) returns exactly the same result as scipy.interpn."""
 
         # Create synthetic 2D array with non-aligned coordinates in X/Y, and X in descending order to mirror a raster's
@@ -403,7 +403,7 @@ class TestInterpolate:
         else:
             mask_nan_dilated = mask_nan.astype("uint8")
         # Get indices of the related pixels, convert to coordinates
-        i, j = np.where(mask_nan_dilated)
+        i, j = np.where(mask_nan_dilated)  # type: ignore
         x, y = r.ij2xy(i, j)
         # And interpolate at those coordinates
         vals = r.interp_points(
@@ -506,7 +506,7 @@ class TestInterpolate:
             mask_edge_dilated = np.logical_and(mask_dilated_plus_one, ~mask_nan_dilated.astype(bool))
 
             # Get indices of the related pixels, convert to coordinates
-            i, j = np.where(mask_edge_dilated)
+            i, j = np.where(mask_edge_dilated)  # type: ignore
             x, y = r.ij2xy(i, j)
             # And interpolate at those coordinates
             vals = r.interp_points(

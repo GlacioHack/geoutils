@@ -32,8 +32,8 @@ from packaging.version import Version
 import geoutils
 
 
-@contextmanager
-def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported"):
+@contextmanager  # type: ignore
+def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported") -> Any:
     """
     Helper to silence logging warnings for parameters that were already supported (such as XSCALE/YSCALE) but not
     yet exposed officially through the API.
@@ -44,7 +44,7 @@ def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupporte
     logger = logging.getLogger("rasterio._env")
 
     class _Filter(logging.Filter):
-        def filter(self, record):
+        def filter(self, record: Any) -> bool:
             return not (
                 record.name == "rasterio._env"
                 and warn_code in record.getMessage()

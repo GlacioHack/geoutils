@@ -108,7 +108,7 @@ class TestDelayed:
     @pytest.mark.parametrize("subsample_size", [2, 100, 100000])  # type: ignore
     def test_delayed_subsample__output(
         self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int
-    ):
+    ) -> None:
         """
         Checks for delayed subsampling function for output accuracy.
         Variables that influence specifically the delayed function and might lead to new errors are:
@@ -147,7 +147,7 @@ class TestDelayed:
     @pytest.mark.parametrize("res", [(0.5, 2), (1, 1)])  # type: ignore
     def test_delayed_interp_points__output(
         self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int, res: tuple[float, float]
-    ):
+    ) -> None:
         """
         Checks for delayed interpolate points function.
         Variables that influence specifically the delayed function are:
@@ -201,7 +201,7 @@ class TestDelayed:
         dst_bounds_rel_shift: tuple[float, float],
         dst_res_rel_fac: tuple[float, float],
         dst_shape_diff: tuple[int, int],
-    ):
+    ) -> None:
         """
         Checks for the delayed reproject function.
         Variables that influence specifically the delayed function are:

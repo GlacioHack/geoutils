@@ -59,7 +59,7 @@ class TestStats:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
-    def test_get_stats_raster(self, example: str, caplog) -> None:
+    def test_get_stats_raster(self, example: str) -> None:
         """
         Verify get_stats() method for a raster, especially output stats for different inputs
         parameters and some stats.
@@ -175,7 +175,7 @@ class TestStats:
         )
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    def test_get_stats_raster_pointcloud(self, example: str, caplog) -> None:
+    def test_get_stats_raster_pointcloud(self, example: str) -> None:
         """
         Verify get_stats() method for a raster converted to pointcloud, especially output stats for different inputs
         parameters.

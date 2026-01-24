@@ -5,7 +5,7 @@ Test tools involving multiple rasters.
 from __future__ import annotations
 
 import warnings
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
 import pyproj
@@ -165,7 +165,7 @@ class TestMultiRaster:
             lazy_fixtures("images_nodata_zero"),
         ],
     )  # type: ignore
-    def test_stack_rasters(self, rasters) -> None:  # type: ignore
+    def test_stack_rasters(self, rasters: Any) -> None:  # type: ignore
         """Test stack_rasters"""
 
         # Silence the reprojection warning for default nodata value
@@ -258,7 +258,7 @@ class TestMultiRaster:
             lazy_fixtures("images_different_crs"),
         ],
     )  # type: ignore
-    def test_merge_rasters(self, rasters) -> None:  # type: ignore
+    def test_merge_rasters(self, rasters: Any) -> None:  # type: ignore
         """Test merge_rasters"""
         # Merge the two overlapping DEMs and check that it closely resembles the initial DEM
 
@@ -311,7 +311,7 @@ class TestMultiRaster:
             lazy_fixtures("images_3d"),
         ],
     )  # type: ignore
-    def test_merge_rasters__errors(self, rasters) -> None:
+    def test_merge_rasters__errors(self, rasters: Any) -> None:
         """Test errors of merge raster are properly raised."""
 
         # For merge algo: function that raises another type error than the expect axis error
