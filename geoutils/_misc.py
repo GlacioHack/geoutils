@@ -59,6 +59,33 @@ def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupporte
         logger.removeFilter(flt)
 
 
+@contextmanager  # type: ignore
+def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported") -> Any:
+    """
+    Helper to silence logging warnings for parameters that were already supported (such as XSCALE/YSCALE) but not
+    yet exposed officially through the API.
+
+    :param param_name: Name of Rasterio parameter.
+    :param warn_code: Warning start code within rasterio._env.
+    """
+    logger = logging.getLogger("rasterio._env")
+
+    class _Filter(logging.Filter):
+        def filter(self, record: Any) -> bool:
+            return not (
+                record.name == "rasterio._env"
+                and warn_code in record.getMessage()
+                and param_name in record.getMessage()
+            )
+
+    flt = _Filter()
+    logger.addFilter(flt)
+    try:
+        yield
+    finally:
+        logger.removeFilter(flt)
+
+
 def import_optional(import_name: str, package_name: str | None = None, extra_name: str = "opt") -> Any:
     """
     Helper function to consistently import and raise errors for an optional dependency.
