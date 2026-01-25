@@ -29,8 +29,6 @@ from typing import Any, Iterable
 
 import affine
 import numpy as np
-import rasterio
-
 import rasterio as rio
 from packaging.version import Version
 from rasterio.crs import CRS
@@ -38,7 +36,7 @@ from rasterio.enums import Resampling
 
 import geoutils as gu
 from geoutils._misc import silence_rasterio_message
-from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
+from geoutils._typing import DTypeLike, NDArrayNum
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
@@ -343,7 +341,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     # All masked values must be set to a nodata value for rasterio's reproject to work properly
     if np.ma.isMaskedArray(src_arr):
         is_input_masked = True
-        src_arr = src_arr.data
+        src_arr = src_arr.data  # type: ignore
         src_mask = np.ma.getmaskarray(src_arr)
     else:
         is_input_masked = False

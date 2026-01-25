@@ -21,7 +21,7 @@ from PIL import Image
 
 import geoutils as gu
 from geoutils import examples
-from geoutils._typing import MArrayNum, NDArrayNum
+from geoutils._typing import DTypeLike, MArrayNum, NDArrayNum
 from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 
 DO_PLOT = False
@@ -1017,6 +1017,7 @@ class TestRaster:
 
         # -- Fifth test: check that the new_array argument works when providing a new dtype ##
         # For an integer dataset cast to float, or opposite (the exploradores dataset will cast from float to int)
+        new_dtype: DTypeLike
         if "int" in str(r.dtype):
             new_dtype = np.float32
         else:
@@ -1934,7 +1935,6 @@ class TestRaster:
         assert np.array_equal(
             red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
-
 
         # Modify the red band and make sure it propagates to the original img (it's not a copy)
         red.data = red.data + 1

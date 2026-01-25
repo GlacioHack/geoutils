@@ -1,9 +1,11 @@
 """Tests on Xarray accessor mirroring Raster API."""
+
 import warnings
 
+import dask.array as da
 import numpy as np
 import pytest
-import dask.array as da
+
 from geoutils import examples, open_raster
 
 
@@ -56,7 +58,6 @@ class TestAccessor:
         assert isinstance(ds.data, np.ndarray)
         ds.load()
         assert ds._in_memory
-
 
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_open__dask(self, path_raster: str) -> None:

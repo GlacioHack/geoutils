@@ -7,15 +7,15 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import numpy as np
+import rasterio
 import rioxarray as rioxr
 import xarray as xr
 from affine import Affine
-import rasterio
 from rasterio.crs import CRS
 from rioxarray.rioxarray import affine_to_coords
 
 import geoutils as gu
-from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
+from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
 from geoutils.raster.base import RasterBase
 
 
@@ -130,10 +130,10 @@ class RasterAccessor(RasterBase):
         return self._obj.attrs.get("AREA_OR_POINT", None)
 
     @area_or_point.setter
-    def area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+    def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
         self.set_area_or_point(new_area_or_point=new_area_or_point)
 
-    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
         self._obj.attrs.update({"AREA_OR_POINT": new_area_or_point})
 
     @property
@@ -193,9 +193,9 @@ class RasterAccessor(RasterBase):
     @property
     def name(self) -> str | None:
         return self._obj.encoding.get("source")
-    
+
     @property
-    def dtype(self) -> str | None:
+    def dtype(self) -> DTypeLike:
         return self._obj.dtype
 
     @property

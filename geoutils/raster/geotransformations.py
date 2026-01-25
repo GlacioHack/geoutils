@@ -26,7 +26,6 @@ import warnings
 from typing import Iterable, Literal
 
 import affine
-import numpy as np
 import rasterio as rio
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -40,8 +39,8 @@ from geoutils.raster._geotransformations import (
     _rio_reproject,
     _user_input_reproject,
 )
-from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
 from geoutils.raster.distributed_computing.dask import delayed_reproject
+from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
 from geoutils.raster.georeferencing import _cast_pixel_interpretation
 
 try:
@@ -132,8 +131,10 @@ def _reproject(
 
     # TODO: Allow Multiproc only for Raster object?
     if mp_backend and dask_backend:
-        raise ValueError("Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
-                         "from reproject(). To use Multiprocessing, open the file without chunks.")
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
+            "from reproject(). To use Multiprocessing, open the file without chunks."
+        )
 
     # If using Multiprocessing backend, process and return None (files written on disk)
     if multiproc_config is not None:

@@ -23,14 +23,14 @@ Module for Raster class.
 
 from __future__ import annotations
 
+import copy
+import math
 import pathlib
 import warnings
 from collections import abc
 from contextlib import ExitStack
 from typing import IO, TYPE_CHECKING, Any, Callable, overload
-import copy
 
-import math
 import numpy as np
 import rasterio as rio
 import rasterio.windows
@@ -44,7 +44,15 @@ from rasterio.plot import show as rshow
 import geoutils as gu
 from geoutils import profiler
 from geoutils._misc import deprecate, import_optional
-from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum, Number, ArrayLike
+from geoutils._typing import (
+    ArrayLike,
+    DTypeLike,
+    MArrayNum,
+    NDArrayBool,
+    NDArrayNum,
+    Number,
+)
+from geoutils.projtools import reproject_from_latlon, reproject_points
 from geoutils.raster.base import RasterBase, RasterType
 from geoutils.raster.georeferencing import (
     _cast_nodata,
@@ -55,7 +63,6 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.projtools import reproject_from_latlon, reproject_points
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -548,7 +555,7 @@ class Raster(RasterBase):
             orig_shape = self._data.shape
         # If filename exists
         elif self._disk_dtype is not None:
-            dtype = self._disk_dtype
+            dtype = str(self._disk_dtype)
             if self._out_count == 1:
                 orig_shape = self._out_shape
             else:
@@ -671,7 +678,7 @@ class Raster(RasterBase):
         return self._tags
 
     @tags.setter
-    def tags(self, new_tags: dict[str, Any]) -> None:
+    def tags(self, new_tags: dict[str, Any] | None) -> None:
         if new_tags is None:
             new_tags = {}
         self._tags = new_tags
@@ -681,10 +688,10 @@ class Raster(RasterBase):
         return self._area_or_point
 
     @area_or_point.setter
-    def area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+    def area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
         self.set_area_or_point(new_area_or_point=new_area_or_point)
 
-    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
+    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None:
         self._area_or_point = new_area_or_point
         # Update tag only if not None
         if new_area_or_point is not None:
@@ -712,7 +719,7 @@ class Raster(RasterBase):
                 return 1
             else:
                 return len(self._bands)
-        return self._count_on_disk
+        return self._count_on_disk  # type: ignore
 
     @property
     def height(self) -> int:
@@ -782,7 +789,7 @@ class Raster(RasterBase):
         return self._name
 
     @property
-    def dtype(self) -> str | None:
+    def dtype(self) -> DTypeLike:
         if not self.is_loaded and self._disk_dtype is not None:
             return self._disk_dtype
         return self.data.dtype
@@ -810,9 +817,7 @@ class Raster(RasterBase):
             raise ValueError("Data are already loaded.")
 
         if self.name is None:
-            raise AttributeError(
-                "Cannot load as name is not set anymore. Did you manually update the name attribute?"
-            )
+            raise AttributeError("Cannot load as name is not set anymore. Did you manually update the name attribute?")
 
         out_count = self._out_count
         # If no index is passed, use all of them
@@ -865,9 +870,7 @@ class Raster(RasterBase):
             raise ValueError("Data are already loaded.")
 
         if self.name is None:
-            raise AttributeError(
-                "Cannot load as name is not set anymore. Did you manually update the name attribute?"
-            )
+            raise AttributeError("Cannot load as name is not set anymore. Did you manually update the name attribute?")
 
         # If no index is passed, use all of them
         if bands is None:
@@ -1573,11 +1576,9 @@ class Raster(RasterBase):
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
-    def copy(self: RasterType,
-             new_array: NDArrayNum | None = None,
-             cast_nodata: bool = True,
-             deep: bool = True) -> (
-            RasterType):
+    def copy(
+        self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True, deep: bool = True
+    ) -> RasterType:
         """
         Copy the raster in-memory.
 
@@ -1591,10 +1592,26 @@ class Raster(RasterBase):
 
         # Core attributes to copy and set again
         # TODO: Add _shape for consistency?
-        dict_copy = ["_crs", "_nodata", "_tags", "_area_or_point",
-                     "_bands", "_transform", "_masked", "_is_mask",
-                     "_disk_shape", "_disk_bands", "_disk_dtype", "_disk_transform", "_downsample",
-                     "_name", "_driver", "_out_shape", "_out_count", "_obj"]
+        dict_copy = [
+            "_crs",
+            "_nodata",
+            "_tags",
+            "_area_or_point",
+            "_bands",
+            "_transform",
+            "_masked",
+            "_is_mask",
+            "_disk_shape",
+            "_disk_bands",
+            "_disk_dtype",
+            "_disk_transform",
+            "_downsample",
+            "_name",
+            "_driver",
+            "_out_shape",
+            "_out_count",
+            "_obj",
+        ]
 
         # Create empty instance without calling __init__
         cls = self.__class__
@@ -2218,16 +2235,16 @@ class Raster(RasterBase):
         return None
 
     def reduce_points(
-            self,
-            points: tuple[ArrayLike, ArrayLike] | gu.PointCloud,
-            reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
-            window: int | None = None,
-            input_latlon: bool = False,
-            band: int | None = None,
-            masked: bool = False,
-            return_window: bool = False,
-            as_array: bool = False,
-            boundless: bool = True,
+        self,
+        points: tuple[ArrayLike, ArrayLike] | gu.PointCloud,
+        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
+        window: int | None = None,
+        input_latlon: bool = False,
+        band: int | None = None,
+        masked: bool = False,
+        return_window: bool = False,
+        as_array: bool = False,
+        boundless: bool = True,
     ) -> Any:
         """
         Reduce raster values around point coordinates.
@@ -2276,10 +2293,10 @@ class Raster(RasterBase):
 
         # Check for array-like inputs
         if (
-                not isinstance(x, (float, np.floating, int, np.integer))
-                and isinstance(y, (float, np.floating, int, np.integer))
-                or isinstance(x, (float, np.floating, int, np.integer))
-                and not isinstance(y, (float, np.floating, int, np.integer))
+            not isinstance(x, (float, np.floating, int, np.integer))
+            and isinstance(y, (float, np.floating, int, np.integer))
+            or isinstance(x, (float, np.floating, int, np.integer))
+            and not isinstance(y, (float, np.floating, int, np.integer))
         ):
             raise TypeError("Coordinates must be both numbers or both array-like.")
 
@@ -2357,9 +2374,9 @@ class Raster(RasterBase):
 
             if self.is_loaded:
                 if self.count == 1:
-                    data = self.data[row: row + height, col: col + width]
+                    data = self.data[row : row + height, col : col + width]
                 else:
-                    data = self.data[slice(None) if band is None else band - 1, row: row + height, col: col + width]
+                    data = self.data[slice(None) if band is None else band - 1, row : row + height, col : col + width]
                 if not masked:
                     data = data.astype(np.float32).filled(np.nan)
                 value = format_value(data)

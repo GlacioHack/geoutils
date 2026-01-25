@@ -11,7 +11,6 @@ from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 
 import geopandas as gpd
 import numpy as np
-
 import rasterio as rio
 import xarray as xr
 from affine import Affine
@@ -93,7 +92,7 @@ class RasterBase(ABC):
         self._bands_loaded: int | tuple[int, ...] | None = None
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_bands: tuple[int] | None = None
-        self._disk_dtype: np.dtype | None = None
+        self._disk_dtype: DTypeLike | None = None
         self._disk_transform: Affine | None = None
         self._out_count: int | None = None
         self._out_shape: tuple[int, int] | None = None
@@ -123,8 +122,9 @@ class RasterBase(ABC):
         raise NotImplementedError("This method is meant to be subclassed.")
 
     # TODO: Here too
-    def copy(self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True,
-             deep: bool = True) -> RasterType:
+    def copy(
+        self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True, deep: bool = True
+    ) -> RasterType:
         """Placeholder method for subclasses."""
         raise NotImplementedError("This method is meant to be subclassed.")
 
@@ -421,8 +421,7 @@ class RasterBase(ABC):
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
     @abstractmethod
-    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"]) -> None:
-        ...
+    def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None: ...
 
     @property
     @abstractmethod
@@ -462,8 +461,7 @@ class RasterBase(ABC):
             return self._data is not None
 
     @abstractmethod
-    def load(self) -> None:
-        ...
+    def load(self) -> None: ...
 
     @property
     @abstractmethod
@@ -512,7 +510,7 @@ class RasterBase(ABC):
 
     @property
     @abstractmethod
-    def dtype(self) -> np.dtype:
+    def dtype(self) -> DTypeLike:
         """Data type of the raster."""
         ...
 
@@ -770,8 +768,9 @@ class RasterBase(ABC):
         """
 
         if not isinstance(other, (RasterBase, xr.DataArray)):
-            raise NotImplementedError("Equality with other object than Raster and DataArray not supported by "
-                                      "raster_equal.")
+            raise NotImplementedError(
+                "Equality with other object than Raster and DataArray not supported by " "raster_equal."
+            )
 
         # Only if both inputs are Raster objects with masked arrays
         if not isinstance(other, xr.DataArray) and not self._is_xr:
@@ -781,7 +780,8 @@ class RasterBase(ABC):
                 equalities_data = [
                     np.array_equal(self.data.data, other.data.data, equal_nan=True),
                     # Use getmaskarray to avoid comparing "nomask" with array when mask=False
-                    np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),]
+                    np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),
+                ]
             # Otherwise, only unmasked data
             else:
                 names = ["data"]
@@ -927,8 +927,11 @@ class RasterBase(ABC):
         """
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = other.rst.get_bounds_projected(self.crs) if isinstance(other, xr.DataArray) \
+        raster_bounds_sameproj = (
+            other.rst.get_bounds_projected(self.crs)
+            if isinstance(other, xr.DataArray)
             else other.get_bounds_projected(self.crs)
+        )
 
         # Calculate intersection of bounding boxes
         intersection = merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
@@ -1015,13 +1018,16 @@ class RasterBase(ABC):
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
-            warnings.warn(message="Argument 'inplace' is deprecated, and will be removed in future releases. "
-                                  "Use 'rast = rast.crop()' instead.",
-                          category=DeprecationWarning)
+            warnings.warn(
+                message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                "Use 'rast = rast.crop()' instead.",
+                category=DeprecationWarning,
+            )
 
             if self._is_xr:
-                raise NotImplementedError("In-place cropping raster is deprecated and not supported through the 'rst' "
-                                          "accessor.")
+                raise NotImplementedError(
+                    "In-place cropping raster is deprecated and not supported through the 'rst' " "accessor."
+                )
             else:
                 self._data = cropped_arr
                 self.transform = new_transform
@@ -1052,13 +1058,16 @@ class RasterBase(ABC):
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
-            warnings.warn(message="Argument 'inplace' is deprecated, and will be removed in future releases. "
-                                  "Use 'rast = rast.icrop()' instead.",
-                          category=DeprecationWarning)
+            warnings.warn(
+                message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                "Use 'rast = rast.icrop()' instead.",
+                category=DeprecationWarning,
+            )
 
             if self._is_xr:
-                raise NotImplementedError("In-place cropping raster is deprecated and not supported through the 'rst' "
-                                          "accessor.")
+                raise NotImplementedError(
+                    "In-place cropping raster is deprecated and not supported through the 'rst' " "accessor."
+                )
             else:
                 self._data = cropped_arr
                 self.transform = new_transform
@@ -1089,7 +1098,7 @@ class RasterBase(ABC):
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
-    ) -> RasterType:
+    ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
 
@@ -1156,20 +1165,24 @@ class RasterBase(ABC):
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
-            warnings.warn(message="Argument 'inplace' is deprecated, and will be removed in future releases. "
-                                  "Use 'rast = rast.reproject()' instead.",
-                          category=DeprecationWarning)
+            warnings.warn(
+                message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                "Use 'rast = rast.reproject()' instead.",
+                category=DeprecationWarning,
+            )
 
             if self._is_xr or multiproc_config:
                 raise NotImplementedError(
                     "In-place cropping raster is deprecated and not supported through the 'rst' "
-                    "accessor or Multiproc config.")
+                    "accessor or Multiproc config."
+                )
             else:
                 # Order is important here, because calling self.data will use nodata to mask the array properly
                 self._crs = crs
                 self._nodata = nodata
                 self._transform = transformed
-                # A little trick to force the right shape of data in, then update the mask properly through the data setter
+                # A little trick to force the right shape of data in,
+                # then update the mask properly through the data setter
                 self._data = data.squeeze()
                 self.data = data
                 return None
@@ -1180,8 +1193,9 @@ class RasterBase(ABC):
             return result_raster  # type: ignore
 
         # Not in-place
-        return self.from_array(data=data, transform=transformed, crs=crs, nodata=nodata,
-                               area_or_point=self.area_or_point, tags=self.tags)
+        return self.from_array(
+            data=data, transform=transformed, crs=crs, nodata=nodata, area_or_point=self.area_or_point, tags=self.tags
+        )
 
     @overload
     def translate(

@@ -3,26 +3,25 @@
 from __future__ import annotations
 
 import os
-import inspect
 import warnings
 from typing import Any
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+import rasterio as rio
 import xarray as xr
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
-import rasterio as rio
-import geopandas as gpd
 
 from geoutils import Raster, Vector, examples, open_raster
-from geoutils.raster.georeferencing import _default_nodata
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
 
-@pytest.fixture(scope="module")
-def lazy_test_files(tmp_path_factory) -> list[str]:
+
+@pytest.fixture(scope="module")  # type: ignore
+def lazy_test_files(tmp_path_factory: Any) -> list[str]:
     """
     Create temporary converted files for lazy tests.
 
@@ -58,6 +57,7 @@ def lazy_test_files(tmp_path_factory) -> list[str]:
         list_fn_out.append(fn_out)
 
     return list_fn_out
+
 
 def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = True) -> bool:
     """Check equality of a Raster object and DataArray object"""
@@ -127,6 +127,7 @@ def assert_output_equal(output1: Any, output2: Any) -> None:
     else:
         assert output1 == output2
 
+
 def should_be_loaded(method: str, args: dict[str, Any], noload: list[str], noload_allowed_args: dict[str, Any]) -> bool:
     """Helper function to check without a method input/output should be loaded or not, based on input dictionaries."""
 
@@ -139,14 +140,17 @@ def should_be_loaded(method: str, args: dict[str, Any], noload: list[str], noloa
         # Get relevant method arguments
         allowed = noload_allowed_args[method]
         # If any value is different from the list of values in the allowed dictionary, it should load
-        any_different = not all((not isinstance(args[k], np.ndarray) and args[k] in allowed[k]) for k in
-                                allowed if k in args)
+        any_different = not all(
+            (not isinstance(args[k], np.ndarray) and args[k] in allowed[k]) for k in allowed if k in args
+        )
         should_output_be_loaded = any_different
 
     return should_output_be_loaded
 
+
 class NeedsTestError(ValueError):
     """Error to remember to add test when a new RasterBase method is added."""
+
 
 class TestClassVsAccessorConsistency:
     """
@@ -170,21 +174,42 @@ class TestClassVsAccessorConsistency:
     properties_input_load = ["data"]
 
     # List of methods that WILL NOT load the input dataset
-    methods_input_noload = ["crop", "icrop", "translate", "get_metric_crs", "xy2ij", "ij2xy", "coords",
-                            "outside_image", "info", "get_bounds_projected", "get_footprint_projected",
-                            "copy", "georeferenced_grid_equal", "intersection"]
+    methods_input_noload = [
+        "crop",
+        "icrop",
+        "translate",
+        "get_metric_crs",
+        "xy2ij",
+        "ij2xy",
+        "coords",
+        "outside_image",
+        "info",
+        "get_bounds_projected",
+        "get_footprint_projected",
+        "copy",
+        "georeferenced_grid_equal",
+        "intersection",
+    ]
     # List of methods that WILL NOT load the input for certain arguments
     methods_input_noload_allowed_args = {"info": {"stats": [False]}}
 
     # List of methods that WILL NOT load the output dataset (mostly in-place methods; otherwise rare,
     # only icrop/crop/translate, that correspond to isel/sel and assign_coords of Xarray)
-    methods_output_noload = ["crop", "icrop", "translate", "copy", "set_crs", "set_transform", "set_nodata",
-                             "set_area_or_point"]
+    methods_output_noload = [
+        "crop",
+        "icrop",
+        "translate",
+        "copy",
+        "set_crs",
+        "set_transform",
+        "set_nodata",
+        "set_area_or_point",
+    ]
     # List of methods that WILL NOT LOAD the output for certain arguments
     # copy(new_array=not None) will load
     methods_output_noload_allowed_args = {"copy": {"deep": [True, False], "new_array": [None]}}
 
-    @pytest.mark.parametrize("path_index", [0, 1, 2])
+    @pytest.mark.parametrize("path_index", [0, 1, 2])  # type: ignore
     @pytest.mark.parametrize("prop", properties)  # type: ignore
     def test_properties__equality_and_loading(self, path_index: int, prop: str, lazy_test_files: list[str]) -> None:
         """
@@ -226,7 +251,10 @@ class TestClassVsAccessorConsistency:
         ("copy", {"deep": False}),  # Shallow copy does not load
         ("copy", {"deep": True}),  # Deep copy does not load either if unloaded!
         ("info", {"stats": False, "verbose": False}),  # Verbose false to capture output
-        ("crop", {"bbox": "random"},),  # "random" will be derived during the test to work on all inputs
+        (
+            "crop",
+            {"bbox": "random"},
+        ),  # "random" will be derived during the test to work on all inputs
         ("icrop", {"bbox": (3, 5, 10, 22)}),
         ("translate", {"xoff": 10.5, "yoff": 5}),
         ("xy2ij", {"x": "random", "y": "random"}),  # "random" will be derived during the test to work on all inputs
@@ -260,12 +288,14 @@ class TestClassVsAccessorConsistency:
         ("filter", {"method": "median", "size": 7}),
         ("get_stats", {}),
         # 2.2. In-place methods
-        ("load", {})
+        ("load", {}),
     ]
+
     @pytest.mark.parametrize("path_index", [0, 1, 2])  # type: ignore
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])  # type: ignore
-    def test_methods__equality_and_loading(self, path_index: int, method: str, kwargs: dict[str, Any],
-                                           lazy_test_files: list[str]) -> None:
+    def test_methods__equality_and_loading(
+        self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
+    ) -> None:
         """
         Test that the method output and loading mechanism of the two objects are exactly the same between a Raster and
         Xarray rst accessor.
@@ -321,8 +351,12 @@ class TestClassVsAccessorConsistency:
         # If no, we check input status
         else:
             # Check using method did or did not load the input Raster or Xarray dataset, following expected values
-            should_input_be_loaded = should_be_loaded(method=method, args=args, noload=self.methods_input_noload,
-                                                      noload_allowed_args=self.methods_input_noload_allowed_args)
+            should_input_be_loaded = should_be_loaded(
+                method=method,
+                args=args,
+                noload=self.methods_input_noload,
+                noload_allowed_args=self.methods_input_noload_allowed_args,
+            )
             assert raster.is_loaded is should_input_be_loaded
             assert ds._in_memory is should_input_be_loaded
 
@@ -330,8 +364,12 @@ class TestClassVsAccessorConsistency:
         # (apart from in-place metadata setting, only a few functions don't load output, such as: crop/icrop, copy,
         # translate; matching sel/isel, copy, assign_coords in Xarray)
         if isinstance(output_ds, xr.DataArray):
-            should_output_be_loaded = should_be_loaded(method=method, args=args, noload=self.methods_output_noload,
-                                                       noload_allowed_args=self.methods_output_noload_allowed_args)
+            should_output_be_loaded = should_be_loaded(
+                method=method,
+                args=args,
+                noload=self.methods_output_noload,
+                noload_allowed_args=self.methods_output_noload_allowed_args,
+            )
             # TODO: Raster class does not load input, but does load output for "crop/icrop"
             if method not in ["crop", "icrop"]:
                 assert output_raster.is_loaded is should_output_be_loaded
@@ -341,17 +379,39 @@ class TestClassVsAccessorConsistency:
         # (in case of raster; this will load all the data, so has to come at the end)
         assert_output_equal(output_raster, output_ds)
 
-
     classmethods_and_kwargs = [
-        ("from_array", {"data": np.ones((5, 5)),
-                        "transform": rio.transform.from_bounds(0, 0, 1, 1, 5, 5),
-                        "crs": CRS.from_epsg(4326),
-                        "nodata": -9999,
-                        "tags": {"metadata": "test"},
-                        "area_or_point": "Point"}),
-        ("from_pointcloud_regular", {"pointcloud": gpd.GeoDataFrame(
-            data={"b1": np.ones(4)}, geometry=gpd.points_from_xy(x=[0, 2, 0, 1,], y=[3, 3, 4, 4], crs=4326)),
-                                     "grid_coords": (np.array([0, 1, 2]), np.array([3, 4]))})]
+        (
+            "from_array",
+            {
+                "data": np.ones((5, 5)),
+                "transform": rio.transform.from_bounds(0, 0, 1, 1, 5, 5),
+                "crs": CRS.from_epsg(4326),
+                "nodata": -9999,
+                "tags": {"metadata": "test"},
+                "area_or_point": "Point",
+            },
+        ),
+        (
+            "from_pointcloud_regular",
+            {
+                "pointcloud": gpd.GeoDataFrame(
+                    data={"b1": np.ones(4)},
+                    geometry=gpd.points_from_xy(
+                        x=[
+                            0,
+                            2,
+                            0,
+                            1,
+                        ],
+                        y=[3, 3, 4, 4],
+                        crs=4326,
+                    ),
+                ),
+                "grid_coords": (np.array([0, 1, 2]), np.array([3, 4])),
+            },
+        ),
+    ]
+
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in classmethods_and_kwargs])  # type: ignore
     def test_classmethods__equality(self, method: str, kwargs: dict[str, Any]) -> None:
         """Test class methods output exactly the same objects. Loading always happens for class methods."""
@@ -362,7 +422,7 @@ class TestClassVsAccessorConsistency:
 
         assert_output_equal(output_raster, output_ds)
 
-    def test_methods__test_coverage(self):
+    def test_methods__test_coverage(self) -> None:
         """Test that checks that all existing RasterBase methods are tested above."""
 
         # Compare tested methods from above list of tuples to all methods derived from class dictionary
@@ -373,10 +433,9 @@ class TestClassVsAccessorConsistency:
         if len(list_missing) != 0:
             raise AssertionError(f"RasterBase not covered by tests: {list_missing}")
 
-    chunked_methods_and_args =(
-        ("reproject", {"crs": CRS.from_epsg(32610), "res": 10}),
-    )
-    def test_methods__chunked(self):
+    chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(32610), "res": 10}),)
+
+    def test_methods__chunked(self) -> None:
         """
         Test that methods that work on chunks yield the exact same output for:
         - In-memory,
@@ -385,4 +444,3 @@ class TestClassVsAccessorConsistency:
 
         Also check that Dask array remains delayed before compute, and Multiprocessing output remains unloaded.
         """
-
