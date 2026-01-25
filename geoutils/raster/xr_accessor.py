@@ -217,6 +217,8 @@ class RasterAccessor(RasterBase):
         :return: Copy of the raster.
         """
 
+        # For a Xarray object, all the metadata should be stored (in .attrs, .encoding, or dimensions/variables),
+        # so we simply wrap the copy function
         return self._obj.copy(data=new_array, deep=deep)
 
     @classmethod
@@ -237,17 +239,28 @@ class RasterAccessor(RasterBase):
         if area_or_point is not None:
             tags.update({"AREA_OR_POINT": area_or_point})
 
+        # Squeeze data
         data = data.squeeze()
 
-        # Get netCDF coordinates from transform and shape
-        coords = affine_to_coords(affine=transform, width=data.shape[0], height=data.shape[1])
-
-        # Build a data array
-        out_ds = xr.DataArray(
-            data=data,
-            coords={"x": coords["x"], "y": coords["y"]},  # Need to order the coords as X then Y in dict, or fails...
-            attrs=tags,
-        )
+        # For a 2-d array
+        if data.ndim == 2:
+            # Get netCDF coordinates from transform and shape
+            coords = affine_to_coords(affine=transform, width=data.shape[0], height=data.shape[1])
+            # Need to order the coords as X then Y in dict, or it fails...
+            out_ds = xr.DataArray(
+                data=data,
+                coords={"x": coords["x"], "y": coords["y"]},
+                attrs=tags,
+            )
+        elif data.ndim == 3:
+            # Get netCDF coordinates from transform and shape
+            coords = affine_to_coords(affine=transform, width=data.shape[1], height=data.shape[2])
+            # Need to order the coords as band, then X, then Y in dict, or it fails...
+            out_ds = xr.DataArray(
+                data=data,
+                coords={"band": np.arange(1, data.shape[0] + 1), "x": coords["x"], "y": coords["y"]},
+                attrs=tags,
+            )
 
         # Set other attributes
         out_ds.rio.write_transform(transform, inplace=True)

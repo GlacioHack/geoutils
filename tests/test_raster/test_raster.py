@@ -786,7 +786,7 @@ class TestRaster:
         # Check that modifying the NaN array does not back-propagate to the original array (np.ma.filled returns a view
         # when there is no invalid data, but in this case get_nanarray should copy the data).
         rst_arr += 5
-        assert rst.raster_equal(rst_copy)
+        assert rst.raster_equal(rst_copy, warn_failure_reason=True)
 
         # -- Then, we test with a mask returned --
         rst_arr, mask = rst.get_nanarray(return_mask=True)
@@ -796,7 +796,7 @@ class TestRaster:
         # Also check for back-propagation here with the mask and array
         rst_arr += 5
         mask = ~mask
-        assert rst.raster_equal(rst_copy)
+        assert rst.raster_equal(rst_copy, warn_failure_reason=True)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
     def test_downsampling(self, example: str) -> None:
@@ -1044,14 +1044,25 @@ class TestRaster:
             r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
             assert r2.dtype == new_dtype
 
-        # TODO: Add shallow copy tests
+        # Test loading mechanism
         r = gu.Raster(example)
 
-        r.copy(deep=False)
+        # Whether the copy is deep or not, the raster or copy does not load (points back towards the same None)
+        r2 = r.copy(deep=False)
         assert not r.is_loaded
-        # Default is True
-        r.copy()
+        assert not r2.is_loaded
+        r3 = r.copy(deep=True)
+        assert not r.is_loaded
+        assert not r3.is_loaded
+        # If we assign a new array, the output is loaded however
+        r4 = r.copy(new_array=np.ones(r.shape))
+        assert r4.is_loaded
+        assert not r.is_loaded
+        # And if input is loaded, output as well
+        r.load()
+        r5 = r.copy()
         assert r.is_loaded
+        assert r5.is_loaded
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
     def test_masking(self, example: str) -> None:
@@ -1501,11 +1512,11 @@ class TestRaster:
 
         # A ValueError if nodata value is incompatible with dtype
         expected_message = r"Nodata value .* incompatible with self.dtype .*"
-        if "int" in r.dtype:
+        if "int" in str(r.dtype):
             with pytest.raises(ValueError, match=expected_message):
                 # Feed a floating numeric to an integer type
                 r.set_nodata(0.5)
-        elif "float" in r.dtype:
+        elif "float" in str(r.dtype):
             # Feed a floating value not supported by our example data
             with pytest.raises(ValueError, match=expected_message):
                 r.set_nodata(np.finfo("longdouble").min)
@@ -1889,27 +1900,28 @@ class TestRaster:
         assert rst2.nodata == _default_nodata(rst.data.dtype)
 
     def test_split_bands(self) -> None:
-        img = gu.Raster(self.landsat_rgb_path)
 
-        red, green, blue = img.split_bands(copy=False)
+        # Case 1/ Unloaded raster
+        img = gu.Raster(self.landsat_rgb_path)
+        red, green, blue = img.split_bands(deep=False)
 
         # Check that the shapes are correct.
         assert red.count == 1
         assert img.count == 3
 
         # Extract only one band (then it will not return a list)
-        red2 = img.split_bands(copy=False, bands=1)[0]
+        red2 = img.split_bands(deep=False, bands=1)[0]
 
         # Extract a subset with a list in a weird direction
-        blue2, green2 = img.split_bands(copy=False, bands=[3, 2])
+        blue2, green2 = img.split_bands(deep=False, bands=[3, 2])
 
         # Check that the subset functionality works as expected.
         assert red.raster_equal(red2)
         assert green.raster_equal(green2)
         assert blue.raster_equal(blue2)
 
-        # Check that the red channel and the rgb data shares memory
-        assert np.shares_memory(red.data, img.data)
+        # It's a shallow copy, but data was not loaded, so they shouldn't share memory
+        assert not np.shares_memory(red.data, img.data)
 
         # Check that the red band data is not equal to the full RGB data.
         assert not red.raster_equal(img)
@@ -1923,10 +1935,11 @@ class TestRaster:
             red.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
 
+
         # Modify the red band and make sure it propagates to the original img (it's not a copy)
         red.data = red.data + 1
         # Copy the bands instead of pointing to the same memory.
-        red_c = img.split_bands(copy=True, bands=1)[0]
+        red_c = img.split_bands(deep=True, bands=1)[0]
 
         # Check that the red band data does not share memory with the rgb image (it's a copy)
         assert not np.shares_memory(red_c.data, img.data)
@@ -1936,6 +1949,13 @@ class TestRaster:
         assert not np.array_equal(
             red_c.data.data.squeeze().astype("float32"), img.data.data[0, :, :].astype("float32"), equal_nan=True
         )
+
+        # Case 2/ Loaded raster
+        # If data was loaded, check that the red channel and the rgb data shares memory
+        img = gu.Raster(self.landsat_rgb_path)
+        img.load()
+        red, green, blue = img.split_bands(deep=False)
+        assert np.shares_memory(red.data, img.data)
 
     def test__is_bigtiff_true(self, tmp_path: os.Path) -> None:
         """Test _is_bigtiff function for BigTIFF"""

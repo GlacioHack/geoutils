@@ -1,4 +1,5 @@
 """Tests on Xarray accessor mirroring Raster API."""
+import warnings
 
 import numpy as np
 import pytest
@@ -84,6 +85,8 @@ class TestAccessor:
         """
         Check that reproject maintains Dask laziness.
         """
+
+        warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata.*")
 
         # Open raster lazily with chunks
         ds = open_raster(path_raster, chunks={"band": 1, "x": 10, "y": 10})

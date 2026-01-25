@@ -87,7 +87,7 @@ def load_multiple_rasters(
             warnings.warn("Intersection is void, returning unloaded rasters.")
             return output_rst
 
-        for rst in output_rst:
+        for i, rst in enumerate(output_rst):
             # Calculate bounds in rst's CRS
             # rasterio's default for densify_pts is too low for very large images, set a default of 5000
             new_bounds = rio.warp.transform_bounds(
@@ -95,7 +95,7 @@ def load_multiple_rasters(
             )
             # Ensure bounds align with the original ones, to avoid resampling at this stage
             new_bounds = gu.projtools.align_bounds(rst.transform, new_bounds)
-            rst.crop(new_bounds, inplace=True)
+            output_rst[i] = output_rst[i].crop(new_bounds)
 
     # Optionally, reproject all rasters to the reference grid
     if reproject:

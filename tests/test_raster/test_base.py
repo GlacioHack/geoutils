@@ -172,7 +172,7 @@ class TestClassVsAccessorConsistency:
     # List of methods that WILL NOT load the input dataset
     methods_input_noload = ["crop", "icrop", "translate", "get_metric_crs", "xy2ij", "ij2xy", "coords",
                             "outside_image", "info", "get_bounds_projected", "get_footprint_projected",
-                            "copy", "georeferenced_grid_equal"]
+                            "copy", "georeferenced_grid_equal", "intersection"]
     # List of methods that WILL NOT load the input for certain arguments
     methods_input_noload_allowed_args = {"info": {"stats": [False]}}
 
@@ -249,7 +249,8 @@ class TestClassVsAccessorConsistency:
         ("info", {"stats": True, "verbose": False}),  # Info with stats loads
         ("reproject", {"crs": CRS.from_epsg(32610), "res": 10}),
         ("raster_equal", {"other": "self"}),
-        ("reduce_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
+        ("intersection", {"other": "self"}),
+        # ("reduce_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
         ("interp_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
         ("proximity", {"target_values": [100]}),
         ("get_nanarray", {}),
@@ -300,7 +301,7 @@ class TestClassVsAccessorConsistency:
                 raster.bounds.bottom + 411,
             )
             args.update({"bbox": bbox})
-        elif method in ["raster_equal", "georeferenced_grid_equal"]:
+        elif method in ["raster_equal", "georeferenced_grid_equal", "intersection"]:
             args.update({"other": ds.copy(deep=False)})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import math
 import pathlib
 import struct
@@ -12,7 +11,6 @@ from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 
 import geopandas as gpd
 import numpy as np
-from sqlalchemy.util import asbool
 
 import rasterio as rio
 import xarray as xr
@@ -776,12 +774,22 @@ class RasterBase(ABC):
                                       "raster_equal.")
 
         # Only if both inputs are Raster objects with masked arrays
-        if not isinstance(other, xr.DataArray) and not self._is_xr and strict_masked:
-            names = ["data.data", "data.mask", "dtype", "transform", "crs", "nodata"]
-            equalities = [
-                np.array_equal(self.data.data, other.data.data, equal_nan=True),
-                # Use getmaskarray to avoid comparing boolean with array when mask=False
-                np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),
+        if not isinstance(other, xr.DataArray) and not self._is_xr:
+            # If strict, compare data under the mask
+            if strict_masked:
+                names = ["data.data", "data.mask"]
+                equalities_data = [
+                    np.array_equal(self.data.data, other.data.data, equal_nan=True),
+                    # Use getmaskarray to avoid comparing "nomask" with array when mask=False
+                    np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),]
+            # Otherwise, only unmasked data
+            else:
+                names = ["data"]
+                equalities_data = [np.ma.allequal(self.data, other.data)]
+
+            names = names + ["fill_value", "dtype", "transform", "crs", "nodata"]
+            equalities = equalities_data + [
+                self.data.fill_value == other.data.fill_value,
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
                 self.crs == other.crs,
@@ -906,22 +914,21 @@ class RasterBase(ABC):
         else:
             raise NotImplementedError("This is not implemented yet.")
 
-    def intersection(self, raster: RasterType, match_ref: bool = True) -> tuple[float, float, float, float]:
+    def intersection(self, other: RasterType, match_ref: bool = True) -> tuple[float, float, float, float]:
         """
-        Returns the bounding box of intersection between this image and another.
+        Returns the bounding box of intersection between this raster and another.
 
         If the rasters have different projections, the intersection extent is given in self's projection system.
 
-        :param raster : path to the second image (or another Raster instance)
-        :param match_ref: if set to True, returns the smallest intersection that aligns with that of self, i.e. same \
-        resolution and offset with self's origin is a multiple of the resolution
-        :returns: extent of the intersection between the 2 images \
-        (xmin, ymin, xmax, ymax) in self's coordinate system.
-
+        :param other: Path to second raster.
+        :param match_ref: If set to True, returns the smallest intersection that aligns with that of self, i.e. same
+            resolution and offset with self's origin is a multiple of the resolution
+        :returns: Extent of the intersection between the 2 raster (xmin, ymin, xmax, ymax) in self's coordinate system.
         """
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = raster.get_bounds_projected(self.crs)  # type: ignore
+        raster_bounds_sameproj = other.rst.get_bounds_projected(self.crs) if isinstance(other, xr.DataArray) \
+            else other.get_bounds_projected(self.crs)
 
         # Calculate intersection of bounding boxes
         intersection = merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
@@ -931,11 +938,11 @@ class RasterBase(ABC):
             warnings.warn("Intersection is void")
             return (0.0, 0.0, 0.0, 0.0)
 
-        # if required, ensure the intersection is aligned with self's georeferences
+        # If required, ensure the intersection is aligned with self's georeferences
         if match_ref:
             intersection = align_bounds(self.transform, intersection)
 
-        # mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
+        # Mypy raises a type issue, not sure how to address the fact that output of merge_bounds can be ()
         return intersection  # type: ignore
 
     @overload
@@ -985,6 +992,7 @@ class RasterBase(ABC):
     def crop(
         self: RasterType,
         bbox: RasterType | gu.Vector | list[float] | tuple[float, ...],
+        inplace: bool = False,
     ) -> RasterType | None:
         """
         Crop the raster to a given extent.
@@ -999,12 +1007,27 @@ class RasterBase(ABC):
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param mode: Whether to match within pixels or exact extent. ``'match_pixel'``  ``'match_extent'``
             will match the extent exactly, adjusting the pixel resolution to fit the extent.
-
+        :param inplace: (DEPRECATED. Use rast = rast.crop() instead) Whether to crop in-place or not.
         :returns: A new cropped raster.
         """
 
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
 
+        # Keep in-place for a bit with deprecation warning
+        if inplace:
+            warnings.warn(message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                                  "Use 'rast = rast.crop()' instead.",
+                          category=DeprecationWarning)
+
+            if self._is_xr:
+                raise NotImplementedError("In-place cropping raster is deprecated and not supported through the 'rst' "
+                                          "accessor.")
+            else:
+                self._data = cropped_arr
+                self.transform = new_transform
+                return None
+
+        # Not in-place
         if self._is_xr:
             newraster = cropped_arr
         else:
@@ -1015,20 +1038,37 @@ class RasterBase(ABC):
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
+        inplace: bool = False,
     ) -> RasterType | None:
         """
         Crop raster based on pixel indices (bbox), converting them into georeferenced coordinates.
 
         :param bbox: Bounding box based on indices of the raster array (colmin, rowmin, colmax, rowmax).
+        :param inplace: (DEPRECATED. Use rast = rast.icrop() instead) Whether to crop in-place or not.
 
-        :returns: Cropped raster .
+        :returns: Cropped raster.
         """
-        crop_img, tfm = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
+        cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
 
+        # Keep in-place for a bit with deprecation warning
+        if inplace:
+            warnings.warn(message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                                  "Use 'rast = rast.icrop()' instead.",
+                          category=DeprecationWarning)
+
+            if self._is_xr:
+                raise NotImplementedError("In-place cropping raster is deprecated and not supported through the 'rst' "
+                                          "accessor.")
+            else:
+                self._data = cropped_arr
+                self.transform = new_transform
+                return None
+
+        # Not in-place
         if self._is_xr:
-            newraster = crop_img
+            newraster = cropped_arr
         else:
-            newraster = self.from_array(crop_img, tfm, self.crs, self.nodata, self.area_or_point)
+            newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
 
         return newraster
 
@@ -1045,6 +1085,7 @@ class RasterBase(ABC):
         resampling: Resampling | str = Resampling.bilinear,
         force_source_nodata: int | float | None = None,
         silent: bool = False,
+        inplace: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
         multiproc_config: MultiprocConfig | None = None,
@@ -1077,6 +1118,7 @@ class RasterBase(ABC):
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
+        :param inplace: (DEPRECATED. Use rast = rast.reproject() instead) Whether to reproject in-place or not.
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
@@ -1107,24 +1149,37 @@ class RasterBase(ABC):
         if return_copy:
             return self
 
-        # If multiprocessing -> results on disk -> load metadata
-        # TODO: Fix re-opening logic for Xarray accessor
-        # if multiproc_config:
-        #     result_raster = Raster(multiproc_config.outfile)
-        #     if inplace:
-        #         crs = result_raster.crs
-        #         nodata = result_raster.nodata
-        #         transformed = result_raster.transform
-        #         data = result_raster.data
-        #     else:
-        #         return result_raster  # type: ignore
-
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
         # assert data is not None
         # assert transformed is not None
         # assert crs is not None
 
-        # Write results to a new Raster.
+        # Keep in-place for a bit with deprecation warning
+        if inplace:
+            warnings.warn(message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                                  "Use 'rast = rast.reproject()' instead.",
+                          category=DeprecationWarning)
+
+            if self._is_xr or multiproc_config:
+                raise NotImplementedError(
+                    "In-place cropping raster is deprecated and not supported through the 'rst' "
+                    "accessor or Multiproc config.")
+            else:
+                # Order is important here, because calling self.data will use nodata to mask the array properly
+                self._crs = crs
+                self._nodata = nodata
+                self._transform = transformed
+                # A little trick to force the right shape of data in, then update the mask properly through the data setter
+                self._data = data.squeeze()
+                self.data = data
+                return None
+
+        # If multiprocessing -> results on disk -> load metadata
+        if multiproc_config:
+            result_raster = self.__class__(multiproc_config.outfile)
+            return result_raster  # type: ignore
+
+        # Not in-place
         return self.from_array(data=data, transform=transformed, crs=crs, nodata=nodata,
                                area_or_point=self.area_or_point, tags=self.tags)
 
@@ -1193,203 +1248,6 @@ class RasterBase(ABC):
             else:
                 raster_copy._set_transform(translated_transform)
             return raster_copy
-
-    def reduce_points(
-        self,
-        points: tuple[ArrayLike, ArrayLike] | gu.PointCloud,
-        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
-        window: int | None = None,
-        input_latlon: bool = False,
-        band: int | None = None,
-        masked: bool = False,
-        return_window: bool = False,
-        as_array: bool = False,
-        boundless: bool = True,
-    ) -> Any:
-        """
-        Reduce raster values around point coordinates.
-
-        By default, samples pixel value of each band. Can be passed a band index to sample from.
-
-        Uses Rasterio's windowed reading to keep memory usage low (for a raster not loaded).
-
-        :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
-            coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
-            If points fall outside of image, value returned is nan.
-        :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
-        :param window: Window size to read around coordinates. Must be odd.
-        :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
-            CRS.
-        :param band: Band number to extract from (from 1 to self.count).
-        :param masked: Whether to return a masked array, or classic array.
-        :param return_window: Whether to return the windows (in addition to the reduced value).
-        :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input
-            coordinates).
-        :param boundless: Whether to allow windows that extend beyond the extent.
-
-        :returns: Point cloud of interpolated points, or 1D array of interpolated values.
-            In addition, if return_window=True, return tuple of (values, arrays).
-
-        :examples:
-
-            >>> self.value_at_coords(-48.125, 67.8901, window=3)  # doctest: +SKIP
-            Returns mean of a 3*3 window:
-                v v v \
-                v c v  | = float(mean)
-                v v v /
-            (c = provided coordinate, v= value of surrounding coordinate)
-
-        """
-
-        if isinstance(points, gu.PointCloud):
-            # TODO: Check conversion is not done for nothing?
-            points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
-            # Otherwise
-        else:
-            if input_latlon:
-                points = reproject_from_latlon((points[1], points[0]), out_crs=self.crs)  # type: ignore
-
-        x, y = points
-
-        # Check for array-like inputs
-        if (
-            not isinstance(x, (float, np.floating, int, np.integer))
-            and isinstance(y, (float, np.floating, int, np.integer))
-            or isinstance(x, (float, np.floating, int, np.integer))
-            and not isinstance(y, (float, np.floating, int, np.integer))
-        ):
-            raise TypeError("Coordinates must be both numbers or both array-like.")
-
-        # If for a single value, wrap in a list
-        if isinstance(x, (float, np.floating, int, np.integer)):
-            x = [x]  # type: ignore
-            y = [y]  # type: ignore
-            # For the end of the function
-            unwrap = True
-        else:
-            unwrap = False
-            # Check that array-like objects are the same length
-            if len(x) != len(y):  # type: ignore
-                raise ValueError("Coordinates must be of the same length.")
-
-        # Check window parameter
-        if window is not None:
-            if not float(window).is_integer():
-                raise ValueError("Window must be a whole number.")
-            if window % 2 != 1:
-                raise ValueError("Window must be an odd number.")
-            window = int(window)
-
-        # Define subfunction for reducing the window array
-        def format_value(value: Any) -> Any:
-            """Check if valid value has been extracted"""
-            if type(value) in [np.ndarray, np.ma.core.MaskedArray]:
-                if window is not None:
-                    value = reducer_function(value.flatten())
-                else:
-                    value = value[0, 0]
-            else:
-                value = None
-            return value
-
-        # Initiate output lists
-        list_values = []
-        if return_window:
-            list_windows = []
-
-        # Convert to latlon if asked
-        # if input_latlon:
-        #     x, y = reproject_from_latlon((y, x), self.crs)  # type: ignore
-
-        # Convert coordinates to pixel space
-        rows, cols = rio.transform.rowcol(self.transform, x, y, op=math.floor)
-
-        # Loop over all coordinates passed
-        for k in range(len(rows)):  # type: ignore
-            value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], NDArrayNum] | Any]
-
-            row = rows[k]  # type: ignore
-            col = cols[k]  # type: ignore
-
-            # Decide what pixel coordinates to read:
-            if window is not None:
-                half_win = (window - 1) / 2
-                # Subtract start coordinates back to top left of window
-                col = col - half_win
-                row = row - half_win
-                # Offset to read to == window
-                width = window
-                height = window
-            else:
-                # Start reading at col,row and read 1px each way
-                width = 1
-                height = 1
-
-            # Make sure coordinates are int
-            col = int(col)
-            row = int(row)
-
-            # Create rasterio's window for reading
-            rio_window = rio.windows.Window(col, row, width, height)
-
-            if self.is_loaded:
-                if self.count == 1:
-                    data = self.data[row : row + height, col : col + width]
-                else:
-                    data = self.data[slice(None) if band is None else band - 1, row : row + height, col : col + width]
-                if not masked:
-                    data = data.astype(np.float32).filled(np.nan)
-                value = format_value(data)
-                win: NDArrayNum | dict[int, NDArrayNum] = data
-
-            else:
-                # TODO: if we want to allow sampling multiple bands, need to do it also when data is loaded
-                # if self.count == 1:
-                with rio.open(self.name) as raster:
-                    data = raster.read(
-                        window=rio_window,
-                        fill_value=self.nodata,
-                        boundless=boundless,
-                        masked=masked,
-                        indexes=band,
-                    )
-                value = format_value(data)
-                win = data
-                # else:
-                #     value = {}
-                #     win = {}
-                #     with rio.open(self.name) as raster:
-                #         for b in self.indexes:
-                #             data = raster.read(
-                #                 window=rio_window, fill_value=self.nodata, boundless=boundless,
-                #                 masked=masked, indexes=b
-                #             )
-                #             val = format_value(data)
-                #             value[b] = val
-                #             win[b] = data  # type: ignore
-
-            list_values.append(value)
-            if return_window:
-                list_windows.append(win)
-
-        # If for a single value, unwrap output list
-        if unwrap:
-            output_val = list_values[0]
-            if return_window:
-                output_win = list_windows[0]
-        else:
-            output_val = np.array(list_values)  # type: ignore
-            if return_window:
-                output_win = list_windows  # type: ignore
-
-        # Return array or pointcloud
-        if not as_array:
-            output_val = gu.PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
-
-        if return_window:
-            return (output_val, output_win)
-        else:
-            return output_val
 
     def xy2ij(
         self,
