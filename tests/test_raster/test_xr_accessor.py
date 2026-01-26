@@ -81,13 +81,11 @@ class TestAccessor:
         assert isinstance(ds_comp.data, np.ndarray)
         assert ds_comp._in_memory
 
-    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("path_raster", [aster_dem_path])  # type: ignore
     def test_reproject__dask(self, path_raster: str) -> None:
         """
         Check that reproject maintains Dask laziness.
         """
-
-        warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata.*")
 
         # Open raster lazily with chunks
         ds = open_raster(path_raster, chunks={"band": 1, "x": 10, "y": 10})

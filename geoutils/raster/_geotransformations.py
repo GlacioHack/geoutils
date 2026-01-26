@@ -120,12 +120,12 @@ def _user_input_reproject(
                     f"set a different nodata with `nodata`."
                 )
 
-            # elif nodata in source_raster.data:
-            #     warnings.warn(
-            #         f"For reprojection, nodata must be set. Default chosen value {nodata} exists in "
-            #         f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
-            #         f"self.set_nodata()."
-            #     )
+            elif nodata in source_raster.data:
+                warnings.warn(
+                    f"For reprojection, nodata must be set. Default chosen value {nodata} exists in "
+                    f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
+                    f"self.set_nodata()."
+                )
 
     # Create a BoundingBox if required
     if bounds is not None:
@@ -341,12 +341,18 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     # All masked values must be set to a nodata value for rasterio's reproject to work properly
     if np.ma.isMaskedArray(src_arr):
         is_input_masked = True
-        src_arr = src_arr.data  # type: ignore
         src_mask = np.ma.getmaskarray(src_arr)
+        src_arr = src_arr.data  # type: ignore
     else:
         is_input_masked = False
-        src_arr = src_arr
         src_mask = ~np.isfinite(src_arr)
+
+    # Check reprojection is possible with nodata (boolean raster will be converted, so no need to check)
+    if np.dtype(src_arr.dtype) != bool and (reproj_kwargs["src_nodata"] is None and np.sum(src_mask) > 0):
+        raise ValueError(
+            "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+            "with `force_source_nodata`."
+        )
 
     # For a boolean type
     convert_bool = False

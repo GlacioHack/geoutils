@@ -114,15 +114,7 @@ def _reproject(
                 )
             return True, None, None, None, None
 
-    # 4/ Check reprojection is possible (boolean raster will be converted, so no need to check)
-    # TODO: Change this behaviour?
-    # if np.dtype(source_raster.dtype) != bool and (src_nodata is None and np.sum(source_raster.data.mask) > 0):
-    #     raise ValueError(
-    #         "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
-    #         "with `force_source_nodata`."
-    #     )
-
-    # 5/ Perform reprojection
+    # 4/ Perform reprojection
     reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously

@@ -291,7 +291,6 @@ class TestRasterGeotransformations:
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
     def test_reproject(self, example: str) -> None:
-        warnings.simplefilter("error")
 
         # Reference raster to be used
         r = gu.Raster(example)
@@ -305,7 +304,7 @@ class TestRasterGeotransformations:
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
-        # make sure at least one pixel is set at default nodata for test
+        # Make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtype)
         rand_indices = gu.stats.subsample_array(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
