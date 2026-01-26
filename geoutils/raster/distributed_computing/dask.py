@@ -23,18 +23,18 @@ Module for dask-delayed functions for out-of-memory raster operations.
 from __future__ import annotations
 
 import warnings
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import numpy as np
 import rasterio as rio
 from scipy.interpolate import interpn
 
+from geoutils._misc import import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.raster.distributed_computing.chunked import (
     _build_geotiling_and_meta,
     _reproject_per_block,
 )
-from geoutils._misc import import_optional
 
 # Dask as optional dependency
 try:
@@ -44,15 +44,15 @@ try:
     from dask.utils import cached_cumsum
 except ImportError:
 
-    def delayed(func=None, *dargs, **dkwargs):
+    def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
-        Fallback @delayed decorator when dask is not installed.
-        Acts as an identity decorator.
+        Fake delayed decorator if dask is not installed
         """
-        if func is None:
-            # Handles @delayed(...)
-            return lambda f: f
-        return func
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
 
 
 # 1/ SUBSAMPLING

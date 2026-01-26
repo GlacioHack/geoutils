@@ -1,7 +1,5 @@
 """Tests on Xarray accessor mirroring Raster API."""
 
-import warnings
-
 import dask.array as da
 import numpy as np
 import pytest
