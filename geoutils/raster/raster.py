@@ -3205,10 +3205,10 @@ class Raster:
         # Use data array directly, as rshow on self.ds will re-load data
         extent = [self.bounds.left, self.bounds.right, self.bounds.bottom, self.bounds.top]
         ax0.imshow(
-            np.flip(data, axis=1),
+            np.flip(data, axis=0),
             extent=extent,
-            origin="lower",
-            aspect="auto",
+            origin="lower",  # So that the array is not upside-down
+            aspect="equal",
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
