@@ -3203,10 +3203,12 @@ class Raster:
             raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
         # Use data array directly, as rshow on self.ds will re-load data
-        rshow(
-            data,
-            transform=self.transform,
-            ax=ax0,
+        extent = [self.bounds.left, self.bounds.right, self.bounds.bottom, self.bounds.top]
+        ax0.imshow(
+            np.flip(data, axis=1),
+            extent=extent,
+            origin="lower",
+            aspect="auto",
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
