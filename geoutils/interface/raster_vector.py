@@ -83,7 +83,6 @@ def _polygonize(
         raise ValueError("in_value must be a number, a tuple or a sequence")
 
     # GeoPandas.from_features() only supports certain dtypes, we find the best common dtype to optimize memory usage
-    # TODO: this should be a function independent of polygonize, reused in several places
     gpd_dtypes = ["uint8", "uint16", "int16", "int32", "float32"]
     list_common_dtype_index = []
     for gpd_type in gpd_dtypes:

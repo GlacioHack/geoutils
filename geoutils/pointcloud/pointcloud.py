@@ -344,7 +344,6 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         # Set data column name based on user input
         self.set_data_column(new_data_column=data_column)
 
-    # TODO: Could also move to Vector directly?
     ##############################################
     # OVERRIDDEN VECTOR METHODS TO SUPPORT LOADING
     ##############################################

@@ -113,7 +113,6 @@ def _user_input_reproject(
         if nodata is None:
             nodata = _default_nodata(dtype)
             # If nodata is already being used, raise a warning.
-            # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
             if not source_raster.is_loaded:
                 warnings.warn(
                     f"For reprojection, nodata must be set. Setting default nodata to {nodata}. You may "
