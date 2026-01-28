@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from packaging.version import Version
 
 import geopandas as gpd
 import numpy as np
@@ -12,6 +11,7 @@ import pandas as pd
 import pytest
 import rasterio as rio
 import xarray as xr
+from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
