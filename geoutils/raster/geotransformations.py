@@ -117,12 +117,11 @@ def _reproject(
 
     # 4/ Perform reprojection
     reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
-
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = multiproc_config is not None
-    dask_backend = da is not None and isinstance(source_raster.data, da.Array)
+    # The check below can only run on Xarray
+    dask_backend = da is not None and source_raster._is_xr and source_raster._obj.chunks is not None
 
-    # TODO: Allow Multiproc only for Raster object?
     if mp_backend and dask_backend:
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "

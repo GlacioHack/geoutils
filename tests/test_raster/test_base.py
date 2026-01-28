@@ -458,7 +458,7 @@ class TestClassVsAccessorConsistency:
         assert output_ds._in_memory
 
         # 2/ For Multiprocessing, same for loading
-        # assert not raster.is_loaded
+        assert not raster.is_loaded
         assert not output_raster.is_loaded
 
         # 3/ For non-Dask array, both should be loaded
@@ -476,3 +476,13 @@ class TestClassVsAccessorConsistency:
         # TODO: Find out why under-mask values are different?
         assert_output_equal(output_raster, output_raster2, use_allclose=True, strict_masked=False)
         assert_output_equal(output_raster, output_ds2, use_allclose=True)
+
+    match_methods = ["reproject", "crop", "create_mask", "rasterize", "proximity", "grid"]
+    def test_methods__match_raster(self) -> None:
+        """Test that methods that take a raster as match-reference input behave the same with DataArray/Raster:
+        - Equal output,
+        - No loading of the raster.
+        """
+
+        # TODO: Finalize after consistent input check function #850
+        assert True
