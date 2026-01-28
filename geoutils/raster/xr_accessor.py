@@ -103,7 +103,7 @@ class RasterAccessor(RasterBase):
 
     def _set_crs(self, new_crs: CRS) -> None:
         # Overloads abstract method in RasterBase
-        self._obj.rio.set_crs(new_crs)
+        self._obj.rio.write_crs(new_crs, inplace=True)
 
     @property
     def crs(self) -> CRS:
@@ -283,3 +283,11 @@ class RasterAccessor(RasterBase):
             tags=self.tags,
             area_or_point=self.area_or_point,
         )
+
+    def to_file(self, **kwargs: Any) -> None:
+        """
+        Write raster to file.
+
+        Wrapper around rioxarray.to_raster().
+                """
+        self._obj.rio.to_raster(**kwargs)

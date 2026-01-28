@@ -249,7 +249,6 @@ def delayed_subsample(
             if len(ind_per_block[i]) > 0
         ]
         # Cast output to the right expected dtype and length, then compute and concatenate
-        print(nb_valids_per_block)
         list_subsamples_delayed = [
             da.from_delayed(s, shape=(nb_valids_per_block[i],), dtype=darr.dtype) for i, s in enumerate(list_subsamples)
         ]
@@ -520,11 +519,6 @@ def delayed_reproject(
             "dst_crs": dst_crs,
         }
     )
-
-    # print("All source transforms")
-    # print([meta_params[i][0]["src_transform"] for i in range(len(dest2source))])
-    # print("All dest transforms")
-    # print([meta_params[i][0]["dst_transform"] for i in range(len(dest2source))])
 
     # Create a delayed object for each block, and flatten the blocks into a 1d shape
     blocks = darr.to_delayed().ravel()

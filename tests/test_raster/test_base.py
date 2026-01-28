@@ -16,6 +16,7 @@ from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
 from geoutils import Raster, Vector, examples, open_raster
+from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
 
@@ -59,39 +60,7 @@ def lazy_test_files(tmp_path_factory: Any) -> list[str]:
     return list_fn_out
 
 
-def equal_xr_raster(ds: xr.DataArray, rast: Raster, warn_failure_reason: bool = True) -> bool:
-    """Check equality of a Raster object and DataArray object"""
-
-    # TODO: Move to raster_equal?
-    equalities = [
-        np.allclose(ds.data, rast.get_nanarray(), equal_nan=True),
-        ds.rst.transform == rast.transform,
-        ds.rst.crs == rast.crs,
-        ds.rst.nodata == rast.nodata,
-        np.array_equal(~np.isfinite(ds.data), np.ma.getmaskarray(rast.data)),
-    ]
-
-    names = ["data", "transform", "crs", "nodata", "mask"]
-
-    complete_equality = all(equalities)
-
-    if not complete_equality and warn_failure_reason:
-        where_fail = np.nonzero(~np.array(equalities))[0]
-        warnings.warn(
-            category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
-        )
-        print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
-        if not equalities[0]:
-            diff = ds.data - rast.get_nanarray()
-            valids = np.isfinite(diff)
-            print(f"Number of non-equal pixels: {np.sum(diff[valids] != 0)}")
-            print(f"Mean: {np.nanmean(diff[valids])}")
-            print(f"Absolute percentile 90: {np.nanpercentile(np.abs(diff[valids]), 90)}")
-
-    return complete_equality
-
-
-def assert_output_equal(output1: Any, output2: Any) -> None:
+def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, strict_masked: bool = True) -> None:
     """Return equality of different output types."""
 
     # For two vectors
@@ -99,12 +68,11 @@ def assert_output_equal(output1: Any, output2: Any) -> None:
         assert output1.vector_equal(output2)
 
     # For two raster: Xarray or Raster objects
-    elif isinstance(output1, Raster) and isinstance(output2, Raster):
-        assert output1.raster_equal(output2)
-    elif isinstance(output1, Raster) and isinstance(output2, xr.DataArray):
-        assert equal_xr_raster(ds=output2, rast=output1)
-    elif isinstance(output1, xr.DataArray) and isinstance(output2, Raster):
-        assert equal_xr_raster(ds=output1, rast=output2)
+    elif isinstance(output1, (Raster, xr.DataArray)):
+        if use_allclose:
+            assert output1.raster_allclose(output2, warn_failure_reason=True, strict_masked=strict_masked)
+        else:
+            assert output1.raster_equal(output2, warn_failure_reason=True, strict_masked=strict_masked)
 
     # For arrays
     elif isinstance(output1, np.ndarray):
@@ -275,8 +243,9 @@ class TestClassVsAccessorConsistency:
         # 2.1. Not in-place
         ("copy", {"new_array": "placeholder"}),  # Copy with new array does load! Will create array of right size below.
         ("info", {"stats": True, "verbose": False}),  # Info with stats loads
-        ("reproject", {"crs": CRS.from_epsg(32610), "res": 10}),
+        ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("raster_equal", {"other": "self"}),
+        ("raster_allclose", {"other": "self"}),
         ("intersection", {"other": "self"}),
         # ("reduce_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
         ("interp_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
@@ -331,7 +300,7 @@ class TestClassVsAccessorConsistency:
                 raster.bounds.bottom + 411,
             )
             args.update({"bbox": bbox})
-        elif method in ["raster_equal", "georeferenced_grid_equal", "intersection"]:
+        elif method in ["raster_equal", "raster_allclose", "georeferenced_grid_equal", "intersection"]:
             args.update({"other": ds.copy(deep=False)})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
@@ -379,7 +348,7 @@ class TestClassVsAccessorConsistency:
         # (in case of raster; this will load all the data, so has to come at the end)
         assert_output_equal(output_raster, output_ds)
 
-    classmethods_and_kwargs = [
+    class_methods_and_kwargs = [
         (
             "from_array",
             {
@@ -412,7 +381,7 @@ class TestClassVsAccessorConsistency:
         ),
     ]
 
-    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in classmethods_and_kwargs])  # type: ignore
+    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in class_methods_and_kwargs])  # type: ignore
     def test_classmethods__equality(self, method: str, kwargs: dict[str, Any]) -> None:
         """Test class methods output exactly the same objects. Loading always happens for class methods."""
 
@@ -427,20 +396,83 @@ class TestClassVsAccessorConsistency:
 
         # Compare tested methods from above list of tuples to all methods derived from class dictionary
         methods_1 = [m[0] for m in self.methods_and_kwargs]
-        methods_2 = [m[0] for m in self.classmethods_and_kwargs]
+        methods_2 = [m[0] for m in self.class_methods_and_kwargs]
         list_missing = [method for method in self.methods if method not in methods_1 + methods_2]
 
         if len(list_missing) != 0:
             raise AssertionError(f"RasterBase not covered by tests: {list_missing}")
 
-    chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(32610), "res": 10}),)
+    chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(4326)}),)
 
-    def test_methods__chunked(self) -> None:
+    @pytest.mark.parametrize("path_index", [0, 2])  # type: ignore
+    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])  # type: ignore
+    def test_chunked_methods__equality_loading_laziness(
+            self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
+    ) -> None:
         """
-        Test that methods that work on chunks yield the exact same output for:
+        Test that chunked methods have the exact same output, loading mechanism and laziness.
+
+        They should yield the exact same output for:
         - In-memory,
         - Dask backend through Xarray accessor,
         - Multiprocessing backend through Raster class.
 
-        Also check that Dask array remains delayed before compute, and Multiprocessing output remains unloaded.
+        Dask array should remain delayed before compute, and Multiprocessing output remains unloaded.
         """
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        # Get filepath
+        path_raster = lazy_test_files[path_index]
+
+        # Open lazily with Dask
+        ds = open_raster(path_raster, chunks={"band": 1, "x": 10, "y": 10})
+        # Open raster that will be processed using Multiprocessing
+        mp_config = MultiprocConfig(chunk_size=10)  # To pass to the function
+        raster = Raster(path_raster)
+        # Open and load both DataArray/Raster with NumPy
+        ds2 = open_raster(path_raster)
+        ds2.load()
+        raster2 = Raster(path_raster)
+        raster2.load()
+
+        # Apply method for each
+        output_raster = getattr(raster, method)(**kwargs, multiproc_config=mp_config)
+        output_ds = getattr(ds.rst, method)(**kwargs)
+        output_raster2 = getattr(raster2, method)(**kwargs)
+        output_ds2 = getattr(ds2.rst, method)(**kwargs)
+
+        # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
+        # Input
+        assert not ds._in_memory
+        assert isinstance(ds.data, da.Array)
+        assert ds.data.chunks is not None
+        # Output
+        assert not output_ds._in_memory
+        assert isinstance(output_ds.data, da.Array)
+        assert output_ds.data.chunks is not None
+        # Output computes successfully, and is then loaded in memory
+        output_ds = output_ds.compute()
+        assert isinstance(output_ds.data, np.ndarray)
+        assert output_ds._in_memory
+
+        # 2/ For Multiprocessing, same for loading
+        # assert not raster.is_loaded
+        assert not output_raster.is_loaded
+
+        # 3/ For non-Dask array, both should be loaded
+        assert ds2._in_memory
+        assert isinstance(ds2.data, np.ndarray)
+        assert output_ds2._in_memory
+        assert isinstance(output_ds2.data, np.ndarray)
+
+        # 4/ For raster, same
+        assert raster2.is_loaded
+        assert output_raster2.is_loaded
+
+        # Check all outputs are exactly the same
+        assert_output_equal(output_raster, output_ds)  # Same chunk sizes, exact same numerics
+        # TODO: Find out why under-mask values are different?
+        assert_output_equal(output_raster, output_raster2, use_allclose=True, strict_masked=False)
+        assert_output_equal(output_raster, output_ds2, use_allclose=True)

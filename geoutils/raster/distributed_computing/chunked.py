@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal, TypeVar
 
 import geopandas as gpd
@@ -317,7 +318,10 @@ def _build_geotiling_and_meta(
     # 2/ Get footprints of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
     # overlap, then map indexes of source blocks that intersect a given destination block
     src_footprints = src_geotiling.get_block_footprints(crs=dst_crs)
-    dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
+    # Raised warning for buffer is not important
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, message="Geometry is in a geographic CRS.*")
+        dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
     dest2source = [list(np.where(dst.intersects(src_footprints).values)[0]) for dst in dst_footprints]
 
     # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and

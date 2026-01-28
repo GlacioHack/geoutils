@@ -79,31 +79,3 @@ class TestAccessor:
         ds_comp = ds.compute()
         assert isinstance(ds_comp.data, np.ndarray)
         assert ds_comp._in_memory
-
-    @pytest.mark.parametrize("path_raster", [aster_dem_path])  # type: ignore
-    def test_reproject__dask(self, path_raster: str) -> None:
-        """
-        Check that reproject maintains Dask laziness.
-        """
-        pytest.importorskip("dask")
-        import dask.array as da
-
-        # Open raster lazily with chunks
-        ds = open_raster(path_raster, chunks={"band": 1, "x": 10, "y": 10})
-
-        ds_reproj = ds.rst.reproject(res=50)
-
-        # This shouldn't affect the input dataset, that remains unloaded
-        ds_arr = ds.data
-        assert not ds._in_memory
-        assert isinstance(ds_arr, da.Array)
-
-        # And the created output should also be lazy
-        ds_arr_reproj = ds_reproj.data
-        assert isinstance(ds_arr_reproj, da.Array)
-        assert ds_arr_reproj.chunks is not None
-
-        # And computes successfully
-        ds_reproj_comp = ds_reproj.compute()
-        assert isinstance(ds_reproj_comp.data, np.ndarray)
-        assert ds_reproj_comp._in_memory

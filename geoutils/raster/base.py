@@ -8,6 +8,7 @@ import struct
 import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Iterable, Literal, TypeVar, overload
+from functools import partial
 
 import geopandas as gpd
 import numpy as np
@@ -753,23 +754,13 @@ class RasterBase(ABC):
             else:
                 warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
 
-    def raster_equal(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False) -> bool:
-        """
-        Check if two rasters are equal.
-
-        This means that are equal:
-        - The raster's masked array's data (including masked values), mask, fill_value and dtype,
-        - The raster's transform, crs and nodata values.
-
-        :param other: Other raster.
-        :param strict_masked: Whether to check if masked cells (in .data.mask) have the same value (in .data.data).
-            Only when comparing two Rasters objects with masked arrays.
-        :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
-        """
+    def _raster_equal_allclose(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False,
+                               use_allclose: bool = False, rtol: float = 1e-5, atol: float = 1e-8):
+        """Core method for raster_equal and raster_allclose."""
 
         if not isinstance(other, (RasterBase, xr.DataArray)):
             raise NotImplementedError(
-                "Equality with other object than Raster and DataArray not supported by " "raster_equal."
+                "Equality with other object than Raster and DataArray not supported by raster_allclose."
             )
 
         # Only if both inputs are Raster objects with masked arrays
@@ -777,15 +768,25 @@ class RasterBase(ABC):
             # If strict, compare data under the mask
             if strict_masked:
                 names = ["data.data", "data.mask"]
-                equalities_data = [
-                    np.array_equal(self.data.data, other.data.data, equal_nan=True),
-                    # Use getmaskarray to avoid comparing "nomask" with array when mask=False
-                    np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),
-                ]
+                if use_allclose:
+                    equalities_data = [
+                        np.allclose(self.data.data, other.data.data, equal_nan=True, rtol=rtol, atol=atol),
+                        # Use getmaskarray to avoid comparing "nomask" with array when mask=False
+                        np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),
+                    ]
+                else:
+                    equalities_data = [
+                        np.array_equal(self.data.data, other.data.data, equal_nan=True),
+                        # Use getmaskarray to avoid comparing "nomask" with array when mask=False
+                        np.array_equal(np.ma.getmaskarray(self.data), np.ma.getmaskarray(other.data)),
+                    ]
             # Otherwise, only unmasked data
             else:
                 names = ["data"]
-                equalities_data = [np.ma.allequal(self.data, other.data)]
+                if use_allclose:
+                    equalities_data = [np.ma.allclose(self.data, other.data, rtol=rtol, atol=atol)]
+                else:
+                    equalities_data = [np.ma.allequal(self.data, other.data)]
 
             names = names + ["fill_value", "dtype", "transform", "crs", "nodata"]
             equalities = equalities_data + [
@@ -803,16 +804,19 @@ class RasterBase(ABC):
             crs = other.rst.crs if isinstance(other, xr.DataArray) else other.crs
             nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
 
-            # Equality whether both, one or none of the arrays are masked
-            if np.ma.isMaskedArray(self.data) and np.ma.isMaskedArray(other.data):
-                array_eq = np.ma.allequal(self.data, other.data)
+            # Select function
+            if use_allclose:
+                func = partial(np.allclose, atol=atol, rtol=rtol)
             else:
-                if np.ma.isMaskedArray(self.data):
-                    array_eq = np.array_equal(self.get_nanarray(), other.data, equal_nan=True)
-                elif np.ma.isMaskedArray(other.data):
-                    array_eq = np.array_equal(self.data, other.rst.get_nanarray(), equal_nan=True)
-                else:
-                    array_eq = np.array_equal(self.data, other.data, equal_nan=True)
+                func = np.array_equal
+
+            # Three cases: masked/NaN, NaN/masked or NaN/NaN
+            if np.ma.isMaskedArray(self.data):
+                array_eq = func(self.get_nanarray(), other.data, equal_nan=True)
+            elif np.ma.isMaskedArray(other.data):
+                array_eq = func(self.data, other.get_nanarray(), equal_nan=True)
+            else:
+                array_eq = func(self.data, other.data, equal_nan=True)
 
             # Equalities
             names = ["data", "dtype", "transform", "crs", "nodata"]
@@ -828,11 +832,58 @@ class RasterBase(ABC):
 
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
+            print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
             warnings.warn(
                 category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
             )
 
         return complete_equality
+
+
+    def raster_equal(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False) -> bool:
+        """
+        Check if two rasters are equal.
+
+        This means that are equal:
+        - The raster's masked array's data (including masked values), mask, fill_value and dtype,
+        - The raster's transform, crs and nodata values.
+
+        :param other: Other raster.
+        :param strict_masked: Whether to check if masked cells (in .data.mask) have the same value (in .data.data).
+            Only when comparing two Rasters objects with masked arrays.
+        :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
+        """
+
+        return self._raster_equal_allclose(other, strict_masked=strict_masked,
+                                           warn_failure_reason=warn_failure_reason, use_allclose=False)
+
+
+    def raster_allclose(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False,
+                        rtol: float = 1e-5, atol: float = 1e-8) -> bool:
+        """
+        Check if two rasters are all close.
+
+        This means that are all close:
+        - The raster data.
+
+        And equal:
+        - The raster's mask, fill_value and dtype,
+        - The raster's transform, crs and nodata values.
+
+        The relative and absolute tolerance arguments are passed to np.allclose.
+
+        :param other: Other raster.
+        :param strict_masked: Whether to check if masked cells (in .data.mask) have the same value (in .data.data).
+            Only when comparing two Rasters objects with masked arrays.
+        :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
+        :param rtol: Relative tolerance.
+        :param atol: Absolute tolerance.
+        """
+
+        return self._raster_equal_allclose(other, strict_masked=strict_masked,
+                                           warn_failure_reason=warn_failure_reason, use_allclose=True,
+                                           atol=atol, rtol=rtol)
+
 
     def georeferenced_grid_equal(self: RasterType, other: RasterType) -> bool:
         """
@@ -1772,7 +1823,6 @@ class RasterBase(ABC):
         )
 
         out_nodata = _default_nodata(proximity.dtype)
-        print(out_nodata)
         return self.from_array(
             data=proximity,
             transform=self.transform,

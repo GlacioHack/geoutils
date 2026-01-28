@@ -29,6 +29,7 @@ import affine
 import rasterio as rio
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
+import xarray as xr
 
 import geoutils as gu
 from geoutils import profiler
@@ -152,7 +153,7 @@ def _reproject(
 @profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
 def _crop(
     source_raster: gu.Raster,
-    bbox: gu.Raster | gu.Vector | list[float] | tuple[float, ...],
+    bbox: gu.Raster | gu.Vector | xr.DataArray | list[float] | tuple[float, ...],
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
 ) -> tuple[NDArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
@@ -165,6 +166,11 @@ def _crop(
         if isinstance(bbox, gu.Raster):
             # Raise a warning if the reference is a raster that has a different pixel interpretation
             _cast_pixel_interpretation(source_raster.area_or_point, bbox.area_or_point)
+    elif isinstance(bbox, xr.DataArray):
+        # For another Vector or Raster, we reproject the bounding box in the same CRS as self
+        xmin, ymin, xmax, ymax = bbox.rst.get_bounds_projected(out_crs=source_raster.crs)
+        # Raise a warning if the reference is a raster that has a different pixel interpretation
+        _cast_pixel_interpretation(source_raster.area_or_point, bbox.rst.area_or_point)
     elif isinstance(bbox, (list, tuple)):
         if distance_unit == "georeferenced":
             xmin, ymin, xmax, ymax = bbox

@@ -25,6 +25,7 @@ import pathlib
 import warnings
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, TypeVar, overload
 
+import xarray as xr
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -772,13 +773,11 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             ind = ind.astype(bool)  # In case the 3D Z column was used, it can only be stored as floating
             # Assign
             if self._has_z:
-                print(ind)
                 new_geo = gpd.points_from_xy(
                     x=self.geometry.x.values[ind], y=self.geometry.y.values[ind], z=assign, crs=self.crs
                 )
                 self.ds.loc[ind, "geometry"] = new_geo
             else:
-                print(self.data_column)
                 self.ds.loc[ind, [self.data_column]] = assign
 
         else:
@@ -1517,13 +1516,16 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :return: Raster from gridded point cloud.
         """
 
-        if isinstance(ref, gu.Raster):
+        if isinstance(ref, (gu.Raster, xr.DataArray)):
             if grid_coords is not None:
                 warnings.warn(
                     "Both reference point cloud and grid coordinates were passed for gridding, "
                     "using only the reference point cloud."
                 )
-            grid_coords = ref.coords(grid=False)
+            if isinstance(ref, gu.Raster):
+                grid_coords = ref.coords(grid=False)
+            else:
+                grid_coords = ref.rst.coords(grid=False)
         else:
             if res is not None:
                 xsize = (self.bounds.right - self.bounds.left) / res

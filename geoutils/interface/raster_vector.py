@@ -26,7 +26,7 @@ from typing import Iterable, Literal
 import affine
 import geopandas as gpd
 import numpy as np
-import rasterio
+import xarray as xr
 import rasterio as rio
 from rasterio import features, warp
 from rasterio.crs import CRS
@@ -117,7 +117,7 @@ def _polygonize(
 
 def _rasterize(
     gdf: gpd.GeoDataFrame,
-    raster: gu.Raster | None = None,
+    raster: gu.Raster | xr.DataArray | None = None,
     crs: CRS | int | None = None,
     xres: float | None = None,
     yres: float | None = None,
@@ -134,7 +134,10 @@ def _rasterize(
         crs = gdf.crs
 
     if raster is not None:
-        crs = raster.crs  # type: ignore
+        if isinstance(raster, gu.Raster):
+            crs = raster.crs  # type: ignore
+        else:
+            crs = raster.rst.crs
 
     vect = gdf.to_crs(crs)
 
@@ -165,10 +168,14 @@ def _rasterize(
         # Calculate raster transform
         transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
-    # otherwise use directly raster's dimensions
+    # Otherwise use directly raster's dimensions
     else:
-        out_shape = raster.shape  # type: ignore
-        transform = raster.transform  # type: ignore
+        if isinstance(raster, gu.Raster):
+            out_shape = raster.shape  # type: ignore
+            transform = raster.transform  # type: ignore
+        else:
+            out_shape = raster.rst.shape
+            transform = raster.rst.transform
 
     # Set default burn value, index from 1 to len(self.ds)
     if in_value is None:
@@ -266,9 +273,14 @@ def _create_mask(
 
         # For a reference, extract transform and CRS
         if ref is not None:
-            transform = ref.transform
-            out_shape = ref.shape
-            crs = ref.crs
+            if isinstance(ref, xr.DataArray):
+                transform = ref.rst.transform
+                out_shape = ref.rst.shape
+                crs = ref.rst.crs
+            else:
+                transform = ref.transform
+                out_shape = ref.shape
+                crs = ref.crs
 
         # For a user-input res
         else:

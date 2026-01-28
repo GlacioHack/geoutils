@@ -608,10 +608,6 @@ class TestRasterGeotransformations:
         ):
             _ = r.reproject(ref=3)
 
-        # If input reference is string and file and does not exist
-        with pytest.raises(ValueError, match=re.escape("Reference raster does not exist.")):
-            _ = r.reproject(ref="no_file.tif")
-
         # -- Check warning for area_or_point works -- #
         r.set_area_or_point("Area", shift_area_or_point=False)
         r2 = r.copy()

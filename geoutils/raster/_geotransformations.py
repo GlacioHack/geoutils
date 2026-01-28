@@ -33,6 +33,7 @@ import rasterio as rio
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
+import xarray as xr
 
 import geoutils as gu
 from geoutils._misc import silence_rasterio_message
@@ -144,18 +145,18 @@ def _user_input_reproject(
         if isinstance(ref, gu.Raster):
             # Raise a warning if the reference is a raster that has a different pixel interpretation
             _cast_pixel_interpretation(source_raster.area_or_point, ref.area_or_point)
-            ds_ref = ref
-        elif isinstance(ref, str):
-            if not os.path.exists(ref):
-                raise ValueError("Reference raster does not exist.")
-            ds_ref = gu.Raster(ref, load_data=False)
+            # Read reprojecting params from ref raster
+            crs = ref.crs
+            res = ref.res
+            bounds = ref.bounds
+        elif isinstance(ref, xr.DataArray):
+            _cast_pixel_interpretation(source_raster.area_or_point, ref.rst.area_or_point)
+            crs = ref.rst.crs
+            res = ref.rst.res
+            bounds = ref.rst.bounds
         else:
             raise TypeError("Type of ref not understood, must be path to file (str), Raster.")
 
-        # Read reprojecting params from ref raster
-        crs = ds_ref.crs
-        res = ds_ref.res
-        bounds = ds_ref.bounds
     else:
         # Determine target CRS
         crs = CRS.from_user_input(crs)
@@ -408,7 +409,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     )
     # If Rasterio is recent enough version, force tolerance to 0 to avoid deformations on chunks
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
-    if Version(rio.__version__) > Version("1.5"):
+    if Version(rio.__version__) >= Version("1.5.0"):
         reproj_kwargs.update({"tolerance": 0})
 
     # Pop dtype and dst_shape arguments that don't exist in Rasterio, and are only used above
