@@ -195,7 +195,7 @@ def test_savings_csv_and_tiff(
         group_by_test, bins_test, aggregated_vars, statistics, save_csv=tmp_path, save_masks=tmp_path
     )
 
-    for interval in ["-0.001_5.0", "10.0_inf", "5.0_10.0"]:
+    for interval in ["0_5.0", "10.0_inf", "5.0_10.0"]:
         assert tmp_path / "groupbyslope1" / f"slope1_{interval}.tif"
     for seg in [1, 2, 3]:
         assert tmp_path / "groupbyslope2" / f"slope2_{seg}.tif"
