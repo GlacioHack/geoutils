@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from packaging.version import Version
 
 import geopandas as gpd
 import numpy as np
@@ -471,8 +472,11 @@ class TestClassVsAccessorConsistency:
         assert output_raster2.is_loaded
 
         # Check all outputs are exactly the same
-        assert_output_equal(output_raster, output_ds)  # Same chunk sizes, exact same numerics
-        # TODO: Find out why under-mask values are different?
+        # (For reproject, no artefacts only since we added "tolerance" argument in Rasterio,
+        # which officially came out in 1.5; so we skip the test for earlier versions)
+        if method == "reproject" and Version(rio.__version__) < Version("1.5.0"):
+            return
+        assert_output_equal(output_raster, output_ds)  # Same chunk sizes, so exact same numerics
         assert_output_equal(output_raster, output_raster2, use_allclose=True, strict_masked=False)
         assert_output_equal(output_raster, output_ds2, use_allclose=True)
 
