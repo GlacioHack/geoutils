@@ -3104,17 +3104,15 @@ class Raster:
         Plot the raster, with axes in projection of image.
 
         This method is a wrapper to matplotlib.imshow with modifications to work on raster (flip Y-axis, lower origin,
-        equal scale).
+        equal scale). Any \*\*kwargs which you give this method will be passed to matplotlib.imshow.
         If the raster is passed with 3(4) bands, it is plotted as RGB(Alpha).
 
-        Any \*\*kwargs which you give this method will be passed to it.
-
-        :param bands: Bands to plot, from 1 to self.count (default is all).
-        :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
-        :param vmin: Colorbar minimum value. Default is data min.
-        :param vmax: Colorbar maximum value. Default is data max.
-        :param alpha: Transparency of raster and colorbar.
-        :param title: Title of the plot.
+        :param bands: Bands to plot, counting from 1 to self.count (default is all bands).
+        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
+        :param vmin: Minimum value for colorbar. Default is data min.
+        :param vmax: Maximum value for colorbar. Default is data max.
+        :param alpha: Transparency of raster and colorbar. Default is None.
+        :param title: Title of the plot. Default is None.
         :param cbar_title: Colorbar label title. Default is None.
         :param add_cbar: Set to True to display a colorbar. Default is True.
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
