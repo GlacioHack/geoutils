@@ -1751,12 +1751,15 @@ class TestRaster:
         assert len(images) == 1
         im = images[0]
         # 2. The image content should be the Y-flipped raster, with band index moved to the end (X, Y, band)
-        assert np.array_equal(im.get_array(), np.flip(np.moveaxis(img_RGB.get_nanarray(), 0, -1), axis=0),
-                                                      equal_nan=True)
+        assert np.array_equal(
+            im.get_array(), np.flip(np.moveaxis(img_RGB.get_nanarray(), 0, -1), axis=0), equal_nan=True
+        )
         # 3. The image coordinate should ascend from bottom-left corner
         assert im.origin == "lower"
         # 4. The image extent should match the raster
         assert im.get_extent() == [img.bounds.left, img.bounds.right, img.bounds.bottom, img.bounds.top]
+        # Original raster data should not have been modified in-place during moveaxis
+        assert img_RGB.data.shape[0] == 3
         if DO_PLOT:
             plt.show()
         else:
@@ -1779,9 +1782,7 @@ class TestRaster:
 
         # Test vmin, vmax and cbar_title
         ax = plt.subplot(111)
-        img.plot(
-            cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax
-        )
+        img.plot(cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax)
         if DO_PLOT:
             plt.show()
         else:

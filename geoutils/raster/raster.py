@@ -30,7 +30,7 @@ import warnings
 from collections import abc
 from contextlib import ExitStack
 from math import floor
-from typing import IO, TYPE_CHECKING, Any, Callable, TypeVar, overload, Iterable
+from typing import IO, TYPE_CHECKING, Any, Callable, TypeVar, overload
 
 import affine
 import geopandas as gpd
@@ -3146,8 +3146,10 @@ class Raster:
                 bands = tuple(range(1, self.count + 1))
             # Check the number of bands is 1, 3 or 4
             if len(bands) not in [1, 3, 4]:
-                raise ValueError(f"Only single-band or 3/4-band (RGB-A) plotting is supported. "
-                                 f"Found {len(bands)} bands. Use the `bands` argument to specify bands.")
+                raise ValueError(
+                    f"Only single-band or 3/4-band (RGB-A) plotting is supported. "
+                    f"Found {len(bands)} bands. Use the `bands` argument to specify bands."
+                )
             if len(bands) == 1:
                 bands = bands[0]
         elif isinstance(bands, int):
@@ -3168,7 +3170,7 @@ class Raster:
             if len(bands) > 1:
                 add_cbar = False
             # Re-order axes for RGB plotting
-            data = np.moveaxis(data, 0, -1)
+            data = np.moveaxis(data, 0, -1)  # type: ignore
 
         # Create colorbar
         # Use rcParam default
