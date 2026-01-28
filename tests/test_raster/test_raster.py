@@ -1702,6 +1702,20 @@ class TestRaster:
 
         # Test default plot
         img.plot()
+
+        # Grab the plot content for checks:
+        # 1. There should be only one image
+        ax = plt.gca()
+        images = ax.get_images()
+        assert len(images) == 1
+        im = images[0]
+        # 2. The image content should be the Y-flipped raster
+        assert np.array_equal(im.get_array(), np.flip(img.get_nanarray(), axis=0), equal_nan=True)
+        # 3. The image coordinate should ascend from bottom-left corner
+        assert im.origin == "lower"
+        # 4. The image extent should match the raster
+        assert im.get_extent() == [img.bounds.left, img.bounds.right, img.bounds.bottom, img.bounds.top]
+
         if DO_PLOT:
             plt.show()
         else:
@@ -1719,7 +1733,7 @@ class TestRaster:
 
         # Test with provided ax
         ax = plt.subplot(111)
-        img.plot(ax=ax, title="Simple plotting test")
+        img.plot(ax=ax)
         if DO_PLOT:
             plt.show()
         else:
@@ -1728,16 +1742,34 @@ class TestRaster:
 
         # Test plot RGB
         ax = plt.subplot(111)
-        img_RGB.plot(ax=ax, title="Plotting RGB")
+        img_RGB.plot(ax=ax)
+        images = ax.get_images()
+        assert len(images) == 1
+        im = images[0]
+        # 2. The image content should be the Y-flipped raster, with band index moved to the end (X, Y, band)
+        assert np.array_equal(
+            im.get_array(), np.flip(np.moveaxis(img_RGB.get_nanarray(), 0, -1), axis=0), equal_nan=True
+        )
+        # 3. The image coordinate should ascend from bottom-left corner
+        assert im.origin == "lower"
+        # 4. The image extent should match the raster
+        assert im.get_extent() == [img.bounds.left, img.bounds.right, img.bounds.bottom, img.bounds.top]
+        # Original raster data should not have been modified in-place during moveaxis
+        assert img_RGB.data.shape[0] == 3
         if DO_PLOT:
             plt.show()
         else:
             plt.close()
         assert True
 
-        # Test plotting single band B/W, add_cbar
+        # Test plotting single band B/W, add_cbar, plot tile
         ax = plt.subplot(111)
-        img_RGB.plot(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Plotting one band B/W")
+        img_RGB.plot(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Test")
+        images = ax.get_images()
+        assert len(images) == 1
+        im = images[0]
+        # The image should be the related band
+        assert np.array_equal(im.get_array(), np.flip(img_RGB.get_nanarray()[0, :, :], axis=0), equal_nan=True)
         if DO_PLOT:
             plt.show()
         else:
@@ -1746,9 +1778,7 @@ class TestRaster:
 
         # Test vmin, vmax and cbar_title
         ax = plt.subplot(111)
-        img.plot(
-            cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax, title="Testing vmin, vmax and cbar_title"
-        )
+        img.plot(cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax)
         if DO_PLOT:
             plt.show()
         else:
@@ -1764,6 +1794,33 @@ class TestRaster:
         else:
             plt.close()
         assert os.path.isfile(temp_file)
+
+    def test_plot__exceptions(self) -> None:
+        """Check exceptions raised by plot are correct."""
+
+        pytest.importorskip("matplotlib")
+
+        # Read single band raster and RGB raster
+        img = gu.Raster(self.landsat_b4_path)
+        img_RGB = gu.Raster(self.landsat_rgb_path)
+
+        # Raise an error any number other than 1 or 3/4 bands are passed
+        with pytest.raises(ValueError, match="Only single-band or 3/4-band.*"):
+            img_RGB.plot(bands=(1, 2))
+
+        # Raise an error if band number out of range
+        with pytest.raises(ValueError, match="Index must be in range.*"):
+            img.plot(bands=2)
+        with pytest.raises(ValueError, match="Index must be in range.*"):
+            img_RGB.plot(bands=4)
+
+        # Wrong types
+        with pytest.raises(ValueError, match="Index must be int, tuple or None"):
+            img.plot(bands="wrong_type")  # type: ignore
+        with pytest.raises(ValueError, match="vmin or vmax cannot be converted to float"):
+            img.plot(vmin="wrong_type", vmax="wrong_type")  # type: ignore
+        with pytest.raises(ValueError, match="ax must be a matplotlib.axes.Axes instance, 'new' or None."):
+            img.plot(ax="wrong_type")  # type: ignore
 
     @pytest.mark.skipif(
         find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing."
