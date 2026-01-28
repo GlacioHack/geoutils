@@ -129,7 +129,7 @@ def grouped_stats(
 
         # is interval
         if is_interval(bins_array):
-            cut = pd.cut(df[groupby_key], bins=bins_array, include_lowest=True)
+            cut = pd.cut(df[groupby_key], bins=bins_array)
             df[group_col] = cut
 
             if save_masks and not isinstance(bins[groupby_key], str):
@@ -175,7 +175,7 @@ def grouped_stats(
         groupby_keys.append(group_col)
 
     # Use aggregation directly on categorical columns (fast)
-    result = df.groupby(groupby_keys, observed=True, dropna=False)[list(aggregated_vars.keys())].agg(statistics)
+    result = df.groupby(groupby_keys)[list(aggregated_vars.keys())].agg(statistics)
 
     if save_csv:
         csv_file = Path(save_csv) / "grouped_stats.csv"

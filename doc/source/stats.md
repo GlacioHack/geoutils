@@ -99,12 +99,17 @@ GeoUtils provides support for grouped statistics, allowing statistics to be comp
 defined by one or more grouping bins. This is particularly useful when analyzing how statistical properties vary
 across classes, bins, or segmentation derived from the data itself.
 
-Example of grouped statistics according elevation values
+
+### Example with altitude intervals
+In this example, we will create different altitude classes from a chosen interval [400, 1000, 2000, 3000, >3000].
+Once these bins are created, we reapply them and compute the mean, minimum, and maximum values of the same raster
+for each sub-interval. It is also possible to use a reference other than the raster itself for the group_by.
+
 ```{code-cell} ipython3
 from geoutils.stats import grouped_stats
 
 group_by = {"rast": rast}
-bins = {"rast": [100, 1000, 2000, 3000, np.inf]}
+bins = {"rast": [400, 1000, 2000, 3000, np.inf]}
 to_aggregate = {"rast": rast}
 statistics = ["mean", "min", "max"]
 
@@ -117,7 +122,13 @@ Bins can be presented in different ways. It is possible to integrate an interval
 segmentation map in raster format.
 ```
 
-Example of grouped statistics according elevation values as mask
+
+### Example with altitude masks
+
+In this example, we will create a mask such as altitude is more than 2000 meters.
+Once these masks are created as a raster, we reapply them and compute the mean, minimum, and maximum values of the same raster
+for masks = True. It is also possible to use a reference other than the raster itself for the group_by.
+
 ```{code-cell} ipython3
 from geoutils.stats import grouped_stats
 
@@ -127,7 +138,7 @@ bins = {"rast": elev_mask}
 to_aggregate = {"rast": rast}
 statistics = ["mean", "min", "max"]
 
-df = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
+df = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics, save_masks="")
 df
 ```
 
