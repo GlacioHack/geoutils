@@ -43,7 +43,6 @@ from affine import Affine
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.plot import show as rshow
 
 import geoutils as gu
 from geoutils import profiler
@@ -3060,6 +3059,7 @@ class Raster:
         vmin: float | int | None = None,
         vmax: float | int | None = None,
         alpha: float | int | None = None,
+        title: str | None = None,
         cbar_title: str | None = None,
         add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
@@ -3077,6 +3077,7 @@ class Raster:
         vmin: float | int | None = None,
         vmax: float | int | None = None,
         alpha: float | int | None = None,
+        title: str | None = None,
         cbar_title: str | None = None,
         add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
@@ -3093,6 +3094,7 @@ class Raster:
         vmin: float | int | None = None,
         vmax: float | int | None = None,
         alpha: float | int | None = None,
+        title: str | None = None,
         cbar_title: str | None = None,
         add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
@@ -3103,35 +3105,27 @@ class Raster:
         r"""
         Plot the raster, with axes in projection of image.
 
-        This method is a wrapper to rasterio.plot.show. Any \*\*kwargs which
-        you give this method will be passed to it.
+        This method is a wrapper to matplotlib.imshow with modifications to work on raster (flip Y-axis, lower origin,
+        equal scale). Any \*\*kwargs which you give this method will be passed to matplotlib.imshow.
+        If the raster is passed with 3(4) bands, it is plotted as RGB(Alpha).
 
-        :param bands: Bands to plot, from 1 to self.count (default is all).
-        :param cmap: The figure's colormap. Default is plt.rcParams['image.cmap'].
-        :param vmin: Colorbar minimum value. Default is data min.
-        :param vmax: Colorbar maximum value. Default is data max.
-        :param alpha: Transparency of raster and colorbar.
-        :param cbar_title: Colorbar label. Default is None.
+        :param bands: Bands to plot, counting from 1 to self.count (default is all bands).
+        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
+        :param vmin: Minimum value for colorbar. Default is data min.
+        :param vmax: Maximum value for colorbar. Default is data max.
+        :param alpha: Transparency of raster and colorbar. Default is None.
+        :param title: Title of the plot. Default is None.
+        :param cbar_title: Colorbar label title. Default is None.
         :param add_cbar: Set to True to display a colorbar. Default is True.
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
             If "new", will create a new axis.
         :param return_axes: Whether to return axes.
         :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
-            with a default DPI (300), no transparency and no metadata. Use `plt.savefig()` to specify other save
+            with a default DPI, no transparency and no metadata. Use `plt.savefig()` to specify other save
             parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
             to close the figure.
 
         :returns: None, or (ax, caxes) if return_axes is True.
-
-
-        You can also pass in \*\*kwargs to be used by the underlying imshow or
-        contour methods of matplotlib. The example below shows provision of
-        a kwarg for rasterio.plot.show, and a kwarg for matplotlib as well::
-
-            import matplotlib.pyplot as plt
-            ax1 = plt.subplot(111)
-            mpl_kws = {'cmap':'seismic'}
-            myimage.plot(ax=ax1, mpl_kws)
         """
 
         matplotlib = import_optional("matplotlib")
@@ -3147,16 +3141,25 @@ class Raster:
             kwargs.update({"interpolation": None})
 
         # Check if specific band selected, or take all
-        # rshow takes care of image dimensions
         # if self.count=3 (4) => plotted as RGB(A)
-        if bands is None:
-            bands = tuple(range(1, self.count + 1))
+        if bands is None or isinstance(bands, tuple):
+            # Use all if None was specified
+            if bands is None:
+                bands = tuple(range(1, self.count + 1))
+            # Check the number of bands is 1, 3 or 4
+            if len(bands) not in [1, 3, 4]:
+                raise ValueError(
+                    f"Only single-band or 3/4-band (RGB-A) plotting is supported. "
+                    f"Found {len(bands)} bands. Use the `bands` argument to specify bands."
+                )
+            if len(bands) == 1:
+                bands = bands[0]
         elif isinstance(bands, int):
             if bands > self.count:
                 raise ValueError(f"Index must be in range 1-{self.count:d}")
             pass
         else:
-            raise ValueError("Index must be int or None")
+            raise ValueError("Index must be int, tuple or None")
 
         # Get data
         if self.count == 1:
@@ -3168,6 +3171,8 @@ class Raster:
         if isinstance(bands, abc.Sequence):
             if len(bands) > 1:
                 add_cbar = False
+            # Re-order axes for RGB plotting
+            data = np.moveaxis(data, 0, -1)  # type: ignore
 
         # Create colorbar
         # Use rcParam default
@@ -3203,16 +3208,20 @@ class Raster:
             raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
         # Use data array directly, as rshow on self.ds will re-load data
-        rshow(
-            data,
-            transform=self.transform,
-            ax=ax0,
+        extent = [self.bounds.left, self.bounds.right, self.bounds.bottom, self.bounds.top]
+        ax0.imshow(
+            np.flip(data, axis=0),
+            extent=extent,
+            origin="lower",  # So that the array is not upside-down
+            aspect="equal",
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
             alpha=alpha,
             **kwargs,
         )
+        if title is not None:
+            ax0.set_title(title)
 
         # Add colorbar
         if add_cbar:
