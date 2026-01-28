@@ -3092,6 +3092,7 @@ class Raster:
         vmin: float | int | None = None,
         vmax: float | int | None = None,
         alpha: float | int | None = None,
+        title: str | None = None,
         cbar_title: str | None = None,
         add_cbar: bool = True,
         ax: matplotlib.axes.Axes | Literal["new"] | None = None,
@@ -3113,7 +3114,8 @@ class Raster:
         :param vmin: Colorbar minimum value. Default is data min.
         :param vmax: Colorbar maximum value. Default is data max.
         :param alpha: Transparency of raster and colorbar.
-        :param cbar_title: Colorbar label. Default is None.
+        :param title: Title of the plot.
+        :param cbar_title: Colorbar label title. Default is None.
         :param add_cbar: Set to True to display a colorbar. Default is True.
         :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
             If "new", will create a new axis.
@@ -3218,6 +3220,8 @@ class Raster:
             alpha=alpha,
             **kwargs,
         )
+        if title is not None:
+            ax0.set_title(title)
 
         # Add colorbar
         if add_cbar:

@@ -1766,9 +1766,9 @@ class TestRaster:
             plt.close()
         assert True
 
-        # Test plotting single band B/W, add_cbar
+        # Test plotting single band B/W, add_cbar, plot tile
         ax = plt.subplot(111)
-        img_RGB.plot(bands=1, cmap="gray", ax=ax, add_cbar=False)
+        img_RGB.plot(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Test")
         images = ax.get_images()
         assert len(images) == 1
         im = images[0]
