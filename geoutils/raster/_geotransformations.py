@@ -30,10 +30,10 @@ from typing import Any, Iterable
 import affine
 import numpy as np
 import rasterio as rio
+import xarray as xr
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-import xarray as xr
 
 import geoutils as gu
 from geoutils._misc import silence_rasterio_message

@@ -26,8 +26,8 @@ from typing import Iterable, Literal
 import affine
 import geopandas as gpd
 import numpy as np
-import xarray as xr
 import rasterio as rio
+import xarray as xr
 from rasterio import features, warp
 from rasterio.crs import CRS
 from rasterio.features import shapes

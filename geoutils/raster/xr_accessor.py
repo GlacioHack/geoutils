@@ -289,5 +289,5 @@ class RasterAccessor(RasterBase):
         Write raster to file.
 
         Wrapper around rioxarray.to_raster().
-                """
+        """
         self._obj.rio.to_raster(**kwargs)

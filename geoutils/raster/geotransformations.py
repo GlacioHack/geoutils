@@ -27,9 +27,9 @@ from typing import Iterable, Literal
 
 import affine
 import rasterio as rio
+import xarray as xr
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-import xarray as xr
 
 import geoutils as gu
 from geoutils import profiler

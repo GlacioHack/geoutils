@@ -7,8 +7,8 @@ import pathlib
 import struct
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 from functools import partial
+from typing import Any, Callable, Iterable, Literal, TypeVar, overload
 
 import geopandas as gpd
 import numpy as np
@@ -754,8 +754,15 @@ class RasterBase(ABC):
             else:
                 warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
 
-    def _raster_equal_allclose(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False,
-                               use_allclose: bool = False, rtol: float = 1e-5, atol: float = 1e-8):
+    def _raster_equal_allclose(
+        self,
+        other: RasterType,
+        strict_masked: bool = True,
+        warn_failure_reason: bool = False,
+        use_allclose: bool = False,
+        rtol: float = 1e-5,
+        atol: float = 1e-8,
+    ) -> bool:
         """Core method for raster_equal and raster_allclose."""
 
         if not isinstance(other, (RasterBase, xr.DataArray)):
@@ -808,7 +815,7 @@ class RasterBase(ABC):
             if use_allclose:
                 func = partial(np.allclose, atol=atol, rtol=rtol)
             else:
-                func = np.array_equal
+                func = np.array_equal  # type: ignore
 
             # Three cases: masked/NaN, NaN/masked or NaN/NaN
             if np.ma.isMaskedArray(self.data):
@@ -839,7 +846,6 @@ class RasterBase(ABC):
 
         return complete_equality
 
-
     def raster_equal(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False) -> bool:
         """
         Check if two rasters are equal.
@@ -854,12 +860,18 @@ class RasterBase(ABC):
         :param warn_failure_reason: Whether to warn for the reason of failure if the check does not pass.
         """
 
-        return self._raster_equal_allclose(other, strict_masked=strict_masked,
-                                           warn_failure_reason=warn_failure_reason, use_allclose=False)
+        return self._raster_equal_allclose(
+            other, strict_masked=strict_masked, warn_failure_reason=warn_failure_reason, use_allclose=False
+        )
 
-
-    def raster_allclose(self, other: RasterType, strict_masked: bool = True, warn_failure_reason: bool = False,
-                        rtol: float = 1e-5, atol: float = 1e-8) -> bool:
+    def raster_allclose(
+        self,
+        other: RasterType,
+        strict_masked: bool = True,
+        warn_failure_reason: bool = False,
+        rtol: float = 1e-5,
+        atol: float = 1e-8,
+    ) -> bool:
         """
         Check if two rasters are all close.
 
@@ -880,10 +892,14 @@ class RasterBase(ABC):
         :param atol: Absolute tolerance.
         """
 
-        return self._raster_equal_allclose(other, strict_masked=strict_masked,
-                                           warn_failure_reason=warn_failure_reason, use_allclose=True,
-                                           atol=atol, rtol=rtol)
-
+        return self._raster_equal_allclose(
+            other,
+            strict_masked=strict_masked,
+            warn_failure_reason=warn_failure_reason,
+            use_allclose=True,
+            atol=atol,
+            rtol=rtol,
+        )
 
     def georeferenced_grid_equal(self: RasterType, other: RasterType) -> bool:
         """

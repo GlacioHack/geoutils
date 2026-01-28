@@ -25,10 +25,10 @@ import pathlib
 import warnings
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, TypeVar, overload
 
-import xarray as xr
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin

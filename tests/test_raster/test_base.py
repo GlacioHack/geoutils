@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import warnings
 from typing import Any
 
 import geopandas as gpd
@@ -407,7 +406,7 @@ class TestClassVsAccessorConsistency:
     @pytest.mark.parametrize("path_index", [0, 2])  # type: ignore
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])  # type: ignore
     def test_chunked_methods__equality_loading_laziness(
-            self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
+        self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
     ) -> None:
         """
         Test that chunked methods have the exact same output, loading mechanism and laziness.
@@ -478,6 +477,7 @@ class TestClassVsAccessorConsistency:
         assert_output_equal(output_raster, output_ds2, use_allclose=True)
 
     match_methods = ["reproject", "crop", "create_mask", "rasterize", "proximity", "grid"]
+
     def test_methods__match_raster(self) -> None:
         """Test that methods that take a raster as match-reference input behave the same with DataArray/Raster:
         - Equal output,
