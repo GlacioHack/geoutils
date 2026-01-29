@@ -107,8 +107,8 @@ class RasterBase(ABC):
         """Whether the underlying object is a Xarray Dataset through accessor, or not."""
         return self._obj is not None
 
-    # TODO: Change to abstract method
     @classmethod
+    @abstractmethod
     def from_array(
         cls: type[RasterType],
         data: NDArrayNum | NDArrayBool,
@@ -118,16 +118,23 @@ class RasterBase(ABC):
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
         cast_nodata: bool = True,
-    ) -> RasterType:
-        """Placeholder method for subclasses."""
-        raise NotImplementedError("This method is meant to be subclassed.")
+    ) -> RasterType: ...
 
-    # TODO: Here too
+    @abstractmethod
     def copy(
         self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True, deep: bool = True
     ) -> RasterType:
-        """Placeholder method for subclasses."""
-        raise NotImplementedError("This method is meant to be subclassed.")
+        """
+        Copy the raster in-memory.
+
+        :param new_array: New array to use in the copied raster.
+        :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
+            compatible. If False, will raise an error when incompatible.
+        :param deep: If True, will return a deep copy of the raster.
+
+        :return: Copy of the raster.
+        """
+        ...
 
     @property
     @abstractmethod
@@ -1540,7 +1547,6 @@ class RasterBase(ABC):
 
         # If point cloud input
         if isinstance(points, gu.PointCloud):
-            # TODO: Check conversion is not done for nothing?
             points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
         # Otherwise
         else:

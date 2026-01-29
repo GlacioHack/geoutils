@@ -224,7 +224,6 @@ def _raster_to_pointcloud(
         if source_raster.count == 1:
             pixel_data = source_raster.data[indices[0], indices[1]]
         else:
-            # TODO: Combining both indexes at once could reduce memory usage?
             pixel_data = source_raster.data[all_indexes, :][:, indices[0], indices[1]]
 
     # Otherwise use rasterio.sample to load only requested pixels

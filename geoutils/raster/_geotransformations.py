@@ -114,7 +114,6 @@ def _user_input_reproject(
         if nodata is None:
             nodata = _default_nodata(dtype)
             # If nodata is already being used, raise a warning.
-            # TODO: for uint8, if all values are used, apply rio.warp to mask to identify invalid values
             if not source_raster.is_loaded:
                 warnings.warn(
                     f"For reprojection, nodata must be set. Setting default nodata to {nodata}. You may "
@@ -416,7 +415,8 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     reproj_kwargs.pop("dtype")
     reproj_kwargs.pop("dst_shape")
 
-    # TODO: Figure out why those warning are raised for _dask_reproject with perfectly fine src_transforms
+    # Rasterio raises a warning that src_transform are not defined when multiple ones are passed during chunked ops
+    # (Dask/Multiproc), although this is not the case, maybe a bug upstream?
     warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
 
     # XSCALE/YSCALE have been supported for a while, but not officially exposed in the API until Rasterio 1.5,

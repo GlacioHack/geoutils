@@ -1643,7 +1643,6 @@ class Vector:
 
         # 0/ If no Raster is passed, create one on the Vector bounds of size 1000 x 1000
         if raster is None:
-            # TODO: this bit of code is common in several vector functions (rasterize, etc): move out as common code?
             # By default, use self's bounds
             if self.bounds is None:
                 raise ValueError("To automatically rasterize on the vector, bounds need to be defined.")

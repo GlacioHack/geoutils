@@ -51,7 +51,6 @@ def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float) -> gu.Vector:
     del ds_buffered
 
     # Return a Vector object of the buffered GeoDataFrame
-    # TODO: Clarify what is conserved in the GeoSeries and what to pass the GeoDataFrame to not lose any attributes
     vector_buffered = gu.Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=gdf.crs))
 
     return vector_buffered

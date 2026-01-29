@@ -271,7 +271,6 @@ def _interp_points(
         array = array.astype(np.float32)
     shape: tuple[int, int] = array.shape[0:2]  # type: ignore
 
-    # TODO: Add check about None for "points" depending on "return_interpolator"
     if not return_interpolator:
         if points is None:
             raise ValueError("Input 'points' cannot be None if 'return_interpolator' is False.")

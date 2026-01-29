@@ -114,7 +114,7 @@ def _get_indices_block_per_subsample(
     # We can write a faster algorithm by sorting
     indices_1d = np.sort(indices_1d)
 
-    # TODO: Write nested lists into array format to further save RAM?
+    # Could we write nested lists into array format to further save RAM?
     # We define a list of indices per block
     relative_index_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
     k = 0  # K is the block number
@@ -308,12 +308,6 @@ def _get_interp_indices_per_block(
 ) -> list[list[int]]:
     """Map blocks where each pair of interpolation coordinates will have to be computed."""
 
-    # TODO 1: Check the robustness for chunksize different and X and Y
-
-    # TODO 2: Check if computing block_i_id matricially + using an == comparison (possibly delayed) to get index
-    #  per block is not more computationally efficient?
-    #  (as it uses array instead of nested lists, and nested lists grow in RAM very fast)
-
     # The argument "starts" contains the list of chunk first X/Y index for the full array, plus the last index
 
     # We use one bucket per block, assuming a flattened blocks shape
@@ -342,8 +336,6 @@ def _delayed_interp_points_block(
     # Reconstruct the coordinates from xi/yi/xres/yres (as it has to be a regular grid)
     x_coords = np.arange(xs, xs + xres * arr_chunk.shape[0], xres)
     y_coords = np.arange(ys, ys + yres * arr_chunk.shape[1], yres)
-
-    # TODO: Use scipy.map_coordinates for an equal grid as in Raster.interp_points?
 
     # Interpolate to points
     interp_chunk = interpn(points=(x_coords, y_coords), values=arr_chunk, xi=(interp_coords[0, :], interp_coords[1, :]))
@@ -377,12 +369,10 @@ def delayed_interp_points(
     # To raise appropriate error on missing optional dependency
     import_optional("dask")
 
-    # TODO: Replace by a generic 2D point casting function accepting multiple inputs (living outside this function)
     # Convert input to 2D array
     points_arr = np.vstack((points[0], points[1]))
 
     # Map depth of overlap required for each interpolation method
-    # TODO: Double-check this window somewhere in SciPy's documentation
     map_depth = {"nearest": 1, "linear": 2, "cubic": 3, "quintic": 5}
 
     # Expand dask array for overlapping computations
