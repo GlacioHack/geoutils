@@ -42,32 +42,29 @@ class RealImageStack:
 
         # Cut the img into two imgs that slightly overlap each other.
         self.img1 = img.copy()
-        self.img1.crop(
+        self.img1 = self.img1.crop(
             rio.coords.BoundingBox(
                 right=x_midpoint + img.res[0] * 3, left=img.bounds.left, top=img.bounds.top, bottom=img.bounds.bottom
             ),
-            inplace=True,
         )
         self.img2 = img.copy()
-        self.img2.crop(
+        self.img2 = self.img2.crop(
             rio.coords.BoundingBox(
                 left=x_midpoint - img.res[0] * 3, right=img.bounds.right, top=img.bounds.top, bottom=img.bounds.bottom
             ),
-            inplace=True,
         )
         if different_crs:
             self.img2 = self.img2.reproject(crs=different_crs, resampling="nearest")
 
         # To check that use_ref_bounds work - create a img that do not cover the whole extent
         self.img3 = img.copy()
-        self.img3.crop(
+        self.img3 = self.img3.crop(
             rio.coords.BoundingBox(
                 left=x_midpoint - img.res[0] * 3,
                 right=img.bounds.right - img.res[0] * 2,
                 top=img.bounds.top,
                 bottom=img.bounds.bottom,
             ),
-            inplace=True,
         )
 
 
@@ -106,32 +103,29 @@ class SyntheticImageStack:
 
         # Cut the img into two imgs that slightly overlap each other.
         self.img1 = img.copy()
-        self.img1.crop(
+        self.img1 = self.img1.crop(
             rio.coords.BoundingBox(
                 right=x_midpoint + img.res[0] * 3, left=img.bounds.left, top=img.bounds.top, bottom=img.bounds.bottom
             ),
-            inplace=True,
         )
         self.img2 = img.copy()
-        self.img2.crop(
+        self.img2 = self.img2.crop(
             rio.coords.BoundingBox(
                 left=x_midpoint - img.res[0] * 3, right=img.bounds.right, top=img.bounds.top, bottom=img.bounds.bottom
             ),
-            inplace=True,
         )
 
         # Define a second raster with only 5s and the value defined above
         self.img2[:5, :5] = img2_value
 
         self.img3 = self.img1.copy()
-        self.img3.crop(
+        self.img3 = self.img3.crop(
             rio.coords.BoundingBox(
                 left=x_midpoint - self.img.res[0] * 3,
                 right=self.img.bounds.right - self.img.res[0] * 2,
                 top=self.img.bounds.top,
                 bottom=self.img.bounds.bottom,
             ),
-            inplace=True,
         )
 
 

@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal, TypeVar
 
 import geopandas as gpd
@@ -317,7 +318,10 @@ def _build_geotiling_and_meta(
     # 2/ Get footprints of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
     # overlap, then map indexes of source blocks that intersect a given destination block
     src_footprints = src_geotiling.get_block_footprints(crs=dst_crs)
-    dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
+    # Raised warning for buffer is not important
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, message="Geometry is in a geographic CRS.*")
+        dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
     dest2source = [list(np.where(dst.intersects(src_footprints).values)[0]) for dst in dst_footprints]
 
     # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
@@ -385,9 +389,6 @@ def _reproject_per_block(
     if "dtype" not in kwargs:
         kwargs.update({"dtype": comb_src_arr.dtype})
 
-    src_mask = comb_src_arr == kwargs["src_nodata"]
-    dst_arr, dst_mask = _rio_reproject(src_arr=comb_src_arr, src_mask=src_mask, reproj_kwargs=kwargs)  # type: ignore
-    if np.issubdtype(dst_arr.dtype, np.floating):
-        dst_arr[dst_mask] = np.nan
+    dst_arr = _rio_reproject(src_arr=comb_src_arr, reproj_kwargs=kwargs)  # type: ignore
 
     return dst_arr

@@ -93,7 +93,15 @@ def _proximity_from_vector_or_raster(
     # If not all pixels are targets, then we compute the distance
     non_targets = np.count_nonzero(mask_boundary)
     if non_targets > 0:
-        proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
+        # For multi-band raster, loop over bands
+        if mask_boundary.ndim == 3:
+            list_band_proxi = []
+            for i in range(mask_boundary.shape[0]):
+                prox = distance_transform_edt(~mask_boundary[i, :, :], sampling=sampling)
+                list_band_proxi.append(prox)
+            proximity = np.stack(list_band_proxi, axis=0)
+        else:
+            proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
     # Otherwise, pass an array full of nodata
     else:
         proximity = np.ones(np.shape(mask_boundary)) * np.nan

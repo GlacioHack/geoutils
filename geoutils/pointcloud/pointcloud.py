@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, TypeVar, ove
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin
@@ -771,13 +772,11 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             ind = ind.astype(bool)  # In case the 3D Z column was used, it can only be stored as floating
             # Assign
             if self._has_z:
-                print(ind)
                 new_geo = gpd.points_from_xy(
                     x=self.geometry.x.values[ind], y=self.geometry.y.values[ind], z=assign, crs=self.crs
                 )
                 self.ds.loc[ind, "geometry"] = new_geo
             else:
-                print(self.data_column)
                 self.ds.loc[ind, [self.data_column]] = assign
 
         else:
@@ -938,7 +937,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             will create a new axis.
         :param return_axes: Whether to return axes.
         :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
-            with a default DPI (300), no transparency and no metadata. Use `plt.savefig()` to specify other save
+            with a default DPI, no transparency and no metadata. Use `plt.savefig()` to specify other save
             parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
             to close the figure.
 
@@ -1516,13 +1515,16 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :return: Raster from gridded point cloud.
         """
 
-        if isinstance(ref, gu.Raster):
+        if isinstance(ref, (gu.Raster, xr.DataArray)):
             if grid_coords is not None:
                 warnings.warn(
                     "Both reference point cloud and grid coordinates were passed for gridding, "
                     "using only the reference point cloud."
                 )
-            grid_coords = ref.coords(grid=False)
+            if isinstance(ref, gu.Raster):
+                grid_coords = ref.coords(grid=False)
+            else:
+                grid_coords = ref.rst.coords(grid=False)
         else:
             if res is not None:
                 xsize = (self.bounds.right - self.bounds.left) / res

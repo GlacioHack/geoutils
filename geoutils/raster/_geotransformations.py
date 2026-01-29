@@ -30,13 +30,14 @@ from typing import Any, Iterable
 import affine
 import numpy as np
 import rasterio as rio
+import xarray as xr
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 import geoutils as gu
 from geoutils._misc import silence_rasterio_message
-from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
+from geoutils._typing import DTypeLike, NDArrayNum
 from geoutils.raster.georeferencing import (
     _cast_pixel_interpretation,
     _default_nodata,
@@ -143,18 +144,18 @@ def _user_input_reproject(
         if isinstance(ref, gu.Raster):
             # Raise a warning if the reference is a raster that has a different pixel interpretation
             _cast_pixel_interpretation(source_raster.area_or_point, ref.area_or_point)
-            ds_ref = ref
-        elif isinstance(ref, str):
-            if not os.path.exists(ref):
-                raise ValueError("Reference raster does not exist.")
-            ds_ref = gu.Raster(ref, load_data=False)
+            # Read reprojecting params from ref raster
+            crs = ref.crs
+            res = ref.res
+            bounds = ref.bounds
+        elif isinstance(ref, xr.DataArray):
+            _cast_pixel_interpretation(source_raster.area_or_point, ref.rst.area_or_point)
+            crs = ref.rst.crs
+            res = ref.rst.res
+            bounds = ref.rst.bounds
         else:
             raise TypeError("Type of ref not understood, must be path to file (str), Raster.")
 
-        # Read reprojecting params from ref raster
-        crs = ds_ref.crs
-        res = ds_ref.res
-        bounds = ds_ref.bounds
     else:
         # Determine target CRS
         crs = CRS.from_user_input(crs)
@@ -330,15 +331,28 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
     )
 
 
-def _rio_reproject(
-    src_arr: NDArrayNum | NDArrayBool, src_mask: NDArrayBool, reproj_kwargs: dict[str, Any]
-) -> tuple[NDArrayNum | NDArrayBool, NDArrayBool]:
+def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:
     """Rasterio reprojection wrapper.
 
     :param src_arr: Source array for data.
-    :param src_mask: Source array for mask, only required if array is not float.
     :param reproj_kwargs: Reprojection parameter dictionary.
     """
+
+    # All masked values must be set to a nodata value for rasterio's reproject to work properly
+    if np.ma.isMaskedArray(src_arr):
+        is_input_masked = True
+        src_mask = np.ma.getmaskarray(src_arr)
+        src_arr = src_arr.data  # type: ignore
+    else:
+        is_input_masked = False
+        src_mask = ~np.isfinite(src_arr)
+
+    # Check reprojection is possible with nodata (boolean raster will be converted, so no need to check)
+    if np.dtype(src_arr.dtype) != bool and (reproj_kwargs["src_nodata"] is None and np.sum(src_mask) > 0):
+        raise ValueError(
+            "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
+            "with `force_source_nodata`."
+        )
 
     # For a boolean type
     convert_bool = False
@@ -394,12 +408,15 @@ def _rio_reproject(
     )
     # If Rasterio is recent enough version, force tolerance to 0 to avoid deformations on chunks
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
-    if Version(rio.__version__) > Version("1.5"):
+    if Version(rio.__version__) >= Version("1.5.0"):
         reproj_kwargs.update({"tolerance": 0})
 
     # Pop dtype and dst_shape arguments that don't exist in Rasterio, and are only used above
     reproj_kwargs.pop("dtype")
     reproj_kwargs.pop("dst_shape")
+
+    # TODO: Figure out why those warning are raised for _dask_reproject with perfectly fine src_transforms
+    warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
 
     # XSCALE/YSCALE have been supported for a while, but not officially exposed in the API until Rasterio 1.5,
     # so we need to silence them in warnings to avoid noise for users
@@ -417,4 +434,11 @@ def _rio_reproject(
     if convert_bool:
         dst_arr = dst_arr.astype(bool)
 
-    return dst_arr, dst_mask
+    # Set mask
+    if is_input_masked:
+        dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=reproj_kwargs["dst_nodata"])
+    else:
+        dst_arr = dst_arr
+        dst_arr[dst_mask] = np.nan
+
+    return dst_arr
