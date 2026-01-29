@@ -1578,19 +1578,8 @@ class Raster(RasterBase):
     def copy(
         self: RasterType, new_array: NDArrayNum | None = None, cast_nodata: bool = True, deep: bool = True
     ) -> RasterType:
-        """
-        Copy the raster in-memory.
-
-        :param new_array: New array to use in the copied raster.
-        :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
-            compatible. If False, will raise an error when incompatible.
-        :param deep: If True, will return a deep copy of the raster.
-
-        :return: Copy of the raster.
-        """
 
         # Core attributes to copy and set again
-        # TODO: Add _shape for consistency?
         dict_copy = [
             "_crs",
             "_nodata",
@@ -1721,7 +1710,6 @@ class Raster(RasterBase):
         else:
 
             # Check the casting between Raster and array inputs, and return error messages if not consistent
-            # TODO: Use nodata value derived here after fixing issue #517
             if isinstance(inputs[0], Raster):
                 raster = inputs[0]
                 other = inputs[1]
@@ -1800,7 +1788,6 @@ class Raster(RasterBase):
         # Two input functions require casting
         else:
             # Check the casting between Raster and array inputs, and return error messages if not consistent
-            # TODO: Use nodata below, but after fixing issue #517
             if isinstance(args[0], Raster):
                 raster = args[0]
                 other = args[1]
@@ -2010,9 +1997,12 @@ class Raster(RasterBase):
         crs = ds.rio.crs
         transform = ds.rio.transform(recalc=True)
         nodata = ds.rio.nodata
+        area_or_point = ds.attrs.get("AREA_OR_POINT", None)
+        tags = ds.attrs
 
-        # TODO: Add tags and area_or_point with PR #509
-        raster = cls.from_array(data=ds.data, transform=transform, crs=crs, nodata=nodata)
+        raster = cls.from_array(
+            data=ds.data, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point, tags=tags
+        )
 
         if dtype is not None:
             raster = raster.astype(dtype)
@@ -2291,7 +2281,6 @@ class Raster(RasterBase):
         """
 
         if isinstance(points, gu.PointCloud):
-            # TODO: Check conversion is not done for nothing?
             points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
             # Otherwise
         else:
@@ -2392,7 +2381,6 @@ class Raster(RasterBase):
                 win: NDArrayNum | dict[int, NDArrayNum] = data
 
             else:
-                # TODO: if we want to allow sampling multiple bands, need to do it also when data is loaded
                 # if self.count == 1:
                 with rio.open(self.name) as raster:
                     data = raster.read(

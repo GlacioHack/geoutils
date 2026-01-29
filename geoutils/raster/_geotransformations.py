@@ -415,7 +415,8 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     reproj_kwargs.pop("dtype")
     reproj_kwargs.pop("dst_shape")
 
-    # TODO: Figure out why those warning are raised for _dask_reproject with perfectly fine src_transforms
+    # Rasterio raises a warning that src_transform are not defined when multiple ones are passed during chunked ops
+    # (Dask/Multiproc), although this is not the case, maybe a bug upstream?
     warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
 
     # XSCALE/YSCALE have been supported for a while, but not officially exposed in the API until Rasterio 1.5,

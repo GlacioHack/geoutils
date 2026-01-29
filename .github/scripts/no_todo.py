@@ -1,4 +1,5 @@
 """Helper function to search for unresolved TODOs in precommit."""
+
 import sys
 from pathlib import Path
 

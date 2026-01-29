@@ -27,8 +27,6 @@ def open_raster(filename: str, is_mask: bool = False, **kwargs: Any) -> xr.DataA
     :param kwargs: Keyword to pass to rioxarray.open().
     """
 
-    # TODO: Wrap the chunk argument to accept 2D chunks? Right now need to pass 3D even for single-band raster
-
     # Open with Rioxarray, cast to float32 if integer type
     ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
 
