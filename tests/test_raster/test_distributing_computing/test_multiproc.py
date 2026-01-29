@@ -40,7 +40,7 @@ def _custom_func_overlap(raster: RasterType, size: int) -> RasterType:
 
 
 # Define a simple function with some args
-def _custom_func(raster: RasterType, addition: float, factor: float) -> RasterType:
+def _custom_func(raster: Raster, addition: float, factor: float) -> Raster:
     return (raster + addition) * factor
 
 

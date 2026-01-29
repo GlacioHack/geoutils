@@ -247,11 +247,16 @@ class TestRasterFilters:  # type: ignore
         np.testing.assert_allclose(filtered.data.data, expected_raster.data.data)
 
     def test_raster_filter_inplace(self) -> None:
-        """Check that in-place filtering modifies the original raster."""
+        """Check that in-place filtering gives the same output as normal filtering."""
         raster = gu.Raster(self.aster_dem_path)
+        # In-place filtering
         filtered_raster = raster.copy()
         filtered_raster.filter("gaussian", sigma=0, inplace=True)
-        np.testing.assert_allclose(filtered_raster.data.data, raster.data.data, rtol=1e-1, atol=1e-1)
+        # Not in-place filtering
+        filtered_raster2 = raster.filter("gaussian", sigma=0)
+        # Check that filtering triggered differences
+        assert not raster.raster_equal(filtered_raster)
+        assert filtered_raster.raster_equal(filtered_raster2)
 
     def test_raster_filter_invalid(self) -> None:
         """Ensure invalid filter method raises appropriate exceptions."""

@@ -23,20 +23,37 @@ Module for dask-delayed functions for out-of-memory raster operations.
 from __future__ import annotations
 
 import warnings
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
-import dask.array as da
-import dask.delayed
 import numpy as np
 import rasterio as rio
-from dask.utils import cached_cumsum
 from scipy.interpolate import interpn
 
+from geoutils._misc import import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.raster.distributed_computing.chunked import (
     _build_geotiling_and_meta,
     _reproject_per_block,
 )
+
+# Dask as optional dependency
+try:
+    import dask
+    import dask.array as da
+    from dask import delayed
+    from dask.utils import cached_cumsum
+except ImportError:
+
+    def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """
+        Fake delayed decorator if dask is not installed
+        """
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
+
 
 # 1/ SUBSAMPLING
 # At the date of April 2024:
@@ -45,7 +62,7 @@ from geoutils.raster.distributed_computing.chunked import (
 # It is not trivial because we don't know where valid values will be in advance, and because of ragged output (varying
 # output length considerations), which prevents from using high-level functions with good efficiency
 # We thus follow https://blog.dask.org/2021/07/02/ragged-output (the dask.array.map_blocks solution has a larger RAM
-# usage by having to drop an axis and re-chunk along 1D of the 2D array, so we use the dask.delayed solution instead)
+# usage by having to drop an axis and re-chunk along 1D of the 2D array, so we use the delayed solution instead)
 
 
 def _get_subsample_size_from_user_input(
@@ -115,7 +132,7 @@ def _get_indices_block_per_subsample(
     return relative_index_per_block
 
 
-@dask.delayed  # type: ignore
+@delayed  # type: ignore
 def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool) -> NDArrayNum:
     """Count number of valid values per block."""
     if arr_chunk.dtype == "bool":
@@ -123,7 +140,7 @@ def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool) -> NDArrayNum:
     return np.array([np.count_nonzero(np.isfinite(arr_chunk))]).reshape((1, 1))
 
 
-@dask.delayed  # type: ignore
+@delayed  # type: ignore
 def _delayed_subsample_block(
     arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum
 ) -> NDArrayNum | NDArrayBool:
@@ -134,7 +151,7 @@ def _delayed_subsample_block(
     return arr_chunk[np.isfinite(arr_chunk)][subsample_indices]
 
 
-@dask.delayed  # type: ignore
+@delayed  # type: ignore
 def _delayed_subsample_indices_block(
     arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum, block_id: dict[str, Any]
 ) -> NDArrayNum:
@@ -194,6 +211,9 @@ def delayed_subsample(
     :return: Subsample of values from the array (optionally, their indexes).
     """
 
+    # To raise appropriate error on missing optional dependency
+    import_optional("dask")
+
     # Get random state
     rng = np.random.default_rng(random_state)
 
@@ -229,7 +249,6 @@ def delayed_subsample(
             if len(ind_per_block[i]) > 0
         ]
         # Cast output to the right expected dtype and length, then compute and concatenate
-        print(nb_valids_per_block)
         list_subsamples_delayed = [
             da.from_delayed(s, shape=(nb_valids_per_block[i],), dtype=darr.dtype) for i, s in enumerate(list_subsamples)
         ]
@@ -309,7 +328,7 @@ def _get_interp_indices_per_block(
     return ind_per_block
 
 
-@dask.delayed  # type: ignore
+@delayed  # type: ignore
 def _delayed_interp_points_block(
     arr_chunk: NDArrayNum, block_id: dict[str, Any], interp_coords: NDArrayNum
 ) -> NDArrayNum:
@@ -354,6 +373,9 @@ def delayed_interp_points(
 
     :return: Array of raster value(s) for the given points.
     """
+
+    # To raise appropriate error on missing optional dependency
+    import_optional("dask")
 
     # TODO: Replace by a generic 2D point casting function accepting multiple inputs (living outside this function)
     # Convert input to 2D array
@@ -416,7 +438,7 @@ def delayed_interp_points(
 # 3/ REPROJECT (see subfunctions in chunked module)
 
 
-@dask.delayed  # type: ignore
+@delayed  # type: ignore
 def _delayed_reproject_per_block(
     *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
 ) -> NDArrayNum:
@@ -461,6 +483,9 @@ def delayed_reproject(
 
     :return: Dask array of reprojected raster.
     """
+
+    # To raise appropriate error on missing optional dependency
+    import_optional("dask")
 
     # Define the chunking
     # For source, we can use the .chunks attribute

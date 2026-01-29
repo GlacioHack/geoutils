@@ -26,8 +26,8 @@ from typing import Iterable, Literal
 import affine
 import geopandas as gpd
 import numpy as np
-import rasterio
 import rasterio as rio
+import xarray as xr
 from rasterio import features, warp
 from rasterio.crs import CRS
 from rasterio.features import shapes
@@ -53,31 +53,33 @@ def _polygonize(
             warnings.warn("Raster mask (boolean type) passed, using target value of 1 (True).")
         target_values = True
 
+    nanarray = source_raster.get_nanarray()
+
     # Mask a unique value set by a number
     if isinstance(target_values, (int, float, np.integer, np.floating)):
-        if np.sum(source_raster.data == target_values) == 0:
+        if np.sum(nanarray == target_values) == 0:
             raise ValueError(f"no pixel with in_value {target_values}")
 
-        bool_msk = np.array(source_raster.data == target_values).astype(np.uint8)
+        bool_msk = np.array(nanarray == target_values).astype(np.uint8)
 
     # Mask values within boundaries set by a tuple
     elif isinstance(target_values, tuple):
-        if np.sum((source_raster.data > target_values[0]) & (source_raster.data < target_values[1])) == 0:
+        if np.sum((nanarray > target_values[0]) & (nanarray < target_values[1])) == 0:
             raise ValueError(f"no pixel with in_value between {target_values[0]} and {target_values[1]}")
 
-        bool_msk = ((source_raster.data > target_values[0]) & (source_raster.data < target_values[1])).astype(np.uint8)
+        bool_msk = ((nanarray > target_values[0]) & (nanarray < target_values[1])).astype(np.uint8)
 
     # Mask specific values set by a sequence
     elif isinstance(target_values, list) or isinstance(target_values, np.ndarray):
-        if np.sum(np.isin(source_raster.data, np.array(target_values))) == 0:
+        if np.sum(np.isin(nanarray, np.array(target_values))) == 0:
             raise ValueError("no pixel with in_value " + ", ".join(map("{}".format, target_values)))
 
-        bool_msk = np.isin(source_raster.data, np.array(target_values)).astype("uint8")
+        bool_msk = np.isin(nanarray, np.array(target_values)).astype("uint8")
 
     # Mask all valid values
     elif target_values == "all":
         # Using getmaskarray is necessary in case .data.mask is nomask (False)
-        bool_msk = (~np.ma.getmaskarray(source_raster.data)).astype("uint8")
+        bool_msk = (~np.ma.getmaskarray(nanarray)).astype("uint8")
 
     else:
         raise ValueError("in_value must be a number, a tuple or a sequence")
@@ -99,7 +101,7 @@ def _polygonize(
     results = (
         {"properties": {"raster_value": v}, "geometry": s}
         for i, (s, v) in enumerate(
-            shapes(source_raster.data.astype(final_dtype), mask=bool_msk, transform=source_raster.transform)
+            shapes(nanarray.astype(final_dtype), mask=bool_msk, transform=source_raster.transform)
         )
     )
 
@@ -115,7 +117,7 @@ def _polygonize(
 
 def _rasterize(
     gdf: gpd.GeoDataFrame,
-    raster: gu.Raster | None = None,
+    raster: gu.Raster | xr.DataArray | None = None,
     crs: CRS | int | None = None,
     xres: float | None = None,
     yres: float | None = None,
@@ -132,7 +134,10 @@ def _rasterize(
         crs = gdf.crs
 
     if raster is not None:
-        crs = raster.crs  # type: ignore
+        if isinstance(raster, gu.Raster):
+            crs = raster.crs  # type: ignore
+        else:
+            crs = raster.rst.crs
 
     vect = gdf.to_crs(crs)
 
@@ -163,10 +168,14 @@ def _rasterize(
         # Calculate raster transform
         transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
 
-    # otherwise use directly raster's dimensions
+    # Otherwise use directly raster's dimensions
     else:
-        out_shape = raster.shape  # type: ignore
-        transform = raster.transform  # type: ignore
+        if isinstance(raster, gu.Raster):
+            out_shape = raster.shape  # type: ignore
+            transform = raster.transform  # type: ignore
+        else:
+            out_shape = raster.rst.shape
+            transform = raster.rst.transform
 
     # Set default burn value, index from 1 to len(self.ds)
     if in_value is None:
@@ -264,9 +273,14 @@ def _create_mask(
 
         # For a reference, extract transform and CRS
         if ref is not None:
-            transform = ref.transform
-            out_shape = ref.shape
-            crs = ref.crs
+            if isinstance(ref, xr.DataArray):
+                transform = ref.rst.transform
+                out_shape = ref.rst.shape
+                crs = ref.rst.crs
+            else:
+                transform = ref.transform
+                out_shape = ref.shape
+                crs = ref.crs
 
         # For a user-input res
         else:

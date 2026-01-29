@@ -133,7 +133,7 @@ class TestDistance:
             # (Landsat Raster with target of 112)
             # It looks like GDAL might not have the right value,
             # so this particular case is treated differently in tests
-            if target_values is not None and target_values[0] == 112 and raster.filename is not None:
+            if target_values is not None and target_values[0] == 112 and raster.name is not None:
                 # Get index and number of not almost equal point (tolerance of 10-4)
                 ind_not_almost_equal = np.abs(gdal_proximity - geoutils_proximity) > 1e-04
                 nb_not_almost_equal = np.count_nonzero(ind_not_almost_equal)
