@@ -25,7 +25,7 @@ class TestSatImg:
     landsat_b4 = examples.get_path_test("everest_landsat_b4")
     aster_dem = examples.get_path_test("exploradores_aster_dem")
 
-    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])
     def test_init(self, example: str) -> None:
         """Test that the sensor reading through Raster initialisation works."""
 
@@ -39,7 +39,7 @@ class TestSatImg:
         for tag in satimg_tags:
             assert tag not in rast.tags.keys()
 
-    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])
     def test_silent(self, example: str) -> None:
         """
         Test that the silent method does not return any output in console
@@ -70,7 +70,7 @@ class TestSatImg:
         # Check nothing outputs to console
         assert len(output2) == 0
 
-    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4, aster_dem])
     def test_save_tags(self, example: str) -> None:
         """Check that the metadata read is saved in tags of raster metadata."""
 

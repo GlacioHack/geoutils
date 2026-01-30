@@ -90,7 +90,7 @@ class Vector:
     See the API for more details.
     """
 
-    @profiler.profile("geoutils.vector.vector.__init__", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.vector.vector.__init__", memprof=True)
     def __init__(
         self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
     ):
@@ -447,22 +447,22 @@ class Vector:
     # GeoPandasBase - Attributes that return a Series
     # -----------------------------------------------
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def area(self) -> pd.Series:
         return self._override_gdf_output(self.ds.area)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def length(self) -> pd.Series:
         return self._override_gdf_output(self.ds.length)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def interiors(self) -> pd.Series:
         return self._override_gdf_output(self.ds.interiors)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def geom_type(self) -> pd.Series:
         return self._override_gdf_output(self.ds.geom_type)
@@ -473,37 +473,37 @@ class Vector:
         """Returns or appends to ``Vector`` a ``Series`` with the bounds of each geometry feature."""
         return self.ds.bounds
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def is_empty(self) -> pd.Series:
         return self._override_gdf_output(self.ds.is_empty)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def is_ring(self) -> pd.Series:
         return self._override_gdf_output(self.ds.is_ring)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def is_simple(self) -> pd.Series:
         return self._override_gdf_output(self.ds.is_simple)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def is_valid(self) -> pd.Series:
         return self._override_gdf_output(self.ds.is_valid)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def has_z(self) -> pd.Series:
         return self.ds.has_z
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def is_ccw(self) -> pd.Series:
         return self._override_gdf_output(self.ds.is_ccw)
 
-    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector", replace_return_series_statement=True)
     @property
     def is_closed(self) -> pd.Series:
         return self._override_gdf_output(self.ds.is_closed)
@@ -512,27 +512,27 @@ class Vector:
     # GeoPandasBase - Attributes that return a GeoSeries
     # --------------------------------------------------
 
-    @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector")
     @property
     def boundary(self) -> Vector:
         return self._override_gdf_output(self.ds.boundary)
 
-    @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector")
     @property
     def centroid(self) -> Vector:
         return self._override_gdf_output(self.ds.centroid)
 
-    @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector")
     @property
     def convex_hull(self) -> Vector:
         return self._override_gdf_output(self.ds.convex_hull)
 
-    @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector")
     @property
     def envelope(self) -> Vector:
         return self._override_gdf_output(self.ds.envelope)
 
-    @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector")
     @property
     def exterior(self) -> Vector:
         return self._override_gdf_output(self.ds.exterior)
@@ -541,12 +541,12 @@ class Vector:
     # GeoPandasBase - Attributes that return a specific value (not Series or GeoSeries)
     # ---------------------------------------------------------------------------------
 
-    @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector")
     @property
     def has_sindex(self) -> bool:
         return self.ds.has_sindex
 
-    @copy_doc(gpd.GeoSeries, "Vector")  # type: ignore
+    @copy_doc(gpd.GeoSeries, "Vector")
     @property
     def sindex(self) -> bool:
         return self.ds.sindex
@@ -1302,7 +1302,7 @@ class Vector:
         inplace: bool = False,
     ) -> VectorType | None: ...
 
-    @profiler.profile("geoutils.vector.vector.crop", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.vector.vector.crop", memprof=True)
     def crop(
         self: VectorType,
         bbox: RasterType | VectorType | list[float] | tuple[float, ...],
@@ -1380,7 +1380,7 @@ class Vector:
         inplace: bool = False,
     ) -> VectorType | None: ...
 
-    @profiler.profile("geoutils.vector.vector.reproject", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.vector.vector.reproject", memprof=True)
     def reproject(
         self: VectorType,
         ref: RasterLike | VectorLike | None = None,
@@ -1535,7 +1535,7 @@ class Vector:
         mask = _create_mask(gdf=self.ds, ref=ref, crs=crs, res=res, points=points, bounds=bounds, as_array=as_array)
         return mask
 
-    @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)
     def rasterize(
         self,
         raster: RasterType | None = None,

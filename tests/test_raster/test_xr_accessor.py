@@ -25,7 +25,7 @@ class TestAccessor:
     def test_open_raster(self) -> None:
         pass
 
-    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])
     def test_copy(self, path_raster: str) -> None:
 
         ds = open_raster(path_raster)
@@ -36,7 +36,7 @@ class TestAccessor:
         assert ds.rst.crs == ds_copy.rst.crs
         assert ds.rst.nodata == ds_copy.rst.nodata
 
-    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])
     def test_open__loaded(self, path_raster: str) -> None:
         """
         Test that a DataArray opened using "open_raster" maintains implicit loading logic.
@@ -56,7 +56,7 @@ class TestAccessor:
         ds.load()
         assert ds._in_memory
 
-    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])
     def test_open__dask(self, path_raster: str) -> None:
         """
         Check that a DataArray opened with chunks using "open_raster" maintains Dask laziness.

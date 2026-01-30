@@ -132,7 +132,7 @@ class TestRasterVectorInterface:
         with pytest.raises(ValueError, match="Only one of raster or crs can be provided."):
             vct.rasterize(raster=rst, crs=3857)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_polygonize(self, example: str) -> None:
         """Test that polygonize doesn't raise errors."""
 
@@ -199,7 +199,7 @@ class TestMaskVectorInterface:
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_polygonize(self, mask: gu.Raster) -> None:
         mask_orig = mask.copy()
         # Run default

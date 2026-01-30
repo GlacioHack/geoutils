@@ -329,7 +329,7 @@ class TestMultiRaster:
         ],
     ]
 
-    @pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore
+    @pytest.mark.parametrize("raster_paths", raster_groups)
     def test_load_multiple_overlap(self, raster_paths: list[str]) -> None:
         """
         Test load_multiple_rasters functionalities, when rasters overlap -> no warning is raised
@@ -383,7 +383,7 @@ class TestMultiRaster:
         [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")],
     ]
 
-    @pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore
+    @pytest.mark.parametrize("raster_paths", raster_groups)
     def test_load_multiple_no_overlap(self, raster_paths: list[str]) -> None:
         """
         Test load_multiple_rasters functionalities with rasters that do not overlap -> raises warning in certain cases

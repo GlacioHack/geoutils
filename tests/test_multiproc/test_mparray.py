@@ -61,7 +61,7 @@ class TestTiling:
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
 
-    @pytest.mark.parametrize("overlap", [0, 5])  # type: ignore
+    @pytest.mark.parametrize("overlap", [0, 5])
     def test_tiling(self, overlap: int) -> None:
 
         # Test with mock data
@@ -153,7 +153,7 @@ class TestMultiproc:
     num_workers = min(2, cpu_count())  # Safer limit for CI
     cluster = ClusterGenerator("test", nb_workers=num_workers)
 
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     def test_load_raster_tile(self, example: str) -> None:
         """
         Test loading a specific tile (spatial subset) from the raster.
@@ -166,8 +166,8 @@ class TestMultiproc:
         raster_tile = _load_raster_tile(raster, tile)
         assert np.array_equal(raster_tile.data, raster.data[..., tile[0] : tile[1], tile[2] : tile[3]])
 
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
-    @pytest.mark.parametrize("padding", [0, 1, 10])  # type: ignore
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
+    @pytest.mark.parametrize("padding", [0, 1, 10])
     def test_remove_tile_padding(self, example: str, padding: int) -> None:
         """
         Test removing padding from a raster tile after processing.
@@ -184,8 +184,8 @@ class TestMultiproc:
         _remove_tile_padding((raster.height, raster.width), raster_tile_with_padding, tile, padding)
         assert raster_tile_with_padding.raster_equal(raster_tile)
 
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
-    @pytest.mark.parametrize("padding", [0, 1, 3])  # type: ignore
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
+    @pytest.mark.parametrize("padding", [0, 1, 3])
     def test_apply_func_block(self, example: str, padding: int) -> None:
         """
         Test applying a function to a raster tile and handling padding removal.
@@ -205,9 +205,9 @@ class TestMultiproc:
         else:
             assert not result_tile.raster_equal(original_tile_filtered)
 
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
-    @pytest.mark.parametrize("tile_size", [100, 200])  # type: ignore
-    @pytest.mark.parametrize("cluster", [None, cluster])  # type: ignore
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
+    @pytest.mark.parametrize("tile_size", [100, 200])
+    @pytest.mark.parametrize("cluster", [None, cluster])
     def test_map_overlap_multiproc_save(self, example: str, tile_size: int, cluster: None | AbstractCluster) -> None:
         """
         Test the multiprocessing map function with a simple operation returning a raster.
@@ -251,10 +251,10 @@ class TestMultiproc:
             output_mask = map_overlap_multiproc_save(_custom_func_mask, raster, config, depth=depth)
             assert np.array_equal(raster.get_mask(), output_mask.data)
 
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])  # type: ignore
-    @pytest.mark.parametrize("tile_size", [10, 20])  # type: ignore
-    @pytest.mark.parametrize("cluster", [None, cluster])  # type: ignore
-    @pytest.mark.parametrize("return_tile", [False, True])  # type: ignore
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
+    @pytest.mark.parametrize("tile_size", [10, 20])
+    @pytest.mark.parametrize("cluster", [None, cluster])
+    @pytest.mark.parametrize("return_tile", [False, True])
     def test_map_multiproc_collect(
         self, example: str, tile_size: int, cluster: None | AbstractCluster, return_tile: bool
     ) -> None:

@@ -21,7 +21,7 @@ from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
 
 
-@pytest.fixture(scope="module")  # type: ignore
+@pytest.fixture(scope="module")
 def lazy_test_files(tmp_path_factory: Any) -> list[str]:
     """
     Create temporary converted files for lazy tests.
@@ -177,8 +177,8 @@ class TestClassVsAccessorConsistency:
     # copy(new_array=not None) will load
     methods_output_noload_allowed_args = {"copy": {"deep": [True, False], "new_array": [None]}}
 
-    @pytest.mark.parametrize("path_index", [0, 1, 2])  # type: ignore
-    @pytest.mark.parametrize("prop", properties)  # type: ignore
+    @pytest.mark.parametrize("path_index", [0, 1, 2])
+    @pytest.mark.parametrize("prop", properties)
     def test_properties__equality_and_loading(self, path_index: int, prop: str, lazy_test_files: list[str]) -> None:
         """
         Test that properties are exactly equal between a Raster and DataArray using the "rst" accessor,
@@ -260,8 +260,8 @@ class TestClassVsAccessorConsistency:
         ("load", {}),
     ]
 
-    @pytest.mark.parametrize("path_index", [0, 1, 2])  # type: ignore
-    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])  # type: ignore
+    @pytest.mark.parametrize("path_index", [0, 1, 2])
+    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])
     def test_methods__equality_and_loading(
         self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
     ) -> None:
@@ -381,7 +381,7 @@ class TestClassVsAccessorConsistency:
         ),
     ]
 
-    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in class_methods_and_kwargs])  # type: ignore
+    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in class_methods_and_kwargs])
     def test_classmethods__equality(self, method: str, kwargs: dict[str, Any]) -> None:
         """Test class methods output exactly the same objects. Loading always happens for class methods."""
 
@@ -404,8 +404,8 @@ class TestClassVsAccessorConsistency:
 
     chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(4326)}),)
 
-    @pytest.mark.parametrize("path_index", [0, 2])  # type: ignore
-    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])  # type: ignore
+    @pytest.mark.parametrize("path_index", [0, 2])
+    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])
     def test_chunked_methods__equality_loading_laziness(
         self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
     ) -> None:

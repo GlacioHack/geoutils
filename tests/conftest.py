@@ -17,7 +17,7 @@ class LoggingWarningCollector(logging.Handler):
         self.records.append(record)
 
 
-@pytest.fixture(autouse=True)  # type: ignore
+@pytest.fixture(autouse=True)
 def fail_on_logging_warnings(request: Any) -> Any:
     """Fixture used automatically in all tests to fail when a logging exceptions of WARNING or above is raised."""
 

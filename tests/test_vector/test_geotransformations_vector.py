@@ -60,7 +60,7 @@ class TestGeotransformations:
 
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
-    @pytest.mark.parametrize("data", test_data)  # type: ignore
+    @pytest.mark.parametrize("data", test_data)
     def test_crop(self, data: list[str]) -> None:
         # Load data
         raster_path, outlines_path = data

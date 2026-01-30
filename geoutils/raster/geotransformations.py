@@ -59,7 +59,7 @@ except ImportError:
 ##############
 
 
-@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)
 def _reproject(
     source_raster: RasterType,
     ref: RasterLike,
@@ -154,7 +154,7 @@ def _reproject(
 #########
 
 
-@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)
 def _crop(
     source_raster: RasterType,
     bbox: RasterLike | VectorLike | list[float] | tuple[float, ...],
@@ -252,7 +252,7 @@ def _crop(
 ##############
 
 
-@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)
 def _translate(
     transform: affine.Affine,
     xoff: float,

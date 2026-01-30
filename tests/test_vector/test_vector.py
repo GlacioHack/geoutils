@@ -365,7 +365,7 @@ class TestGeoPandasMethods:
                 f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}", NeedToImplementWarning
             )
 
-    @pytest.mark.parametrize("method", nongeo_methods + geo_methods)  # type: ignore
+    @pytest.mark.parametrize("method", nongeo_methods + geo_methods)
     def test_overridden_funcs_args(self, method: str) -> None:
         """Check that all methods overridden have the same arguments as in GeoPandas."""
 
@@ -399,8 +399,8 @@ class TestGeoPandasMethods:
         if argspec_upstream.defaults != argspec_geoutils.defaults:
             warnings.warn("Default argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
 
-    @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])  # type: ignore
-    @pytest.mark.parametrize("method", nongeo_properties)  # type: ignore
+    @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])
+    @pytest.mark.parametrize("method", nongeo_properties)
     def test_nongeo_properties(self, vector: gu.Vector, method: str) -> None:
         """Check non-geometric properties are consistent with GeoPandas."""
 
@@ -415,9 +415,9 @@ class TestGeoPandasMethods:
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
 
-    @pytest.mark.parametrize("vector1", [synthvec1, realvec1])  # type: ignore
-    @pytest.mark.parametrize("vector2", [synthvec2, realvec2])  # type: ignore
-    @pytest.mark.parametrize("method", nongeo_methods)  # type: ignore
+    @pytest.mark.parametrize("vector1", [synthvec1, realvec1])
+    @pytest.mark.parametrize("vector2", [synthvec2, realvec2])
+    @pytest.mark.parametrize("method", nongeo_methods)
     def test_nongeo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """
         Check non-geometric methods are consistent with GeoPandas.
@@ -461,8 +461,8 @@ class TestGeoPandasMethods:
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
 
-    @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])  # type: ignore
-    @pytest.mark.parametrize("method", geo_properties)  # type: ignore
+    @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])
+    @pytest.mark.parametrize("method", geo_properties)
     def test_geo_properties(self, vector: gu.Vector, method: str) -> None:
         """Check geometric properties are consistent with GeoPandas."""
 
@@ -515,9 +515,9 @@ class TestGeoPandasMethods:
         "get_geometry": {"index": 1},
     }
 
-    @pytest.mark.parametrize("vector1", [synthvec1, realvec1])  # type: ignore
-    @pytest.mark.parametrize("vector2", [synthvec2, realvec2])  # type: ignore
-    @pytest.mark.parametrize("method", geo_methods)  # type: ignore
+    @pytest.mark.parametrize("vector1", [synthvec1, realvec1])
+    @pytest.mark.parametrize("vector2", [synthvec2, realvec2])
+    @pytest.mark.parametrize("method", geo_methods)
     def test_geo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """Check geometric methods are consistent with GeoPandas."""
 

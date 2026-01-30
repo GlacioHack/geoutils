@@ -344,7 +344,7 @@ class Raster(RasterBase):
     See the API for more details.
     """
 
-    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)
     def __init__(
         self,
         filename_or_dataset: (

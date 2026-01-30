@@ -19,7 +19,7 @@ class TestProfiling:
 
     @pytest.mark.skipif(
         find_spec("psutil") is not None and find_spec("plotly") is not None,
-        reason="Only runs if psutil or plotly is missing.",  # type: ignore
+        reason="Only runs if psutil or plotly is missing.",
     )
     def test_profiling__missing_dep(self) -> None:
         """Test that the profiling functions fail with expected error when psutil is missing."""
@@ -33,8 +33,8 @@ class TestProfiling:
     @pytest.mark.parametrize(
         "profiling_configuration",
         [(False, False, True), (True, False, True), (False, True, True), (True, True, True), (True, True, False)],
-    )  # type: ignore
-    @pytest.mark.parametrize("profiling_function", ["load", "get_stats", "subsample", "output_given"])  # type: ignore
+    )
+    @pytest.mark.parametrize("profiling_function", ["load", "get_stats", "subsample", "output_given"])
     def test_profiling_configuration(
         self, profiling_configuration: tuple[bool, bool, bool], profiling_function: str, tmp_path: str
     ) -> None:

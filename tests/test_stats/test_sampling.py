@@ -33,7 +33,7 @@ class TestSampling:
     assert np.ndim(array3D) == 3
     assert np.count_nonzero(array3D.mask) > 0
 
-    @pytest.mark.parametrize("array", [array1D, array2D, array3D])  # type: ignore
+    @pytest.mark.parametrize("array", [array1D, array2D, array3D])
     def test_subsample(self, array: NDArrayNum) -> None:
         """
         Test gu.stats.subsample_array.

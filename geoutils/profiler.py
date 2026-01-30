@@ -303,7 +303,7 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
     :example:
         from geoutils import profiler
 
-        @profiler.profile("my profiled function", memprof=True, interval=0.05)  # type: ignore
+        @profiler.profile("my profiled function", memprof=True, interval=0.05)
         def my_function():
 
     """

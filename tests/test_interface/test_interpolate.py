@@ -79,8 +79,8 @@ class TestInterpolate:
 
         assert np.array_equal(vals, vals2, equal_nan=True)
 
-    @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
-    @pytest.mark.parametrize("shift_aop", [True, False])  # type: ignore
+    @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])
+    @pytest.mark.parametrize("shift_aop", [True, False])
     def test_interp_points__synthetic(self, tag_aop: Literal["Area", "Point"] | None, shift_aop: bool) -> None:
         """
         Test interp_points function with synthetic data:
@@ -247,7 +247,7 @@ class TestInterpolate:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
@@ -312,11 +312,11 @@ class TestInterpolate:
 
         assert np.array_equal(vals2, vals3, equal_nan=True)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    )  # type: ignore
-    @pytest.mark.parametrize("dist", ["half_order_up", "half_order_down", 0, 1, 5])  # type: ignore
+    )
+    @pytest.mark.parametrize("dist", ["half_order_up", "half_order_down", 0, 1, 5])
     def test_interp_point__nodata_propag(
         self,
         example: str,

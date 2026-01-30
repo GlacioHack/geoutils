@@ -20,10 +20,10 @@ class TestMultiProc:
     num_workers = min(2, cpu_count())  # Safer limit for CI
     cluster = ClusterGenerator("test", nb_workers=num_workers)
 
-    @pytest.mark.skip()  # type: ignore
-    @pytest.mark.parametrize("example", [aster_dem_path])  # type: ignore
-    @pytest.mark.parametrize("tile_size", [10, 20])  # type: ignore
-    @pytest.mark.parametrize("cluster", [None, cluster])  # type: ignore
+    @pytest.mark.skip()
+    @pytest.mark.parametrize("example", [aster_dem_path])
+    @pytest.mark.parametrize("tile_size", [10, 20])
+    @pytest.mark.parametrize("cluster", [None, cluster])
     def test_multiproc_reproject(self, example: str, tile_size: int, cluster: None | AbstractCluster) -> None:
         """Test for multiproc_reproject"""
 
@@ -86,7 +86,7 @@ class TestMultiProc:
             assert out_img_multi.shape == (500, 500)
             assert out_img_single.raster_equal(out_img_multi)
 
-    @pytest.mark.skip()  # type: ignore
+    @pytest.mark.skip(reason="Not implemented yet")
     def test_map_overlap_multiproc_save_bigTiff(self) -> None:
         """
         Test the multiprocessing map function with a simple operation returning a raster > 4go (BigTIFF format)

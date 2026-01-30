@@ -94,9 +94,9 @@ class TestDistance:
 
         # Test all options, with both an artificial Raster (that has all target values) and a real Raster
 
-    @pytest.mark.parametrize("distunits", ["GEO", "PIXEL"])  # type: ignore
+    @pytest.mark.parametrize("distunits", ["GEO", "PIXEL"])
     # 0 and 1,2,3 are especially useful for the artificial Raster, and 112 for the real Raster
-    @pytest.mark.parametrize("target_values", [[1, 2, 3], [0], [112], None])  # type: ignore
+    @pytest.mark.parametrize("target_values", [[1, 2, 3], [0], [112], None])
     @pytest.mark.parametrize(
         "raster",
         [
@@ -105,7 +105,7 @@ class TestDistance:
                 np.arange(25, dtype="int32").reshape(5, 5), transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326
             ),
         ],
-    )  # type: ignore
+    )
     def test_proximity_raster_against_gdal(
         self, distunits: str, target_values: list[float] | None, raster: gu.Raster
     ) -> None:
@@ -214,7 +214,7 @@ class TestDistance:
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_proximity_mask(self, mask: gu.Raster) -> None:
         mask_orig = mask.copy()
         # Run default

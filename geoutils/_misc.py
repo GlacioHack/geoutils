@@ -32,7 +32,7 @@ from packaging.version import Version
 from geoutils._version import __version__
 
 
-@contextmanager  # type: ignore
+@contextmanager
 def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported") -> Any:
     """
     Helper to silence logging warnings for parameters that were already supported (such as XSCALE/YSCALE) but not

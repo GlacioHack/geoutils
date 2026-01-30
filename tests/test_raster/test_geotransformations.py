@@ -52,7 +52,7 @@ class TestRasterGeotransformations:
 
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
-    @pytest.mark.parametrize("data", test_data)  # type: ignore
+    @pytest.mark.parametrize("data", test_data)
     def test_crop(self, data: list[str]) -> None:
         """Test for crop method, also called by square brackets through __getitem__"""
 
@@ -237,7 +237,7 @@ class TestRasterGeotransformations:
         r2_crop = r2.crop(bbox)
         assert r2_crop.area_or_point == "Point"
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_translate(self, example: str) -> None:
         """Test translation works as intended"""
 
@@ -289,7 +289,7 @@ class TestRasterGeotransformations:
         with pytest.raises(ValueError, match="Argument 'distance_unit' should be either 'pixel' or 'georeferenced'."):
             r.translate(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_reproject(self, example: str) -> None:
 
         # Reference raster to be used
@@ -635,7 +635,7 @@ class TestMaskGeotransformations:
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_crop(self, mask: gu.Raster) -> None:
         # Test with same bounds -> should be the same #
 
@@ -720,7 +720,7 @@ class TestMaskGeotransformations:
         mask_orig_pix.icrop(bbox2_pixel, inplace=True)
         assert mask_orig.raster_equal(mask_orig_pix)
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_reproject(self, mask: gu.Raster) -> None:
         # Test 1: with a classic resampling (bilinear)
 

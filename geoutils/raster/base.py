@@ -677,7 +677,7 @@ class RasterBase(ABC):
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]]: ...
 
-    @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)
     def get_stats(
         self,
         stats_name: (
@@ -1087,7 +1087,7 @@ class RasterBase(ABC):
         else:
             return nanarray
 
-    @profiler.profile("geoutils.raster.raster.crop", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.crop", memprof=True)
     def crop(
         self: RasterType,
         bbox: RasterType | VectorType | list[float] | tuple[float, ...],
@@ -1136,7 +1136,7 @@ class RasterBase(ABC):
             newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
         return newraster
 
-    @profiler.profile("geoutils.raster.raster.icrop", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.icrop", memprof=True)
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -1177,7 +1177,7 @@ class RasterBase(ABC):
 
         return newraster
 
-    @profiler.profile("geoutils.raster.raster.reproject", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.reproject", memprof=True)
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -1514,7 +1514,7 @@ class RasterBase(ABC):
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
-    @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)
     def interp_points(
         self,
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
@@ -1909,7 +1909,7 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
-    @profiler.profile("geoutils.raster.raster.subsample", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.subsample", memprof=True)
     def subsample(
         self,
         subsample: float | int,

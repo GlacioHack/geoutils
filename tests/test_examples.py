@@ -13,13 +13,13 @@ from geoutils import examples
 
 @pytest.mark.parametrize(
     "example", ["everest_landsat_b4", "everest_landsat_b4_cropped", "everest_landsat_rgb", "exploradores_aster_dem"]
-)  # type: ignore
+)
 def test_read_paths_raster(example: str) -> None:
     assert isinstance(gu.Raster(examples.get_path(example)), gu.Raster)
     assert isinstance(gu.Raster(examples.get_path_test(example)), gu.Raster)
 
 
-@pytest.mark.parametrize("example", ["everest_rgi_outlines", "exploradores_rgi_outlines"])  # type: ignore
+@pytest.mark.parametrize("example", ["everest_rgi_outlines", "exploradores_rgi_outlines"])
 def test_read_paths_vector(example: str) -> None:
     warnings.simplefilter("error")
     assert isinstance(gu.Vector(examples.get_path(example)), gu.Vector)
@@ -38,7 +38,7 @@ original_sha256_examples = {
 }
 
 
-@pytest.mark.parametrize("example", examples.available)  # type: ignore
+@pytest.mark.parametrize("example", examples.available)
 def test_data_integrity__examples(example: str) -> None:
     """
     Test that input data is not corrupted by checking sha265 sum
@@ -63,7 +63,7 @@ original_sha256_test = {
 }
 
 
-@pytest.mark.parametrize("example_test", examples.available_test)  # type: ignore
+@pytest.mark.parametrize("example_test", examples.available_test)
 def test_data_integrity__tests(example_test: str) -> None:
     """
     Test that input data is not corrupted by checking sha265 sum

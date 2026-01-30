@@ -132,7 +132,7 @@ def _get_indices_block_per_subsample(
     return relative_index_per_block
 
 
-@delayed  # type: ignore
+@delayed
 def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool) -> NDArrayNum:
     """Count number of valid values per block."""
     if arr_chunk.dtype == "bool":
@@ -140,7 +140,7 @@ def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool) -> NDArrayNum:
     return np.array([np.count_nonzero(np.isfinite(arr_chunk))]).reshape((1, 1))
 
 
-@delayed  # type: ignore
+@delayed
 def _delayed_subsample_block(
     arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum
 ) -> NDArrayNum | NDArrayBool:
@@ -151,7 +151,7 @@ def _delayed_subsample_block(
     return arr_chunk[np.isfinite(arr_chunk)][subsample_indices]
 
 
-@delayed  # type: ignore
+@delayed
 def _delayed_subsample_indices_block(
     arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum, block_id: dict[str, Any]
 ) -> NDArrayNum:
@@ -322,7 +322,7 @@ def _get_interp_indices_per_block(
     return ind_per_block
 
 
-@delayed  # type: ignore
+@delayed
 def _delayed_interp_points_block(
     arr_chunk: NDArrayNum, block_id: dict[str, Any], interp_coords: NDArrayNum
 ) -> NDArrayNum:
@@ -428,7 +428,7 @@ def delayed_interp_points(
 # 3/ REPROJECT (see subfunctions in chunked module)
 
 
-@delayed  # type: ignore
+@delayed
 def _delayed_reproject_per_block(
     *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
 ) -> NDArrayNum:
