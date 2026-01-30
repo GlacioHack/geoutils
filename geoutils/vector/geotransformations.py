@@ -20,16 +20,21 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import geopandas as gpd
-import rasterio as rio
 from rasterio.crs import CRS
 
-import geoutils as gu
+from geoutils._dispatch import get_geo_attr, has_geo_attr
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterLike
+    from geoutils.vector.vector import VectorLike
 
 
 def _reproject(
     gdf: gpd.GeoDataFrame,
-    ref: gu.Raster | rio.io.DatasetReader | gu.Vector | gpd.GeoDataFrame | None = None,
+    ref: RasterLike | VectorLike | None = None,
     crs: CRS | str | int | None = None,
 ) -> gpd.GeoDataFrame:
     """Reproject a vector. See Vector.reproject() for more details."""
@@ -41,13 +46,10 @@ def _reproject(
     # Case a raster or vector is provided as reference
     if ref is not None:
         # Check that ref type is either str, Raster or rasterio data set
-        if isinstance(ref, (gu.Raster, gu.Vector, rio.io.DatasetReader, gpd.GeoDataFrame)):
-            ds_ref = ref
+        if has_geo_attr(ref, "crs"):
+            crs = get_geo_attr(ref, "crs")
         else:
-            raise TypeError("Type of ref must be a raster or vector.")
-
-        # Read reprojecting params from ref raster
-        crs = ds_ref.crs
+            raise TypeError("Match-reference input must have a 'crs' attribute, such as a raster or vector.")
     else:
         # Determine user-input target CRS
         crs = CRS.from_user_input(crs)

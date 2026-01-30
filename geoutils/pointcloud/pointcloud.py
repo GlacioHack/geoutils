@@ -23,28 +23,43 @@ import logging
 import os.path
 import pathlib
 import warnings
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, TypeVar, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    Literal,
+    TypeVar,
+    Union,
+    overload,
+)
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
 
-import geoutils as gu
 from geoutils import profiler
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
 from geoutils.stats.stats import _statistics
+from geoutils.vector import Vector, VectorType
 
 if TYPE_CHECKING:
     import matplotlib
+
+    from geoutils.raster.base import RasterType
+
+# This is a generic Vector-type (if subclasses are made, this will change appropriately)
+PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
+PointCloudLike = TypeVar("PointCloudLike", bound=Union["Vector", gpd.GeoDataFrame])
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -111,9 +126,6 @@ _HANDLED_FUNCTIONS_2NIN = [
     "not_equal",
 ]
 handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
-
-# This is a generic Vector-type (if subclasses are made, this will change appropriately)
-PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
 
 
 def _load_laspy_data(filename: str, columns: list[str]) -> gpd.GeoDataFrame:
@@ -264,7 +276,7 @@ def _cast_numeric_array_pointcloud(
     return other_data
 
 
-class PointCloud(gu.Vector):  # type: ignore[misc]
+class PointCloud(Vector):  # type: ignore[misc]
     """
     The georeferenced point cloud.
 
@@ -565,7 +577,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             if convert_coords:
                 x = self.ds.geometry.x.values.astype(dtype)
                 y = self.ds.geometry.y.values.astype(dtype)
-                return gu.PointCloud.from_xyz(x=x, y=y, z=out_data, crs=self.crs, data_column=self.data_column)
+                return self.from_xyz(x=x, y=y, z=out_data, crs=self.crs, data_column=self.data_column)
             else:
                 return self.copy(new_array=out_data)
 
@@ -907,7 +919,7 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     def plot(
         self,
         column: str | None = None,
-        ref_crs: gu.Raster | gu.Vector | gpd.GeoDataFrame | str | CRS | int | None = None,
+        ref_crs: RasterType | VectorType | gpd.GeoDataFrame | CRS | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -949,8 +961,9 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         # Ensure that the vector is in the same crs as a reference
-        if isinstance(ref_crs, (gu.Raster, gu.Vector, gpd.GeoDataFrame, str)):
-            vect_reproj = self.reproject(ref=ref_crs)
+        if has_geo_attr(ref_crs, "crs"):
+            crs = get_geo_attr(ref_crs, "crs")
+            vect_reproj = self.reproject(ref=crs)
         elif isinstance(ref_crs, (CRS, int)):
             vect_reproj = self.reproject(crs=ref_crs)
         else:
@@ -1490,13 +1503,13 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
     @profiler.profile("geoutils.pointcloud.pointcloud.grid", memprof=True)  # type: ignore
     def grid(
         self,
-        ref: gu.Raster | None = None,
+        ref: RasterType | None = None,
         grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
         res: float | tuple[float, float] | None = None,
         resampling: Literal["nearest", "linear", "cubic"] = "linear",
         dist_nodata_pixel: float = 1.0,
         nodata: int | float = -9999,
-    ) -> gu.Raster:
+    ) -> RasterType:
         """
         Grid point cloud into a raster.
 
@@ -1515,16 +1528,17 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
         :return: Raster from gridded point cloud.
         """
 
-        if isinstance(ref, (gu.Raster, xr.DataArray)):
+        if has_geo_attr(ref, "transform") and has_geo_attr(ref, "shape"):
             if grid_coords is not None:
                 warnings.warn(
                     "Both reference point cloud and grid coordinates were passed for gridding, "
                     "using only the reference point cloud."
                 )
-            if isinstance(ref, gu.Raster):
-                grid_coords = ref.coords(grid=False)
-            else:
-                grid_coords = ref.rst.coords(grid=False)
+            transform = get_geo_attr(ref, "transform")
+            shape = get_geo_attr(ref, "shape")
+            area_or_point = get_geo_attr(ref, "area_or_point")
+            grid_coords = _coords(transform=transform, shape=shape, area_or_point=area_or_point, grid=False)
+
         else:
             if res is not None:
                 xsize = (self.bounds.right - self.bounds.left) / res
@@ -1541,5 +1555,6 @@ class PointCloud(gu.Vector):  # type: ignore[misc]
             resampling=resampling,
             dist_nodata_pixel=dist_nodata_pixel,
         )
+        from geoutils.raster import Raster  # Runtime import to avoid circularity issues
 
-        return gu.Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=nodata)
+        return Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=nodata)

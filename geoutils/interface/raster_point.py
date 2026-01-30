@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Literal
+from typing import TYPE_CHECKING, Iterable, Literal
 
 import affine
 import geopandas as gpd
@@ -28,15 +28,19 @@ import numpy as np
 import rasterio as rio
 from rasterio.crs import CRS
 
-import geoutils as gu
+from geoutils._dispatch import has_geo_attr
 from geoutils._typing import NDArrayNum
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.georeferencing import _default_nodata, _xy2ij
 from geoutils.stats import subsample_array
 
+if TYPE_CHECKING:
+    from geoutils.pointcloud.pointcloud import PointCloudLike
+    from geoutils.raster.base import RasterType
+
 
 def _regular_pointcloud_to_raster(
-    pointcloud: gpd.GeoDataFrame | gu.PointCloud,
+    pointcloud: PointCloudLike,
     grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
     transform: rio.transform.Affine = None,
     shape: tuple[int, int] = None,
@@ -49,7 +53,7 @@ def _regular_pointcloud_to_raster(
     """
 
     # Extract geodataframe and data column name depending on input
-    if isinstance(pointcloud, gu.PointCloud):
+    if has_geo_attr(pointcloud, "data_column"):
         gdf_pc = pointcloud.ds
         data_column_name = pointcloud.data_column
     else:
@@ -116,7 +120,7 @@ def _regular_pointcloud_to_raster(
 
 
 def _raster_to_pointcloud(
-    source_raster: gu.Raster,
+    source_raster: RasterType,
     data_column_name: str = "b1",
     data_band: int = 1,
     auxiliary_data_bands: list[int] | None = None,
@@ -126,7 +130,7 @@ def _raster_to_pointcloud(
     as_array: bool = False,
     random_state: int | np.random.Generator | None = None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-) -> NDArrayNum | gu.PointCloud:
+) -> NDArrayNum | PointCloudLike:
     """
     Convert a raster to a point cloud. See Raster.to_pointcloud() for details.
     """
@@ -252,13 +256,20 @@ def _raster_to_pointcloud(
     )
 
     if not as_array:
-        pc = gpd.GeoDataFrame(
-            pixel_data.T,
-            columns=all_column_names,
-            geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
-            crs=source_raster.crs,
+        from geoutils.pointcloud import (
+            PointCloud,  # Runtime import to avoid circularity issues
         )
-        return gu.PointCloud(pc, data_column=data_column_name)
+
+        pc = PointCloud(
+            gpd.GeoDataFrame(
+                pixel_data.T,
+                columns=all_column_names,
+                geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
+                crs=source_raster.crs,
+            ),
+            data_column=data_column_name
+        )
+        return pc
     else:
         # Merge the coordinates and pixel data an array of N x K
         # This has the downside of converting all the data to the same data type

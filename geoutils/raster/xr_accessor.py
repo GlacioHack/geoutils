@@ -14,7 +14,6 @@ from affine import Affine
 from rasterio.crs import CRS
 from rioxarray.rioxarray import affine_to_coords
 
-import geoutils as gu
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
 from geoutils.raster.base import RasterBase
 
@@ -273,7 +272,10 @@ class RasterAccessor(RasterBase):
 
         :return:
         """
-        return gu.Raster.from_array(
+
+        from geoutils.raster import Raster  # Runtime import to avoid circularity issues
+
+        return Raster.from_array(
             data=self._obj.data,
             crs=self.crs,
             transform=self.transform,

@@ -145,6 +145,9 @@ doc/source/io_examples/
 doc/source/handling_examples/
 doc/source/analysis_examples/
 doc/source/gen_modules/
+# Temporary files that can appear if doc build fails
+doc/source/myraster.tif
+doc/source/myvector.gpkg
 
 # Directories where example data is downloaded
 geoutils/example_data/

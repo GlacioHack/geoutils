@@ -25,17 +25,16 @@ from __future__ import annotations
 
 import os
 import warnings
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 import affine
 import numpy as np
 import rasterio as rio
-import xarray as xr
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
-import geoutils as gu
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._misc import silence_rasterio_message
 from geoutils._typing import DTypeLike, NDArrayNum
 from geoutils.raster.georeferencing import (
@@ -43,6 +42,10 @@ from geoutils.raster.georeferencing import (
     _default_nodata,
     _res,
 )
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterLike, RasterType
+
 
 ###########################
 # 1/ REPROJECT SUBFUNCTIONS
@@ -66,8 +69,8 @@ def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
 
 
 def _user_input_reproject(
-    source_raster: gu.Raster,
-    ref: gu.Raster,
+    source_raster: RasterType,
+    ref: RasterLike,
     crs: CRS | str | int | None,
     res: float | Iterable[float] | None,
     bounds: dict[str, float] | rio.coords.BoundingBox | None,
@@ -140,21 +143,18 @@ def _user_input_reproject(
     # Case a raster is provided as reference
     if ref is not None:
         # Check that ref type is either str, Raster or rasterio data set
-        # Preferably use Raster instance to avoid rasterio data set to remain open. See PR #45
-        if isinstance(ref, gu.Raster):
+        if has_geo_attr(ref, "crs") and has_geo_attr(ref, "res") and has_geo_attr(ref, "bounds"):
+            crs = get_geo_attr(ref, "crs")
+            res = get_geo_attr(ref, "res")
+            bounds = get_geo_attr(ref, "bounds")
             # Raise a warning if the reference is a raster that has a different pixel interpretation
-            _cast_pixel_interpretation(source_raster.area_or_point, ref.area_or_point)
-            # Read reprojecting params from ref raster
-            crs = ref.crs
-            res = ref.res
-            bounds = ref.bounds
-        elif isinstance(ref, xr.DataArray):
-            _cast_pixel_interpretation(source_raster.area_or_point, ref.rst.area_or_point)
-            crs = ref.rst.crs
-            res = ref.rst.res
-            bounds = ref.rst.bounds
+            if has_geo_attr(ref, "area_or_point"):
+                _cast_pixel_interpretation(source_raster.area_or_point, get_geo_attr(ref, "area_or_point"))
         else:
-            raise TypeError("Type of ref not understood, must be path to file (str), Raster.")
+            raise TypeError(
+                "Type of match-reference not understood, must be path a raster-type implementing "
+                "the properties 'crs', 'res', and 'bounds'."
+            )
 
     else:
         # Determine target CRS
@@ -165,7 +165,7 @@ def _user_input_reproject(
 
 
 def _get_target_georeferenced_grid(
-    raster: gu.Raster,
+    raster: RasterType,
     crs: CRS | str | int | None = None,
     grid_size: tuple[int, int] | None = None,
     res: int | float | Iterable[float] | None = None,
@@ -274,7 +274,7 @@ def _get_target_georeferenced_grid(
 
 
 def _get_reproj_params(
-    source_raster: gu.Raster,
+    source_raster: RasterType,
     crs: CRS,
     res: float | Iterable[float] | None,
     grid_size: tuple[int, int] | None,

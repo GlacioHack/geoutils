@@ -29,8 +29,7 @@ from typing import Any, Callable
 
 from packaging.version import Version
 
-import geoutils
-
+from ._version import __version__
 
 @contextmanager  # type: ignore
 def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported") -> Any:
@@ -102,7 +101,7 @@ def deprecate(removal_version: Version | None = None, details: str | None = None
         def new_func(*args, **kwargs):  # type: ignore
 
             # Get current base version (without dev changes)
-            current_version = Version(Version(geoutils.__version__).base_version)
+            current_version = Version(Version(__version__).base_version)
 
             # True if it should warn, False if it should raise an error
             should_warn = removal_version is None or removal_version > current_version
@@ -128,7 +127,7 @@ def deprecate(removal_version: Version | None = None, details: str | None = None
             if should_warn and removal_version is not None:
                 text += f" This functionality will be removed in version {removal_version}."
             elif not should_warn:
-                text += f" Current version: {geoutils.__version__}."
+                text += f" Current version: {__version__}."
 
             if should_warn:
                 warnings.warn(text, category=DeprecationWarning, stacklevel=2)

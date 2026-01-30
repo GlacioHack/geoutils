@@ -40,9 +40,9 @@ from affine import Affine
 from packaging.version import Version
 from rasterio.crs import CRS
 
-import geoutils as gu
 from geoutils import profiler
 from geoutils._misc import deprecate, import_optional
+from geoutils._dispatch import has_geo_attr
 from geoutils._typing import (
     ArrayLike,
     DTypeLike,
@@ -71,6 +71,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     import matplotlib
+    from geoutils.pointcloud.pointcloud import PointCloudLike
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -2235,7 +2236,7 @@ class Raster(RasterBase):
 
     def reduce_points(
         self,
-        points: tuple[ArrayLike, ArrayLike] | gu.PointCloud,
+        points: tuple[ArrayLike, ArrayLike] | PointCloudLike,
         reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
         window: int | None = None,
         input_latlon: bool = False,
@@ -2268,19 +2269,9 @@ class Raster(RasterBase):
 
         :returns: Point cloud of interpolated points, or 1D array of interpolated values.
             In addition, if return_window=True, return tuple of (values, arrays).
-
-        :examples:
-
-            >>> self.value_at_coords(-48.125, 67.8901, window=3)  # doctest: +SKIP
-            Returns mean of a 3*3 window:
-                v v v \
-                v c v  | = float(mean)
-                v v v /
-            (c = provided coordinate, v= value of surrounding coordinate)
-
         """
 
-        if isinstance(points, gu.PointCloud):
+        if has_geo_attr(points, "ds"):
             points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
             # Otherwise
         else:
@@ -2420,8 +2411,9 @@ class Raster(RasterBase):
                 output_win = list_windows  # type: ignore
 
         # Return array or pointcloud
+        from geoutils.pointcloud import PointCloud  # Runtime import to avoid circularity issues
         if not as_array:
-            output_val = gu.PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
+            output_val = PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
 
         if return_window:
             return (output_val, output_win)

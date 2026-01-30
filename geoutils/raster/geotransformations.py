@@ -23,17 +23,17 @@ Functionalities for geotransformations of raster objects.
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, Literal
+from typing import TYPE_CHECKING, Iterable, Literal
 
 import affine
 import rasterio as rio
-import xarray as xr
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
-import geoutils as gu
 from geoutils import profiler
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
+from geoutils.projtools import _get_bounds_projected
 from geoutils.raster._geotransformations import (
     _get_reproj_params,
     _is_reproj_needed,
@@ -42,7 +42,11 @@ from geoutils.raster._geotransformations import (
 )
 from geoutils.raster.distributed_computing.dask import delayed_reproject
 from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
-from geoutils.raster.georeferencing import _cast_pixel_interpretation
+from geoutils.raster.georeferencing import _cast_pixel_interpretation, _ij2xy
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterLike, RasterType
+    from geoutils.vector.vector import VectorLike
 
 try:
     import dask.array as da
@@ -56,8 +60,8 @@ except ImportError:
 
 @profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)  # type: ignore
 def _reproject(
-    source_raster: gu.Raster,
-    ref: gu.Raster,
+    source_raster: RasterType,
+    ref: RasterLike,
     crs: CRS | str | int | None = None,
     res: float | Iterable[float] | None = None,
     grid_size: tuple[int, int] | None = None,
@@ -69,7 +73,7 @@ def _reproject(
     silent: bool = False,
     n_threads: int = 0,
     memory_limit: int = 64,
-    multiproc_config: gu.raster.MultiprocConfig | None = None,
+    multiproc_config: MultiprocConfig | None = None,
 ) -> tuple[bool, NDArrayNum | NDArrayBool | None, affine.Affine | None, CRS | None, int | float | None]:
     """
     Reproject raster. See Raster.reproject() for details.
@@ -151,34 +155,36 @@ def _reproject(
 
 @profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
 def _crop(
-    source_raster: gu.Raster,
-    bbox: gu.Raster | gu.Vector | xr.DataArray | list[float] | tuple[float, ...],
+    source_raster: RasterType,
+    bbox: RasterLike | VectorLike | list[float] | tuple[float, ...],
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
 ) -> tuple[NDArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
 
     assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
 
-    if isinstance(bbox, (gu.Raster, gu.Vector)):
-        # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-        xmin, ymin, xmax, ymax = bbox.get_bounds_projected(out_crs=source_raster.crs)
-        if isinstance(bbox, gu.Raster):
-            # Raise a warning if the reference is a raster that has a different pixel interpretation
-            _cast_pixel_interpretation(source_raster.area_or_point, bbox.area_or_point)
-    elif isinstance(bbox, xr.DataArray):
-        # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-        xmin, ymin, xmax, ymax = bbox.rst.get_bounds_projected(out_crs=source_raster.crs)
-        # Raise a warning if the reference is a raster that has a different pixel interpretation
-        _cast_pixel_interpretation(source_raster.area_or_point, bbox.rst.area_or_point)
-    elif isinstance(bbox, (list, tuple)):
+    if isinstance(bbox, (list, tuple)):
+        # If georeferenced, use input directly
         if distance_unit == "georeferenced":
             xmin, ymin, xmax, ymax = bbox
+        # Else, convert to ij
         else:
             colmin, rowmin, colmax, rowmax = bbox
             xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
             xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
+    elif has_geo_attr(bbox, "bounds") and has_geo_attr(bbox, "crs"):
+        # Check if object has a "bounds" property
+        bounds = get_geo_attr(bbox, "bounds")
+        crs = get_geo_attr(bbox, "crs")
+        xmin, ymin, xmax, ymax = _get_bounds_projected(bounds, in_crs=crs, out_crs=source_raster.crs)
+        # Check if object has an "area_or_point" property
+        if has_geo_attr(bbox, "area_or_point"):
+            _cast_pixel_interpretation(source_raster.area_or_point, get_geo_attr(bbox, "area_or_point"))
     else:
-        raise ValueError("'bbox' must be a Raster, Vector, or list of coordinates.")
+        raise ValueError(
+            "'bbox' must be a list of coordinates or implement a 'bounds' and 'crs' property such as a raster or " 
+            "vector."
+        )
 
     # Finding the intersection of requested bounds and original bounds, cropped to image shape
     ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)

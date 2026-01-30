@@ -405,7 +405,7 @@ class TestPointCloud:
     specific_method_args = {
         "reproject": {"crs": CRS.from_epsg(32610)},
         "crop": {
-            "crop_geom": (
+            "bbox": (
                 np.min(gdf1.geometry.x.values),
                 np.min(gdf1.geometry.y.values),
                 np.max(gdf1.geometry.x.values),

@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
+# Copyright (c) 2025 GeoUtils developers
 #
 # This file is part of the GeoUtils project:
 # https://github.com/glaciohack/geoutils
@@ -16,5 +16,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from geoutils.raster.distributed_computing.dask import *  # noqa
-from geoutils.raster.distributed_computing.multiproc import *  # noqa
+from geoutils.multiproc.mparray import *  # noqa
+from geoutils.multiproc.cluster import *  # noqa

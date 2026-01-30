@@ -21,11 +21,15 @@
 from __future__ import annotations
 
 import warnings
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-import geoutils as gu
+from geoutils._dispatch import has_geo_attr
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterType
 
 
 def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
@@ -54,8 +58,8 @@ def get_array_and_mask(
     :returns array_data, invalid_mask: a tuple of ndarrays. First is array with invalid pixels converted to NaN, \
     second is mask of invalid pixels (True if invalid).
     """
-    #
-    if isinstance(array, gu.Raster):
+    # Check for raster input: only data is not sufficient, as this is also defined within a masked array
+    if has_geo_attr(array, "data") and has_geo_attr(array, "transform"):
         array = array.data
 
     if check_shape:
@@ -98,7 +102,7 @@ def get_valid_extent(array: NDArrayNum | NDArrayBool | MArrayNum) -> tuple[int, 
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
 
 
-def get_xy_rotated(raster: gu.Raster, along_track_angle: float) -> tuple[NDArrayNum, NDArrayNum]:
+def get_xy_rotated(raster: RasterType, along_track_angle: float) -> tuple[NDArrayNum, NDArrayNum]:
     """
     Rotate x, y axes of image to get along- and cross-track distances.
     :param raster: Raster to get x,y positions from.

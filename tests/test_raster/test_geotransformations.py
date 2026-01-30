@@ -604,7 +604,7 @@ class TestRasterGeotransformations:
 
         # If wrong type for `ref`
         with pytest.raises(
-            TypeError, match=re.escape("Type of ref not understood, must be path to file (str), Raster.")
+            TypeError, match="Type of match-reference not understood.*"
         ):
             _ = r.reproject(ref=3)
 

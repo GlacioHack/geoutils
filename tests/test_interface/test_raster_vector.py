@@ -87,7 +87,7 @@ class TestRasterVectorInterface:
             vector.create_mask()
 
         # If the raster has the wrong type
-        with pytest.raises(ValueError, match="Reference must be a raster or a point cloud."):
+        with pytest.raises(ValueError, match="Reference must be a.*"):
             vector.create_mask("lol")  # type: ignore
 
         # Check that a warning is raised if the bounds were passed specifically by the user

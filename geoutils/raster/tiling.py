@@ -19,14 +19,11 @@
 """Tiling tools for arrays and rasters."""
 from __future__ import annotations
 
-import math
 import sys
 
 import numpy as np
 from scipy.ndimage import zoom
 
-import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 
 
@@ -79,31 +76,6 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     :param shape: The shape of array to be subdivided.
     :param count: The amount of subdivisions to make.
 
-    :examples:
-        >>> subdivide_array((4, 4), 4)  # doctest: +SKIP
-        array([[0, 0, 1, 1],
-               [0, 0, 1, 1],
-               [2, 2, 3, 3],
-               [2, 2, 3, 3]])
-
-        >>> subdivide_array((6, 4), 4)  # doctest: +SKIP
-        array([[0, 0, 1, 1],
-               [0, 0, 1, 1],
-               [0, 0, 1, 1],
-               [2, 2, 3, 3],
-               [2, 2, 3, 3],
-               [2, 2, 3, 3]])
-
-        >>> subdivide_array((5, 4), 3)  # doctest: +SKIP
-        array([[0, 0, 0, 0],
-               [0, 0, 0, 0],
-               [1, 1, 2, 2],
-               [1, 1, 2, 2],
-               [1, 1, 2, 2]])
-
-    :raises ValueError: If the 'shape' size (`np.prod(shape)`) is smallern than 'count'
-                        If the shape is not a 2D shape.
-
     :returns: An array of shape 'shape' with 'count' unique indices.
     """
 
@@ -130,112 +102,3 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
     indices = zoom(small_indices, zoom=zoom_factors, order=0).astype(int)
 
     return indices.reshape(shape)
-
-
-def _generate_tiling_grid(
-    row_min: int,
-    col_min: int,
-    row_max: int,
-    col_max: int,
-    row_split: int,
-    col_split: int,
-    overlap: int = 0,
-) -> NDArrayNum:
-    """
-    Generate a grid of positions by splitting [row_min, row_max] x
-    [col_min, col_max] into tiles of size row_split x col_split with optional overlap.
-
-    :param row_min: Minimum row index of the bounding box to split.
-    :param col_min: Minimum column index of the bounding box to split.
-    :param row_max: Maximum row index of the bounding box to split.
-    :param col_max: Maximum column index of the bounding box to split.
-    :param row_split: Height of each tile.
-    :param col_split: Width of each tile.
-    :param overlap: size of overlapping between tiles (both vertically and horizontally).
-    :return: A numpy array grid with splits in two dimensions (0: row, 1: column),
-             where each cell contains [row_min, row_max, col_min, col_max].
-    """
-    if overlap < 0:
-        raise ValueError(f"Overlap negative : {overlap}, must be positive")
-    if not isinstance(overlap, int):
-        raise TypeError(f"Overlap : {overlap}, must be an integer")
-
-    # Calculate the total range of rows and columns
-    col_range = col_max - col_min
-    row_range = row_max - row_min
-
-    # Calculate the number of splits considering overlap
-    nb_col_split = math.ceil(col_range / col_split)
-    nb_row_split = math.ceil(row_range / row_split)
-
-    # If the leftover part after full split is smaller than or equal to the overlap, reduce the number of splits by 1
-    # This ensures we do not generate unnecessary additional tiles that overlap too much.
-    if 0 < col_range % col_split <= overlap:
-        nb_col_split = max(nb_col_split - 1, 1)
-    if 0 < row_range % row_split <= overlap:
-        nb_row_split = max(nb_row_split - 1, 1)
-
-    # Initialize the output grid
-    tiling_grid = np.zeros(shape=(nb_row_split, nb_col_split, 4), dtype=int)
-
-    for row in range(nb_row_split):
-        for col in range(nb_col_split):
-            # Calculate the start of the tile
-            row_start = max(row_min + row * row_split - overlap, 0)
-            col_start = max(col_min + col * col_split - overlap, 0)
-
-            # Calculate the end of the tile ensuring it doesn't exceed the bounds
-            row_end = min(row_max, (row + 1) * row_split + overlap)
-            col_end = min(col_max, (col + 1) * col_split + overlap)
-
-            # Populate the grid with the tile boundaries
-            tiling_grid[row, col] = [row_start, row_end, col_start, col_end]
-
-    return tiling_grid
-
-
-def compute_tiling(
-    tile_size: int,
-    raster_shape: tuple[int, int],
-    ref_shape: tuple[int, int],
-    overlap: int = 0,
-) -> NDArrayNum:
-    """
-    Compute the raster tiling grid to coregister raster by block.
-
-    :param tile_size: Size of each tile (square tiles).
-    :param raster_shape: Shape of the raster to determine tiling parameters.
-    :param ref_shape: The shape of another raster to coregister, use to validate the shape.
-    :param overlap: Size of overlap between tiles (optional).
-    :return: tiling_grid (array of tile boundaries).
-
-    :raises ValueError: if overlap is negative.
-    :raises TypeError: if overlap is not an integer.
-    """
-    if raster_shape != ref_shape:
-        raise Exception("Reference and secondary rasters do not have the same shape")
-    row_max, col_max = raster_shape
-
-    # Generate tiling
-    tiling_grid = _generate_tiling_grid(0, 0, row_max, col_max, tile_size, tile_size, overlap=overlap)
-    return tiling_grid
-
-
-def plot_tiling(raster: gu.Raster, tiling_grid: NDArrayNum) -> None:
-    """
-    Plot raster with its tiling.
-
-    :param raster: The raster to plot with its tiling.
-    :param tiling_grid: tiling given by compute_tiling.
-    """
-    mpl = import_optional("matplotlib")
-
-    ax, caxes = raster.plot(return_axes=True)
-    for tile in tiling_grid.reshape(-1, 4):
-        row_min, row_max, col_min, col_max = tile
-        x_min, y_min = raster.transform * (col_min, row_min)  # Bottom-left corner
-        x_max, y_max = raster.transform * (col_max, row_max)  # Top-right corne
-        rect = mpl.patches.Rectangle(
-            (x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5
-        )
-        ax.add_patch(rect)
