@@ -2277,7 +2277,7 @@ class Raster(RasterBase):
 
         if isinstance(points, tuple):
             if input_latlon:
-                pts = reproject_from_latlon(points, out_crs=self.crs)
+                pts = reproject_from_latlon((points[1], points[0]), out_crs=self.crs)
             else:
                 pts = points
         else:
@@ -2290,17 +2290,17 @@ class Raster(RasterBase):
 
         # Check for array-like inputs
         if (
-            not isinstance(x, Number)
-            and isinstance(y, Number)
-            or isinstance(x, Number)
-            and not isinstance(y, Number)
+            not isinstance(x, (float, np.floating, int, np.integer))
+            and isinstance(y, (float, np.floating, int, np.integer))
+            or isinstance(x, (float, np.floating, int, np.integer))
+            and not isinstance(y, (float, np.floating, int, np.integer))
         ):
             raise TypeError("Coordinates must be both numbers or both array-like.")
 
-        # If for a single value, wrap in a list
-        if isinstance(x, Number):
-            x = np.array([x])  # type: ignore
-            y = np.array([y])  # type: ignore
+            # If for a single value, wrap in a list
+        if isinstance(x, (float, np.floating, int, np.integer)):
+            x = [x]  # type: ignore
+            y = [y]  # type: ignore
             # For the end of the function
             unwrap = True
         else:

@@ -278,7 +278,7 @@ def reproject_points(
     assert len(points) == 2, "Points must be a tuple of N arrays"
 
     x, y = points
-    transformer = pyproj.Transformer.from_crs(in_crs, out_crs)
+    transformer = pyproj.Transformer.from_crs(in_crs, out_crs, always_xy=True)
     xout, yout = transformer.transform(x, y)
     return xout, yout
 
