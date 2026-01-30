@@ -285,7 +285,7 @@ class TestInterpolate:
         assert val2 == pytest.approx(val, nan_ok=True)
 
         # Check that interp convert to latlon
-        lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
+        lat, lon = gu.projtools.reproject_to_latlon((x, y), in_crs=r.crs)
         val_latlon = r.interp_points((lat, lon), method=method, input_latlon=True, as_array=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001, nan_ok=True)
 
@@ -560,7 +560,7 @@ class TestInterpolate:
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
-        lat, lon = reproject_to_latlon(points=[xtest0, ytest0], in_crs=r.crs)
+        lat, lon = reproject_to_latlon(points=(xtest0, ytest0), in_crs=r.crs)
         z_val_2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
         assert z_val == z_val_2
 
@@ -635,7 +635,7 @@ class TestInterpolate:
 
         # Lower right pixel
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
-        lat, lon = reproject_to_latlon([x, y], r.crs)
+        lat, lon = reproject_to_latlon((x, y), r.crs)
         assert (
             r.reduce_points((x, y), as_array=True)
             == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
@@ -644,7 +644,7 @@ class TestInterpolate:
 
         # One pixel above
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
-        lat, lon = reproject_to_latlon([x, y], r.crs)
+        lat, lon = reproject_to_latlon((x, y), r.crs)
         assert (
             r.reduce_points((x, y), as_array=True)
             == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
@@ -653,7 +653,7 @@ class TestInterpolate:
 
         # One pixel left
         x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
-        lat, lon = reproject_to_latlon([x, y], r.crs)
+        lat, lon = reproject_to_latlon((x, y), r.crs)
         assert (
             r.reduce_points((x, y), as_array=True)
             == r.reduce_points((lon, lat), input_latlon=True, as_array=True)

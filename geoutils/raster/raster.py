@@ -44,7 +44,6 @@ from geoutils import profiler
 from geoutils._dispatch import has_geo_attr
 from geoutils._misc import deprecate, import_optional
 from geoutils._typing import (
-    ArrayLike,
     DTypeLike,
     MArrayNum,
     NDArrayBool,
@@ -2241,7 +2240,7 @@ class Raster(RasterBase):
 
     def reduce_points(
         self,
-        points: tuple[ArrayLike, ArrayLike] | PointCloudLike,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
         reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
         window: int | None = None,
         input_latlon: bool = False,
@@ -2276,16 +2275,18 @@ class Raster(RasterBase):
             In addition, if return_window=True, return tuple of (values, arrays).
         """
 
-        if has_geo_attr(points, "ds"):
-            points = reproject_points(
-                (points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs  # type: ignore
-            )
-            # Otherwise
-        else:
+        if isinstance(points, tuple):
             if input_latlon:
-                points = reproject_from_latlon((points[1], points[0]), out_crs=self.crs)  # type: ignore
+                pts = reproject_from_latlon(points, out_crs=self.crs)
+            else:
+                pts = points
+        else:
+            if has_geo_attr(points, "ds"):
+                pts = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
+            else:
+                raise TypeError("Input must be a tuple of array-like or a point cloud.")
 
-        x, y = points
+        x, y = pts
 
         # Check for array-like inputs
         if (

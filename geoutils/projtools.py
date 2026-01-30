@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import warnings
 from math import ceil, floor
-from typing import Iterable, Literal
+from typing import Any, Iterable, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -131,25 +131,25 @@ def _get_utm_ups_crs(df: gpd.GeoDataFrame, method: Literal["centroid"] | Literal
 
 
 def bounds2poly(
-    bounds_geom: list[float] | rio.io.DatasetReader,
+    bounds_geom: tuple[float, ...] | Any,
     in_crs: CRS | None = None,
     out_crs: CRS | None = None,
 ) -> Polygon:
     """
     Converts self's bounds into a shapely Polygon. Optionally, returns it into a different CRS.
 
-    :param bounds_geom: A geometry with bounds. Can be either a list of coordinates (xmin, ymin, xmax, ymax),\
-            a rasterio/Raster object, a geoPandas/Vector object
-    :param in_crs: Input CRS
-    :param out_crs: Output CRS
+    :param bounds_geom: A geometry with bounds. Can be either a tuple of coordinates (xmin, ymin, xmax, ymax), or an
+        object that implements "bounds".
+    :param in_crs: Input CRS.
+    :param out_crs: Output CRS.
 
     :returns: Output polygon
     """
-    # If boundsGeom is a GeoPandas or Vector object (warning, has both total_bounds and bounds attributes)
+    # If bounds geometry is a vector object (warning, has both total_bounds and bounds attributes)
     if hasattr(bounds_geom, "total_bounds"):
         xmin, ymin, xmax, ymax = bounds_geom.total_bounds  # type: ignore
         in_crs = bounds_geom.crs  # type: ignore
-    # If boundsGeom is a rasterio or Raster object
+    # If bounds geometry is a raster object
     elif hasattr(bounds_geom, "bounds"):
         xmin, ymin, xmax, ymax = bounds_geom.bounds  # type: ignore
         in_crs = bounds_geom.crs  # type: ignore
@@ -158,13 +158,15 @@ def bounds2poly(
         xmin, ymin, xmax, ymax = bounds_geom
     else:
         raise ValueError(
-            "boundsGeom must a list/tuple of coordinates or an object with attributes bounds or total_bounds."
+            "bounds_geom must a list/tuple of coordinates or an object with attributes bounds or total_bounds."
         )
 
     corners = np.array([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
     if (in_crs is not None) & (out_crs is not None):
-        corners = np.transpose(reproject_points(np.transpose(corners), in_crs, out_crs))
+        corners_t = np.transpose(corners)
+        reproj_corners = reproject_points((corners_t[0, :], corners_t[1, :]), in_crs, out_crs)
+        corners = np.transpose(np.array(reproj_corners))
 
     bbox = Polygon(corners)
 
@@ -262,18 +264,18 @@ def align_bounds(
 
 
 def reproject_points(
-    points: list[list[float]] | list[float] | tuple[list[float], list[float]] | NDArrayNum, in_crs: CRS, out_crs: CRS
-) -> tuple[list[float], list[float]]:
+    points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum], in_crs: CRS, out_crs: CRS
+) -> tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum]:
     """
     Reproject a set of point from input_crs to output_crs.
 
-    :param points: Input points to be reprojected. Must be of shape (2, N), i.e (x coords, y coords)
-    :param in_crs: Input CRS
-    :param out_crs: Output CRS
+    :param points: Input points to be reprojected, as tuple of 1-d arrays.
+    :param in_crs: Input CRS.
+    :param out_crs: Output CRS.
 
-    :returns: Reprojected points, of same shape as points.
+    :returns: Reprojected points of same shape as input points.
     """
-    assert np.shape(points)[0] == 2, "points must be of shape (2, N)"
+    assert len(points) == 2, "Points must be a tuple of N arrays"
 
     x, y = points
     transformer = pyproj.Transformer.from_crs(in_crs, out_crs)
@@ -287,8 +289,8 @@ crs_4326 = rio.crs.CRS.from_epsg(4326)
 
 
 def reproject_to_latlon(
-    points: list[list[float]] | list[float] | NDArrayNum, in_crs: CRS, round_: int = 8
-) -> NDArrayNum:
+    points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum], in_crs: CRS, round_: int = 8
+) -> tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum]:
     """
     Reproject a set of point from in_crs to lat/lon.
 
@@ -299,12 +301,12 @@ def reproject_to_latlon(
     :returns: Reprojected points, of same shape as points.
     """
     proj_points = reproject_points(points, in_crs, crs_4326)
-    return np.round(proj_points, round_)
+    return np.round(proj_points[0], round_), np.round(proj_points[1], round_)
 
 
 def reproject_from_latlon(
-    points: list[list[float]] | tuple[list[float], list[float]] | NDArrayNum, out_crs: CRS, round_: int = 2
-) -> NDArrayNum:
+    points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum], out_crs: CRS, round_: int = 2
+) -> tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum]:
     """
     Reproject a set of point from lat/lon to out_crs.
 
@@ -315,7 +317,7 @@ def reproject_from_latlon(
     :returns: Reprojected points, of same shape as points.
     """
     proj_points = reproject_points(points, crs_4326, out_crs)
-    return np.round(proj_points, round_)
+    return np.round(proj_points[0], round_), np.round(proj_points[1], round_)
 
 
 def reproject_shape(inshape: BaseGeometry, in_crs: CRS, out_crs: CRS) -> BaseGeometry:

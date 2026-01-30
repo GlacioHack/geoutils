@@ -1569,13 +1569,11 @@ class RasterBase(ABC):
 
         if isinstance(points, tuple):
             if input_latlon:
-                pts = reproject_from_latlon(points, out_crs=self.crs)  # type: ignore
+                pts = reproject_from_latlon(points, out_crs=self.crs)
             else:
-                pts = points  # type: ignore
+                pts = points
         elif has_geo_attr(points, "data_column"):
-            pts = reproject_points(
-                (points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs  # type: ignore
-            )
+            pts = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
         else:
             raise TypeError("Input must be a tuple of array-like or a point cloud.")
 
@@ -1583,7 +1581,7 @@ class RasterBase(ABC):
             array,
             transform=self.transform,
             area_or_point=self.area_or_point,
-            points=pts,  # type: ignore
+            points=pts,
             method=method,
             shift_area_or_point=shift_area_or_point,
             dist_nodata_spread=dist_nodata_spread,

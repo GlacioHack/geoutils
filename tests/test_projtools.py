@@ -132,8 +132,8 @@ class TestProjTools:
         randx = rng.integers(low=img.bounds.left, high=img.bounds.right, size=(nsample,))
         randy = rng.integers(low=img.bounds.bottom, high=img.bounds.top, size=(nsample,))
 
-        lat, lon = pt.reproject_to_latlon([list(randx), list(randy)], img.crs)
-        x, y = pt.reproject_from_latlon([lat, lon], img.crs)
+        lat, lon = pt.reproject_to_latlon((randx, randy), img.crs)
+        x, y = pt.reproject_from_latlon((lat, lon), img.crs)  # type: ignore
 
         assert np.all(x == randx)
         assert np.all(y == randy)
