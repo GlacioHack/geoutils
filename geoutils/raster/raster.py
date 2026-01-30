@@ -2290,17 +2290,17 @@ class Raster(RasterBase):
 
         # Check for array-like inputs
         if (
-            not isinstance(x, (float, np.floating, int, np.integer))
-            and isinstance(y, (float, np.floating, int, np.integer))
-            or isinstance(x, (float, np.floating, int, np.integer))
-            and not isinstance(y, (float, np.floating, int, np.integer))
+            not isinstance(x, Number)
+            and isinstance(y, Number)
+            or isinstance(x, Number)
+            and not isinstance(y, Number)
         ):
             raise TypeError("Coordinates must be both numbers or both array-like.")
 
         # If for a single value, wrap in a list
-        if isinstance(x, (float, np.floating, int, np.integer)):
-            x = [x]  # type: ignore
-            y = [y]  # type: ignore
+        if isinstance(x, Number):
+            x = np.array([x])  # type: ignore
+            y = np.array([y])  # type: ignore
             # For the end of the function
             unwrap = True
         else:

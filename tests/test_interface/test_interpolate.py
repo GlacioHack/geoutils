@@ -183,7 +183,7 @@ class TestInterpolate:
             + [(4, i) for i in np.arange(1, 4)]
             + [(i, 4) for i in np.arange(4, 1)]
         )
-        points_out_xy = list(zip(*points_out))
+        points_out_xy = tuple(zip(*points_out))
         raster_points_out = raster.interp_points(points_out_xy, as_array=True)
         assert all(~np.isfinite(raster_points_out))
 
@@ -313,9 +313,7 @@ class TestInterpolate:
         assert np.array_equal(vals2, vals3, equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    @pytest.mark.parametrize(
-        "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    )
+    @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"])
     @pytest.mark.parametrize("dist", ["half_order_up", "half_order_down", 0, 1, 5])
     def test_interp_point__nodata_propag(
         self,

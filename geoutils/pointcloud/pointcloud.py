@@ -50,7 +50,7 @@ from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
 from geoutils.stats.stats import _statistics
-from geoutils.vector import Vector, VectorLike
+from geoutils.vector.vector import Vector, VectorLike
 
 if TYPE_CHECKING:
     import matplotlib
