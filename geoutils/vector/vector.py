@@ -49,9 +49,9 @@ from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
-from geoutils._dispatch import has_geo_attr, get_geo_attr
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
 from geoutils.projtools import (
@@ -65,12 +65,13 @@ from geoutils.vector.geotransformations import _reproject
 if TYPE_CHECKING:
     import matplotlib
 
-    from geoutils.pointcloud.pointcloud import PointCloudType
-    from geoutils.raster.base import RasterType
+    from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.raster import Raster
+    from geoutils.raster.base import RasterLike, RasterType
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
-VectorLike = TypeVar("VectorLike", bound=Union["Vector", gpd.GeoDataFrame])
+VectorLike = Union["Vector", gpd.GeoDataFrame]
 
 
 class Vector:
@@ -267,7 +268,7 @@ class Vector:
 
     def plot(
         self,
-        ref_crs: RasterType | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | str | CRS | int | None = None,
+        ref_crs: RasterLike | VectorLike | CRS | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -1089,26 +1090,26 @@ class Vector:
 
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def from_file(cls: VectorType, filename: str, **kwargs: Any) -> VectorType:
+    def from_file(cls, filename: str, **kwargs: Any) -> Vector:
 
         return cls(gpd.GeoDataFrame.from_file(filename=filename, **kwargs))
 
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def from_arrow(cls: VectorType, table: Any, geometry: Any = None) -> VectorType:
+    def from_arrow(cls, table: Any, geometry: Any = None) -> Vector:
 
         return cls(gpd.GeoDataFrame.from_arrow(table=table, geometry=geometry))
 
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def from_features(cls: VectorType, features: Iterable[dict[str, Any]], crs: CRS, columns: list[str]) -> VectorType:
+    def from_features(cls, features: Iterable[dict[str, Any]], crs: CRS, columns: list[str]) -> Vector:
 
         return cls(gpd.GeoDataFrame.from_features(features=features, crs=crs, columns=columns))
 
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def from_postgis(
-        cls: VectorType,
+        cls,
         sql: str,
         con: Any,
         geom_col: str = "geom",
@@ -1118,7 +1119,7 @@ class Vector:
         parse_dates: Any = None,
         params: Any = None,
         chunksize: Any = None,
-    ) -> VectorType:
+    ) -> Vector:
 
         return cls(
             gpd.GeoDataFrame.from_postgis(
@@ -1136,9 +1137,7 @@ class Vector:
 
     @classmethod
     @copy_doc(gpd.GeoDataFrame, "Vector")
-    def from_dict(
-        cls: VectorType, data: dict[str, Any], geometry: Any = None, crs: CRS | None = None, **kwargs: Any
-    ) -> VectorType:
+    def from_dict(cls, data: dict[str, Any], geometry: Any = None, crs: CRS | None = None, **kwargs: Any) -> Vector:
 
         return cls(gpd.GeoDataFrame.from_dict(data=data, geometry=geometry, crs=crs, **kwargs))
 
@@ -1335,8 +1334,10 @@ class Vector:
         elif isinstance(bbox, (list, tuple)):
             xmin, ymin, xmax, ymax = bbox
         else:
-            raise TypeError("Crop bounding box must be a list of coordinates, or a geospatial object implementing "
-                            "'bounds', such as a raster or vector.")
+            raise TypeError(
+                "Crop bounding box must be a list of coordinates, or a geospatial object implementing "
+                "'bounds', such as a raster or vector."
+            )
 
         # Need to separate the two options, inplace update
         if inplace:
@@ -1382,7 +1383,7 @@ class Vector:
     @profiler.profile("geoutils.vector.vector.reproject", memprof=True)  # type: ignore
     def reproject(
         self: VectorType,
-        ref: RasterType | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
+        ref: RasterLike | VectorLike | None = None,
         crs: CRS | str | int | None = None,
         inplace: bool = False,
     ) -> VectorType | None:
@@ -1478,19 +1479,19 @@ class Vector:
     @overload
     def create_mask(
         self,
-        ref: PointCloudType | RasterType | None = None,
+        ref: RasterLike | PointCloudLike | None = None,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         points: tuple[NDArrayNum, NDArrayNum] = None,
         *,
         as_array: Literal[False] = False,
-    ) -> PointCloudType | RasterType: ...
+    ) -> Raster | PointCloud: ...
 
     @overload
     def create_mask(
         self,
-        ref: RasterType | PointCloudType | None = None,
+        ref: RasterLike | PointCloudLike | None = None,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
@@ -1501,13 +1502,13 @@ class Vector:
 
     def create_mask(
         self,
-        ref: RasterType | PointCloudType | None = None,
+        ref: RasterLike | PointCloudLike | None = None,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         points: tuple[NDArrayNum, NDArrayNum] = None,
         as_array: bool = False,
-    ) -> RasterType | PointCloudType | NDArrayBool:
+    ) -> Raster | PointCloud | NDArrayBool:
         """
         Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
         feature, False if not).
@@ -1531,10 +1532,8 @@ class Vector:
         """
 
         # Create mask
-        mask = _create_mask(gdf=self.ds, ref=ref, crs=crs, res=res, points=points, bounds=bounds,
-                                                 as_array=as_array)
+        mask = _create_mask(gdf=self.ds, ref=ref, crs=crs, res=res, points=points, bounds=bounds, as_array=as_array)
         return mask
-
 
     @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)  # type: ignore
     def rasterize(
@@ -1654,7 +1653,10 @@ class Vector:
         :return: Proximity raster.
         """
 
-        from geoutils.raster.raster import Raster, _default_nodata  # Runtime import to avoid circularity issues
+        from geoutils.raster.raster import (  # Runtime import to avoid circularity issues
+            Raster,
+            _default_nodata,
+        )
 
         # 0/ If no Raster is passed, create one on the Vector bounds of size 1000 x 1000
         if raster is None:
@@ -1755,7 +1757,9 @@ class Vector:
         else:
             raise NotImplementedError("This is not implemented yet.")
 
-    def buffer_without_overlap(self, buffer_size: int | float, metric: bool = True, plot: bool = False) -> VectorType:
+    def buffer_without_overlap(
+        self: VectorType, buffer_size: int | float, metric: bool = True, plot: bool = False
+    ) -> VectorType:
         """
         Buffer the vector geometries without overlapping each other.
 

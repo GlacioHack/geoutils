@@ -21,18 +21,19 @@ from __future__ import annotations
 import logging
 import tempfile
 import warnings
+from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 import numpy as np
-from typing import Any, Callable, Literal, overload, TYPE_CHECKING
-
 import rasterio as rio
-from geoutils.multiproc.cluster import AbstractCluster, ClusterGenerator
-from geoutils._typing import NDArrayNum
+
 from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._misc import import_optional
+from geoutils._typing import NDArrayNum
+from geoutils.multiproc.cluster import AbstractCluster, ClusterGenerator
 
 if TYPE_CHECKING:
     from geoutils.raster.raster import Raster
+
 
 class MultiprocConfig:
     """
@@ -178,6 +179,7 @@ def plot_tiling(raster: Raster, tiling_grid: NDArrayNum) -> None:
             (x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5
         )
         ax.add_patch(rect)
+
 
 def _load_raster_tile(raster_unload: Raster, tile: NDArrayNum) -> Raster:
     """

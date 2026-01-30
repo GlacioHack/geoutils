@@ -41,8 +41,8 @@ from packaging.version import Version
 from rasterio.crs import CRS
 
 from geoutils import profiler
-from geoutils._misc import deprecate, import_optional
 from geoutils._dispatch import has_geo_attr
+from geoutils._misc import deprecate, import_optional
 from geoutils._typing import (
     ArrayLike,
     DTypeLike,
@@ -71,6 +71,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     import matplotlib
+
     from geoutils.pointcloud.pointcloud import PointCloudLike
 
 # List of NumPy "array" functions that are handled.
@@ -637,6 +638,10 @@ class Raster(RasterBase):
                 "to convert to a data type that won't derive the nodata values (e.g., a float type).",
             )
             self._data[self._data.data == self.nodata] = np.ma.masked
+
+    @property
+    def _chunks(self) -> tuple[tuple[int, ...], ...] | None:
+        return None
 
     def _set_transform(self, new_transform: Affine) -> None:
         # Overloads abstract method in RasterBase
@@ -2272,7 +2277,9 @@ class Raster(RasterBase):
         """
 
         if has_geo_attr(points, "ds"):
-            points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
+            points = reproject_points(
+                (points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs  # type: ignore
+            )
             # Otherwise
         else:
             if input_latlon:
@@ -2411,7 +2418,10 @@ class Raster(RasterBase):
                 output_win = list_windows  # type: ignore
 
         # Return array or pointcloud
-        from geoutils.pointcloud import PointCloud  # Runtime import to avoid circularity issues
+        from geoutils.pointcloud import (
+            PointCloud,  # Runtime import to avoid circularity issues
+        )
+
         if not as_array:
             output_val = PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
 

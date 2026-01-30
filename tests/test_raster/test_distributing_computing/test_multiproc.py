@@ -3,15 +3,15 @@ Tests for multiprocessing functions
 """
 
 from multiprocessing import cpu_count
-import pytest
-
-import rasterio as rio
-import geoutils as gu
-from geoutils import examples
-from geoutils.multiproc import ClusterGenerator, AbstractCluster, MultiprocConfig
-from geoutils import Raster
 
 import numpy as np
+import pytest
+import rasterio as rio
+
+import geoutils as gu
+from geoutils import Raster, examples
+from geoutils.multiproc import AbstractCluster, ClusterGenerator, MultiprocConfig
+
 
 class TestMultiProc:
 

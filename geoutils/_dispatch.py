@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
+
 def get_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "vct", "pc")) -> Any:
     """Retrieve an attribute from an object, or one of its accessors."""
 
@@ -37,9 +38,9 @@ def get_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "v
 
     # Fallback
     raise AttributeError(
-        f"Attribute '{attr_name}' not found on object {type(obj)} "
-        f"or its potential accessors {accessors}."
+        f"Attribute '{attr_name}' not found on object {type(obj)} " f"or its potential accessors {accessors}."
     )
+
 
 def has_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "vct", "pc")) -> Any:
     """Check if attribute exists for an object, or one of its accessors."""
@@ -55,5 +56,3 @@ def has_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "v
             return True
 
     return False
-
-

@@ -278,7 +278,7 @@ def reproject_points(
     x, y = points
     transformer = pyproj.Transformer.from_crs(in_crs, out_crs)
     xout, yout = transformer.transform(x, y)
-    return (xout, yout)
+    return xout, yout
 
 
 # Functions to convert from and to latlon

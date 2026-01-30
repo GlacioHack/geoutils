@@ -50,16 +50,16 @@ from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.georeferencing import _coords
 from geoutils.stats.sampling import subsample_array
 from geoutils.stats.stats import _statistics
-from geoutils.vector import Vector, VectorType
+from geoutils.vector import Vector, VectorLike
 
 if TYPE_CHECKING:
     import matplotlib
 
-    from geoutils.raster.base import RasterType
+    from geoutils.raster.base import RasterLike, RasterType
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
-PointCloudLike = TypeVar("PointCloudLike", bound=Union["Vector", gpd.GeoDataFrame])
+PointCloudLike = Union["PointCloud", gpd.GeoDataFrame]
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -916,10 +916,10 @@ class PointCloud(Vector):  # type: ignore[misc]
         else:
             return outputs
 
-    def plot(
+    def plot(  # type: ignore
         self,
         column: str | None = None,
-        ref_crs: RasterType | VectorType | gpd.GeoDataFrame | CRS | int | None = None,
+        ref_crs: RasterLike | VectorLike | CRS | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -931,10 +931,10 @@ class PointCloud(Vector):  # type: ignore[misc]
         savefig_fname: str | None = None,
         **kwargs: Any,
     ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        r"""
+        """
         Plot the point cloud.
 
-        This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs which
+        This method is a wrapper to geopandas.GeoDataFrame.plot. Any kwargs which
         you give this method will be passed to it.
 
         :param column: Column to plot. Default is the data column of the point cloud.

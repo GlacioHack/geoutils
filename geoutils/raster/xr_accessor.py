@@ -75,6 +75,10 @@ class RasterAccessor(RasterBase):
         self._obj.data = new_data
 
     @property
+    def _chunks(self) -> tuple[tuple[int, ...], ...] | None:
+        return self._obj.chunks
+
+    @property
     def transform(self) -> Affine:
         # Overloads abstract method in RasterBase
         return self._obj.rio.transform()

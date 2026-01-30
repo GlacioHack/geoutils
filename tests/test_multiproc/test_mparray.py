@@ -9,24 +9,23 @@ from typing import Any
 
 import numpy as np
 import pytest
-import rasterio as rio
 import scipy
 from numpy import floating
 
 import geoutils as gu
 from geoutils import Raster, examples
+from geoutils.multiproc.cluster import (
+    AbstractCluster,
+    ClusterGenerator,
+)
 from geoutils.multiproc.mparray import (
     MultiprocConfig,
     _apply_func_block,
+    _generate_tiling_grid,
     _load_raster_tile,
     _remove_tile_padding,
     map_multiproc_collect,
     map_overlap_multiproc_save,
-    _generate_tiling_grid
-)
-from geoutils.multiproc.cluster import (
-    AbstractCluster,
-    ClusterGenerator,
 )
 from geoutils.raster import RasterType
 
@@ -56,6 +55,7 @@ def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
 def _custom_func_mask(raster: RasterType) -> gu.Raster:
     mask_array = raster.get_mask()
     return gu.Raster.from_array(mask_array, raster.transform, raster.crs)
+
 
 class TestTiling:
 
@@ -144,6 +144,7 @@ class TestTiling:
             _generate_tiling_grid(0, 0, 100, 100, 50, 50, -1)
         with pytest.raises(TypeError):
             _generate_tiling_grid(0, 0, 100, 100, 50, 50, 0.5)  # type: ignore
+
 
 class TestMultiproc:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")

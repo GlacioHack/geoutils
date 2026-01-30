@@ -603,9 +603,7 @@ class TestRasterGeotransformations:
             _ = r.reproject(grid_size=(10, 10), res=50)
 
         # If wrong type for `ref`
-        with pytest.raises(
-            TypeError, match="Type of match-reference not understood.*"
-        ):
+        with pytest.raises(TypeError, match="Type of match-reference not understood.*"):
             _ = r.reproject(ref=3)
 
         # -- Check warning for area_or_point works -- #

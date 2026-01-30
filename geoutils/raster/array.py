@@ -60,7 +60,7 @@ def get_array_and_mask(
     """
     # Check for raster input: only data is not sufficient, as this is also defined within a masked array
     if has_geo_attr(array, "data") and has_geo_attr(array, "transform"):
-        array = array.data
+        array = array.data  # type: ignore
 
     if check_shape:
         if array.ndim > 2 and array.shape[0] > 1:
@@ -117,8 +117,8 @@ def get_xy_rotated(raster: RasterType, along_track_angle: float) -> tuple[NDArra
     # (only relative is important, we don't care about offsets, so let's fix lower-left to make the tests easier
     # by starting nicely at 0,0)
     xx, yy = raster.coords(grid=True, force_offset="ll")
-    xx -= np.min(xx)
-    yy -= np.min(yy)
+    xx = xx - np.min(xx)
+    yy = yy - np.min(yy)
 
     # Get rotated coordinates
 

@@ -33,9 +33,12 @@ from geoutils.raster.distributed_computing.chunked import (
     _reproject_per_block,
 )
 
+if TYPE_CHECKING:
+    from geoutils.raster import Raster
+
 
 def _wrapper_multiproc_reproject_per_block(
-    rst: gu.Raster,
+    rst: Raster,
     src_block_ids: list[dict[str, int]],
     dst_block_id: dict[str, int],
     idx_d2s: list[int],
@@ -57,7 +60,7 @@ def _wrapper_multiproc_reproject_per_block(
 
 
 def _multiproc_reproject(
-    rst: gu.Raster,
+    rst: Raster,
     config: MultiprocConfig,
     src_crs: rio.CRS,
     src_nodata: int | float | None,

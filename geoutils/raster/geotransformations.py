@@ -33,6 +33,7 @@ from rasterio.enums import Resampling
 from geoutils import profiler
 from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
+from geoutils.multiproc import MultiprocConfig
 from geoutils.projtools import _get_bounds_projected
 from geoutils.raster._geotransformations import (
     _get_reproj_params,
@@ -42,7 +43,7 @@ from geoutils.raster._geotransformations import (
 )
 from geoutils.raster.distributed_computing.dask import delayed_reproject
 from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
-from geoutils.raster.georeferencing import _cast_pixel_interpretation, _ij2xy
+from geoutils.raster.georeferencing import _cast_pixel_interpretation
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
@@ -124,7 +125,7 @@ def _reproject(
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = multiproc_config is not None
     # The check below can only run on Xarray
-    dask_backend = da is not None and source_raster._is_xr and source_raster._obj.chunks is not None
+    dask_backend = da is not None and source_raster._chunks is not None
 
     if mp_backend and dask_backend:
         raise ValueError(
@@ -134,7 +135,7 @@ def _reproject(
 
     # If using Multiprocessing backend, process and return None (files written on disk)
     if multiproc_config is not None:
-        _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
+        _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)  # type: ignore
         return False, None, None, None, None
 
     # If using Dask backend, process and return Dask array
@@ -182,7 +183,7 @@ def _crop(
             _cast_pixel_interpretation(source_raster.area_or_point, get_geo_attr(bbox, "area_or_point"))
     else:
         raise ValueError(
-            "'bbox' must be a list of coordinates or implement a 'bounds' and 'crs' property such as a raster or " 
+            "'bbox' must be a list of coordinates or implement a 'bounds' and 'crs' property such as a raster or "
             "vector."
         )
 
@@ -200,6 +201,7 @@ def _crop(
     if source_raster._is_xr:
 
         (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+        assert source_raster._obj is not None
         crop_img = source_raster._obj.isel(y=slice(rowmin, rowmax), x=slice(colmin, colmax))
 
     elif source_raster.is_loaded:

@@ -35,7 +35,7 @@ from geoutils.raster.georeferencing import _default_nodata, _xy2ij
 from geoutils.stats import subsample_array
 
 if TYPE_CHECKING:
-    from geoutils.pointcloud.pointcloud import PointCloudLike
+    from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
     from geoutils.raster.base import RasterType
 
 
@@ -45,7 +45,7 @@ def _regular_pointcloud_to_raster(
     transform: rio.transform.Affine = None,
     shape: tuple[int, int] = None,
     nodata: int | float | None = None,
-    data_column_name: str = "b1",
+    data_column_name: str | None = "b1",
     area_or_point: Literal["Area", "Point"] = "Point",
 ) -> tuple[NDArrayNum, affine.Affine, CRS, int | float | None, Literal["Area", "Point"]]:
     """
@@ -130,7 +130,7 @@ def _raster_to_pointcloud(
     as_array: bool = False,
     random_state: int | np.random.Generator | None = None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-) -> NDArrayNum | PointCloudLike:
+) -> NDArrayNum | PointCloud:
     """
     Convert a raster to a point cloud. See Raster.to_pointcloud() for details.
     """
@@ -267,7 +267,7 @@ def _raster_to_pointcloud(
                 geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
                 crs=source_raster.crs,
             ),
-            data_column=data_column_name
+            data_column=data_column_name,
         )
         return pc
     else:

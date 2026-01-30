@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
 
 import geopandas as gpd
 import numpy as np
@@ -30,9 +29,6 @@ from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
 from geoutils.projtools import _get_utm_ups_crs, bounds2poly
-
-if TYPE_CHECKING:
-    from geoutils.vector.vector import VectorType
 
 
 def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float) -> gpd.GeoDataFrame:

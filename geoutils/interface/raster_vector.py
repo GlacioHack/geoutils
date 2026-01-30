@@ -37,16 +37,16 @@ from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.raster.georeferencing import _bounds
 
 if TYPE_CHECKING:
-    from geoutils.pointcloud.pointcloud import PointCloudType, PointCloudLike
-    from geoutils.raster.base import RasterLike, RasterType
-    from geoutils.vector.vector import VectorType
+    from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.raster.base import Raster, RasterLike, RasterType
+    from geoutils.vector.vector import Vector
 
 
 def _polygonize(
     source_raster: RasterType,
     target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"],
     data_column_name: str,
-) -> VectorType:
+) -> Vector:
     """Polygonize a raster. See Raster.polygonize() for details."""
 
     # If target values is passed but does not correspond to 0 or 1, raise a warning
@@ -128,7 +128,7 @@ def _rasterize(
     bounds: tuple[float, float, float, float] | None = None,
     in_value: int | float | Iterable[int | float] | None = None,
     out_value: int | float = 0,
-) -> RasterType:
+) -> Raster:
     if (raster is not None) and (crs is not None):
         raise ValueError("Only one of raster or crs can be provided.")
 
@@ -201,6 +201,7 @@ def _rasterize(
         raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
     from geoutils.raster import Raster  # Runtime import to avoid circularity issues
+
     output = Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
 
     return output
@@ -254,7 +255,7 @@ def _create_mask(
     bounds: tuple[float, float, float, float] | None = None,
     points: tuple[NDArrayNum, NDArrayNum] | None = None,
     as_array: bool = False,
-) -> RasterType | PointCloudType | NDArrayBool:
+) -> Raster | PointCloud | NDArrayBool:
     """See Vector.create_mask for description."""
 
     # Raise errors for wrong inputs
@@ -332,7 +333,8 @@ def _create_mask(
 
         # For a reference, extract geometry
         if ref is not None:
-            pts = ref.ds.geometry
+            ds = get_geo_attr(ref, "ds")
+            pts = ds.geometry
 
         else:
 
@@ -344,9 +346,10 @@ def _create_mask(
         mask = _create_mask_pointcloud(gdf=gdf, pts=pts)
         transform = None
 
-
+    from geoutils.pointcloud import (
+        PointCloud,  # Runtime import to avoid circularity issues
+    )
     from geoutils.raster import Raster  # Runtime import to avoid circularity issues
-    from geoutils.pointcloud import PointCloud  # Runtime import to avoid circularity issues
 
     # Return output as mask or as array
     if as_array:

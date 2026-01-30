@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
 import numpy as np
 import rasterio as rio
@@ -31,7 +31,7 @@ from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
 from geoutils.raster._geotransformations import _resampling_method_from_str
 from geoutils.raster.array import get_array_and_mask
-from geoutils.raster.raster import Raster, RasterType, _default_nodata
+from geoutils.raster.raster import Raster, _default_nodata
 
 
 def load_multiple_rasters(
@@ -249,13 +249,13 @@ def stack_rasters(
 
 
 def merge_rasters(
-    rasters: list[RasterType],
-    reference: int | RasterType = 0,
+    rasters: list[Raster],
+    reference: int | Raster = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.enums.Resampling = "bilinear",
     use_ref_bounds: bool = False,
     progress: bool = True,
-) -> RasterType:
+) -> Raster:
     """
     Spatially merge a list of rasters into one larger raster of their maximum extent.
 

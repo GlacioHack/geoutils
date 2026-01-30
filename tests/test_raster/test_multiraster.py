@@ -208,11 +208,8 @@ class TestMultiRaster:
         assert rasters.img.bounds == stacked_img.bounds
 
         # Others than int or gu.Raster should raise a ValueError
-        try:
-            stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference="a string")
-        except ValueError as exception:
-            if "reference should be" not in str(exception):
-                raise exception
+        with pytest.raises(ValueError, match="reference should be .*"):
+            gu.raster.stack_rasters([rasters.img1, rasters.img2], reference="a string")  # type: ignore
 
         # Check that use_ref_bounds works - use a img that do not cover the whole extent
 

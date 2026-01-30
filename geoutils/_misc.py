@@ -29,7 +29,8 @@ from typing import Any, Callable
 
 from packaging.version import Version
 
-from ._version import __version__
+from geoutils._version import __version__
+
 
 @contextmanager  # type: ignore
 def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported") -> Any:
