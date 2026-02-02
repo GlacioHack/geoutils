@@ -24,7 +24,6 @@ This module allows the user to process grouped statistics easily
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -87,23 +86,20 @@ def grouped_stats(
     bins: dict[str, RasterType | list[int] | object],
     aggregated_vars: dict[str, NDArrayNum],
     statistics: list[str],
-    save_csv: str | Path | None = None,
-    save_masks: str | Path | None = None,
-) -> pd.DataFrame:
+) -> tuple[Any, dict[str, dict[str, NDArrayNum] | None]]:
     """
     Get statistics grouped (=binned) by other variables, whether categorical or continuous.
     :param groupby_vars: Dictionary containing Raster to group by.
     :param bins: Bins to use. Can be a list of interval, binary mask or segmentation map.
     :param aggregated_vars: Values to group, can be a dictionary .
     :param statistics: List or dict of statistics to compute, e.g. ["mean", "std"].
-    :param save_csv: Path to save CSV file.
-    :param save_masks: Path to save masks.
     """
 
     # Check that groupby_vars and bins as the same values
     if set(groupby_vars) != set(bins):
         raise ValueError("One bins/mask/segmentation entry per input array required.")
 
+    # Load bins
     new_bins = {}
     for key, value in bins.items():
         if isinstance(value, str):
@@ -114,72 +110,69 @@ def grouped_stats(
 
     crs, shape, transform = init_binnings_attributes(next(iter(groupby_vars.values())))
 
-    # panda dataframe works on arrays
+    # Flatten arrays for pandas
     groupby_vars_array = from_raster_to_flattened(groupby_vars)
     aggregated_vars_arrays = from_raster_to_flattened(aggregated_vars)
 
-    # Init panda data frame
     df = pd.DataFrame({**groupby_vars_array, **aggregated_vars_arrays})
+
     groupby_keys = []
-    # Analyze type of binnings
+    returned_masks = {}
+
     for groupby_key in groupby_vars.keys():
         group_col = f"groupby_{groupby_key}"
-
         bins_array = new_bins[groupby_key]
 
-        # is interval
+        if isinstance(bins[groupby_key], (str, Raster)):
+            returned_masks[group_col] = None
+        else:
+            returned_masks[group_col] = {}
+
+        # ---------- Interval bins ----------
         if is_interval(bins_array):
             cut = pd.cut(df[groupby_key], bins=bins_array)
             df[group_col] = cut
 
-            if save_masks and not isinstance(bins[groupby_key], str):
+            if returned_masks[group_col] is not None:
                 for interval in cut.cat.categories:
                     mask_flat = (cut == interval).to_numpy()
-                    mask = mask_flat.reshape(shape)
-                    outdir = Path(save_masks) / group_col
-                    outdir.mkdir(parents=True, exist_ok=True)
-                    fname = f"{groupby_key}_{interval.left}_{interval.right}.tif"
-                    Raster.from_array(mask.reshape(shape), transform=transform, crs=crs).save(outdir / fname)
+                    mask_to_raster = Raster.from_array(mask_flat.reshape(shape), transform, crs)
 
+                    returned_masks[group_col][f"{groupby_key}_{interval.left}_{interval.right}"] = mask_to_raster
+
+        # ---------- Raster (mask or segmentation) ----------
         elif isinstance(bins_array, Raster):
             data = np.asarray(bins_array.data.data).flatten()
+
             if len(data) != len(df):
                 raise ValueError(f"Mask has invalid length {len(data)}, expected {len(df)}")
-            # binary mask
+
+            # Binary mask
             if bins_array.is_mask:
                 df[group_col] = pd.Categorical(data, categories=[False, True])
-                if save_masks and not isinstance(bins[groupby_key], str):
-                    mask = data.reshape(shape).astype("uint8")
-                    fname = f"{groupby_key}_mask.tif"
-                    outdir = Path(save_masks) / group_col
-                    outdir.mkdir(parents=True, exist_ok=True)
-                    Raster.from_array(mask.reshape(shape), transform=transform, crs=crs).save(outdir / fname)
-            # segmentation
+
+                if returned_masks[group_col] is not None:
+                    mask_to_raster = Raster.from_array(data.reshape(shape).astype("uint8"), transform, crs)
+
+                    returned_masks[group_col][f"{groupby_key}_mask"] = mask_to_raster
+
+            # Segmentation
             else:
                 df[group_col] = pd.Categorical(data)
 
-                if save_masks and not isinstance(bins[groupby_key], str):
-                    labels = np.unique(data[~np.isnan(data)])
-                    for lbl in labels:
-                        mask_flat = data == lbl
-                        mask = mask_flat.reshape(shape)
+                if returned_masks[group_col] is not None:
+                    segm_names = np.unique(data[~np.isnan(data)])
+                    for segm_name in segm_names:
+                        mask_to_raster = Raster.from_array((data == segm_name).reshape(shape), transform, crs)
 
-                        fname = f"{groupby_key}_seg_{int(lbl)}.tif"
-                        outdir = Path(save_masks) / group_col
-                        outdir.mkdir(parents=True, exist_ok=True)
-                        Raster.from_array(mask.reshape(shape), transform=transform, crs=crs).save(outdir / fname)
+                        returned_masks[group_col][f"{groupby_key}_seg_{int(segm_name)}"] = mask_to_raster
+
         else:
             raise NotImplementedError("This type of bins does not yet work")
 
-        # Compute the stats
         groupby_keys.append(group_col)
 
-    # Use aggregation directly on categorical columns (fast)
-    result = df.groupby(groupby_keys)[list(aggregated_vars.keys())].agg(statistics)
+    # Compute statistics
+    result = df.groupby(groupby_keys, observed=True)[list(aggregated_vars.keys())].agg(statistics)
 
-    if save_csv:
-        csv_file = Path(save_csv) / "grouped_stats.csv"
-        csv_file.parent.mkdir(parents=True, exist_ok=True)
-        result.reset_index().to_csv(csv_file, index=False)
-
-    return result
+    return result, returned_masks

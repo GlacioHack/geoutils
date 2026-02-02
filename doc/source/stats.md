@@ -105,16 +105,38 @@ In this example, we will create different altitude classes from a chosen interva
 Once these bins are created, we reapply them and compute the mean, minimum, and maximum values of the same raster
 for each sub-interval. It is also possible to use a reference other than the raster itself for the group_by.
 
+A dictionary containing the masks that have been created during the computation will also be returned by the function.
+Using geoUtils functions makes it very easy to visualise them.
+
 ```{code-cell} ipython3
 from geoutils.stats import grouped_stats
+import math
+import matplotlib.pyplot as plt
 
 group_by = {"rast": rast}
 bins = {"rast": [400, 1000, 2000, 3000, np.inf]}
 to_aggregate = {"rast": rast}
 statistics = ["mean", "min", "max"]
 
-df = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
-df
+df, masks = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
+
+groups = list(masks["groupby_rast"].keys())
+n = len(groups)
+
+ncols = 3
+nrows = math.ceil(n / ncols)
+
+fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 5*nrows))
+axes = axes.flatten()
+
+for ax, group in zip(axes, groups):
+    masks["groupby_rast"][group].plot(ax=ax)
+    ax.set_title(group)
+
+for ax in axes[n:]:
+    ax.axis("off")
+
+plt.tight_layout()
 ```
 
 ```{warning}
@@ -135,10 +157,14 @@ from geoutils.stats import grouped_stats
 group_by = {"rast": rast}
 elev_mask = rast > 2000
 bins = {"rast": elev_mask}
+
+elev_mask.plot()
+plt.show()
+
 to_aggregate = {"rast": rast}
 statistics = ["mean", "min", "max"]
 
-df = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics, save_masks="")
+df, _ = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
 df
 ```
 
