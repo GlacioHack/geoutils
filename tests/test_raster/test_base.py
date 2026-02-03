@@ -150,7 +150,7 @@ class TestClassVsAccessorConsistency:
         "xy2ij",
         "ij2xy",
         "coords",
-        "outside_image",
+        "outside_bounds",
         "info",
         "get_bounds_projected",
         "get_footprint_projected",
@@ -232,7 +232,7 @@ class TestClassVsAccessorConsistency:
         ("get_footprint_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_bounds_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("georeferenced_grid_equal", {"other": "self"}),
-        ("outside_image", {"xi": [-2, 10000, 10], "yj": [10, 50, 20]}),
+        ("outside_bounds", {"xi": [-2, 10000, 10], "yj": [10, 50, 20]}),
         # 1.2. In-place methods
         ("translate", {"xoff": 10.5, "yoff": 5, "inplace": True}),
         ("set_transform", {"new_transform": rio.transform.from_bounds(0, 0, 1, 1, 5, 5)}),

@@ -162,7 +162,7 @@ def _coords(
         return np.asarray(xx), np.asarray(yy)
 
 
-def _outside_image(
+def _outside_bounds(
     xi: ArrayLike,
     yj: ArrayLike,
     transform: rio.transform.Affine,
@@ -172,12 +172,17 @@ def _outside_image(
 ) -> bool:
     """See description of Raster.outside_image."""
 
+    # If not passed as X/Y index, convert from coordinates
     if not index:
-        yj, xi = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
+        row, col = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
+    else:
+        row, col = xi, yj
 
-    if np.any(np.array((xi, yj)) < 0):
+    # Row and columns can't be negative
+    if np.any(np.array((col, row)) < 0):
         return True
-    elif np.asanyarray(xi) > shape[1] or np.asanyarray(yj) > shape[0]:
+    # Or superior or equal to shape
+    elif np.asanyarray(col) >= shape[1] or np.asanyarray(row) >= shape[0]:
         return True
     else:
         return False

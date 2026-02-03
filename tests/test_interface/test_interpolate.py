@@ -558,7 +558,7 @@ class TestInterpolate:
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
-        lat, lon = reproject_to_latlon(points=(xtest0, ytest0), in_crs=r.crs)
+        lon, lat = reproject_to_latlon(points=(xtest0, ytest0), in_crs=r.crs)
         z_val_2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
         assert z_val == z_val_2
 
@@ -633,27 +633,27 @@ class TestInterpolate:
 
         # Lower right pixel
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
-        lat, lon = reproject_to_latlon((x, y), r.crs)
-        assert (
-            r.reduce_points((x, y), as_array=True)
-            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
-            == r.data[-1, -1]
-        )
+        lon, lat = reproject_to_latlon((x, y), r.crs)
+        lr1 = r.reduce_points((x, y), as_array=True)
+        lr2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+        lr3 = r.data[-1, -1]
+        assert np.array_equal(lr1, lr2, equal_nan=True)
+        assert np.array_equal(lr2, lr3, equal_nan=True)
 
         # One pixel above
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
-        lat, lon = reproject_to_latlon((x, y), r.crs)
-        assert (
-            r.reduce_points((x, y), as_array=True)
-            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
-            == r.data[-2, -1]
-        )
+        lon, lat = reproject_to_latlon((x, y), r.crs)
+        lra1 = r.reduce_points((x, y), as_array=True)
+        lra2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+        lra3 = r.data[-2, -1]
+        assert np.array_equal(lra1, lra2, equal_nan=True)
+        assert np.array_equal(lra2, lra3, equal_nan=True)
 
         # One pixel left
         x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
-        lat, lon = reproject_to_latlon((x, y), r.crs)
-        assert (
-            r.reduce_points((x, y), as_array=True)
-            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
-            == r.data[-1, -2]
-        )
+        lon, lat = reproject_to_latlon((x, y), r.crs)
+        lrl1 = r.reduce_points((x, y), as_array=True)
+        lrl2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+        lrl3 = r.data[-1, -2]
+        assert np.array_equal(lrl1, lrl2, equal_nan=True)
+        assert np.array_equal(lrl2, lrl3, equal_nan=True)

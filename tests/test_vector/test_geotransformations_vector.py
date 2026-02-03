@@ -9,7 +9,7 @@ import pytest
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 
 import geoutils as gu
-
+from geoutils.exceptions import InvalidBoundsError
 
 class TestGeotransformations:
 
@@ -105,7 +105,7 @@ class TestGeotransformations:
             assert np.sum(~np.array(intersects_old)) > 0
 
         # Check that error is raised when cropGeom argument is invalid
-        with pytest.raises(TypeError, match="Crop bounding box must be a list of coordinates.*"):
+        with pytest.raises(InvalidBoundsError, match="Cannot interpret bounding box input.*"):
             outlines.crop(1, inplace=True)  # type: ignore
 
     def test_translate(self) -> None:

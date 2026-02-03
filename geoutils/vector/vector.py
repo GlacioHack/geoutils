@@ -49,7 +49,7 @@ from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr, _check_match_bbox
 from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -1278,7 +1278,7 @@ class Vector:
     @overload
     def crop(
         self: VectorType,
-        crop_geom: RasterType | VectorType | list[float] | tuple[float, ...],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
         clip: bool,
         *,
         inplace: Literal[False] = False,
@@ -1287,7 +1287,7 @@ class Vector:
     @overload
     def crop(
         self: VectorType,
-        crop_geom: RasterType | VectorType | list[float] | tuple[float, ...],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
         clip: bool,
         *,
         inplace: Literal[True],
@@ -1296,7 +1296,7 @@ class Vector:
     @overload
     def crop(
         self: VectorType,
-        crop_geom: RasterType | VectorType | list[float] | tuple[float, ...],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
         clip: bool,
         *,
         inplace: bool = False,
@@ -1305,7 +1305,7 @@ class Vector:
     @profiler.profile("geoutils.vector.vector.crop", memprof=True)
     def crop(
         self: VectorType,
-        bbox: RasterType | VectorType | list[float] | tuple[float, ...],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
         clip: bool = False,
         *,
         inplace: bool = False,
@@ -1327,17 +1327,8 @@ class Vector:
 
         :returns: Cropped vector (or None if inplace).
         """
-        if has_geo_attr(bbox, "bounds") and has_geo_attr(bbox, "crs"):
-            bounds = get_geo_attr(bbox, "bounds")
-            crs = get_geo_attr(bbox, "crs")
-            xmin, ymin, xmax, ymax = _get_bounds_projected(bounds=bounds, in_crs=crs, out_crs=self.crs)
-        elif isinstance(bbox, (list, tuple)):
-            xmin, ymin, xmax, ymax = bbox
-        else:
-            raise TypeError(
-                "Crop bounding box must be a list of coordinates, or a geospatial object implementing "
-                "'bounds', such as a raster or vector."
-            )
+
+        xmin, ymin, xmax, ymax = _check_match_bbox(self, bbox)
 
         # Need to separate the two options, inplace update
         if inplace:

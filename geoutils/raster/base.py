@@ -29,7 +29,7 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
-from geoutils._dispatch import has_geo_attr
+from geoutils._dispatch import _check_match_points
 from geoutils._misc import deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -41,7 +41,7 @@ from geoutils._typing import (
 )
 from geoutils.filters import _filter
 from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.interpolate import _interp_points
+from geoutils.interface.interpolate import _interp_points, _reduce_points
 from geoutils.interface.raster_point import (
     _raster_to_pointcloud,
     _regular_pointcloud_to_raster,
@@ -53,8 +53,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     align_bounds,
     merge_bounds,
-    reproject_from_latlon,
-    reproject_points,
+    reproject_from_latlon
 )
 from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
@@ -62,7 +61,7 @@ from geoutils.raster.georeferencing import (
     _coords,
     _default_nodata,
     _ij2xy,
-    _outside_image,
+    _outside_bounds,
     _res,
     _xy2ij,
 )
@@ -1456,16 +1455,16 @@ class RasterBase(ABC):
 
     def outside_image(self, xi: ArrayLike, yj: ArrayLike, index: bool = True) -> bool:
         """
-        Check whether a given point falls outside the raster.
+        Check whether a given point falls outside the bounds of the raster.
 
         :param xi: Indices (or coordinates) of x direction to check.
         :param yj: Indices (or coordinates) of y direction to check.
         :param index: Interpret ij as raster indices (default is ``True``). If False, assumes ij is coordinates.
 
-        :returns is_outside: ``True`` if ij is outside the image.
+        :returns is_outside: ``True`` if ij is outside the bounds.
         """
 
-        return _outside_image(
+        return _outside_bounds(
             xi=xi, yj=yj, transform=self.transform, shape=self.shape, area_or_point=self.area_or_point, index=index
         )
 
@@ -1567,15 +1566,12 @@ class RasterBase(ABC):
         if self.count != 1:
             array = array[band - 1, :, :]
 
-        if isinstance(points, tuple):
-            if input_latlon:
-                pts = reproject_from_latlon(points, out_crs=self.crs)
-            else:
-                pts = points
-        elif has_geo_attr(points, "data_column"):
-            pts = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
-        else:
-            raise TypeError("Input must be a tuple of array-like or a point cloud.")
+        # Check and normalize input points
+        pts, input_scalar = _check_match_points(self, points)
+
+        # Convert from latlon if necessary
+        if input_latlon:
+            pts = reproject_from_latlon(pts, out_crs=self.crs)
 
         z = _interp_points(
             array,
@@ -1599,6 +1595,48 @@ class RasterBase(ABC):
             )
 
             return PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
+
+    def reduce_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
+        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
+        window: int | None = None,
+        input_latlon: bool = False,
+        band: int | None = None,
+        masked: bool = False,
+        return_window: bool = False,
+        as_array: bool = False,
+        boundless: bool = True,
+    ) -> Any:
+        """
+        Reduce raster values around point coordinates.
+
+        By default, samples pixel value of each band. Can be passed a band index to sample from.
+
+        Uses Rasterio's windowed reading to keep memory usage low (for a raster not loaded).
+
+        :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
+            coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
+            If points fall outside of image, value returned is nan.
+        :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
+        :param window: Window size to read around coordinates. Must be odd.
+        :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
+            CRS.
+        :param band: Band number to extract from (from 1 to self.count).
+        :param masked: Whether to return a masked array, or classic array.
+        :param return_window: Whether to return the windows (in addition to the reduced value).
+        :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input
+            coordinates).
+        :param boundless: Whether to allow windows that extend beyond the extent.
+
+        :returns: Point cloud of interpolated points, or 1D array of interpolated values.
+            In addition, if return_window=True, return tuple of (values, arrays).
+        """
+
+        return _reduce_points(self, points=points, reducer_function=reducer_function, window=window,
+                              input_latlon=input_latlon, band=band, masked=masked, return_window=return_window,
+                              as_array=as_array, boundless=boundless)
+
 
     @overload
     def filter(

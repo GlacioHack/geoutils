@@ -31,7 +31,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import _check_match_bbox
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.projtools import _get_bounds_projected
@@ -157,35 +157,24 @@ def _reproject(
 @profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)
 def _crop(
     source_raster: RasterType,
-    bbox: RasterLike | VectorLike | list[float] | tuple[float, ...],
+    bbox: RasterLike | VectorLike | tuple[float, float, float, float],
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
 ) -> tuple[NDArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
 
+    # Check input, raise appropriate errors and warnings
+    bbox = _check_match_bbox(source_raster, bbox)
+
     assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
 
-    if isinstance(bbox, (list, tuple)):
-        # If georeferenced, use input directly
-        if distance_unit == "georeferenced":
-            xmin, ymin, xmax, ymax = bbox
-        # Else, convert to ij
-        else:
-            colmin, rowmin, colmax, rowmax = bbox
-            xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
-            xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
-    elif has_geo_attr(bbox, "bounds") and has_geo_attr(bbox, "crs"):
-        # Check if object has a "bounds" property
-        bounds = get_geo_attr(bbox, "bounds")
-        crs = get_geo_attr(bbox, "crs")
-        xmin, ymin, xmax, ymax = _get_bounds_projected(bounds, in_crs=crs, out_crs=source_raster.crs)
-        # Check if object has an "area_or_point" property
-        if has_geo_attr(bbox, "area_or_point"):
-            _cast_pixel_interpretation(source_raster.area_or_point, get_geo_attr(bbox, "area_or_point"))
+    # If using georeferenced unit, use bbox directly
+    if distance_unit == "georeferenced":
+        xmin, ymin, xmax, ymax = bbox
+    # Else, convert to ij
     else:
-        raise ValueError(
-            "'bbox' must be a list of coordinates or implement a 'bounds' and 'crs' property such as a raster or "
-            "vector."
-        )
+        colmin, rowmin, colmax, rowmax = bbox
+        xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
+        xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
 
     # Finding the intersection of requested bounds and original bounds, cropped to image shape
     ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)

@@ -52,19 +52,6 @@ def _grid_pointcloud(
         expressed in number of pixels.
     """
 
-    # Input checks
-    if (
-        not isinstance(grid_coords, tuple)
-        or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
-        or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
-    ):
-        raise TypeError("Input grid coordinates must be 1D arrays.")
-
-    diff_x = np.diff(grid_coords[0])
-    diff_y = np.diff(grid_coords[1])
-
-    if not all(diff_x == diff_x[0]) and all(diff_y == diff_y[0]):
-        raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
 
     # 1/ Interpolate irregular point cloud on a regular grid
 
