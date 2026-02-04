@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from collections.abc import Sequence
 import warnings
 from typing import Any, TYPE_CHECKING
@@ -288,12 +290,12 @@ def _check_coords(coords: tuple[NDArrayNum, NDArrayNum]) -> tuple[tuple[NDArrayN
 # Level 1 checks: Can accept a reference object to match or manual input
 ########################################################################
 
-def _check_match_points(source_obj: RasterBase | Vector,
+def _check_match_points(src: RasterBase | Vector,
                         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
                         ) -> tuple[tuple[NDArrayNum, NDArrayNum], bool]:
-    """Function for checking match feature for points consistently.
+    """Function for checking and normalizing input of match feature for points consistently.
 
-    :param source_obj: Source object (raster, vector, point cloud).
+    :param src: Source object (raster, vector, point cloud).
     :param points: Points object (tuple of arrays/numbers, or point cloud).
 
     :return: Tuple of point coordinates (X and Y), Boolean to know if inputs were scalar.
@@ -303,8 +305,13 @@ def _check_match_points(source_obj: RasterBase | Vector,
     if has_geo_attr(points, "geometry") and has_geo_attr(points, "crs"):
         crs = get_geo_attr(points, "crs")
         pts = reproject_points((points.geometry.x.values, points.geometry.y.values), in_crs=crs,
-                               out_crs=source_obj.crs)
+                               out_crs=src.crs)
         input_scalar = False
+
+        logging.debug(
+            f"Match points input: using reference object of type {type(src).__name__!r} "
+            f" that implements 'geometry' and 'crs'."
+        )
 
     # Or if points is a sequence of arrays (excluding strings and bytes)
     elif isinstance(points, Sequence) and not isinstance(points, (str, bytes)):
@@ -340,6 +347,11 @@ def _check_match_points(source_obj: RasterBase | Vector,
 
         pts = x_arr, y_arr
 
+        if input_scalar:
+            logging.debug(f"Match points input: using provided tuple of scalars.")
+        else:
+            logging.debug(f"Match points input: using provided tuple of array-likes.")
+
     else:
         raise InvalidPointsError(
             f"Cannot interpret point input from object of type {type(points).__name__!r}. "
@@ -349,13 +361,13 @@ def _check_match_points(source_obj: RasterBase | Vector,
 
     return pts, input_scalar
 
-def _check_match_bbox(source_obj: RasterBase | Vector,
+def _check_match_bbox(src: RasterBase | Vector,
                       bbox: RasterLike | VectorLike | rio.coords.BoundingBox | tuple[Number, Number, Number,
                         Number]) \
         -> tuple[Number, Number, Number, Number]:
-    """Function for checking match feature on bounds consistently.
+    """Function for checking and normalizing input of match feature on bounds consistently.
 
-    :param source_obj: Source object (raster, vector, point cloud) that has a .bounds attribute.
+    :param src: Source object (raster, vector, point cloud) that has a .bounds attribute.
     :param bbox: Bounding box object (tuple or bounding box or raster, vector, point cloud).
 
     :return: Tuple of bounding box (xmin, ymin, xmax, ymax).
@@ -365,15 +377,24 @@ def _check_match_bbox(source_obj: RasterBase | Vector,
     if has_geo_attr(bbox, "bounds") and has_geo_attr(bbox, "crs"):
         bounds = _check_bounds(get_geo_attr(bbox, "bounds"))
         crs = _check_crs(get_geo_attr(bbox, "crs"))
-        xmin, ymin, xmax, ymax = _get_bounds_projected(bounds=bounds, in_crs=crs, out_crs=source_obj.crs)
+        xmin, ymin, xmax, ymax = _get_bounds_projected(bounds=bounds, in_crs=crs, out_crs=src.crs)
+
+        logging.debug(
+            f"Match bbox input: using reference object of type {type(src).__name__!r} "
+            f"that implements 'bounds' and 'crs'."
+        )
 
         # If input has an area_or_point attribute, raise warning if inconsistent with source
-        if has_geo_attr(bbox, "area_or_point") and hasattr(source_obj, "area_or_point"):
-            _cast_pixel_interpretation(source_obj.area_or_point, get_geo_attr(bbox, "area_or_point"))
+        if has_geo_attr(bbox, "area_or_point") and hasattr(src, "area_or_point"):
+            _cast_pixel_interpretation(src.area_or_point, get_geo_attr(bbox, "area_or_point"))
 
     # If bbox is a rasterio bounding box
     elif isinstance(bbox, (rio.coords.BoundingBox, Sequence)):
         xmin, ymin, xmax, ymax = _check_bounds(bbox)
+
+        logging.debug(
+            f"Match bbox input: using provided bounding box or sequence of 4."
+        )
 
     # If none of the above, add full description in error
     else:
@@ -396,14 +417,108 @@ def _grid_from_bounds_res(bounds: tuple[Number, Number, Number, Number], res: Nu
     res = _check_resolution(res)
 
     # Derive shape and transform
-    shape = round((xmax - xmin) / res[0]), round((ymax - ymin) / res[1])
-    return shape, rio.transform.from_bounds(xmin, ymin, xmax, ymax, shape[0], shape[1])
+    shape = round((ymax - ymin) / res[1]), round((xmax - xmin) / res[0])
+    transform = rio.transform.from_origin(xmin, ymax, res[0], res[1])
+    return shape, transform
 
-def _grid_from_bounds_shape(bounds: tuple[Number, Number, Number, Number], shape: tuple[int, int]) -> rio.Affine:
+def _grid_from_bounds_shape(bounds: tuple[Number, Number, Number, Number], shape: tuple[int, int]) \
+        -> tuple[tuple[int, int], rio.Affine]:
     """Helper function to get grid transform from bounds and shape."""
 
     xmin, ymin, xmax, ymax = _check_bounds(bounds)
-    return rio.transform.from_bounds(xmin, ymin, xmax, ymax, shape[0], shape[1])
+    shape = _check_shape(shape)
+    # Careful, shape inverted (width, height in Rasterio; height, width in NumPy)
+    transform = rio.transform.from_bounds(xmin, ymin, xmax, ymax, shape[1], shape[0])
+    return shape, transform
+
+def _grid_from_src(dst_crs: pyproj.CRS, src: RasterBase, shape: tuple[int, int] | None = None,
+                   res: tuple[Number, Number] | Number | None = None,
+                   bounds: tuple[Number, Number, Number, Number] | None = None) \
+        -> tuple[tuple[int, int], rio.Affine]:
+    """
+    Helper function to get default grid shape/transform from user inputs, including "fallback" from source.
+
+    Note: This step is necessary ONLY IF:
+      1. Output CRS differs from input CRS,
+      2. We have incomplete target grid: we either don't know target resolution/shape, or don't know target
+        bounds, or none of the two.
+    """
+
+    # Check and normalize inputs, and pass shape/res if they exist
+    if shape is not None and res is not None:
+        raise AssertionError("Internal logic violated: Shape and res should not be defined at the same time. "
+                             "This is a bug, please report it.")
+    if shape is not None:
+        height, width = _check_shape(shape)  # Careful, height/width are inverted in Rasterio (width comes first)
+    else:
+        height, width = None, None
+    if res is not None:
+        res = _check_resolution(res)
+    else:
+        res = None
+    if bounds is not None:
+        bounds = _check_bounds(bounds)
+    else:
+        bounds = None
+
+    # First, if all are the same, return source transform and size (to avoid approximation errors below)
+    if ((_check_crs(dst_crs) == _check_crs(src.crs))
+            & ((shape is None) | (shape == src.shape))
+            & ((res is None) | (res == src.res))
+            & ((bounds is None) | (bounds == src.bounds))):
+        return src.shape, src.transform
+
+    # If input source has no width/height, should exist from source object
+    if not has_geo_attr(src, "width"):
+        src_width = width
+        src_height = height
+    else:
+        src_width = src.width
+        src_height = src.height
+
+    # If no output res/shape exists (only bounds passed, or no input at all), we keep the same output shape as input
+    if res is None and shape is None:
+        width, height = src.width, src.height
+
+    # We let Rasterio figure out the default transform (i.e. resolution) in the new CRS with same size output
+    transform, width, height = rio.warp.calculate_default_transform(
+        src.crs,
+        dst_crs,
+        src_width,
+        src_height,
+        left=src.bounds.left,
+        right=src.bounds.right,
+        top=src.bounds.top,
+        bottom=src.bounds.bottom,
+        dst_width=width,  # Only defined if res is None
+        dst_height=height,  # Only defined if res is None
+        resolution=res,  # Only defined if shape is None
+    )
+    out_shape = height, width
+
+    # If no target bounds were passed, this is already the desired output
+    # (calculate_default_transform already accounted for res input, or width/height input, or none of the two)
+    if bounds is None:
+        return out_shape, transform
+    # If target bounds exist, we use the transform above to deduce the actual resolution of output, and re-compute
+    # the transform using our bounds
+    else:
+        # If only shape was defined, this is direct
+        if shape is not None:
+            return _grid_from_bounds_shape(bounds=bounds, shape=shape)
+        # Otherwise, we need to calculate the new output shape given target window (bounds), rounded to nearest integer,
+        # so that we match the exact bounds
+        else:
+            ref_win = rio.windows.from_bounds(*list(bounds), transform).round_lengths()
+            out_shape = (int(ref_win.height), int(ref_win.width))
+            # We force the resolution here
+            if res is not None:
+                _, transform = _grid_from_bounds_res(bounds=bounds, res=res)
+                return out_shape, transform
+            # We force the bounds here
+            else:
+                return _grid_from_bounds_shape(bounds=bounds, shape=out_shape)
+
 
 def _grid_from_coords(coords: tuple[NDArrayNum, NDArrayNum]) -> tuple[tuple[int, int], rio.Affine]:
     """Helper function to get grid transform from coordinates."""
@@ -421,28 +536,45 @@ def _grid_from_coords(coords: tuple[NDArrayNum, NDArrayNum]) -> tuple[tuple[int,
         ysize=dxdy[0],
     )
 
-def _check_match_grid(source_obj: RasterBase | Vector,
+def _check_match_grid(src: RasterBase | Vector,
                       ref: RasterLike | VectorLike | None,
                       res: Number | tuple[Number, Number] | None,
                       shape: tuple[int, int] | None,
                       bounds: tuple[Number, Number, Number, Number] | None,
                       coords: tuple[NDArrayNum, NDArrayNum] | None,
-                      crs: pyproj.CRS | None) -> tuple[tuple[int, int], rio.Affine, pyproj.CRS]:
-    """Function for checking match feature on grids consistently.
+                      crs: pyproj.CRS | None,
+                      ) -> tuple[tuple[int, int], rio.Affine, pyproj.CRS]:
+    """
+    Function for checking and normalizing input of match feature on grids consistently.
 
-    :param source_obj: Source object (raster, vector, point cloud).
-    :param ref: Reference object (raster, vector, point cloud) to match for defining the grid.
-    :param res: Resolution of grid (to provide with bounds; only needed if shape not provided).
-    :param shape: Shape of grid (to provide with bounds; only needed if resolution not provided).
-    :param bounds: Bounding box (xmin, ymin, xmax, ymax) of grid.
-    :param coords: Regular coordinates (X, Y) of grid (to provide alone, nothing else required).
-    :param crs: Coordinate reference system of grid.
+    Uses reference input as priority, then optional manual inputs ('res', 'shape', 'bounds', 'coords'),
+    otherwise fallbacks to source object.
 
-    The grid can be defined with the following options:
-    - Match a raster reference (CRS, bounds and resolution/shape),
-    - Match a vector or point cloud reference extent (bounds, CRS) along with a provided resolution/shape,
-    - Match provided bounds and resolution/shape, optionally defined in another CRS.
-    - Match provided grid coordinates, optionally defined in another CRS.
+    Note that :
+    - Both 'res' and 'shape' describe the resolution, and cannot be used together (mutually exclusive). Shape
+        order corresponds to that of the NumPy array (height, width).
+    - Grid coordinates 'coords' is equivalent to passing 'res'/'shape' + 'bounds', and should be used alone.
+    - The unit to use for 'res' or 'coords' is that of the matching CRS: reference if passed, or 'crs' if passed,
+        otherwise source object (own CRS).
+
+
+    The grid can be defined the following ways:
+    1. If a raster referenced is provided, match its grid (CRS, bounds and resolution/shape),
+    2. If a vector or point cloud reference is provided, match its projected extent (bounds, CRS) and set the
+        resolution/shape to that provided (or, if none provided and source is a raster, fallback to that of source),
+    3. If only a resolution/shape is provided, match this resolution using source extent (bounds, CRS),
+    4. If both resolution/shape and bounds are provided, matches this full grid definition, optionally in
+        another CRS if provided (otherwise uses source).
+    5. If grid coordinates are provided, matches this full grid definition, optionally in another CRS if provided
+        (otherwise uses source).
+
+    :param src: Source object (raster, vector, point cloud).
+    :param ref: Reference object (raster, vector, point cloud) to match for defining the destination grid.
+    :param res: Resolution of destination grid, in units of destination CRS (mutually exclusive with shape).
+    :param shape: Shape of destination grid (mutually exclusive with bounds).
+    :param bounds: Bounding box (xmin, ymin, xmax, ymax) of destination grid, in units of destination CRS.
+    :param coords: Regular coordinates (X, Y) of destination grid (to provide alone) in units of destination CRS.
+    :param crs: Coordinate reference system of destination grid.
 
     :return: Shape and transform.
     """
@@ -451,13 +583,21 @@ def _check_match_grid(source_obj: RasterBase | Vector,
     ################################
     if ref is not None:
 
+        if crs is not None:
+            raise InvalidGridError("Either 'ref' or 'crs' must be provided, not both.")
+
         # If reference defines a complete grid (raster-like)
         # IMPORTANT! Geodataframe do implement "transform" (method), so we check if transform is an Affine object
         if has_geo_attr(ref, "shape") and has_geo_attr(ref, "transform") and has_geo_attr(ref, "crs")\
                 and isinstance(get_geo_attr(ref, "transform"), rio.Affine):
-            ref_shape = get_geo_attr(ref, "shape")
-            ref_transform = get_geo_attr(ref, "transform")
-            ref_crs = get_geo_attr(ref, "crs")
+            dst_shape = get_geo_attr(ref, "shape")
+            dst_transform = get_geo_attr(ref, "transform")
+            dst_crs = get_geo_attr(ref, "crs")
+
+            logging.debug(
+                f"Match grid input: using reference object of type {type(src).__name__!r} "
+                f"that implements 'transform' and 'shape' and 'crs' (raster-like)."
+            )
 
             # Check redundance of other arguments
             redundant = {
@@ -475,32 +615,50 @@ def _check_match_grid(source_obj: RasterBase | Vector,
                     "Pass only 'ref' input to silence this warning.")
                 warnings.warn(category=IgnoredGridWarning, message=msg)
 
+            # If input has an area_or_point attribute, raise warning if inconsistent with source
+            if has_geo_attr(ref, "area_or_point") and hasattr(src, "area_or_point"):
+                _cast_pixel_interpretation(src.area_or_point, get_geo_attr(ref, "area_or_point"))
+
         # If reference only defines a partial grid (vector or point cloud-like)
         elif has_geo_attr(ref, "bounds") and has_geo_attr(ref, "crs"):
-            ref_bounds = get_geo_attr(ref, "bounds")
-            ref_crs = get_geo_attr(ref, "crs")
-            if res is None and shape is None:
-                raise InvalidGridError(
-                    f"Reference input from object of type {type(ref).__name__!r} only contains "
-                    f"bounds and CRS, and thus requires a provided resolution 'res' or grid shape 'shape' to define a "
-                    f"complete grid, but none was passed.")
-            elif res is not None and shape is not None:
+            dst_bounds = get_geo_attr(ref, "bounds")
+            dst_crs = get_geo_attr(ref, "crs")
+
+            logging.debug(
+                f"Match grid input: using reference object of type {type(src).__name__!r} "
+                f"that implements only 'bounds' and 'crs' (vector-like)."
+            )
+
+            if res is not None and shape is not None:
                 raise InvalidGridError(
                     f"Both 'res' and 'shape' were passed to define the grid resolution alongside object of type"
                     f" {type(ref).__name__!r} defining bounds and CRS. Only provide one of 'res' or 'shape'.")
+            if res is None and shape is None:
+                # If no resolution was defined but source has one (= it is a raster), fallback on source
+                if not hasattr(src, "res"):
+                    raise InvalidGridError(
+                        f"Reference input from object of type {type(ref).__name__!r} only contains "
+                        f"bounds and CRS, and thus requires a provided resolution 'res' or grid shape 'shape' to "
+                        f"define a complete grid, but none was passed and source object of type"
+                        f" {type(src).__name__!r} (fallback) has none.")
+                else:
+                    logging.debug("Match grid input: no resolution defined alongside reference, fallback on "
+                                  "resolution of source object.")
+                    # We calculate for potential differing CRS and target bounds
+                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=dst_bounds)
             if coords is not None:
                 msg = (
-                    f"Reference input from object of type {type(ref).__name__!r} alongside 'res' or 'shape' already "
-                    f"defines a complete grid, ignoring inputs 'coords'. Pass only 'ref' and ('res' or 'shape') to "
+                    f"Reference input from object of type {type(ref).__name__!r} and provided 'res' or 'shape' already "
+                    f"define a complete grid, ignoring inputs 'coords'. Pass only 'ref' and ('res' or 'shape') to "
                     f"silence this warning.")
                 warnings.warn(category=IgnoredGridWarning, message=msg)
 
             # Resolution and shape: after the above, one or the other must not be None
+            # (Note: Both are already defined in target CRS, so no need for projected calculations)
             if res is not None:
-                ref_shape, ref_transform = _grid_from_bounds_res(ref_bounds, res)
-            else:
-                ref_shape = _check_shape(shape)
-                ref_transform = _grid_from_bounds_shape(ref_bounds, shape)
+                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, res=res)
+            elif shape is not None:
+                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, shape=shape)
 
         else:
             raise InvalidGridError(
@@ -508,36 +666,55 @@ def _check_match_grid(source_obj: RasterBase | Vector,
                 f"should implement either 'transform', 'shape' and 'crs' (raster-like), or 'bounds' and "
                 f"'crs' (vector-like) through its object or accessors. If not, provide these arguments separately.")
 
-    # Case 2: No reference is passed, only manual arguments
-    #######################################################
+    # Case 2: No reference is passed, only manual arguments (fallbacks on source)
+    #############################################################################
     else:
-        # If CRS is not defined
+
+        # Get output CRS, fallback to source
         if crs is not None:
-            ref_crs = _check_crs(crs)
+            dst_crs = _check_crs(crs)
         else:
-            ref_crs = source_obj.crs
+            dst_crs = src.crs
 
-        # If (res or shape) and bounds are defined
-        if (res is not None or shape is not None) and bounds is not None:
+        # If (res or shape) and bounds are defined, from user or on source fallback
+        if ((res is not None or shape is not None or hasattr(src, "res"))
+                and (bounds is not None or hasattr(src, "bounds"))):
 
-            # Ensure only one of the two is defined
+            # If both res and shape passed, raise error
             if res is not None and shape is not None:
                 raise InvalidGridError("Both output grid resolution 'res' and shape 'shape' were passed, while "
                                        "both describe resolution, only define one or the other.")
-            # If coordinates are passed, raise warning that they are ignored
-            if coords is not None:
+            # If coordinates are also passed, raise error
+            if coords is not None and ((res is not None or shape is not None) and bounds is not None):
                 raise InvalidGridError("Both 'coords' and ('res' or 'shape' + 'bounds) arguments were passed, while "
                                        "both define a complete grid, only define one or the other.")
 
-            if res is not None:
-                ref_shape, ref_transform = _grid_from_bounds_res(bounds, res)
-            else:
-                ref_shape = _check_shape(shape)
-                ref_transform = _grid_from_bounds_shape(bounds, shape)
+            # If coords exists, other arguments were unsufficient to define a full grid (or would have failed above)
+            # So we trigger fallback, but coords takes priority over fallback, so we skip if it exists
+            if coords is None:
 
-        elif coords is not None:
+                # If user-input was passed
+                if res is not None and bounds is not None:
+                    logging.debug("Match grid input: using bounds and resolution to derive grid.")
+                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, res=res)
+                if shape is not None and bounds is not None:
+                    logging.debug("Match grid input: using bounds and shape to derive grid.")
+                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, shape=shape)
 
-            # Get redundant arguments (should never define a full grid based on above)
+                # Fallback to source if res/shape or bounds undefined
+                if bounds is None and (shape is not None or res is not None):
+                    logging.debug("Match grid input: no bounds defined, fallback on source object.")
+                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, shape=shape, res=res)
+                if bounds is not None and (res is None and shape is None):
+                    logging.debug("Match grid input: no resolution defined, fallback on source object.")
+                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds)
+                if bounds is None and (res is None and shape is None):
+                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src)
+
+        # If coordinates are defined
+        if coords is not None:
+
+            # Get redundant arguments (that could never define a full grid based on checks above)
             redundant = {
                 "res": res is not None,
                 "bounds": bounds is not None,
@@ -550,13 +727,18 @@ def _check_match_grid(source_obj: RasterBase | Vector,
                     "Pass only 'coords' input to silence this warning.")
                 warnings.warn(category=IgnoredGridWarning, message=msg)
 
-            ref_shape, ref_transform = _grid_from_coords(coords)
+            logging.debug("Match grid input: using coordinates to derive grid.")
+            # Coordinates should be in units of output CRS, no ambiguity bounds/res, can compute directly from
+            # coordinates
+            dst_shape, dst_transform = _grid_from_coords(coords)
 
-        else:
+        if coords is None and not ((res is not None or shape is not None or hasattr(src, "res"))
+                                   and (bounds is not None or hasattr(src, "bounds"))):
             raise InvalidGridError(
                 "Insufficient inputs to define a complete grid, which requires either: 1/ A raster-like object as "
                 "reference, or 2/ A vector-like object as reference along with a provided "
-                "resolution or shape, or 3/ Bounds along with resolution or shape, "
-                "or 4/ Grid coordinates; the last two optionally with a CRS (if different than source).")
+                "resolution or shape, or 3/ A provided resolution or shape (use bounds from source object),"
+                " 4/ A provided resolution or shape and provided bounds, "
+                "or 5/ Provided grid coordinates; the last two optionally with a CRS (if different than source).")
 
-    return ref_shape, ref_transform, ref_crs
+    return dst_shape, dst_transform, dst_crs

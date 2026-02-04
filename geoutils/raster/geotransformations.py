@@ -31,19 +31,17 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
 from geoutils import profiler
-from geoutils._dispatch import _check_match_bbox
+from geoutils._dispatch import _check_match_bbox, _check_match_grid
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.multiproc import MultiprocConfig
-from geoutils.projtools import _get_bounds_projected
 from geoutils.raster._geotransformations import (
-    _get_reproj_params,
     _is_reproj_needed,
     _rio_reproject,
-    _user_input_reproject,
+    _check_reproj_nodata_dtype,
+    _resampling_method_from_str
 )
 from geoutils.raster.distributed_computing.dask import delayed_reproject
 from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
-from geoutils.raster.georeferencing import _cast_pixel_interpretation
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
@@ -80,32 +78,32 @@ def _reproject(
     Reproject raster. See Raster.reproject() for details.
     """
 
-    # 1/ Process user input
-    crs, dtype, src_nodata, nodata, res, bounds = _user_input_reproject(
+    # 1/ Check and normalize match-grid inputs
+    dst_shape, dst_transform, dst_crs = _check_match_grid(src=source_raster, ref=ref, res=res, shape=grid_size,
+                                                          bounds=bounds, crs=crs, coords=None)
+
+    # 2/ Check user input for nodata and dtype
+    dtype, src_nodata, nodata = _check_reproj_nodata_dtype(
         source_raster=source_raster,
-        ref=ref,
-        crs=crs,
-        bounds=bounds,
-        res=res,
         nodata=nodata,
         dtype=dtype,
         force_source_nodata=force_source_nodata,
     )
 
-    # 2/ Derive georeferencing parameters for reprojection (transform, grid size)
-    reproj_kwargs = _get_reproj_params(
-        source_raster=source_raster,
-        crs=crs,
-        res=res,
-        grid_size=grid_size,
-        bounds=bounds,
-        dtype=dtype,
-        src_nodata=src_nodata,
-        nodata=nodata,
-        resampling=resampling,
-    )
+    # 3/ Store georeferencing parameters for reprojection
+    reproj_kwargs = {
+        "src_transform": source_raster.transform,
+        "dst_transform": dst_transform,
+        "src_crs": source_raster.crs,
+        "dst_crs": dst_crs,
+        "resampling": resampling if isinstance(resampling, Resampling) else _resampling_method_from_str(resampling),
+        "src_nodata": src_nodata,
+        "dst_nodata": nodata,
+        "dtype": dtype,
+        "dst_shape": dst_shape,
+    }
 
-    # 3/ Check if reprojection is needed, otherwise return source raster with warning
+    # 4/ Check if reprojection is needed, otherwise return source raster with warning
     if _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
         if (nodata == src_nodata) or (nodata is None):
             if not silent:
@@ -120,7 +118,7 @@ def _reproject(
                 )
             return True, None, None, None, None
 
-    # 4/ Perform reprojection
+    # 5/ Perform reprojection
     reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = multiproc_config is not None

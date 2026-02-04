@@ -234,7 +234,9 @@ class TestDispatchLevelOne:
 
     # Raster and vector classes
     rast = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 10, 10, 5, 5), crs=4326)
+    rast2 = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 5, 5, 5, 5), crs=4326)
     vect = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])]}, crs="EPSG:4326"))
+    vect2 = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])]}, crs="EPSG:4326"))
     # Xarray DataArray and Vector geodataframe
     rast_xr = rast.to_xarray()
     vect_gdf = vect.ds
@@ -258,7 +260,7 @@ class TestDispatchLevelOne:
     def test_check_match_bbox__valid(self, bbox_input: Any, expected: Any):
         """Check that valid match-bbox input pass."""
 
-        xmin, ymin, xmax, ymax = _check_match_bbox(source_obj=self.rast, bbox=bbox_input)
+        xmin, ymin, xmax, ymax = _check_match_bbox(src=self.rast, bbox=bbox_input)
         assert (xmin, ymin, xmax, ymax) == expected
 
     @pytest.mark.parametrize(
@@ -347,38 +349,55 @@ class TestDispatchLevelOne:
             _check_match_points(rast, points_input)
 
     @pytest.mark.parametrize(
-        "grid_input, res, shape, bounds, coords",
+        # Source, Reference, Resolution, Shape, Bounds, Coordinates
+        # Source = Object from which the match is called (used as fallback for bounds/CRS)
+        # Reference = Object passed to match
+        "src, ref, res, shape, bounds, coords",
         [
+            # 1/ First category: No source fallback (= first column does not matter, it is ignored)
             # Only coords (regular grid)
-            (None, None, None, None, (np.array([0, 1, 2]), np.array([0, 1, 2]))),
+            ("rast", None, None, None, None, (np.array([0, 1, 2]), np.array([0, 1, 2]))),
             # Bounds + resolution
-            (None, 1, None, (0, 0, 3, 3), None),
+            ("rast", None, 1, None, (0, 0, 3, 3), None),
             # Bounds + shape
-            (None, None, (3, 3), (0, 0, 3, 3), None),
+            ("rast", None, None, (3, 3), (0, 0, 3, 3), None),
             # Reference raster
-            ("rast", None, None, None, None),
+            ("rast", "rast", None, None, None, None),
             # Reference vector + resolution
-            ("vect", 1, None, None, None),
+            ("rast", "vect", 1, None, None, None),
             # Reference vector + shape
-            ("vect", None, (3, 3), None, None),
+            ("rast", "vect", None, (3, 3), None, None),
+            # 2/ Second category: Source fallback (= first column matters)
+            # Source fallback for bounds (raster or vector) + resolution
+            ("rast", None, 1, None, None, None),
+            ("vect", None, 1, None, None, None),
+            # Source fallback for resolution (raster only) + bounds
+            ("rast", None, None, None, (0, 0, 3, 3), None),
+            # Source fallback for resolution (raster only) + reference vector
+            ("rast", 'vect', None, None, None, None),
         ]
     )
-    def test_check_match_grid__valid(self, grid_input: Any, res: Any, shape: Any, bounds: Any, coords: Any):
+    def test_check_match_grid__valid(self, src: Any, ref: Any, res: Any, shape: Any, bounds: Any, coords: Any):
         """Check that valid match-grid input pass."""
         # Synthetic raster/vector
         rast = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 10, 10, 5, 5), crs=4326)
         vect = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])]}, crs="EPSG:4326"))
 
-        source_obj = rast
-        ref = None
-        if grid_input == "rast":
-            ref = rast
-        elif grid_input == "vect":
-            ref = vect
+        ref_input = None
+        if ref == "rast":
+            ref_input = rast
+        elif ref == "vect":
+            ref_input = vect
+
+        src_input = None
+        if src == "rast":
+            src_input = rast
+        elif src == "vect":
+            src_input = vect
 
         out_shape, out_transform, out_crs = _check_match_grid(
-            source_obj=source_obj,
-            ref=ref,
+            src=src_input,
+            ref=ref_input,
             res=res,
             shape=shape,
             bounds=bounds,
@@ -387,7 +406,7 @@ class TestDispatchLevelOne:
         )
 
         # Sanity checks
-        assert out_crs == source_obj.crs
+        assert out_crs == src_input.crs
         assert isinstance(out_shape, tuple) and len(out_shape) == 2
         assert isinstance(out_transform, rio.Affine)
 
@@ -400,8 +419,8 @@ class TestDispatchLevelOne:
             (dict(ref={"bounds": (0, 0, 1, 1)}), "Cannot interpret reference grid", None),
 
             # Vector reference: missing res / shape
-            (dict(ref=vect), "requires a provided resolution 'res' or grid shape 'shape'", None),
-            (dict(ref=vect_gdf), "requires a provided resolution 'res' or grid shape 'shape'", None),
+            (dict(src=vect, ref=vect), "requires a provided resolution 'res' or grid shape 'shape'", None),
+            (dict(src=vect, ref=vect_gdf), "requires a provided resolution 'res' or grid shape 'shape'", None),
 
             # Vector reference: both res and shape
             (dict(ref=vect, res=1, shape=(10, 10)), "Both 'res' and 'shape' were passed", None),
@@ -427,10 +446,10 @@ class TestDispatchLevelOne:
             ),
 
             # Manual grid: coords with other grid definitions
-            (dict(coords=(np.arange(5), np.arange(5)), res=1),
+            (dict(src=vect, coords=(np.arange(5), np.arange(5)), res=1),
              None,
              (IgnoredGridWarning, "already defines a complete grid"),),
-            (dict(coords=(np.arange(5), np.arange(5)), shape=(10, 10)),
+            (dict(src=vect, coords=(np.arange(5), np.arange(5)), shape=(10, 10)),
              None,
              (IgnoredGridWarning, "already defines a complete grid"),),
             (dict(coords=(np.arange(5), np.arange(5)), bounds=(0, 0, 10, 10)),
@@ -438,29 +457,32 @@ class TestDispatchLevelOne:
              (IgnoredGridWarning, "already defines a complete grid"),),
 
             # Insufficient inputs
-            (dict(), "Insufficient inputs to define a complete grid", None),
+            (dict(src=vect), "Insufficient inputs to define a complete grid", None),
         ],
     )
     def test_check_match_grid__exceptions(self, kwargs: dict[str, Any], error_match: str, warn: tuple[Any, str]):
         """Check that invalid match-grid input raise proper errors."""
 
-        init_kwargs = {"ref": None, "res": None, "shape": None, "bounds": None, "coords": None, "crs": None}
+        init_kwargs = {"src": None, "ref": None, "res": None, "shape": None, "bounds": None, "coords": None,
+                       "crs": None}
         init_kwargs.update(kwargs)
+        if init_kwargs["src"] is None:
+            init_kwargs["src"] = self.rast
 
         if warn is not None:
             warn_cls, warn_match = warn
             with pytest.warns(warn_cls, match=warn_match):
                 if error_match:
                     with pytest.raises(InvalidGridError, match=error_match):
-                        _check_match_grid(source_obj=self.rast, **init_kwargs)
+                        _check_match_grid(**init_kwargs)
                 else:
-                    _check_match_grid(source_obj=self.rast, **init_kwargs)
+                    _check_match_grid(**init_kwargs)
         else:
             if error_match:
                 with pytest.raises(InvalidGridError, match=error_match):
-                    _check_match_grid(source_obj=self.rast, **init_kwargs)
+                    _check_match_grid(**init_kwargs)
             else:
-                _check_match_grid(source_obj=self.rast, **init_kwargs)
+                _check_match_grid(**init_kwargs)
 
 
 

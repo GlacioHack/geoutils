@@ -31,7 +31,7 @@ from rasterio import features, warp
 from rasterio.crs import CRS
 from rasterio.features import shapes
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr, _check_match_grid
 from geoutils._misc import silence_rasterio_message
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.raster.georeferencing import _bounds
@@ -121,60 +121,20 @@ def _polygonize(
 
 def _rasterize(
     gdf: gpd.GeoDataFrame,
-    raster: RasterType | None = None,
-    crs: CRS | int | None = None,
-    xres: float | None = None,
-    yres: float | None = None,
-    bounds: tuple[float, float, float, float] | None = None,
+    ref: RasterType | None = None,
     in_value: int | float | Iterable[int | float] | None = None,
     out_value: int | float = 0,
+    res: tuple[Number, Number] | None = None,
+    shape: tuple[int, int] | None = None,
+    grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
+    crs: CRS | int | None = None,
 ) -> Raster:
-    if (raster is not None) and (crs is not None):
-        raise ValueError("Only one of raster or crs can be provided.")
 
-    # Reproject vector into requested CRS or rst CRS first, if needed
-    # This has to be done first so that width/height calculated below are correct!
-    if crs is None:
-        crs = gdf.crs
-
-    if raster is not None:
-        if has_geo_attr(raster, "crs"):
-            crs = get_geo_attr(raster, "crs")
-
-    vect = gdf.to_crs(crs)
-
-    # If no raster given, now use provided dimensions
-    if raster is None:
-        # At minimum, xres must be set
-        if xres is None:
-            raise ValueError("At least raster or xres must be set.")
-        if yres is None:
-            yres = xres
-
-        # By default, use self's bounds
-        if bounds is None:
-            bounds = vect.total_bounds
-
-        # Calculate raster shape
-        left, bottom, right, top = bounds
-        width = abs((right - left) / xres)
-        height = abs((top - bottom) / yres)
-
-        if width % 1 != 0 or height % 1 != 0:
-            warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds.")
-
-        width = int(np.round(width))
-        height = int(np.round(height))
-        out_shape = (height, width)
-
-        # Calculate raster transform
-        transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
-
-    # Otherwise use directly raster's dimensions
-    else:
-        if has_geo_attr(raster, "shape") and has_geo_attr(raster, "transform"):
-            out_shape = get_geo_attr(raster, "shape")
-            transform = get_geo_attr(raster, "transform")
+    out_transform, out_shape, out_crs = _check_match_grid(src=gdf, ref=ref, res=res, shape=shape,
+                                                          bounds=bounds, crs=crs, coords=grid_coords)
+    if crs is not None:
+        vect = gdf.to_crs(crs)
 
     # Set default burn value, index from 1 to len(self.ds)
     if in_value is None:
@@ -191,18 +151,17 @@ def _rasterize(
 
         out_geom = ((geom, value) for geom, value in zip(vect.geometry, in_value))
 
-        mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape, transform=transform)
+        mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape, transform=out_transform)
 
     elif isinstance(in_value, int | float | np.floating | np.integer):
         mask = features.rasterize(
-            shapes=vect.geometry, fill=out_value, out_shape=out_shape, transform=transform, default_value=in_value
+            shapes=vect.geometry, fill=out_value, out_shape=out_shape, transform=out_transform, default_value=in_value
         )
     else:
         raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
     from geoutils.raster import Raster  # Runtime import to avoid circularity issues
-
-    output = Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+    output = Raster.from_array(data=mask, transform=out_transform, crs=crs, nodata=None)
 
     return output
 

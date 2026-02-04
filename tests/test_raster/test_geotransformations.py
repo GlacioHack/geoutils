@@ -14,6 +14,7 @@ import geoutils as gu
 from geoutils import examples
 from geoutils.raster._geotransformations import _resampling_method_from_str
 from geoutils.raster.raster import _default_nodata
+from geoutils.exceptions import InvalidGridError
 
 DO_PLOT = False
 
@@ -346,7 +347,7 @@ class TestRasterGeotransformations:
         # - Test size - this should modify the shape, and hence resolution, but not the bounds -
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
         r_test = r.reproject(grid_size=out_size)
-        assert r_test.shape == (out_size[1], out_size[0])
+        assert r_test.shape == (out_size[0], out_size[1])
         assert r_test.res != r.res
         assert r_test.bounds == r.bounds
 
@@ -373,7 +374,7 @@ class TestRasterGeotransformations:
 
         # - Test size and bounds -
         r_test = r.reproject(grid_size=out_size, bounds=dst_bounds)
-        assert r_test.shape == (out_size[1], out_size[0])
+        assert r_test.shape == (out_size[0], out_size[1])
         assert r_test.bounds == dst_bounds
 
         # - Test res -
@@ -595,15 +596,15 @@ class TestRasterGeotransformations:
         # -- Test additional errors raised for argument combinations -- #
 
         # If both ref and crs are set
-        with pytest.raises(ValueError, match=re.escape("Either of `ref` or `crs` must be set. Not both.")):
+        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
             _ = r.reproject(ref=r2, crs=r.crs)
 
         # Size and res are mutually exclusive
-        with pytest.raises(ValueError, match=re.escape("size and res both specified. Specify only one.")):
+        with pytest.raises(InvalidGridError, match="Both output grid resolution 'res' and shape"):
             _ = r.reproject(grid_size=(10, 10), res=50)
 
         # If wrong type for `ref`
-        with pytest.raises(TypeError, match="Type of match-reference not understood.*"):
+        with pytest.raises(InvalidGridError, match="Cannot interpret reference grid from"):
             _ = r.reproject(ref=3)
 
         # -- Check warning for area_or_point works -- #

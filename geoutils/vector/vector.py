@@ -1565,10 +1565,9 @@ class Vector:
 
         return _rasterize(
             gdf=self.ds,
-            raster=raster,
+            ref=raster,
             crs=crs,
-            xres=xres,
-            yres=yres,
+            res=(xres, yres),
             bounds=bounds,
             in_value=in_value,
             out_value=out_value,

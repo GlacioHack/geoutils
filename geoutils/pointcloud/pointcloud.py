@@ -39,11 +39,10 @@ import numpy as np
 import pandas as pd
 from pyproj import CRS
 from rasterio.coords import BoundingBox
-from rasterio.transform import from_origin
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr, _check_match_grid
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
@@ -1506,6 +1505,8 @@ class PointCloud(Vector):  # type: ignore[misc]
         ref: RasterType | None = None,
         grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
         res: float | tuple[float, float] | None = None,
+        shape: tuple[int, int] | None = None,
+        bounds: tuple[float, float, float, float] | BoundingBox | None = None,
         resampling: Literal["nearest", "linear", "cubic"] = "linear",
         dist_nodata_pixel: float = 1.0,
         nodata: int | float = -9999,
@@ -1528,25 +1529,9 @@ class PointCloud(Vector):  # type: ignore[misc]
         :return: Raster from gridded point cloud.
         """
 
-        if has_geo_attr(ref, "transform") and has_geo_attr(ref, "shape"):
-            if grid_coords is not None:
-                warnings.warn(
-                    "Both reference point cloud and grid coordinates were passed for gridding, "
-                    "using only the reference point cloud."
-                )
-            transform = get_geo_attr(ref, "transform")
-            shape = get_geo_attr(ref, "shape")
-            area_or_point = get_geo_attr(ref, "area_or_point")
-            grid_coords = _coords(transform=transform, shape=shape, area_or_point=area_or_point, grid=False)
-
-        else:
-            if res is not None:
-                xsize = (self.bounds.right - self.bounds.left) / res
-                ysize = (self.bounds.top - self.bounds.bottom) / res
-                transform = from_origin(west=self.bounds.left, north=self.bounds.top, xsize=xsize, ysize=ysize)
-                grid_coords = _coords(transform=transform, shape=(ysize, xsize), grid=False, area_or_point=None)
-            else:
-                grid_coords = grid_coords
+        out_shape, out_transform, out_crs = _check_match_grid(self, ref=ref, coords=grid_coords,
+                                                              res=res, bounds=bounds, shape=shape, crs=None)
+        grid_coords = _coords(transform=out_transform, shape=out_shape, grid=False, area_or_point=None)
 
         array, transform = _grid_pointcloud(
             self.ds,
