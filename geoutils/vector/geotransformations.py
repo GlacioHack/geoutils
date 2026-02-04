@@ -29,7 +29,7 @@ from geoutils._dispatch import get_geo_attr, has_geo_attr
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike
-    from geoutils.vector.vector import VectorLike, Vector
+    from geoutils.vector.vector import Vector, VectorLike
 
 
 def _reproject(

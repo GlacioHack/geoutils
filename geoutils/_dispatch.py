@@ -133,8 +133,9 @@ def _check_bounds(
 
         for k, v in bbox.items():
             if not isinstance(v, (int, float)):
-                raise InvalidBoundsError(f"Bounding box dictionary value for {k!r} must be numeric, got"
-                                         f" {type(v).__name__}.")
+                raise InvalidBoundsError(
+                    f"Bounding box dictionary value for {k!r} must be numeric, got" f" {type(v).__name__}."
+                )
         xmin, ymin, xmax, ymax = bbox["left"], bbox["bottom"], bbox["right"], bbox["top"]
 
     # If bbox is an iterable with 4 coordinates (excluding strings and bytes)

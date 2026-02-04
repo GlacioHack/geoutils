@@ -22,9 +22,8 @@ Module for Vector class.
 
 from __future__ import annotations
 
-import warnings
-
 import pathlib
+import warnings
 from collections import abc
 from os import PathLike
 from typing import (
@@ -51,7 +50,7 @@ from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import _check_match_bbox, _check_crs, get_geo_attr, has_geo_attr
+from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
 from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -1576,8 +1575,9 @@ class Vector:
 
         # Deprecate old xres and yres
         if "xres" in kwargs.keys() or "yres" in kwargs.keys():
-            warnings.warn(message="Input 'xres' and 'yres' are deprecrated in favour of 'res'.",
-                          category=DeprecationWarning)
+            warnings.warn(
+                message="Input 'xres' and 'yres' are deprecrated in favour of 'res'.", category=DeprecationWarning
+            )
         xres = kwargs.get("xres", None)
         yres = kwargs.get("yres", None)
         if xres is not None:

@@ -104,7 +104,6 @@ class TestDispatchLevelZero:
             ),
             ({"otherkey": 5}, "should have keys"),  # Wrong key
             ({"left": "a", "bottom": 0, "right": 1, "top": 3}, "value for 'left' must be numeric"),  # Key non-numeric
-
             (["a", "b", "c", "d"], "must be numeric"),  # Non-numeric
             (42, "Cannot interpret bounding box input"),  # Invalid type
         ],
