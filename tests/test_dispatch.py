@@ -2,25 +2,40 @@
 Test the dispatch functions used for checking and normalizing inputs.
 """
 
-import warnings
-
 from typing import Any
 
-import pandas as pd
-import pytest
-import numpy as np
-import rasterio as rio
 import geopandas as gpd
-from shapely.geometry import Polygon, Point
+import numpy as np
+import pandas as pd
 import pyproj
+import pytest
+import rasterio as rio
+from shapely.geometry import Point, Polygon
 
 import geoutils as gu
-from geoutils._dispatch import (
-    _check_bounds, _check_crs, _check_resolution, _check_shape, _check_coords,  # Level-0 checks (manual input)
-    _grid_from_coords, _grid_from_bounds_res, _grid_from_bounds_shape, _grid_from_src,  # Helpers for grid conversion
-    _check_match_bbox, _check_match_points, _check_match_grid)  # Level-1 checks (match reference object)
-from geoutils.exceptions import (InvalidBoundsError, InvalidResolutionError, InvalidShapeError, InvalidGridError,
-                                 InvalidPointsError, InvalidCRSError, IgnoredGridWarning)
+from geoutils._dispatch import _check_coords  # Level-0 checks (manual input)
+from geoutils._dispatch import _grid_from_src  # Helpers for grid conversion
+from geoutils._dispatch import (  # Level-1 checks (match reference object)
+    _check_bounds,
+    _check_crs,
+    _check_match_bbox,
+    _check_match_grid,
+    _check_match_points,
+    _check_resolution,
+    _check_shape,
+    _grid_from_bounds_res,
+    _grid_from_bounds_shape,
+    _grid_from_coords,
+)
+from geoutils.exceptions import (
+    IgnoredGridWarning,
+    InvalidBoundsError,
+    InvalidCRSError,
+    InvalidGridError,
+    InvalidPointsError,
+    InvalidResolutionError,
+    InvalidShapeError,
+)
 
 
 class TestDispatchLevelZero:
@@ -70,16 +85,22 @@ class TestDispatchLevelZero:
         xmin, ymin, xmax, ymax = _check_bounds(bbox)
         assert (xmin, ymin, xmax, ymax) == (0, 1, 2, 3)
 
-    @pytest.mark.parametrize("bbox, match_text", [
-        ([0, 1, 2], "length of 3"),  # Invalid length
-        ([5, 0, 2, 4], "xmin must be < xmax"),  # Invalid ordering, xmin >= xmax
-        ([0, 5, 4, 2], "ymin must be < ymax"),  # Invalid ordering, ymin >= ymax
-        (pd.DataFrame(data={"notgood": [1]}), "must contain columns"),  # Invalid columns in dataframe
-        # Too length
-        (pd.DataFrame(data={"minx": [0, 1], "miny": [1, 2], "maxx": [2, 3], "maxy": [3, 4]}), "must contain columns"),
-        (["a", "b", "c", "d"], "must be numeric"),  # Non-numeric
-        (42, "Cannot interpret bounding box input"),  # Invalid type
-    ])
+    @pytest.mark.parametrize(
+        "bbox, match_text",
+        [
+            ([0, 1, 2], "length of 3"),  # Invalid length
+            ([5, 0, 2, 4], "xmin must be < xmax"),  # Invalid ordering, xmin >= xmax
+            ([0, 5, 4, 2], "ymin must be < ymax"),  # Invalid ordering, ymin >= ymax
+            (pd.DataFrame(data={"notgood": [1]}), "must contain columns"),  # Invalid columns in dataframe
+            # Too length
+            (
+                pd.DataFrame(data={"minx": [0, 1], "miny": [1, 2], "maxx": [2, 3], "maxy": [3, 4]}),
+                "must contain columns",
+            ),
+            (["a", "b", "c", "d"], "must be numeric"),  # Non-numeric
+            (42, "Cannot interpret bounding box input"),  # Invalid type
+        ],
+    )
     def test_check_bounds__exceptions(self, bbox: Any, match_text: str) -> None:
         """Check that invalid bounds input raise proper errors."""
 
@@ -95,16 +116,19 @@ class TestDispatchLevelZero:
         # Valid sequence resolution, normalized to tuple
         assert _check_resolution([1.0, 2.0]) == (1.0, 2.0)  # type: ignore
 
-    @pytest.mark.parametrize("res, match_text", [
-        ([1, 2, 3], "sequence of length 3"),  # Invalid length
-        (["a", "b"], "must be numeric"),  # Non-numeric in sequence
-        ([-1, 1], "strictly positive"),  # Non-positive in sequence
-        ([2, np.nan], "finite number"),  # Non-finite in sequence
-        (["a", "b"], "must be numeric"),  # Non-numeric
-        (0, "strictly positive"),  # Non-positive for scalar
-        (np.inf, "finite number"),  # Non-finite for scalar
-        ("wrong", "Resolution must be a number or a sequence"),  # Non-finite for scalar
-    ])
+    @pytest.mark.parametrize(
+        "res, match_text",
+        [
+            ([1, 2, 3], "sequence of length 3"),  # Invalid length
+            (["a", "b"], "must be numeric"),  # Non-numeric in sequence
+            ([-1, 1], "strictly positive"),  # Non-positive in sequence
+            ([2, np.nan], "finite number"),  # Non-finite in sequence
+            (["a", "b"], "must be numeric"),  # Non-numeric
+            (0, "strictly positive"),  # Non-positive for scalar
+            (np.inf, "finite number"),  # Non-finite for scalar
+            ("wrong", "Resolution must be a number or a sequence"),  # Non-finite for scalar
+        ],
+    )
     def test_check_resolution__exceptions(self, res: Any, match_text: str) -> None:
         """Check that invalid resolution input raise proper errors."""
 
@@ -117,14 +141,17 @@ class TestDispatchLevelZero:
         # Valid shape as tuple
         assert _check_shape((10, 20)) == (10, 20)
         # Valid shape as other sequence
-        assert _check_shape([10, 20]) == (10, 20)
+        assert _check_shape([10, 20]) == (10, 20)  # type: ignore
 
-    @pytest.mark.parametrize("shape, match_text", [
-        (10, "sequence of two integers"),  # Not a sequence
-        ((10,), "length 1"),  # Wrong length
-        ((-1, 5), "non-negative"),  # Negative
-        (("a", 5), "must be integers"),  # Non-integer
-    ])
+    @pytest.mark.parametrize(
+        "shape, match_text",
+        [
+            (10, "sequence of two integers"),  # Not a sequence
+            ((10,), "length 1"),  # Wrong length
+            ((-1, 5), "non-negative"),  # Negative
+            (("a", 5), "must be integers"),  # Non-integer
+        ],
+    )
     def test_check_shape__exceptions(self, shape: Any, match_text: str) -> None:
         """Check that invalid shape input raise proper errors."""
 
@@ -141,10 +168,10 @@ class TestDispatchLevelZero:
             # Regular decreasing
             (([3, 2, 1, 0], [10, 8, 6, 4]), (-1.0, -2.0)),
             # NumPy arrays
-            ((np.array([0., 0.5, 1.0]), np.array([10., 20., 30.])), (0.5, 10.0)),
-        ]
+            ((np.array([0.0, 0.5, 1.0]), np.array([10.0, 20.0, 30.0])), (0.5, 10.0)),
+        ],
     )
-    def test_check_coords__valid(self, coords: Any, expected_dxdy: Any):
+    def test_check_coords__valid(self, coords: Any, expected_dxdy: Any) -> None:
         """Check that valid regular coordinates pass and return resolution."""
         (x, y), (dx, dy) = _check_coords(coords)
 
@@ -174,12 +201,13 @@ class TestDispatchLevelZero:
             (([0, 1, 3], [0, 1, 2]), "must be regular"),
             # Irregular spacing (y)
             (([0, 1, 2], [0, 1, 3]), "must be regular"),
-        ]
+        ],
     )
-    def test_check_coords__exceptions(self, coords: Any, match_text: str):
+    def test_check_coords__exceptions(self, coords: Any, match_text: str) -> None:
         """Check that invalid coordinate inputs raise proper errors."""
         with pytest.raises(InvalidGridError, match=match_text):
             _check_coords(coords)
+
 
 class TestDispatchGridHelpers:
     """Helpers to build grid from inputs."""
@@ -187,9 +215,9 @@ class TestDispatchGridHelpers:
     # Raster and vector classes
     rast_bounds = (0, 0, 10, 10)
     rast_res = (2, 2)
-    rast_half_res = (rast_res[0]/2, rast_res[1]/2)
+    rast_half_res = (rast_res[0] / 2, rast_res[1] / 2)
     rast_shape = (5, 5)
-    rast_twice_shape = (rast_shape[0]*2, rast_shape[1]*2)
+    rast_twice_shape = (rast_shape[0] * 2, rast_shape[1] * 2)
     rast = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 10, 10, 5, 5), crs=4326)
     vect = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])]}, crs="EPSG:4326"))
 
@@ -221,7 +249,6 @@ class TestDispatchGridHelpers:
         y = np.array([0])
         with pytest.raises(InvalidGridError, match="at least 2 points"):
             _grid_from_coords((x, y))
-
 
     def test_grid_from_bounds_res_and_shape(self) -> None:
         """Test that the conversion works as intended (no errors to check here, depends on above)."""
@@ -276,8 +303,15 @@ class TestDispatchGridHelpers:
         ],
     )
     def test_grid_from_src__valid(
-            self, dst_crs, src_kind, shape, res, bounds, exp_shape, exp_same_tfm
-    ):
+        self,
+        dst_crs: int,
+        src_kind: str,
+        shape: tuple[int, int] | None,
+        res: tuple[float, float] | None,
+        bounds: tuple[float, float, float, float] | None,
+        exp_shape: tuple[int, int] | None,
+        exp_same_tfm: bool,
+    ) -> None:
         """Check that valid inputs for grid from source pass and give the right outputs."""
 
         # Get source (raster or vector)
@@ -285,9 +319,7 @@ class TestDispatchGridHelpers:
         crs = pyproj.CRS.from_user_input(dst_crs)
 
         # Compute output shape and transform
-        out_shape, out_transform = _grid_from_src(
-            dst_crs=crs, src=src, shape=shape, res=res, bounds=bounds
-        )
+        out_shape, out_transform = _grid_from_src(dst_crs=crs, src=src, shape=shape, res=res, bounds=bounds)
 
         # If expected shape is passed, check it matches expected
         if exp_shape is not None:
@@ -343,9 +375,9 @@ class TestDispatchLevelOne:
             # Vector-like objects
             (vect, (0, 0, 1, 1)),
             (vect_gdf, (0, 0, 1, 1)),
-        ]
+        ],
     )
-    def test_check_match_bbox__valid(self, bbox_input: Any, expected: Any):
+    def test_check_match_bbox__valid(self, bbox_input: Any, expected: Any) -> None:
         """Check that valid match-bbox input pass."""
 
         xmin, ymin, xmax, ymax = _check_match_bbox(src=self.rast, bbox=bbox_input)
@@ -368,9 +400,9 @@ class TestDispatchLevelOne:
             (42, "Cannot interpret bounding box input"),
             ("abcd", "Cannot interpret bounding box input"),
             (None, "Cannot interpret bounding box input"),
-        ]
+        ],
     )
-    def test_check_match_bbox__exceptions(self, bbox_input: Any, match_text: str):
+    def test_check_match_bbox__exceptions(self, bbox_input: Any, match_text: str) -> None:
         """Check that invalid match-bbox input raise proper errors."""
 
         with pytest.raises(InvalidBoundsError, match=match_text):
@@ -380,17 +412,20 @@ class TestDispatchLevelOne:
         "points_input, expected_pts, expected_tag_scalar",
         [
             # Tuple of numbers (scalar)
-            ((5, 6), (np.array([5.]), np.array([6.])), True),
+            ((5, 6), (np.array([5.0]), np.array([6.0])), True),
             # Tuple of 1D arrays
             ((np.arange(0, 3), np.arange(3, 6)), (np.arange(0, 3), np.arange(3, 6)), False),
             # Using x/y arrays
             ((np.array([1, 2, 3]), np.array([4, 5, 6])), (np.array([1, 2, 3]), np.array([4, 5, 6])), False),
             # Vector-like (point cloud)
-            (gu.Vector(gpd.GeoDataFrame({"geometry": [Point(0, 1), Point(1, 2)]}, crs="EPSG:4326")),
-            (np.array([0, 1]), np.array([1, 2])), False),
-        ]
+            (
+                gu.Vector(gpd.GeoDataFrame({"geometry": [Point(0, 1), Point(1, 2)]}, crs="EPSG:4326")),
+                (np.array([0, 1]), np.array([1, 2])),
+                False,
+            ),
+        ],
     )
-    def test_check_match_points__valid(self, points_input: Any, expected_pts: Any, expected_tag_scalar: bool):
+    def test_check_match_points__valid(self, points_input: Any, expected_pts: Any, expected_tag_scalar: bool) -> None:
         """Check that valid match-points input pass."""
 
         # Create synthetic raster for source_obj
@@ -407,8 +442,8 @@ class TestDispatchLevelOne:
 
         # For vector-like input
         if isinstance(points_input, gu.Vector):
-            assert pts[0].shape[0] == len(points_input.ds)
-            assert pts[1].shape[0] == len(points_input.ds)
+            assert pts[0].shape[0] == len(points_input.ds)  # type: ignore
+            assert pts[1].shape[0] == len(points_input.ds)  # type: ignore
 
     @pytest.mark.parametrize(
         "points_input, match_text",
@@ -425,9 +460,9 @@ class TestDispatchLevelOne:
             # Invalid object
             (42, "Cannot interpret point input"),
             ("abc", "Cannot interpret point input"),
-        ]
+        ],
     )
-    def test_check_match_points__exceptions(self, points_input: Any, match_text: str):
+    def test_check_match_points__exceptions(self, points_input: Any, match_text: str) -> None:
         """Check that invalid match-points input raise proper errors."""
 
         transform = rio.transform.from_bounds(0, 0, 10, 10, 5, 5)
@@ -462,35 +497,27 @@ class TestDispatchLevelOne:
             # Source fallback for resolution (raster only) + bounds
             ("rast", None, None, None, (0, 0, 3, 3), None),
             # Source fallback for resolution (raster only) + reference vector
-            ("rast", 'vect', None, None, None, None),
-        ]
+            ("rast", "vect", None, None, None, None),
+        ],
     )
-    def test_check_match_grid__valid(self, src: Any, ref: Any, res: Any, shape: Any, bounds: Any, coords: Any):
+    def test_check_match_grid__valid(self, src: Any, ref: Any, res: Any, shape: Any, bounds: Any, coords: Any) -> None:
         """Check that valid match-grid input pass."""
         # Synthetic raster/vector
         rast = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 10, 10, 5, 5), crs=4326)
         vect = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])]}, crs="EPSG:4326"))
 
-        ref_input = None
         if ref == "rast":
             ref_input = rast
         elif ref == "vect":
             ref_input = vect
 
-        src_input = None
         if src == "rast":
             src_input = rast
         elif src == "vect":
             src_input = vect
 
         out_shape, out_transform, out_crs = _check_match_grid(
-            src=src_input,
-            ref=ref_input,
-            res=res,
-            shape=shape,
-            bounds=bounds,
-            coords=coords,
-            crs=None
+            src=src_input, ref=ref_input, res=res, shape=shape, bounds=bounds, coords=coords, crs=None
         )
 
         # Sanity checks
@@ -502,57 +529,66 @@ class TestDispatchLevelOne:
         "kwargs, error_match, warn",
         [
             # Invalid reference objects (error only)
-            (dict(ref=42), "Cannot interpret reference grid", None),
-            (dict(ref="abcd"), "Cannot interpret reference grid", None),
-            (dict(ref={"bounds": (0, 0, 1, 1)}), "Cannot interpret reference grid", None),
-
+            ({"ref": 42}, "Cannot interpret reference grid", None),
+            ({"ref": "abcd"}, "Cannot interpret reference grid", None),
+            ({"ref": {"bounds": (0, 0, 1, 1)}}, "Cannot interpret reference grid", None),
             # Vector reference: missing res / shape
-            (dict(src=vect, ref=vect), "requires a provided resolution 'res' or grid shape 'shape'", None),
-            (dict(src=vect, ref=vect_gdf), "requires a provided resolution 'res' or grid shape 'shape'", None),
-
+            ({"src": vect, "ref": vect}, "requires a provided resolution 'res' or grid shape 'shape'", None),
+            ({"src": vect, "ref": vect_gdf}, "requires a provided resolution 'res' or grid shape 'shape'", None),
             # Vector reference: both res and shape
-            (dict(ref=vect, res=1, shape=(10, 10)), "Both 'res' and 'shape' were passed", None),
-            (dict(ref=vect_gdf, res=1, shape=(10, 10)), "Both 'res' and 'shape' were passed", None),
-
+            ({"ref": vect, "res": 1, "shape": (10, 10)}, "Both 'res' and 'shape' were passed", None),
+            ({"ref": vect_gdf, "res": 1, "shape": (10, 10)}, "Both 'res' and 'shape' were passed", None),
             # Raster ref ignores redundant args (warning only)
             (
-                    dict(ref=rast, res=1),
-                    None,
-                    (IgnoredGridWarning, "already defines a complete grid"),
+                {"ref": rast, "res": 1},
+                None,
+                (IgnoredGridWarning, "already defines a complete grid"),
             ),
             (
-                    dict(ref=rast_xr, bounds=(0, 0, 10, 10)),
-                    None,
-                    (IgnoredGridWarning, "already defines a complete grid"),
+                {"ref": rast_xr, "bounds": (0, 0, 10, 10)},
+                None,
+                (IgnoredGridWarning, "already defines a complete grid"),
             ),
-
             # Manual grid: res + shape together (error)
             (
-                    dict(res=1, shape=(10, 10), bounds=(0, 0, 10, 10)),
-                    "Both output grid resolution 'res' and shape 'shape'",
-                    None,
+                {"res": 1, "shape": (10, 10), "bounds": (0, 0, 10, 10)},
+                "Both output grid resolution 'res' and shape 'shape'",
+                None,
             ),
-
             # Manual grid: coords with other grid definitions
-            (dict(src=vect, coords=(np.arange(5), np.arange(5)), res=1),
-             None,
-             (IgnoredGridWarning, "already defines a complete grid"),),
-            (dict(src=vect, coords=(np.arange(5), np.arange(5)), shape=(10, 10)),
-             None,
-             (IgnoredGridWarning, "already defines a complete grid"),),
-            (dict(coords=(np.arange(5), np.arange(5)), bounds=(0, 0, 10, 10)),
-             None,
-             (IgnoredGridWarning, "already defines a complete grid"),),
-
+            (
+                {"src": vect, "coords": (np.arange(5), np.arange(5)), "res": 1},
+                None,
+                (IgnoredGridWarning, "already defines a complete grid"),
+            ),
+            (
+                {"src": vect, "coords": (np.arange(5), np.arange(5)), "shape": (10, 10)},
+                None,
+                (IgnoredGridWarning, "already defines a complete grid"),
+            ),
+            (
+                {"coords": (np.arange(5), np.arange(5)), "bounds": (0, 0, 10, 10)},
+                None,
+                (IgnoredGridWarning, "already defines a complete grid"),
+            ),
             # Insufficient inputs
-            (dict(src=vect), "Insufficient inputs to define a complete grid", None),
+            ({"src": vect}, "Insufficient inputs to define a complete grid", None),
         ],
     )
-    def test_check_match_grid__exceptions(self, kwargs: dict[str, Any], error_match: str, warn: tuple[Any, str]):
+    def test_check_match_grid__exceptions(
+        self, kwargs: dict[str, Any], error_match: str, warn: tuple[Any, str]
+    ) -> None:
         """Check that invalid match-grid input raise proper errors."""
 
-        init_kwargs = {"src": None, "ref": None, "res": None, "shape": None, "bounds": None, "coords": None,
-                       "crs": None}
+        init_kwargs = {
+            "src": None,
+            "ref": None,
+            "res": None,
+            "shape": None,
+            "bounds": None,
+            "coords": None,
+            "crs": None,
+        }
         init_kwargs.update(kwargs)
         if init_kwargs["src"] is None:
             init_kwargs["src"] = self.rast
@@ -562,15 +598,12 @@ class TestDispatchLevelOne:
             with pytest.warns(warn_cls, match=warn_match):
                 if error_match:
                     with pytest.raises(InvalidGridError, match=error_match):
-                        _check_match_grid(**init_kwargs)
+                        _check_match_grid(**init_kwargs)  # type: ignore
                 else:
-                    _check_match_grid(**init_kwargs)
+                    _check_match_grid(**init_kwargs)  # type: ignore
         else:
             if error_match:
                 with pytest.raises(InvalidGridError, match=error_match):
                     _check_match_grid(**init_kwargs)
             else:
                 _check_match_grid(**init_kwargs)
-
-
-

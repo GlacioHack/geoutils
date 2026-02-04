@@ -24,7 +24,6 @@ Module for Raster class.
 from __future__ import annotations
 
 import copy
-import math
 import pathlib
 import warnings
 from collections import abc
@@ -41,7 +40,6 @@ from packaging.version import Version
 from rasterio.crs import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import _check_match_points
 from geoutils._misc import deprecate, import_optional
 from geoutils._typing import (
     DTypeLike,
@@ -69,8 +67,6 @@ except ImportError:
 
 if TYPE_CHECKING:
     import matplotlib
-
-    from geoutils.pointcloud.pointcloud import PointCloudLike
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html

@@ -49,7 +49,7 @@ from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, has_geo_attr, _check_match_bbox
+from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
 from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -1332,14 +1332,14 @@ class Vector:
 
         # Need to separate the two options, inplace update
         if inplace:
-            self._ds = self.ds.cx[xmin:xmax, ymin:ymax]
+            self._ds = self.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore
             if clip:
                 self._ds = self.ds.clip(mask=(xmin, ymin, xmax, ymax))
             return None
         # Or create a copy otherwise
         else:
             new_vector = self.copy()
-            new_vector._ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]
+            new_vector._ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore
             if clip:
                 new_vector._ds = new_vector.ds.clip(mask=(xmin, ymin, xmax, ymax))
             return new_vector

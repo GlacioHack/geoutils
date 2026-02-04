@@ -53,7 +53,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     align_bounds,
     merge_bounds,
-    reproject_from_latlon
+    reproject_from_latlon,
 )
 from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
@@ -1633,10 +1633,18 @@ class RasterBase(ABC):
             In addition, if return_window=True, return tuple of (values, arrays).
         """
 
-        return _reduce_points(self, points=points, reducer_function=reducer_function, window=window,
-                              input_latlon=input_latlon, band=band, masked=masked, return_window=return_window,
-                              as_array=as_array, boundless=boundless)
-
+        return _reduce_points(
+            self,
+            points=points,
+            reducer_function=reducer_function,
+            window=window,
+            input_latlon=input_latlon,
+            band=band,
+            masked=masked,
+            return_window=return_window,
+            as_array=as_array,
+            boundless=boundless,
+        )
 
     @overload
     def filter(

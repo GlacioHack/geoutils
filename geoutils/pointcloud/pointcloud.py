@@ -42,7 +42,7 @@ from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, has_geo_attr, _check_match_grid
+from geoutils._dispatch import _check_match_grid, get_geo_attr, has_geo_attr
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
@@ -1529,8 +1529,9 @@ class PointCloud(Vector):  # type: ignore[misc]
         :return: Raster from gridded point cloud.
         """
 
-        out_shape, out_transform, out_crs = _check_match_grid(self, ref=ref, coords=grid_coords,
-                                                              res=res, bounds=bounds, shape=shape, crs=None)
+        out_shape, out_transform, out_crs = _check_match_grid(
+            self, ref=ref, coords=grid_coords, res=res, bounds=bounds, shape=shape, crs=None
+        )
         grid_coords = _coords(transform=out_transform, shape=out_shape, grid=False, area_or_point=None)
 
         array, transform = _grid_pointcloud(

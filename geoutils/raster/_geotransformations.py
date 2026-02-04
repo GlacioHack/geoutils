@@ -40,12 +40,13 @@ from geoutils.raster.georeferencing import (
 )
 
 if TYPE_CHECKING:
-    from geoutils.raster.base import RasterLike, RasterType
+    from geoutils.raster.base import RasterType
 
 
 ###########################
 # 1/ REPROJECT SUBFUNCTIONS
 ###########################
+
 
 def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
@@ -61,6 +62,7 @@ def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
             f"Valid methods: {[method.name for method in rio.enums.Resampling]}"
         )
     return resampling_method
+
 
 def _check_reproj_nodata_dtype(
     source_raster: RasterType,
@@ -111,6 +113,7 @@ def _check_reproj_nodata_dtype(
                 )
 
     return dtype, src_nodata, nodata
+
 
 def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any]) -> bool:
     """Check if reprojection is actually needed based on transformation parameters."""

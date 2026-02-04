@@ -20,25 +20,26 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, overload, TYPE_CHECKING
-
 import math
+from typing import TYPE_CHECKING, Any, Callable, Literal, overload
+
 import numpy as np
 import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
 from geoutils import profiler
-from geoutils._typing import NDArrayNum, Number
 from geoutils._dispatch import _check_match_points
+from geoutils._typing import NDArrayNum, Number
 from geoutils.projtools import reproject_from_latlon
 from geoutils.raster.georeferencing import _coords, _outside_bounds, _res, _xy2ij
 
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
 
 if TYPE_CHECKING:
-    from geoutils.raster.base import RasterBase
     from geoutils.pointcloud.pointcloud import PointCloudLike
+    from geoutils.raster.base import RasterBase
+
 
 def _get_dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int) -> int:
     """
@@ -353,7 +354,8 @@ def _interp_points(
     return rpoints
 
 
-def _reduce_points(source_raster: RasterBase,
+def _reduce_points(
+    source_raster: RasterBase,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
     reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
     window: int | None = None,
@@ -362,7 +364,8 @@ def _reduce_points(source_raster: RasterBase,
     masked: bool = False,
     return_window: bool = False,
     as_array: bool = False,
-    boundless: bool = True,):
+    boundless: bool = True,
+) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
 
     # Check and normalize input points
     pts, input_scalar = _check_match_points(source_raster, points)
@@ -408,14 +411,6 @@ def _reduce_points(source_raster: RasterBase,
         row = rows[k]  # type: ignore
         col = cols[k]  # type: ignore
 
-        # If center is out of image, continue and return only NaNs
-        if _outside_bounds(row, col, transform=source_raster.transform, shape=source_raster.shape,
-                          area_or_point=source_raster.area_or_point):
-            list_values.append(np.atleast_1d(np.nan))
-            if return_window:
-                list_windows.append(np.ones((window, window)) * np.nan)
-            continue
-
         # Decide what pixel coordinates to read:
         if window is not None:
             half_win = (window - 1) / 2
@@ -430,15 +425,30 @@ def _reduce_points(source_raster: RasterBase,
             width = 1
             height = 1
 
+        # If center is out of image, continue and return only NaNs
+        if _outside_bounds(
+            row,
+            col,
+            transform=source_raster.transform,
+            shape=source_raster.shape,
+            area_or_point=source_raster.area_or_point,
+        ):
+            list_values.append(np.atleast_1d(np.nan))
+            if return_window:
+                list_windows.append(np.ones((height, width)) * np.nan)
+            continue
+
         # Make sure coordinates are int
         col = int(col)
         row = int(row)
 
         if True:
             if source_raster.count == 1:
-                data = source_raster.data[row: row + height, col: col + width]
+                data = source_raster.data[row : row + height, col : col + width]
             else:
-                data = source_raster.data[slice(None) if band is None else band - 1, row: row + height, col: col + width]
+                data = source_raster.data[
+                    slice(None) if band is None else band - 1, row : row + height, col : col + width
+                ]
             if np.ma.isMaskedArray(data) and not masked:
                 data = data.astype(np.float32).filled(np.nan)
             value = format_value(data)
@@ -460,9 +470,9 @@ def _reduce_points(source_raster: RasterBase,
             value = format_value(data)
             win = data
 
-        list_values.append(value)
+        list_values.append(value)  # type: ignore
         if return_window:
-            list_windows.append(win)
+            list_windows.append(win)  # type: ignore
 
     # If for a single value, unwrap output list
     if input_scalar:

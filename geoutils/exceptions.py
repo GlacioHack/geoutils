@@ -20,23 +20,30 @@
 
 from __future__ import annotations
 
+
 class InvalidBoundsError(ValueError):
     """Raised when bound-type input is not recognized."""
+
 
 class InvalidPointsError(ValueError):
     """Raised when point-type input is not recognized."""
 
+
 class InvalidCRSError(ValueError):
     """Raised when CRS-type input is not recognized."""
+
 
 class InvalidGridError(ValueError):
     """Raised when grid-type input is not recognized."""
 
+
 class InvalidResolutionError(ValueError):
     """Raised when resolution-type input is not recognized."""
 
+
 class InvalidShapeError(ValueError):
     """Raised when resolution-type input is not recognized."""
+
 
 class IgnoredGridWarning(UserWarning):
     """Raised when grid-type input is ignored (because redundant with others)."""

@@ -176,7 +176,7 @@ def _outside_bounds(
     if not index:
         row, col = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
     else:
-        row, col = xi, yj
+        row, col = xi, yj  # type: ignore
 
     # Row and columns can't be negative
     if np.any(np.array((col, row)) < 0):

@@ -23,7 +23,7 @@ Functionalities for geotransformations of raster objects.
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Iterable, Literal
+from typing import TYPE_CHECKING, Literal
 
 import affine
 import rasterio as rio
@@ -35,10 +35,10 @@ from geoutils._dispatch import _check_match_bbox, _check_match_grid
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.raster._geotransformations import (
-    _is_reproj_needed,
-    _rio_reproject,
     _check_reproj_nodata_dtype,
-    _resampling_method_from_str
+    _is_reproj_needed,
+    _resampling_method_from_str,
+    _rio_reproject,
 )
 from geoutils.raster.distributed_computing.dask import delayed_reproject
 from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
@@ -62,9 +62,9 @@ def _reproject(
     source_raster: RasterType,
     ref: RasterLike,
     crs: CRS | str | int | None = None,
-    res: float | Iterable[float] | None = None,
+    res: float | tuple[float, float] | None = None,
     grid_size: tuple[int, int] | None = None,
-    bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+    bounds: tuple[float, float, float, float] | rio.coords.BoundingBox | None = None,
     nodata: int | float | None = None,
     dtype: DTypeLike | None = None,
     resampling: Resampling | str = Resampling.bilinear,
@@ -79,8 +79,9 @@ def _reproject(
     """
 
     # 1/ Check and normalize match-grid inputs
-    dst_shape, dst_transform, dst_crs = _check_match_grid(src=source_raster, ref=ref, res=res, shape=grid_size,
-                                                          bounds=bounds, crs=crs, coords=None)
+    dst_shape, dst_transform, dst_crs = _check_match_grid(
+        src=source_raster, ref=ref, res=res, shape=grid_size, bounds=bounds, crs=crs, coords=None
+    )
 
     # 2/ Check user input for nodata and dtype
     dtype, src_nodata, nodata = _check_reproj_nodata_dtype(

@@ -32,7 +32,7 @@ from geoutils._typing import NDArrayNum
 
 def _grid_pointcloud(
     pc: gpd.GeoDataFrame,
-    grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
+    grid_coords: tuple[NDArrayNum, NDArrayNum],
     data_column_name: str | None = None,
     resampling: Literal["nearest", "linear", "cubic"] = "linear",
     dist_nodata_pixel: float = 1.0,
@@ -51,7 +51,6 @@ def _grid_pointcloud(
     :param dist_nodata_pixel: Distance from the point cloud after which grid cells are filled by nodata values,
         expressed in number of pixels.
     """
-
 
     # 1/ Interpolate irregular point cloud on a regular grid
 

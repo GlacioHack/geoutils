@@ -31,7 +31,7 @@ from rasterio import features, warp
 from rasterio.crs import CRS
 from rasterio.features import shapes
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr, _check_match_grid
+from geoutils._dispatch import _check_match_grid, get_geo_attr, has_geo_attr
 from geoutils._misc import silence_rasterio_message
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.raster.georeferencing import _bounds
@@ -131,8 +131,9 @@ def _rasterize(
     crs: CRS | int | None = None,
 ) -> Raster:
 
-    out_shape, out_transform, out_crs = _check_match_grid(src=source_vector, ref=ref, res=res, shape=shape,
-                                                          bounds=bounds, crs=crs, coords=grid_coords)
+    out_shape, out_transform, out_crs = _check_match_grid(
+        src=source_vector, ref=ref, res=res, shape=shape, bounds=bounds, crs=crs, coords=grid_coords
+    )
     if out_crs is not None:
         source_vector = source_vector.to_crs(out_crs)
     vect = source_vector.ds
@@ -162,6 +163,7 @@ def _rasterize(
         raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
     from geoutils.raster import Raster  # Runtime import to avoid circularity issues
+
     output = Raster.from_array(data=mask, transform=out_transform, crs=out_crs, nodata=None)
 
     return output
