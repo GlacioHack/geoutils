@@ -107,13 +107,15 @@ def _check_crs(crs: Any) -> pyproj.CRS:
 
 
 def _check_bounds(
-    bbox: rio.coords.BoundingBox | tuple[Number, Number, Number, Number] | pd.DataFrame
+    bbox: rio.coords.BoundingBox | tuple[Number, Number, Number, Number] | pd.DataFrame | dict[str, float]
 ) -> tuple[Number, Number, Number, Number]:
     """Helper function to check bounds value when provided as a sequence or bounding box object."""
 
+    # If rasterio bounding box, simply extract
     if isinstance(bbox, rio.coords.BoundingBox):
         xmin, ymin, xmax, ymax = bbox.left, bbox.bottom, bbox.right, bbox.top
 
+    # If pandas dataframe (GeoPandas-like), extract if only one row
     elif isinstance(bbox, pd.DataFrame):
         if all(c in bbox.columns for c in ["minx", "maxx", "miny", "maxy"]) and len(bbox) == 1:
             xmin, ymin, xmax, ymax = bbox["minx"][0], bbox["miny"][0], bbox["maxx"][0], bbox["maxy"][0]
@@ -122,6 +124,18 @@ def _check_bounds(
                 f"Bounding box as a dataframe must contain columns 'minx', 'maxx', 'miny', "
                 f"'maxy' and be of length 1, got columns {bbox.columns} with length {len(bbox)}"
             )
+
+    # If dictionary, check entries
+    elif isinstance(bbox, dict):
+        required = {"left", "bottom", "right", "top"}
+        if set(bbox) != required:
+            raise InvalidBoundsError(f"Bounding box as dictionary should have keys {required}, got {set(bbox)}.")
+
+        for k, v in bbox.items():
+            if not isinstance(v, (int, float)):
+                raise InvalidBoundsError(f"Bounding box dictionary value for {k!r} must be numeric, got"
+                                         f" {type(v).__name__}.")
+        xmin, ymin, xmax, ymax = bbox["left"], bbox["bottom"], bbox["right"], bbox["top"]
 
     # If bbox is an iterable with 4 coordinates (excluding strings and bytes)
     elif isinstance(bbox, Sequence) and not isinstance(bbox, (str, bytes)):

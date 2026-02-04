@@ -20,21 +20,21 @@ Processing large raster datasets can be **computationally expensive and memory-i
 
 GeoUtils offers two functions for out-of-memory multiprocessing:
 
-- {func}`~geoutils.raster.map_overlap_multiproc_save`: Applies a function to raster tiles and **saves the output** as a {class}`geoutils.Raster`.
-- {func}`~geoutils.raster.map_multiproc_collect`: Applies a function and **collects extracted data** from raster tiles into a list.
+- {func}`~geoutils.multiproc.map_overlap_multiproc_save`: Applies a function to raster tiles and **saves the output** as a {class}`geoutils.Raster`.
+- {func}`~geoutils.multiproc.map_multiproc_collect`: Applies a function and **collects extracted data** from raster tiles into a list.
 
 Both functions require a **multiprocessing configuration** defined with {class}`~geoutils.raster.MultiprocConfig`.
 
 ---
 
-## Using {class}`~geoutils.raster.MultiprocConfig`
+## Using {class}`~geoutils.multiproc.MultiprocConfig`
 
-{class}`~geoutils.raster.MultiprocConfig` defines tiling and processing settings, such as chunk size, output file, driver, and computing cluster. It ensures that computations are performed **without loading the entire raster into memory**.
+{class}`~geoutils.multiproc.MultiprocConfig` defines tiling and processing settings, such as chunk size, output file, driver, and computing cluster. It ensures that computations are performed **without loading the entire raster into memory**.
 
-### Example: creating a {class}`~geoutils.raster.MultiprocConfig` object
+### Example: creating a {class}`~geoutils.multiproc.MultiprocConfig` object
 ```{code-cell} ipython3
-from geoutils.raster import ClusterGenerator
-from geoutils.raster import MultiprocConfig
+from geoutils.multiproc import ClusterGenerator
+from geoutils.multiproc import MultiprocConfig
 
 # Create a configuration without multiprocessing cluster (tasks will be processed sequentially)
 config_basic = MultiprocConfig(chunk_size=200, outfile="output.tif", cluster=None)
@@ -49,7 +49,7 @@ config_np.cluster = ClusterGenerator("multi", nb_workers=4)
 
 ---
 
-## {func}`~geoutils.raster.map_overlap_multiproc_save`: process and save large rasters
+## {func}`~geoutils.multiproc.map_overlap_multiproc_save`: process and save large rasters
 
 This function applies a user-defined function to raster tiles and **saves the output** to a file. The entire raster is **never loaded into memory at once**, making it suitable for processing large datasets.
 The function returned the raster metadata loaded from the file.
@@ -64,11 +64,11 @@ The function returned the raster metadata loaded from the file.
 import geoutils as gu
 import scipy
 import numpy as np
-from geoutils.raster import RasterType, map_overlap_multiproc_save
+from geoutils.multiproc import map_overlap_multiproc_save
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
 
-def filter(raster: RasterType, size: int) -> RasterType:
+def filter(raster: gu.Raster, size: int) -> gu.Raster:
     new_data = scipy.ndimage.maximum_filter(raster.data, size)
     if raster.nodata is not None:
         new_data = np.ma.masked_equal(new_data, raster.nodata)
@@ -88,7 +88,7 @@ os.remove(config_basic.outfile)
 
 ---
 
-## {func}`~geoutils.raster.map_multiproc_collect`: extract and collect data from large rasters
+## {func}`~geoutils.multiproc.map_multiproc_collect`: extract and collect data from large rasters
 
 This function applies a function to raster tiles and **returns a list** of extracted data, without saving a new raster file. The process runs in **out-of-memory mode**, ensuring efficient handling of large datasets.
 
@@ -99,7 +99,7 @@ This function applies a function to raster tiles and **returns a list** of extra
 
 ### Example: extracting elevation statistics
 ```{code-cell} ipython3
-from geoutils.raster import map_multiproc_collect
+from geoutils.multiproc import map_multiproc_collect
 from typing import Any
 
 # Compute mean
@@ -123,6 +123,6 @@ To include tile location (col_min, col_max, row_min, row_max) in the results, se
 
 | Use case                                      | Function                                                               |
 |-----------------------------------------------|------------------------------------------------------------------------|
-| Apply processing and save results as a raster | {func}`~geoutils.raster.map_overlap_multiproc_save`                 |
-| Extract statistics or features into a list    | {func}`~geoutils.raster.map_multiproc_collect`                         |
-| Track tile locations with extracted data      | {func}`~geoutils.raster.map_multiproc_collect` with `return_tile=True` |
+| Apply processing and save results as a raster | {func}`~geoutils.multiproc.map_overlap_multiproc_save`                 |
+| Extract statistics or features into a list    | {func}`~geoutils.multiproc.map_multiproc_collect`                         |
+| Track tile locations with extracted data      | {func}`~geoutils.multiproc.map_multiproc_collect` with `return_tile=True` |

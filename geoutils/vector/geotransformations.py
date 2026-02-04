@@ -29,11 +29,11 @@ from geoutils._dispatch import get_geo_attr, has_geo_attr
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike
-    from geoutils.vector.vector import VectorLike
+    from geoutils.vector.vector import VectorLike, Vector
 
 
 def _reproject(
-    gdf: gpd.GeoDataFrame,
+    source_vector: Vector,
     ref: RasterLike | VectorLike | None = None,
     crs: CRS | str | int | None = None,
 ) -> gpd.GeoDataFrame:
@@ -54,6 +54,6 @@ def _reproject(
         # Determine user-input target CRS
         crs = CRS.from_user_input(crs)
 
-    new_ds = gdf.to_crs(crs=crs)
+    new_ds = source_vector.ds.to_crs(crs=crs)
 
     return new_ds

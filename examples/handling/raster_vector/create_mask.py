@@ -40,7 +40,7 @@ vect_rasterized
 # :class:`~geoutils.Vector` itself, except from the :attr:`~geoutils.Raster.shape` to rasterize that will default to 1000 x 1000.
 
 
-# vect_rasterized = vect.create_mask(xres=500)
+# vect_rasterized = vect.create_mask(res=500)
 # vect_rasterized.plot()
 
 # %%

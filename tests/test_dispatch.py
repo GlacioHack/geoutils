@@ -85,6 +85,11 @@ class TestDispatchLevelZero:
         xmin, ymin, xmax, ymax = _check_bounds(bbox)
         assert (xmin, ymin, xmax, ymax) == (0, 1, 2, 3)
 
+        # Valid dataframe (bounding box of geodataframe)
+        bbox = {"left": 0, "bottom": 1, "right": 2, "top": 3}
+        xmin, ymin, xmax, ymax = _check_bounds(bbox)
+        assert (xmin, ymin, xmax, ymax) == (0, 1, 2, 3)
+
     @pytest.mark.parametrize(
         "bbox, match_text",
         [
@@ -92,11 +97,14 @@ class TestDispatchLevelZero:
             ([5, 0, 2, 4], "xmin must be < xmax"),  # Invalid ordering, xmin >= xmax
             ([0, 5, 4, 2], "ymin must be < ymax"),  # Invalid ordering, ymin >= ymax
             (pd.DataFrame(data={"notgood": [1]}), "must contain columns"),  # Invalid columns in dataframe
-            # Too length
+            # Too lengthy inside dataframe
             (
                 pd.DataFrame(data={"minx": [0, 1], "miny": [1, 2], "maxx": [2, 3], "maxy": [3, 4]}),
                 "must contain columns",
             ),
+            ({"otherkey": 5}, "should have keys"),  # Wrong key
+            ({"left": "a", "bottom": 0, "right": 1, "top": 3}, "value for 'left' must be numeric"),  # Key non-numeric
+
             (["a", "b", "c", "d"], "must be numeric"),  # Non-numeric
             (42, "Cannot interpret bounding box input"),  # Invalid type
         ],
@@ -506,6 +514,7 @@ class TestDispatchLevelOne:
         rast = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 10, 10, 5, 5), crs=4326)
         vect = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])]}, crs="EPSG:4326"))
 
+        ref_input = None
         if ref == "rast":
             ref_input = rast
         elif ref == "vect":

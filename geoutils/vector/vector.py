@@ -22,6 +22,8 @@ Module for Vector class.
 
 from __future__ import annotations
 
+import warnings
+
 import pathlib
 from collections import abc
 from os import PathLike
@@ -49,7 +51,7 @@ from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
+from geoutils._dispatch import _check_match_bbox, _check_crs, get_geo_attr, has_geo_attr
 from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -311,7 +313,7 @@ class Vector:
         # Ensure that the vector is in the same crs as a reference
         if has_geo_attr(ref_crs, "crs"):
             crs = get_geo_attr(ref_crs, "crs")
-            vect_reproj = self.reproject(ref=crs)
+            vect_reproj = self.reproject(crs=crs)
         elif isinstance(ref_crs, (CRS, int)):
             vect_reproj = self.reproject(crs=ref_crs)
         else:
@@ -1282,6 +1284,7 @@ class Vector:
         clip: bool,
         *,
         inplace: Literal[False] = False,
+        crop_geom: Any = None,
     ) -> VectorType: ...
 
     @overload
@@ -1291,6 +1294,7 @@ class Vector:
         clip: bool,
         *,
         inplace: Literal[True],
+        crop_geom: Any = None,
     ) -> None: ...
 
     @overload
@@ -1300,15 +1304,17 @@ class Vector:
         clip: bool,
         *,
         inplace: bool = False,
+        crop_geom: Any = None,
     ) -> VectorType | None: ...
 
     @profiler.profile("geoutils.vector.vector.crop", memprof=True)
     def crop(
         self: VectorType,
-        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float] = None,
         clip: bool = False,
         *,
         inplace: bool = False,
+        crop_geom: Any = None,
     ) -> VectorType | None:
         """
         Crop the vector to given extent.
@@ -1324,9 +1330,17 @@ class Vector:
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param clip: Whether to clip the geometry to the given extent (by default keeps all intersecting).
         :param inplace: Whether to update the vector in-place.
+        :param crop_geom: (DEPRECATED) Old argument for bounding box, use 'bbox'.
 
         :returns: Cropped vector (or None if inplace).
         """
+
+        # Deprecate crop_geom
+        if crop_geom is not None:
+            warnings.warn(DeprecationWarning("Argument 'crop_geom' is deprecated, use 'bbox' instead."))
+            bbox = crop_geom
+        if bbox is None:
+            raise ValueError("Argument 'bbox' must be passed.")
 
         xmin, ymin, xmax, ymax = _check_match_bbox(self, bbox)
 
@@ -1396,7 +1410,7 @@ class Vector:
         :returns: Reprojected vector (or None if inplace).
         """
 
-        new_ds = _reproject(gdf=self.ds, ref=ref, crs=crs)
+        new_ds = _reproject(self, ref=ref, crs=crs)
 
         if inplace:
             self.ds = new_ds
@@ -1560,8 +1574,10 @@ class Vector:
         :returns: Raster or mask containing the burned geometries.
         """
 
+        # Deprecate old xres and yres
         if "xres" in kwargs.keys() or "yres" in kwargs.keys():
-            raise DeprecationWarning("Input 'xres' and 'yres' are deprecrated in favour of 'res'.")
+            warnings.warn(message="Input 'xres' and 'yres' are deprecrated in favour of 'res'.",
+                          category=DeprecationWarning)
         xres = kwargs.get("xres", None)
         yres = kwargs.get("yres", None)
         if xres is not None:
