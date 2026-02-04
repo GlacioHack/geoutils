@@ -51,7 +51,7 @@ from shapely.geometry.base import BaseGeometry
 from geoutils import profiler
 from geoutils._dispatch import get_geo_attr, has_geo_attr, _check_match_bbox
 from geoutils._misc import copy_doc, deprecate, import_optional
-from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.raster_vector import _create_mask, _rasterize
 from geoutils.projtools import (
@@ -1531,11 +1531,11 @@ class Vector:
         self,
         raster: RasterType | None = None,
         crs: CRS | int | None = None,
-        xres: float | None = None,
-        yres: float | None = None,
+        res: tuple[Number, Number] | Number | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         in_value: int | float | abc.Iterable[int | float] | None = None,
         out_value: int | float = 0,
+        **kwargs: Any,
     ) -> RasterType:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
@@ -1551,10 +1551,7 @@ class Vector:
         :param raster: Reference raster to match during rasterization.
         :param crs: Coordinate reference system as string or EPSG code
             (Default to raster.crs if not None then self.crs).
-        :param xres: Output raster spatial resolution in x. Only if raster is None.
-            Must be in units of crs, if set.
-        :param yres: Output raster spatial resolution in y. Only if raster is None.
-            Must be in units of crs, if set. (Default to xres).
+        :param res: Output raster spatial resolution.
         :param bounds: Output raster bounds (left, bottom, right, top). Only if raster is None.
             Must be in same system as crs, if set. (Default to self bounds).
         :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1).
@@ -1563,11 +1560,21 @@ class Vector:
         :returns: Raster or mask containing the burned geometries.
         """
 
+        if "xres" in kwargs.keys() or "yres" in kwargs.keys():
+            raise DeprecationWarning("Input 'xres' and 'yres' are deprecrated in favour of 'res'.")
+        xres = kwargs.get("xres", None)
+        yres = kwargs.get("yres", None)
+        if xres is not None:
+            if yres is not None:
+                res = (xres, yres)
+            else:
+                res = xres
+
         return _rasterize(
-            gdf=self.ds,
+            source_vector=self,
             ref=raster,
             crs=crs,
-            res=(xres, yres),
+            res=res,
             bounds=bounds,
             in_value=in_value,
             out_value=out_value,

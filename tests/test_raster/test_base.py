@@ -150,7 +150,7 @@ class TestClassVsAccessorConsistency:
         "xy2ij",
         "ij2xy",
         "coords",
-        "outside_bounds",
+        "outside_image",
         "info",
         "get_bounds_projected",
         "get_footprint_projected",
@@ -232,7 +232,7 @@ class TestClassVsAccessorConsistency:
         ("get_footprint_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_bounds_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("georeferenced_grid_equal", {"other": "self"}),
-        ("outside_bounds", {"xi": [-2, 10000, 10], "yj": [10, 50, 20]}),
+        ("outside_image", {"xi": [-2, 10000, 10], "yj": [10, 50, 20]}),
         # 1.2. In-place methods
         ("translate", {"xoff": 10.5, "yoff": 5, "inplace": True}),
         ("set_transform", {"new_transform": rio.transform.from_bounds(0, 0, 1, 1, 5, 5)}),
@@ -247,7 +247,7 @@ class TestClassVsAccessorConsistency:
         ("raster_equal", {"other": "self"}),
         ("raster_allclose", {"other": "self"}),
         ("intersection", {"other": "self"}),
-        # ("reduce_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
+        ("reduce_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
         ("interp_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
         ("proximity", {"target_values": [100]}),
         ("get_nanarray", {}),
@@ -400,7 +400,7 @@ class TestClassVsAccessorConsistency:
         list_missing = [method for method in self.methods if method not in methods_1 + methods_2]
 
         if len(list_missing) != 0:
-            raise AssertionError(f"RasterBase not covered by tests: {list_missing}")
+            raise AssertionError(f"RasterBase methods not covered by tests: {list_missing}")
 
     chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(4326)}),)
 

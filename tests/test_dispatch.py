@@ -17,7 +17,7 @@ import pyproj
 import geoutils as gu
 from geoutils._dispatch import (
     _check_bounds, _check_crs, _check_resolution, _check_shape, _check_coords,  # Level-0 checks (manual input)
-    _grid_from_coords, _grid_from_bounds_res, _grid_from_bounds_shape,  # Helpers for grid conversion
+    _grid_from_coords, _grid_from_bounds_res, _grid_from_bounds_shape, _grid_from_src,  # Helpers for grid conversion
     _check_match_bbox, _check_match_points, _check_match_grid)  # Level-1 checks (match reference object)
 from geoutils.exceptions import (InvalidBoundsError, InvalidResolutionError, InvalidShapeError, InvalidGridError,
                                  InvalidPointsError, InvalidCRSError, IgnoredGridWarning)
@@ -184,6 +184,15 @@ class TestDispatchLevelZero:
 class TestDispatchGridHelpers:
     """Helpers to build grid from inputs."""
 
+    # Raster and vector classes
+    rast_bounds = (0, 0, 10, 10)
+    rast_res = (2, 2)
+    rast_half_res = (rast_res[0]/2, rast_res[1]/2)
+    rast_shape = (5, 5)
+    rast_twice_shape = (rast_shape[0]*2, rast_shape[1]*2)
+    rast = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 10, 10, 5, 5), crs=4326)
+    vect = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])]}, crs="EPSG:4326"))
+
     def test_grid_from_coords__valid(self) -> None:
         """Check that valid coordinates input pass."""
 
@@ -221,13 +230,92 @@ class TestDispatchGridHelpers:
         bounds = (0, 0, 10, 20)
         res = (2, 5)
         shape, tfm = _grid_from_bounds_res(bounds, res)
-        assert shape == (5, 4)
+        assert shape == (4, 5)
         assert isinstance(tfm, rio.Affine)
 
         # Valid bounds and shape conversion
         shape2 = (5, 4)
-        tfm2 = _grid_from_bounds_shape(bounds, shape2)
+        shape, tfm2 = _grid_from_bounds_shape(bounds, shape2)
         assert isinstance(tfm2, rio.Affine)
+
+    @pytest.mark.parametrize(
+        "dst_crs,src_kind,shape,res,bounds,exp_shape,exp_same_tfm",
+        [
+            # Same CRS raster = exact passthrough
+            (4326, "rast", None, None, None, rast_shape, True),
+            # Same CRS raster + same shape = still passthrough
+            (4326, "rast", rast_shape, None, None, (5, 5), True),
+            # Same CRS raster + same resolution = still passthrough
+            (4326, "rast", None, rast_res, None, (5, 5), True),
+            # Same CRS raster + same bounds = still passthrough
+            (4326, "rast", None, None, rast_bounds, (5, 5), True),
+            # Same CRS raster + same shape/bounds = still passthrough
+            (4326, "rast", rast_shape, None, rast_bounds, (5, 5), True),
+            # Same CRS raster + same res/bounds = still passthrough
+            (4326, "rast", None, rast_res, rast_bounds, (5, 5), True),
+            # Same CRS raster + half-resolution = twice shape (with bounds or not)
+            (4326, "rast", None, rast_half_res, None, rast_twice_shape, False),
+            (4326, "rast", None, rast_half_res, rast_bounds, rast_twice_shape, False),
+            # Same CRS raster + twice shape = twice shape (with bounds or not)
+            (4326, "rast", rast_twice_shape, None, None, rast_twice_shape, False),
+            (4326, "rast", rast_twice_shape, None, rast_bounds, rast_twice_shape, False),
+            # CRS change raster = default reprojection grid
+            (3857, "rast", None, None, None, (5, 5), False),
+            # CRS change raster + explicit shape = force shape
+            (3857, "rast", (6, 6), None, None, (6, 6), False),
+            # CRS change raster + explicit resolution = force resolution
+            (3857, "rast", None, (1000, 1000), None, None, False),  # Can't know output shape when changing resolution
+            # CRS change raster + bounds + shape = bounds must match exactly
+            (3857, "rast", (4, 4), None, (0, 0, 5, 5), (4, 4), False),
+            # CRS change raster + bounds + resolution = infer shape from bounds
+            (3857, "rast", None, (1000, 1000), (0, 0, 5000, 5000), None, False),  # Same here
+            # Vector source + explicit shape = grid built from bounds
+            (3857, "vect", (4, 4), None, None, (4, 4), False),
+            # Vector source + explicit resolution = grid built from bounds
+            (3857, "vect", None, (1000, 1000), None, None, False),  # Same here
+        ],
+    )
+    def test_grid_from_src__valid(
+            self, dst_crs, src_kind, shape, res, bounds, exp_shape, exp_same_tfm
+    ):
+        """Check that valid inputs for grid from source pass and give the right outputs."""
+
+        # Get source (raster or vector)
+        src = self.rast if src_kind == "rast" else self.vect
+        crs = pyproj.CRS.from_user_input(dst_crs)
+
+        # Compute output shape and transform
+        out_shape, out_transform = _grid_from_src(
+            dst_crs=crs, src=src, shape=shape, res=res, bounds=bounds
+        )
+
+        # If expected shape is passed, check it matches expected
+        if exp_shape is not None:
+            assert out_shape == exp_shape
+        # Check transform is affine
+        assert isinstance(out_transform, rio.Affine)
+
+        # If bounds were passed, check it matches exactly
+        if bounds is not None:
+            xmin, ymin, xmax, ymax = rio.transform.array_bounds(*out_shape, out_transform)
+            assert (xmin, ymin, xmax, ymax) == pytest.approx(bounds)
+
+        # If res was passed, check it matches exactly
+        if res is not None:
+            rx, ry = res
+            a, b, _, d, e, _ = out_transform[:6]
+
+            assert b == 0
+            assert d == 0
+            assert a == pytest.approx(rx)
+            assert -e == pytest.approx(ry)
+
+        # Check if we expect the exact same transform, or not
+        if exp_same_tfm:
+            assert out_transform == src.transform
+        else:
+            assert out_transform != src.transform or crs != src.crs
+
 
 class TestDispatchLevelOne:
     """Level one user-input checks: match bbox, match points and match grid."""

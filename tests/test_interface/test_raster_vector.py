@@ -12,6 +12,7 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils import examples
+from geoutils.exceptions import InvalidGridError
 
 
 class TestRasterVectorInterface:
@@ -108,29 +109,28 @@ class TestRasterVectorInterface:
 
         # Use Web Mercator at 30 m.
         # Capture the warning on resolution not matching exactly bounds
-        with pytest.warns(UserWarning):
-            vct.rasterize(xres=30, crs=3857)
+        vct.rasterize(res=30, crs=3857)
 
         # Typically, rasterize returns a raster
-        burned_in2_out1 = vct.rasterize(ref=rst, in_value=2, out_value=1)
+        burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
         assert isinstance(burned_in2_out1, gu.Raster)
 
         # For an in_value of 1 and out_value of 0 (default)
-        burned_mask = vct.rasterize(ref=rst, in_value=1)
+        burned_mask = vct.rasterize(raster=rst, in_value=1)
         assert isinstance(burned_mask, gu.Raster)
         # Convert to boolean
         burned_mask = burned_mask.astype(bool)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
-        assert burned_mask.raster_equal(vct.create_mask(rst))
+        assert burned_mask.raster_equal(vct.create_mask(rst), warn_failure_reason=True)
 
         # The two rasterization should match
         assert np.all(burned_in2_out1[burned_mask] == 2)
         assert np.all(burned_in2_out1[~burned_mask] == 1)
 
         # Check that errors are raised
-        with pytest.raises(ValueError, match="Only one of raster or crs can be provided."):
-            vct.rasterize(ref=rst, crs=3857)
+        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
+            vct.rasterize(raster=rst, crs=3857)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_polygonize(self, example: str) -> None:

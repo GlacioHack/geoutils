@@ -386,9 +386,9 @@ def _reduce_points(source_raster: RasterBase,
         """Check if valid value has been extracted"""
         if type(value) in [np.ndarray, np.ma.core.MaskedArray]:
             if window is not None:
-                value = reducer_function(value.flatten())
+                value = np.atleast_1d(reducer_function(value.flatten()))
             else:
-                value = value[0, 0]
+                value = np.atleast_1d(value[0, 0])
         else:
             value = None
         return value
@@ -411,7 +411,7 @@ def _reduce_points(source_raster: RasterBase,
         # If center is out of image, continue and return only NaNs
         if _outside_bounds(row, col, transform=source_raster.transform, shape=source_raster.shape,
                           area_or_point=source_raster.area_or_point):
-            list_values.append(np.nan)
+            list_values.append(np.atleast_1d(np.nan))
             if return_window:
                 list_windows.append(np.ones((window, window)) * np.nan)
             continue
@@ -434,20 +434,21 @@ def _reduce_points(source_raster: RasterBase,
         col = int(col)
         row = int(row)
 
-        # Create rasterio's window for reading
-        rio_window = rio.windows.Window(col, row, width, height)
-
-        if source_raster.is_loaded or source_raster._is_xr:
+        if True:
             if source_raster.count == 1:
                 data = source_raster.data[row: row + height, col: col + width]
             else:
                 data = source_raster.data[slice(None) if band is None else band - 1, row: row + height, col: col + width]
-            if not masked:
+            if np.ma.isMaskedArray(data) and not masked:
                 data = data.astype(np.float32).filled(np.nan)
             value = format_value(data)
             win: NDArrayNum | dict[int, NDArrayNum] = data
 
         else:
+
+            # Create rasterio's window for reading
+            rio_window = rio.windows.Window(col, row, width, height)
+
             with rio.open(source_raster.name) as raster:
                 data = raster.read(
                     window=rio_window,
@@ -465,11 +466,12 @@ def _reduce_points(source_raster: RasterBase,
 
     # If for a single value, unwrap output list
     if input_scalar:
-        output_val = list_values[0]
+        output_val = list_values[0][0]
         if return_window:
             output_win = list_windows[0]
     else:
-        output_val = np.array(list_values)  # type: ignore
+        output_val = np.array(list_values)
+        output_val = output_val.squeeze()
         if return_window:
             output_win = list_windows  # type: ignore
 

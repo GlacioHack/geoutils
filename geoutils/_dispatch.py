@@ -156,7 +156,7 @@ def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Numb
             raise InvalidResolutionError(
                 f"Resolution must be strictly positive, got {res!r}."
             )
-        return res, res
+        return float(res), float(res)
 
     # Case 2: Sequence of two numbers for X and Y (xres, yres)
     if isinstance(res, Sequence):
@@ -188,7 +188,7 @@ def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Numb
                 f"got (xres={xres}, yres={yres})."
             )
 
-        return xres, yres
+        return float(xres), float(yres)
 
     # If none of the above
     raise InvalidResolutionError(
@@ -461,12 +461,24 @@ def _grid_from_src(dst_crs: pyproj.CRS, src: RasterBase, shape: tuple[int, int] 
     else:
         bounds = None
 
-    # First, if all are the same, return source transform and size (to avoid approximation errors below)
-    if ((_check_crs(dst_crs) == _check_crs(src.crs))
+    # First, for a raster source, if all are the same, return exactly source transform and size
+    # (to avoid approximation errors from calculations below)
+    if hasattr(src, "transform") and isinstance(src.transform, rio.Affine):
+        if ((dst_crs == src.crs)
             & ((shape is None) | (shape == src.shape))
             & ((res is None) | (res == src.res))
             & ((bounds is None) | (bounds == src.bounds))):
-        return src.shape, src.transform
+
+            return src.shape, src.transform
+
+    # If there is no input grid (i.e. no resampling involved), just build output grid directly from user inputs
+    if not hasattr(src, "res"):
+        if bounds is None:
+            bounds = _get_bounds_projected(_check_bounds(src.bounds), in_crs=src.crs, out_crs=dst_crs)
+        if res is not None:
+            return _grid_from_bounds_res(bounds, res)
+        elif shape is not None:
+            return _grid_from_bounds_shape(bounds, shape)
 
     # If input source has no width/height, should exist from source object
     if not has_geo_attr(src, "width"):
@@ -490,9 +502,9 @@ def _grid_from_src(dst_crs: pyproj.CRS, src: RasterBase, shape: tuple[int, int] 
         right=src.bounds.right,
         top=src.bounds.top,
         bottom=src.bounds.bottom,
+        resolution=res,  # Only defined if shape is None
         dst_width=width,  # Only defined if res is None
         dst_height=height,  # Only defined if res is None
-        resolution=res,  # Only defined if shape is None
     )
     out_shape = height, width
 
@@ -621,8 +633,8 @@ def _check_match_grid(src: RasterBase | Vector,
 
         # If reference only defines a partial grid (vector or point cloud-like)
         elif has_geo_attr(ref, "bounds") and has_geo_attr(ref, "crs"):
-            dst_bounds = get_geo_attr(ref, "bounds")
-            dst_crs = get_geo_attr(ref, "crs")
+            dst_bounds = _check_bounds(get_geo_attr(ref, "bounds"))
+            dst_crs = _check_crs(get_geo_attr(ref, "crs"))
 
             logging.debug(
                 f"Match grid input: using reference object of type {type(src).__name__!r} "
@@ -674,7 +686,7 @@ def _check_match_grid(src: RasterBase | Vector,
         if crs is not None:
             dst_crs = _check_crs(crs)
         else:
-            dst_crs = src.crs
+            dst_crs = _check_crs(src.crs)
 
         # If (res or shape) and bounds are defined, from user or on source fallback
         if ((res is not None or shape is not None or hasattr(src, "res"))

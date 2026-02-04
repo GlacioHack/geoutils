@@ -120,25 +120,26 @@ def _polygonize(
 
 
 def _rasterize(
-    gdf: gpd.GeoDataFrame,
+    source_vector: Vector,
     ref: RasterType | None = None,
     in_value: int | float | Iterable[int | float] | None = None,
     out_value: int | float = 0,
-    res: tuple[Number, Number] | None = None,
+    res: tuple[Number, Number] | Number | None = None,
     shape: tuple[int, int] | None = None,
     grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
     bounds: tuple[float, float, float, float] | None = None,
     crs: CRS | int | None = None,
 ) -> Raster:
 
-    out_transform, out_shape, out_crs = _check_match_grid(src=gdf, ref=ref, res=res, shape=shape,
+    out_shape, out_transform, out_crs = _check_match_grid(src=source_vector, ref=ref, res=res, shape=shape,
                                                           bounds=bounds, crs=crs, coords=grid_coords)
-    if crs is not None:
-        vect = gdf.to_crs(crs)
+    if out_crs is not None:
+        source_vector = source_vector.to_crs(out_crs)
+    vect = source_vector.ds
 
     # Set default burn value, index from 1 to len(self.ds)
     if in_value is None:
-        in_value = gdf.index + 1
+        in_value = vect.index + 1
 
     # Rasterize geometry
     if isinstance(in_value, Iterable):
@@ -161,7 +162,7 @@ def _rasterize(
         raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
     from geoutils.raster import Raster  # Runtime import to avoid circularity issues
-    output = Raster.from_array(data=mask, transform=out_transform, crs=crs, nodata=None)
+    output = Raster.from_array(data=mask, transform=out_transform, crs=out_crs, nodata=None)
 
     return output
 
