@@ -33,19 +33,6 @@ from geoutils._typing import NDArrayNum
 from geoutils.raster.raster import Raster, RasterType
 
 
-def init_binnings_attributes(raster: RasterType) -> tuple[Any, Any, Any]:
-    """
-    Initialize binning attributes for saving tiff file.
-
-    :param raster: raster object
-    """
-    crs = raster.crs
-    shape = raster.data.shape
-    transform = raster.transform
-
-    return crs, shape, transform
-
-
 def from_raster_to_flattened(dict_raster: dict[str, Any]) -> dict[str, Any]:
     """
     Transform every raster in flattened data to be processed by pandas
@@ -108,13 +95,19 @@ def grouped_stats(
         else:
             new_bins[key] = value
 
-    crs, shape, transform = init_binnings_attributes(next(iter(groupby_vars.values())))
+    raster_base = next(iter(groupby_vars.values()))
+    crs = raster_base.crs
+    shape = raster_base.data.shape
+    transform = raster_base.transform
+    nodata = raster_base.nodata
 
     # Flatten arrays for pandas
     groupby_vars_array = from_raster_to_flattened(groupby_vars)
     aggregated_vars_arrays = from_raster_to_flattened(aggregated_vars)
 
     df = pd.DataFrame({**groupby_vars_array, **aggregated_vars_arrays})
+    if nodata is not None:
+        df = df.replace(nodata, np.nan)
 
     groupby_keys = []
     returned_masks = {}

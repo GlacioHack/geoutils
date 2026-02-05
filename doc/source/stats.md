@@ -61,7 +61,7 @@ import numpy as np
 
 # Instantiate a raster from a filename on disk
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
-rast = gu.Raster(filename_rast)
+rast = gu.Raster(filename_rast, force_nodata=-9999)
 rast
 ```
 

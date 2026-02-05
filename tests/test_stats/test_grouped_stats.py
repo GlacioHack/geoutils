@@ -3,7 +3,6 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 import pytest
-from affine import Affine
 from pandas.testing import assert_frame_equal
 
 from geoutils import Raster
@@ -55,15 +54,6 @@ def statistics():  # type: ignore
 @pytest.fixture
 def aggregated_vars(elev_raster):  # type: ignore
     return {"raster": elev_raster}
-
-
-def test_init_init_binnings_attributes(elev_raster: Raster, transform: List[Any]) -> None:
-
-    crs, shape, transform_test = grouped_stats.init_binnings_attributes(elev_raster)
-
-    assert crs == 32645
-    assert shape == (4, 5)
-    assert transform_test == Affine(30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0)
 
 
 def test_from_raster_to_flattened(elev_raster: Raster) -> None:
@@ -127,7 +117,8 @@ def test_grouped_stats_interval(
         ),
     )
 
-    crs, _, transform_test = grouped_stats.init_binnings_attributes(elev_raster)
+    crs = elev_raster.crs
+    transform_test = elev_raster.transform
 
     expected_mask = {
         "groupby_slope1": {
@@ -206,6 +197,34 @@ def test_grouped_stats_mask(
     expected_mask = {"groupby_slope1": None}
 
     assert expected_mask == masks_test
+
+
+def test_grouped_stats_mask_nodata(
+    aggregated_vars: Dict[str, Any], mask_raster: Raster, statistics: List[Any]  # type: ignore
+) -> None:
+
+    slope_raster = Raster.from_array(
+        np.array([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, -999]]),
+        transform=mask_raster.transform,
+        crs=mask_raster.crs,
+        nodata=-9999,
+    )
+
+    group_by_test = {"slope1": slope_raster}
+    expected_df = pd.DataFrame(
+        {
+            ("raster", "mean"): [11.333333, 9.25],
+            ("raster", "min"): [2, 1],
+        },
+        index=pd.CategoricalIndex(
+            [False, True], categories=[False, True], ordered=False, dtype="category", name="groupby_slope1"
+        ),
+    )
+
+    df_test, masks_test = grouped_stats.grouped_stats(
+        group_by_test, {"slope1": mask_raster}, aggregated_vars, statistics
+    )
+    assert_frame_equal(df_test, expected_df)
 
 
 def test_grouped_stats_segm(
