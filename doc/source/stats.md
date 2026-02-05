@@ -119,6 +119,14 @@ to_aggregate = {"rast": rast}
 statistics = ["mean", "min", "max"]
 
 df, masks = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
+df
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
 
 groups = list(masks["groupby_rast"].keys())
 n = len(groups)
@@ -140,7 +148,7 @@ plt.tight_layout()
 ```
 
 ```{warning}
-Bins can be presented in different ways. It is possible to integrate an interval of minimum 3 values, a mask or a
+Bins can be presented in different ways. It is possible to integrate an interval of minimum 2 values, a mask or a
 segmentation map in raster format.
 ```
 
@@ -158,9 +166,6 @@ group_by = {"rast": rast}
 elev_mask = rast > 2000
 bins = {"rast": elev_mask}
 
-elev_mask.plot()
-plt.show()
-
 to_aggregate = {"rast": rast}
 statistics = ["mean", "min", "max"]
 
@@ -168,6 +173,10 @@ df, _ = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
 df
 ```
 
+```{code-cell} ipython3
+elev_mask.plot()
+plt.show()
+```
 ## Subsampling
 
 The {func}`~geoutils.Raster.subsample` method allows to efficiently extract a valid random subsample from a raster or a point cloud. It can conveniently

@@ -73,8 +73,8 @@ def is_interval(bin_value: RasterType | list[int] | object) -> bool:
         raise ValueError("If bins is an interval, it must be a 1-dimensional array")
     elif not np.issubdtype(bins_array.dtype, np.number):
         raise TypeError("Bins must be a list of number")
-    elif bins_array.size <= 2:
-        raise ValueError("Bins must be of size > 2")
+    elif bins_array.size < 2:
+        raise ValueError("Bins must be of size >= 2")
     elif not np.all(np.diff(bins_array) > 0):
         raise ValueError("Values must be strictly increasing.")
 
