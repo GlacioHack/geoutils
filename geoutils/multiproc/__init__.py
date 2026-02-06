@@ -16,5 +16,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+<<<<<<<< HEAD:geoutils/multiproc/__init__.py
 from geoutils.multiproc.cluster import *  # noqa
 from geoutils.multiproc.mparray import *  # noqa
+========
+from geoutils.raster.distributed_computing.dask import *  # noqa
+from geoutils.raster.distributed_computing.multiproc import *  # noqa
+>>>>>>>> 0027c89 (Improve typing, input checks and import management for package scalability (#855)):geoutils/raster/distributed_computing/__init__.py

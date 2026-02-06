@@ -38,6 +38,10 @@ if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
     from geoutils.raster.base import RasterType
 
+if TYPE_CHECKING:
+    from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.raster.base import RasterType
+
 
 def _regular_pointcloud_to_raster(
     pointcloud: PointCloudLike,
