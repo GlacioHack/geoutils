@@ -12,6 +12,7 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils import examples
+from geoutils.exceptions import InvalidGridError
 
 
 class TestRasterVectorInterface:
@@ -87,7 +88,7 @@ class TestRasterVectorInterface:
             vector.create_mask()
 
         # If the raster has the wrong type
-        with pytest.raises(ValueError, match="Reference must be a raster or a point cloud."):
+        with pytest.raises(ValueError, match="Reference must be a.*"):
             vector.create_mask("lol")  # type: ignore
 
         # Check that a warning is raised if the bounds were passed specifically by the user
@@ -108,8 +109,7 @@ class TestRasterVectorInterface:
 
         # Use Web Mercator at 30 m.
         # Capture the warning on resolution not matching exactly bounds
-        with pytest.warns(UserWarning):
-            vct.rasterize(xres=30, crs=3857)
+        vct.rasterize(res=30, crs=3857)
 
         # Typically, rasterize returns a raster
         burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
@@ -122,17 +122,17 @@ class TestRasterVectorInterface:
         burned_mask = burned_mask.astype(bool)
 
         # Check that rasterizing with in_value=1 is the same as creating a mask
-        assert burned_mask.raster_equal(vct.create_mask(rst))
+        assert burned_mask.raster_equal(vct.create_mask(rst), warn_failure_reason=True)
 
         # The two rasterization should match
         assert np.all(burned_in2_out1[burned_mask] == 2)
         assert np.all(burned_in2_out1[~burned_mask] == 1)
 
         # Check that errors are raised
-        with pytest.raises(ValueError, match="Only one of raster or crs can be provided."):
+        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
             vct.rasterize(raster=rst, crs=3857)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_polygonize(self, example: str) -> None:
         """Test that polygonize doesn't raise errors."""
 
@@ -199,7 +199,7 @@ class TestMaskVectorInterface:
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_polygonize(self, mask: gu.Raster) -> None:
         mask_orig = mask.copy()
         # Run default

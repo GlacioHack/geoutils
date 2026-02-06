@@ -20,7 +20,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, overload
+import math
+from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 import numpy as np
 import rasterio as rio
@@ -28,10 +29,16 @@ from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
 from geoutils import profiler
+from geoutils._dispatch import _check_match_points
 from geoutils._typing import NDArrayNum, Number
-from geoutils.raster.georeferencing import _coords, _outside_image, _res, _xy2ij
+from geoutils.projtools import reproject_from_latlon
+from geoutils.raster.georeferencing import _coords, _outside_bounds, _res, _xy2ij
 
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
+
+if TYPE_CHECKING:
+    from geoutils.pointcloud.pointcloud import PointCloudLike
+    from geoutils.raster.base import RasterBase
 
 
 def _get_dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int) -> int:
@@ -251,7 +258,7 @@ def _interp_points(
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
 
-@profiler.profile("geoutils.interface.interpolate._interp_points", memprof=True)  # type: ignore
+@profiler.profile("geoutils.interface.interpolate._interp_points", memprof=True)
 def _interp_points(
     array: NDArrayNum,
     transform: rio.transform.Affine,
@@ -278,7 +285,7 @@ def _interp_points(
         i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
 
         ind_invalid = np.vectorize(
-            lambda k1, k2: _outside_image(
+            lambda k1, k2: _outside_bounds(
                 k1, k2, transform=transform, area_or_point=area_or_point, shape=shape, index=True
             )
         )(j, i)
@@ -345,3 +352,148 @@ def _interp_points(
     rpoints[np.array(ind_invalid)] = np.nan
 
     return rpoints
+
+
+def _reduce_points(
+    source_raster: RasterBase,
+    points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
+    reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
+    window: int | None = None,
+    input_latlon: bool = False,
+    band: int | None = None,
+    masked: bool = False,
+    return_window: bool = False,
+    as_array: bool = False,
+    boundless: bool = True,
+) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
+
+    # Check and normalize input points
+    pts, input_scalar = _check_match_points(source_raster, points)
+
+    # Convert from latlon if necessary
+    if input_latlon:
+        pts = reproject_from_latlon(pts, out_crs=source_raster.crs)
+
+    x, y = pts
+
+    # Check window parameter
+    if window is not None:
+        if not float(window).is_integer():
+            raise ValueError("Window must be a whole number.")
+        if window % 2 != 1:
+            raise ValueError("Window must be an odd number.")
+        window = int(window)
+
+    # Define subfunction for reducing the window array
+    def format_value(value: Any) -> Any:
+        """Check if valid value has been extracted"""
+        if type(value) in [np.ndarray, np.ma.core.MaskedArray]:
+            if window is not None:
+                value = np.atleast_1d(reducer_function(value.flatten()))
+            else:
+                value = np.atleast_1d(value[0, 0])
+        else:
+            value = None
+        return value
+
+    # Initiate output lists
+    list_values = []
+    if return_window:
+        list_windows = []
+
+    # Convert coordinates to pixel space
+    rows, cols = rio.transform.rowcol(source_raster.transform, x, y, op=math.floor)
+
+    # Loop over all coordinates passed
+    for k in range(len(rows)):  # type: ignore
+        value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], NDArrayNum] | Any]
+
+        row = rows[k]  # type: ignore
+        col = cols[k]  # type: ignore
+
+        # Decide what pixel coordinates to read:
+        if window is not None:
+            half_win = (window - 1) / 2
+            # Subtract start coordinates back to top left of window
+            col = col - half_win
+            row = row - half_win
+            # Offset to read to == window
+            width = window
+            height = window
+        else:
+            # Start reading at col,row and read 1px each way
+            width = 1
+            height = 1
+
+        # If center is out of image, continue and return only NaNs
+        if _outside_bounds(
+            row,
+            col,
+            transform=source_raster.transform,
+            shape=source_raster.shape,
+            area_or_point=source_raster.area_or_point,
+        ):
+            list_values.append(np.atleast_1d(np.nan))
+            if return_window:
+                list_windows.append(np.ones((height, width)) * np.nan)
+            continue
+
+        # Make sure coordinates are int
+        col = int(col)
+        row = int(row)
+
+        if True:
+            if source_raster.count == 1:
+                data = source_raster.data[row : row + height, col : col + width]
+            else:
+                data = source_raster.data[
+                    slice(None) if band is None else band - 1, row : row + height, col : col + width
+                ]
+            if np.ma.isMaskedArray(data) and not masked:
+                data = data.astype(np.float32).filled(np.nan)
+            value = format_value(data)
+            win: NDArrayNum | dict[int, NDArrayNum] = data
+
+        else:
+
+            # Create rasterio's window for reading
+            rio_window = rio.windows.Window(col, row, width, height)
+
+            with rio.open(source_raster.name) as raster:
+                data = raster.read(
+                    window=rio_window,
+                    fill_value=source_raster.nodata,
+                    boundless=boundless,
+                    masked=masked,
+                    indexes=band,
+                )
+            value = format_value(data)
+            win = data
+
+        list_values.append(value)  # type: ignore
+        if return_window:
+            list_windows.append(win)  # type: ignore
+
+    # If for a single value, unwrap output list
+    if input_scalar:
+        output_val = list_values[0][0]
+        if return_window:
+            output_win = list_windows[0]
+    else:
+        output_val = np.array(list_values)
+        output_val = output_val.squeeze()
+        if return_window:
+            output_win = list_windows  # type: ignore
+
+    # Return array or pointcloud
+    from geoutils.pointcloud import (
+        PointCloud,  # Runtime import to avoid circularity issues
+    )
+
+    if not as_array:
+        output_val = PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=source_raster.crs)
+
+    if return_window:
+        return (output_val, output_win)
+    else:
+        return output_val

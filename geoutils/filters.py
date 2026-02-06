@@ -122,7 +122,7 @@ def gaussian_filter(array: NDArrayNum, sigma: float, **kwargs: Any) -> NDArrayNu
     return filtered
 
 
-@jit(nopython=True, parallel=True)  # type: ignore
+@jit(nopython=True, parallel=True)
 def median_filter_numba(array: NDArrayNum, size: int) -> NDArrayNum:
     """
     Apply a median filter to a raster that may contain NaNs, using numbas's implementation.

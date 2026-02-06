@@ -98,7 +98,7 @@ _ALIAS_STATS_LIST_MASK = {
 }
 
 
-@profiler.profile("geoutils.stats.stats._statistics", memprof=True)  # type: ignore
+@profiler.profile("geoutils.stats.stats._statistics", memprof=True)
 def _statistics(
     data: NDArrayNum,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,

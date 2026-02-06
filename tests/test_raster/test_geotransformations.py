@@ -12,6 +12,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
+from geoutils.exceptions import InvalidGridError
 from geoutils.raster._geotransformations import _resampling_method_from_str
 from geoutils.raster.raster import _default_nodata
 
@@ -52,7 +53,7 @@ class TestRasterGeotransformations:
 
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
-    @pytest.mark.parametrize("data", test_data)  # type: ignore
+    @pytest.mark.parametrize("data", test_data)
     def test_crop(self, data: list[str]) -> None:
         """Test for crop method, also called by square brackets through __getitem__"""
 
@@ -237,7 +238,7 @@ class TestRasterGeotransformations:
         r2_crop = r2.crop(bbox)
         assert r2_crop.area_or_point == "Point"
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_translate(self, example: str) -> None:
         """Test translation works as intended"""
 
@@ -289,7 +290,7 @@ class TestRasterGeotransformations:
         with pytest.raises(ValueError, match="Argument 'distance_unit' should be either 'pixel' or 'georeferenced'."):
             r.translate(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_reproject(self, example: str) -> None:
 
         # Reference raster to be used
@@ -346,7 +347,7 @@ class TestRasterGeotransformations:
         # - Test size - this should modify the shape, and hence resolution, but not the bounds -
         out_size = (r.shape[1] // 2, r.shape[0] // 2)  # Outsize is (ncol, nrow)
         r_test = r.reproject(grid_size=out_size)
-        assert r_test.shape == (out_size[1], out_size[0])
+        assert r_test.shape == (out_size[0], out_size[1])
         assert r_test.res != r.res
         assert r_test.bounds == r.bounds
 
@@ -373,7 +374,7 @@ class TestRasterGeotransformations:
 
         # - Test size and bounds -
         r_test = r.reproject(grid_size=out_size, bounds=dst_bounds)
-        assert r_test.shape == (out_size[1], out_size[0])
+        assert r_test.shape == (out_size[0], out_size[1])
         assert r_test.bounds == dst_bounds
 
         # - Test res -
@@ -595,17 +596,15 @@ class TestRasterGeotransformations:
         # -- Test additional errors raised for argument combinations -- #
 
         # If both ref and crs are set
-        with pytest.raises(ValueError, match=re.escape("Either of `ref` or `crs` must be set. Not both.")):
+        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
             _ = r.reproject(ref=r2, crs=r.crs)
 
         # Size and res are mutually exclusive
-        with pytest.raises(ValueError, match=re.escape("size and res both specified. Specify only one.")):
+        with pytest.raises(InvalidGridError, match="Both output grid resolution 'res' and shape"):
             _ = r.reproject(grid_size=(10, 10), res=50)
 
         # If wrong type for `ref`
-        with pytest.raises(
-            TypeError, match=re.escape("Type of ref not understood, must be path to file (str), Raster.")
-        ):
+        with pytest.raises(InvalidGridError, match="Cannot interpret reference grid from"):
             _ = r.reproject(ref=3)
 
         # -- Check warning for area_or_point works -- #
@@ -637,7 +636,7 @@ class TestMaskGeotransformations:
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_crop(self, mask: gu.Raster) -> None:
         # Test with same bounds -> should be the same #
 
@@ -722,7 +721,7 @@ class TestMaskGeotransformations:
         mask_orig_pix.icrop(bbox2_pixel, inplace=True)
         assert mask_orig.raster_equal(mask_orig_pix)
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_reproject(self, mask: gu.Raster) -> None:
         # Test 1: with a classic resampling (bilinear)
 

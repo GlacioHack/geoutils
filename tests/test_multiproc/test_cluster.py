@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from geoutils.raster.distributed_computing.cluster import (
+from geoutils.multiproc.cluster import (
     BasicCluster,
     ClusterGenerator,
     MpCluster,

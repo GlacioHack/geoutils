@@ -13,7 +13,7 @@ from geoutils.raster.array import get_array_and_mask, get_valid_extent, get_xy_r
 
 
 class TestArray:
-    @pytest.mark.parametrize("dtype", ["uint8", "uint16", "int32", "float32", "float16"])  # type: ignore
+    @pytest.mark.parametrize("dtype", ["uint8", "uint16", "int32", "float32", "float16"])
     @pytest.mark.parametrize(
         "mask_and_viewable",
         [
@@ -22,7 +22,7 @@ class TestArray:
             ([True, False, False, False], False),  # A masked array with an occupied mask should not support views.
             ([False, False, False, False], True),  # A masked array with an empty occupied mask should support views.
         ],
-    )  # type: ignore
+    )
     @pytest.mark.parametrize(
         "shape_and_check_passes",
         [
@@ -31,7 +31,7 @@ class TestArray:
             ((2, 2), True),  # A 2D array is okay.
             ((4,), True),  # A 1D array is okay.
         ],
-    )  # type: ignore
+    )
     def test_get_array_and_mask(
         self,
         dtype: str,

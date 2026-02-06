@@ -103,9 +103,9 @@ class TestDelayed:
     for small_darr in list_small_darr:
         darr_bool.append(da.where(da.isfinite(small_darr), True, False))
 
-    @pytest.mark.parametrize("darr, darr_bool", list(zip(list_small_darr, darr_bool)))  # type: ignore
-    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
-    @pytest.mark.parametrize("subsample_size", [2, 100, 100000])  # type: ignore
+    @pytest.mark.parametrize("darr, darr_bool", list(zip(list_small_darr, darr_bool)))
+    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
+    @pytest.mark.parametrize("subsample_size", [2, 100, 100000])
     def test_delayed_subsample__output(
         self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int
     ) -> None:
@@ -141,10 +141,10 @@ class TestDelayed:
         assert np.array_equal(sub, sub_bool)
         assert np.array_equal(indices, indices_bool)
 
-    @pytest.mark.parametrize("darr", list_small_darr)  # type: ignore
-    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
-    @pytest.mark.parametrize("ninterp", [2, 100])  # type: ignore
-    @pytest.mark.parametrize("res", [(0.5, 2), (1, 1)])  # type: ignore
+    @pytest.mark.parametrize("darr", list_small_darr)
+    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
+    @pytest.mark.parametrize("ninterp", [2, 100])
+    @pytest.mark.parametrize("res", [(0.5, 2), (1, 1)])
     def test_delayed_interp_points__output(
         self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int, res: tuple[float, float]
     ) -> None:
@@ -184,15 +184,15 @@ class TestDelayed:
 
         assert np.array_equal(interp1, interp2, equal_nan=True)
 
-    @pytest.mark.parametrize("darr", list_small_darr)  # type: ignore
-    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)  # type: ignore
-    @pytest.mark.parametrize("dst_chunksizes", list_small_chunksizes_in_mem)  # type: ignore
+    @pytest.mark.parametrize("darr", list_small_darr)
+    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
+    @pytest.mark.parametrize("dst_chunksizes", list_small_chunksizes_in_mem)
     # Shift upper left corner of output bounds (relative to projected input bounds) by fractions of the raster size
-    @pytest.mark.parametrize("dst_bounds_rel_shift", [(0, 0), (-0.2, 0.5)])  # type: ignore
+    @pytest.mark.parametrize("dst_bounds_rel_shift", [(0, 0), (-0.2, 0.5)])
     # Modify output resolution (relative to projected input resolution) by a factor
-    @pytest.mark.parametrize("dst_res_rel_fac", [(1, 1), (2.1, 0.54)])  # type: ignore
+    @pytest.mark.parametrize("dst_res_rel_fac", [(1, 1), (2.1, 0.54)])
     # Same for shape
-    @pytest.mark.parametrize("dst_shape_diff", [(0, 0), (-28, 117)])  # type: ignore
+    @pytest.mark.parametrize("dst_shape_diff", [(0, 0), (-28, 117)])
     def test_delayed_reproject__output(
         self,
         darr: da.Array,

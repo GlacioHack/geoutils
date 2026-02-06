@@ -98,7 +98,7 @@ class TestPointCloud:
         assert pc.data_column == "number_of_returns"
         assert not pc.is_loaded
 
-    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")  # type: ignore
+    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")
     def test_init_las__missing_dep(self) -> None:
         """Check that an absent laspy dependency raises the proper error."""
 
@@ -405,7 +405,7 @@ class TestPointCloud:
     specific_method_args = {
         "reproject": {"crs": CRS.from_epsg(32610)},
         "crop": {
-            "crop_geom": (
+            "bbox": (
                 np.min(gdf1.geometry.x.values),
                 np.min(gdf1.geometry.y.values),
                 np.max(gdf1.geometry.x.values),
@@ -456,7 +456,7 @@ class TestPointCloud:
         assert np.allclose(pc2.data, saved2.data, atol=atol)
         assert np.allclose(pc2["b2"].values, saved2["b2"].values, atol=atol)
 
-    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")  # type: ignore
+    @pytest.mark.skipif(find_spec("laspy") is not None, reason="Only runs if laspy is missing.")
     def test_to_las__missing_dep(self) -> None:
         """Check to_las() raises the proper error if laspy is not installed."""
 
@@ -465,7 +465,7 @@ class TestPointCloud:
 
     @pytest.mark.parametrize(
         "method", ["reproject", "crop", "translate", "set_precision", "to_crs", "set_crs", "rename_geometry"]
-    )  # type: ignore
+    )
     def test_cast_vector_methods__geometry_invariant(self, method: str) -> None:
         """Test that method that don't modify geometry do cast back to a PointCloud."""
 
@@ -605,7 +605,7 @@ class TestArithmetic:
         "__mod__",
     ]
 
-    @pytest.mark.parametrize("op", ops_2args)  # type: ignore
+    @pytest.mark.parametrize("op", ops_2args)
     def test_ops_2args_expl(self, op: str) -> None:
         """
         Check that arithmetic overloading functions, with two operands, work as expected when called explicitly.
@@ -673,7 +673,7 @@ class TestArithmetic:
 
     reflective_ops = [["__add__", "__radd__"], ["__mul__", "__rmul__"]]
 
-    @pytest.mark.parametrize("ops", reflective_ops)  # type: ignore
+    @pytest.mark.parametrize("ops", reflective_ops)
     def test_reflectivity(self, ops: list[str]) -> None:
         """
         Check reflective operations
@@ -909,7 +909,7 @@ class TestArithmetic:
         # Bitwise invert
         assert (~m1).pointcloud_equal(self.copy(~m1.data, pc_ref=pc1))
 
-    @pytest.mark.parametrize("op", ops_2args)  # type: ignore
+    @pytest.mark.parametrize("op", ops_2args)
     def test_raise_errors(self, op: str) -> None:
         """
         Test that errors are properly raised in certain situations.
@@ -948,13 +948,13 @@ class TestArithmetic:
         with pytest.raises(NotImplementedError, match=expected_message):
             getattr(self.pc1, op)("some_string")
 
-    @pytest.mark.parametrize("power", [2, 3.14, -1])  # type: ignore
+    @pytest.mark.parametrize("power", [2, 3.14, -1])
     def test_power(self, power: float | int) -> None:
         if power > 0:  # Integers to negative integer powers are not allowed.
             assert self.pc1**power == self.copy(self.pc1.data**power, pc_ref=self.pc1)
         assert self.pc1_f32**power == self.copy(self.pc1_f32.data**power, pc_ref=self.pc1_f32)
 
-    @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])  # type: ignore
+    @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])
     def test_numpy_functions(self, dtype: str) -> None:
         """Test how rasters can be used as/with numpy arrays."""
         warnings.simplefilter("error")
@@ -1155,8 +1155,8 @@ class TestArrayInterface:
     # Wrong CRS input
     wrong_crs = CRS(32610)
 
-    @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
-    @pytest.mark.parametrize("dtype", ["uint8", "int8", "float32"])  # type: ignore
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)
+    @pytest.mark.parametrize("dtype", ["uint8", "int8", "float32"])
     def test_array_ufunc_1nin_1nout(self, ufunc_str: str, dtype: str) -> None:
         """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
 
@@ -1204,9 +1204,9 @@ class TestArrayInterface:
                 with pytest.raises(TypeError):
                     ufunc(pc)
 
-    @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
-    @pytest.mark.parametrize("dtype1", ["uint8", "int8", "float32"])  # type: ignore
-    @pytest.mark.parametrize("dtype2", ["uint8", "int8", "float32"])  # type: ignore
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)
+    @pytest.mark.parametrize("dtype1", ["uint8", "int8", "float32"])
+    @pytest.mark.parametrize("dtype2", ["uint8", "int8", "float32"])
     def test_array_ufunc_2nin_1nout(self, ufunc_str: str, dtype1: str, dtype2: str) -> None:
         """Test that ufuncs with two input arguments consistently return the same result as for masked arrays."""
 
@@ -1284,8 +1284,8 @@ class TestArrayInterface:
                 with pytest.raises(TypeError):
                     ufunc(pc1, pc2)
 
-    @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
-    @pytest.mark.parametrize("dtype", ["uint8", "int8", "float32"])  # type: ignore
+    @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)
+    @pytest.mark.parametrize("dtype", ["uint8", "int8", "float32"])
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str) -> None:
         """
         Test that single-input array functions that we support give the same output as they would on the masked array.
@@ -1330,9 +1330,9 @@ class TestArrayInterface:
             else:
                 assert np.array_equal(output_pc, output_arr, equal_nan=True)
 
-    @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
-    @pytest.mark.parametrize("dtype1", ["uint8", "int8", "float32"])  # type: ignore
-    @pytest.mark.parametrize("dtype2", ["uint8", "int8", "float32"])  # type: ignore
+    @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)
+    @pytest.mark.parametrize("dtype1", ["uint8", "int8", "float32"])
+    @pytest.mark.parametrize("dtype2", ["uint8", "int8", "float32"])
     def test_array_functions_2nin(self, arrfunc_str: str, dtype1: str, dtype2: str) -> None:
         """
         Test that double-input array functions that we support give the same output as they would on the masked array.
@@ -1368,7 +1368,7 @@ class TestArrayInterface:
             else:
                 assert np.array_equal(output_pc, output_arr, equal_nan=True)
 
-    @pytest.mark.parametrize("method_str", ["reduce"])  # type: ignore
+    @pytest.mark.parametrize("method_str", ["reduce"])
     def test_ufunc_methods(self, method_str: str) -> None:
         """
         Test that universal function methods all behave properly, don't need to test all

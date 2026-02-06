@@ -28,11 +28,10 @@ import shapely
 from scipy.spatial import Voronoi
 from shapely.geometry.polygon import Polygon
 
-import geoutils as gu
 from geoutils.projtools import _get_utm_ups_crs, bounds2poly
 
 
-def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float) -> gu.Vector:
+def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float) -> gpd.GeoDataFrame:
     """
     Metric buffering. See Vector.buffer_metric() for details.
     """
@@ -51,14 +50,14 @@ def _buffer_metric(gdf: gpd.GeoDataFrame, buffer_size: float) -> gu.Vector:
     del ds_buffered
 
     # Return a Vector object of the buffered GeoDataFrame
-    vector_buffered = gu.Vector(gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=gdf.crs))
+    vector_buffered = gpd.GeoDataFrame(geometry=ds_buffered_origproj.geometry, crs=gdf.crs)
 
     return vector_buffered
 
 
 def _buffer_without_overlap(
     ds: gpd.GeoDataFrame, buffer_size: int | float, metric: bool = True, plot: bool = False
-) -> gu.Vector:
+) -> gpd.GeoDataFrame:
     """See Vector.buffer_without_overlap() for details."""
 
     # Project in local UTM if metric is True
@@ -101,7 +100,7 @@ def _buffer_without_overlap(
     if metric:
         merged_voronoi = merged_voronoi.to_crs(crs=ds.crs)
 
-    return gu.Vector(merged_voronoi)
+    return merged_voronoi
 
 
 def _extract_vertices(gdf: gpd.GeoDataFrame) -> list[list[tuple[float, float]]]:

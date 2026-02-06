@@ -21,19 +21,22 @@
 from __future__ import annotations
 
 import warnings
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import geopandas as gpd
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
-import geoutils as gu
 from geoutils._typing import NDArrayNum
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterType
+    from geoutils.vector.vector import VectorType
 
 
 def _proximity_from_vector_or_raster(
-    raster: gu.Raster,
-    vector: gu.Vector | None = None,
+    raster: RasterType,
+    vector: VectorType | None = None,
     target_values: list[float] | None = None,
     geometry_type: str = "boundary",
     in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
@@ -62,9 +65,10 @@ def _proximity_from_vector_or_raster(
         warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS.*")
 
         # We create a geodataframe with the geometry type
-        boundary_shp = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
+        vec_cop = vector.copy()
+        vec_cop.ds = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
         # We mask the pixels that make up the geometry type
-        mask_boundary = gu.Vector(boundary_shp).create_mask(raster, as_array=True)
+        mask_boundary = vec_cop.create_mask(raster, as_array=True)
 
     else:
         # Get raster array
@@ -111,7 +115,7 @@ def _proximity_from_vector_or_raster(
         if in_or_out == "both":
             pass
         elif in_or_out in ["in", "out"]:
-            mask_polygon = gu.Vector(vector.ds).create_mask(raster, as_array=True)
+            mask_polygon = vector.create_mask(raster, as_array=True)
             if in_or_out == "in":
                 proximity[~mask_polygon] = 0
             else:

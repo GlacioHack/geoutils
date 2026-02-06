@@ -91,7 +91,7 @@ class TestProjTools:
         assert pt.utm_to_epsg("1N") == pt.utm_to_epsg("01N") == pt.utm_to_epsg("01n")
         assert pt.utm_to_epsg("08s") == pt.utm_to_epsg("8S") == pt.utm_to_epsg("08S")
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_get_metric_crs_utm(self, example: str) -> None:
         """Check that the function works consistently with GeoPandas for UTM."""
 
@@ -118,7 +118,7 @@ class TestProjTools:
         assert vect_north.get_metric_crs() == pyproj.CRS.from_epsg(32661)
         assert vect_south.get_metric_crs() == pyproj.CRS.from_epsg(32761)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_latlon_reproject(self, example: str) -> None:
         """
         Check that to and from latlon projections are self consistent within tolerated rounding errors
@@ -132,8 +132,8 @@ class TestProjTools:
         randx = rng.integers(low=img.bounds.left, high=img.bounds.right, size=(nsample,))
         randy = rng.integers(low=img.bounds.bottom, high=img.bounds.top, size=(nsample,))
 
-        lat, lon = pt.reproject_to_latlon([list(randx), list(randy)], img.crs)
-        x, y = pt.reproject_from_latlon([lat, lon], img.crs)
+        lat, lon = pt.reproject_to_latlon((randx, randy), img.crs)
+        x, y = pt.reproject_from_latlon((lat, lon), img.crs)  # type: ignore
 
         assert np.all(x == randx)
         assert np.all(y == randy)
@@ -188,10 +188,10 @@ class TestProjTools:
             aster_dem_path,
             aster_outlines_path,
         ],
-    )  # type: ignore
+    )
     # Try with geographic, a UTM zone and a Robinson
-    @pytest.mark.parametrize("out_crs", [pyproj.CRS.from_epsg(4326), pyproj.CRS.from_epsg(32610)])  # type: ignore
-    @pytest.mark.parametrize("densify_points", [2, 10, 5000])  # type: ignore
+    @pytest.mark.parametrize("out_crs", [pyproj.CRS.from_epsg(4326), pyproj.CRS.from_epsg(32610)])
+    @pytest.mark.parametrize("densify_points", [2, 10, 5000])
     def test_get_footprint_projected(self, fn_raster_or_vector: str, out_crs: pyproj.CRS, densify_points: int) -> None:
         """Test the get footprint projected function."""
 

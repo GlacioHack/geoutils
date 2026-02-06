@@ -169,7 +169,7 @@ intersecting geometries to the extent.
 
 ```{code-cell} ipython3
 # Crop vector to smaller bounds
-vect_crop = vect.crop(crop_geom=(-73.5, -46.6, -73.4, -46.5), clip=True)
+vect_crop = vect.crop((-73.5, -46.6, -73.4, -46.5), clip=True)
 vect_crop.info()
 ```
 

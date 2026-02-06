@@ -14,7 +14,7 @@ class TestGeoreferencing:
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_ij2xy(self, example: str) -> None:
         """Test the outputs of ij2xy and that the function is reversible with xy2ij."""
 
@@ -68,7 +68,7 @@ class TestGeoreferencing:
         assert rst.ij2xy([0], [rst.shape[1] - 1]) == ([lims_ul[2]], [lims_ul[3]])
         assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1]) == ([lims_ul[2]], [lims_ul[1]])
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_xy2ij_ij2xy_reversible(self, example: str) -> None:
 
         # Open raster
@@ -170,7 +170,7 @@ class TestGeoreferencing:
 
         assert np.array_equal(np.array(list_z_ind, dtype=np.float32), rpts, equal_nan=True)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_coords(self, example: str) -> None:
 
         img = gu.Raster(example)

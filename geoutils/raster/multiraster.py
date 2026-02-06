@@ -27,16 +27,16 @@ import numpy as np
 import rasterio as rio
 import rasterio.warp
 
-import geoutils as gu
 from geoutils._typing import NDArrayNum
+from geoutils.projtools import align_bounds, merge_bounds
 from geoutils.raster._geotransformations import _resampling_method_from_str
 from geoutils.raster.array import get_array_and_mask
-from geoutils.raster.raster import RasterType, _default_nodata
+from geoutils.raster.raster import Raster, _default_nodata
 
 
 def load_multiple_rasters(
     raster_paths: list[str], crop: bool = True, ref_grid: int | None = None, **kwargs: Any
-) -> list[RasterType]:
+) -> list[Raster]:
     """
     Function to load multiple rasters at once in a memory efficient way.
     First load metadata only.
@@ -63,14 +63,14 @@ def load_multiple_rasters(
         raise ValueError("`ref_grid` must be None or an integer")
 
     # Need to define a reference CRS for calculating intersection
-    ref_crs = gu.Raster(raster_paths[ref_grid], load_data=False).crs
+    ref_crs = Raster(raster_paths[ref_grid], load_data=False).crs
 
     # First load all rasters metadata
     output_rst = []
     bounds = []
     for path in raster_paths:
         # Initialize raster
-        rst = gu.Raster(path, load_data=False)
+        rst = Raster(path, load_data=False)
         output_rst.append(rst)
 
         # Get bound in reference CRS
@@ -78,7 +78,7 @@ def load_multiple_rasters(
         bounds.append(bound)
 
     # Second get the intersection of all raster bounds
-    intersection = gu.projtools.merge_bounds(bounds, merging_algorithm="intersection")
+    intersection = merge_bounds(bounds, merging_algorithm="intersection")
 
     # Optionally, crop the rasters
     if crop:
@@ -94,7 +94,7 @@ def load_multiple_rasters(
                 ref_crs, rst.crs, intersection[0], intersection[1], intersection[2], intersection[3], densify_pts=5000
             )
             # Ensure bounds align with the original ones, to avoid resampling at this stage
-            new_bounds = gu.projtools.align_bounds(rst.transform, new_bounds)
+            new_bounds = align_bounds(rst.transform, new_bounds)
             output_rst[i] = output_rst[i].crop(new_bounds)
 
     # Optionally, reproject all rasters to the reference grid
@@ -105,7 +105,7 @@ def load_multiple_rasters(
         if crop:
             # make sure new bounds align with reference's bounds (to avoid resampling ref)
             new_bounds = intersection
-            new_bounds = gu.projtools.align_bounds(ref_rst.transform, intersection)
+            new_bounds = align_bounds(ref_rst.transform, intersection)
             new_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
         else:
             new_bounds = ref_rst.bounds
@@ -126,13 +126,13 @@ def load_multiple_rasters(
 
 
 def stack_rasters(
-    rasters: list[RasterType],
-    reference: int | gu.Raster = 0,
+    rasters: list[Raster],
+    reference: int | Raster = 0,
     resampling_method: str | rio.enums.Resampling = "bilinear",
     use_ref_bounds: bool = False,
     diff: bool = False,
     progress: bool = True,
-) -> gu.Raster:
+) -> Raster:
     """
     Stack a list of rasters on their maximum extent into a multi-band raster.
 
@@ -168,7 +168,7 @@ def stack_rasters(
     # Select reference raster
     if isinstance(reference, int):
         reference_raster = rasters[reference]
-    elif isinstance(reference, gu.Raster):
+    elif isinstance(reference, Raster):
         reference_raster = reference
     else:
         raise ValueError("reference should be either an integer or geoutils.Raster object")
@@ -177,7 +177,7 @@ def stack_rasters(
     if use_ref_bounds:
         dst_bounds = reference_raster.bounds
     else:
-        dst_bounds = gu.projtools.merge_bounds(
+        dst_bounds = merge_bounds(
             [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters],
             resolution=reference_raster.res[0],
             return_rio_bbox=True,
@@ -194,7 +194,7 @@ def stack_rasters(
         nodata = (
             reference_raster.nodata
             if reference_raster.nodata is not None
-            else gu.raster.raster._default_nodata(reference_raster.data.dtype)
+            else _default_nodata(reference_raster.data.dtype)
         )
         # Reproject to reference grid
         reprojected_raster = raster.reproject(
@@ -237,8 +237,8 @@ def stack_rasters(
         nodata = _default_nodata(data.dtype)
     data[np.isnan(data)] = nodata  # type: ignore
 
-    # Save as gu.Raster - needed as some child classes may not accept multiple bands
-    r = gu.Raster.from_array(
+    # Save as Raster - needed as some child classes may not accept multiple bands
+    r = Raster.from_array(
         data=data,
         transform=rio.transform.from_bounds(*dst_bounds, width=data[0].shape[1], height=data[0].shape[0]),
         crs=reference_raster.crs,
@@ -249,13 +249,13 @@ def stack_rasters(
 
 
 def merge_rasters(
-    rasters: list[RasterType],
-    reference: int | RasterType = 0,
+    rasters: list[Raster],
+    reference: int | Raster = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.enums.Resampling = "bilinear",
     use_ref_bounds: bool = False,
     progress: bool = True,
-) -> RasterType:
+) -> Raster:
     """
     Spatially merge a list of rasters into one larger raster of their maximum extent.
 
@@ -294,7 +294,7 @@ def merge_rasters(
     # Select reference raster
     if isinstance(reference, int):
         reference_raster = rasters[reference]
-    elif isinstance(reference, gu.Raster):
+    elif isinstance(reference, Raster):
         reference_raster = reference
     else:
         raise ValueError("reference should be either an integer or geoutils.Raster object")
@@ -330,7 +330,7 @@ def merge_rasters(
         nodata = _default_nodata(merged_data.dtype)
     merged_data[np.isnan(merged_data)] = nodata
 
-    # Save as gu.Raster
+    # Save as Raster
     merged_raster = reference_raster.from_array(
         data=np.reshape(merged_data, (len(merged_data),) + merged_data[0].shape),
         transform=rio.transform.from_bounds(

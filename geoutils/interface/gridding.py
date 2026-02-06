@@ -32,7 +32,7 @@ from geoutils._typing import NDArrayNum
 
 def _grid_pointcloud(
     pc: gpd.GeoDataFrame,
-    grid_coords: tuple[NDArrayNum, NDArrayNum] = None,
+    grid_coords: tuple[NDArrayNum, NDArrayNum],
     data_column_name: str | None = None,
     resampling: Literal["nearest", "linear", "cubic"] = "linear",
     dist_nodata_pixel: float = 1.0,
@@ -51,20 +51,6 @@ def _grid_pointcloud(
     :param dist_nodata_pixel: Distance from the point cloud after which grid cells are filled by nodata values,
         expressed in number of pixels.
     """
-
-    # Input checks
-    if (
-        not isinstance(grid_coords, tuple)
-        or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
-        or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
-    ):
-        raise TypeError("Input grid coordinates must be 1D arrays.")
-
-    diff_x = np.diff(grid_coords[0])
-    diff_y = np.diff(grid_coords[1])
-
-    if not all(diff_x == diff_x[0]) and all(diff_y == diff_y[0]):
-        raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
 
     # 1/ Interpolate irregular point cloud on a regular grid
 

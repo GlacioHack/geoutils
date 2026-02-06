@@ -208,11 +208,8 @@ class TestMultiRaster:
         assert rasters.img.bounds == stacked_img.bounds
 
         # Others than int or gu.Raster should raise a ValueError
-        try:
-            stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference="a string")
-        except ValueError as exception:
-            if "reference should be" not in str(exception):
-                raise exception
+        with pytest.raises(ValueError, match="reference should be .*"):
+            gu.raster.stack_rasters([rasters.img1, rasters.img2], reference="a string")  # type: ignore
 
         # Check that use_ref_bounds works - use a img that do not cover the whole extent
 
@@ -332,7 +329,7 @@ class TestMultiRaster:
         ],
     ]
 
-    @pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore
+    @pytest.mark.parametrize("raster_paths", raster_groups)
     def test_load_multiple_overlap(self, raster_paths: list[str]) -> None:
         """
         Test load_multiple_rasters functionalities, when rasters overlap -> no warning is raised
@@ -386,7 +383,7 @@ class TestMultiRaster:
         [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")],
     ]
 
-    @pytest.mark.parametrize("raster_paths", raster_groups)  # type: ignore
+    @pytest.mark.parametrize("raster_paths", raster_groups)
     def test_load_multiple_no_overlap(self, raster_paths: list[str]) -> None:
         """
         Test load_multiple_rasters functionalities with rasters that do not overlap -> raises warning in certain cases

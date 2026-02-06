@@ -53,7 +53,7 @@ class TestStatisticalFilters:
 
     landsat_data = gu.Raster(gu.examples.get_path("everest_landsat_b4")).astype(np.float32)
 
-    @pytest.mark.parametrize(  # type: ignore
+    @pytest.mark.parametrize(
         "name, filter_func",
         [
             ("median", lambda arr: gu.filters.median_filter(arr, size=5)),
@@ -126,7 +126,7 @@ class TestStatisticalFilters:
         assert filtered_numba.shape == arr.shape
         assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
 
-    @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")  # type: ignore
+    @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")
     def test_filter_numba__missing_dep(self) -> None:
         """Test that when numba is missing, the proper import error is raised."""
 
@@ -369,7 +369,7 @@ class TestSyntheticsNansFilters:  # type: ignore
         np.testing.assert_allclose(approx_gt, test[3, 1], rtol=1e-1)
 
 
-@pytest.mark.parametrize(  # type: ignore
+@pytest.mark.parametrize(
     "method, np_filter",
     [
         ("mean", np.nanmean),

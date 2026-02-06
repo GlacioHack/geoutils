@@ -9,6 +9,7 @@ import pytest
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 
 import geoutils as gu
+from geoutils.exceptions import InvalidBoundsError
 
 
 class TestGeotransformations:
@@ -55,12 +56,12 @@ class TestGeotransformations:
             v0.reproject()
             v0.reproject(ref=r0, crs=32617)
         # If input of wrong type
-        with pytest.raises(TypeError, match=re.escape("Type of ref must be a raster or vector.")):
+        with pytest.raises(TypeError, match="Match-reference input must have a 'crs' attribute.*"):
             v0.reproject(ref=10)  # type: ignore
 
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
-    @pytest.mark.parametrize("data", test_data)  # type: ignore
+    @pytest.mark.parametrize("data", test_data)
     def test_crop(self, data: list[str]) -> None:
         # Load data
         raster_path, outlines_path = data
@@ -73,14 +74,14 @@ class TestGeotransformations:
 
         # Crop
         outlines_new = outlines.copy()
-        outlines_new.crop(crop_geom=rst, inplace=True)
+        outlines_new.crop(rst, inplace=True)
 
         # Check default behaviour - crop and return copy
-        outlines_copy = outlines.crop(crop_geom=rst)
+        outlines_copy = outlines.crop(rst)
 
         # Crop by passing bounds
         outlines_new_bounds = outlines.copy()
-        outlines_new_bounds.crop(crop_geom=list(rst.bounds), inplace=True)
+        outlines_new_bounds.crop(list(rst.bounds), inplace=True)
         assert_geodataframe_equal(outlines_new.ds, outlines_new_bounds.ds)
         # Check the return-by-copy as well
         assert_geodataframe_equal(outlines_copy.ds, outlines_new_bounds.ds)
@@ -105,7 +106,7 @@ class TestGeotransformations:
             assert np.sum(~np.array(intersects_old)) > 0
 
         # Check that error is raised when cropGeom argument is invalid
-        with pytest.raises(TypeError, match="Crop geometry must be a Raster, Vector, or list of coordinates."):
+        with pytest.raises(InvalidBoundsError, match="Cannot interpret bounding box input.*"):
             outlines.crop(1, inplace=True)  # type: ignore
 
     def test_translate(self) -> None:

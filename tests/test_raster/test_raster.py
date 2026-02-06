@@ -35,7 +35,7 @@ class TestRaster:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
     aster_outlines_path = examples.get_path_test("exploradores_rgi_outlines")
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_init(self, example: str) -> None:
         """Test that all possible inputs work properly in Raster class init"""
 
@@ -100,7 +100,7 @@ class TestRaster:
         r6 = gu.Raster(example, force_nodata=255)
         assert r6._nodata == 255
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_repr_str(self, example: str) -> None:
         """Test the representation of a raster works"""
 
@@ -129,7 +129,7 @@ class TestRaster:
         assert r_str == r.data.__str__()
         assert r_repr.split("data=")[1][:10] != "not_loaded"
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
 
@@ -303,7 +303,7 @@ class TestRaster:
             r._name = None
             r.load()
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_load_only_mask(self, example: str) -> None:
         """
         Test that loading only mask works properly.
@@ -321,7 +321,7 @@ class TestRaster:
         assert not r_notloaded.is_loaded
         assert np.array_equal(mask_notloaded, mask_loaded)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_get_mask(self, example: str) -> None:
         """
         Test that getting mask works properly (similar to _load_only_mask).
@@ -339,7 +339,7 @@ class TestRaster:
         assert not r_notloaded.is_loaded
         assert np.array_equal(mask_notloaded, mask_loaded)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_to_rio_dataset(self, example: str) -> None:
         """Test the export to a rasterio dataset"""
 
@@ -359,7 +359,7 @@ class TestRaster:
         assert np.array_equal(rst.data.data, rio_ds.read().squeeze())
         assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask.squeeze())
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_to_xarray(self, example: str) -> None:
         """Test the export to a xarray dataset"""
 
@@ -395,7 +395,7 @@ class TestRaster:
         else:
             assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_xarray(self, example: str) -> None:
         """Test raster creation from a xarray dataset, not fully reversible with to_xarray due to float conversion"""
 
@@ -420,11 +420,11 @@ class TestRaster:
             rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtype)
             assert rst3.raster_equal(rst, strict_masked=False)
 
-    @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])
     @pytest.mark.parametrize(
         "dtype",
         ["uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64", "float32", "float64", "longdouble"],
-    )  # type: ignore
+    )
     def test_data_setter(self, dtype: str, nodata_init: str | None) -> None:
         """
         Test that the behaviour of data setter, which is triggered directly using from_array, is as expected.
@@ -759,7 +759,7 @@ class TestRaster:
         assert rst1.bounds.left == rst.bounds.left + rst.res[0] / 2
         assert rst1.bounds.top == rst.bounds.top - rst.res[1] / 2
 
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
     def test_get_nanarray(self, example: str) -> None:
         """
         Check that self.get_nanarray behaves as expected for examples with invalid data or not, and with several bands
@@ -798,7 +798,7 @@ class TestRaster:
         mask = ~mask
         assert rst.raster_equal(rst_copy, warn_failure_reason=True)
 
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
     def test_downsampling(self, example: str) -> None:
         """
         Check that self metadata are correctly updated when using downsampling
@@ -952,7 +952,7 @@ class TestRaster:
         with pytest.raises(ValueError, match=expected_message):
             r1.__sub__(r2)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_copy(self, example: str) -> None:
         """
         Test that the copy method works as expected for Raster.
@@ -1065,7 +1065,7 @@ class TestRaster:
         assert r.is_loaded
         assert r5.is_loaded
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_masking(self, example: str) -> None:
         """
         Test self.set_mask
@@ -1119,7 +1119,7 @@ class TestRaster:
         with pytest.raises(ValueError, match="mask must be a numpy array"):
             r.set_mask(1)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_getitem_setitem(self, example: str) -> None:
         """Test the __getitem__ method ([]) for indexing and __setitem__ for index assignment."""
 
@@ -1210,7 +1210,7 @@ class TestRaster:
         with pytest.raises(ValueError, match=re.escape(message_raster.format(op_name_assign))):
             rst[mask] = 1
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_intersection(self, example: list[str]) -> None:
         """Check the behaviour of the intersection function"""
         # Load input raster
@@ -1334,7 +1334,7 @@ class TestRaster:
             intersection = r.intersection(r_nonoverlap)
             assert intersection == (0.0, 0.0, 0.0, 0.0)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_set_nodata(self, example: str) -> None:
         """
         We test set_nodata() with all possible input parameters, check expected behaviour for updating array and mask,
@@ -1545,7 +1545,7 @@ class TestRaster:
             np.ma.getmaskarray(r.data)[~index_old_nodata], np.ma.getmaskarray(r_copy.data)[~index_old_nodata]
         )
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_nodata_setter(self, example: str) -> None:
         """Check that the nodata setter gives the same result as set_nodata with default parameters"""
 
@@ -1594,7 +1594,7 @@ class TestRaster:
         with pytest.raises(TypeError, match="dtype 1 not understood."):
             _default_nodata(1)  # type: ignore
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_astype(self, example: str) -> None:
 
         warnings.filterwarnings(
@@ -1659,8 +1659,8 @@ class TestRaster:
         assert r3.nodata == r.nodata
 
     # The multi-band example will not have a colorbar, so not used in tests
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path])  # type: ignore
-    @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path])
+    @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))
     def test_plot_cbar(self, example: str, figsize: NDArrayNum) -> None:
         """
         Test cbar matches plot height.
@@ -1833,7 +1833,7 @@ class TestRaster:
         with pytest.raises(ImportError, match="Optional dependency 'matplotlib' required.*"):
             img.plot()
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_to_file(self, example: str) -> None:
         # Read single band raster
         img = gu.Raster(example)
@@ -1907,7 +1907,7 @@ class TestRaster:
         except (NotADirectoryError, PermissionError):
             pass
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_array(self, example: str) -> None:
 
         if "LE71" in os.path.basename(example):
@@ -2067,7 +2067,7 @@ class TestMask:
     # Mask from an outline
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_init(self, example: str) -> None:
         """Test that Mask subclass initialization function as intended."""
 
@@ -2112,8 +2112,8 @@ class TestMask:
         "__ge__",
     ]
 
-    @pytest.mark.parametrize("op", ops_logical)  # type: ignore
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("op", ops_logical)
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_logical_casting_real(self, example: str, op: str) -> None:
         """
         Test that logical operations cast Raster object to Mask on real data
@@ -2128,7 +2128,7 @@ class TestMask:
         assert np.array_equal(mask.data.data, getattr(rst.data.data, op)(1))
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_implicit_logical_casting_real(self, example: str) -> None:
         """
         Test that implicit logical operations on real data
@@ -2173,7 +2173,7 @@ class TestMask:
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
 
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])  # type: ignore
+    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_to_file(self, mask: gu.Raster) -> None:
         """Test saving for masks"""
 
@@ -2388,7 +2388,7 @@ class TestArithmetic:
         "__mod__",
     ]
 
-    @pytest.mark.parametrize("op", ops_2args)  # type: ignore
+    @pytest.mark.parametrize("op", ops_2args)
     def test_ops_2args_expl(self, op: str) -> None:
         """
         Check that arithmetic overloading functions, with two operands, work as expected when called explicitly.
@@ -2487,7 +2487,7 @@ class TestArithmetic:
 
     reflective_ops = [["__add__", "__radd__"], ["__mul__", "__rmul__"]]
 
-    @pytest.mark.parametrize("ops", reflective_ops)  # type: ignore
+    @pytest.mark.parametrize("ops", reflective_ops)
     def test_reflectivity(self, ops: list[str]) -> None:
         """
         Check reflective operations
@@ -2731,7 +2731,7 @@ class TestArithmetic:
         # Bitwise invert
         assert (~m1).raster_equal(self.from_array(~m1.data, rst_ref=r1))
 
-    @pytest.mark.parametrize("op", ops_2args)  # type: ignore
+    @pytest.mark.parametrize("op", ops_2args)
     def test_raise_errors(self, op: str) -> None:
         """
         Test that errors are properly raised in certain situations.
@@ -2782,13 +2782,13 @@ class TestArithmetic:
         with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
             getattr(self.r2, op)(self.r1_wrong_aop)
 
-    @pytest.mark.parametrize("power", [2, 3.14, -1])  # type: ignore
+    @pytest.mark.parametrize("power", [2, 3.14, -1])
     def test_power(self, power: float | int) -> None:
         if power > 0:  # Integers to negative integer powers are not allowed.
             assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
         assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
 
-    @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])  # type: ignore
+    @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])
     def test_numpy_functions(self, dtype: str) -> None:
         """Test how rasters can be used as/with numpy arrays."""
         warnings.simplefilter("error")
@@ -2924,9 +2924,9 @@ class TestArrayInterface:
     wrong_transform = rio.transform.from_bounds(0, 0, 1, 1, width - 1, height - 1)
     mask_wrong_shape = rng.integers(0, 2, size=(width - 1, height - 1), dtype=bool)
 
-    @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)  # type: ignore
-    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
-    @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_1nin_1nout + ufuncs_str_1nin_2nout)
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])
     def test_array_ufunc_1nin_1nout(self, ufunc_str: str, nodata_init: None | str, dtype: str) -> None:
         """Test that ufuncs with one input and one output consistently return the same result as for masked arrays."""
 
@@ -2987,11 +2987,11 @@ class TestArrayInterface:
                 with pytest.raises(TypeError):
                     ufunc(rst)
 
-    @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)  # type: ignore
-    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
-    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
-    @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
-    @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
+    @pytest.mark.parametrize("ufunc_str", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout)
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])
+    @pytest.mark.parametrize("nodata1_init", [None, "type_default"])
+    @pytest.mark.parametrize("nodata2_init", [None, "type_default"])
     def test_array_ufunc_2nin_1nout(
         self, ufunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str
     ) -> None:
@@ -3093,9 +3093,9 @@ class TestArrayInterface:
                 with pytest.raises(TypeError):
                     ufunc(rst1, rst2)
 
-    @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)  # type: ignore
-    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])  # type: ignore
-    @pytest.mark.parametrize("nodata_init", [None, "type_default"])  # type: ignore
+    @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)
+    @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])
+    @pytest.mark.parametrize("nodata_init", [None, "type_default"])
     def test_array_functions_1nin(self, arrfunc_str: str, dtype: str, nodata_init: None | str) -> None:
         """
         Test that single-input array functions that we support give the same output as they would on the masked array.
@@ -3168,11 +3168,11 @@ class TestArrayInterface:
             else:
                 assert output_rst == output_ma
 
-    @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)  # type: ignore
-    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])  # type: ignore
-    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])  # type: ignore
-    @pytest.mark.parametrize("nodata1_init", [None, "type_default"])  # type: ignore
-    @pytest.mark.parametrize("nodata2_init", [None, "type_default"])  # type: ignore
+    @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)
+    @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])
+    @pytest.mark.parametrize("dtype2", ["uint8", "int16", "float32"])
+    @pytest.mark.parametrize("nodata1_init", [None, "type_default"])
+    @pytest.mark.parametrize("nodata2_init", [None, "type_default"])
     def test_array_functions_2nin(
         self, arrfunc_str: str, nodata1_init: None | str, nodata2_init: str, dtype1: str, dtype2: str
     ) -> None:
@@ -3222,7 +3222,7 @@ class TestArrayInterface:
             else:
                 assert np.ma.allequal(output_rst, output_ma)
 
-    @pytest.mark.parametrize("method_str", ["reduce"])  # type: ignore
+    @pytest.mark.parametrize("method_str", ["reduce"])
     def test_ufunc_methods(self, method_str: str) -> None:
         """
         Test that universal function methods all behave properly, don't need to test all

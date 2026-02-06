@@ -24,7 +24,6 @@ Module for Raster class.
 from __future__ import annotations
 
 import copy
-import math
 import pathlib
 import warnings
 from collections import abc
@@ -40,18 +39,15 @@ from affine import Affine
 from packaging.version import Version
 from rasterio.crs import CRS
 
-import geoutils as gu
 from geoutils import profiler
 from geoutils._misc import deprecate, import_optional
 from geoutils._typing import (
-    ArrayLike,
     DTypeLike,
     MArrayNum,
     NDArrayBool,
     NDArrayNum,
     Number,
 )
-from geoutils.projtools import reproject_from_latlon, reproject_points
 from geoutils.raster.base import RasterBase, RasterType
 from geoutils.raster.georeferencing import (
     _cast_nodata,
@@ -343,7 +339,7 @@ class Raster(RasterBase):
     See the API for more details.
     """
 
-    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)  # type: ignore
+    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)
     def __init__(
         self,
         filename_or_dataset: (
@@ -636,6 +632,10 @@ class Raster(RasterBase):
                 "to convert to a data type that won't derive the nodata values (e.g., a float type).",
             )
             self._data[self._data.data == self.nodata] = np.ma.masked
+
+    @property
+    def _chunks(self) -> tuple[tuple[int, ...], ...] | None:
+        return None
 
     def _set_transform(self, new_transform: Affine) -> None:
         # Overloads abstract method in RasterBase
@@ -2232,201 +2232,6 @@ class Raster(RasterBase):
         if return_axes:
             return ax0, cax
         return None
-
-    def reduce_points(
-        self,
-        points: tuple[ArrayLike, ArrayLike] | gu.PointCloud,
-        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
-        window: int | None = None,
-        input_latlon: bool = False,
-        band: int | None = None,
-        masked: bool = False,
-        return_window: bool = False,
-        as_array: bool = False,
-        boundless: bool = True,
-    ) -> Any:
-        """
-        Reduce raster values around point coordinates.
-
-        By default, samples pixel value of each band. Can be passed a band index to sample from.
-
-        Uses Rasterio's windowed reading to keep memory usage low (for a raster not loaded).
-
-        :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
-            coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
-            If points fall outside of image, value returned is nan.
-        :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
-        :param window: Window size to read around coordinates. Must be odd.
-        :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
-            CRS.
-        :param band: Band number to extract from (from 1 to self.count).
-        :param masked: Whether to return a masked array, or classic array.
-        :param return_window: Whether to return the windows (in addition to the reduced value).
-        :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input
-            coordinates).
-        :param boundless: Whether to allow windows that extend beyond the extent.
-
-        :returns: Point cloud of interpolated points, or 1D array of interpolated values.
-            In addition, if return_window=True, return tuple of (values, arrays).
-
-        :examples:
-
-            >>> self.value_at_coords(-48.125, 67.8901, window=3)  # doctest: +SKIP
-            Returns mean of a 3*3 window:
-                v v v \
-                v c v  | = float(mean)
-                v v v /
-            (c = provided coordinate, v= value of surrounding coordinate)
-
-        """
-
-        if isinstance(points, gu.PointCloud):
-            points = reproject_points((points.ds.geometry.x.values, points.ds.geometry.y.values), points.crs, self.crs)
-            # Otherwise
-        else:
-            if input_latlon:
-                points = reproject_from_latlon((points[1], points[0]), out_crs=self.crs)  # type: ignore
-
-        x, y = points
-
-        # Check for array-like inputs
-        if (
-            not isinstance(x, (float, np.floating, int, np.integer))
-            and isinstance(y, (float, np.floating, int, np.integer))
-            or isinstance(x, (float, np.floating, int, np.integer))
-            and not isinstance(y, (float, np.floating, int, np.integer))
-        ):
-            raise TypeError("Coordinates must be both numbers or both array-like.")
-
-        # If for a single value, wrap in a list
-        if isinstance(x, (float, np.floating, int, np.integer)):
-            x = [x]  # type: ignore
-            y = [y]  # type: ignore
-            # For the end of the function
-            unwrap = True
-        else:
-            unwrap = False
-            # Check that array-like objects are the same length
-            if len(x) != len(y):  # type: ignore
-                raise ValueError("Coordinates must be of the same length.")
-
-        # Check window parameter
-        if window is not None:
-            if not float(window).is_integer():
-                raise ValueError("Window must be a whole number.")
-            if window % 2 != 1:
-                raise ValueError("Window must be an odd number.")
-            window = int(window)
-
-        # Define subfunction for reducing the window array
-        def format_value(value: Any) -> Any:
-            """Check if valid value has been extracted"""
-            if type(value) in [np.ndarray, np.ma.core.MaskedArray]:
-                if window is not None:
-                    value = reducer_function(value.flatten())
-                else:
-                    value = value[0, 0]
-            else:
-                value = None
-            return value
-
-        # Initiate output lists
-        list_values = []
-        if return_window:
-            list_windows = []
-
-        # Convert to latlon if asked
-        # if input_latlon:
-        #     x, y = reproject_from_latlon((y, x), self.crs)  # type: ignore
-
-        # Convert coordinates to pixel space
-        rows, cols = rio.transform.rowcol(self.transform, x, y, op=math.floor)
-
-        # Loop over all coordinates passed
-        for k in range(len(rows)):  # type: ignore
-            value: float | dict[int, float] | tuple[float | dict[int, float] | tuple[list[float], NDArrayNum] | Any]
-
-            row = rows[k]  # type: ignore
-            col = cols[k]  # type: ignore
-
-            # Decide what pixel coordinates to read:
-            if window is not None:
-                half_win = (window - 1) / 2
-                # Subtract start coordinates back to top left of window
-                col = col - half_win
-                row = row - half_win
-                # Offset to read to == window
-                width = window
-                height = window
-            else:
-                # Start reading at col,row and read 1px each way
-                width = 1
-                height = 1
-
-            # Make sure coordinates are int
-            col = int(col)
-            row = int(row)
-
-            # Create rasterio's window for reading
-            rio_window = rio.windows.Window(col, row, width, height)
-
-            if self.is_loaded:
-                if self.count == 1:
-                    data = self.data[row : row + height, col : col + width]
-                else:
-                    data = self.data[slice(None) if band is None else band - 1, row : row + height, col : col + width]
-                if not masked:
-                    data = data.astype(np.float32).filled(np.nan)
-                value = format_value(data)
-                win: NDArrayNum | dict[int, NDArrayNum] = data
-
-            else:
-                # if self.count == 1:
-                with rio.open(self.name) as raster:
-                    data = raster.read(
-                        window=rio_window,
-                        fill_value=self.nodata,
-                        boundless=boundless,
-                        masked=masked,
-                        indexes=band,
-                    )
-                value = format_value(data)
-                win = data
-                # else:
-                #     value = {}
-                #     win = {}
-                #     with rio.open(self.name) as raster:
-                #         for b in self.indexes:
-                #             data = raster.read(
-                #                 window=rio_window, fill_value=self.nodata, boundless=boundless,
-                #                 masked=masked, indexes=b
-                #             )
-                #             val = format_value(data)
-                #             value[b] = val
-                #             win[b] = data  # type: ignore
-
-            list_values.append(value)
-            if return_window:
-                list_windows.append(win)
-
-        # If for a single value, unwrap output list
-        if unwrap:
-            output_val = list_values[0]
-            if return_window:
-                output_win = list_windows[0]
-        else:
-            output_val = np.array(list_values)  # type: ignore
-            if return_window:
-                output_win = list_windows  # type: ignore
-
-        # Return array or pointcloud
-        if not as_array:
-            output_val = gu.PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=self.crs)
-
-        if return_window:
-            return (output_val, output_win)
-        else:
-            return output_val
 
     def split_bands(self: RasterType, bands: list[int] | int | None = None, deep: bool = True) -> list[RasterType]:
         """

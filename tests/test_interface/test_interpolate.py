@@ -79,8 +79,8 @@ class TestInterpolate:
 
         assert np.array_equal(vals, vals2, equal_nan=True)
 
-    @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])  # type: ignore
-    @pytest.mark.parametrize("shift_aop", [True, False])  # type: ignore
+    @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])
+    @pytest.mark.parametrize("shift_aop", [True, False])
     def test_interp_points__synthetic(self, tag_aop: Literal["Area", "Point"] | None, shift_aop: bool) -> None:
         """
         Test interp_points function with synthetic data:
@@ -183,7 +183,7 @@ class TestInterpolate:
             + [(4, i) for i in np.arange(1, 4)]
             + [(i, 4) for i in np.arange(4, 1)]
         )
-        points_out_xy = list(zip(*points_out))
+        points_out_xy = tuple(zip(*points_out))
         raster_points_out = raster.interp_points(points_out_xy, as_array=True)
         assert all(~np.isfinite(raster_points_out))
 
@@ -247,7 +247,7 @@ class TestInterpolate:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     )  # type: ignore
@@ -285,7 +285,7 @@ class TestInterpolate:
         assert val2 == pytest.approx(val, nan_ok=True)
 
         # Check that interp convert to latlon
-        lat, lon = gu.projtools.reproject_to_latlon([x, y], in_crs=r.crs)
+        lat, lon = gu.projtools.reproject_to_latlon((x, y), in_crs=r.crs)
         val_latlon = r.interp_points((lat, lon), method=method, input_latlon=True, as_array=True)[0]
         assert val == pytest.approx(val_latlon, abs=0.0001, nan_ok=True)
 
@@ -312,11 +312,9 @@ class TestInterpolate:
 
         assert np.array_equal(vals2, vals3, equal_nan=True)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])  # type: ignore
-    @pytest.mark.parametrize(
-        "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    )  # type: ignore
-    @pytest.mark.parametrize("dist", ["half_order_up", "half_order_down", 0, 1, 5])  # type: ignore
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
+    @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"])
+    @pytest.mark.parametrize("dist", ["half_order_up", "half_order_down", 0, 1, 5])
     def test_interp_point__nodata_propag(
         self,
         example: str,
@@ -560,7 +558,7 @@ class TestInterpolate:
         # -- Tests 2: check arguments work as intended --
 
         # 1/ Lat-lon argument check by getting the coordinates of our last test point
-        lat, lon = reproject_to_latlon(points=[xtest0, ytest0], in_crs=r.crs)
+        lon, lat = reproject_to_latlon(points=(xtest0, ytest0), in_crs=r.crs)
         z_val_2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
         assert z_val == z_val_2
 
@@ -635,27 +633,27 @@ class TestInterpolate:
 
         # Lower right pixel
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
-        lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert (
-            r.reduce_points((x, y), as_array=True)
-            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
-            == r.data[-1, -1]
-        )
+        lon, lat = reproject_to_latlon((x, y), r.crs)
+        lr1 = r.reduce_points((x, y), as_array=True)
+        lr2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+        lr3 = r.data[-1, -1]
+        assert np.array_equal(lr1, lr2, equal_nan=True)
+        assert np.array_equal(lr2, lr3, equal_nan=True)
 
         # One pixel above
         x, y = [r.bounds.right - r.res[0] / 2, r.bounds.bottom + 3 * r.res[1] / 2]
-        lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert (
-            r.reduce_points((x, y), as_array=True)
-            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
-            == r.data[-2, -1]
-        )
+        lon, lat = reproject_to_latlon((x, y), r.crs)
+        lra1 = r.reduce_points((x, y), as_array=True)
+        lra2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+        lra3 = r.data[-2, -1]
+        assert np.array_equal(lra1, lra2, equal_nan=True)
+        assert np.array_equal(lra2, lra3, equal_nan=True)
 
         # One pixel left
         x, y = [r.bounds.right - 3 * r.res[0] / 2, r.bounds.bottom + r.res[1] / 2]
-        lat, lon = reproject_to_latlon([x, y], r.crs)
-        assert (
-            r.reduce_points((x, y), as_array=True)
-            == r.reduce_points((lon, lat), input_latlon=True, as_array=True)
-            == r.data[-1, -2]
-        )
+        lon, lat = reproject_to_latlon((x, y), r.crs)
+        lrl1 = r.reduce_points((x, y), as_array=True)
+        lrl2 = r.reduce_points((lon, lat), input_latlon=True, as_array=True)
+        lrl3 = r.data[-1, -2]
+        assert np.array_equal(lrl1, lrl2, equal_nan=True)
+        assert np.array_equal(lrl2, lrl3, equal_nan=True)

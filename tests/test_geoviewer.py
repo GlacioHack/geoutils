@@ -18,7 +18,7 @@ import geoviewer  # noqa
 
 @pytest.mark.parametrize(
     "filename", [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")]
-)  # type: ignore
+)
 @pytest.mark.parametrize(
     "option",
     (
@@ -37,7 +37,7 @@ import geoviewer  # noqa
         ("-nodata", "99"),
         ("-noresampl",),
     ),
-)  # type: ignore
+)
 def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
@@ -69,7 +69,7 @@ def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: 
 
 @pytest.mark.parametrize(
     "filename", [gu.examples.get_path_test("everest_landsat_b4"), gu.examples.get_path_test("exploradores_aster_dem")]
-)  # type: ignore
+)
 @pytest.mark.parametrize(
     "args",
     (
@@ -85,7 +85,7 @@ def test_geoviewer_valid_1band(capsys, monkeypatch, filename, option):  # type: 
         (("-nodata", "lol"), ValueError),
         (("-nodata", "1e40"), ValueError),
     ),
-)  # type: ignore
+)
 def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
@@ -102,7 +102,7 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
         geoviewer.main([filename, *option])
 
 
-@pytest.mark.parametrize("filename", [gu.examples.get_path_test("everest_landsat_rgb")])  # type: ignore
+@pytest.mark.parametrize("filename", [gu.examples.get_path_test("everest_landsat_rgb")])
 @pytest.mark.parametrize(
     "option",
     (
@@ -118,7 +118,7 @@ def test_geoviewer_invalid_1band(capsys, monkeypatch, filename, args):  # type: 
         ("-nodata", "99"),
         ("-noresampl",),
     ),
-)  # type: ignore
+)
 def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)
@@ -153,7 +153,7 @@ def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: 
     [
         gu.examples.get_path_test("everest_landsat_rgb"),
     ],
-)  # type: ignore
+)
 @pytest.mark.parametrize(
     "args",
     (
@@ -161,7 +161,7 @@ def test_geoviewer_valid_3band(capsys, monkeypatch, filename, option):  # type: 
         (("-band", "4"), IndexError),
         (("-nodata", "1e40"), ValueError),
     ),
-)  # type: ignore
+)
 def test_geoviewer_invalid_3band(capsys, monkeypatch, filename, args):  # type: ignore
     # To avoid having the plots popping up during execution
     monkeypatch.setattr(plt, "show", lambda: None)

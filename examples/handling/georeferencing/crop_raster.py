@@ -44,7 +44,7 @@ rast.plot(ax="new", cmap="Purples")
 vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
 
 # %%
-# **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Raster.crop`, including another :class:`~geoutils.Raster` or a
+# **Second option:** we can pass other arguments to :func:`~geoutils.Raster.crop`, including another :class:`~geoutils.Raster` or a
 # simple :class:`tuple` of bounds. For instance, we can re-crop the raster to be smaller than the vector.
 
 rast = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom, rast.bounds.right, rast.bounds.top - 500))

@@ -23,26 +23,29 @@ Functionalities for geotransformations of raster objects.
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, Literal
+from typing import TYPE_CHECKING, Literal
 
 import affine
 import rasterio as rio
-import xarray as xr
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
-import geoutils as gu
 from geoutils import profiler
+from geoutils._dispatch import _check_match_bbox, _check_match_grid
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
+from geoutils.multiproc import MultiprocConfig
 from geoutils.raster._geotransformations import (
-    _get_reproj_params,
+    _check_reproj_nodata_dtype,
     _is_reproj_needed,
+    _resampling_method_from_str,
     _rio_reproject,
-    _user_input_reproject,
 )
 from geoutils.raster.distributed_computing.dask import delayed_reproject
 from geoutils.raster.distributed_computing.multiproc import _multiproc_reproject
-from geoutils.raster.georeferencing import _cast_pixel_interpretation
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterLike, RasterType
+    from geoutils.vector.vector import VectorLike
 
 try:
     import dask.array as da
@@ -54,14 +57,14 @@ except ImportError:
 ##############
 
 
-@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)
 def _reproject(
-    source_raster: gu.Raster,
-    ref: gu.Raster,
+    source_raster: RasterType,
+    ref: RasterLike,
     crs: CRS | str | int | None = None,
-    res: float | Iterable[float] | None = None,
+    res: float | tuple[float, float] | None = None,
     grid_size: tuple[int, int] | None = None,
-    bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
+    bounds: tuple[float, float, float, float] | rio.coords.BoundingBox | None = None,
     nodata: int | float | None = None,
     dtype: DTypeLike | None = None,
     resampling: Resampling | str = Resampling.bilinear,
@@ -69,38 +72,39 @@ def _reproject(
     silent: bool = False,
     n_threads: int = 0,
     memory_limit: int = 64,
-    multiproc_config: gu.raster.MultiprocConfig | None = None,
+    multiproc_config: MultiprocConfig | None = None,
 ) -> tuple[bool, NDArrayNum | NDArrayBool | None, affine.Affine | None, CRS | None, int | float | None]:
     """
     Reproject raster. See Raster.reproject() for details.
     """
 
-    # 1/ Process user input
-    crs, dtype, src_nodata, nodata, res, bounds = _user_input_reproject(
+    # 1/ Check and normalize match-grid inputs
+    dst_shape, dst_transform, dst_crs = _check_match_grid(
+        src=source_raster, ref=ref, res=res, shape=grid_size, bounds=bounds, crs=crs, coords=None
+    )
+
+    # 2/ Check user input for nodata and dtype
+    dtype, src_nodata, nodata = _check_reproj_nodata_dtype(
         source_raster=source_raster,
-        ref=ref,
-        crs=crs,
-        bounds=bounds,
-        res=res,
         nodata=nodata,
         dtype=dtype,
         force_source_nodata=force_source_nodata,
     )
 
-    # 2/ Derive georeferencing parameters for reprojection (transform, grid size)
-    reproj_kwargs = _get_reproj_params(
-        source_raster=source_raster,
-        crs=crs,
-        res=res,
-        grid_size=grid_size,
-        bounds=bounds,
-        dtype=dtype,
-        src_nodata=src_nodata,
-        nodata=nodata,
-        resampling=resampling,
-    )
+    # 3/ Store georeferencing parameters for reprojection
+    reproj_kwargs = {
+        "src_transform": source_raster.transform,
+        "dst_transform": dst_transform,
+        "src_crs": source_raster.crs,
+        "dst_crs": dst_crs,
+        "resampling": resampling if isinstance(resampling, Resampling) else _resampling_method_from_str(resampling),
+        "src_nodata": src_nodata,
+        "dst_nodata": nodata,
+        "dtype": dtype,
+        "dst_shape": dst_shape,
+    }
 
-    # 3/ Check if reprojection is needed, otherwise return source raster with warning
+    # 4/ Check if reprojection is needed, otherwise return source raster with warning
     if _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
         if (nodata == src_nodata) or (nodata is None):
             if not silent:
@@ -115,12 +119,12 @@ def _reproject(
                 )
             return True, None, None, None, None
 
-    # 4/ Perform reprojection
+    # 5/ Perform reprojection
     reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = multiproc_config is not None
     # The check below can only run on Xarray
-    dask_backend = da is not None and source_raster._is_xr and source_raster._obj.chunks is not None
+    dask_backend = da is not None and source_raster._chunks is not None
 
     if mp_backend and dask_backend:
         raise ValueError(
@@ -130,7 +134,7 @@ def _reproject(
 
     # If using Multiprocessing backend, process and return None (files written on disk)
     if multiproc_config is not None:
-        _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)
+        _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)  # type: ignore
         return False, None, None, None, None
 
     # If using Dask backend, process and return Dask array
@@ -149,36 +153,27 @@ def _reproject(
 #########
 
 
-@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)
 def _crop(
-    source_raster: gu.Raster,
-    bbox: gu.Raster | gu.Vector | xr.DataArray | list[float] | tuple[float, ...],
+    source_raster: RasterType,
+    bbox: RasterLike | VectorLike | tuple[float, float, float, float],
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
 ) -> tuple[NDArrayNum, affine.Affine]:
     """Crop raster. See details in Raster.crop()."""
 
+    # Check input, raise appropriate errors and warnings
+    bbox = _check_match_bbox(source_raster, bbox)
+
     assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
 
-    if isinstance(bbox, (gu.Raster, gu.Vector)):
-        # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-        xmin, ymin, xmax, ymax = bbox.get_bounds_projected(out_crs=source_raster.crs)
-        if isinstance(bbox, gu.Raster):
-            # Raise a warning if the reference is a raster that has a different pixel interpretation
-            _cast_pixel_interpretation(source_raster.area_or_point, bbox.area_or_point)
-    elif isinstance(bbox, xr.DataArray):
-        # For another Vector or Raster, we reproject the bounding box in the same CRS as self
-        xmin, ymin, xmax, ymax = bbox.rst.get_bounds_projected(out_crs=source_raster.crs)
-        # Raise a warning if the reference is a raster that has a different pixel interpretation
-        _cast_pixel_interpretation(source_raster.area_or_point, bbox.rst.area_or_point)
-    elif isinstance(bbox, (list, tuple)):
-        if distance_unit == "georeferenced":
-            xmin, ymin, xmax, ymax = bbox
-        else:
-            colmin, rowmin, colmax, rowmax = bbox
-            xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
-            xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
+    # If using georeferenced unit, use bbox directly
+    if distance_unit == "georeferenced":
+        xmin, ymin, xmax, ymax = bbox
+    # Else, convert to ij
     else:
-        raise ValueError("'bbox' must be a Raster, Vector, or list of coordinates.")
+        colmin, rowmin, colmax, rowmax = bbox
+        xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
+        xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
 
     # Finding the intersection of requested bounds and original bounds, cropped to image shape
     ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)
@@ -194,6 +189,7 @@ def _crop(
     if source_raster._is_xr:
 
         (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
+        assert source_raster._obj is not None
         crop_img = source_raster._obj.isel(y=slice(rowmin, rowmax), x=slice(colmin, colmax))
 
     elif source_raster.is_loaded:
@@ -244,7 +240,7 @@ def _crop(
 ##############
 
 
-@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)  # type: ignore
+@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)
 def _translate(
     transform: affine.Affine,
     xoff: float,

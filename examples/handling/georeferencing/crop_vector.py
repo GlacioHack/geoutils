@@ -44,11 +44,11 @@ rast.plot(ax="new", cmap="Greys_r", alpha=0.7)
 vect.plot(ref_crs=rast, fc="none", ec="tab:purple", lw=3)
 
 # %%
-# **Second option:** we can pass other ``crop_geom`` argument to :func:`~geoutils.Vector.crop`, including another :class:`~geoutils.Vector` or a
+# **Second option:** we can pass other arguments to :func:`~geoutils.Vector.crop`, including another :class:`~geoutils.Vector` or a
 # simple :class:`tuple` of bounds.
 
 bounds = rast.get_bounds_projected(out_crs=vect.crs)
-vect = vect.crop(crop_geom=(bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top))
+vect = vect.crop((bounds.left + 0.5 * (bounds.right - bounds.left), bounds.bottom, bounds.right, bounds.top))
 
 rast.plot(ax="new", cmap="Greys_r", alpha=0.7)
 vect.plot(ref_crs=rast, fc="none", ec="tab:purple", lw=3)

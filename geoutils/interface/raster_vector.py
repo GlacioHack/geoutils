@@ -21,28 +21,32 @@
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, Literal
+from typing import TYPE_CHECKING, Iterable, Literal
 
 import affine
 import geopandas as gpd
 import numpy as np
 import rasterio as rio
-import xarray as xr
 from rasterio import features, warp
 from rasterio.crs import CRS
 from rasterio.features import shapes
 
-import geoutils as gu
+from geoutils._dispatch import _check_match_grid, get_geo_attr, has_geo_attr
 from geoutils._misc import silence_rasterio_message
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.raster.georeferencing import _bounds
 
+if TYPE_CHECKING:
+    from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.raster.base import Raster, RasterLike, RasterType
+    from geoutils.vector.vector import Vector
+
 
 def _polygonize(
-    source_raster: gu.Raster,
+    source_raster: RasterType,
     target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"],
     data_column_name: str,
-) -> gu.Vector:
+) -> Vector:
     """Polygonize a raster. See Raster.polygonize() for details."""
 
     # If target values is passed but does not correspond to 0 or 1, raise a warning
@@ -110,75 +114,33 @@ def _polygonize(
     gdf.insert(0, data_column_name, range(0, 0 + len(gdf)))
     gdf = gdf.set_geometry(col="geometry")
     gdf = gdf.set_crs(source_raster.crs)
+    from geoutils.vector import Vector  # Runtime import to avoid circularity issues
 
-    return gu.Vector(gdf)
+    return Vector(gdf)
 
 
 def _rasterize(
-    gdf: gpd.GeoDataFrame,
-    raster: gu.Raster | xr.DataArray | None = None,
-    crs: CRS | int | None = None,
-    xres: float | None = None,
-    yres: float | None = None,
-    bounds: tuple[float, float, float, float] | None = None,
+    source_vector: Vector,
+    ref: RasterType | None = None,
     in_value: int | float | Iterable[int | float] | None = None,
     out_value: int | float = 0,
-) -> gu.Raster:
-    if (raster is not None) and (crs is not None):
-        raise ValueError("Only one of raster or crs can be provided.")
+    res: tuple[Number, Number] | Number | None = None,
+    shape: tuple[int, int] | None = None,
+    grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
+    crs: CRS | int | None = None,
+) -> Raster:
 
-        # Reproject vector into requested CRS or rst CRS first, if needed
-        # This has to be done first so that width/height calculated below are correct!
-    if crs is None:
-        crs = gdf.crs
-
-    if raster is not None:
-        if isinstance(raster, gu.Raster):
-            crs = raster.crs  # type: ignore
-        else:
-            crs = raster.rst.crs
-
-    vect = gdf.to_crs(crs)
-
-    # If no raster given, now use provided dimensions
-    if raster is None:
-        # At minimum, xres must be set
-        if xres is None:
-            raise ValueError("At least raster or xres must be set.")
-        if yres is None:
-            yres = xres
-
-        # By default, use self's bounds
-        if bounds is None:
-            bounds = vect.total_bounds
-
-        # Calculate raster shape
-        left, bottom, right, top = bounds
-        width = abs((right - left) / xres)
-        height = abs((top - bottom) / yres)
-
-        if width % 1 != 0 or height % 1 != 0:
-            warnings.warn("Bounds not a multiple of xres/yres, use rounded bounds.")
-
-        width = int(np.round(width))
-        height = int(np.round(height))
-        out_shape = (height, width)
-
-        # Calculate raster transform
-        transform = rio.transform.from_bounds(left, bottom, right, top, width, height)
-
-    # Otherwise use directly raster's dimensions
-    else:
-        if isinstance(raster, gu.Raster):
-            out_shape = raster.shape  # type: ignore
-            transform = raster.transform  # type: ignore
-        else:
-            out_shape = raster.rst.shape
-            transform = raster.rst.transform
+    out_shape, out_transform, out_crs = _check_match_grid(
+        src=source_vector, ref=ref, res=res, shape=shape, bounds=bounds, crs=crs, coords=grid_coords
+    )
+    if out_crs is not None:
+        source_vector = source_vector.to_crs(out_crs)
+    vect = source_vector.ds
 
     # Set default burn value, index from 1 to len(self.ds)
     if in_value is None:
-        in_value = gdf.index + 1
+        in_value = vect.index + 1
 
     # Rasterize geometry
     if isinstance(in_value, Iterable):
@@ -191,16 +153,18 @@ def _rasterize(
 
         out_geom = ((geom, value) for geom, value in zip(vect.geometry, in_value))
 
-        mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape, transform=transform)
+        mask = features.rasterize(shapes=out_geom, fill=out_value, out_shape=out_shape, transform=out_transform)
 
     elif isinstance(in_value, int | float | np.floating | np.integer):
         mask = features.rasterize(
-            shapes=vect.geometry, fill=out_value, out_shape=out_shape, transform=transform, default_value=in_value
+            shapes=vect.geometry, fill=out_value, out_shape=out_shape, transform=out_transform, default_value=in_value
         )
     else:
         raise ValueError("in_value must be a single number or an iterable with same length as self.ds.geometry")
 
-    output = gu.Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)
+    from geoutils.raster import Raster  # Runtime import to avoid circularity issues
+
+    output = Raster.from_array(data=mask, transform=out_transform, crs=out_crs, nodata=None)
 
     return output
 
@@ -247,19 +211,26 @@ def _create_mask_raster(
 
 def _create_mask(
     gdf: gpd.GeoDataFrame,
-    ref: gu.Raster | gu.PointCloud | None = None,
+    ref: RasterLike | PointCloudLike | None = None,
     crs: CRS | None = None,
     res: float | tuple[float, float] | None = None,
     bounds: tuple[float, float, float, float] | None = None,
     points: tuple[NDArrayNum, NDArrayNum] | None = None,
-) -> tuple[NDArrayBool, affine.Affine | None, gpd.GeoSeries | None, CRS]:
+    as_array: bool = False,
+) -> Raster | PointCloud | NDArrayBool:
     """See Vector.create_mask for description."""
 
     # Raise errors for wrong inputs
+    is_ref_raster = ref is not None and (
+        has_geo_attr(ref, "transform") and has_geo_attr(ref, "shape") and has_geo_attr(ref, "crs")
+    )
+    is_ref_pointcloud = ref is not None and (has_geo_attr(ref, "ds") and has_geo_attr(ref, "data_column"))
     if ref is not None:
-        if not isinstance(ref, (gu.Raster, gu.PointCloud)):
-            raise ValueError("Reference must be a raster or a point cloud.")
-
+        if not (is_ref_raster or is_ref_pointcloud):
+            raise ValueError(
+                "Reference must be a raster implementing 'transform', 'crs', and 'shape' "
+                "or a point cloud implementing 'ds' and 'data_column'."
+            )
     else:
         if res is None and points is None:
             raise ValueError(
@@ -268,18 +239,12 @@ def _create_mask(
             )
 
     # If raster reference or user-input exists, we compute a raster mask
-    if (ref is not None and isinstance(ref, gu.Raster)) or res is not None:
-
+    if is_ref_raster or res is not None:
         # For a reference, extract transform and CRS
         if ref is not None:
-            if isinstance(ref, xr.DataArray):
-                transform = ref.rst.transform
-                out_shape = ref.rst.shape
-                crs = ref.rst.crs
-            else:
-                transform = ref.transform
-                out_shape = ref.shape
-                crs = ref.crs
+            transform = get_geo_attr(ref, "transform")
+            out_shape = get_geo_attr(ref, "shape")
+            crs = get_geo_attr(ref, "crs")
 
         # For a user-input res
         else:
@@ -330,7 +295,8 @@ def _create_mask(
 
         # For a reference, extract geometry
         if ref is not None:
-            pts = ref.ds.geometry
+            ds = get_geo_attr(ref, "ds")
+            pts = ds.geometry
 
         else:
 
@@ -342,4 +308,19 @@ def _create_mask(
         mask = _create_mask_pointcloud(gdf=gdf, pts=pts)
         transform = None
 
-    return mask, transform, crs, pts
+    from geoutils.pointcloud import (
+        PointCloud,  # Runtime import to avoid circularity issues
+    )
+    from geoutils.raster import Raster  # Runtime import to avoid circularity issues
+
+    # Return output as mask or as array
+    if as_array:
+        return mask.squeeze()
+    else:
+        # If pts is None, the output is a point cloud mask
+        if pts is not None:
+            return PointCloud.from_xyz(x=pts.x.values, y=pts.y.values, z=mask, crs=crs)
+        # Otherwise, the transform is not None
+        else:
+            assert transform is not None  # For mypy
+            return Raster.from_array(data=mask, transform=transform, crs=crs, nodata=None)

@@ -518,7 +518,7 @@ mask
 Raster masks can also be created from a {class}`~geoutils.Vector` using {class}`~geoutils.Vector.create_mask`, which rasterizes
 all input geometries to a boolean array through {class}`~geoutils.Vector.rasterize`.
 
-Georeferencing attributes to create the {class}`~geoutils.Raster` mask can also be passed individually, using `bounds`, `crs`, `xres` and `yres`.
+Georeferencing attributes to create the {class}`~geoutils.Raster` mask can also be passed individually, using `bounds`, `crs`, and `res`.
 
 ```{code-cell} ipython3
 # Open a vector of glacier outlines
