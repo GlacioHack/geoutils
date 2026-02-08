@@ -18,7 +18,7 @@
 
 from geoutils.raster.raster import Raster, RasterType, handled_array_funcs  # noqa isort:skip
 from geoutils.raster.array import *  # noqa
-from geoutils.raster.distributed_computing import *  # noqa
+from geoutils.raster.transformations import *  # noqa
 from geoutils.raster.georeferencing import *  # noqa
 from geoutils.raster.geotransformations import *  # noqa
 from geoutils.raster.multiraster import *  # noqa

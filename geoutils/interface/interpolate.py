@@ -32,7 +32,7 @@ from geoutils import profiler
 from geoutils._dispatch import _check_match_points
 from geoutils._typing import NDArrayNum, Number
 from geoutils.projtools import reproject_from_latlon
-from geoutils.raster.georeferencing import _coords, _outside_bounds, _res, _xy2ij
+from geoutils.raster.referencing import _coords, _outside_bounds, _res, _xy2ij
 
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
 
@@ -40,6 +40,26 @@ if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloudLike
     from geoutils.raster.base import RasterBase
 
+# Dask as optional dependency
+try:
+    import dask
+    import dask.array as da
+    from dask import delayed
+    from dask.utils import cached_cumsum
+except ImportError:
+
+    def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """
+        Fake delayed decorator if dask is not installed
+        """
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
+
+# 1/ REGULAR GRID INTERPOLATION AT POINT COORDINATES
+####################################################
 
 def _get_dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int) -> int:
     """
@@ -353,6 +373,150 @@ def _interp_points(
 
     return rpoints
 
+
+# 2/ POINT INTERPOLATION ON REGULAR OR EQUAL GRID
+# At the date of April 2024:
+# This functionality is not covered efficiently by Dask/Xarray, because they need to support rectilinear grids, which
+# is difficult when interpolating in the chunked dimensions, and loads nearly all array memory when using .interp().
+
+# Here we harness the fact that rasters are always on regular (or sometimes equal) grids to efficiently map
+# the location of the blocks required for interpolation, which requires little memory usage.
+
+# Code structure inspired by https://blog.dask.org/2021/07/02/ragged-output and the "block_id" in map_blocks
+
+
+def _get_interp_indices_per_block(
+    interp_x: NDArrayNum,
+    interp_y: NDArrayNum,
+    starts: list[tuple[int, ...]],
+    num_chunks: tuple[int, int],
+    chunksize: tuple[int, int],
+    xres: float,
+    yres: float,
+) -> list[list[int]]:
+    """Map blocks where each pair of interpolation coordinates will have to be computed."""
+
+    # The argument "starts" contains the list of chunk first X/Y index for the full array, plus the last index
+
+    # We use one bucket per block, assuming a flattened blocks shape
+    ind_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
+    for i, (x, y) in enumerate(zip(interp_x, interp_y)):
+        # Because it is a regular grid, we know exactly in which block ID the coordinate will fall
+        block_i_1d = int((x - starts[0][0]) / (xres * chunksize[0])) * num_chunks[1] + int(
+            (y - starts[1][0]) / (yres * chunksize[1])
+        )
+        ind_per_block[block_i_1d].append(i)
+
+    return ind_per_block
+
+
+@delayed
+def _delayed_interp_points_block(
+    arr_chunk: NDArrayNum, block_id: dict[str, Any], interp_coords: NDArrayNum
+) -> NDArrayNum:
+    """
+    Interpolate block in 2D out-of-memory for a regular or equal grid.
+    """
+
+    # Extract information out of block_id dictionary
+    xs, ys, xres, yres = (block_id["xstart"], block_id["ystart"], block_id["xres"], block_id["yres"])
+
+    # Reconstruct the coordinates from xi/yi/xres/yres (as it has to be a regular grid)
+    x_coords = np.arange(xs, xs + xres * arr_chunk.shape[0], xres)
+    y_coords = np.arange(ys, ys + yres * arr_chunk.shape[1], yres)
+
+    # Interpolate to points
+    interp_chunk = interpn(points=(x_coords, y_coords), values=arr_chunk, xi=(interp_coords[0, :], interp_coords[1, :]))
+
+    # And return the interpolated array
+    return interp_chunk
+
+
+# CHUNKED LOGIC
+
+def delayed_interp_points(
+    darr: da.Array,
+    points: tuple[list[float], list[float]],
+    resolution: tuple[float, float],
+    method: Literal["nearest", "linear", "cubic", "quintic"] = "linear",
+) -> NDArrayNum:
+    """
+    Interpolate raster at point coordinates on out-of-memory chunks.
+
+    This function harnesses the fact that a raster is defined on a regular (or equal) grid, and it is therefore
+    faster than Xarray.interpn (especially for small sample sizes) and uses only a fraction of the memory usage.
+
+    :param darr: Input dask array.
+    :param points: Point(s) at which to interpolate raster value. If points fall outside of image, value
+            returned is nan. Shape should be (N,2).
+    :param resolution: Resolution of the raster (xres, yres).
+    :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', or 'quintic'. For more information,
+            see scipy.ndimage.map_coordinates and scipy.interpolate.interpn. Default is linear.
+
+    :return: Array of raster value(s) for the given points.
+    """
+
+    # To raise appropriate error on missing optional dependency
+    import_optional("dask")
+
+    # Convert input to 2D array
+    points_arr = np.vstack((points[0], points[1]))
+
+    # Map depth of overlap required for each interpolation method
+    map_depth = {"nearest": 1, "linear": 2, "cubic": 3, "quintic": 5}
+
+    # Expand dask array for overlapping computations
+    chunksize = darr.chunksize
+    expanded = da.overlap.overlap(darr, depth=map_depth[method], boundary=np.nan)
+
+    # Get starting 2D index for each chunk of the full array
+    # (mirroring what is done in block_id of dask.array.map_blocks)
+    starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
+    num_chunks = expanded.numblocks
+
+    # Get samples indices per blocks
+    ind_per_block = _get_interp_indices_per_block(
+        points_arr[0, :], points_arr[1, :], starts, num_chunks, chunksize, resolution[0], resolution[1]
+    )
+
+    # Create a delayed object for each block, and flatten the blocks into a 1d shape
+    blocks = expanded.to_delayed().ravel()
+
+    # Build the block IDs by unravelling starting indexes for each block
+    indexes_xi, indexes_yi = np.unravel_index(np.arange(len(blocks)), shape=(num_chunks[0], num_chunks[1]))
+    block_ids = [
+        {
+            "xstart": (starts[0][indexes_xi[i]] - map_depth[method]) * resolution[0],
+            "ystart": (starts[1][indexes_yi[i]] - map_depth[method]) * resolution[1],
+            "xres": resolution[0],
+            "yres": resolution[1],
+        }
+        for i in range(len(blocks))
+    ]
+
+    # Compute values delayed
+    list_interp = [
+        _delayed_interp_points_block(data_chunk, block_ids[i], points_arr[:, ind_per_block[i]])
+        for i, data_chunk in enumerate(blocks)
+        if len(ind_per_block[i]) > 0
+    ]
+
+    # We define the expected output shape and dtype to simplify things for Dask
+    list_interp_delayed = [
+        da.from_delayed(p, shape=(1, len(ind_per_block[i])), dtype=darr.dtype) for i, p in enumerate(list_interp)
+    ]
+    interp_points = np.concatenate(dask.compute(*list_interp_delayed), axis=0)
+
+    # Re-order per-block output points to match their original indices
+    indices = np.concatenate(ind_per_block).astype(int)
+    argsort = np.argsort(indices)
+    interp_points = np.array(interp_points)[argsort]
+
+    return interp_points
+
+
+
+# 2/ REGULAR GRID REDUCTION IN WINDOW AROUND POINT COORDINATES
 
 def _reduce_points(
     source_raster: RasterBase,

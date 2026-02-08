@@ -15,7 +15,7 @@ pytest.importorskip("dask")
 
 import dask.array as da  # noqa
 
-from geoutils.raster.distributed_computing.dask import (  # noqa
+from geoutils.raster.transformations.dask import (  # noqa
     delayed_interp_points,
     delayed_reproject,
     delayed_subsample,

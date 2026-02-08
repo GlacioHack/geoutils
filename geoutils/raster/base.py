@@ -55,7 +55,7 @@ from geoutils.projtools import (
     merge_bounds,
     reproject_from_latlon,
 )
-from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
+from geoutils.raster.transformations.multiproc import MultiprocConfig
 from geoutils.raster.georeferencing import (
     _bounds,
     _coords,
