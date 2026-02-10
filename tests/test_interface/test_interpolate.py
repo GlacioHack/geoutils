@@ -184,7 +184,8 @@ class TestInterpolate:
             + [(i, 4) for i in np.arange(4, 1)]
         )
         points_out_xy = tuple(zip(*points_out))
-        raster_points_out = raster.interp_points(points_out_xy, as_array=True)
+        with pytest.warns(UserWarning, match="All provided points were outside of raster bounds"):
+            raster_points_out = raster.interp_points(points_out_xy, as_array=True)
         assert all(~np.isfinite(raster_points_out))
 
         # To use cubic or quintic, we need a larger grid (minimum 6x6, but let's aim bigger with 50x50)
@@ -300,9 +301,7 @@ class TestInterpolate:
 
         # 3/ Test return_interpolator is consistent with above
         interp = _interp_points(
-            r.get_nanarray(),
-            transform=r.transform,
-            area_or_point=r.area_or_point,
+            r,
             points=(x, y),
             method=method,
             return_interpolator=True,

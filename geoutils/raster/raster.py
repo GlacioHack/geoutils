@@ -49,7 +49,7 @@ from geoutils._typing import (
     Number,
 )
 from geoutils.raster.base import RasterBase, RasterType
-from geoutils.raster.georeferencing import (
+from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
     _default_nodata,

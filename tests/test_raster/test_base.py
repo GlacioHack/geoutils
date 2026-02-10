@@ -80,7 +80,10 @@ def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, 
             output1 = output1.filled(np.nan)
         if np.ma.isMaskedArray(output2):
             output2 = output2.filled(np.nan)
-        assert np.array_equal(output1, output2, equal_nan=True)
+        if use_allclose:
+            assert np.allclose(output1, output2, equal_nan=True)
+        else:
+            assert np.array_equal(output1, output2, equal_nan=True)
 
     # For tuple of arrays
     elif isinstance(output1, tuple) and isinstance(output1[0], np.ndarray):
@@ -402,8 +405,10 @@ class TestClassVsAccessorConsistency:
         if len(list_missing) != 0:
             raise AssertionError(f"RasterBase methods not covered by tests: {list_missing}")
 
-    chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(4326)}),)
-
+    chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(4326)}),
+                                ("interp_points", {"points": "random", "as_array": True}),
+                                ("subsample", {"subsample": 100, "strategy": "topk"},),
+                                ("subsample", {"subsample": 100, "strategy": "topk", "return_indices": True},))
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])
     def test_chunked_methods__equality_loading_laziness(
@@ -437,48 +442,89 @@ class TestClassVsAccessorConsistency:
         raster2 = Raster(path_raster)
         raster2.load()
 
+        # Special arguments
+        if "points" in method:
+            rng = np.random.default_rng(seed=42)
+            ninterp = 10
+            res = raster.res
+            interp_x = raster.bounds.left + (rng.choice(raster.shape[0], ninterp) + rng.random(ninterp)) * res[0]
+            interp_y = raster.bounds.bottom + (rng.choice(raster.shape[1], ninterp) + rng.random(ninterp)) * res[1]
+            kwargs.update({"points": (interp_x, interp_y)})
+
         # Apply method for each
-        output_raster = getattr(raster, method)(**kwargs, multiproc_config=mp_config)
+        output_raster = getattr(raster, method)(**kwargs, mp_config=mp_config)
         output_ds = getattr(ds.rst, method)(**kwargs)
         output_raster2 = getattr(raster2, method)(**kwargs)
         output_ds2 = getattr(ds2.rst, method)(**kwargs)
 
-        # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
-        # Input
-        assert not ds._in_memory
-        assert isinstance(ds.data, da.Array)
-        assert ds.data.chunks is not None
-        # Output
-        assert not output_ds._in_memory
-        assert isinstance(output_ds.data, da.Array)
-        assert output_ds.data.chunks is not None
-        # Output computes successfully, and is then loaded in memory
-        output_ds = output_ds.compute()
-        assert isinstance(output_ds.data, np.ndarray)
-        assert output_ds._in_memory
+        # For a raster-type output (reprojection, rasterize, create_mask, proximity, etc...)
+        if isinstance(output_raster, Raster):
 
-        # 2/ For Multiprocessing, same for loading
-        assert not raster.is_loaded
-        assert not output_raster.is_loaded
+            # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
+            # Input
+            assert not ds._in_memory
+            assert isinstance(ds.data, da.Array)
+            assert ds.data.chunks is not None
+            # Output
+            assert not output_ds._in_memory
+            assert isinstance(output_ds.data, da.Array)
+            assert output_ds.data.chunks is not None
+            # Output computes successfully, and is then loaded in memory
+            output_ds = output_ds.compute()
+            assert isinstance(output_ds.data, np.ndarray)
+            assert output_ds._in_memory
 
-        # 3/ For non-Dask array, both should be loaded
-        assert ds2._in_memory
-        assert isinstance(ds2.data, np.ndarray)
-        assert output_ds2._in_memory
-        assert isinstance(output_ds2.data, np.ndarray)
+            # 2/ For Multiprocessing, same for loading
+            assert not raster.is_loaded
+            assert not output_raster.is_loaded
 
-        # 4/ For raster, same
-        assert raster2.is_loaded
-        assert output_raster2.is_loaded
+            # 3/ For non-Dask array, both should be loaded
+            assert ds2._in_memory
+            assert isinstance(ds2.data, np.ndarray)
+            assert output_ds2._in_memory
+            assert isinstance(output_ds2.data, np.ndarray)
+
+            # 4/ For raster, same
+            assert raster2.is_loaded
+            assert output_raster2.is_loaded
+
+        # For an array-type output (interpolation, subsampling, reduction, ...)
+        elif isinstance(output_raster, np.ndarray):
+
+            # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
+            # Input
+            assert not ds._in_memory
+            assert isinstance(ds.data, da.Array)
+            assert ds.data.chunks is not None
+            # Output
+            assert isinstance(output_ds, da.Array)
+            assert output_ds.chunks is not None
+            # Output computes successfully, and is then loaded in memory
+            output_ds = output_ds.compute()
+            assert isinstance(output_ds, np.ndarray)
+
+            # 2/ For Multiprocessing, same for loading
+            assert not raster.is_loaded
+            assert isinstance(output_raster, np.ndarray)
+
+            # 3/ For non-Dask array, both should be loaded
+            assert ds2._in_memory
+            assert isinstance(ds2.data, np.ndarray)
+            assert isinstance(output_ds2, np.ndarray)
+
+            # 4/ For raster, same
+            assert raster2.is_loaded
+            assert isinstance(output_raster2, np.ndarray)
 
         # Check all outputs are exactly the same
         # (For reproject, no artefacts only since we added "tolerance" argument in Rasterio,
         # which officially came out in 1.5; so we skip the test for earlier versions)
         if method == "reproject" and Version(rio.__version__) < Version("1.5.0"):
             return
-        assert_output_equal(output_raster, output_ds)  # Same chunk sizes, so exact same numerics
+        assert_output_equal(output_raster, output_ds, use_allclose=True)
         assert_output_equal(output_raster, output_raster2, use_allclose=True, strict_masked=False)
         assert_output_equal(output_raster, output_ds2, use_allclose=True)
+
 
     match_methods = ["reproject", "crop", "create_mask", "rasterize", "proximity", "grid"]
 

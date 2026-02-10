@@ -46,8 +46,8 @@ from geoutils._dispatch import _check_match_grid, get_geo_attr, has_geo_attr
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
-from geoutils.raster.georeferencing import _coords
-from geoutils.stats.sampling import subsample_array
+from geoutils.raster.referencing import _coords
+from geoutils.stats.sampling import _subsample
 from geoutils.stats.stats import _statistics
 from geoutils.vector.vector import Vector, VectorLike
 
@@ -1495,7 +1495,7 @@ class PointCloud(Vector):  # type: ignore[misc]
         :return: Array of sampled valid values, or array of sampled indices.
         """
 
-        return subsample_array(
+        return _subsample(
             array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
         )
 

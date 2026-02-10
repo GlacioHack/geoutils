@@ -6,6 +6,7 @@ import math
 import pathlib
 import struct
 import warnings
+import operator
 from abc import ABC, abstractmethod
 from functools import partial
 from typing import (
@@ -41,7 +42,7 @@ from geoutils._typing import (
 )
 from geoutils.filters import _filter
 from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.interpolate import _interp_points, _reduce_points
+from geoutils.interface.interpolation import _interp_points, _reduce_points
 from geoutils.interface.raster_point import (
     _raster_to_pointcloud,
     _regular_pointcloud_to_raster,
@@ -53,10 +54,9 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
     align_bounds,
     merge_bounds,
-    reproject_from_latlon,
 )
-from geoutils.raster.transformations.multiproc import MultiprocConfig
-from geoutils.raster.georeferencing import (
+from geoutils.multiproc import MultiprocConfig
+from geoutils.raster.referencing import (
     _bounds,
     _coords,
     _default_nodata,
@@ -65,8 +65,8 @@ from geoutils.raster.georeferencing import (
     _res,
     _xy2ij,
 )
-from geoutils.raster.geotransformations import _crop, _reproject, _translate
-from geoutils.stats.sampling import subsample_array
+from geoutils.raster.transformations import _crop, _reproject, _translate
+from geoutils.stats.sampling import _subsample
 from geoutils.stats.stats import _statistics
 
 # Input/output is a RasterType (= Raster or RasterAccessor subclass)
@@ -1479,7 +1479,7 @@ class RasterBase(ABC):
         *,
         as_array: Literal[False] = False,
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> PointCloud: ...
 
@@ -1494,7 +1494,7 @@ class RasterBase(ABC):
         *,
         as_array: Literal[True],
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> NDArrayNum: ...
 
@@ -1509,7 +1509,7 @@ class RasterBase(ABC):
         *,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
@@ -1523,7 +1523,7 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud:
         """
@@ -1556,45 +1556,22 @@ class RasterBase(ABC):
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
-        :param force_scipy_function: Force to use either map_coordinates or interpn. Mainly for testing purposes.
 
         :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
 
-        # Extract array supporting NaNs
-        array = self.get_nanarray()
-        if self.count != 1:
-            array = array[band - 1, :, :]
-
-        # Check and normalize input points
-        pts, input_scalar = _check_match_points(self, points)
-
-        # Convert from latlon if necessary
-        if input_latlon:
-            pts = reproject_from_latlon(pts, out_crs=self.crs)
-
-        z = _interp_points(
-            array,
-            transform=self.transform,
-            area_or_point=self.area_or_point,
-            points=pts,
+        return _interp_points(
+            self,
+            points=points,
             method=method,
+            band=band,
+            input_latlon=input_latlon,
+            as_array=as_array,
             shift_area_or_point=shift_area_or_point,
             dist_nodata_spread=dist_nodata_spread,
-            force_scipy_function=force_scipy_function,
+            mp_config=mp_config,
             **kwargs,
         )
-
-        # Return array or pointcloud
-        if as_array:
-            return z
-        else:
-            # If point cloud input
-            from geoutils.pointcloud import (
-                PointCloud,  # Runtime import to avoid circular issues
-            )
-
-            return PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
 
     def reduce_points(
         self,
@@ -1936,6 +1913,8 @@ class RasterBase(ABC):
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum: ...
 
     @overload
@@ -1945,6 +1924,8 @@ class RasterBase(ABC):
         return_indices: Literal[True],
         *,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
@@ -1953,6 +1934,8 @@ class RasterBase(ABC):
         subsample: float | int,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     @profiler.profile("geoutils.raster.raster.subsample", memprof=True)
@@ -1961,6 +1944,8 @@ class RasterBase(ABC):
         subsample: float | int,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
         Randomly sample the raster. Only valid values are considered.
@@ -1973,6 +1958,7 @@ class RasterBase(ABC):
         :return: Array of sampled valid values, or array of sampled indices.
         """
 
-        return subsample_array(
-            array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
+        return _subsample(
+            self, subsample=subsample, return_indices=return_indices, random_state=random_state,
+            strategy=strategy, mp_config=mp_config
         )

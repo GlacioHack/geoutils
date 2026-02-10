@@ -34,7 +34,7 @@ from rasterio.features import shapes
 from geoutils._dispatch import _check_match_grid, get_geo_attr, has_geo_attr
 from geoutils._misc import silence_rasterio_message
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
-from geoutils.raster.georeferencing import _bounds
+from geoutils.raster.referencing import _bounds
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike

@@ -17,7 +17,7 @@
 # limitations under the License.
 
 """
-Functionalities for geotransformations of raster objects.
+Functionalities for transformations of raster objects.
 """
 
 from __future__ import annotations
@@ -649,7 +649,7 @@ def _delayed_reproject_per_block(
     return _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
 
 
-def delayed_reproject(
+def _dask_reproject(
     darr: da.Array,
     src_transform: rio.transform.Affine,
     src_crs: rio.crs.CRS,
@@ -866,7 +866,7 @@ def _reproject(
     silent: bool = False,
     n_threads: int = 0,
     memory_limit: int = 64,
-    multiproc_config: MultiprocConfig | None = None,
+    mp_config: MultiprocConfig | None = None,
 ) -> tuple[bool, NDArrayNum | NDArrayBool | None, affine.Affine | None, CRS | None, int | float | None]:
     """
     Reproject raster. See Raster.reproject() for details.
@@ -916,7 +916,7 @@ def _reproject(
     # 5/ Perform reprojection
     reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
     # Cannot use Multiprocessing backend and Dask backend simultaneously
-    mp_backend = multiproc_config is not None
+    mp_backend = mp_config is not None
     # The check below can only run on Xarray
     dask_backend = da is not None and source_raster._chunks is not None
 
@@ -927,13 +927,13 @@ def _reproject(
         )
 
     # If using Multiprocessing backend, process and return None (files written on disk)
-    if multiproc_config is not None:
-        _multiproc_reproject(source_raster, config=multiproc_config, **reproj_kwargs)  # type: ignore
+    if mp_config is not None:
+        _multiproc_reproject(source_raster, mp_config=mp_config, **reproj_kwargs)  # type: ignore
         return False, None, None, None, None
 
     # If using Dask backend, process and return Dask array
     if da is not None and isinstance(source_raster.data, da.Array):
-        dst_arr = delayed_reproject(darr=source_raster.data, **reproj_kwargs)
+        dst_arr = _dask_reproject(darr=source_raster.data, **reproj_kwargs)
 
     # If using direct reprojection, process and return NumPy array
     else:

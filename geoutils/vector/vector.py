@@ -61,7 +61,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
-from geoutils.vector.geotransformations import _reproject
+from geoutils.vector.transformations import _reproject
 
 if TYPE_CHECKING:
     import matplotlib

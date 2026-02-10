@@ -137,7 +137,7 @@ def _generate_tiling_grid(
 def compute_tiling(
     tile_size: int,
     raster_shape: tuple[int, int],
-    ref_shape: tuple[int, int],
+    ref_shape: tuple[int, int] = None,
     overlap: int = 0,
 ) -> NDArrayNum:
     """
@@ -145,14 +145,14 @@ def compute_tiling(
 
     :param tile_size: Size of each tile (square tiles).
     :param raster_shape: Shape of the raster to determine tiling parameters.
-    :param ref_shape: The shape of another raster to coregister, use to validate the shape.
+    :param ref_shape: Shape of another raster to coregister, use for validation (optional).
     :param overlap: Size of overlap between tiles (optional).
     :return: tiling_grid (array of tile boundaries).
 
-    :raises ValueError: if overlap is negative.
-    :raises TypeError: if overlap is not an integer.
+    :raises ValueError: If overlap is negative.
+    :raises TypeError: If overlap is not an integer.
     """
-    if raster_shape != ref_shape:
+    if ref_shape is not None and raster_shape != ref_shape:
         raise Exception("Reference and secondary rasters do not have the same shape")
     row_max, col_max = raster_shape
 

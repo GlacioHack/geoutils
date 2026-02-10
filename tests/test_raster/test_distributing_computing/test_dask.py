@@ -15,10 +15,8 @@ pytest.importorskip("dask")
 
 import dask.array as da  # noqa
 
-from geoutils.raster.transformations.dask import (  # noqa
-    delayed_interp_points,
-    delayed_reproject,
-    delayed_subsample,
+from geoutils.interface.interpolate import (  # noqa
+    _dask_interp_points,
 )
 
 
@@ -163,7 +161,7 @@ class TestDelayed:
         interp_x = (rng.choice(darr.shape[0], ninterp) + rng.random(ninterp)) * res[0]
         interp_y = (rng.choice(darr.shape[1], ninterp) + rng.random(ninterp)) * res[1]
 
-        interp1 = delayed_interp_points(darr, points=(interp_x, interp_y), resolution=res)  # type: ignore
+        interp1 = _dask_interp_points(darr, points=(interp_x, interp_y), resolution=res)  # type: ignore
 
         # 2/ Output checks
 

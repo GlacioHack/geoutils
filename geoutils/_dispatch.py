@@ -44,7 +44,7 @@ from geoutils.projtools import (
     _get_bounds_projected,
     reproject_points,
 )
-from geoutils.raster.georeferencing import _cast_pixel_interpretation
+from geoutils.raster.referencing import _cast_pixel_interpretation
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloudLike
