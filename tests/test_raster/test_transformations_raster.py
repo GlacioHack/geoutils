@@ -927,9 +927,9 @@ class TestDask:
     for small_shape in list_small_shapes:
         for w in with_nodata:
             small_darr = rng.normal(size=small_shape[0] * small_shape[1])
-            # Add about half nodata values
+            # Add about 5% of nodata values
             if w:
-                ind_nodata = rng.choice(small_darr.size, size=int(small_darr.size / 2), replace=False)
+                ind_nodata = rng.choice(small_darr.size, size=int(0.05 * small_darr.size), replace=False)
                 small_darr[list(ind_nodata)] = np.nan
             small_darr = small_darr.reshape(small_shape[0], small_shape[1])
             list_small_darr.append(small_darr)

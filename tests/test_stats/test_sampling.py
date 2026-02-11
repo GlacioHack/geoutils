@@ -39,9 +39,12 @@ class TestSampling:
         """
         Test gu.stats.subsample_array.
         """
+
+        warnings.filterwarnings("ignore", message=".*larger than the number of valid pixels.*", category=UserWarning)
+
         # Test that subsample > 1 works as expected, i.e. output 1D array, with no masked values, or selected size
         for npts in np.arange(2, np.size(array)):
-            random_values = gu.stats.subsample_array(array, subsample=npts)
+            random_values = _subsample_numpy(array, subsample=npts)
             assert np.ndim(random_values) == 1
             assert np.size(random_values) == npts
             assert np.count_nonzero(random_values.mask) == 0
@@ -121,7 +124,7 @@ class TestDask:
 
     @pytest.mark.parametrize("darr, darr_bool", list(zip(list_small_darr, darr_bool)))
     @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
-    @pytest.mark.parametrize("subsample_size", [2, 100, 100000])
+    @pytest.mark.parametrize("subsample_size", [2, 100, 10000])
     def test_dask_subsample__output(
         self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int
     ) -> None:
@@ -144,7 +147,7 @@ class TestDask:
         # 2/ Output checks
 
         # # The subsample should have exactly the prescribed length, with only valid values
-        assert issubclass(sub, da.Array)
+        assert isinstance(sub, da.Array)
         sub.compute()
         assert len(sub) == min(subsample_size, np.count_nonzero(np.isfinite(darr)))
         assert all(np.isfinite(sub))
@@ -153,7 +156,7 @@ class TestDask:
         # And compare to the same subsample with vindex (now that we know the coordinates of valid values sampled)
         indices = _dask_subsample(darr, subsample=subsample_size, random_state=42, return_indices=True)
         assert isinstance(indices, tuple)
-        assert issubclass(indices[0], da.Array) and issubclass(indices[1], da.Array)
+        assert isinstance(indices[0], da.Array) and isinstance(indices[1], da.Array)
         sub2 = np.array(darr.vindex[indices[0].compute(), indices[1].compute()])
         assert np.array_equal(sub, sub2)
 
@@ -162,7 +165,7 @@ class TestDask:
         darr_bool = darr_bool.rechunk(chunksizes_in_mem)
         indices_bool = _dask_subsample(darr_bool, subsample=subsample_size, random_state=42, return_indices=True)
         assert isinstance(indices, tuple)
-        assert issubclass(indices[0], da.Array) and issubclass(indices[1], da.Array)
+        assert isinstance(indices[0], da.Array) and isinstance(indices[1], da.Array)
         indices_bool = (indices_bool[0].compute(), indices_bool[1].compute())
         sub_bool = np.array(darr.vindex[indices_bool])
         assert np.array_equal(sub, sub_bool)

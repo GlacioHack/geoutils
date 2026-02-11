@@ -429,8 +429,8 @@ def _delayed_subsample_indices_block(
         )
 
     # Convert to full-array indexes by adding the row and column starting indexes for this block
-    ix += block_id["xstart"]
-    iy += block_id["ystart"]
+    ix += block_id["row_start"]
+    iy += block_id["col_start"]
 
     return np.hstack((ix, iy))
 

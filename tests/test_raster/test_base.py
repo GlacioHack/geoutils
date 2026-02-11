@@ -470,7 +470,11 @@ class TestClassVsAccessorConsistency:
             assert isinstance(output_ds.data, da.Array)
             assert output_ds.data.chunks is not None
             # Output computes successfully, and is then loaded in memory
+            import time
+            t0 = time.time()
             output_ds = output_ds.compute()
+            print(time.time() - t0)
+            assert False
             assert isinstance(output_ds.data, np.ndarray)
             assert output_ds._in_memory
 

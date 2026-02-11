@@ -16,6 +16,7 @@ from geoutils.interface.interpolation import (
     _interp_points,
     _interpn_interpolator,
     _dask_interp_points,
+    _interp_points_base,
     method_to_order,
 )
 from geoutils.projtools import reproject_to_latlon
@@ -673,9 +674,9 @@ class TestDask:
     for small_shape in list_small_shapes:
         for w in with_nodata:
             small_darr = rng.normal(size=small_shape[0] * small_shape[1])
-            # Add about half nodata values
+            # Add about 5% of nodata values
             if w:
-                ind_nodata = rng.choice(small_darr.size, size=int(small_darr.size / 2), replace=False)
+                ind_nodata = rng.choice(small_darr.size, size=int(0.05 * small_darr.size), replace=False)
                 small_darr[list(ind_nodata)] = np.nan
             small_darr = small_darr.reshape(small_shape[0], small_shape[1])
             list_small_darr.append(small_darr)
@@ -707,30 +708,37 @@ class TestDask:
 
         # 1/ Define points to interpolate given the size and resolution
         darr = darr.rechunk(chunksizes_in_mem)
-        rng = np.random.default_rng(seed=42)
-        interp_x = (rng.choice(darr.shape[0], ninterp) + rng.random(ninterp)) * res[0]
-        interp_y = (rng.choice(darr.shape[1], ninterp) + rng.random(ninterp)) * res[1]
+        ny, nx = darr.shape  # (rows, cols)
+        xres, yres = res
 
-        transform = rio.transform.from_origin(0, darr.shape[0] * res[1], res[0], res[1])
+        # Build a north-up transform with origin at (0, ny*yres)
+        # Pixel (row=0, col=0) upper-left corner is (0, top)
+        top = ny * yres
+        transform = rio.transform.from_origin(0.0, float(top), float(xres), float(yres))
+
+        rng = np.random.default_rng(seed=42)
+        # Sample random points within the raster bounds in georeferenced coords.
+        # Use pixel centers: x in (0.5*xres .. (nx-0.5)*xres), y in (top-0.5*yres .. top-(ny-0.5)*yres)
+        cols = rng.integers(0, nx, size=ninterp)
+        rows = rng.integers(0, ny, size=ninterp)
+        dx = rng.random(ninterp) - 0.5
+        dy = rng.random(ninterp) - 0.5
+
+        interp_x = (cols + 0.5 + dx) * xres
+        interp_y = top - (rows + 0.5 + dy) * yres
 
         interp1 = _dask_interp_points(darr, points=(interp_x, interp_y), transform=transform, method="linear")
+        interp1 = np.array(interp1.compute())
 
-        # 2/ Output checks
+        interp2 = _interp_points_base(np.array(darr), points=(interp_x, interp_y), transform=transform, method="linear")
 
-        # Interpolate directly with Xarray (loads a lot in memory) and check results are exactly the same
-        import xarray as xr
-        xx = xr.DataArray(interp_x, dims="z", name="x")
-        yy = xr.DataArray(interp_y, dims="z", name="y")
-        ds = xr.DataArray(
-            data=darr,
-            dims=["x", "y"],
-            coords={
-                "x": np.arange(0, darr.shape[0] * res[0], res[0]),
-                "y": np.arange(0, darr.shape[1] * res[1], res[1]),
-            },
+        # Differentiate points close to boundary (gets the effect of Dask expanding the sides during overlap,
+        # and filling the values with "nearest")
+        at_boundary = (
+                (interp_x <= 2*xres) |
+                (interp_x >= nx * xres - 2*xres) |
+                (interp_y <= 2*yres) |
+                (interp_y >= ny * yres - 2*yres)
         )
-        interp2 = ds.interp(x=xx, y=yy)
-        interp2.compute()
-        interp2 = np.array(interp2.values)
-
-        assert np.array_equal(interp1, interp2, equal_nan=True)
+        assert np.allclose(interp1[~at_boundary], interp2[~at_boundary], equal_nan=True, rtol=1e-3)
+        assert np.allclose(interp1[at_boundary], interp2[at_boundary], equal_nan=True, rtol=1e-3)

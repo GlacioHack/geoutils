@@ -330,16 +330,16 @@ class GeoGrid:
         if crs is None:
             crs = self.crs
         bounds = rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
-        return _get_bounds_projected(bounds=bounds, in_crs=self.crs, out_crs=crs)
+        return _get_bounds_projected(bounds=bounds, in_crs=self.crs, out_crs=crs, densify_points=5)
 
     @property
     def bounds(self) -> rio.coords.BoundingBox:
         return self.bounds_projected()
 
-    def footprint_projected(self, crs: rio.crs.CRS = None) -> gpd.GeoDataFrame:
+    def footprint_projected(self, crs: rio.crs.CRS = None, buffer_px: int = 0) -> gpd.GeoDataFrame:
         if crs is None:
             crs = self.crs
-        return _get_footprint_projected(self.bounds, in_crs=self.crs, out_crs=crs, densify_points=100)
+        return _get_footprint_projected(self.bounds, in_crs=self.crs, out_crs=crs, densify_points=5)
 
     @property
     def footprint(self) -> gpd.GeoDataFrame:
@@ -530,6 +530,7 @@ def _build_geotiling_and_meta(
     used to support block-wise reprojection operations (e.g. with multiprocessing or dask).
 
     This function performs the following:
+
     1. Constructs `GeoGrid` and `ChunkedGeoGrid` objects for source and destination rasters,
        based on provided shape, transform, CRS, and chunk sizes.
     2. Computes spatial footprints for each chunk in both grids, and determines which
@@ -605,7 +606,7 @@ def _reproject_per_block(
         dst_shape = (combined_meta["dst_count"], *combined_meta["dst_shape"]) if is_multiband \
             else combined_meta["dst_shape"]
         dst_arr = np.zeros(dst_shape, dtype=np.dtype("float32"))
-        dst_arr[:] = kwargs["dst_nodata"]
+        dst_arr[:] = np.nan
         return dst_arr
 
     # First, we build an empty array with the combined shape, only with nodata values
@@ -692,6 +693,8 @@ def _dask_reproject(
     # To raise appropriate error on missing optional dependency
     import_optional("dask")
 
+    import time
+    t0 = time.time()
     # Define the chunking
     # For source, we can use the .chunks attribute
     src_chunks = darr.chunks[-2:]  # In case input is multi-band
@@ -713,6 +716,9 @@ def _dask_reproject(
             dst_chunksizes=dst_chunksizes,
         )
     )
+
+    t1 = time.time()
+    print(t1 - t0)
 
     # We call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
 

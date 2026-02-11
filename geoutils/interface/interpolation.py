@@ -471,7 +471,8 @@ def _dask_interp_points(
 
     # Expand dask array for overlapping computations
     chunksize = darr.chunksize
-    expanded = da.overlap.overlap(darr, depth=depth, boundary=np.nan)
+    # TODO: Figure out how to get NaNs in exact same places
+    expanded = da.overlap.overlap(darr, depth=depth, boundary="nearest")
 
     # Get starting 2D index for each chunk of the full array
     # (mirroring what is done in block_id of dask.array.map_blocks)
