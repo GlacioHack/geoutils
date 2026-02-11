@@ -4,22 +4,27 @@ from __future__ import annotations
 
 import re
 import warnings
+from multiprocessing import cpu_count
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
+from pyproj import CRS
+from packaging.version import Version
 
 import geoutils as gu
 from geoutils import examples
 from geoutils.exceptions import InvalidGridError
-from geoutils.raster._geotransformations import _resampling_method_from_str
+from geoutils.raster.transformations import _resampling_method_from_str, _dask_reproject, _rio_reproject
 from geoutils.raster.raster import _default_nodata
+from geoutils.multiproc import ClusterGenerator, MultiprocConfig
+from geoutils.stats.sampling import _subsample_numpy
 
 DO_PLOT = False
 
 
-class TestRasterGeotransformations:
+class TestRasterTransformations:
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
@@ -301,13 +306,13 @@ class TestRasterGeotransformations:
         r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.stats.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # Make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtype)
-        rand_indices = gu.stats.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
@@ -554,7 +559,7 @@ class TestRasterGeotransformations:
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
-        rand_indices = gu.stats.subsample_array(r_gaps.data, nsamples, return_indices=True)
+        rand_indices = _subsample_numpy(r_gaps.data, nsamples, return_indices=True)
         r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
@@ -783,3 +788,236 @@ class TestMaskGeotransformations:
         assert np.all(res.data.mask)
         # Default data value (behind the mask) is True
         assert np.all(res.data.data)
+
+class TestMultiproc:
+
+    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
+    num_workers = min(2, cpu_count())  # Safer limit for CI
+    cluster = ClusterGenerator("test", nb_workers=num_workers)
+
+    @pytest.mark.parametrize("example", [aster_dem_path])
+    @pytest.mark.parametrize("tile_size", [10, 20])
+    @pytest.mark.parametrize("cluster", [None, cluster])
+    def test_multiproc_reproject(self, example: str, tile_size: int, cluster: None | AbstractCluster) -> None:
+        """Test for multiproc_reproject"""
+
+        r = gu.Raster(example)
+        config = MultiprocConfig(tile_size, cluster=cluster)
+
+        # - Test reprojection with bounds and resolution -
+        dst_bounds = rio.coords.BoundingBox(
+            left=r.bounds.left, bottom=r.bounds.bottom + r.res[0], right=r.bounds.right - 2 * r.res[1], top=r.bounds.top
+        )
+        res_tuple = (r.res[0] * 0.5, r.res[1] * 3)
+
+        # Multiprocessing reprojection
+        r_multi = r.reproject(bounds=dst_bounds, res=res_tuple, mp_config=config)
+
+        # Assert that the raster has not been loaded during reprojection
+        assert not r.is_loaded
+
+        # Single-process reprojection
+        r_single = r.reproject(bounds=dst_bounds, res=res_tuple)
+
+        # Assert the results are the same
+        assert r_single.raster_allclose(r_multi, warn_failure_reason=True, strict_masked=False)
+
+        # - Test reprojection with CRS change -
+        for out_crs in [rio.crs.CRS.from_epsg(4326)]:
+
+            # Single-process reprojection
+            r_single = r.reproject(crs=out_crs)
+
+            # Multiprocessing reprojection
+            r_multi = r.reproject(crs=out_crs, mp_config=config)
+
+            # Assert the results are the same
+            assert r_single.raster_allclose(r_multi, warn_failure_reason=True, strict_masked=False)
+
+        # Check that reprojection works for several bands in multiproc as well
+        for n in [3]:
+            img1 = gu.Raster.from_array(
+                np.ones((n, 50, 50), dtype="uint8"),
+                transform=rio.transform.from_origin(0, 50, 1, 1),
+                crs=4326,
+                nodata=0,
+            )
+            img2 = gu.Raster.from_array(
+                np.ones((n, 50, 50), dtype="uint8"),
+                transform=rio.transform.from_origin(50, 50, 1, 1),
+                crs=4326,
+                nodata=0,
+            )
+
+            out_img_single = img2.reproject(img1)
+            out_img_multi = img2.reproject(ref=img1, mp_config=config)
+
+            assert out_img_multi.count == n
+            assert out_img_multi.shape == (50, 50)
+            assert out_img_single.raster_allclose(out_img_multi, warn_failure_reason=True, strict_masked=False)
+
+
+def _build_dst_transform_shifted_newres(
+    src_transform: rio.transform.Affine,
+    src_shape: tuple[int, int],
+    src_crs: CRS,
+    dst_crs: CRS,
+    bounds_rel_shift: tuple[float, float],
+    res_rel_fac: tuple[float, float],
+) -> rio.transform.Affine:
+    """
+    Build a destination transform intersecting the source transform given source/destination shapes,
+    and possibly introducing a relative shift in upper-left bound and multiplicative change in resolution.
+    """
+
+    # Get bounding box in source CRS
+    bounds = rio.coords.BoundingBox(*rio.transform.array_bounds(src_shape[0], src_shape[1], src_transform))
+
+    # Construct an aligned transform in the destination CRS assuming the same resolution
+    tmp_transform = rio.warp.calculate_default_transform(
+        src_crs,
+        dst_crs,
+        src_shape[1],
+        src_shape[0],
+        left=bounds.left,
+        right=bounds.right,
+        top=bounds.top,
+        bottom=bounds.bottom,
+        dst_width=src_shape[1],
+        dst_height=src_shape[0],
+    )[0]
+    # This allows us to get bounds and resolution in the units of the new CRS
+    tmp_res = (tmp_transform[0], abs(tmp_transform[4]))
+    tmp_bounds = rio.coords.BoundingBox(*rio.transform.array_bounds(src_shape[0], src_shape[1], tmp_transform))
+    # Now we can create a shifted/different-res destination grid
+    dst_transform = rio.transform.from_origin(
+        west=tmp_bounds.left + bounds_rel_shift[0] * tmp_res[0] * src_shape[1],
+        north=tmp_bounds.top + 150 * bounds_rel_shift[0] * tmp_res[1] * src_shape[0],
+        xsize=tmp_res[0] / res_rel_fac[0],
+        ysize=tmp_res[1] / res_rel_fac[1],
+    )
+
+    return dst_transform
+
+
+class TestDask:
+    """
+    Testing class for delayed functions.
+
+    We test on a first set of rasters big enough to clearly monitor the memory usage, and a second set small enough
+    to run fast to check a wide range of input parameters.
+
+    We compare outputs with the in-memory function specifically for input variables that influence the delayed
+    algorithm and might lead to new errors (for example: array shape to get subsample/points locations for
+    subsample and interp_points, or destination chunksizes to map output of reproject).
+    """
+
+    # Skip the whole module if Dask is not installed
+    pytest.importorskip("dask")
+    import dask.array as da
+
+    # Define random seed for generating test data
+    rng = da.random.default_rng(seed=42)
+
+    # Smaller test files for fast checks, with various shapes and with/without nodata
+    list_small_shapes = [(51, 47)]
+    with_nodata = [False, True]
+    list_small_darr = []
+    for small_shape in list_small_shapes:
+        for w in with_nodata:
+            small_darr = rng.normal(size=small_shape[0] * small_shape[1])
+            # Add about half nodata values
+            if w:
+                ind_nodata = rng.choice(small_darr.size, size=int(small_darr.size / 2), replace=False)
+                small_darr[list(ind_nodata)] = np.nan
+            small_darr = small_darr.reshape(small_shape[0], small_shape[1])
+            list_small_darr.append(small_darr)
+
+    # List of in-memory chunksize for small tests
+    list_small_chunksizes_in_mem = [(10, 10), (7, 19)]
+
+    # Create a corresponding boolean array for each numerical dask array
+    # Every finite numerical value (valid numerical value) corresponds to True (valid boolean value).
+    darr_bool = []
+    for small_darr in list_small_darr:
+        darr_bool.append(da.where(da.isfinite(small_darr), True, False))
+
+    @pytest.mark.parametrize("darr", list_small_darr)
+    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
+    @pytest.mark.parametrize("dst_chunksizes", list_small_chunksizes_in_mem)
+    # Shift upper left corner of output bounds (relative to projected input bounds) by fractions of the raster size
+    @pytest.mark.parametrize("dst_bounds_rel_shift", [(0, 0), (-0.2, 0.5)])
+    # Modify output resolution (relative to projected input resolution) by a factor
+    @pytest.mark.parametrize("dst_res_rel_fac", [(1, 1), (2.1, 0.54)])
+    # Same for shape
+    @pytest.mark.parametrize("dst_shape_diff", [(0, 0), (-28, 117)])
+    def test_dask_reproject__output(
+        self,
+        darr: da.Array,
+        chunksizes_in_mem: tuple[int, int],
+        dst_chunksizes: tuple[int, int],
+        dst_bounds_rel_shift: tuple[float, float],
+        dst_res_rel_fac: tuple[float, float],
+        dst_shape_diff: tuple[int, int],
+    ) -> None:
+        """
+        Checks for the delayed reproject function.
+        Variables that influence specifically the delayed function are:
+        - Input/output chunksizes,
+        - Input array shape,
+        - Output geotransform relative to projected input geotransform,
+        - Output array shape relative to input.
+        """
+
+        # 0/ Define input parameters
+
+        # Get input and output shape
+        darr = darr.rechunk(chunksizes_in_mem)
+        src_shape = darr.shape
+        dst_shape = (src_shape[0] + dst_shape_diff[0], src_shape[1] + dst_shape_diff[1])
+        arr = np.array(darr)
+
+        # Define arbitrary input transform, as we only care about the relative difference with the output transform
+        src_transform = rio.transform.from_bounds(10, 10, 15, 15, src_shape[0], src_shape[1])
+
+        # Other arguments having (normally) no influence
+        src_crs = CRS(4326)
+        dst_crs = CRS(32630)
+        src_nodata = -9999
+        dst_nodata = 99999
+        resampling = rio.enums.Resampling.bilinear
+
+        # Get shifted dst_transform with new resolution
+        dst_transform = _build_dst_transform_shifted_newres(
+            src_transform=src_transform,
+            src_crs=src_crs,
+            dst_crs=dst_crs,
+            src_shape=src_shape,
+            bounds_rel_shift=dst_bounds_rel_shift,
+            res_rel_fac=dst_res_rel_fac,
+        )
+
+        # 2/ Run delayed reproject with memory monitoring
+        reproj_kwargs = {"src_transform": src_transform, "src_crs": src_crs, "dst_crs": dst_crs,
+                         "resampling": resampling, "dst_transform": dst_transform, "src_nodata": src_nodata,
+                         "dst_nodata": dst_nodata, "dst_shape": dst_shape, "dtype": darr.dtype, "num_threads": 1}
+
+        reproj_arr = _dask_reproject(
+            darr,
+            dst_chunksizes=dst_chunksizes,
+            **reproj_kwargs,
+        )
+        # Load in memory
+        reproj_arr = np.array(reproj_arr)
+
+        # 3/ Outputs check: load in memory and compare with a direct Rasterio reproject
+
+        dst_arr = _rio_reproject(
+            arr,
+            reproj_kwargs,
+        )
+
+        # For recent version (tolerance argument added and set to zero), results are the same
+        if Version(rio.__version__) >= Version("1.5.0"):
+            assert np.allclose(reproj_arr, dst_arr, equal_nan=True)

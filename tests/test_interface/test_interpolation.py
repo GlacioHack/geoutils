@@ -11,10 +11,11 @@ from scipy.ndimage import binary_dilation
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.interface.interpolate import (
+from geoutils.interface.interpolation import (
     _get_dist_nodata_spread,
     _interp_points,
     _interpn_interpolator,
+    _dask_interp_points,
     method_to_order,
 )
 from geoutils.projtools import reproject_to_latlon
@@ -656,3 +657,80 @@ class TestInterpolate:
         lrl3 = r.data[-1, -2]
         assert np.array_equal(lrl1, lrl2, equal_nan=True)
         assert np.array_equal(lrl2, lrl3, equal_nan=True)
+
+class TestDask:
+
+    pytest.importorskip("dask")
+    import dask.array as da
+
+    # Define random seed for generating test data
+    rng = da.random.default_rng(seed=42)
+
+    # Smaller test files for fast checks, with various shapes and with/without nodata
+    list_small_shapes = [(51, 47)]
+    with_nodata = [False, True]
+    list_small_darr = []
+    for small_shape in list_small_shapes:
+        for w in with_nodata:
+            small_darr = rng.normal(size=small_shape[0] * small_shape[1])
+            # Add about half nodata values
+            if w:
+                ind_nodata = rng.choice(small_darr.size, size=int(small_darr.size / 2), replace=False)
+                small_darr[list(ind_nodata)] = np.nan
+            small_darr = small_darr.reshape(small_shape[0], small_shape[1])
+            list_small_darr.append(small_darr)
+
+    # List of in-memory chunksize for small tests
+    list_small_chunksizes_in_mem = [(10, 10), (7, 19)]
+
+    # Create a corresponding boolean array for each numerical dask array
+    # Every finite numerical value (valid numerical value) corresponds to True (valid boolean value).
+    darr_bool = []
+    for small_darr in list_small_darr:
+        darr_bool.append(da.where(da.isfinite(small_darr), True, False))
+
+    @pytest.mark.parametrize("darr", list_small_darr)
+    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
+    @pytest.mark.parametrize("ninterp", [2, 100])
+    @pytest.mark.parametrize("res", [(0.5, 2), (1, 1)])
+    def test_dask_interp_points__output(
+            self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int, res: tuple[float, float]
+    ) -> None:
+        """
+        Checks for delayed interpolate points function.
+        Variables that influence specifically the delayed function are:
+        - Input chunksizes,
+        - Input array shape,
+        - Number of interpolated points,
+        - The resolution of the regular grid.
+        """
+
+        # 1/ Define points to interpolate given the size and resolution
+        darr = darr.rechunk(chunksizes_in_mem)
+        rng = np.random.default_rng(seed=42)
+        interp_x = (rng.choice(darr.shape[0], ninterp) + rng.random(ninterp)) * res[0]
+        interp_y = (rng.choice(darr.shape[1], ninterp) + rng.random(ninterp)) * res[1]
+
+        transform = rio.transform.from_origin(0, darr.shape[0] * res[1], res[0], res[1])
+
+        interp1 = _dask_interp_points(darr, points=(interp_x, interp_y), transform=transform, method="linear")
+
+        # 2/ Output checks
+
+        # Interpolate directly with Xarray (loads a lot in memory) and check results are exactly the same
+        import xarray as xr
+        xx = xr.DataArray(interp_x, dims="z", name="x")
+        yy = xr.DataArray(interp_y, dims="z", name="y")
+        ds = xr.DataArray(
+            data=darr,
+            dims=["x", "y"],
+            coords={
+                "x": np.arange(0, darr.shape[0] * res[0], res[0]),
+                "y": np.arange(0, darr.shape[1] * res[1], res[1]),
+            },
+        )
+        interp2 = ds.interp(x=xx, y=yy)
+        interp2.compute()
+        interp2 = np.array(interp2.values)
+
+        assert np.array_equal(interp1, interp2, equal_nan=True)

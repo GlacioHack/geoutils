@@ -32,7 +32,7 @@ from geoutils._dispatch import has_geo_attr
 from geoutils._typing import NDArrayNum
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.referencing import _default_nodata, _xy2ij
-from geoutils.stats.sampling import _subsample
+from geoutils.stats.sampling import _subsample_numpy
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -221,7 +221,7 @@ def _raster_to_pointcloud(
     # Build a low memory boolean masked array with invalid values masked to pass to subsampling
     ma_valid = np.ma.masked_array(data=np.ones(np.shape(valid_mask), dtype=bool), mask=~valid_mask)
     # Take a subsample within the valid values
-    indices = _subsample(array=ma_valid, subsample=subsample, random_state=random_state, return_indices=True)
+    indices = _subsample_numpy(array=ma_valid, subsample=subsample, random_state=random_state, return_indices=True)
 
     # If the Raster is loaded, pick from the data while ignoring the mask
     if source_raster.is_loaded or source_raster._is_xr:

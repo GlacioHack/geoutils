@@ -746,13 +746,10 @@ def _interp_points(
             arr = source_raster.data
         # If using Dask backend, process and return NumPy array (ragged output)
         if dask_backend:
-            z_inbounds = _dask_interp_points(darr=arr, transform=transform,
-                                             points=pts_inbounds,
-                                             **interp_kwargs)
+            z_inbounds = _dask_interp_points(darr=arr, transform=transform, points=pts_inbounds, **interp_kwargs)
         # If using direct reprojection, process and return NumPy array
         else:
-            z_inbounds = _interp_points_base(array=arr, transform=transform,
-                                             points=pts_inbounds, **interp_kwargs)
+            z_inbounds = _interp_points_base(array=arr, transform=transform, points=pts_inbounds, **interp_kwargs)
 
     # 3/ Output preparation and return
 

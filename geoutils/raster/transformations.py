@@ -262,7 +262,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     if reproj_kwargs["dst_nodata"] is not None:
         dst_mask = dst_arr == reproj_kwargs["dst_nodata"]
     else:
-        dst_mask = np.zeros(src_arr.shape, dtype=bool)
+        dst_mask = np.zeros(dst_arr.shape, dtype=bool)
 
     # If output needs to be converted back to boolean
     if convert_bool:
@@ -272,7 +272,6 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     if is_input_masked:
         dst_arr = np.ma.masked_array(data=dst_arr, mask=dst_mask, fill_value=reproj_kwargs["dst_nodata"])
     else:
-        dst_arr = dst_arr
         dst_arr[dst_mask] = np.nan
 
     return dst_arr
@@ -508,6 +507,7 @@ def _combined_blocks_shape_transform(
 
 
 def _build_geotiling_and_meta(
+    src_count: int,
     src_shape: tuple[int, int],
     src_transform: rio.transform.Affine,
     src_crs: CRS,
@@ -584,7 +584,8 @@ def _build_geotiling_and_meta(
     # Append dst shape/transform to metadata
     dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
     for i, (c, _) in enumerate(meta_params):
-        c.update({"dst_shape": dst_block_geogrids[i].shape, "dst_transform": tuple(dst_block_geogrids[i].transform)})
+        c.update({"dst_shape": dst_block_geogrids[i].shape, "dst_transform": tuple(dst_block_geogrids[i].transform),
+                  "dst_count": src_count})
 
     return src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids
 
@@ -596,31 +597,34 @@ def _reproject_per_block(
     Reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
     """
 
+    is_multiband = combined_meta["dst_count"] >= 2
+
     # If no source chunk intersects, we return a chunk of destination nodata values
     if len(src_arrs) == 0:
         # We can use float32 to return NaN, will be cast to other floating type later if that's not source array dtype
-        dst_arr = np.zeros(combined_meta["dst_shape"], dtype=np.dtype("float32"))
+        dst_shape = (combined_meta["dst_count"], *combined_meta["dst_shape"]) if is_multiband \
+            else combined_meta["dst_shape"]
+        dst_arr = np.zeros(dst_shape, dtype=np.dtype("float32"))
         dst_arr[:] = kwargs["dst_nodata"]
         return dst_arr
 
     # First, we build an empty array with the combined shape, only with nodata values
-    is_multiband = len(src_arrs[0].shape) > 2
     shape = (src_arrs[0].shape[0], *combined_meta["src_shape"]) if is_multiband else combined_meta["src_shape"]
 
     comb_src_arr = np.full(shape, kwargs["src_nodata"], dtype=src_arrs[0].dtype)
+    if np.ma.isMaskedArray(src_arrs[0]):
+        comb_src_arr = np.ma.masked_array(data=comb_src_arr)
 
     # Then fill it with the source chunks values
     for arr, bid in zip(src_arrs, block_ids):
         comb_src_arr[..., bid["rys"] : bid["rye"], bid["rxs"] : bid["rxe"]] = arr
 
     # Now, we can simply call Rasterio!
-
     # We build the combined transform from tuple
     src_transform = rio.transform.Affine(*combined_meta["src_transform"])
     dst_transform = rio.transform.Affine(*combined_meta["dst_transform"])
 
     # Reproject wrapper
-
     # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
     kwargs.update(
         {
@@ -690,14 +694,16 @@ def _dask_reproject(
 
     # Define the chunking
     # For source, we can use the .chunks attribute
-    src_chunks = darr.chunks
+    src_chunks = darr.chunks[-2:]  # In case input is multi-band
 
     if dst_chunksizes is None:
-        dst_chunksizes = darr.chunksize
+        dst_chunksizes = (darr.chunksize[-2], darr.chunksize[-1])  # In case input is multi-band
+
     # Prepare geotiling and reprojection metadata for source and destination grids
     src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids = (
         _build_geotiling_and_meta(
-            src_shape=darr.shape,
+            src_count=darr.shape[0] if darr.ndim == 3 else 1,
+            src_shape=darr.shape[-2:],  # In case input is multi-band
             src_transform=src_transform,
             src_crs=src_crs,
             dst_shape=dst_shape,
@@ -722,32 +728,65 @@ def _dask_reproject(
     )
 
     # Create a delayed object for each block, and flatten the blocks into a 1d shape
-    blocks = darr.to_delayed().ravel()
-    # Run the delayed reprojection, looping for each destination block
-    list_reproj = [
-        _delayed_reproject_per_block(
-            *blocks[dest2source[i]], block_ids=meta_params[i][1], combined_meta=meta_params[i][0], **kwargs
-        )
-        for i in range(len(dest2source))
-    ]
+    blocks_delayed = darr.to_delayed()
 
-    # We define the expected output shape and dtype to simplify things for Dask
-    list_reproj_delayed = [
-        da.from_delayed(r, shape=dst_block_geogrids[i].shape, dtype=darr.dtype) for i, r in enumerate(list_reproj)
-    ]
+    # Spatial block grid shape (from spatial chunks)
+    is_multiband = darr.ndim == 3
+    ny_src = len(src_chunks[0])
+    nx_src = len(src_chunks[1])
+    src_yi, src_xi = np.unravel_index(np.arange(ny_src * nx_src), shape=(ny_src, nx_src))
+    # Normalize band groups:
+    # - 2D: one pseudo group (bb=None, nb=0)
+    # - 3D: real band blocks with their sizes
+    band_groups: list[tuple[int | None, int]] = (
+        [(None, 0)] if not is_multiband else [(bb, int(sz)) for bb, sz in enumerate(darr.chunks[0])]
+    )
+    # Output data type
+    out_dtype = np.dtype(kwargs.get("dtype", darr.dtype))
+
+    # Helper function to support both 2D and 3D cases
+    def _dst_block_as_da(i: int) -> da.Array:
+        """Build destination block as a Dask array (2D or 3D)."""
+        shp2 = dst_block_geogrids[i].shape  # (ydst, xdst)
+
+        # Spatial source coords for this destination tile
+        coords = [(src_yi[j], src_xi[j]) for j in dest2source[i]]
+
+        def _src_chunks_for_group(bb: int | None) -> list[Any]:
+            # Accounting for the fact that blocks_delayed is either (ny,nx) or (nb,ny,nx)
+            if bb is None:
+                return [blocks_delayed[y, x] for (y, x) in coords]
+            return [blocks_delayed[bb, y, x] for (y, x) in coords]
+
+        def _one_group(bb: int | None, nb: int) -> da.Array:
+            r = _delayed_reproject_per_block(
+                *_src_chunks_for_group(bb),
+                block_ids=meta_params[i][1],
+                combined_meta=meta_params[i][0],
+                **kwargs,
+            )
+            shape = shp2 if bb is None else (nb, *shp2)
+            # We define the expected output shape and dtype to simplify things for Dask
+            return da.from_delayed(r, shape=shape, dtype=out_dtype)
+
+        # Build per-group outputs then concatenate along band axis if needed
+        groups = [_one_group(bb, nb) for (bb, nb) in band_groups]
+        return groups[0] if len(groups) == 1 else da.concatenate(groups, axis=0)
+
+    # Run the delayed reprojection, looping for each destination block-band (2D block and 1D band-chunk)
+    list_reproj_da = [_dst_block_as_da(i) for i in range(len(dest2source))]
 
     # Array comes out as flat blocks x chunksize0 (varying) x chunksize1 (varying), so we can't reshape directly
     # We need to unravel the flattened blocks indices to align X/Y, then concatenate all columns, then rows
-    indexes_xi, indexes_yi = np.unravel_index(
-        np.arange(len(dest2source)), shape=(len(dst_chunks[0]), len(dst_chunks[1]))
-    )
-
-    lists_columns = [
-        [l for i, l in enumerate(list_reproj_delayed) if j == indexes_xi[i]] for j in range(len(dst_chunks[0]))
+    ny_dst, nx_dst = len(dst_chunks[0]), len(dst_chunks[1])
+    iy, ix = np.unravel_index(np.arange(len(dest2source)), shape=(ny_dst, nx_dst))
+    ax_x = 1 if darr.ndim == 2 else 2  # Adjust axes depending on if raster is single-band or multi-band
+    ax_y = 0 if darr.ndim == 2 else 1
+    rows = [
+        da.concatenate([list_reproj_da[k] for k in range(len(list_reproj_da)) if iy[k] == r], axis=ax_x)
+        for r in range(ny_dst)
     ]
-    concat_columns = [da.concatenate(c, axis=1) for c in lists_columns]
-    concat_all = da.concatenate(concat_columns, axis=0)
-
+    concat_all = da.concatenate(rows, axis=ax_y)
     return concat_all
 
 def _wrapper_multiproc_reproject_per_block(
@@ -774,7 +813,7 @@ def _wrapper_multiproc_reproject_per_block(
 
 def _multiproc_reproject(
     rst: Raster,
-    config: MultiprocConfig,
+    mp_config: MultiprocConfig,
     src_crs: rio.CRS,
     src_nodata: int | float | None,
     dst_shape: tuple[int, int],
@@ -791,9 +830,11 @@ def _multiproc_reproject(
     """
 
     # Prepare geotiling and reprojection metadata for source and destination grids
-    src_chunks = _chunks2d_from_chunksizes_shape(chunksizes=(config.chunk_size, config.chunk_size), shape=rst.shape)
+    src_chunks = _chunks2d_from_chunksizes_shape(chunksizes=(mp_config.chunk_size, mp_config.chunk_size),
+                                                 shape=rst.shape)
     src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids = (
         _build_geotiling_and_meta(
+            src_count=rst.count,
             src_shape=rst.shape,
             src_transform=rst.transform,
             src_crs=rst.crs,
@@ -801,7 +842,7 @@ def _multiproc_reproject(
             dst_transform=dst_transform,
             dst_crs=dst_crs,
             src_chunks=src_chunks,
-            dst_chunksizes=(config.chunk_size, config.chunk_size),
+            dst_chunksizes=(mp_config.chunk_size, mp_config.chunk_size),
         )
     )
 
@@ -822,7 +863,7 @@ def _multiproc_reproject(
     tasks = []
     for i in range(len(dest2source)):
         tasks.append(
-            config.cluster.launch_task(
+            mp_config.cluster.launch_task(
                 fun=_wrapper_multiproc_reproject_per_block,
                 args=[
                     rst,
@@ -848,7 +889,7 @@ def _multiproc_reproject(
     }
 
     # Create a new raster file to save the processed results
-    _write_multiproc_result(tasks, config, file_metadata)
+    _write_multiproc_result(tasks, mp_config, file_metadata)
 
 
 @profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)

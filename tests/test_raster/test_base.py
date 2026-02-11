@@ -409,7 +409,7 @@ class TestClassVsAccessorConsistency:
                                 ("interp_points", {"points": "random", "as_array": True}),
                                 ("subsample", {"subsample": 100, "strategy": "topk"},),
                                 ("subsample", {"subsample": 100, "strategy": "topk", "return_indices": True},))
-    @pytest.mark.parametrize("path_index", [0, 2])
+    @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])
     def test_chunked_methods__equality_loading_laziness(
         self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]

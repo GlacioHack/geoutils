@@ -1186,13 +1186,13 @@ class RasterBase(ABC):
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
+        resampling: Resampling | str = "bilinear",
         force_source_nodata: int | float | None = None,
         silent: bool = False,
         inplace: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -1226,7 +1226,7 @@ class RasterBase(ABC):
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
-        :param multiproc_config: Configuration object containing chunk size, output file path, and an optional cluster.
+        :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
         :returns: Reprojected raster.
 
@@ -1246,7 +1246,7 @@ class RasterBase(ABC):
             silent=silent,
             n_threads=n_threads,
             memory_limit=memory_limit,
-            multiproc_config=multiproc_config,
+            mp_config=mp_config,
         )
 
         # If return copy is True (target georeferenced grid was the same as input)
@@ -1266,7 +1266,7 @@ class RasterBase(ABC):
                 category=DeprecationWarning,
             )
 
-            if self._is_xr or multiproc_config:
+            if self._is_xr or mp_config:
                 raise NotImplementedError(
                     "In-place cropping raster is deprecated and not supported through the 'rst' "
                     "accessor or Multiproc config."
@@ -1283,8 +1283,8 @@ class RasterBase(ABC):
                 return None
 
         # If multiprocessing -> results on disk -> load metadata
-        if multiproc_config:
-            result_raster = self.__class__(multiproc_config.outfile)
+        if mp_config:
+            result_raster = self.__class__(mp_config.outfile)
             return result_raster  # type: ignore
 
         # Not in-place
