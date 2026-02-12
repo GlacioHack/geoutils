@@ -13,8 +13,7 @@ kernelspec:
 (filters)=
 
 # Filters
-GeoUtils provides several filters to process raster data. These filters can be found in the `geoutils.filters` module.
-They can be applied to {class}`~geoutils.Raster` objects.
+GeoUtils provides several filters to process raster data. They can be applied to {class}`~geoutils.Raster` objects.
 
 ## Available filters
 The following filters are currently available in GeoUtils:
@@ -40,7 +39,7 @@ The following filters are currently available in GeoUtils:
 | `kwargs`            | Kwargs from [scipy](https://docs.scipy.org/doc/scipy/reference/ndimage.html) are available | `gaussian`, `min`, `max`       | dict  |               |
 
 ```{note}
-`median` filter can be computationally intensive, especially on large rasters. GeoUtils supports the use of
+The `median` filter can be computationally intensive, especially on large rasters. GeoUtils supports the use of
 [Numba](https://numba.pydata.org/) to accelerate filter computations. To enable Numba, ensure it is installed in your
 environment and set the `engine` parameter to `numba` when applying the filter
 ```
@@ -72,8 +71,6 @@ ax[1].set_title("Filtered raster")
 rast_filtered.plot(ax=ax[1])
 plt.tight_layout()
 ```
-
-Another way to apply filters is through the {func}`~geoutils.filters.filter_name` methods directly on the raster data.
 
 For example, to apply a median filter:
 

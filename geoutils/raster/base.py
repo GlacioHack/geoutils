@@ -1606,6 +1606,20 @@ class RasterBase(ABC):
         :param inplace: Whether to modify the raster in-place.
         :param size: Window size for filter
 
+        :param sigma: Optional standard deviation for Gaussian filtering.
+        Only used when `method="gaussian"`.
+
+        :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
+        Only used when `method="median"`.
+
+        :param outlier_threshold:  The minimum difference abs(array - mean) for a pixel to be considered an outlier.
+        Only used when `method="distance"`.
+
+        :param radius: The radius in which the average value is calculated. Only used when `method="distance"`.
+
+        :param **kwargs : Additional keyword arguments passed to the underlying filter
+        implementation.
+
         :return: A new Raster instance with the filtered data (or None if inplace).
 
         :raises ValueError: If the filter name is not one of the predefined options.
