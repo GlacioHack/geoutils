@@ -53,8 +53,8 @@ For example:
 import geoutils as gu
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
 rast = gu.Raster(filename_rast)
-# Filter the raster with a median filter of size 10
-rast_filtered = rast.filter("median", size=10)
+# Filter the raster with a median filter of size 5
+rast_filtered = rast.filter("median", size=5)
 ```
 
 ```{code-cell} ipython3
