@@ -30,17 +30,17 @@ The following filters are currently available in GeoUtils:
 | `custom`    | Allows users to define their own filter function to be applied to a numpy array.                                                                                      |                                                                 |
 
 ## Parameters
-| Parameter           | Definition                                                                                 | Available for filter   | Type  | Default value |
-|:--------------------|--------------------------------------------------------------------------------------------|------------------------|-------|---------------|
-| `engine`            | Filtering engine to use, either "scipy" or "numba".                                        | Median                 | str   | scipy         |
-| `outlier_threshold` | The minimum difference abs(array - mean) for a pixel to be considered an outlier           | Distance               | float | 2             |
-| `radius`            | The radius in which the average value is calculated                                        | Distance               | float | 5             |
-| `sigma`             | The sigma of the Gaussian kernel                                                           | Gaussian               | float | 5             |
-| `size`              | The size of the window to use (must be odd).                                               | Median, mean, min, max | int   | 5             |
-| `kwargs`            | Kwargs from [scipy](https://docs.scipy.org/doc/scipy/reference/ndimage.html) are available | Gaussian, min, max     | dict  |               |
+| Parameter           | Definition                                                                                 | Available for filter           | Type  | Default value |
+|:--------------------|--------------------------------------------------------------------------------------------|--------------------------------|-------|---------------|
+| `engine`            | Filtering engine to use, either "scipy" or "numba".                                        | `median`                       | str   | scipy         |
+| `outlier_threshold` | The minimum difference abs(array - mean) for a pixel to be considered an outlier           | `distance`                     | float | 2             |
+| `radius`            | The radius in which the average value is calculated                                        | `distance`                     | float | 5             |
+| `sigma`             | The sigma of the Gaussian kernel                                                           | `gaussian`                     | float | 5             |
+| `size`              | The size of the window to use (must be odd).                                               | `median`, `mean`, `min`, `max` | int   | 5             |
+| `kwargs`            | Kwargs from [scipy](https://docs.scipy.org/doc/scipy/reference/ndimage.html) are available | `gaussian`, `min`, `max`       | dict  |               |
 
 ```{note}
-Median filter can be computationally intensive, especially on large rasters. GeoUtils supports the use of
+`median` filter can be computationally intensive, especially on large rasters. GeoUtils supports the use of
 [Numba](https://numba.pydata.org/) to accelerate filter computations. To enable Numba, ensure it is installed in your
 environment and set the `engine` parameter to `numba` when applying the filter
 ```
