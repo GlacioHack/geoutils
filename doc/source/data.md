@@ -18,17 +18,17 @@ GeoUtils uses and proposes several data examples to manipulate and test the diff
 
 ## Description
 
-Several sites (Coromandel Peninsula in New Zealand,  Mount Everest and Exploradores Glacier  in Chili) are proposed to cover different kinds of data:
+Several sites (Coromandel Peninsula in New Zealand, Mount Everest and Exploradores Glacier  in Chili) are proposed to cover different kinds of data:
 
-| Alias                          |        Site        |               Filename               |    Type     |                                     Description                                     |
-|-------------------------------:|:------------------:|:------------------------------------:|:-----------:|:-----------------------------------------------------------------------------------:|
-| `"coromandel_lidar"`           |  Coromandel_Lidar  |              points.laz              | Point Cloud |                    Land elevation over the area measured in 2021                    |
-| `"everest_landsat_b4"`         |  Everest_Landsat   |     LE71400412000304SGS00_B4.tif     |   Raster    |                  B04 (red) image of the Mount Everest area in 2000                  |
-| `"everest_landsat_b4_cropped"` |  Everest_Landsat   | LE71400412000304SGS00_B4_cropped.tif |   Raster    |              B04 (red) cropped image of the Mount Everest area in 2000              |
-| `"everest_landsat_rgb"`        |  Everest_Landsat   |    LE71400412000304SGS00_RGB.tif     |   Raster    |                     RGB image of the Mount Everest area in 2000                     |
-| `"everest_rgi_outlines"`       |  Everest_Landsat   |    15_rgi60_glacier_outlines.gpkg    |   Vector    |    Glacier outlines around the Mount Everest around 2000 [(1)](#doi-references)     |
-| `"exploradores_aster_dem"`     | Exploradores_ASTER |   AST_L1A_00303182012144228_Z.tif    |   Raster    |                Land elevation of the Exploradores Glacier area 2012                 |
-| `"exploradores_rgi_outlines"`  | Exploradores_ASTER |    17_rgi60_glacier_outlines.gpkg    |   Vector    | Glacier outlines around the Exploradores Glacier around 2000 [(1)](#doi-references) |
+| Alias                          |                    Site and Filename                    |    Type     |                                     Description                                     |
+|-------------------------------:|:-------------------------------------------------------:|:-----------:|:-----------------------------------------------------------------------------------:|
+| `"coromandel_lidar"`           |             Coromandel_Lidar \n points.laz              | Point Cloud |                    Land elevation over the area measured in 2021                    |
+| `"everest_landsat_b4"`         |     Everest_Landsa \n LE71400412000304SGS00_B4.tif      |   Raster    |                  B04 (red) image of the Mount Everest area in 2000                  |
+| `"everest_landsat_b4_cropped"` | Everest_Landsat \n LE71400412000304SGS00_B4_cropped.tif |   Raster    |              B04 (red) cropped image of the Mount Everest area in 2000              |
+| `"everest_landsat_rgb"`        |    Everest_Landsat \n LE71400412000304SGS00_RGB.tif     |   Raster    |                     RGB image of the Mount Everest area in 2000                     |
+| `"everest_rgi_outlines"`       |    Everest_Landsat \n 15_rgi60_glacier_outlines.gpkg    |   Vector    |    Glacier outlines around the Mount Everest around 2000 [(1)](#doi-references)     |
+| `"exploradores_aster_dem"`     |  Exploradores_ASTER \n AST_L1A_00303182012144228_Z.tif  |   Raster    |                Land elevation of the Exploradores Glacier area 2012                 |
+| `"exploradores_rgi_outlines"`  |  Exploradores_ASTER \n 17_rgi60_glacier_outlines.gpkg   |   Vector    | Glacier outlines around the Exploradores Glacier around 2000 [(1)](#doi-references) |
 
 
 ```{note}
