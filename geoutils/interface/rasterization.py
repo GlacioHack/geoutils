@@ -20,15 +20,18 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import geopandas as gpd
 import numpy as np
+import rasterio as rio
 from rasterio import features
 from rasterio.crs import CRS
 from shapely.strtree import STRtree
 from shapely.geometry import box as shapely_box
+import xarray as xr
 
 from geoutils._dispatch import _check_match_grid, _check_match_points
 from geoutils._misc import silence_rasterio_message, import_optional
@@ -78,7 +81,7 @@ def _normalize_burn_values(vect_geoms: Sequence[Any], in_value: int | float | It
     """
     geoms = np.asarray(vect_geoms, dtype=object)
 
-    # Default burn value, index from 1..N
+    # Default burn value, index from 1 to N
     if in_value is None:
         values = np.arange(1, len(geoms) + 1, dtype=np.int64)
         return _VectorBurnSpec(geoms=geoms, values=values, default_value=None)
@@ -172,6 +175,7 @@ def _rasterio_rasterize_burn(
     :param dtype: Output dtype.
     :param all_touched: Rasterio rasterize option.
     """
+    warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
     if values is None:
         return features.rasterize(
             shapes=geoms,
@@ -358,7 +362,7 @@ def _multiproc_rasterize(
         return tile, dst_tile
 
     # Submit tasks to cluster interface
-    tasks = [mp_config.cluster.launch_task(rasterize_block, [i, block_ids[i]]) for i in range(len(block_ids))]
+    tasks = [mp_config.cluster.launch_task(rasterize_block, [(i, block_ids[i])]) for i in range(len(block_ids))]
 
     # Write tiles as they complete
     return _write_multiproc_result(tasks=tasks, mp_config=mp_config, file_metadata=file_metadata)
@@ -424,6 +428,7 @@ def _rasterize(
 
     # Runtime import to avoid circular import
     from geoutils.raster import Raster
+    from geoutils.raster.xr_accessor import RasterAccessor
 
     # Base backend (eager)
     if not mp_backend and not dask_backend:
@@ -460,7 +465,7 @@ def _rasterize(
             out_dtype=out_dtype,
             all_touched=all_touched,
         )
-        return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
+        return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
 
     # Multiprocessing backend (lazy and writes to file)
 
@@ -500,7 +505,7 @@ def _create_mask_pointcloud(source_vector: Vector,
     points_gs = gpd.points_from_xy(x=points[0], y=points[1])
 
     # Project to same CRS if required
-    points_gs = points_gs.reproject(crs=source_vector.crs)
+    points_gs = points_gs.to_crs(crs=source_vector.crs)
 
     # Check that points are contained no matter alignment
     contained = points_gs.within(source_vector.ds, align=False)
@@ -559,9 +564,19 @@ def _create_mask_raster(
         out_dtype=np.uint8,  # avoid large dtype + keep rasterize fast/safe
     )
 
-    # Convert to boolean (lazy if dask-backed)
-    # TODO: Add logic to load as bool in delayed manner in Raster class?
-    rst_bool = rst01.copy(new_array=rst01.data.astype(bool))
+    # Convert to boolean
+    # If DataArray, convert with astype (lazy if Dask array)
+    if isinstance(rst01, xr.DataArray):
+        rst_bool = rst01.astype(np.bool_, copy=False)
+    else:
+        # If raster, convert with astype if loaded
+        if rst01.is_loaded:
+            rst_bool = rst01.astype(np.bool_)
+        # If unloaded, set the is_mask attribute for later loading as boolean
+        # TODO: Move that behaviour to astype eventually? Maybe issue to open
+        else:
+            rst01._is_mask = True
+            rst_bool = rst01
 
     if as_array:
         return rst_bool.data
@@ -625,7 +640,8 @@ def _create_mask(
         # Prefer to chain the raster error (or the points one if raster not triggered)
         cause = err_rast or err_points
         raise ValueError(
-            "Input arguments must define a valid raster or point cloud."
+            "Input arguments must define a valid raster or point cloud. Pass either a raster or point cloud "
+            "reference 'ref', or at least 'res'/'shape' for a raster mask, or 'points' for a point cloud mask."
         ) from cause
 
     # For raster input

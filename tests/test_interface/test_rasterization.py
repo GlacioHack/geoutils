@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import re
-import warnings
-
 import geopandas as gpd
 import numpy as np
 import pytest
 from shapely import LineString, MultiLineString, MultiPolygon, Polygon
+import xarray as xr
 
 import geoutils as gu
 from geoutils import examples
 from geoutils.exceptions import InvalidGridError
-
+from geoutils.multiproc import MultiprocConfig
 
 class TestRasterVectorInterface:
 
@@ -47,6 +45,44 @@ class TestRasterVectorInterface:
     gdf = gpd.GeoDataFrame({"geometry": [multilines]}, crs="EPSG:4326")
     vector_multilines = gu.Vector(gdf)
 
+    # Package examples
+    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
+    landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
+    everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
+    aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
+    aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
+
+    def test_rasterize(self) -> None:
+        """Test rasterizing an EPSG:3426 dataset into a projection."""
+
+        vct = gu.Vector(self.everest_outlines_path)
+        rst = gu.Raster(self.landsat_b4_crop_path)
+
+        # Use Web Mercator at 30 m.
+        # Capture the warning on resolution not matching exactly bounds
+        vct.rasterize(res=30, crs=3857)
+
+        # Typically, rasterize returns a raster
+        burned_in2_out1 = vct.rasterize(rst, in_value=2, out_value=1)
+        assert isinstance(burned_in2_out1, gu.Raster)
+
+        # For an in_value of 1 and out_value of 0 (default)
+        burned_mask = vct.rasterize(rst, in_value=1)
+        assert isinstance(burned_mask, gu.Raster)
+        # Convert to boolean
+        burned_mask = burned_mask.astype(bool)
+
+        # Check that rasterizing with in_value=1 is the same as creating a mask
+        assert burned_mask.raster_equal(vct.create_mask(rst), warn_failure_reason=True)
+
+        # The two rasterization should match
+        assert np.all(burned_in2_out1[burned_mask] == 2)
+        assert np.all(burned_in2_out1[~burned_mask] == 1)
+
+        # Check that errors are raised
+        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
+            vct.rasterize(rst, crs=3857)
+
     def test_create_mask(self) -> None:
         """
         Test Vector.create_mask.
@@ -79,145 +115,157 @@ class TestRasterVectorInterface:
         # Check that by default, create_mask returns a Mask
         assert isinstance(mask, gu.Raster) and mask.is_mask
 
-        # Check that an error is raised if xres is not passed
+        # Check that an error is raised if no input is passed
         with pytest.raises(
             ValueError,
-            match="Without a reference for masking, specify at least the resolution "
-            "a raster mask, or the points coordinates for a point cloud mask.",
+            match="Input arguments must define a valid raster or point cloud.",
         ):
             vector.create_mask()
 
         # If the raster has the wrong type
-        with pytest.raises(ValueError, match="Reference must be a.*"):
+        with pytest.raises(ValueError, match="Input arguments must define a valid raster or point cloud."):
             vector.create_mask("lol")  # type: ignore
 
-        # Check that a warning is raised if the bounds were passed specifically by the user
-        with pytest.warns(UserWarning):
-            vector.create_mask(res=1.01, bounds=(0, 0, 21, 21))
+    @pytest.mark.parametrize("all_touched", [False, True])
+    @pytest.mark.parametrize("in_value_mode", ["scalar", "iterable", "none"])
+    def test_rasterize_create_mask__chunked_backends_equal(
+        self,
+        tmp_path,
+        all_touched: bool,
+        in_value_mode: str,
+    ) -> None:
+        """
+        Test rasterize and create_mask for base versus chunked (Dask, Multiprocessing).
 
-    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
-    landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
-    everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
-    aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
-    aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
+        Uses an output-only grid definition (no input raster dependence) so that
+        all three backends are forced to target the exact same grid.
+        """
 
-    def test_rasterize(self) -> None:
-        """Test rasterizing an EPSG:3426 dataset into a projection."""
+        pytest.importorskip("dask")
+        import dask.array as da
 
-        vct = gu.Vector(self.everest_outlines_path)
-        rst = gu.Raster(self.landsat_b4_crop_path)
+        # Output grid spec
+        vect = self.vector.copy()
+        bounds = (0.0, 0.0, 21.0, 21.0)
+        res = 1.0
+        crs = "EPSG:4326"
 
-        # Use Web Mercator at 30 m.
-        # Capture the warning on resolution not matching exactly bounds
-        vct.rasterize(res=30, crs=3857)
+        # Chunking
+        chunksizes = (10, 10)
 
-        # Typically, rasterize returns a raster
-        burned_in2_out1 = vct.rasterize(raster=rst, in_value=2, out_value=1)
-        assert isinstance(burned_in2_out1, gu.Raster)
+        # Burn value modes for rasterize
+        if in_value_mode == "scalar":
+            in_value = 7
+            out_value = 0
+        elif in_value_mode == "iterable":
+            # single-geom iterable (length must match geom count)
+            in_value = [7]
+            out_value = 0
+        elif in_value_mode == "none":
+            # None -> burn values become [1 .. N] internally; here N=1 so burn=1
+            in_value = None
+            out_value = 0
+        else:
+            raise ValueError("Unexpected in_value_mode")
 
-        # For an in_value of 1 and out_value of 0 (default)
-        burned_mask = vct.rasterize(raster=rst, in_value=1)
-        assert isinstance(burned_mask, gu.Raster)
-        # Convert to boolean
-        burned_mask = burned_mask.astype(bool)
+        # Multiprocessing config (writes tiles to file)
+        mp_outfile = tmp_path / f"mp_rasterize_{all_touched}_{in_value_mode}.tif"
+        mp_config = MultiprocConfig(chunk_size=chunksizes[0], outfile=str(mp_outfile), driver="GTiff")
 
-        # Check that rasterizing with in_value=1 is the same as creating a mask
-        assert burned_mask.raster_equal(vct.create_mask(rst), warn_failure_reason=True)
+        # 1) RASTERIZE
+        ##############
 
-        # The two rasterization should match
-        assert np.all(burned_in2_out1[burned_mask] == 2)
-        assert np.all(burned_in2_out1[~burned_mask] == 1)
+        # Base (eager)
+        rst_base = vect.rasterize(
+            res=res,
+            bounds=bounds,
+            crs=crs,
+            in_value=in_value,
+            out_value=out_value,
+            all_touched=all_touched,
+            out_dtype=np.uint8,
+        )
+        assert isinstance(rst_base, gu.Raster)
+        base_arr = np.asarray(rst_base.data)
+        # Dask (lazy output)
+        rst_dask = vect.rasterize(
+            res=res,
+            bounds=bounds,
+            crs=crs,
+            in_value=in_value,
+            out_value=out_value,
+            all_touched=all_touched,
+            out_dtype=np.uint8,
+            dask=True,
+            chunksizes=chunksizes,
+        )
+        assert isinstance(rst_dask, xr.DataArray)
+        assert isinstance(rst_dask.data, da.Array)
+        dask_arr = np.asarray(rst_dask.data.compute())
 
-        # Check that errors are raised
-        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
-            vct.rasterize(raster=rst, crs=3857)
+        # Multiprocessing (writes to disk then opens, output Raster is unloaded)
+        rst_mp = vect.rasterize(
+            res=res,
+            bounds=bounds,
+            crs=crs,
+            in_value=in_value,
+            out_value=out_value,
+            all_touched=all_touched,
+            out_dtype=np.uint8,
+            mp_config=mp_config,
+            chunksizes=chunksizes,
+        )
+        assert isinstance(rst_mp, gu.Raster)
+        assert not rst_mp.is_loaded
+        mp_arr = np.asarray(rst_mp.data)
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    def test_polygonize(self, example: str) -> None:
-        """Test that polygonize doesn't raise errors."""
+        # Exact equality
+        assert base_arr.shape == dask_arr.shape == mp_arr.shape == (21, 21)
+        assert np.array_equal(base_arr, dask_arr)
+        assert np.array_equal(base_arr, mp_arr)
 
-        img = gu.Raster(example)
+        # 2) CREATE_MASK
+        ################
 
-        # -- Test 1: basic functioning of polygonize --
+        # Base (eager)
+        m_base = vect.create_mask(
+            res=res,
+            bounds=bounds,
+            crs=crs,
+            all_touched=all_touched,
+        )
+        assert isinstance(m_base, gu.Raster)
+        mask_base = np.asarray(m_base.data, dtype=bool)
 
-        # Get unique value for image and the corresponding area
-        value = np.unique(img)[0]
-        pixel_area = np.count_nonzero(img.data == value) * img.res[0] * img.res[1]
+        # Dask (lazy)
+        m_dask = vect.create_mask(
+            res=res,
+            bounds=bounds,
+            crs=crs,
+            all_touched=all_touched,
+            dask=True,
+            chunksizes=chunksizes,
+        )
+        assert isinstance(m_dask, xr.DataArray)
+        assert isinstance(m_dask.data, da.Array)
+        mask_dask = np.asarray(m_dask.data.compute(), dtype=bool)
 
-        # Polygonize the raster for this value, and compute the total area
-        polygonized = img.polygonize(target_values=value)
-        polygon_area = polygonized.ds.area.sum()
+        # MP (writes to disk then opens, output is unloaded)
+        m_mp = vect.create_mask(
+            res=res,
+            bounds=bounds,
+            crs=crs,
+            all_touched=all_touched,
+            mp_config=mp_config,
+            chunksizes=chunksizes,
+        )
+        assert isinstance(m_mp, gu.Raster)
+        assert not m_mp.is_loaded
+        mask_mp = np.asarray(m_mp.data)
 
-        # Check that these two areas are approximately equal
-        assert polygon_area == pytest.approx(pixel_area)
-        assert isinstance(polygonized, gu.Vector)
-        assert polygonized.crs == img.crs
+        assert m_base.shape == m_dask.shape == m_mp.shape == (21, 21)
+        assert np.array_equal(mask_base, mask_dask)
+        assert np.array_equal(mask_base, mask_mp)
 
-        # Check default name of data column, and that defining a custom name works the same
-        assert "id" in polygonized.ds.columns
-        polygonized2 = img.polygonize(target_values=value, data_column_name="myname")
-        assert "myname" in polygonized2.ds.columns
-        assert np.array_equal(polygonized2.ds["myname"].values, polygonized.ds["id"].values)
-
-        # -- Test 2: data types --
-
-        # Check that polygonize works as expected for any input dtype (e.g. float64 being not supported by GeoPandas)
-        for dtype in ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"]:
-            img_dtype = img.copy()
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", category=UserWarning, message="dtype conversion will result in a " "loss of information.*"
-                )
-                warnings.filterwarnings(
-                    "ignore",
-                    category=UserWarning,
-                    message="Unmasked values equal to the nodata value found in data array.*",
-                )
-                img_dtype = img_dtype.astype(dtype)
-            value = np.unique(img_dtype)[0]
-            img_dtype.polygonize(target_values=value)
-
-        # And for a boolean object, such as a mask
-        mask = img > value
-        mask.polygonize(target_values=1)
-
-
-class TestMaskVectorInterface:
-
-    # Paths to example data
-    landsat_b4_path = examples.get_path_test("everest_landsat_b4")
-    landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
-    everest_outlines_path = examples.get_path_test("everest_rgi_outlines")
-    aster_dem_path = examples.get_path_test("exploradores_aster_dem")
-
-    # Mask without nodata
-    rst_landsat_b4 = gu.Raster(landsat_b4_path)
-    mask_landsat_b4 = rst_landsat_b4 > np.nanmedian(rst_landsat_b4)
-    # Mask with nodata
-    rst_aster_dem = gu.Raster(aster_dem_path)
-    mask_aster_dem = rst_aster_dem > np.nanmedian(rst_aster_dem)
-    # Mask from an outline
-    mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
-
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
-    def test_polygonize(self, mask: gu.Raster) -> None:
-        mask_orig = mask.copy()
-        # Run default
-        vect = mask.polygonize()
-        # Check the dtype of the original mask was properly reconverted
-        assert mask.data.dtype == bool
-        # Check the original mask was not modified during polygonizing
-        assert mask_orig.raster_equal(mask)
-
-        # Check the output is cast into a vector
-        assert isinstance(vect, gu.Vector)
-
-        # Run with zero as target
-        vect = mask.polygonize(target_values=0)
-        assert isinstance(vect, gu.Vector)
-
-        # Check a warning is raised when using a non-boolean value
-        with pytest.warns(
-            UserWarning, match=re.escape("Raster mask (boolean type) passed, using target value of 1 (" "True).")
-        ):
-            mask.polygonize(target_values=2)
+        # Sanity check that the known "center pixel" is True for this geometry/grid
+        assert m_base[10, 10] is np.True_

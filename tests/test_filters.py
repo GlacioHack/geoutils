@@ -11,7 +11,7 @@ import geoutils as gu
 from geoutils import Raster
 from geoutils._typing import NDArrayNum
 from geoutils.raster import get_array_and_mask
-
+from geoutils.multiproc import MultiprocConfig
 
 class TestGaussianFilter:
     """Tests for the Gaussian filter applied to raster data."""
@@ -217,14 +217,14 @@ class TestGenericFilter:
         def double(arr: NDArrayNum) -> NDArrayNum:
             return arr * 2
 
-        filtered = gu.filters._filter(arr, method=double)
+        filtered = gu.filters._filter_base(arr, method=double)
         np.testing.assert_array_equal(filtered, double(arr))
 
     def test_filter_with_invalid_method_type_raises(self) -> None:
         """Passing an invalid method type should raise a TypeError."""
         arr = np.arange(9).reshape(3, 3).astype(np.float32)
         with pytest.raises(ValueError):
-            gu.filters._filter(arr, method="1234")
+            gu.filters._filter_base(arr, method="1234")
 
 
 class TestRasterFilters:  # type: ignore
@@ -384,6 +384,74 @@ def test_filter_against_center_value(method: str, np_filter: Callable[[NDArrayNu
     """
     arr = np.random.normal(size=(3, 3))
 
-    arr_filtered = gu.filters._filter(arr, method=method, size=3)
+    arr_filtered = gu.filters._filter_base(arr, method=method, size=3)
 
     assert np.isclose(np_filter(arr), arr_filtered[1, 1], atol=1e-8)
+
+class TestFilterChunked:
+
+    @pytest.mark.parametrize("path_index", [0, 2])
+    @pytest.mark.parametrize("method", ["gaussian", "median", "mean", "min", "max"])
+    @pytest.mark.parametrize("size", [3, 7])
+    def test_filter_chunked_backends_equal(
+        self,
+        tmp_path,
+        path_index: int,
+        method: str,
+        size: int,
+        lazy_test_files_tiny: list[str],
+    ) -> None:
+        """
+        Test that filter yields (nearly) identical output for base (in-memory numpy), or chunked (Dask/Multiprocessing).
+
+        Notes:
+          - For gaussian, tiny floating differences can occur across chunk boundaries  due to boundary handling and
+          floating summation orderso we use allclose.
+        """
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        # Get raster path
+        path_raster = lazy_test_files_tiny[path_index]
+
+        # 1/ Open test files
+        # Base input (in-memory)
+        raster_base = gu.Raster(path_raster)
+        raster_base.load()
+        # Multiprocessing input (keep lazy)
+        raster_mp = gu.Raster(path_raster)
+        mp_config = MultiprocConfig(chunk_size=10)
+        # Dask input (lazy)
+        ds = gu.open_raster(path_raster, chunks={"x": 10, "y": 10})
+        assert not ds._in_memory
+        assert isinstance(ds.data, da.Array)
+        assert ds.data.chunks is not None
+
+        # 2/ Compute filters and check output is lazy
+        # Base
+        base_rst = raster_base.filter(method=method, size=size)
+        assert isinstance(base_rst, Raster)
+        # MP
+        mp_rst = raster_mp.filter(method=method, size=size, mp_config=mp_config)
+        assert isinstance(mp_rst, Raster)
+        assert not mp_rst.is_loaded
+        # Dask
+        dask_rst = ds.rst.filter(method=method, size=size)
+        assert isinstance(dask_rst.data, da.Array)
+
+        # Inputs also stays lazy where expected
+        assert not raster_mp.is_loaded
+        assert not ds._in_memory
+        assert isinstance(ds.data, da.Array)
+
+        # 3/ Comparison
+        if method == "gaussian":
+            rtol, atol = 0.0, 1e-6
+        else:
+            rtol, atol = 0.0, 0.0
+
+        # Compute Dask input
+        dask_rst = dask_rst.compute()
+        assert base_rst.raster_allclose(dask_rst, warn_failure_reason=True, strict_masked=False, atol=atol)
+        assert base_rst.raster_allclose(mp_rst, warn_failure_reason=True, strict_masked=False, atol=atol)

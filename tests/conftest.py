@@ -1,5 +1,5 @@
 """Test configuration."""
-
+from __future__ import annotations
 import os
 import logging
 from typing import Any
@@ -14,11 +14,28 @@ class LoggingWarningCollector(logging.Handler):
 
     def __init__(self) -> None:
         super().__init__(level=logging.WARNING)
-        self.records = []
+        self.records: list[logging.LogRecord] = []
 
-    def emit(self, record: Any) -> None:
-        self.records.append(record)
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.records.append(record)
+        except Exception:
+            # Logging handlers must never raise
+            pass
 
+    def handleError(self, record: logging.LogRecord) -> None:
+        # Override default behavior (which can print to stderr) and never raise
+        return
+
+def _safe_record_line(r: logging.LogRecord) -> str:
+    # Helper to avoid record.getMessage() raising errors if msg/args formatting is invalid
+    try:
+        msg = r.getMessage()
+    except Exception as e:
+        # Fall back to a representation that will always work
+        msg = f"<message formatting failed: {type(e).__name__}: {e}; msg={r.msg!r} args={r.args!r}>"
+
+    return f"{r.levelname}:{r.name}:{msg}"
 
 @pytest.fixture(autouse=True)
 def fail_on_logging_warnings(request: Any) -> Any:
@@ -30,9 +47,11 @@ def fail_on_logging_warnings(request: Any) -> Any:
     root.addHandler(collector)
 
     # Run test
-    yield
-
-    root.removeHandler(collector)
+    try:
+        yield
+    finally:
+        root.removeHandler(collector)
+        collector.close()
 
     # Allow opt-out
     if request.node.get_closest_marker("allow_logging_warnings"):
@@ -49,11 +68,8 @@ def fail_on_logging_warnings(request: Any) -> Any:
 
     # Fail on those exceptions and report exception level, name and message
     if bad:
-        msgs = "\n".join(f"{r.levelname}:{r.name}:{r.getMessage()}" for r in bad)
-        pytest.fail(
-            "Logging warning/error detected:\n" + msgs,
-            pytrace=False,
-        )
+        msgs = "\n".join(_safe_record_line(r) for r in bad)
+        pytest.fail("Logging warning/error detected:\n" + msgs, pytrace=False)
 
 @pytest.fixture(scope="module")
 def lazy_test_files(tmp_path_factory: Any) -> list[str]:

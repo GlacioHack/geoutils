@@ -193,8 +193,7 @@ def _multiproc_filter(
         return block.copy(new_array=filtered_block)
 
     # Call Multiprocessing map_overlap
-    return map_overlap_multiproc_save(filter_block, rst, mp_config=mp_config, method=method, size=size, depth=depth,
-                                      **kwargs)
+    return map_overlap_multiproc_save(filter_block, rst, mp_config, method, size, depth=depth, **kwargs)
 
 def _filter(
     source_raster: RasterBase,
@@ -207,9 +206,7 @@ def _filter(
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
-    # The check below can only run on Xarray
     dask_backend = da is not None and source_raster._chunks is not None
-
     if mp_backend and dask_backend:
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
@@ -220,9 +217,10 @@ def _filter(
     if mp_backend:
         return _multiproc_filter(source_raster, mp_config=mp_config, method=method, size=size, **kwargs)
     elif dask_backend:
-        return _dask_filter(source_raster.data, method=method, size=size, **kwargs)
+        array = _dask_filter(source_raster.data, method=method, size=size, **kwargs)
     else:
-        return _filter_base(source_raster.data, method=method, size=size, **kwargs)
+        array = _filter_base(source_raster.data, method=method, size=size, **kwargs)
+    return source_raster.copy(new_array=array)
 
 
 def gaussian_filter(array: NDArrayNum, sigma: float, **kwargs: Any) -> NDArrayNum:

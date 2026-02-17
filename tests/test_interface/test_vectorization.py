@@ -14,10 +14,8 @@ import rasterio as rio
 import shapely
 from shapely.geometry.base import BaseGeometry
 import numpy as np
-import shapely
 from shapely.ops import unary_union
 import xarray as xr
-
 
 import geoutils as gu
 from geoutils import examples
@@ -181,7 +179,7 @@ def _assert_vectors_equal_ordered(g1, g2, exact: bool=False):
         eq = [a.equals(b) for a, b in zip(g1.geometry.values, g2.geometry.values)]
 
     def _geom_debug(a: BaseGeometry, b: BaseGeometry) -> str:
-        # symmetric difference area is a great “how different are they” scalar
+        """Helper to print various statistics for debugging"""
         try:
             sda = a.symmetric_difference(b).area
         except Exception:
@@ -193,6 +191,7 @@ def _assert_vectors_equal_ordered(g1, g2, exact: bool=False):
             f"symdiff_area={sda}"
         )
 
+    # If no equal, raise error with useful debugging message
     if not all(eq):
         i = next(i for i, ok in enumerate(eq) if not ok)
         a, b = g1.geometry.values[i], g2.geometry.values[i]
@@ -433,9 +432,9 @@ class TestPolygonize:
         raster_base.load()
         # Multiprocessing input (lazy if we pass Multiprocessing later)
         raster_mp = gu.Raster(path_raster)
-        mp_config = MultiprocConfig(chunk_size=200)
+        mp_config = MultiprocConfig(chunk_size=10)
         # Dask input (lazy)
-        ds = open_raster(path_raster, chunks={"x": 200, "y": 200})
+        ds = open_raster(path_raster, chunks={"x": 10, "y": 10})
         assert not ds._in_memory
         assert isinstance(ds.data, da.Array)
         assert ds.data.chunks is not None
