@@ -24,15 +24,22 @@ Filters class to remove outliers and reduce noise in rasters.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
+import math
 import numpy as np
 import scipy
 from packaging.version import Version
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import uniform_filter, gaussian_filter
 
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.multiproc import map_overlap_multiproc_save, MultiprocConfig
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterBase
+    from geoutils.raster.raster import Raster
+    import da.array as da
 
 if Version(scipy.__version__) > Version("1.16.0"):
     generic_filter_scipy = scipy.ndimage.vectorized_filter
@@ -58,14 +65,63 @@ except ImportError:
 
         return decorator
 
+try:
+    import dask.array as da
+except Exception:  # keep optional at import time
+    da = None  # type: ignore
 
-def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any) -> NDArrayNum:
+
+def _overlap_depth_for_filter(method: str | Callable[..., NDArrayNum], size: int, **kwargs: Any) -> int:
+    """
+    Compute halo depth (pixels) needed for map_overlap so the filter is correct at block edges.
+    """
+
+    # Default for windowed filters: depth = radius
+    # The size is assumed odd
+    def _window_radius(sz: int) -> int:
+        return max(0, int(sz) // 2)
+
+    # For callables
+    if not isinstance(method, str):
+        # Unknown callable => assume window-like behavior using `size`
+        return _window_radius(size)
+
+    # For median, mean, max, min and distance filters
+    if method in {"median", "mean", "max", "min", "distance"}:
+        return _window_radius(size)
+
+    # For gaussian filter
+    if method == "gaussian":
+        # Uses radius = truncate * sigma
+        sigma = kwargs.get("sigma", size)  # let "size" act as default sigma if not provided
+        truncate = float(kwargs.get("truncate", 4.0))
+
+        # Sigma can be scalar or sequence; take max to ensure enough depth for both axes
+        if np.isscalar(sigma):
+            sig = float(sigma)
+        else:
+            sig = float(np.max(np.asarray(sigma, dtype=float)))
+
+        radius = int(math.ceil(truncate * sig))
+        return max(0, radius)
+
+    # Fallback
+    return _window_radius(size)
+
+def _filter_base(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any) -> (
+        NDArrayNum):
     """
     Dispatch filter application by method name or custom callable.
 
     :param array: Array to filter.
     :param method: Filter method name or callable.
     """
+
+    if np.issubdtype(array.dtype, np.integer):
+        array = array.astype(np.float32)
+    if np.ma.isMaskedArray(array):
+        array = array.filled(np.nan)
+
     filter_map: dict[str, Callable[..., NDArrayNum]] = {
         "gaussian": gaussian_filter,
         "median": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmedian, size=size),
@@ -85,6 +141,88 @@ def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: in
         raise TypeError("`method` must be a string or a callable.")
 
     return func(array, **kwargs)
+
+
+def _dask_filter(
+    array: da.Array,
+    method: str | Callable[..., NDArrayNum],
+    size: int = 3,
+    **kwargs: Any,
+) -> da.Array:
+    """
+    Apply filter to a Dask array.
+
+    Just a wrapper around map_overlap.
+    """
+    import_optional("dask")
+
+    # Get depth of overlap
+    depth = _overlap_depth_for_filter(method, size=size, **kwargs)
+
+    # Block function to pass
+    def _block_func(block: NDArrayNum, method=method, size=size, kwargs=kwargs) -> NDArrayNum:
+        # Block already includes the halo from map_overlap
+        return _filter_base(block, method=method, size=size, **kwargs)
+
+    # Call map_overlap
+    return da.map_overlap(
+        _block_func,
+        array,
+        depth={0: depth, 1: depth},
+        boundary="nearest",
+        trim=True,
+        dtype=array.dtype,
+    )
+
+def _multiproc_filter(
+    rst: Raster,
+    mp_config: MultiprocConfig,
+    method: str | Callable[..., NDArrayNum],
+    size: int = 3,
+    **kwargs: Any,
+):
+
+    # Get depth of overlap
+    depth = _overlap_depth_for_filter(method, size=size, **kwargs)
+
+    # Block function to pass
+    def filter_block(block: Raster, method=method, size=size, kwargs=kwargs) -> Raster:
+        """Block function for multiprocessing."""
+        nan_block = block.get_nanarray()
+        filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
+        return block.copy(new_array=filtered_block)
+
+    # Call Multiprocessing map_overlap
+    return map_overlap_multiproc_save(filter_block, rst, mp_config=mp_config, method=method, size=size, depth=depth,
+                                      **kwargs)
+
+def _filter(
+    source_raster: RasterBase,
+    method: str | Callable[..., NDArrayNum],
+    size: int,
+    mp_config: MultiprocConfig | None = None,
+    **kwargs: Any,
+):
+    """Filter raster."""
+
+    # Cannot use Multiprocessing backend and Dask backend simultaneously
+    mp_backend = mp_config is not None
+    # The check below can only run on Xarray
+    dask_backend = da is not None and source_raster._chunks is not None
+
+    if mp_backend and dask_backend:
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
+            "from filter(). To use Multiprocessing, open the file without chunks."
+        )
+
+    # Dispatch based on backend
+    if mp_backend:
+        return _multiproc_filter(source_raster, mp_config=mp_config, method=method, size=size, **kwargs)
+    elif dask_backend:
+        return _dask_filter(source_raster.data, method=method, size=size, **kwargs)
+    else:
+        return _filter_base(source_raster.data, method=method, size=size, **kwargs)
 
 
 def gaussian_filter(array: NDArrayNum, sigma: float, **kwargs: Any) -> NDArrayNum:

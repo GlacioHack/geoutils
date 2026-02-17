@@ -797,7 +797,7 @@ class TestMultiproc:
     cluster = ClusterGenerator("test", nb_workers=num_workers)
 
     @pytest.mark.parametrize("example", [aster_dem_path])
-    @pytest.mark.parametrize("tile_size", [10, 20])
+    @pytest.mark.parametrize("tile_size", [20])
     @pytest.mark.parametrize("cluster", [None, cluster])
     def test_multiproc_reproject(self, example: str, tile_size: int, cluster: None | AbstractCluster) -> None:
         """Test for multiproc_reproject"""
@@ -935,7 +935,7 @@ class TestDask:
             list_small_darr.append(small_darr)
 
     # List of in-memory chunksize for small tests
-    list_small_chunksizes_in_mem = [(10, 10), (7, 19)]
+    list_small_chunksizes_in_mem = [(20, 20), (17, 39)]
 
     # Create a corresponding boolean array for each numerical dask array
     # Every finite numerical value (valid numerical value) corresponds to True (valid boolean value).

@@ -21,45 +21,6 @@ from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
 
 
-@pytest.fixture(scope="module")
-def lazy_test_files(tmp_path_factory: Any) -> list[str]:
-    """
-    Create temporary converted files for lazy tests.
-
-    Below, we compare Xarray accessor and Raster class including loading/laziness (without data loaded).
-    So we need to convert all of our integer test examples to float32 with valid nodata ahead of loading,
-    and save them to temporary test files.
-    """
-
-    # Create temporary directory at module scope
-    tmpdir = tmp_path_factory.mktemp("lazy_data")
-
-    list_name = ["everest_landsat_b4", "everest_landsat_rgb", "exploradores_aster_dem"]
-    list_fn_out = []
-    for name in list_name:
-
-        # Get filepath
-        fn = examples.get_path_test(name)
-
-        # If dataset is already float32 with defined nodata, return the path
-        if name == "exploradores_aster_dem":
-            list_fn_out.append(fn)
-            continue
-
-        # Else open, convert
-        rast = Raster(fn)
-        rast = rast.astype(dtype=np.float32, convert_nodata=False)
-        rast.set_nodata(-9999)
-
-        # Save to file in temporary directory
-        fn_out = os.path.join(tmpdir, os.path.splitext(os.path.basename(fn))[0] + "_float32.tif")
-        rast.to_file(fn_out)
-
-        list_fn_out.append(fn_out)
-
-    return list_fn_out
-
-
 def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, strict_masked: bool = True) -> None:
     """Return equality of different output types."""
 
@@ -432,9 +393,9 @@ class TestClassVsAccessorConsistency:
         path_raster = lazy_test_files[path_index]
 
         # Open lazily with Dask
-        ds = open_raster(path_raster, chunks={"band": 1, "x": 10, "y": 10})
+        ds = open_raster(path_raster, chunks={"band": 1, "x": 25, "y": 25})
         # Open raster that will be processed using Multiprocessing
-        mp_config = MultiprocConfig(chunk_size=10)  # To pass to the function
+        mp_config = MultiprocConfig(chunk_size=25)  # To pass to the function
         raster = Raster(path_raster)
         # Open and load both DataArray/Raster with NumPy
         ds2 = open_raster(path_raster)
@@ -470,11 +431,7 @@ class TestClassVsAccessorConsistency:
             assert isinstance(output_ds.data, da.Array)
             assert output_ds.data.chunks is not None
             # Output computes successfully, and is then loaded in memory
-            import time
-            t0 = time.time()
             output_ds = output_ds.compute()
-            print(time.time() - t0)
-            assert False
             assert isinstance(output_ds.data, np.ndarray)
             assert output_ds._in_memory
 

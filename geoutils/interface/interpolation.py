@@ -29,7 +29,6 @@ import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
-from geoutils import profiler
 from geoutils._dispatch import _check_match_points
 from geoutils._typing import NDArrayNum, Number
 from geoutils._misc import import_optional

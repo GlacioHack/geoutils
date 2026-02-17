@@ -54,7 +54,7 @@ from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
 from geoutils._misc import copy_doc, deprecate, import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.raster_vector import _create_mask, _rasterize
+from geoutils.interface.rasterization import _create_mask, _rasterize
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,

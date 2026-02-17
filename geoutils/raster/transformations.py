@@ -30,21 +30,21 @@ import affine
 import rasterio as rio
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-import geopandas as gpd
 import numpy as np
-import pandas as pd
 from packaging.version import Version
+from shapely.geometry import box
+from shapely.strtree import STRtree
 
 from geoutils import profiler
 from geoutils._dispatch import _check_match_bbox, _check_match_grid
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
-from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 from geoutils.raster.referencing import (
     _default_nodata,
     _res,
 )
 from geoutils._misc import silence_rasterio_message, import_optional
 from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
+from geoutils.multiproc.chunked import GeoGrid, ChunkedGeoGrid, _chunks2d_from_chunksizes_shape
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
@@ -280,206 +280,9 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 # CHUNKED LOGIC (for both Dask and Multiprocessing)
 
 # At the date of April 2024: not supported by Rioxarray
-# Part of the code (defining a GeoGrid and GeoTiling classes) is inspired by
-# https://github.com/opendatacube/odc-geo/pull/88, modified to be concise, stand-alone and rely only on
-# Rasterio/GeoPandas
-
-# We define a GeoGrid and GeoTiling class (which composes GeoGrid) to consistently deal with georeferenced footprints
-# of chunked grids
-GeoGridType = TypeVar("GeoGridType", bound="GeoGrid")
-
-
-class GeoGrid:
-    """
-    Georeferenced grid class.
-
-    Describes a georeferenced grid through a geotransform (one-sided bounds and resolution), shape and CRS.
-    """
-
-    def __init__(self, transform: rio.transform.Affine, shape: tuple[int, int], crs: rio.crs.CRS | None):
-
-        self._transform = transform
-        self._shape = shape
-        self._crs = crs
-
-    @property
-    def transform(self) -> rio.transform.Affine:
-        return self._transform
-
-    @property
-    def crs(self) -> rio.crs.CRS:
-        return self._crs
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        return self._shape
-
-    @property
-    def height(self) -> int:
-        return self.shape[0]
-
-    @property
-    def width(self) -> int:
-        return self.shape[1]
-
-    @property
-    def res(self) -> tuple[int, int]:
-        return self.transform[0], abs(self.transform[4])
-
-    def bounds_projected(self, crs: rio.crs.CRS = None) -> rio.coords.BoundingBox:
-        if crs is None:
-            crs = self.crs
-        bounds = rio.coords.BoundingBox(*rio.transform.array_bounds(self.height, self.width, self.transform))
-        return _get_bounds_projected(bounds=bounds, in_crs=self.crs, out_crs=crs, densify_points=5)
-
-    @property
-    def bounds(self) -> rio.coords.BoundingBox:
-        return self.bounds_projected()
-
-    def footprint_projected(self, crs: rio.crs.CRS = None, buffer_px: int = 0) -> gpd.GeoDataFrame:
-        if crs is None:
-            crs = self.crs
-        return _get_footprint_projected(self.bounds, in_crs=self.crs, out_crs=crs, densify_points=5)
-
-    @property
-    def footprint(self) -> gpd.GeoDataFrame:
-        return self.footprint_projected()
-
-    @classmethod
-    def from_dict(cls: type[GeoGridType], dict_meta: dict[str, Any]) -> GeoGridType:
-        """Create a GeoGrid from a dictionary containing transform, shape and CRS."""
-        return cls(**dict_meta)
-
-    def translate(
-        self: GeoGridType,
-        xoff: float,
-        yoff: float,
-        distance_unit: Literal["georeferenced"] | Literal["pixel"] = "pixel",
-    ) -> GeoGridType:
-        """Translate into a new geogrid (not inplace)."""
-
-        if distance_unit not in ["georeferenced", "pixel"]:
-            raise ValueError("Argument 'distance_unit' should be either 'pixel' or 'georeferenced'.")
-
-        # Get transform
-        dx, b, xmin, d, dy, ymax = list(self.transform)[:6]
-
-        # Convert pixel offsets to georeferenced units
-        if distance_unit == "pixel":
-            # Can either multiply the offset by the resolution
-            # xoff *= self.res[0]
-            # yoff *= self.res[1]
-
-            # Or use the boundaries instead! (maybe less floating point issues? doesn't seem to matter in tests)
-            xoff = xoff / self.shape[1] * (self.bounds.right - self.bounds.left)
-            yoff = yoff / self.shape[0] * (self.bounds.top - self.bounds.bottom)
-
-        shifted_transform = rio.transform.Affine(dx, b, xmin + xoff, d, dy, ymax + yoff)
-
-        return self.from_dict({"transform": shifted_transform, "crs": self.crs, "shape": self.shape})
-
-
-def _get_block_ids_per_chunk(chunks: tuple[tuple[int, ...], tuple[int, ...]]) -> list[dict[str, int]]:
-    """Get location of chunks based on array shape and list of chunk sizes."""
-
-    # Get number of chunks
-    num_chunks = (len(chunks[0]), len(chunks[1]))
-
-    # Get robust list of chunk locations (using what is done in block_id of dask.array.map_blocks)
-    # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
-    from dask.utils import cached_cumsum
-
-    starts = [cached_cumsum(c, initial_zero=True) for c in chunks]
-    nb_blocks = num_chunks[0] * num_chunks[1]
-    ixi, iyi = np.unravel_index(np.arange(nb_blocks), shape=(num_chunks[0], num_chunks[1]))
-    # Starting and ending indexes "s" and "e" for both X/Y, to place the chunk in the full array
-    block_ids = [
-        {
-            "num_block": i,
-            "ys": starts[0][ixi[i]],
-            "xs": starts[1][iyi[i]],
-            "ye": starts[0][ixi[i] + 1],
-            "xe": starts[1][iyi[i] + 1],
-        }
-        for i in range(nb_blocks)
-    ]
-
-    return block_ids
-
-
-class ChunkedGeoGrid:
-    """
-    Chunked georeferenced grid class.
-
-    Associates a georeferenced grid to chunks (possibly of varying sizes).
-    """
-
-    def __init__(self, grid: GeoGrid, chunks: tuple[tuple[int, ...], tuple[int, ...]]):
-
-        self._grid = grid
-        self._chunks = chunks
-
-    @property
-    def grid(self) -> GeoGrid:
-        return self._grid
-
-    @property
-    def chunks(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
-        return self._chunks
-
-    def get_block_locations(self) -> list[dict[str, int]]:
-        """Get block locations in 2D: xstart, xend, ystart, yend."""
-        return _get_block_ids_per_chunk(self._chunks)
-
-    def get_blocks_as_geogrids(self) -> list[GeoGrid]:
-        """Get blocks as geogrids with updated transform/shape."""
-
-        block_ids = self.get_block_locations()
-
-        list_geogrids = []
-        for bid in block_ids:
-            # We get the block size
-            block_shape = (bid["ye"] - bid["ys"], bid["xe"] - bid["xs"])
-            # Build a temporary geogrid with the same transform as the full grid, but with the chunk shape
-            geogrid_tmp = GeoGrid(transform=self.grid.transform, crs=self.grid.crs, shape=block_shape)
-            # And shift it to the right location (X is positive in index direction, Y is negative)
-            geogrid_block = geogrid_tmp.translate(xoff=bid["xs"], yoff=-bid["ys"])
-            list_geogrids.append(geogrid_block)
-
-        return list_geogrids
-
-    def get_block_footprints(self, crs: rio.crs.CRS = None) -> gpd.GeoDataFrame:
-        """Get block projected footprints as a single geodataframe."""
-
-        geogrids = self.get_blocks_as_geogrids()
-        footprints = [gg.footprint_projected(crs=crs) if crs is not None else gg.footprint for gg in geogrids]
-
-        return pd.concat(footprints)
-
-
-def _chunks2d_from_chunksizes_shape(
-    chunksizes: tuple[int, int], shape: tuple[int, int]
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """Get tuples of chunk sizes for X/Y dimensions based on chunksizes and array shape."""
-
-    # Chunksize is fixed, except for the last chunk depending on the shape
-    chunks_y = tuple(
-        min(
-            chunksizes[0],
-            shape[0] - i * chunksizes[0],
-        )
-        for i in range(int(np.ceil(shape[0] / chunksizes[0])))
-    )
-    chunks_x = tuple(
-        min(
-            chunksizes[1],
-            shape[1] - i * chunksizes[1],
-        )
-        for i in range(int(np.ceil(shape[1] / chunksizes[1])))
-    )
-
-    return chunks_y, chunks_x
-
+# Part of the code was inspired by https://github.com/opendatacube/odc-geo/pull/88, modified to be concise,
+# stand-alone and rely only on Rasterio/Shapely/Pyproj
+# (Code now lives in multiproc/chunked)
 
 def _combined_blocks_shape_transform(
     sub_block_ids: list[dict[str, int]], src_geogrid: GeoGrid
@@ -548,7 +351,6 @@ def _build_geotiling_and_meta(
         - List of metadata dictionaries per destination block
         - List of destination `GeoGrid` blocks
     """
-
     # 1/ Define source and destination chunked georeferenced grid through simple classes storing CRS/transform/shape,
     # which allow to consistently derive shape/transform for each block and their CRS-projected footprints
 
@@ -561,14 +363,36 @@ def _build_geotiling_and_meta(
     dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=dst_chunksizes, shape=dst_shape)
     dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
 
-    # 2/ Get footprints of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
+    # 2/ Get bounds of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
     # overlap, then map indexes of source blocks that intersect a given destination block
-    src_footprints = src_geotiling.get_block_footprints(crs=dst_crs)
-    # Raised warning for buffer is not important
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=UserWarning, message="Geometry is in a geographic CRS.*")
-        dst_footprints = dst_geotiling.get_block_footprints().buffer(2 * max(dst_geogrid.res))
-    dest2source = [list(np.where(dst.intersects(src_footprints).values)[0]) for dst in dst_footprints]
+    src_boxes = [box(*gg.bounds_projected(crs=dst_crs)) for gg in src_geotiling.get_blocks_as_geogrids()]
+    dst_boxes = [box(*gg.bounds_projected(crs=dst_crs)).buffer(2*max(dst_geogrid.res)) for gg in
+                 dst_geotiling.get_blocks_as_geogrids()]
+    # Faster to use spatial index over source boxes
+    tree = STRtree(src_boxes)
+    # For Shapely 2.0: STRtree.query(..., predicate="intersects") is fastest, for earlier versions we filter manually
+
+    # Quick feature check
+    try:
+        _ = tree.query(dst_boxes[0], predicate="intersects") if dst_boxes else []
+        has_predicate = True
+    except TypeError:
+        has_predicate = False
+
+    # Build mapping: for each destination box, list intersecting source indices
+    dest2source: list[list[int]] = []
+    if has_predicate:
+        # Shapely 2: Query returns indices directly (int array)
+        for dst in dst_boxes:
+            idx = tree.query(dst, predicate="intersects")
+            dest2source.append([int(i) for i in np.asarray(idx).ravel()])
+    else:
+        # Shapely 1.8: Query returns geometries, so we convert to indices via id() map + filter intersects
+        id_to_idx = {id(g): i for i, g in enumerate(src_boxes)}
+        for dst in dst_boxes:
+            cand_geoms = tree.query(dst)
+            matches = [id_to_idx[id(g)] for g in cand_geoms if dst.intersects(g)]
+            dest2source.append(matches)
 
     # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
     # transform of each tuples of source blocks
@@ -693,8 +517,6 @@ def _dask_reproject(
     # To raise appropriate error on missing optional dependency
     import_optional("dask")
 
-    import time
-    t0 = time.time()
     # Define the chunking
     # For source, we can use the .chunks attribute
     src_chunks = darr.chunks[-2:]  # In case input is multi-band
@@ -716,9 +538,6 @@ def _dask_reproject(
             dst_chunksizes=dst_chunksizes,
         )
     )
-
-    t1 = time.time()
-    print(t1 - t0)
 
     # We call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
 

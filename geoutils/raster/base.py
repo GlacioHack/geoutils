@@ -30,7 +30,6 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
-from geoutils._dispatch import _check_match_points
 from geoutils._misc import deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -47,7 +46,7 @@ from geoutils.interface.raster_point import (
     _raster_to_pointcloud,
     _regular_pointcloud_to_raster,
 )
-from geoutils.interface.raster_vector import _polygonize
+from geoutils.interface.vectorization import _polygonize
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -1103,8 +1102,6 @@ class RasterBase(ABC):
         :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
             coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
-        :param mode: Whether to match within pixels or exact extent. ``'match_pixel'``  ``'match_extent'``
-            will match the extent exactly, adjusting the pixel resolution to fit the extent.
         :param inplace: (DEPRECATED. Use rast = rast.crop() instead) Whether to crop in-place or not.
         :returns: A new cropped raster.
         """
@@ -1627,8 +1624,6 @@ class RasterBase(ABC):
     def filter(
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
-        *,
-        inplace: Literal[False] = False,
         size: int = 3,
         **kwargs: dict[str, Any],
     ) -> RasterType: ...
@@ -1637,8 +1632,6 @@ class RasterBase(ABC):
     def filter(
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
-        *,
-        inplace: Literal[True],
         size: int = 3,
         **kwargs: dict[str, Any],
     ) -> None: ...
@@ -1646,8 +1639,8 @@ class RasterBase(ABC):
     def filter(
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
-        inplace: bool = False,
         size: int = 3,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: dict[str, Any],
     ) -> RasterType | None:
         """
@@ -1655,8 +1648,8 @@ class RasterBase(ABC):
 
         :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
                        for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
-        :param inplace: Whether to modify the raster in-place.
         :param size: Window size for filter
+        :param mp_config: Multiprocessing configuration.
 
         :return: A new Raster instance with the filtered data (or None if inplace).
 
@@ -1664,17 +1657,7 @@ class RasterBase(ABC):
         :raises TypeError: If `method` is neither a string nor a callable.
         """
 
-        # Convert to NaN array for filters
-        nan_array = self.get_nanarray()
-
-        # Apply filter
-        filtered_array = _filter(nan_array, method, size, **kwargs)
-
-        if inplace:
-            self.data = filtered_array
-            return None
-        else:
-            return self.copy(new_array=filtered_array)
+        return _filter(source_raster=self, method=method, size=size, mp_config=mp_config, **kwargs)
 
     @deprecate(
         Version("0.3.0"),
@@ -1843,10 +1826,13 @@ class RasterBase(ABC):
     def polygonize(
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
+        connectivity: Literal[4, 8] = 4,
         data_column_name: str = "id",
+        strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
+        mp_config: "MultiprocConfig | None" = None,
     ) -> Vector:
         """
-        Polygonize the raster into a vector.
+        Polygonize the raster into a vector of polygon geometries delineating target values.
 
         :param target_values: Value or range of values of the raster from which to
           create geometries (defaults to "all", for which all unique pixel values of the raster are used).
@@ -1856,7 +1842,8 @@ class RasterBase(ABC):
         :returns: Vector containing the polygonized geometries associated to target values.
         """
 
-        return _polygonize(source_raster=self, target_values=target_values, data_column_name=data_column_name)
+        return _polygonize(source_raster=self, target_values=target_values, connectivity=connectivity,
+                           data_column_name=data_column_name, strategy=strategy, mp_config=mp_config)
 
     def proximity(
         self,
