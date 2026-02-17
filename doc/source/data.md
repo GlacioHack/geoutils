@@ -33,7 +33,7 @@ Several sites (Coromandel Peninsula in New Zealand, Mount Everest and Explorador
 
 ```{note}
 If you need more information about the data, you can read this [page](https://github.com/GlacioHack/geoutils-data/blob/main/README.md)
-of the [xdem-data github project](https://github.com/GlacioHack/geoutils-data) where they are stored or the documentation associated with their Digital Object Identifier:
+of the [geoutils-data repository project](https://github.com/GlacioHack/geoutils-data) where they are stored, described and referenced with their Digital Object Identifier:
 
 1. DOI: [10.7265/N5-RGI-60](https://doi.org/10.7265/N5-RGI-60)
 ```
