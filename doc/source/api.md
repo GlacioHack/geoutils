@@ -73,10 +73,7 @@ documentation.
     :toctree: gen_modules/
 
     Raster.is_mask
-    Raster.count_on_disk
-    Raster.bands_on_disk
     Raster.is_loaded
-    Raster.is_modified
     Raster.name
     Raster.driver
     Raster.tags

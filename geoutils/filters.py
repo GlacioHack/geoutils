@@ -223,7 +223,7 @@ def _filter(
     return source_raster.copy(new_array=array)
 
 
-def gaussian_filter(array: NDArrayNum, sigma: float, **kwargs: Any) -> NDArrayNum:
+def gaussian_filter(array: NDArrayNum, sigma: float = 5, **kwargs: Any) -> NDArrayNum:
     """
     Apply a Gaussian filter to a raster that may contain NaNs.
     N.B: kernel_size is set automatically based on sigma.
@@ -318,7 +318,9 @@ def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"
     raise ValueError("Input array must be 2D or 3D.")
 
 
-def _apply_median_filter_2d(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"]) -> NDArrayNum:
+def _apply_median_filter_2d(
+    array: NDArrayNum, size: int = 5, engine: Literal["scipy", "numba"] = "scipy"
+) -> NDArrayNum:
     """
     Apply a 2D median filter on an array that may contain NaNs.
 
@@ -343,7 +345,7 @@ def _apply_median_filter_2d(array: NDArrayNum, size: int, engine: Literal["scipy
         return np.where(nans, array, median_vals)
 
 
-def mean_filter(array: NDArrayNum, size: int) -> NDArrayNum:
+def mean_filter(array: NDArrayNum, size: int = 5) -> NDArrayNum:
     """
     Apply a mean filter to a 2D array that may contain NaNs.
 
@@ -418,7 +420,7 @@ def max_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     return np.where(nans, array, array_nans_replaced_f)
 
 
-def distance_filter(array: NDArrayNum, radius: float, outlier_threshold: float) -> NDArrayNum:
+def distance_filter(array: NDArrayNum, radius: float = 5, outlier_threshold: float = 2) -> NDArrayNum:
     """
     Filter out pixels whose value is distant more than a set threshold from the average value of all neighbor \
     pixels within a given radius.
