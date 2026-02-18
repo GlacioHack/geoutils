@@ -2182,7 +2182,6 @@ class Raster(RasterBase):
         if vmax is None:
             vmax = float(np.nanmax(data))
 
-
         # Make sure they are numbers, to avoid mpl error
         try:
             vmin = float(vmin)
