@@ -23,7 +23,7 @@ from pluggy import PluggyTeardownRaisedWarning
 from pyproj import CRS
 
 from geoutils.examples import _EXAMPLES_DIRECTORY
-from geoutils.raster.transformations.dask import (
+from geoutils.raster.transformation.dask import (
     delayed_interp_points,
     delayed_reproject,
     delayed_subsample,

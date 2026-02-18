@@ -60,7 +60,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
-from geoutils.vector.transformations import _reproject
+from geoutils.vector.transformation import _reproject
 from geoutils.multiproc import MultiprocConfig
 
 if TYPE_CHECKING:

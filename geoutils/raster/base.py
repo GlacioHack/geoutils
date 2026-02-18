@@ -64,7 +64,7 @@ from geoutils.raster.referencing import (
     _res,
     _xy2ij,
 )
-from geoutils.raster.transformations import _crop, _reproject, _translate
+from geoutils.raster.transformation import _crop, _reproject, _translate
 from geoutils.stats.sampling import _subsample
 from geoutils.stats.stats import _statistics
 
@@ -1640,6 +1640,9 @@ class RasterBase(ABC):
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
         size: int = 3,
+        sigma: int = 1,
+        engine: Literal["scipy", "numba"] = "scipy",
+        outlier_threshold: float = 2.,
         mp_config: MultiprocConfig | None = None,
         **kwargs: dict[str, Any],
     ) -> RasterType | None:
@@ -1650,20 +1653,13 @@ class RasterBase(ABC):
                        for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
         :param size: Window size for filter
         :param mp_config: Multiprocessing configuration.
-
         :param sigma: Optional standard deviation for Gaussian filtering.
-        Only used when `method="gaussian"`.
-
+            Only used when `method="gaussian"`.
         :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
-        Only used when `method="median"`.
-
+            Only used when `method="median"`.
         :param outlier_threshold:  The minimum difference abs(array - mean) for a pixel to be considered an outlier.
-        Only used when `method="distance"`.
-
-        :param radius: The radius in which the average value is calculated. Only used when `method="distance"`.
-
-        :param **kwargs : Additional keyword arguments passed to the underlying filter
-        implementation.
+            Only used when `method="distance"`.
+        :param kwargs : Additional keyword arguments passed to the underlying filter implementation.
 
         :return: A new Raster instance with the filtered data (or None if inplace).
 
@@ -1671,7 +1667,11 @@ class RasterBase(ABC):
         :raises TypeError: If `method` is neither a string nor a callable.
         """
 
-        return _filter(source_raster=self, method=method, size=size, mp_config=mp_config, **kwargs)
+        if "inplace" in kwargs:
+            raise DeprecationWarning("Argument 'inplace' is deprecated, use rst = rst.filter() instead.")
+
+        return _filter(source_raster=self, method=method, size=size, mp_config=mp_config, sigma=sigma,
+                       engine=engine, outlier_threshold=outlier_threshold, **kwargs)
 
     @deprecate(
         Version("0.3.0"),

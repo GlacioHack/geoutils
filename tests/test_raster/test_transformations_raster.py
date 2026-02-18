@@ -16,7 +16,7 @@ from packaging.version import Version
 import geoutils as gu
 from geoutils import examples
 from geoutils.exceptions import InvalidGridError
-from geoutils.raster.transformations import _resampling_method_from_str, _dask_reproject, _rio_reproject
+from geoutils.raster.transformation import _resampling_method_from_str, _dask_reproject, _rio_reproject
 from geoutils.raster.raster import _default_nodata
 from geoutils.multiproc import ClusterGenerator, MultiprocConfig
 from geoutils.stats.sampling import _subsample_numpy
