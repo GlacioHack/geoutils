@@ -32,8 +32,7 @@ Several sites (Coromandel Peninsula in New Zealand, Mount Everest and Explorador
 
 
 ```{note}
-{: id="doi"}
-
+ <a name="doi"></a>
 If you need more information about the data, you can read this [page](https://github.com/GlacioHack/geoutils-data/blob/main/README.md)
 of the [geoutils-data repository project](https://github.com/GlacioHack/geoutils-data) where they are stored, described and referenced with their Digital Object Identifier:
 
