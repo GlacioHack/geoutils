@@ -29,7 +29,7 @@ import rasterio.warp
 
 from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
-from geoutils.raster._geotransformations import _resampling_method_from_str
+from geoutils.raster.transformation import _resampling_method_from_str
 from geoutils.raster.array import get_array_and_mask
 from geoutils.raster.raster import Raster, _default_nodata
 

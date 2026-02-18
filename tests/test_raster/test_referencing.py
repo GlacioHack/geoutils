@@ -7,7 +7,7 @@ import geoutils as gu
 from geoutils import examples
 
 
-class TestGeoreferencing:
+class TestReferencing:
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")

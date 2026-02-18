@@ -11,10 +11,12 @@ from scipy.ndimage import binary_dilation
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.interface.interpolate import (
+from geoutils.interface.interpolation import (
     _get_dist_nodata_spread,
     _interp_points,
     _interpn_interpolator,
+    _dask_interp_points,
+    _interp_points_base,
     method_to_order,
 )
 from geoutils.projtools import reproject_to_latlon
@@ -184,7 +186,8 @@ class TestInterpolate:
             + [(i, 4) for i in np.arange(4, 1)]
         )
         points_out_xy = tuple(zip(*points_out))
-        raster_points_out = raster.interp_points(points_out_xy, as_array=True)
+        with pytest.warns(UserWarning, match="All provided points were outside of raster bounds"):
+            raster_points_out = raster.interp_points(points_out_xy, as_array=True)
         assert all(~np.isfinite(raster_points_out))
 
         # To use cubic or quintic, we need a larger grid (minimum 6x6, but let's aim bigger with 50x50)
@@ -300,9 +303,7 @@ class TestInterpolate:
 
         # 3/ Test return_interpolator is consistent with above
         interp = _interp_points(
-            r.get_nanarray(),
-            transform=r.transform,
-            area_or_point=r.area_or_point,
+            r,
             points=(x, y),
             method=method,
             return_interpolator=True,
@@ -657,3 +658,87 @@ class TestInterpolate:
         lrl3 = r.data[-1, -2]
         assert np.array_equal(lrl1, lrl2, equal_nan=True)
         assert np.array_equal(lrl2, lrl3, equal_nan=True)
+
+class TestDask:
+
+    pytest.importorskip("dask")
+    import dask.array as da
+
+    # Define random seed for generating test data
+    rng = da.random.default_rng(seed=42)
+
+    # Smaller test files for fast checks, with various shapes and with/without nodata
+    list_small_shapes = [(51, 47)]
+    with_nodata = [False, True]
+    list_small_darr = []
+    for small_shape in list_small_shapes:
+        for w in with_nodata:
+            small_darr = rng.normal(size=small_shape[0] * small_shape[1])
+            # Add about 5% of nodata values
+            if w:
+                ind_nodata = rng.choice(small_darr.size, size=int(0.05 * small_darr.size), replace=False)
+                small_darr[list(ind_nodata)] = np.nan
+            small_darr = small_darr.reshape(small_shape[0], small_shape[1])
+            list_small_darr.append(small_darr)
+
+    # List of in-memory chunksize for small tests
+    list_small_chunksizes_in_mem = [(10, 10), (7, 19)]
+
+    # Create a corresponding boolean array for each numerical dask array
+    # Every finite numerical value (valid numerical value) corresponds to True (valid boolean value).
+    darr_bool = []
+    for small_darr in list_small_darr:
+        darr_bool.append(da.where(da.isfinite(small_darr), True, False))
+
+    @pytest.mark.parametrize("darr", list_small_darr)
+    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
+    @pytest.mark.parametrize("ninterp", [2, 100])
+    @pytest.mark.parametrize("res", [(0.5, 2), (1, 1)])
+    def test_dask_interp_points__output(
+            self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int, res: tuple[float, float]
+    ) -> None:
+        """
+        Checks for delayed interpolate points function.
+        Variables that influence specifically the delayed function are:
+        - Input chunksizes,
+        - Input array shape,
+        - Number of interpolated points,
+        - The resolution of the regular grid.
+        """
+
+        # 1/ Define points to interpolate given the size and resolution
+        darr = darr.rechunk(chunksizes_in_mem)
+        ny, nx = darr.shape  # (rows, cols)
+        xres, yres = res
+
+        # Build a north-up transform with origin at (0, ny*yres)
+        # Pixel (row=0, col=0) upper-left corner is (0, top)
+        top = ny * yres
+        transform = rio.transform.from_origin(0.0, float(top), float(xres), float(yres))
+
+        rng = np.random.default_rng(seed=42)
+        # Sample random points within the raster bounds in georeferenced coords.
+        # Use pixel centers: x in (0.5*xres .. (nx-0.5)*xres), y in (top-0.5*yres .. top-(ny-0.5)*yres)
+        cols = rng.integers(0, nx, size=ninterp)
+        rows = rng.integers(0, ny, size=ninterp)
+        dx = rng.random(ninterp) - 0.5
+        dy = rng.random(ninterp) - 0.5
+
+        interp_x = (cols + 0.5 + dx) * xres
+        interp_y = top - (rows + 0.5 + dy) * yres
+
+        interp1 = _dask_interp_points(darr, points=(interp_x, interp_y), transform=transform, method="linear")
+        interp1 = np.array(interp1.compute())
+
+        interp2 = _interp_points_base(np.array(darr), points=(interp_x, interp_y), transform=transform, method="linear")
+
+        # Differentiate points close to boundary (gets the effect of Dask expanding the sides during overlap,
+        # and filling the values with "nearest")
+        at_boundary = (
+                (interp_x <= 3*xres) |
+                (interp_x >= nx * xres - 3*xres) |
+                (interp_y <= 3*yres) |
+                (interp_y >= ny * yres - 3*yres)
+        )
+        assert np.allclose(interp1[~at_boundary], interp2[~at_boundary], equal_nan=True, rtol=1e-3)
+        # assert np.allclose(interp1[at_boundary], interp2[at_boundary], equal_nan=True, rtol=1e-3)

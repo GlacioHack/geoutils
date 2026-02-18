@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import pathlib
 import warnings
-from collections import abc
 from os import PathLike
 from typing import (
     TYPE_CHECKING,
@@ -52,16 +51,17 @@ from shapely.geometry.base import BaseGeometry
 from geoutils import profiler
 from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
 from geoutils._misc import copy_doc, deprecate, import_optional
-from geoutils._typing import NDArrayBool, NDArrayNum, Number
+from geoutils._typing import NDArrayBool, NDArrayNum, Number, DTypeLike
 from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.raster_vector import _create_mask, _rasterize
+from geoutils.interface.rasterization import _create_mask, _rasterize
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
-from geoutils.vector.geotransformations import _reproject
+from geoutils.vector.transformation import _reproject
+from geoutils.multiproc import MultiprocConfig
 
 if TYPE_CHECKING:
     import matplotlib
@@ -1507,11 +1507,18 @@ class Vector:
     def create_mask(
         self,
         ref: RasterLike | PointCloudLike | None = None,
+        all_touched: bool = False,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        points: tuple[NDArrayNum, NDArrayNum] = None,
+        shape: tuple[int, int] | None = None,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+        points: tuple[NDArrayNum, NDArrayNum] | None = None,
         as_array: bool = False,
+        *,
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        dask: bool = False,
     ) -> Raster | PointCloud | NDArrayBool:
         """
         Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
@@ -1535,20 +1542,40 @@ class Vector:
         :returns: A raster or point cloud mask.
         """
 
-        # Create mask
-        mask = _create_mask(gdf=self.ds, ref=ref, crs=crs, res=res, points=points, bounds=bounds, as_array=as_array)
-        return mask
+        return _create_mask(
+            source_vector=self,
+            ref=ref,
+            all_touched=all_touched,
+            crs=crs,
+            res=res,
+            shape=shape,
+            grid_coords=grid_coords,
+            points=points,
+            bounds=bounds,
+            as_array=as_array,
+            chunksizes=chunksizes,
+            mp_config=mp_config,
+            dask=dask,
+        )
 
     @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)
     def rasterize(
         self,
-        raster: RasterType | None = None,
-        crs: CRS | int | None = None,
-        res: tuple[Number, Number] | Number | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
-        in_value: int | float | abc.Iterable[int | float] | None = None,
+        ref: RasterType | None = None,
+        in_value: int | float | Iterable[int | float] | None = None,
         out_value: int | float = 0,
-        **kwargs: Any,
+        all_touched: bool = False,
+        out_dtype: DTypeLike | None = None,
+        res: tuple[Number, Number] | Number | None = None,
+        shape: tuple[int, int] | None = None,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        crs: CRS | int | None = None,
+        *,
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        dask: bool = False,
+        **kwargs
     ) -> RasterType:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
@@ -1561,7 +1588,7 @@ class Vector:
         Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
         Default is an index from 1 to len(self.ds).
 
-        :param raster: Reference raster to match during rasterization.
+        :param ref: Reference raster to match during rasterization.
         :param crs: Coordinate reference system as string or EPSG code
             (Default to raster.crs if not None then self.crs).
         :param res: Output raster spatial resolution.
@@ -1576,7 +1603,7 @@ class Vector:
         # Deprecate old xres and yres
         if "xres" in kwargs.keys() or "yres" in kwargs.keys():
             warnings.warn(
-                message="Input 'xres' and 'yres' are deprecrated in favour of 'res'.", category=DeprecationWarning
+                message="Argument 'xres' and 'yres' are deprecrated in favour of 'res'.", category=DeprecationWarning
             )
         xres = kwargs.get("xres", None)
         yres = kwargs.get("yres", None)
@@ -1585,15 +1612,27 @@ class Vector:
                 res = (xres, yres)
             else:
                 res = xres
+        if "raster" in kwargs.keys():
+            warnings.warn(
+                message="Argument 'raster' is deprecrated in favour of 'ref'.", category=DeprecationWarning
+            )
+            ref = kwargs.get("raster", None)
 
         return _rasterize(
             source_vector=self,
-            ref=raster,
-            crs=crs,
-            res=res,
-            bounds=bounds,
+            ref=ref,
             in_value=in_value,
             out_value=out_value,
+            all_touched=all_touched,
+            out_dtype=out_dtype,
+            res=res,
+            shape=shape,
+            grid_coords=grid_coords,
+            bounds=bounds,
+            crs=crs,
+            chunksizes=chunksizes,
+            mp_config=mp_config,
+            dask=dask,
         )
 
     @classmethod

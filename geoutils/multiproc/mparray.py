@@ -137,7 +137,7 @@ def _generate_tiling_grid(
 def compute_tiling(
     tile_size: int,
     raster_shape: tuple[int, int],
-    ref_shape: tuple[int, int],
+    ref_shape: tuple[int, int] = None,
     overlap: int = 0,
 ) -> NDArrayNum:
     """
@@ -145,14 +145,14 @@ def compute_tiling(
 
     :param tile_size: Size of each tile (square tiles).
     :param raster_shape: Shape of the raster to determine tiling parameters.
-    :param ref_shape: The shape of another raster to coregister, use to validate the shape.
+    :param ref_shape: Shape of another raster to coregister, use for validation (optional).
     :param overlap: Size of overlap between tiles (optional).
     :return: tiling_grid (array of tile boundaries).
 
-    :raises ValueError: if overlap is negative.
-    :raises TypeError: if overlap is not an integer.
+    :raises ValueError: If overlap is negative.
+    :raises TypeError: If overlap is not an integer.
     """
-    if raster_shape != ref_shape:
+    if ref_shape is not None and raster_shape != ref_shape:
         raise Exception("Reference and secondary rasters do not have the same shape")
     row_max, col_max = raster_shape
 
@@ -269,7 +269,7 @@ def _apply_func_block(
 def map_overlap_multiproc_save(
     func: Callable[..., Raster],
     raster_path: str | Raster,
-    config: MultiprocConfig,
+    mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
     **kwargs: Any,
@@ -285,7 +285,7 @@ def map_overlap_multiproc_save(
 
     :param func: A function to apply to each raster tile. It must return a :class:`geoutils.Raster` object.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
-    :param config: Configuration object containing chunk size, output file path, and an optional cluster.
+    :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
         The `outfile` parameter in `config` must be provided.
     :param args: Additional positional arguments to pass to `func`.
     :param depth: The overlap size between tiles to avoid edge effects, default is 0.
@@ -305,7 +305,7 @@ def map_overlap_multiproc_save(
         raster = raster_path
 
     # Generate tiling grid
-    tiling_grid = compute_tiling(config.chunk_size, raster.shape, raster.shape, overlap=depth)
+    tiling_grid = compute_tiling(mp_config.chunk_size, raster.shape, raster.shape, overlap=depth)
 
     # Create tasks for multiprocessing
     tasks = []
@@ -314,11 +314,11 @@ def map_overlap_multiproc_save(
             tile = tiling_grid[row, col]
             # Launch the task on the cluster to process each tile
             tasks.append(
-                config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
+                mp_config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
             )
 
     # get first tile to retrieve dtype and nodata
-    result_tile0, _ = config.cluster.get_res(tasks[0])
+    result_tile0, _ = mp_config.cluster.get_res(tasks[0])
     file_metadata = {
         "width": raster.width,
         "height": raster.height,
@@ -329,7 +329,7 @@ def map_overlap_multiproc_save(
         "nodata": result_tile0.nodata,
     }
 
-    raster_output = _write_multiproc_result(tasks, config, file_metadata)
+    raster_output = _write_multiproc_result(tasks, mp_config, file_metadata)
 
     # Warns user if output file is a BigTIFF
     if raster_output._is_bigtiff():
@@ -343,7 +343,7 @@ def map_overlap_multiproc_save(
 
 def _write_multiproc_result(
     tasks: list[Any],
-    config: MultiprocConfig,
+    mp_config: MultiprocConfig,
     file_metadata: dict[str, Any],
 ) -> Raster:
 
@@ -351,11 +351,11 @@ def _write_multiproc_result(
     from geoutils.raster import Raster
 
     # Create a new raster file to save the processed results
-    with rio.open(config.outfile, "w", driver=config.driver, **file_metadata, BIGTIFF="IF_NEEDED") as dst:
+    with rio.open(mp_config.outfile, "w", driver=mp_config.driver, **file_metadata, BIGTIFF="IF_NEEDED") as dst:
         try:
             # Iterate over the tasks and retrieve the processed tiles
             for results in tasks:
-                result_tile, dst_tile = config.cluster.get_res(results)
+                result_tile, dst_tile = mp_config.cluster.get_res(results)
                 is_mask = has_geo_attr(result_tile, "is_mask") and get_geo_attr(result_tile, "is_mask")
 
                 # Define the window in the output file where the tile should be written
@@ -375,20 +375,20 @@ def _write_multiproc_result(
 
                 # Write the processed tile to the appropriate location in the output file
                 dst.write(data, window=dst_window)
-            logging.info(f"Raster saved under {config.outfile}")
+            logging.info(f"Raster saved under {mp_config.outfile}")
         except Exception as e:
             raise RuntimeError(f"Error retrieving raster tiles from multiprocessing tasks: {e}")
 
     if is_mask:
-        return Raster(config.outfile, as_mask=True)
-    return Raster(config.outfile)
+        return Raster(mp_config.outfile, as_mask=True)
+    return Raster(mp_config.outfile)
 
 
 @overload
 def map_multiproc_collect(
     func: Callable[..., Any],
     raster_path: str | Any,
-    config: MultiprocConfig,
+    mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
     return_tile: Literal[True],
@@ -400,7 +400,7 @@ def map_multiproc_collect(
 def map_multiproc_collect(
     func: Callable[..., Any],
     raster_path: str | Any,
-    config: MultiprocConfig,
+    mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
     return_tile: Literal[False] = False,
@@ -411,7 +411,7 @@ def map_multiproc_collect(
 def map_multiproc_collect(
     func: Callable[..., Any],
     raster_path: str | Raster,
-    config: MultiprocConfig,
+    mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
     return_tile: bool = False,
@@ -430,7 +430,7 @@ def map_multiproc_collect(
 
     :param func: A function to apply to each raster tile. It should return any type *except* :class:`geoutils.Raster`.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
-    :param config: Configuration object containing chunk size, output file path, and an optional cluster.
+    :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
     :param args: Additional positional arguments to pass to `func`.
     :param depth: The overlap size between tiles to avoid edge effects.
     :param return_tile: If `True`, the output includes the tile indices in addition to the results.
@@ -452,7 +452,7 @@ def map_multiproc_collect(
         raster = raster_path
 
     # Generate tiling grid
-    tiling_grid = compute_tiling(config.chunk_size, raster.shape, raster.shape, overlap=depth)
+    tiling_grid = compute_tiling(mp_config.chunk_size, raster.shape, raster.shape, overlap=depth)
 
     # Create tasks for multiprocessing
     tasks = []
@@ -461,14 +461,14 @@ def map_multiproc_collect(
             tile = tiling_grid[row, col]
             # Launch the task on the cluster to process each tile
             tasks.append(
-                config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
+                mp_config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
             )
 
     try:
         list_results = []
         # Iterate over the tasks and retrieve the processed tiles
         for results in tasks:
-            result, dst_tile = config.cluster.get_res(results)
+            result, dst_tile = mp_config.cluster.get_res(results)
             if return_tile:
                 list_results.append((result, dst_tile))
             else:
