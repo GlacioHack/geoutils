@@ -130,6 +130,7 @@ analysis_examples/index
 api
 cli
 config
+data
 release_notes
 ```
 

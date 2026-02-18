@@ -28,6 +28,12 @@ pyplot.rcParams['savefig.dpi'] = 600
 pyplot.rcParams['font.size'] = 9
 ```
 
+## Download data examples
+
+Example data from GeoUtils can be automatically downloaded with the function `geoutils.examples.get_path()` as used below.
+
+See the {ref}`data` page to learn more about all our example data and different download options.
+
 ## Short example
 
 ```{note}
