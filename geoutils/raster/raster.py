@@ -2161,10 +2161,10 @@ class Raster(RasterBase):
 
         # Create colorbar
         # Use rcParam default
-        if cmap is None and len(bands) == 1:
+        if cmap is None and isinstance(bands, int):
             # ONLY set a cmap arg for single band images
             cmap = plt.get_cmap(plt.rcParams["image.cmap"])
-        elif cmap is None and len(bands) > 1:
+        elif cmap is None and isinstance(bands, tuple):
             # Leave cmap as None for multi-band image, because if a cmap
             # is passed then imshow treats this as an instruction to apply scalar
             # mapping, which is not a desirable behaviour (it can result in color-casted
@@ -2181,6 +2181,7 @@ class Raster(RasterBase):
 
         if vmax is None:
             vmax = float(np.nanmax(data))
+
 
         # Make sure they are numbers, to avoid mpl error
         try:
