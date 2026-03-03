@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import warnings
-from multiprocessing import cpu_count
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -15,18 +14,15 @@ from packaging.version import Version
 from pyproj import CRS
 
 import geoutils as gu
-from geoutils import examples
+from geoutils import examples, open_raster
 from geoutils.exceptions import InvalidGridError
-from geoutils.multiproc import AbstractCluster, ClusterGenerator, MultiprocConfig
+from geoutils.multiproc import MultiprocConfig
+from geoutils.projtools import _get_bounds_projected
 from geoutils.raster.raster import _default_nodata
 from geoutils.raster.transformation import (
-    _dask_reproject,
     _resampling_method_from_str,
-    _rio_reproject,
 )
-from geoutils.projtools import _get_bounds_projected
 from geoutils.stats.sampling import _subsample_numpy
-from geoutils import open_raster
 
 DO_PLOT = False
 
@@ -947,6 +943,10 @@ class TestReprojectChunked:
         assert not raster_mp.is_loaded
 
         # 5/ Output checks: all backends must match base
+        # (For reproject, no artefacts only since we added "tolerance" argument in Rasterio,
+        # which officially came out in 1.5; so we skip the test for earlier versions)
+        if Version(rio.__version__) < Version("1.5.0"):
+            return
         assert base.raster_allclose(xr_base, warn_failure_reason=True, strict_masked=False)
         assert base.raster_allclose(dask_r, warn_failure_reason=True, strict_masked=False)
         assert base.raster_allclose(mp_r, warn_failure_reason=True, strict_masked=False)
