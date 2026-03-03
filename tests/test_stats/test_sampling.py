@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import warnings
+from typing import Literal
 
 import numpy as np
 import pytest
 
 from geoutils._typing import NDArrayNum
 from geoutils.stats.sampling import _dask_subsample, _subsample_numpy
+from geoutils.raster.array import get_mask_from_array
+import geoutils as gu
+from geoutils import open_raster
+from geoutils.multiproc import MultiprocConfig
+
 
 
 class TestSampling:
@@ -82,92 +88,233 @@ class TestSampling:
         assert np.array_equal(sub42, sub42_gen)
 
 
-class TestDask:
-    """
-    Testing class for delayed functions.
 
-    We test on a first set of rasters big enough to clearly monitor the memory usage, and a second set small enough
-    to run fast to check a wide range of input parameters.
+class TestSubsampleChunked:
 
-    We compare outputs with the in-memory function specifically for input variables that influence the delayed
-    algorithm and might lead to new errors (for example: array shape to get subsample/points locations for
-    subsample and interp_points, or destination chunksizes to map output of reproject).
-    """
+    # Strategies supported by _subsample
+    subsample_strategies = ("sequential", "topk")
 
-    pytest.importorskip("dask")
-    import dask.array as da
-
-    # Define random seed for generating test data
-    rng = da.random.default_rng(seed=42)
-
-    # Smaller test files for fast checks, with various shapes and with/without nodata
-    list_small_shapes = [(51, 47)]
-    with_nodata = [False, True]
-    list_small_darr = []
-    for small_shape in list_small_shapes:
-        for w in with_nodata:
-            small_darr = rng.normal(size=small_shape[0] * small_shape[1])
-            # Add about half nodata values
-            if w:
-                ind_nodata = rng.choice(small_darr.size, size=int(small_darr.size / 2), replace=False)
-                small_darr[list(ind_nodata)] = np.nan
-            small_darr = small_darr.reshape(small_shape[0], small_shape[1])
-            list_small_darr.append(small_darr)
-
-    # List of in-memory chunksize for small tests
-    list_small_chunksizes_in_mem = [(10, 10), (7, 19)]
-
-    # Create a corresponding boolean array for each numerical dask array
-    # Every finite numerical value (valid numerical value) corresponds to True (valid boolean value).
-    darr_bool = []
-    for small_darr in list_small_darr:
-        darr_bool.append(da.where(da.isfinite(small_darr), True, False))
-
-    @pytest.mark.parametrize("darr, darr_bool", list(zip(list_small_darr, darr_bool)))
-    @pytest.mark.parametrize("chunksizes_in_mem", list_small_chunksizes_in_mem)
-    @pytest.mark.parametrize("subsample_size", [2, 100, 10000])
-    def test_dask_subsample__output(
-        self, darr: da.Array, darr_bool: da.Array, chunksizes_in_mem: tuple[int, int], subsample_size: int
+    @pytest.mark.parametrize("path_index", [0, 2])
+    @pytest.mark.parametrize("strategy", subsample_strategies)
+    @pytest.mark.parametrize("return_indices", [False, True])
+    @pytest.mark.parametrize("subsample", [2, 100, 0.05])  # int size and fraction
+    def test_subsample__backends(
+        self,
+        path_index: int,
+        strategy: Literal["sequential", "topk"],
+        return_indices: bool,
+        subsample: int | float,
+        lazy_test_files_tiny: list[str],
     ) -> None:
         """
-        Checks for delayed subsampling function for output accuracy.
-        Variables that influence specifically the delayed function and might lead to new errors are:
-        - Input chunksizes,
-        - Input array shape,
-        - Number of subsampled points.
+        Test that subsample behaves consistently across backends:
+         - NumPy backend through Raster (in-memory),
+         - NumPy backend through Xarray DataArray (in-memory),
+         - Dask backend through Xarray accessor (lazy),
+         - Multiprocessing backend through Raster (lazy input; eager output by design).
+
+        Notes:
+         - "topk" strategy is intended to be chunk-invariant -> outputs should match across backends.
+         - "sequential" strategy is chunk/order-dependent -> we do NOT require cross-backend equality,
+           but we still validate output properties and determinism for a fixed random_state.
         """
 
+        pytest.importorskip("dask")
         import dask.array as da
 
         warnings.filterwarnings("ignore", category=UserWarning, message="Subsample value*")
 
-        # 1/ We run the delayed function after re-chunking
-        darr = darr.rechunk(chunksizes_in_mem)
-        sub = _dask_subsample(darr, subsample=subsample_size, random_state=42)
+        # Get filepath of on-disk (for laziness) test file
+        path_raster = lazy_test_files_tiny[path_index]
 
-        # 2/ Output checks
+        # 1/ Prepare inputs for each backend
 
-        # # The subsample should have exactly the prescribed length, with only valid values
-        assert isinstance(sub, da.Array)
-        sub.compute()
-        assert len(sub) == min(subsample_size, np.count_nonzero(np.isfinite(darr)))
-        assert all(np.isfinite(sub))
+        # Base raster input (in-memory -> NumPy backend)
+        raster_base = gu.Raster(path_raster)
+        raster_base.load()
+        assert raster_base.is_loaded
 
-        # To verify the sampling works correctly, we can get its subsample indices with the argument return_indices
-        # And compare to the same subsample with vindex (now that we know the coordinates of valid values sampled)
-        indices = _dask_subsample(darr, subsample=subsample_size, random_state=42, return_indices=True)
-        assert isinstance(indices, tuple)
-        assert isinstance(indices[0], da.Array) and isinstance(indices[1], da.Array)
-        sub2 = np.array(darr.vindex[indices[0].compute(), indices[1].compute()])
-        assert np.array_equal(sub, sub2)
+        # Base data array input (in-memory -> NumPy backend through Xarray)
+        ds_base = open_raster(path_raster)
+        ds_base.load()
+        assert ds_base._in_memory
 
-        # Finally, to verify that a boolean array, with valid values at the same locations as the numerical array,
-        # leads to the same results, we compare the samples values and the samples indices.
-        darr_bool = darr_bool.rechunk(chunksizes_in_mem)
-        indices_bool = _dask_subsample(darr_bool, subsample=subsample_size, random_state=42, return_indices=True)
-        assert isinstance(indices, tuple)
-        assert isinstance(indices[0], da.Array) and isinstance(indices[1], da.Array)
-        indices_bool = (indices_bool[0].compute(), indices_bool[1].compute())
-        sub_bool = np.array(darr.vindex[indices_bool])
-        assert np.array_equal(sub, sub_bool)
-        assert np.array_equal(indices, indices_bool)
+        # Multiprocessing input (keep lazy until mp backend reads)
+        raster_mp = gu.Raster(path_raster)
+        assert not raster_mp.is_loaded
+
+        # Dask input (lazy chunked xarray)
+        ds_dask = open_raster(path_raster, chunks={"x": 10, "y": 10})
+        assert not ds_dask._in_memory
+        assert isinstance(ds_dask.data, da.Array)
+        assert ds_dask.data.chunks is not None
+
+        # 2/ Run subsample across backends (fixed seed for determinism)
+        seed = 42
+        mp_config = MultiprocConfig(chunk_size=10)
+
+        # NumPy backend via Raster
+        out_raster = raster_base.subsample(
+            subsample=subsample,
+            return_indices=return_indices,
+            random_state=seed,
+            strategy=strategy,
+        )
+
+        # NumPy backend via Xarray DataArray
+        out_xr = ds_base.rst.subsample(
+            subsample=subsample,
+            return_indices=return_indices,
+            random_state=seed,
+            strategy=strategy,
+        )
+
+        # Dask backend via Xarray accessor: should return lazy dask arrays
+        out_dask = ds_dask.rst.subsample(
+            subsample=subsample,
+            return_indices=return_indices,
+            random_state=seed,
+            strategy=strategy,
+        )
+
+        # Multiprocessing backend via Raster: output is eager by design, input raster stays lazy
+        out_mp = raster_mp.subsample(
+            subsample=subsample,
+            return_indices=return_indices,
+            random_state=seed,
+            strategy=strategy,
+            mp_config=mp_config,
+        )
+
+        # 3/ Laziness checks
+
+        # Dask input stays unloaded and lazy
+        assert not ds_dask._in_memory
+        assert isinstance(ds_dask.data, da.Array)
+
+        # Multiprocessing should not load the raster object itself (still points to disk)
+        assert not raster_mp.is_loaded
+
+        # Dask output type checks (lazy)
+        if return_indices:
+            assert isinstance(out_dask, tuple) and len(out_dask) == 2
+            assert isinstance(out_dask[0], da.Array)
+            assert isinstance(out_dask[1], da.Array)
+        else:
+            assert isinstance(out_dask, da.Array)
+
+        # 4/ Normalize outputs to comparable NumPy representations
+
+        def _as_numpy(
+            out: object,
+        ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+            """Convert backend outputs to NumPy arrays for comparison."""
+            if isinstance(out, tuple):
+                r, c = out
+                if hasattr(r, "compute"):
+                    r = r.compute()
+                if hasattr(c, "compute"):
+                    c = c.compute()
+                return (np.asarray(r), np.asarray(c))
+            else:
+                if hasattr(out, "compute"):
+                    out = out.compute()
+                return np.asarray(out)
+
+        out_raster_np = _as_numpy(out_raster)
+        out_xr_np = _as_numpy(out_xr)
+        out_dask_np = _as_numpy(out_dask)
+        out_mp_np = _as_numpy(out_mp)
+
+        # 5/ Generic output validity checks (all backends)
+
+        # Mirror _subsample() array selection (band=1 default)
+        arr = raster_base.data if raster_base.data.ndim == 2 else raster_base.data[0, :, :]
+        assert arr.ndim == 2
+
+        # Mirror _subsample_numpy() validity definition
+        mask = get_mask_from_array(arr)  # True where invalid
+        n_valid = int(np.count_nonzero(~mask))  # valid pixels
+
+        # Mirror _get_subsample_size_from_user_input()
+        if isinstance(subsample, float):
+            expected = int(subsample * n_valid)
+        else:
+            expected = min(int(subsample), n_valid)
+
+        def _check_output(out_np: NDArrayNum | tuple[NDArrayNum, NDArrayNum]) -> None:
+            """Validate length, finiteness and index/value consistency."""
+            if isinstance(out_np, tuple):
+                rr, cc = out_np
+                assert rr.shape == cc.shape
+                assert rr.ndim == 1 and cc.ndim == 1
+                assert len(rr) == expected
+                # Indices should be within bounds
+                assert np.all((0 <= rr) & (rr < arr.shape[0]))
+                assert np.all((0 <= cc) & (cc < arr.shape[1]))
+                # Indices must point to finite values
+                # Indices must point to valid values per get_mask_from_array
+                assert np.all(~mask[rr, cc])
+            else:
+                assert out_np.ndim == 1
+                assert len(out_np) == expected
+                assert np.all(np.isfinite(out_np))
+
+        _check_output(out_raster_np)
+        _check_output(out_xr_np)
+        _check_output(out_dask_np)
+        _check_output(out_mp_np)
+
+        # 6/ Backend equivalence logic
+
+        if strategy == "topk":
+            # Chunk-invariant strategy: require exact equality across backends.
+            assert np.array_equal(out_raster_np, out_xr_np)
+            assert np.array_equal(out_raster_np, out_dask_np)
+            assert np.array_equal(out_raster_np, out_mp_np)
+        else:
+            # Sequential: do not require equality across backends (order/chunk dependent),
+            # but require determinism per backend for the same seed.
+            out_raster_np_2 = _as_numpy(
+                raster_base.subsample(
+                    subsample=subsample,
+                    return_indices=return_indices,
+                    random_state=seed,
+                    strategy=strategy,
+                )
+            )
+            out_dask_np_2 = _as_numpy(
+                ds_dask.rst.subsample(
+                    subsample=subsample,
+                    return_indices=return_indices,
+                    random_state=seed,
+                    strategy=strategy,
+                )
+            )
+            out_mp_np_2 = _as_numpy(
+                raster_mp.subsample(
+                    subsample=subsample,
+                    return_indices=return_indices,
+                    random_state=seed,
+                    strategy=strategy,
+                    mp_config=mp_config,
+                )
+            )
+
+            assert np.array_equal(out_raster_np, out_raster_np_2)
+            assert np.array_equal(out_dask_np, out_dask_np_2)
+            assert np.array_equal(out_mp_np, out_mp_np_2)
+
+        # 7/ Indices versus values consistency check for return_indices=True
+        if return_indices:
+            rr, cc = out_raster_np  # use any backend; for topk they match; for sequential we validate per-backend above
+            vals_from_indices = arr[rr, cc]
+            # Compare to "values mode" from same backend and same seed/strategy
+            vals_raster = raster_base.subsample(
+                subsample=subsample,
+                return_indices=False,
+                random_state=seed,
+                strategy=strategy,
+            )
+            vals_raster_np = _as_numpy(vals_raster)
+            assert np.array_equal(np.asarray(vals_from_indices), np.asarray(vals_raster_np))

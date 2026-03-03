@@ -626,7 +626,7 @@ def _wrapper_multiproc_nb_valids_per_block(rst: Raster, tile_idx: NDArrayNum) ->
 
     if np.issubdtype(arr.dtype, np.bool_):
         return int(np.count_nonzero(arr))
-    return int(np.count_nonzero(np.isfinite(arr)))
+    return int(np.count_nonzero(~get_mask_from_array(arr)))
 
 
 def _wrapper_multiproc_subsample_values_block(
@@ -975,9 +975,10 @@ def _subsample(
         # Temporary switch bands
         orig_bands = source_raster.bands
         source_raster._bands = (band,)
-        return _multiproc_subsample(source_raster, config=mp_config, **subsample_kwargs)
-        # Rewrite original bands
-        source_raster._bands = orig_bands
+        try:
+            return _multiproc_subsample(source_raster, config=mp_config, **subsample_kwargs)
+        finally:
+            source_raster._bands = orig_bands
     else:
         if source_raster.data.ndim != 2:
             arr = source_raster.data[band - 1, :, :]

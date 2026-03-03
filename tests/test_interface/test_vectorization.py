@@ -410,7 +410,7 @@ class TestPolygonize:
     @pytest.mark.parametrize("connectivity", [4, 8])
     @pytest.mark.parametrize("strategy", chunked_strategies)
     @pytest.mark.parametrize("target_mode", ["scalar", "range", "all"])
-    def test_polygonize_chunked_backends_equal(
+    def test_polygonize__chunked_backends_equal(
         self,
         path_index: int,
         connectivity: Literal[4, 8],
@@ -420,7 +420,8 @@ class TestPolygonize:
     ) -> None:
         """
         Test that polygonize yields identical output for:
-         - In-memory base function,
+         - In-memory base function through Raster,
+         - In-memory base function through Xarray DataArray,
          - Dask backend through Xarray accessor,
          - Multiprocessing backend through Raster class.
 
@@ -433,9 +434,12 @@ class TestPolygonize:
         # Get filepath of on-disk  (for laziness) test file
         path_raster = lazy_test_files_tiny[path_index]
 
-        # Base input (in-memory)
+        # Base raster input (in-memory)
         raster_base = gu.Raster(path_raster)
         raster_base.load()
+        # Base data array input (in-memory)
+        ds_base = open_raster(path_raster)
+        ds_base.load()
         # Multiprocessing input (lazy if we pass Multiprocessing later)
         raster_mp = gu.Raster(path_raster)
         mp_config = MultiprocConfig(chunk_size=10)
@@ -463,6 +467,8 @@ class TestPolygonize:
             target_values=target_values,
             connectivity=connectivity,
         )
+        # Base data array output
+        xr_base = ds_base.polygonize(target_values=target_values, connectivity=connectivity)
         # Multiprocessing output (Vector, computed by design)
         mp_vect = raster_mp.polygonize(
             target_values=target_values,
@@ -488,3 +494,4 @@ class TestPolygonize:
         # so we use setwise=True
         assert_vectors_equal(base, dask_vect, setwise=True)
         assert_vectors_equal(base, mp_vect, setwise=True)
+        assert_vectors_equal(base, xr_base, setwise=True)
