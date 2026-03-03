@@ -444,10 +444,5 @@ class TestFilterChunked:
 
         # Compute Dask input
         dask_rst = dask_rst.compute()
-
-        print(base_rst.data)
-        print(dask_rst.data)
-        print(base_rst.data - dask_rst.data)
-        print(np.nanmax(np.abs(dask_rst.data - base_rst.data)))
         assert base_rst.raster_allclose(dask_rst, warn_failure_reason=True, strict_masked=False, atol=atol)
         assert base_rst.raster_allclose(mp_rst, warn_failure_reason=True, strict_masked=False, atol=atol)

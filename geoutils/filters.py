@@ -124,22 +124,34 @@ def _filter_base(
     if np.ma.isMaskedArray(array):
         array = array.filled(np.nan)
 
-    filter_map: dict[str, Callable[..., NDArrayNum]] = {
-        "gaussian": gaussian_filter,
-        "median": lambda arr, size=size, **_: generic_filter_scipy(
-            arr, np.nanmedian, size=size, mode="constant", cval=np.nan
-        ),
-        "mean": lambda arr, size=size, **_: generic_filter_scipy(
-            arr, np.nanmean, size=size, mode="constant", cval=np.nan
-        ),
-        "max": lambda arr, size=size, **_: generic_filter_scipy(
-            arr, np.nanmax, size=size, mode="constant", cval=np.nan
-        ),
-        "min": lambda arr, size=size, **_: generic_filter_scipy(
-            arr, np.nanmin, size=size, mode="constant", cval=np.nan
-        ),
-        "distance": distance_filter,
-    }
+    # With new SciPy, just use vectorized version
+    if Version(scipy.__version__) > Version("1.16.0"):
+        filter_map: dict[str, Callable[..., NDArrayNum]] = {
+            "gaussian": gaussian_filter,
+            "median": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmedian, size=size, mode="constant", cval=np.nan
+            ),
+            "mean": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmean, size=size, mode="constant", cval=np.nan
+            ),
+            "max": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmax, size=size, mode="constant", cval=np.nan
+            ),
+            "min": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmin, size=size, mode="constant", cval=np.nan
+            ),
+            "distance": distance_filter,
+        }
+    # With old SciPy, maintain speed with tricks from older custom filters
+    else:
+        filter_map: dict[str, Callable[..., NDArrayNum]] = {
+            "gaussian": gaussian_filter,
+            "median": median_filter,
+            "mean": mean_filter,
+            "max": max_filter,
+            "min": min_filter,
+            "distance": distance_filter,
+        }
 
     if isinstance(method, str):
         if method not in filter_map:
