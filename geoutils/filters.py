@@ -125,8 +125,9 @@ def _filter_base(
         array = array.filled(np.nan)
 
     # With new SciPy, just use vectorized version
+    filter_map: dict[str, Callable[..., NDArrayNum]]
     if Version(scipy.__version__) > Version("1.16.0"):
-        filter_map: dict[str, Callable[..., NDArrayNum]] = {
+        filter_map = {
             "gaussian": gaussian_filter,
             "median": lambda arr, size=size, **_: generic_filter_scipy(
                 arr, np.nanmedian, size=size, mode="constant", cval=np.nan
@@ -144,7 +145,7 @@ def _filter_base(
         }
     # With old SciPy, maintain speed with tricks from older custom filters
     else:
-        filter_map: dict[str, Callable[..., NDArrayNum]] = {
+        filter_map = {
             "gaussian": gaussian_filter,
             "median": median_filter,
             "mean": mean_filter,

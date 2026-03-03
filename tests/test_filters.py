@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from importlib.util import find_spec
+from typing import Any
 
 import numpy as np
 import pytest
