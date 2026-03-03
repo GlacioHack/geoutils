@@ -237,11 +237,12 @@ def _chunks2d_from_chunksizes_shape(
 
     return chunks_y, chunks_x
 
-def cached_cumsum(chunks: tuple[int, ...], initial_zero: bool = True) -> list[int]:
+
+def cached_cumsum(chunks: tuple[int, ...], initial_zero: bool = True) -> tuple[int, ...]:
     """Like dask's cumulative chunk starts. For (3,3,1) -> [0,3,6,7] if initial_zero."""
     out = [0] if initial_zero else []
     s = 0
     for c in chunks:
         s += c
         out.append(s)
-    return out
+    return tuple(out)
