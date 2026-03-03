@@ -468,7 +468,7 @@ class TestPolygonize:
             connectivity=connectivity,
         )
         # Base data array output
-        xr_base = ds_base.polygonize(target_values=target_values, connectivity=connectivity)
+        xr_base = ds_base.rst.polygonize(target_values=target_values, connectivity=connectivity)
         # Multiprocessing output (Vector, computed by design)
         mp_vect = raster_mp.polygonize(
             target_values=target_values,

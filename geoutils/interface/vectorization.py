@@ -664,12 +664,12 @@ class _ChunkedRasterReader:
         blk = self.raster.crop((bounds.left, bounds.bottom, bounds.right, bounds.top))
 
         # Convert masked-array to NaN array (if floatting only), without copy using filled()
+        arr = blk.data.astype(self.prepared.final_dtype, copy=False)
         if np.issubdtype(self.prepared.final_dtype, np.integer):
             fill_value = self.raster.nodata
         else:
             fill_value = np.nan
-        arr = np.asarray(blk.data.filled(fill_value))
-        return arr.astype(self.prepared.final_dtype, copy=False)
+        return arr.filled(fill_value)
 
     def _read_block_bounds(self, bounds: rio.coords.BoundingBox) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
         """Core window read: values + mask + labels."""
@@ -2019,11 +2019,9 @@ def _polygonize(
                 fill_value = source_raster.nodata
             else:
                 fill_value = np.nan
-            if np.ma.is_masked(arr):
-                source_arr = arr.filled(fill_value)
-            else:
-                source_arr = arr
-            values = source_arr.astype(prepared.final_dtype, copy=False)
+            values = arr.astype(prepared.final_dtype, copy=False)
+            if np.ma.isMaskedArray(arr):
+                arr = arr.filled(fill_value)
             mask = np.asarray(_build_selection_mask(values, prepared))
 
             gdf = _polygonize_base(

@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 import scipy
+import xarray as xr
 
 import geoutils as gu
 from geoutils import Raster
@@ -393,7 +394,7 @@ class TestFilterChunked:
         lazy_test_files_tiny: list[str],
     ) -> None:
         """
-        Test that filter yields (nearly) identical output for base (in-memory numpy), or chunked (Dask/Multiprocessing).
+        Test that filter yields (nearly) identical output for base (in-memory), or chunked (Dask/Multiprocessing).
 
         Notes:
           - For gaussian, tiny floating differences can occur across chunk boundaries  due to boundary handling and
@@ -407,9 +408,12 @@ class TestFilterChunked:
         path_raster = lazy_test_files_tiny[path_index]
 
         # 1/ Open test files
-        # Base input (in-memory)
+        # Raster base input (in-memory)
         raster_base = gu.Raster(path_raster)
         raster_base.load()
+        # Xarray base input (in-memory data array)
+        xr_base = gu.open_raster(path_raster)
+        xr_base.load()
         # Multiprocessing input (keep lazy)
         raster_mp = gu.Raster(path_raster)
         mp_config = MultiprocConfig(chunk_size=10)
@@ -420,15 +424,19 @@ class TestFilterChunked:
         assert ds.data.chunks is not None
 
         # 2/ Compute filters and check output is lazy
-        # Base
+        # Raster base
         base_rst = raster_base.filter(method=method, size=size)
         assert isinstance(base_rst, Raster)
+        # Xarray base
+        base_xr = xr_base.rst.filter(method=method, size=size)
+        assert isinstance(base_xr, xr.DataArray)
         # MP
         mp_rst = raster_mp.filter(method=method, size=size, mp_config=mp_config)
         assert isinstance(mp_rst, Raster)
         assert not mp_rst.is_loaded
         # Dask
         dask_rst = ds.rst.filter(method=method, size=size)
+        assert isinstance(dask_rst, xr.DataArray)
         assert isinstance(dask_rst.data, da.Array)
 
         # Inputs also stays lazy where expected
@@ -446,3 +454,4 @@ class TestFilterChunked:
         dask_rst = dask_rst.compute()
         assert base_rst.raster_allclose(dask_rst, warn_failure_reason=True, strict_masked=False, atol=atol)
         assert base_rst.raster_allclose(mp_rst, warn_failure_reason=True, strict_masked=False, atol=atol)
+        assert base_rst.raster_allclose(base_xr, warn_failure_reason=True, strict_masked=False, atol=atol)
