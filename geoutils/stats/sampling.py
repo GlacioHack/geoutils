@@ -118,17 +118,17 @@ def _splitmix64(x: np.typing.NDArray[np.uint64]) -> NDArrayNum:
 
     # First mixing step: XOR-shift to spread high bits into low bits, then multiply by a chosen odd constant
     z = x
-    z = (z ^ (z >> 30)) * np.uint64(0xBF58476D1CE4E5B9)
+    z = (z ^ (z >> 30)) * np.uint64(0xBF58476D1CE4E5B9)  # type: ignore[assignment]
     z &= mask
 
     # Second mixing step: Another XOR-shift followed by multiplication with a different constant
     # The constants were empirically chosen to achieve strong avalanche properties (each input bit affects
     # many output bits)
-    z = (z ^ (z >> 27)) * np.uint64(0x94D049BB133111EB)
+    z = (z ^ (z >> 27)) * np.uint64(0x94D049BB133111EB)  # type: ignore[assignment]
     z &= mask
 
     # Final XOR-shift to finish diffusion
-    z = z ^ (z >> 31)
+    z = z ^ (z >> 31)  # type: ignore[assignment]
 
     return z.astype(np.uint64, copy=False)
 
