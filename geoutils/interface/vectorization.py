@@ -449,6 +449,7 @@ class _ChunkedDaskReader:
     def read_block(
         self,
         b: dict[str, int],
+        tiling_transform: rio.Affine,
     ) -> tuple[NDArrayNum, NDArrayBool, NDArrayNum]:
         ys, ye, xs, xe = b["ys"], b["ye"], b["xs"], b["xe"]
         return (
@@ -457,7 +458,8 @@ class _ChunkedDaskReader:
             self.labels[ys:ye, xs:xe],
         )
 
-    def read_vseam_strips(self, bL: dict[str, int], bR: dict[str, int]) -> tuple[NDArrayNum, ...]:
+    def read_vseam_strips(self, bL: dict[str, int], bR: dict[str, int], tiling_transform: rio.Affine) -> tuple[
+        NDArrayNum, ...]:
         """Read vertical seam for labels, values and mask."""
 
         # Left and right indexes
@@ -476,7 +478,8 @@ class _ChunkedDaskReader:
             self.mask[ys:ye, xR0:xR1],
         )
 
-    def read_hseam_strips(self, bT: dict[str, int], bB: dict[str, int]) -> tuple[NDArrayNum, ...]:
+    def read_hseam_strips(self, bT: dict[str, int], bB: dict[str, int], tiling_transform: rio.Affine) -> tuple[
+        NDArrayNum, ...]:
         """Read horizontal seam for labels, values and mask."""
 
         # Top and bottom indexes
@@ -495,7 +498,8 @@ class _ChunkedDaskReader:
             self.mask[yB0:yB1, xs:xe],
         )
 
-    def read_diag_corners(self, bTL: dict[str, int], bBR: dict[str, int]) -> tuple[NDArrayNum, ...]:
+    def read_diag_corners(self, bTL: dict[str, int], bBR: dict[str, int], tiling_transform: rio.Affine) -> tuple[NDArrayNum,
+    ...]:
         """Read diagonal corners (8-connectivity only) for labels, values and mask."""
 
         # Bottom-right of TL and top-left of BR
@@ -512,7 +516,8 @@ class _ChunkedDaskReader:
             self.mask[yBR : yBR + 1, xBR : xBR + 1],
         )
 
-    def read_antidiag_corners(self, bTR: dict[str, int], bBL: dict[str, int]) -> tuple[NDArrayNum, ...]:
+    def read_antidiag_corners(self, bTR: dict[str, int], bBL: dict[str, int], tiling_transform: rio.Affine) -> tuple[
+        NDArrayNum, ...]:
         """Read anti-diagonal corners (8-connectivity only) for labels, values and mask."""
 
         # Bottom-left of TR vs top-right of BL
@@ -1031,8 +1036,6 @@ def _build_seam_mapping(
             labL, labR, valL, valR, mL, mR = reader.read_vseam_strips(
                 {**bL, "ys": ys, "ye": ye},
                 {**bR, "ys": ys, "ye": ye},
-                halo=0,
-                shape=shape,
                 tiling_transform=t,
             )
             seam_tasks.append(runner.submit(_seam_task, labL, labR, valL, valR, mL, mR, bidL, bidR, "v"))
@@ -1057,8 +1060,6 @@ def _build_seam_mapping(
             labT, labB_, valT, valB, mT, mB = reader.read_hseam_strips(
                 {**bT, "xs": xs, "xe": xe},
                 {**bB, "xs": xs, "xe": xe},
-                halo=0,
-                shape=shape,
                 tiling_transform=t,
             )
             seam_tasks.append(runner.submit(_seam_task, labT, labB_, valT, valB, mT, mB, bidT, bidB, "h"))
