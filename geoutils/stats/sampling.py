@@ -108,6 +108,9 @@ def _splitmix64(x: np.typing.NDArray[np.uint64]) -> NDArrayNum:
     - Sebastiano Vigna, SplitMix64 reference implementation, https://prng.di.unimi.it/splitmix64.c
     """
 
+    # Force input to uint64 to avoid accidental casting
+    x = np.asarray(x, dtype=np.uint64)
+
     # Add a large odd constant derived from the golden ratio
     # This ensures that consecutive inputs do not map to related outputs
     x = (x + np.uint64(0x9E3779B97F4A7C15)) & np.uint64(0xFFFFFFFFFFFFFFFF)
@@ -124,7 +127,9 @@ def _splitmix64(x: np.typing.NDArray[np.uint64]) -> NDArrayNum:
     z &= np.uint64(0xFFFFFFFFFFFFFFFF)
 
     # Final XOR-shift to finish diffusion
-    return z ^ (z >> np.uint64(31))
+    z = z ^ (z >> np.uint64(31))
+
+    return z.astype(np.uint64, copy=False)
 
 
 @overload
