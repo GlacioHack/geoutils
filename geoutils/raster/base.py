@@ -1,3 +1,21 @@
+# Copyright (c) 2026 GeoUtils developers
+#
+# This file is part of the GeoUtils project:
+# https://github.com/glaciohack/geoutils
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Module for the RasterBase class, parent of both the Raster class and the 'rst' Xarray accessor."""
 
 from __future__ import annotations
@@ -29,7 +47,6 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
-from geoutils._dispatch import _check_match_points
 from geoutils._misc import deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -41,22 +58,21 @@ from geoutils._typing import (
 )
 from geoutils.filters import _filter
 from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.interpolate import _interp_points, _reduce_points
+from geoutils.interface.interpolation import _interp_points, _reduce_points
 from geoutils.interface.raster_point import (
     _raster_to_pointcloud,
     _regular_pointcloud_to_raster,
 )
-from geoutils.interface.raster_vector import _polygonize
+from geoutils.interface.vectorization import _polygonize
+from geoutils.multiproc import MultiprocConfig
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
     _get_utm_ups_crs,
     align_bounds,
     merge_bounds,
-    reproject_from_latlon,
 )
-from geoutils.raster.distributed_computing.multiproc import MultiprocConfig
-from geoutils.raster.georeferencing import (
+from geoutils.raster.referencing import (
     _bounds,
     _coords,
     _default_nodata,
@@ -65,8 +81,8 @@ from geoutils.raster.georeferencing import (
     _res,
     _xy2ij,
 )
-from geoutils.raster.geotransformations import _crop, _reproject, _translate
-from geoutils.stats.sampling import subsample_array
+from geoutils.raster.transformation import _crop, _reproject, _translate
+from geoutils.stats.sampling import _subsample
 from geoutils.stats.stats import _statistics
 
 # Input/output is a RasterType (= Raster or RasterAccessor subclass)
@@ -100,7 +116,7 @@ class RasterBase(ABC):
         self._area_or_point: Literal["Area", "Point"] | None = None
 
         # Other non-derivatives attributes
-        self._bands: int | list[int] | None = None
+        self._bands: int | list[int] | tuple[int, ...] | None = None
         self._driver: str | None = None
         self._name: str | None = None
         self._tags: dict[str, Any] = {}
@@ -1103,8 +1119,6 @@ class RasterBase(ABC):
         :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
             coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
-        :param mode: Whether to match within pixels or exact extent. ``'match_pixel'``  ``'match_extent'``
-            will match the extent exactly, adjusting the pixel resolution to fit the extent.
         :param inplace: (DEPRECATED. Use rast = rast.crop() instead) Whether to crop in-place or not.
         :returns: A new cropped raster.
         """
@@ -1186,13 +1200,13 @@ class RasterBase(ABC):
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
-        resampling: Resampling | str = Resampling.bilinear,
+        resampling: Resampling | str = "bilinear",
         force_source_nodata: int | float | None = None,
         silent: bool = False,
         inplace: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
-        multiproc_config: MultiprocConfig | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -1226,7 +1240,7 @@ class RasterBase(ABC):
         :param silent: Whether to print warning statements.
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
-        :param multiproc_config: Configuration object containing chunk size, output file path, and an optional cluster.
+        :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
         :returns: Reprojected raster.
 
@@ -1246,7 +1260,7 @@ class RasterBase(ABC):
             silent=silent,
             n_threads=n_threads,
             memory_limit=memory_limit,
-            multiproc_config=multiproc_config,
+            mp_config=mp_config,
         )
 
         # If return copy is True (target georeferenced grid was the same as input)
@@ -1266,7 +1280,7 @@ class RasterBase(ABC):
                 category=DeprecationWarning,
             )
 
-            if self._is_xr or multiproc_config:
+            if self._is_xr or mp_config:
                 raise NotImplementedError(
                     "In-place cropping raster is deprecated and not supported through the 'rst' "
                     "accessor or Multiproc config."
@@ -1283,8 +1297,8 @@ class RasterBase(ABC):
                 return None
 
         # If multiprocessing -> results on disk -> load metadata
-        if multiproc_config:
-            result_raster = self.__class__(multiproc_config.outfile)
+        if mp_config:
+            result_raster = self.__class__(mp_config.outfile)
             return result_raster  # type: ignore
 
         # Not in-place
@@ -1479,7 +1493,7 @@ class RasterBase(ABC):
         *,
         as_array: Literal[False] = False,
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> PointCloud: ...
 
@@ -1494,7 +1508,7 @@ class RasterBase(ABC):
         *,
         as_array: Literal[True],
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> NDArrayNum: ...
 
@@ -1509,7 +1523,7 @@ class RasterBase(ABC):
         *,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
@@ -1523,7 +1537,7 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
-        force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud:
         """
@@ -1556,45 +1570,22 @@ class RasterBase(ABC):
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
-        :param force_scipy_function: Force to use either map_coordinates or interpn. Mainly for testing purposes.
 
         :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
 
-        # Extract array supporting NaNs
-        array = self.get_nanarray()
-        if self.count != 1:
-            array = array[band - 1, :, :]
-
-        # Check and normalize input points
-        pts, input_scalar = _check_match_points(self, points)
-
-        # Convert from latlon if necessary
-        if input_latlon:
-            pts = reproject_from_latlon(pts, out_crs=self.crs)
-
-        z = _interp_points(
-            array,
-            transform=self.transform,
-            area_or_point=self.area_or_point,
-            points=pts,
+        return _interp_points(
+            self,
+            points=points,
             method=method,
+            band=band,
+            input_latlon=input_latlon,
+            as_array=as_array,
             shift_area_or_point=shift_area_or_point,
             dist_nodata_spread=dist_nodata_spread,
-            force_scipy_function=force_scipy_function,
+            mp_config=mp_config,
             **kwargs,
         )
-
-        # Return array or pointcloud
-        if as_array:
-            return z
-        else:
-            # If point cloud input
-            from geoutils.pointcloud import (
-                PointCloud,  # Runtime import to avoid circular issues
-            )
-
-            return PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=self.crs)
 
     def reduce_points(
         self,
@@ -1646,54 +1637,30 @@ class RasterBase(ABC):
             boundless=boundless,
         )
 
-    @overload
     def filter(
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
-        *,
-        inplace: Literal[False] = False,
         size: int = 3,
+        sigma: int = 1,
+        engine: Literal["scipy", "numba"] = "scipy",
+        outlier_threshold: float = 2.0,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: dict[str, Any],
-    ) -> RasterType: ...
-
-    @overload
-    def filter(
-        self: RasterType,
-        method: str | Callable[..., NDArrayNum],
-        *,
-        inplace: Literal[True],
-        size: int = 3,
-        **kwargs: dict[str, Any],
-    ) -> None: ...
-
-    def filter(
-        self: RasterType,
-        method: str | Callable[..., NDArrayNum],
-        inplace: bool = False,
-        size: int = 3,
-        **kwargs: dict[str, Any],
-    ) -> RasterType | None:
+    ) -> RasterType:
         """
         Apply a filter to the array.
 
         :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
                        for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
-        :param inplace: Whether to modify the raster in-place.
         :param size: Window size for filter
-
+        :param mp_config: Multiprocessing configuration.
         :param sigma: Optional standard deviation for Gaussian filtering.
-        Only used when `method="gaussian"`.
-
+            Only used when `method="gaussian"`.
         :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
-        Only used when `method="median"`.
-
+            Only used when `method="median"`.
         :param outlier_threshold:  The minimum difference abs(array - mean) for a pixel to be considered an outlier.
-        Only used when `method="distance"`.
-
-        :param radius: The radius in which the average value is calculated. Only used when `method="distance"`.
-
-        :param **kwargs : Additional keyword arguments passed to the underlying filter
-        implementation.
+            Only used when `method="distance"`.
+        :param kwargs : Additional keyword arguments passed to the underlying filter implementation.
 
         :return: A new Raster instance with the filtered data (or None if inplace).
 
@@ -1701,17 +1668,19 @@ class RasterBase(ABC):
         :raises TypeError: If `method` is neither a string nor a callable.
         """
 
-        # Convert to NaN array for filters
-        nan_array = self.get_nanarray()
+        if "inplace" in kwargs:
+            raise DeprecationWarning("Argument 'inplace' is deprecated, use rst = rst.filter() instead.")
 
-        # Apply filter
-        filtered_array = _filter(nan_array, method, size, **kwargs)
-
-        if inplace:
-            self.data = filtered_array
-            return None
-        else:
-            return self.copy(new_array=filtered_array)
+        return _filter(
+            source_raster=self,
+            method=method,
+            size=size,
+            mp_config=mp_config,
+            sigma=sigma,
+            engine=engine,
+            outlier_threshold=outlier_threshold,
+            **kwargs,
+        )
 
     @deprecate(
         Version("0.3.0"),
@@ -1880,10 +1849,14 @@ class RasterBase(ABC):
     def polygonize(
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
+        connectivity: Literal[4, 8] = 4,
+        band: int = 1,
         data_column_name: str = "id",
+        strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
+        mp_config: MultiprocConfig | None = None,
     ) -> Vector:
         """
-        Polygonize the raster into a vector.
+        Polygonize the raster into a vector of polygon geometries delineating target values.
 
         :param target_values: Value or range of values of the raster from which to
           create geometries (defaults to "all", for which all unique pixel values of the raster are used).
@@ -1893,7 +1866,15 @@ class RasterBase(ABC):
         :returns: Vector containing the polygonized geometries associated to target values.
         """
 
-        return _polygonize(source_raster=self, target_values=target_values, data_column_name=data_column_name)
+        return _polygonize(
+            source_raster=self,
+            target_values=target_values,
+            connectivity=connectivity,
+            band=band,
+            data_column_name=data_column_name,
+            strategy=strategy,
+            mp_config=mp_config,
+        )
 
     def proximity(
         self,
@@ -1949,7 +1930,10 @@ class RasterBase(ABC):
         subsample: int | float,
         return_indices: Literal[False] = False,
         *,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum: ...
 
     @overload
@@ -1958,7 +1942,10 @@ class RasterBase(ABC):
         subsample: int | float,
         return_indices: Literal[True],
         *,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
@@ -1966,7 +1953,10 @@ class RasterBase(ABC):
         self,
         subsample: float | int,
         return_indices: bool = False,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     @profiler.profile("geoutils.raster.raster.subsample", memprof=True)
@@ -1974,19 +1964,30 @@ class RasterBase(ABC):
         self,
         subsample: float | int,
         return_indices: bool = False,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "sequential",
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
         Randomly sample the raster. Only valid values are considered.
 
         :param subsample: Subsample size. If <= 1, a fraction of the total pixels to extract.
             If > 1, the number of pixels.
+        :param band: Band to subsample. Use return_indices=True and indexing to subsample the same points over
+            several bands.
         :param return_indices: Whether to return the extracted indices only.
         :param random_state: Random state or seed number.
 
         :return: Array of sampled valid values, or array of sampled indices.
         """
 
-        return subsample_array(
-            array=self.data, subsample=subsample, return_indices=return_indices, random_state=random_state
+        return _subsample(
+            self,
+            subsample=subsample,
+            band=band,
+            return_indices=return_indices,
+            random_state=random_state,
+            strategy=strategy,
+            mp_config=mp_config,
         )

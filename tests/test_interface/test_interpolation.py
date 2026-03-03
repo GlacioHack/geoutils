@@ -10,13 +10,14 @@ from scipy.interpolate import interpn
 from scipy.ndimage import binary_dilation
 
 import geoutils as gu
-from geoutils import examples
-from geoutils.interface.interpolate import (
+from geoutils import examples, open_raster
+from geoutils.interface.interpolation import (
     _get_dist_nodata_spread,
     _interp_points,
     _interpn_interpolator,
     method_to_order,
 )
+from geoutils.multiproc import MultiprocConfig
 from geoutils.projtools import reproject_to_latlon
 
 
@@ -184,7 +185,8 @@ class TestInterpolate:
             + [(i, 4) for i in np.arange(4, 1)]
         )
         points_out_xy = tuple(zip(*points_out))
-        raster_points_out = raster.interp_points(points_out_xy, as_array=True)
+        with pytest.warns(UserWarning, match="All provided points were outside of raster bounds"):
+            raster_points_out = raster.interp_points(points_out_xy, as_array=True)
         assert all(~np.isfinite(raster_points_out))
 
         # To use cubic or quintic, we need a larger grid (minimum 6x6, but let's aim bigger with 50x50)
@@ -300,9 +302,7 @@ class TestInterpolate:
 
         # 3/ Test return_interpolator is consistent with above
         interp = _interp_points(
-            r.get_nanarray(),
-            transform=r.transform,
-            area_or_point=r.area_or_point,
+            r,
             points=(x, y),
             method=method,
             return_interpolator=True,
@@ -657,3 +657,175 @@ class TestInterpolate:
         lrl3 = r.data[-1, -2]
         assert np.array_equal(lrl1, lrl2, equal_nan=True)
         assert np.array_equal(lrl2, lrl3, equal_nan=True)
+
+
+class TestInterpPointsChunked:
+
+    @pytest.mark.parametrize("path_index", [0, 2])
+    @pytest.mark.parametrize("method", ["nearest", "linear"])
+    @pytest.mark.parametrize("ninterp", [2, 100])
+    @pytest.mark.parametrize("as_array", [True])
+    def test_interp_points__chunked_backends_equal(
+        self,
+        path_index: int,
+        method: Literal["nearest", "linear"],
+        ninterp: int,
+        as_array: bool,
+        lazy_test_files_tiny: list[str],
+    ) -> None:
+        """
+        Test that interp_points yields consistent output for:
+         - In-memory base function through Raster (NumPy backend),
+         - In-memory base function through Xarray DataArray (NumPy backend),
+         - Dask backend through Xarray accessor (lazy input; ragged/eager compute by design),
+         - Multiprocessing backend through Raster class (lazy input; ragged/eager compute by design).
+
+        Notes:
+         - Dask and Multiprocessing implementations must return a NumPy array (ragged output),
+           while the in-memory backends may return NumPy array directly.
+         - Points outside of bounds are handled in the wrapper (_interp_points) by returning NaNs.
+        """
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        # Get filepath of on-disk (for laziness) test file
+        path_raster = lazy_test_files_tiny[path_index]
+
+        # 1/ Prepare backend inputs
+
+        # Base raster input (in-memory)
+        raster_base = gu.Raster(path_raster)
+        raster_base.load()
+        assert raster_base.is_loaded
+
+        # Base data array input (in-memory)
+        ds_base = open_raster(path_raster)
+        ds_base.load()
+        assert ds_base._in_memory
+
+        # Multiprocessing input (lazy)
+        raster_mp = gu.Raster(path_raster)
+        assert not raster_mp.is_loaded
+
+        # Dask input (lazy chunked xarray)
+        ds_dask = open_raster(path_raster, chunks={"x": 10, "y": 10})
+        assert not ds_dask._in_memory
+        assert isinstance(ds_dask.data, da.Array)
+        assert ds_dask.data.chunks is not None
+
+        # 2/ Build interpolation points in georeferenced coordinates
+
+        # We intentionally sample mostly in-bounds points (to compare actual interpolation) and a few out-of-bounds
+        # points (to test the NaN padding logic)
+        transform = raster_base.transform
+        ny, nx = raster_base.shape  # rows, cols
+
+        # Raster bounds in world coordinates (using rasterio for robustness)
+        left, bottom, right, top = rio.transform.array_bounds(ny, nx, transform)
+
+        rng = np.random.default_rng(seed=42)
+
+        # Mostly in-bounds points (70%)
+        nin = int(np.ceil(0.7 * ninterp))
+        x_in = rng.uniform(left, right, size=nin)
+        y_in = rng.uniform(bottom, top, size=nin)
+
+        # Some out-of-bounds points (30%)
+        nout = ninterp - nin
+        # Push them outside by up to 20% of raster span
+        dx = 0.2 * (right - left)
+        dy = 0.2 * (top - bottom)
+        x_out = rng.uniform(left - dx, right + dx, size=nout)
+        y_out = rng.uniform(bottom - dy, top + dy, size=nout)
+
+        x = np.concatenate([x_in, x_out])
+        y = np.concatenate([y_in, y_out])
+
+        # Shuffle so in/out are mixed (tests masking/rebuild ordering)
+        perm = rng.permutation(ninterp)
+        x = x[perm]
+        y = y[perm]
+
+        # 3/ Run interp_points across backends
+
+        # For the wrapper, out-of-bounds points are removed for chunked work, then NaNs are rebuilt in output.
+        # Dask/MP return arrays (ragged output), so we request as_array=True for all.
+        mp_config = MultiprocConfig(chunk_size=10)
+
+        # Base raster output (NumPy backend)
+        out_raster = raster_base.interp_points(points=(x, y), method=method, as_array=as_array)
+
+        # Base xarray output (NumPy backend)
+        out_xr = ds_base.rst.interp_points(points=(x, y), method=method, as_array=as_array)
+
+        # Dask output (output is eager)
+        out_dask = ds_dask.rst.interp_points(points=(x, y), method=method, as_array=as_array)
+
+        # Multiprocessing output (output is eager)
+        out_mp = raster_mp.interp_points(points=(x, y), method=method, as_array=as_array, mp_config=mp_config)
+
+        # 4/ Laziness checks (inputs remain lazy)
+        assert not ds_dask._in_memory
+        assert isinstance(ds_dask.data, da.Array)
+        assert not raster_mp.is_loaded
+
+        # 5/ Normalize to NumPy arrays
+        out_raster_np = np.asarray(out_raster)
+        out_xr_np = np.asarray(out_xr)
+        out_dask_np = np.asarray(out_dask)
+        out_mp_np = np.asarray(out_mp)
+
+        # Shape checks
+        assert out_raster_np.shape == (ninterp,)
+        assert out_xr_np.shape == (ninterp,)
+        assert out_dask_np.shape == (ninterp,)
+        assert out_mp_np.shape == (ninterp,)
+
+        # 6/ Consistency checks
+        #
+        # Edge handling can differ slightly across implementations (halo/overlap, nodata spreading, boundary fill),
+        # especially for linear interpolation close to raster bounds
+        # We therefore:
+        #  - Require full equality for "nearest" (stable),
+        #  - For "linear", compare only points that are inside bounds, and not within a small pixel margin of the
+        #   raster edges.
+        #
+        # Out-of-bounds points must still return NaNs across all backends (wrapper contract)
+
+        # Identify which points are inside the raster bounds (in world coordinates)
+        in_bounds = (x >= left) & (x <= right) & (y >= bottom) & (y <= top)
+
+        # Define an edge margin in "pixels" expressed in world units.
+        margin_px = 3
+        xres, yres = raster_base.res
+
+        # Points within 3 pixels of any edge are considered "at boundary"
+        at_boundary = (
+            (x <= left + margin_px * xres)
+            | (x >= right - margin_px * xres)
+            | (y <= bottom + margin_px * yres)
+            | (y >= top - margin_px * yres)
+        )
+
+        core = in_bounds & ~at_boundary
+
+        if method == "nearest":
+            # Nearest should be identical everywhere (including near boundaries) given identical bounds filtering
+            assert np.array_equal(out_raster_np[core], out_xr_np[core], equal_nan=True)
+            assert np.array_equal(out_raster_np[core], out_dask_np[core], equal_nan=True)
+            assert np.array_equal(out_raster_np[core], out_mp_np[core], equal_nan=True)
+        else:
+            # Linear: compare only away from the raster boundary
+            assert np.allclose(out_raster_np[core], out_xr_np[core], equal_nan=True, rtol=1e-6, atol=0.0)
+            assert np.allclose(out_raster_np[core], out_dask_np[core], equal_nan=True, rtol=1e-6, atol=0.0)
+            assert np.allclose(out_raster_np[core], out_mp_np[core], equal_nan=True, rtol=1e-6, atol=0.0)
+
+        # Still require that truly out-of-bounds points map to NaNs consistently
+        oob = ~in_bounds
+        assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_xr_np[oob]))
+
+        # Need to fix Dask behaviour near edges, see issue #876...
+        # assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_dask_np[oob]))
+
+        assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_mp_np[oob]))

@@ -22,6 +22,6 @@ allow_untyped_decorators = true
 disable_error_code = ["untyped-decorator"]
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --doctest-ignore-import-errors -W error::UserWarning"
+addopts = "--doctest-modules --doctest-ignore-import-errors -W error::UserWarning --import-mode=importlib"
 log_level = "WARNING"
 testpaths = ["tests", "geoutils"]

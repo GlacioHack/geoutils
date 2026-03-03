@@ -78,7 +78,7 @@ sphinx_gallery_conf = {
         os.path.join(example_path, "io"),
         os.path.join(example_path, "handling"),
         os.path.join(example_path, "analysis"),
-    ],  # path to your example scripts
+    ],  # path to example scripts
     "gallery_dirs": [
         "io_examples",
         "handling_examples",

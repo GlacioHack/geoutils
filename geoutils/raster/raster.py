@@ -1,4 +1,4 @@
-# Copyright (c) 2025 GeoUtils developers
+# Copyright (c) 2026 GeoUtils developers
 # Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
 #
 # This file is part of the GeoUtils project:
@@ -49,7 +49,7 @@ from geoutils._typing import (
     Number,
 )
 from geoutils.raster.base import RasterBase, RasterType
-from geoutils.raster.georeferencing import (
+from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
     _default_nodata,

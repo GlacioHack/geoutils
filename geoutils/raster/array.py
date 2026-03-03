@@ -1,4 +1,4 @@
-# Copyright (c) 2025 GeoUtils developers
+# Copyright (c) 2026 GeoUtils developers
 #
 # This file is part of the GeoUtils project:
 # https://github.com/glaciohack/geoutils
@@ -40,7 +40,7 @@ def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayB
 
     :returns invalid_mask: boolean array, True where array is masked or Nan.
     """
-    mask = (array.mask | ~np.isfinite(array.data)) if isinstance(array, np.ma.masked_array) else ~np.isfinite(array)
+    mask = (np.ma.getmaskarray(array) | ~np.isfinite(array.data)) if np.ma.isMaskedArray(array) else ~np.isfinite(array)
     return mask.squeeze()
 
 

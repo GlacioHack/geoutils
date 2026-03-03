@@ -12,7 +12,7 @@ import geoutils as gu
 from geoutils.exceptions import InvalidBoundsError
 
 
-class TestGeotransformations:
+class TestTransformations:
 
     landsat_b4_path = gu.examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")

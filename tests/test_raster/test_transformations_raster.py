@@ -4,22 +4,30 @@ from __future__ import annotations
 
 import re
 import warnings
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
+from packaging.version import Version
+from pyproj import CRS
 
 import geoutils as gu
-from geoutils import examples
+from geoutils import examples, open_raster
 from geoutils.exceptions import InvalidGridError
-from geoutils.raster._geotransformations import _resampling_method_from_str
+from geoutils.multiproc import MultiprocConfig
+from geoutils.projtools import _get_bounds_projected
 from geoutils.raster.raster import _default_nodata
+from geoutils.raster.transformation import (
+    _resampling_method_from_str,
+)
+from geoutils.stats.sampling import _subsample_numpy
 
 DO_PLOT = False
 
 
-class TestRasterGeotransformations:
+class TestRasterTransformations:
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
@@ -301,13 +309,13 @@ class TestRasterGeotransformations:
         r_nodata.set_nodata(None)
 
         # Make sure at least one pixel is masked for test 1
-        rand_indices = gu.stats.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = np.ma.masked
         assert np.count_nonzero(r_nodata.data.mask) > 0
 
         # Make sure at least one pixel is set at default nodata for test
         default_nodata = _default_nodata(r_nodata.dtype)
-        rand_indices = gu.stats.subsample_array(r_nodata.data, 10, return_indices=True)
+        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
         r_nodata.data[rand_indices] = default_nodata
         assert np.count_nonzero(r_nodata.data == default_nodata) > 0
 
@@ -554,7 +562,7 @@ class TestRasterGeotransformations:
         # Create a raster with (additional) random gaps
         r_gaps = r.copy()
         nsamples = 200
-        rand_indices = gu.stats.subsample_array(r_gaps.data, nsamples, return_indices=True)
+        rand_indices = _subsample_numpy(r_gaps.data, nsamples, return_indices=True)
         r_gaps.data[rand_indices] = np.ma.masked
         assert np.sum(r_gaps.data.mask) - np.sum(r.data.mask) == nsamples  # sanity check
 
@@ -783,3 +791,162 @@ class TestMaskGeotransformations:
         assert np.all(res.data.mask)
         # Default data value (behind the mask) is True
         assert np.all(res.data.data)
+
+
+class TestReprojectChunked:
+
+    pytest.importorskip("dask")
+    import dask.array as da
+
+    @pytest.mark.parametrize("path_index", [0, 2])
+    @pytest.mark.parametrize("tile_size", [20])
+    @pytest.mark.parametrize("crs_mode", ["epsg4326", "metric_utm"])
+    @pytest.mark.parametrize("bounds_mode", ["shrink", "extend"])
+    @pytest.mark.parametrize("res_mode", ["upsample", "downsample"])
+    @pytest.mark.parametrize("resampling", [rio.enums.Resampling.nearest, rio.enums.Resampling.bilinear])
+    def test_reproject__chunked_backends_equal(
+        self,
+        path_index: int,
+        tile_size: int,
+        crs_mode: Literal["epsg4326", "metric_utm"],
+        bounds_mode: Literal["shrink", "extend"],
+        res_mode: Literal["upsample", "downsample"],
+        resampling: rio.enums.Resampling,
+        lazy_test_files_tiny: list[str],
+    ) -> None:
+        """
+        Test that reproject yields identical output for:
+         - In-memory base function through Raster,
+         - In-memory base function through Xarray DataArray,
+         - Dask backend through Xarray accessor (lazy input),
+         - Multiprocessing backend through Raster class (lazy input).
+
+        We vary grid definition through:
+         - CRS choice (EPSG:4326 vs local metric CRS),
+         - Bounds (shrink vs extend),
+         - Resolution (upsample vs downsample).
+
+        Additionally, both Dask and Multiprocessing inputs remain lazy (unloaded).
+        """
+
+        import dask.array as da
+
+        warnings.filterwarnings("ignore", category=UserWarning, message="Output projection, bounds and grid size*")
+        warnings.filterwarnings("ignore", category=UserWarning, message="Only nodata is different*")
+
+        # 1/ Prepare backend inputs
+        # Get filepath of on-disk (for laziness) test file
+        path_raster = lazy_test_files_tiny[path_index]
+
+        # Base raster input (in-memory)
+        raster_base = gu.Raster(path_raster)
+        raster_base.load()
+        assert raster_base.is_loaded
+
+        # Base data array input (in-memory)
+        ds_base = open_raster(path_raster)
+        ds_base.load()
+        assert ds_base._in_memory
+
+        # Multiprocessing input (lazy)
+        raster_mp = gu.Raster(path_raster)
+        assert not raster_mp.is_loaded
+
+        # Dask input (lazy)
+        ds_dask = open_raster(path_raster, chunks={"x": tile_size, "y": tile_size})
+        assert not ds_dask._in_memory
+        assert isinstance(ds_dask.data, da.Array)
+        assert ds_dask.data.chunks is not None
+
+        # 2/ Parameterize CRS, bounds and resolution
+        if crs_mode == "epsg4326":
+            out_crs: CRS | None = CRS.from_epsg(4326)
+        elif crs_mode == "metric_utm":
+            # Local metric CRS (typically UTM) derived from raster extent
+            out_crs = raster_base.get_metric_crs()
+        else:
+            raise ValueError
+
+        # Bounds modifications: shrink or extend relative to original bounds
+        b = raster_base.bounds
+        xpad = float(raster_base.res[0]) * 10.0
+        ypad = float(raster_base.res[1]) * 10.0
+
+        if bounds_mode == "shrink":
+            dst_bounds = rio.coords.BoundingBox(
+                left=b.left + xpad,
+                bottom=b.bottom + ypad,
+                right=b.right - xpad,
+                top=b.top - ypad,
+            )
+        elif bounds_mode == "extend":
+            dst_bounds = rio.coords.BoundingBox(
+                left=b.left - xpad,
+                bottom=b.bottom - ypad,
+                right=b.right + xpad,
+                top=b.top + ypad,
+            )
+        else:
+            raise ValueError
+        dst_bounds = _get_bounds_projected(dst_bounds, in_crs=raster_base.crs, out_crs=out_crs)
+
+        # Resolution modifications: upsample or downsample relative to original
+
+        # Get native resolution in destination CRS units
+        # (width / ncols, height / nrows)
+        src_bounds_proj = _get_bounds_projected(raster_base.bounds, in_crs=raster_base.crs, out_crs=out_crs)
+        dst_width = src_bounds_proj.right - src_bounds_proj.left
+        dst_height = src_bounds_proj.top - src_bounds_proj.bottom
+        ny, nx = raster_base.shape
+        base_res_x = float(dst_width) / float(nx)
+        base_res_y = float(dst_height) / float(ny)
+        if res_mode == "upsample":
+            res = (base_res_x * 0.5, base_res_y * 0.5)
+        elif res_mode == "downsample":
+            res = (base_res_x * 2.0, base_res_y * 2.0)
+        else:
+            raise ValueError
+
+        # Multiprocessing config
+        mp_config = MultiprocConfig(chunk_size=tile_size)
+
+        # 3/ Run reproject for each backend
+        base = raster_base.reproject(
+            crs=out_crs,
+            bounds=dst_bounds,
+            res=res,
+            resampling=resampling,
+        )
+        xr_base = ds_base.rst.reproject(
+            crs=out_crs,
+            bounds=dst_bounds,
+            res=res,
+            resampling=resampling,
+        )
+        dask_r = ds_dask.rst.reproject(
+            crs=out_crs,
+            bounds=dst_bounds,
+            res=res,
+            resampling=resampling,
+        )
+        mp_r = raster_mp.reproject(
+            crs=out_crs,
+            bounds=dst_bounds,
+            res=res,
+            resampling=resampling,
+            mp_config=mp_config,
+        )
+
+        # 4/ Laziness checks
+        assert not ds_dask._in_memory
+        assert isinstance(ds_dask.data, da.Array)
+        assert not raster_mp.is_loaded
+
+        # 5/ Output checks: all backends must match base
+        # (For reproject, no artefacts only since we added "tolerance" argument in Rasterio,
+        # which officially came out in 1.5; so we skip the test for earlier versions)
+        if Version(rio.__version__) < Version("1.5.0"):
+            return
+        assert base.raster_allclose(xr_base, warn_failure_reason=True, strict_masked=False)
+        assert base.raster_allclose(dask_r, warn_failure_reason=True, strict_masked=False)
+        assert base.raster_allclose(mp_r, warn_failure_reason=True, strict_masked=False)

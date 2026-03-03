@@ -1,4 +1,4 @@
-# Copyright (c) 2025 GeoUtils developers
+# Copyright (c) 2026 GeoUtils developers
 # Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
 #
 # This file is part of the GeoUtils project:
@@ -23,16 +23,22 @@ Filters class to remove outliers and reduce noise in rasters.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import scipy
+import scipy.ndimage
 from packaging.version import Version
-from scipy.ndimage import uniform_filter
 
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.multiproc import MultiprocConfig, map_overlap_multiproc_save
+
+if TYPE_CHECKING:
+    from geoutils.raster.base import RasterBase
+    from geoutils.raster.raster import Raster
 
 if Version(scipy.__version__) > Version("1.16.0"):
     generic_filter_scipy = scipy.ndimage.vectorized_filter
@@ -59,21 +65,94 @@ except ImportError:
         return decorator
 
 
-def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any) -> NDArrayNum:
+try:
+    import dask.array as da
+except Exception:  # keep optional at import time
+    da = None  # type: ignore
+
+
+def _overlap_depth_for_filter(method: str | Callable[..., NDArrayNum], size: int, **kwargs: Any) -> int:
+    """
+    Compute halo depth (pixels) needed for map_overlap so the filter is correct at block edges.
+    """
+
+    # Default for windowed filters: depth = radius
+    # The size is assumed odd
+    def _window_radius(sz: int) -> int:
+        return max(0, int(sz) // 2)
+
+    # For callables
+    if not isinstance(method, str):
+        # Unknown callable => assume window-like behavior using `size`
+        return _window_radius(size)
+
+    # For median, mean, max, min and distance filters
+    if method in {"median", "mean", "max", "min", "distance"}:
+        return _window_radius(size)
+
+    # For gaussian filter
+    if method == "gaussian":
+        # Uses radius = truncate * sigma
+        sigma = kwargs.get("sigma", 1)  # Needs to be the default defined in gaussian filter
+        truncate = float(kwargs.get("truncate", 4.0))
+
+        # Sigma can be scalar or sequence; take max to ensure enough depth for both axes
+        if np.isscalar(sigma):
+            sig = float(sigma)  # type: ignore
+        else:
+            sig = float(np.max(np.asarray(sigma, dtype=float)))
+
+        radius = int(math.ceil(truncate * sig))
+        return max(0, radius)
+
+    # Fallback
+    return _window_radius(size)
+
+
+def _filter_base(
+    array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any
+) -> NDArrayNum:
     """
     Dispatch filter application by method name or custom callable.
 
     :param array: Array to filter.
     :param method: Filter method name or callable.
     """
-    filter_map: dict[str, Callable[..., NDArrayNum]] = {
-        "gaussian": gaussian_filter,
-        "median": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmedian, size=size),
-        "mean": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmean, size=size),
-        "max": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmax, size=size),
-        "min": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmin, size=size),
-        "distance": distance_filter,
-    }
+
+    if np.issubdtype(array.dtype, np.integer):
+        array = array.astype(np.float32)
+    if np.ma.isMaskedArray(array):
+        array = array.filled(np.nan)
+
+    # With new SciPy, just use vectorized version
+    filter_map: dict[str, Callable[..., NDArrayNum]]
+    if Version(scipy.__version__) > Version("1.16.0"):
+        filter_map = {
+            "gaussian": gaussian_filter,
+            "median": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmedian, size=size, mode="constant", cval=np.nan
+            ),
+            "mean": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmean, size=size, mode="constant", cval=np.nan
+            ),
+            "max": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmax, size=size, mode="constant", cval=np.nan
+            ),
+            "min": lambda arr, size=size, **_: generic_filter_scipy(
+                arr, np.nanmin, size=size, mode="constant", cval=np.nan
+            ),
+            "distance": distance_filter,
+        }
+    # With old SciPy, maintain speed with tricks from older custom filters
+    else:
+        filter_map = {
+            "gaussian": gaussian_filter,
+            "median": lambda arr, size=size, **_: median_filter(arr, size=size),
+            "mean": lambda arr, size=size, **_: mean_filter(arr, size=size),
+            "max": lambda arr, size=size, **_: max_filter(arr, size=size),
+            "min": lambda arr, size=size, **_: min_filter(arr, size=size),
+            "distance": distance_filter,
+        }
 
     if isinstance(method, str):
         if method not in filter_map:
@@ -87,7 +166,102 @@ def _filter(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: in
     return func(array, **kwargs)
 
 
-def gaussian_filter(array: NDArrayNum, sigma: float = 5, **kwargs: Any) -> NDArrayNum:
+def _dask_filter(
+    array: da.Array,
+    method: str | Callable[..., NDArrayNum],
+    size: int = 3,
+    **kwargs: Any,
+) -> da.Array:
+    """
+    Apply filter to a Dask array.
+
+    Wrapper around map_overlap.
+    """
+    import_optional("dask")
+
+    # Get depth of overlap
+    depth = _overlap_depth_for_filter(method, size=size, **kwargs)
+
+    # Block function to pass
+    def _block_func(block: NDArrayNum) -> NDArrayNum:
+        # Block already includes the halo from map_overlap
+        return _filter_base(block, method=method, size=size, **kwargs)
+
+    # Call map_overlap
+    return da.map_overlap(
+        _block_func,
+        array,
+        depth=depth,
+        boundary=np.nan,
+        dtype=array.dtype,
+    )
+
+
+def _multiproc_filter(
+    rst: Raster,
+    mp_config: MultiprocConfig,
+    method: str | Callable[..., NDArrayNum],
+    size: int = 3,
+    **kwargs: Any,
+) -> Raster:
+
+    # Get depth of overlap
+    depth = _overlap_depth_for_filter(method, size=size, **kwargs)
+
+    # Block function to pass
+    def filter_block(block: Raster) -> Raster:
+        """Block function for multiprocessing."""
+        nan_block = block.get_nanarray()
+        filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
+        return block.copy(new_array=filtered_block)
+
+    # Call Multiprocessing map_overlap
+    return map_overlap_multiproc_save(filter_block, rst, mp_config, depth=depth)
+
+
+def _filter(
+    source_raster: RasterBase,
+    method: str | Callable[..., NDArrayNum],
+    size: int,
+    sigma: int = 1,
+    engine: Literal["scipy", "numba"] = "scipy",
+    outlier_threshold: float = 2.0,
+    mp_config: MultiprocConfig | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Parent function to filter raster, dispatching to in-memory, Dask or Multiprocessing backend."""
+
+    # Cannot use Multiprocessing backend and Dask backend simultaneously
+    mp_backend = mp_config is not None
+    dask_backend = da is not None and source_raster._chunks is not None
+    if mp_backend and dask_backend:
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
+            "from filter(). To use Multiprocessing, open the file without chunks."
+        )
+
+    # Pass positional argument as kwargs only if relevant
+    if kwargs is None:
+        kwargs = {}
+    if method == "gaussian":
+        kwargs.update({"sigma": sigma})
+    if method == "median":
+        kwargs.update({"engine": engine})
+    if method == "distance":
+        kwargs.update({"outlier_threshold": outlier_threshold})
+
+    # Dispatch based on backend
+    if mp_backend:
+        assert mp_config is not None
+        return _multiproc_filter(source_raster, mp_config=mp_config, method=method, size=size, **kwargs)  # type: ignore
+    elif dask_backend:
+        array = _dask_filter(source_raster.data, method=method, size=size, **kwargs)
+    else:
+        array = _filter_base(source_raster.data, method=method, size=size, **kwargs)
+    return source_raster.copy(new_array=array)
+
+
+def gaussian_filter(array: NDArrayNum, sigma: float = 1, **kwargs: Any) -> NDArrayNum:
     """
     Apply a Gaussian filter to a raster that may contain NaNs.
     N.B: kernel_size is set automatically based on sigma.
@@ -109,8 +283,8 @@ def gaussian_filter(array: NDArrayNum, sigma: float = 5, **kwargs: Any) -> NDArr
     arr_filled = np.where(mask, 0, array)
 
     # Apply gaussian filter to values and mask
-    filtered = scipy.ndimage.gaussian_filter(arr_filled, sigma, **kwargs)
-    normalization = scipy.ndimage.gaussian_filter(mask_f, sigma, **kwargs)
+    filtered = scipy.ndimage.gaussian_filter(arr_filled, sigma, mode="constant", cval=0, **kwargs)
+    normalization = scipy.ndimage.gaussian_filter(mask_f, sigma, mode="constant", cval=0, **kwargs)
 
     # Avoid division by zero
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -201,10 +375,7 @@ def _apply_median_filter_2d(
         return np.where(nans, array, median_vals)
 
     else:
-        if not _HAS_NUMBA:
-            # Call import simply to raise an error consistent with other optional imports
-            import_optional("numba")
-
+        import_optional("numba")
         median_vals = median_filter_numba(array, size)
         return np.where(nans, array, median_vals)
 
@@ -226,9 +397,9 @@ def mean_filter(array: NDArrayNum, size: int = 5) -> NDArrayNum:
     mask = ~np.isnan(array)
     array_filled = np.where(mask, array, 0)
     # Compute sum over the kernel
-    sum_vals = uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
+    sum_vals = scipy.ndimage.uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
     # Count of valid (non-nodata) pixels in the kernel
-    count_vals = uniform_filter(mask.astype(float), size=size, mode="constant", cval=0.0)
+    count_vals = scipy.ndimage.uniform_filter(mask.astype(float), size=size, mode="constant", cval=0.0)
 
     with np.errstate(invalid="ignore", divide="ignore"):
         mean_vals = sum_vals / count_vals
@@ -284,15 +455,15 @@ def max_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
     return np.where(nans, array, array_nans_replaced_f)
 
 
-def distance_filter(array: NDArrayNum, radius: float = 5, outlier_threshold: float = 2) -> NDArrayNum:
+def distance_filter(array: NDArrayNum, sigma: float = 5, outlier_threshold: float = 2) -> NDArrayNum:
     """
     Filter out pixels whose value is distant more than a set threshold from the average value of all neighbor \
     pixels within a given radius.
     Filtered pixels are set to NaN.
     For npw, we use the gaussian filter for calculated the average value
 
-    :param array: the input array to be filtered.
-    :param radius: the radius in which the average value is calculated (for Gaussian filter, this is sigma).
+    :param array: Input array to be filtered.
+    :param sigma: Radius in which the average value is calculated (for Gaussian filter, this is sigma).
     :param outlier_threshold: the minimum difference abs(array - mean) for a pixel to be considered an outlier.
 
     :returns: the filtered array (same shape as input)
@@ -301,8 +472,8 @@ def distance_filter(array: NDArrayNum, radius: float = 5, outlier_threshold: flo
     valid_mask = np.isfinite(array)
 
     # Smooth both the data and the valid mask
-    smoothed = gaussian_filter(np.nan_to_num(array, nan=0.0), sigma=radius)
-    normalization = gaussian_filter(valid_mask.astype(float), sigma=radius)
+    smoothed = gaussian_filter(np.nan_to_num(array, nan=0.0), sigma=sigma)
+    normalization = gaussian_filter(valid_mask.astype(float), sigma=sigma)
 
     # Avoid division by zero
     with np.errstate(invalid="ignore", divide="ignore"):
