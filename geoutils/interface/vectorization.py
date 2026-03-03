@@ -41,6 +41,7 @@ from geoutils.multiproc.chunked import (
     _chunks2d_from_chunksizes_shape,
 )
 from geoutils.multiproc.mparray import MultiprocConfig
+from geoutils.raster.referencing import _cast_nodata
 
 if TYPE_CHECKING:
     from geoutils.raster.base import Raster, RasterBase, RasterType
@@ -664,12 +665,12 @@ class _ChunkedRasterReader:
         blk = self.raster.crop((bounds.left, bounds.bottom, bounds.right, bounds.top))
 
         # Convert masked-array to NaN array (if floatting only), without copy using filled()
-        arr = blk.data.astype(self.prepared.final_dtype, copy=False)
         if np.issubdtype(self.prepared.final_dtype, np.integer):
-            fill_value = self.raster.nodata
+            fill_value = _cast_nodata(nodata=self.raster.nodata, out_dtype=self.prepared.final_dtype)
         else:
             fill_value = np.nan
-        return arr.filled(fill_value)
+        arr = np.asarray(blk.data.filled(fill_value))
+        return arr.astype(self.prepared.final_dtype, copy=False)
 
     def _read_block_bounds(self, bounds: rio.coords.BoundingBox) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
         """Core window read: values + mask + labels."""
@@ -2016,12 +2017,13 @@ def _polygonize(
         else:
             # Eager: materialize values and build selection mask with SAME semantics as chunked backends
             if np.issubdtype(prepared.final_dtype, np.integer):
-                fill_value = source_raster.nodata
+                fill_value = _cast_nodata(out_dtype=prepared.final_dtype, nodata=source_raster.nodata)
             else:
                 fill_value = np.nan
-            values = arr.astype(prepared.final_dtype, copy=False)
+            arr = source_raster.data.astype(prepared.final_dtype, copy=False)
             if np.ma.isMaskedArray(arr):
                 arr = arr.filled(fill_value)
+            values = arr
             mask = np.asarray(_build_selection_mask(values, prepared))
 
             gdf = _polygonize_base(
