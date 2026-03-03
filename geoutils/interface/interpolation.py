@@ -33,6 +33,7 @@ from geoutils._dispatch import _check_match_points
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig, compute_tiling
+from geoutils.multiproc.chunked import cached_cumsum
 from geoutils.projtools import reproject_from_latlon
 from geoutils.raster.referencing import _bounds, _coords, _outside_bounds, _res, _xy2ij
 
@@ -48,7 +49,6 @@ try:
     import dask
     import dask.array as da
     from dask import delayed
-    from dask.utils import cached_cumsum
 except ImportError:
 
     da = None
@@ -609,15 +609,6 @@ def _multiproc_interp_points(
         rem = n % chunk
         sizes = (chunk,) * full + ((rem,) if rem else ())
         return sizes if sizes else (0,)
-
-    def cached_cumsum(chunks: tuple[int, ...], initial_zero: bool = True) -> list[int]:
-        """Like dask's cumulative chunk starts. For (3,3,1) -> [0,3,6,7] if initial_zero."""
-        out = [0] if initial_zero else []
-        s = 0
-        for c in chunks:
-            s += c
-            out.append(s)
-        return out
 
     # Get starting 2D index for each chunk of the full array
     # (mirroring what is done in block_id of dask.array.map_blocks)

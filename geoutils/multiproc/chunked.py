@@ -129,8 +129,7 @@ def _get_block_ids_per_chunk(chunks: tuple[tuple[int, ...], tuple[int, ...]]) ->
 
     # Get robust list of chunk locations (using what is done in block_id of dask.array.map_blocks)
     # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
-    from dask.utils import cached_cumsum
-
+    # We mirror cached_cumsum from dask.utils (for use in both Multiprocessing and Dask)
     starts = [cached_cumsum(c, initial_zero=True) for c in chunks]
     nb_blocks = num_chunks[0] * num_chunks[1]
     ixi, iyi = np.unravel_index(np.arange(nb_blocks), shape=(num_chunks[0], num_chunks[1]))
@@ -237,3 +236,12 @@ def _chunks2d_from_chunksizes_shape(
     )
 
     return chunks_y, chunks_x
+
+def cached_cumsum(chunks: tuple[int, ...], initial_zero: bool = True) -> list[int]:
+    """Like dask's cumulative chunk starts. For (3,3,1) -> [0,3,6,7] if initial_zero."""
+    out = [0] if initial_zero else []
+    s = 0
+    for c in chunks:
+        s += c
+        out.append(s)
+    return out
