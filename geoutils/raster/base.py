@@ -6,7 +6,6 @@ import math
 import pathlib
 import struct
 import warnings
-import operator
 from abc import ABC, abstractmethod
 from functools import partial
 from typing import (
@@ -47,6 +46,7 @@ from geoutils.interface.raster_point import (
     _regular_pointcloud_to_raster,
 )
 from geoutils.interface.vectorization import _polygonize
+from geoutils.multiproc import MultiprocConfig
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -54,7 +54,6 @@ from geoutils.projtools import (
     align_bounds,
     merge_bounds,
 )
-from geoutils.multiproc import MultiprocConfig
 from geoutils.raster.referencing import (
     _bounds,
     _coords,
@@ -99,7 +98,7 @@ class RasterBase(ABC):
         self._area_or_point: Literal["Area", "Point"] | None = None
 
         # Other non-derivatives attributes
-        self._bands: int | list[int] | None = None
+        self._bands: int | list[int] | tuple[int, ...] | None = None
         self._driver: str | None = None
         self._name: str | None = None
         self._tags: dict[str, Any] = {}
@@ -1620,32 +1619,16 @@ class RasterBase(ABC):
             boundless=boundless,
         )
 
-    @overload
-    def filter(
-        self: RasterType,
-        method: str | Callable[..., NDArrayNum],
-        size: int = 3,
-        **kwargs: dict[str, Any],
-    ) -> RasterType: ...
-
-    @overload
-    def filter(
-        self: RasterType,
-        method: str | Callable[..., NDArrayNum],
-        size: int = 3,
-        **kwargs: dict[str, Any],
-    ) -> None: ...
-
     def filter(
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
         size: int = 3,
         sigma: int = 1,
         engine: Literal["scipy", "numba"] = "scipy",
-        outlier_threshold: float = 2.,
+        outlier_threshold: float = 2.0,
         mp_config: MultiprocConfig | None = None,
         **kwargs: dict[str, Any],
-    ) -> RasterType | None:
+    ) -> RasterType:
         """
         Apply a filter to the array.
 
@@ -1670,8 +1653,16 @@ class RasterBase(ABC):
         if "inplace" in kwargs:
             raise DeprecationWarning("Argument 'inplace' is deprecated, use rst = rst.filter() instead.")
 
-        return _filter(source_raster=self, method=method, size=size, mp_config=mp_config, sigma=sigma,
-                       engine=engine, outlier_threshold=outlier_threshold, **kwargs)
+        return _filter(
+            source_raster=self,
+            method=method,
+            size=size,
+            mp_config=mp_config,
+            sigma=sigma,
+            engine=engine,
+            outlier_threshold=outlier_threshold,
+            **kwargs,
+        )
 
     @deprecate(
         Version("0.3.0"),
@@ -1844,7 +1835,7 @@ class RasterBase(ABC):
         band: int = 1,
         data_column_name: str = "id",
         strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
-        mp_config: "MultiprocConfig | None" = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> Vector:
         """
         Polygonize the raster into a vector of polygon geometries delineating target values.
@@ -1857,8 +1848,15 @@ class RasterBase(ABC):
         :returns: Vector containing the polygonized geometries associated to target values.
         """
 
-        return _polygonize(source_raster=self, target_values=target_values, connectivity=connectivity, band=band,
-                           data_column_name=data_column_name, strategy=strategy, mp_config=mp_config)
+        return _polygonize(
+            source_raster=self,
+            target_values=target_values,
+            connectivity=connectivity,
+            band=band,
+            data_column_name=data_column_name,
+            strategy=strategy,
+            mp_config=mp_config,
+        )
 
     def proximity(
         self,
@@ -1912,9 +1910,9 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: int | float,
-        band: int = 1,
         return_indices: Literal[False] = False,
         *,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
@@ -1924,9 +1922,9 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: int | float,
-        band: int = 1,
-        return_indices: Literal[True] = False,
+        return_indices: Literal[True],
         *,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
@@ -1936,8 +1934,8 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: float | int,
-        band: int = 1,
         return_indices: bool = False,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
@@ -1947,8 +1945,8 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: float | int,
-        band: int = 1,
         return_indices: bool = False,
+        band: int = 1,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
@@ -1967,6 +1965,11 @@ class RasterBase(ABC):
         """
 
         return _subsample(
-            self, subsample=subsample, return_indices=return_indices, random_state=random_state,
-            strategy=strategy, mp_config=mp_config
+            self,
+            subsample=subsample,
+            band=band,
+            return_indices=return_indices,
+            random_state=random_state,
+            strategy=strategy,
+            mp_config=mp_config,
         )

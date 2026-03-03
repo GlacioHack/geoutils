@@ -4,28 +4,28 @@ Test module for vectorization (polygonize, etc).
 
 from __future__ import annotations
 
-import re
+import os
 import warnings
 from typing import Any, Literal
 
+import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio as rio
 import shapely
 from shapely.geometry.base import BaseGeometry
-import numpy as np
 from shapely.ops import unary_union
-import xarray as xr
 
 import geoutils as gu
-from geoutils import examples
+from geoutils import examples, open_raster
+from geoutils._typing import NDArrayNum
 from geoutils.multiproc.mparray import MultiprocConfig
-from geoutils import open_raster
 
 # Helpers for different types of vector equality
 ###############################################
 
-def _explode_polys(g):
+
+def _explode_polys(g: gpd.Geoseries) -> gpd.GeoSeries:
     """Helper to explore geometry to its components polygons."""
     if g is None or g.is_empty:
         return []
@@ -41,7 +41,7 @@ def _explode_polys(g):
     return []
 
 
-def _canon(g, grid=None):
+def _canon(g: gpd.GeoSeries, grid: Any = None) -> gpd.GeoSeries:
     """Helper to canonicalize geometries."""
     g = shapely.normalize(g)
     if grid is not None:
@@ -56,7 +56,7 @@ def _canon(g, grid=None):
     return g
 
 
-def _components(geoms, grid=None):
+def _components(geoms: gpd.GeoSeries, grid: Any = None) -> Any:
     """Helper to get the normalized polygons component of a geometry."""
     u = unary_union(list(geoms)) if len(geoms) else shapely.GeometryCollection()
     u = _canon(u, grid=grid)
@@ -66,12 +66,12 @@ def _components(geoms, grid=None):
 
 
 def assert_vectors_equal_setwise_components(
-    g1,
-    g2,
-    value_col="raster_value",
-    grid=None,
-    tol=0.0,
-):
+    g1: gpd.GeoDataFrame,
+    g2: gpd.GeoDataFrame,
+    value_col: str = "raster_value",
+    grid: Any = None,
+    tol: float = 0.0,
+) -> None:
     """
     Compare components per value*, ignoring feature fragmentation.
     Uses geometric equality (equals_exact/equals), not WKB byte identity.
@@ -83,8 +83,8 @@ def assert_vectors_equal_setwise_components(
     # compare the set of unique values (exact)
     u_base = set(np.asarray(g1["raster_value"]))
     u_chk = set(np.asarray(g2["raster_value"]))
-    print("unique only in base:", list(sorted(u_base - u_chk))[:20])
-    print("unique only in chunk:", list(sorted(u_chk - u_base))[:20])
+    print("Unique only in base:", sorted(u_base - u_chk)[:20])
+    print("Unique only in chunk:", sorted(u_chk - u_base)[:20])
 
     # Get and sort unique values of geometries
     vals = sorted(set(np.unique(g1[value_col])) | set(np.unique(g2[value_col])))
@@ -129,7 +129,7 @@ def assert_vectors_equal_setwise_components(
                 sda = float(ua.symmetric_difference(ub).area)
             except Exception:
                 sda = float("nan")
-            failed.append((v, "geom_mismatch", sda))
+            failed.append((v, "geom_mismatch", sda))  # type: ignore
 
     # Raise error with useful info if test failed
     if failed:
@@ -141,7 +141,8 @@ def assert_vectors_equal_setwise_components(
             }
         )
 
-def _sort_gdf_for_compare(gdf, value_col="raster_value"):
+
+def _sort_gdf_for_compare(gdf: gpd.GeoDataFrame, value_col: str = "raster_value") -> gpd.GeoDataFrame:
     """
     Normalize ordering to make deterministic comparisons.
 
@@ -163,7 +164,8 @@ def _sort_gdf_for_compare(gdf, value_col="raster_value"):
     g = g.drop(columns=["_wkb"], errors="ignore")
     return g
 
-def _assert_vectors_equal_ordered(g1, g2, exact: bool=False):
+
+def _assert_vectors_equal_ordered(g1: gpd.GeoDataFrame, g2: gpd.GeoDataFrame, exact: bool = False) -> None:
     """Stricter test: we check that geometries are equal AND ordered exactly the same."""
 
     g1 = _sort_gdf_for_compare(g1)
@@ -196,19 +198,18 @@ def _assert_vectors_equal_ordered(g1, g2, exact: bool=False):
         i = next(i for i, ok in enumerate(eq) if not ok)
         a, b = g1.geometry.values[i], g2.geometry.values[i]
         raise AssertionError(
-            "Geometry mismatch at index "
-            f"{i}\n"
-            f"{_geom_debug(a, b)}\n"
-            f"a.wkt={a.wkt}\n\nb.wkt={b.wkt}\n"
+            "Geometry mismatch at index " f"{i}\n" f"{_geom_debug(a, b)}\n" f"a.wkt={a.wkt}\n\nb.wkt={b.wkt}\n"
         )
 
-def assert_vectors_equal(v1: gu.Vector,
-                         v2: gu.Vector,
-                         *,
-                         check_crs: bool = True,
-                         exact: bool = False,
-                         setwise: bool = False,
-                         ) -> None:
+
+def assert_vectors_equal(
+    v1: gu.Vector,
+    v2: gu.Vector,
+    *,
+    check_crs: bool = True,
+    exact: bool = False,
+    setwise: bool = False,
+) -> None:
     """
     Compare two vectors for polygonize tests.
 
@@ -242,7 +243,9 @@ def assert_vectors_equal(v1: gu.Vector,
         _assert_vectors_equal_ordered(g1, g2, exact)
 
 
-def _write_tmp_tif(tmp_path, arr: np.ndarray, *, transform=None, crs=None, nodata=None) -> str:
+def _write_tmp_tif(
+    tmp_path: str, arr: NDArrayNum, *, transform: Any = None, crs: Any = None, nodata: Any = None
+) -> str:
     """
     Write a single-band GeoTIFF for Multiprocessing backend tests.
     """
@@ -252,7 +255,7 @@ def _write_tmp_tif(tmp_path, arr: np.ndarray, *, transform=None, crs=None, nodat
     if crs is None:
         crs = rio.crs.CRS.from_epsg(32645)  # arbitrary projected CRS
 
-    path = tmp_path / "tmp_polygonize.tif"
+    path = os.path.join(tmp_path, "tmp_polygonize.tif")
     profile = {
         "driver": "GTiff",
         "height": arr.shape[0],
@@ -315,7 +318,9 @@ class TestPolygonize:
                 "ignore", category=UserWarning, message="dtype conversion will result in a loss of information.*"
             )
             warnings.filterwarnings(
-                "ignore", category=UserWarning, message="Unmasked values equal to the nodata value found in data array.*"
+                "ignore",
+                category=UserWarning,
+                message="Unmasked values equal to the nodata value found in data array.*",
             )
             img_dtype = img_dtype.astype(dtype)
 
@@ -345,7 +350,9 @@ class TestPolygonize:
             mask.polygonize(target_values=2)
 
     @pytest.mark.parametrize("strategy", chunked_strategies)
-    def test_polygonize__connectivity_across_chunks(self, tmp_path, strategy) -> None:
+    def test_polygonize__connectivity_across_chunks(
+        self, tmp_path: Any, strategy: Literal["label_union", "label_stitch", "geometry_stitch"]
+    ) -> None:
         """
         Test that 4/8-connectivity is respected across chunks for all chunked methods.
 
@@ -399,7 +406,6 @@ class TestPolygonize:
         assert_vectors_equal(base8, mp8, setwise=True)
         assert_vectors_equal(base4, mp4, setwise=True)
 
-
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("connectivity", [4, 8])
     @pytest.mark.parametrize("strategy", chunked_strategies)
@@ -418,7 +424,7 @@ class TestPolygonize:
          - Dask backend through Xarray accessor,
          - Multiprocessing backend through Raster class.
 
-        Additionnally, both Dask and Multiprocessing inputs remains lazy (unloaded), but output vector is eager.
+        Additionally, both Dask and Multiprocessing inputs remains lazy (unloaded), but output vector is eager.
         """
 
         pytest.importorskip("dask")
@@ -480,6 +486,5 @@ class TestPolygonize:
 
         # All outputs geometries must match base exactly spatially, but order/polygon definition might differ slightly
         # so we use setwise=True
-        # assert_vectors_equal(base, dask_vect, setwise=True)
+        assert_vectors_equal(base, dask_vect, setwise=True)
         assert_vectors_equal(base, mp_vect, setwise=True)
-

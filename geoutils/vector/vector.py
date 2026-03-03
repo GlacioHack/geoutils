@@ -51,9 +51,10 @@ from shapely.geometry.base import BaseGeometry
 from geoutils import profiler
 from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
 from geoutils._misc import copy_doc, deprecate, import_optional
-from geoutils._typing import NDArrayBool, NDArrayNum, Number, DTypeLike
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.rasterization import _create_mask, _rasterize
+from geoutils.multiproc import MultiprocConfig
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -61,7 +62,6 @@ from geoutils.projtools import (
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.transformation import _reproject
-from geoutils.multiproc import MultiprocConfig
 
 if TYPE_CHECKING:
     import matplotlib
@@ -1484,24 +1484,36 @@ class Vector:
     def create_mask(
         self,
         ref: RasterLike | PointCloudLike | None = None,
+        all_touched: bool = False,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        points: tuple[NDArrayNum, NDArrayNum] = None,
+        shape: tuple[int, int] | None = None,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+        points: tuple[NDArrayNum, NDArrayNum] | None = None,
         *,
         as_array: Literal[False] = False,
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        dask: bool = False,
     ) -> Raster | PointCloud: ...
 
     @overload
     def create_mask(
         self,
         ref: RasterLike | PointCloudLike | None = None,
+        all_touched: bool = False,
         crs: CRS | None = None,
         res: float | tuple[float, float] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        points: tuple[NDArrayNum, NDArrayNum] = None,
+        shape: tuple[int, int] | None = None,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+        points: tuple[NDArrayNum, NDArrayNum] | None = None,
         *,
         as_array: Literal[True],
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        dask: bool = False,
     ) -> NDArrayBool: ...
 
     def create_mask(
@@ -1514,8 +1526,8 @@ class Vector:
         shape: tuple[int, int] | None = None,
         grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
         points: tuple[NDArrayNum, NDArrayNum] | None = None,
-        as_array: bool = False,
         *,
+        as_array: bool = False,
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
@@ -1575,7 +1587,7 @@ class Vector:
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
-        **kwargs
+        **kwargs: Any,
     ) -> RasterType:
         """
         Rasterize vector to a raster or mask, with input geometries burned in.
@@ -1613,9 +1625,7 @@ class Vector:
             else:
                 res = xres
         if "raster" in kwargs.keys():
-            warnings.warn(
-                message="Argument 'raster' is deprecrated in favour of 'ref'.", category=DeprecationWarning
-            )
+            warnings.warn(message="Argument 'raster' is deprecrated in favour of 'ref'.", category=DeprecationWarning)
             ref = kwargs.get("raster", None)
 
         return _rasterize(

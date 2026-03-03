@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from importlib.util import find_spec
+from types import Any
 
 import numpy as np
 import pytest
@@ -10,8 +11,9 @@ import scipy
 import geoutils as gu
 from geoutils import Raster
 from geoutils._typing import NDArrayNum
-from geoutils.raster import get_array_and_mask
 from geoutils.multiproc import MultiprocConfig
+from geoutils.raster import get_array_and_mask
+
 
 class TestGaussianFilter:
     """Tests for the Gaussian filter applied to raster data."""
@@ -376,6 +378,7 @@ def test_filter_against_center_value(method: str, np_filter: Callable[[NDArrayNu
 
     assert np.isclose(np_filter(arr), arr_filtered[1, 1], atol=1e-8)
 
+
 class TestFilterChunked:
 
     @pytest.mark.parametrize("path_index", [0, 2])
@@ -383,7 +386,7 @@ class TestFilterChunked:
     @pytest.mark.parametrize("size", [3, 7])
     def test_filter_chunked_backends_equal(
         self,
-        tmp_path,
+        tmp_path: Any,
         path_index: int,
         method: str,
         size: int,
@@ -435,9 +438,9 @@ class TestFilterChunked:
 
         # 3/ Comparison
         if method == "gaussian":
-            rtol, atol = 0.0, 1e-6
+            atol = 1e-6
         else:
-            rtol, atol = 0.0, 0.0
+            atol = 0.0
 
         # Compute Dask input
         dask_rst = dask_rst.compute()

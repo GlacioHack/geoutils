@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import geopandas as gpd
 import numpy as np
 import pytest
-from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 import xarray as xr
+from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils import examples
 from geoutils.exceptions import InvalidGridError
 from geoutils.multiproc import MultiprocConfig
+
 
 class TestRasterVectorInterface:
 
@@ -130,7 +133,7 @@ class TestRasterVectorInterface:
     @pytest.mark.parametrize("in_value_mode", ["scalar", "iterable", "none"])
     def test_rasterize_create_mask__chunked_backends_equal(
         self,
-        tmp_path,
+        tmp_path: Any,
         all_touched: bool,
         in_value_mode: str,
     ) -> None:
@@ -159,7 +162,7 @@ class TestRasterVectorInterface:
             out_value = 0
         elif in_value_mode == "iterable":
             # single-geom iterable (length must match geom count)
-            in_value = [7]
+            in_value = [7]  # type: ignore
             out_value = 0
         elif in_value_mode == "none":
             # None -> burn values become [1 .. N] internally; here N=1 so burn=1

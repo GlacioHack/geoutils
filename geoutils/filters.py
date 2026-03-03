@@ -23,23 +23,22 @@ Filters class to remove outliers and reduce noise in rasters.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, Literal, TYPE_CHECKING
-
 import math
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal
+
 import numpy as np
 import scipy
+import scipy.ndimage
 from packaging.version import Version
-from scipy.ndimage import uniform_filter, gaussian_filter
 
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
-from geoutils.multiproc import map_overlap_multiproc_save, MultiprocConfig
+from geoutils.multiproc import MultiprocConfig, map_overlap_multiproc_save
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterBase
     from geoutils.raster.raster import Raster
-    import da.array as da
 
 if Version(scipy.__version__) > Version("1.16.0"):
     generic_filter_scipy = scipy.ndimage.vectorized_filter
@@ -64,6 +63,7 @@ except ImportError:
             return func
 
         return decorator
+
 
 try:
     import dask.array as da
@@ -98,7 +98,7 @@ def _overlap_depth_for_filter(method: str | Callable[..., NDArrayNum], size: int
 
         # Sigma can be scalar or sequence; take max to ensure enough depth for both axes
         if np.isscalar(sigma):
-            sig = float(sigma)
+            sig = float(sigma)  # type: ignore
         else:
             sig = float(np.max(np.asarray(sigma, dtype=float)))
 
@@ -108,8 +108,10 @@ def _overlap_depth_for_filter(method: str | Callable[..., NDArrayNum], size: int
     # Fallback
     return _window_radius(size)
 
-def _filter_base(array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any) -> (
-        NDArrayNum):
+
+def _filter_base(
+    array: NDArrayNum, method: str | Callable[..., NDArrayNum], size: int = 3, **kwargs: Any
+) -> NDArrayNum:
     """
     Dispatch filter application by method name or custom callable.
 
@@ -124,14 +126,18 @@ def _filter_base(array: NDArrayNum, method: str | Callable[..., NDArrayNum], siz
 
     filter_map: dict[str, Callable[..., NDArrayNum]] = {
         "gaussian": gaussian_filter,
-        "median": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmedian, size=size, mode="constant",
-                                                                   cval=np.nan),
-        "mean": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmean, size=size, mode="constant",
-                                                                   cval=np.nan),
-        "max": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmax, size=size, mode="constant",
-                                                                   cval=np.nan),
-        "min": lambda arr, size=size, **_: generic_filter_scipy(arr, np.nanmin, size=size, mode="constant",
-                                                                   cval=np.nan),
+        "median": lambda arr, size=size, **_: generic_filter_scipy(
+            arr, np.nanmedian, size=size, mode="constant", cval=np.nan
+        ),
+        "mean": lambda arr, size=size, **_: generic_filter_scipy(
+            arr, np.nanmean, size=size, mode="constant", cval=np.nan
+        ),
+        "max": lambda arr, size=size, **_: generic_filter_scipy(
+            arr, np.nanmax, size=size, mode="constant", cval=np.nan
+        ),
+        "min": lambda arr, size=size, **_: generic_filter_scipy(
+            arr, np.nanmin, size=size, mode="constant", cval=np.nan
+        ),
         "distance": distance_filter,
     }
 
@@ -164,7 +170,7 @@ def _dask_filter(
     depth = _overlap_depth_for_filter(method, size=size, **kwargs)
 
     # Block function to pass
-    def _block_func(block: NDArrayNum, method=method, size=size, kwargs=kwargs) -> NDArrayNum:
+    def _block_func(block: NDArrayNum) -> NDArrayNum:
         # Block already includes the halo from map_overlap
         return _filter_base(block, method=method, size=size, **kwargs)
 
@@ -177,19 +183,20 @@ def _dask_filter(
         dtype=array.dtype,
     )
 
+
 def _multiproc_filter(
     rst: Raster,
     mp_config: MultiprocConfig,
     method: str | Callable[..., NDArrayNum],
     size: int = 3,
     **kwargs: Any,
-):
+) -> Raster:
 
     # Get depth of overlap
     depth = _overlap_depth_for_filter(method, size=size, **kwargs)
 
     # Block function to pass
-    def filter_block(block: Raster, method=method, size=size, kwargs=kwargs) -> Raster:
+    def filter_block(block: Raster) -> Raster:
         """Block function for multiprocessing."""
         nan_block = block.get_nanarray()
         filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
@@ -198,16 +205,17 @@ def _multiproc_filter(
     # Call Multiprocessing map_overlap
     return map_overlap_multiproc_save(filter_block, rst, mp_config, depth=depth)
 
+
 def _filter(
     source_raster: RasterBase,
     method: str | Callable[..., NDArrayNum],
     size: int,
     sigma: int = 1,
     engine: Literal["scipy", "numba"] = "scipy",
-    outlier_threshold: float = 2.,
+    outlier_threshold: float = 2.0,
     mp_config: MultiprocConfig | None = None,
     **kwargs: Any,
-):
+) -> Any:
     """Parent function to filter raster, dispatching to in-memory, Dask or Multiprocessing backend."""
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
@@ -231,7 +239,8 @@ def _filter(
 
     # Dispatch based on backend
     if mp_backend:
-        return _multiproc_filter(source_raster, mp_config=mp_config, method=method, size=size, **kwargs)
+        assert mp_config is not None
+        return _multiproc_filter(source_raster, mp_config=mp_config, method=method, size=size, **kwargs)  # type: ignore
     elif dask_backend:
         array = _dask_filter(source_raster.data, method=method, size=size, **kwargs)
     else:
@@ -375,9 +384,9 @@ def mean_filter(array: NDArrayNum, size: int = 5) -> NDArrayNum:
     mask = ~np.isnan(array)
     array_filled = np.where(mask, array, 0)
     # Compute sum over the kernel
-    sum_vals = uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
+    sum_vals = scipy.ndimage.uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
     # Count of valid (non-nodata) pixels in the kernel
-    count_vals = uniform_filter(mask.astype(float), size=size, mode="constant", cval=0.0)
+    count_vals = scipy.ndimage.uniform_filter(mask.astype(float), size=size, mode="constant", cval=0.0)
 
     with np.errstate(invalid="ignore", divide="ignore"):
         mean_vals = sum_vals / count_vals

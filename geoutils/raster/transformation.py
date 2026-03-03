@@ -24,27 +24,31 @@ from __future__ import annotations
 
 import os
 import warnings
-from typing import TYPE_CHECKING,  Any, Literal, TypeVar, Callable
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import affine
+import numpy as np
 import rasterio as rio
+from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-import numpy as np
-from packaging.version import Version
 from shapely.geometry import box
 from shapely.strtree import STRtree
 
 from geoutils import profiler
 from geoutils._dispatch import _check_match_bbox, _check_match_grid
+from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
+from geoutils.multiproc.chunked import (
+    ChunkedGeoGrid,
+    GeoGrid,
+    _chunks2d_from_chunksizes_shape,
+)
+from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
 from geoutils.raster.referencing import (
     _default_nodata,
     _res,
 )
-from geoutils._misc import silence_rasterio_message, import_optional
-from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
-from geoutils.multiproc.chunked import GeoGrid, ChunkedGeoGrid, _chunks2d_from_chunksizes_shape
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
@@ -53,13 +57,12 @@ if TYPE_CHECKING:
 
 # Dask as optional dependency
 try:
-    import dask
     import dask.array as da
     from dask import delayed
-    from dask.utils import cached_cumsum
 except ImportError:
 
     da = None
+
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Fake delayed decorator if dask is not installed
@@ -70,11 +73,13 @@ except ImportError:
 
         return decorator
 
+
 ##############
 # 1/ REPROJECT
 ##############
 
 # SUBFUNCTIONS
+
 
 def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
@@ -285,6 +290,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 # stand-alone and rely only on Rasterio/Shapely/Pyproj
 # (Code now lives in multiproc/chunked)
 
+
 def _combined_blocks_shape_transform(
     sub_block_ids: list[dict[str, int]], src_geogrid: GeoGrid
 ) -> tuple[dict[str, Any], list[dict[str, int]]]:
@@ -367,8 +373,10 @@ def _build_geotiling_and_meta(
     # 2/ Get bounds of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
     # overlap, then map indexes of source blocks that intersect a given destination block
     src_boxes = [box(*gg.bounds_projected(crs=dst_crs)) for gg in src_geotiling.get_blocks_as_geogrids()]
-    dst_boxes = [box(*gg.bounds_projected(crs=dst_crs)).buffer(2*max(dst_geogrid.res)) for gg in
-                 dst_geotiling.get_blocks_as_geogrids()]
+    dst_boxes = [
+        box(*gg.bounds_projected(crs=dst_crs)).buffer(2 * max(dst_geogrid.res))
+        for gg in dst_geotiling.get_blocks_as_geogrids()
+    ]
     # Faster to use spatial index over source boxes
     tree = STRtree(src_boxes)
     # For Shapely 2.0: STRtree.query(..., predicate="intersects") is fastest, for earlier versions we filter manually
@@ -410,8 +418,13 @@ def _build_geotiling_and_meta(
     # Append dst shape/transform to metadata
     dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
     for i, (c, _) in enumerate(meta_params):
-        c.update({"dst_shape": dst_block_geogrids[i].shape, "dst_transform": tuple(dst_block_geogrids[i].transform),
-                  "dst_count": src_count})
+        c.update(
+            {
+                "dst_shape": dst_block_geogrids[i].shape,
+                "dst_transform": tuple(dst_block_geogrids[i].transform),
+                "dst_count": src_count,
+            }
+        )
 
     return src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids
 
@@ -428,8 +441,9 @@ def _reproject_per_block(
     # If no source chunk intersects, we return a chunk of destination nodata values
     if len(src_arrs) == 0:
         # We can use float32 to return NaN, will be cast to other floating type later if that's not source array dtype
-        dst_shape = (combined_meta["dst_count"], *combined_meta["dst_shape"]) if is_multiband \
-            else combined_meta["dst_shape"]
+        dst_shape = (
+            (combined_meta["dst_count"], *combined_meta["dst_shape"]) if is_multiband else combined_meta["dst_shape"]
+        )
         dst_arr = np.zeros(dst_shape, dtype=np.dtype("float32"))
         dst_arr[:] = np.nan
         return dst_arr
@@ -615,6 +629,7 @@ def _dask_reproject(
     concat_all = da.concatenate(rows, axis=ax_y)
     return concat_all
 
+
 def _wrapper_multiproc_reproject_per_block(
     rst: Raster,
     src_block_ids: list[dict[str, int]],
@@ -656,8 +671,9 @@ def _multiproc_reproject(
     """
 
     # Prepare geotiling and reprojection metadata for source and destination grids
-    src_chunks = _chunks2d_from_chunksizes_shape(chunksizes=(mp_config.chunk_size, mp_config.chunk_size),
-                                                 shape=rst.shape)
+    src_chunks = _chunks2d_from_chunksizes_shape(
+        chunksizes=(mp_config.chunk_size, mp_config.chunk_size), shape=rst.shape
+    )
     src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids = (
         _build_geotiling_and_meta(
             src_count=rst.count,
@@ -812,6 +828,7 @@ def _reproject(
 #########
 # 2/ CROP
 #########
+
 
 @profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)
 def _crop(

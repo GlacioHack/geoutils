@@ -10,15 +10,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
-from pyproj import CRS
 from packaging.version import Version
+from pyproj import CRS
 
 import geoutils as gu
 from geoutils import examples
 from geoutils.exceptions import InvalidGridError
-from geoutils.raster.transformation import _resampling_method_from_str, _dask_reproject, _rio_reproject
+from geoutils.multiproc import AbstractCluster, ClusterGenerator, MultiprocConfig
 from geoutils.raster.raster import _default_nodata
-from geoutils.multiproc import ClusterGenerator, MultiprocConfig
+from geoutils.raster.transformation import (
+    _dask_reproject,
+    _resampling_method_from_str,
+    _rio_reproject,
+)
 from geoutils.stats.sampling import _subsample_numpy
 
 DO_PLOT = False
@@ -789,6 +793,7 @@ class TestMaskGeotransformations:
         # Default data value (behind the mask) is True
         assert np.all(res.data.data)
 
+
 class TestMultiproc:
 
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
@@ -999,9 +1004,18 @@ class TestDask:
         )
 
         # 2/ Run delayed reproject with memory monitoring
-        reproj_kwargs = {"src_transform": src_transform, "src_crs": src_crs, "dst_crs": dst_crs,
-                         "resampling": resampling, "dst_transform": dst_transform, "src_nodata": src_nodata,
-                         "dst_nodata": dst_nodata, "dst_shape": dst_shape, "dtype": darr.dtype, "num_threads": 1}
+        reproj_kwargs = {
+            "src_transform": src_transform,
+            "src_crs": src_crs,
+            "dst_crs": dst_crs,
+            "resampling": resampling,
+            "dst_transform": dst_transform,
+            "src_nodata": src_nodata,
+            "dst_nodata": dst_nodata,
+            "dst_shape": dst_shape,
+            "dtype": darr.dtype,
+            "num_threads": 1,
+        }
 
         reproj_arr = _dask_reproject(
             darr,

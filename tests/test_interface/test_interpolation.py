@@ -12,11 +12,11 @@ from scipy.ndimage import binary_dilation
 import geoutils as gu
 from geoutils import examples
 from geoutils.interface.interpolation import (
+    _dask_interp_points,
     _get_dist_nodata_spread,
     _interp_points,
-    _interpn_interpolator,
-    _dask_interp_points,
     _interp_points_base,
+    _interpn_interpolator,
     method_to_order,
 )
 from geoutils.projtools import reproject_to_latlon
@@ -659,6 +659,7 @@ class TestInterpolate:
         assert np.array_equal(lrl1, lrl2, equal_nan=True)
         assert np.array_equal(lrl2, lrl3, equal_nan=True)
 
+
 class TestDask:
 
     pytest.importorskip("dask")
@@ -695,7 +696,7 @@ class TestDask:
     @pytest.mark.parametrize("ninterp", [2, 100])
     @pytest.mark.parametrize("res", [(0.5, 2), (1, 1)])
     def test_dask_interp_points__output(
-            self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int, res: tuple[float, float]
+        self, darr: da.Array, chunksizes_in_mem: tuple[int, int], ninterp: int, res: tuple[float, float]
     ) -> None:
         """
         Checks for delayed interpolate points function.
@@ -735,10 +736,10 @@ class TestDask:
         # Differentiate points close to boundary (gets the effect of Dask expanding the sides during overlap,
         # and filling the values with "nearest")
         at_boundary = (
-                (interp_x <= 3*xres) |
-                (interp_x >= nx * xres - 3*xres) |
-                (interp_y <= 3*yres) |
-                (interp_y >= ny * yres - 3*yres)
+            (interp_x <= 3 * xres)
+            | (interp_x >= nx * xres - 3 * xres)
+            | (interp_y <= 3 * yres)
+            | (interp_y >= ny * yres - 3 * yres)
         )
         assert np.allclose(interp1[~at_boundary], interp2[~at_boundary], equal_nan=True, rtol=1e-3)
         # assert np.allclose(interp1[at_boundary], interp2[at_boundary], equal_nan=True, rtol=1e-3)

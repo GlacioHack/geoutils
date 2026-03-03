@@ -18,13 +18,13 @@
 
 from geoutils.raster.raster import Raster, RasterType, handled_array_funcs  # noqa isort:skip
 from geoutils.raster.array import *  # noqa
-from geoutils.raster.transformation import *  # noqa
-from geoutils.raster.referencing import *  # noqa
 from geoutils.raster.multiraster import *  # noqa
 
 # To-be-deprecated
 from geoutils.raster.raster import Mask  # noqa
+from geoutils.raster.referencing import *  # noqa
 from geoutils.raster.satimg import *  # noqa
 from geoutils.raster.tiling import *  # noqa
+from geoutils.raster.transformation import *  # noqa
 
 __all__ = ["RasterType", "Raster"]

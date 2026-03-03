@@ -22,24 +22,26 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Iterable, Sequence
 
 import geopandas as gpd
 import numpy as np
 import rasterio as rio
+import xarray as xr
 from rasterio import features
 from rasterio.crs import CRS
-from shapely.strtree import STRtree
 from shapely.geometry import box as shapely_box
-import xarray as xr
+from shapely.strtree import STRtree
 
 from geoutils._dispatch import _check_match_grid, _check_match_points
-from geoutils._misc import silence_rasterio_message, import_optional
-from geoutils._typing import NDArrayBool, NDArrayNum, Number, DTypeLike
-from geoutils.multiproc.chunked import GeoGrid, ChunkedGeoGrid, _chunks2d_from_chunksizes_shape
+from geoutils._misc import import_optional
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.multiproc.chunked import (
+    ChunkedGeoGrid,
+    GeoGrid,
+    _chunks2d_from_chunksizes_shape,
+)
 from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
-
-from typing import Any, Iterable, Sequence
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -58,6 +60,7 @@ except ImportError:
 
 # Common helpers
 
+
 @dataclass(frozen=True)
 class _VectorBurnSpec:
     """
@@ -67,12 +70,15 @@ class _VectorBurnSpec:
     :param values: Per-geometry burn values, or None for scalar burn.
     :param default_value: Scalar burn value if values is None.
     """
+
     geoms: NDArrayNum
     values: NDArrayNum | None
     default_value: int | float | None
 
 
-def _normalize_burn_values(vect_geoms: Sequence[Any], in_value: int | float | Iterable[int | float] | None) -> _VectorBurnSpec:
+def _normalize_burn_values(
+    vect_geoms: Sequence[Any], in_value: int | float | Iterable[int | float] | None
+) -> _VectorBurnSpec:
     """
     Normalize burn values into either per-geometry values or a scalar default value.
 
@@ -100,7 +106,7 @@ def _normalize_burn_values(vect_geoms: Sequence[Any], in_value: int | float | It
     raise ValueError("in_value must be a single number or an iterable with same length as geometry.")
 
 
-def _make_dtype(out_value: int | float, burn: _VectorBurnSpec, out_dtype: DTypeLike | None = None) -> np.dtype:
+def _make_dtype(out_value: int | float, burn: _VectorBurnSpec, out_dtype: DTypeLike | None = None) -> DTypeLike:
     """
     Determine output dtype from fill and burn values.
 
@@ -117,7 +123,7 @@ def _make_dtype(out_value: int | float, burn: _VectorBurnSpec, out_dtype: DTypeL
     return np.result_type(*dts)
 
 
-def _get_strtree_and_lut(geoms: NDArrayNum, cache: dict[str, Any]):
+def _get_strtree_and_lut(geoms: NDArrayNum, cache: dict[str, Any]) -> tuple[Any, dict[int, int]]:
     """
     Build and cache STRtree + id to idx LUT for Shapely 1.8 compatibility.
 
@@ -133,7 +139,7 @@ def _get_strtree_and_lut(geoms: NDArrayNum, cache: dict[str, Any]):
     return tree, cache["id_to_idx"]
 
 
-def _query_indices(tree, id_to_idx: dict[int, int], query_geom) -> NDArrayNum:
+def _query_indices(tree: Any, id_to_idx: dict[int, int], query_geom: Any) -> NDArrayNum:
     """
     Query indices of geometries intersecting query geometry.
 
@@ -153,6 +159,7 @@ def _query_indices(tree, id_to_idx: dict[int, int], query_geom) -> NDArrayNum:
             return np.empty((0,), dtype=np.int64)
         return np.asarray([id_to_idx[id(g)] for g in hits if query_geom.intersects(g)], dtype=np.int64)
 
+
 def _rasterio_rasterize_burn(
     geoms: NDArrayNum,
     values: NDArrayNum | None,
@@ -160,7 +167,7 @@ def _rasterio_rasterize_burn(
     out_shape: tuple[int, int],
     transform: Any,
     fill: int | float,
-    dtype: np.dtype,
+    dtype: DTypeLike,
     all_touched: bool = False,
 ) -> NDArrayNum:
     """
@@ -196,6 +203,7 @@ def _rasterio_rasterize_burn(
         all_touched=all_touched,
         dtype=dtype,
     )
+
 
 def _rasterize_on_geogrid(
     gg: GeoGrid,
@@ -248,6 +256,7 @@ def _rasterize_on_geogrid(
         all_touched=all_touched,
     )
 
+
 def _rasterize_base(
     vect_geoms: Sequence[Any],
     out_shape: tuple[int, int],
@@ -283,6 +292,7 @@ def _rasterize_base(
         all_touched=all_touched,
     )
 
+
 def _dask_rasterize(
     burn: _VectorBurnSpec,
     dst_geotiling: ChunkedGeoGrid,
@@ -315,14 +325,15 @@ def _dask_rasterize(
         nx = len(dst_geotiling.chunks[1])
         return iy * nx + ix
 
-    def _block_func(block: np.ndarray, block_info=None) -> np.ndarray:
+    def _block_func(block: NDArrayNum, block_info: Any = None) -> NDArrayNum:
         """Block function for Dask."""
-        info = block_info[None]
+        info = block_info[None]  # type: ignore
         bidx = _flat_block_index(info["chunk-location"])
         gg = dst_block_geogrids[bidx]
         return _rasterize_on_geogrid(gg, burn, out_value, dtype, all_touched=all_touched, cache=_CACHE)
 
     return template.map_blocks(_block_func, dtype=dtype)
+
 
 def _multiproc_rasterize(
     burn: _VectorBurnSpec,
@@ -347,7 +358,7 @@ def _multiproc_rasterize(
     """
     block_ids = dst_geotiling.get_block_locations()
 
-    def rasterize_block(task: tuple[int, dict[str, int]]) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+    def rasterize_block(task: tuple[int, dict[str, int]]) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
         """
         Block function for multiprocessing.
 
@@ -366,6 +377,7 @@ def _multiproc_rasterize(
 
     # Write tiles as they complete
     return _write_multiproc_result(tasks=tasks, mp_config=mp_config, file_metadata=file_metadata)
+
 
 def _rasterize(
     source_vector: Vector,
@@ -433,7 +445,7 @@ def _rasterize(
     # Base backend (eager)
     if not mp_backend and not dask_backend:
         mask = _rasterize_base(
-            vect_geoms=burn.geoms,
+            vect_geoms=burn.geoms,  # type: ignore
             out_shape=out_shape,
             out_transform=out_transform,
             in_value=in_value,
@@ -446,9 +458,10 @@ def _rasterize(
     # Build chunked geogrid (shared for Dask and multiproc)
     if chunksizes is None:
         if ref is not None and ref._chunks is not None:
-            chunksizes = ref._chunks
+            chunksizes = ref._chunks  # type: ignore
         else:
             chunksizes = (1024, 1024)
+    assert chunksizes is not None
 
     dst_geogrid = GeoGrid(transform=out_transform, shape=out_shape, crs=out_crs)
     dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=chunksizes, shape=out_shape)
@@ -480,6 +493,7 @@ def _rasterize(
         "transform": out_transform,
         "nodata": None,
     }
+    assert mp_config is not None
     return _multiproc_rasterize(
         burn=burn,
         dst_geotiling=dst_geotiling,
@@ -491,13 +505,15 @@ def _rasterize(
         all_touched=all_touched,
     )
 
+
 #######################################################################
 # 2/ GEOMETRY MASKING (BOOLEAN RASTERIZE OR BOOLEAN POINT WITHIN CHECK)
 #######################################################################
 
-def _create_mask_pointcloud(source_vector: Vector,
-                            points: tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-                            as_array: bool = False) -> NDArrayBool:
+
+def _create_mask_pointcloud(
+    source_vector: Vector, points: tuple[NDArrayNum, NDArrayNum] | PointCloudLike, as_array: bool = False
+) -> NDArrayBool:
     """Subfunction to create a point cloud mask using geopandas."""
 
     # Normalize input
@@ -659,10 +675,11 @@ def _create_mask(
             chunksizes=chunksizes,
             mp_config=mp_config,
             dask=dask,
-            as_array=as_array
+            as_array=as_array,
         )
     # Point cloud mask path: point cloud ref OR points provided
     else:
         # Create boolean mask for points
-        return _create_mask_pointcloud(source_vector=source_vector, points=points if points is not None else ref,
-                                       as_array=as_array)
+        return _create_mask_pointcloud(
+            source_vector=source_vector, points=points if points is not None else ref, as_array=as_array
+        )

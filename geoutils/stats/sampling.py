@@ -20,16 +20,16 @@
 
 from __future__ import annotations
 
-import warnings
 import operator
-from typing import Literal, overload, Any, Callable, TYPE_CHECKING
+import warnings
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, overload
 
 import numpy as np
 
-from geoutils._typing import MArrayNum, NDArrayNum, NDArrayBool
-from geoutils.raster.array import get_mask_from_array
 from geoutils._misc import import_optional
-from geoutils.multiproc import compute_tiling, MultiprocConfig
+from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.multiproc import MultiprocConfig, compute_tiling
+from geoutils.raster.array import get_mask_from_array
 
 if TYPE_CHECKING:
     from geoutils.raster.raster import Raster, RasterBase
@@ -43,6 +43,7 @@ try:
 except ImportError:
 
     da = None
+
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Fake delayed decorator if dask is not installed
@@ -53,14 +54,17 @@ except ImportError:
 
         return decorator
 
+
 ###################################################
 # 1/ SUBSAMPLING AT FINITE RANDOM POINT COORDINATES
 ###################################################
 
 # Common input check
 
+
 def _get_subsample_size_from_user_input(
-    subsample: int | float, total_nb_valids: int,
+    subsample: int | float,
+    total_nb_valids: int,
 ) -> int:
     """Get subsample size based on a user input of either integer size or fraction of the number of valid points."""
 
@@ -87,7 +91,8 @@ def _get_subsample_size_from_user_input(
 # NumPy implementation
 ######################
 
-def _splitmix64(x: NDArrayNum) -> NDArrayNum:
+
+def _splitmix64(x: np.typing.NDArray[np.uint64]) -> NDArrayNum:
     """
     Vectorized SplitMix64 mixer from uint64 to uint64.
 
@@ -102,6 +107,7 @@ def _splitmix64(x: NDArrayNum) -> NDArrayNum:
       https://doi.org/10.1145/2660193.2660195
     - Sebastiano Vigna, SplitMix64 reference implementation, https://prng.di.unimi.it/splitmix64.c
     """
+
     # Add a large odd constant derived from the golden ratio
     # This ensures that consecutive inputs do not map to related outputs
     x = (x + np.uint64(0x9E3779B97F4A7C15)) & np.uint64(0xFFFFFFFFFFFFFFFF)
@@ -119,6 +125,7 @@ def _splitmix64(x: NDArrayNum) -> NDArrayNum:
 
     # Final XOR-shift to finish diffusion
     return z ^ (z >> np.uint64(31))
+
 
 @overload
 def _subsample_numpy(
@@ -193,8 +200,7 @@ def _subsample_numpy(
     # STRATEGY 1: "sequential", we use a random order for the index of valid values
     if strategy == "sequential":
 
-        rng = np.random.default_rng(random_state
-                                    )
+        rng = np.random.default_rng(random_state)
         # Choose random indexes among all valids
         chosen = rng.choice(valids, subsample_size, replace=False)
 
@@ -240,6 +246,7 @@ def _subsample_numpy(
 # We thus follow https://blog.dask.org/2021/07/02/ragged-output (the dask.array.map_blocks solution has a larger RAM
 # usage by having to drop an axis and re-chunk along 1D of the 2D array, so we use the delayed solution instead)
 
+
 def _get_indices_block_per_subsample(
     indices_1d: NDArrayNum, num_chunks: tuple[int, int], nb_valids_per_block: list[int]
 ) -> list[list[int]]:
@@ -280,12 +287,14 @@ def _get_indices_block_per_subsample(
 
     return relative_index_per_block
 
+
 @delayed
 def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool) -> NDArrayNum:
     """Count number of valid values per block."""
     if arr_chunk.dtype == np.bool_:
         return np.array([np.count_nonzero(arr_chunk)]).reshape((1, 1))
     return np.array([np.count_nonzero(np.isfinite(arr_chunk))]).reshape((1, 1))
+
 
 @delayed
 def _delayed_topk_candidates_block(
@@ -296,7 +305,7 @@ def _delayed_topk_candidates_block(
     k: int,
     nx_full: int,  # Width of full array
     return_indices_local: bool,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[NDArrayNum, NDArrayNum | NDArrayBool]:
     """
     Return up to k valid samples from one block as (keys, payload).
 
@@ -356,13 +365,14 @@ def _delayed_topk_candidates_block(
             vals = arr_chunk.ravel()[flat[sel]]
         return key_sel, vals
 
+
 @delayed
 def _delayed_merge_topk(
-    keys_list: list[np.ndarray],
-    payload_list: list[np.ndarray],
+    keys_list: list[NDArrayNum],
+    payload_list: list[NDArrayNum],
     *,
     k: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[NDArrayNum, NDArrayNum]:
     """
     Merge per-block candidates and return the global top-k by key.
 
@@ -395,8 +405,9 @@ def _delayed_merge_topk(
     # Return the m smallest keys and their associated payload entries
     return keys[sel], payload[sel]
 
+
 @delayed
-def _delayed_gid_to_rc(gid: np.ndarray, nx_full: int) -> tuple[np.ndarray, np.ndarray]:
+def _delayed_gid_to_rc(gid: NDArrayNum, nx_full: int) -> tuple[NDArrayNum, NDArrayNum]:
     """
     Convert global linear indices back to (row, col) indices.
     """
@@ -404,6 +415,7 @@ def _delayed_gid_to_rc(gid: np.ndarray, nx_full: int) -> tuple[np.ndarray, np.nd
     r = gid // np.int64(nx_full)
     c = gid - r * np.int64(nx_full)
     return r.astype(np.int64), c.astype(np.int64)
+
 
 @delayed
 def _delayed_subsample_block(
@@ -414,6 +426,7 @@ def _delayed_subsample_block(
     if arr_chunk.dtype == np.bool_:
         return arr_chunk[arr_chunk][subsample_indices]
     return arr_chunk[np.isfinite(arr_chunk)][subsample_indices]
+
 
 @delayed
 def _delayed_subsample_indices_block(
@@ -434,6 +447,7 @@ def _delayed_subsample_indices_block(
     iy += block_id["col_start"]
 
     return np.hstack((ix, iy))
+
 
 def _dask_subsample(
     darr: da.Array,
@@ -463,11 +477,13 @@ def _dask_subsample(
     blocks = darr.to_delayed().ravel()
 
     # Compute number of valid points for each block out-of-memory
-    list_delayed_valids = [da.from_delayed(_delayed_nb_valids(b), shape=(1, 1),
-                                           dtype=np.dtype("int32")) for b in blocks]
+    list_delayed_valids = [
+        da.from_delayed(_delayed_nb_valids(b), shape=(1, 1), dtype=np.dtype("int32")) for b in blocks
+    ]
     # Compute once, then flatten
-    nb_valids_per_block = np.concatenate([x.ravel() for x in
-                                          dask.compute(*list_delayed_valids)], axis=0).astype(np.int64)
+    nb_valids_per_block = np.concatenate([x.ravel() for x in dask.compute(*list_delayed_valids)], axis=0).astype(
+        np.int64
+    )
 
     # Sum to get total number of valid points
     total_nb_valids = int(np.sum(nb_valids_per_block))
@@ -494,8 +510,7 @@ def _dask_subsample(
     indexes_yb, indexes_xb = np.unravel_index(np.arange(len(blocks)), shape=(num_chunks[0], num_chunks[1]))
 
     block_ids = [
-        {"row_start": starts[0][indexes_yb[i]], "col_start": starts[1][indexes_xb[i]]}
-         for i in range(len(blocks))
+        {"row_start": starts[0][indexes_yb[i]], "col_start": starts[1][indexes_xb[i]]} for i in range(len(blocks))
     ]
 
     # STRATEGY 1: "sequential" (chunk-dependent)
@@ -513,7 +528,9 @@ def _dask_subsample(
         if not return_indices:
             # Task a delayed subsample to be computed for each block, skipping blocks with no values to sample
             used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
-            list_subsamples = [_delayed_subsample_block(blocks[i], np.asarray(ind_per_block[i], dtype=np.int64)) for i in used]
+            list_subsamples = [
+                _delayed_subsample_block(blocks[i], np.asarray(ind_per_block[i], dtype=np.int64)) for i in used
+            ]
 
             # Cast output to the right expected dtype and length, then compute and concatenate
             list_subsamples_da = [
@@ -527,8 +544,9 @@ def _dask_subsample(
             # Task delayed subsample indices to be computed for each block, skipping blocks with no values to sample
             used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
             list_subsample_indices = [
-                _delayed_subsample_indices_block(blocks[i], np.asarray(ind_per_block[i], dtype=np.int64),
-                                                 block_id=block_ids[i])
+                _delayed_subsample_indices_block(
+                    blocks[i], np.asarray(ind_per_block[i], dtype=np.int64), block_id=block_ids[i]
+                )
                 for i in used
             ]
 
@@ -595,9 +613,11 @@ def _dask_subsample(
     else:
         raise ValueError(f"Unknown strategy {strategy!r}, available strategies are 'sequential' or 'topk'.")
 
+
 ################################
 # Multiprocessing implementation
 ################################
+
 
 def _wrapper_multiproc_nb_valids_per_block(rst: Raster, tile_idx: NDArrayNum) -> int:
     """Count valid values in one tile out-of-memory."""
@@ -672,7 +692,7 @@ def _wrapper_multiproc_topk_candidates_block(
     k: int,
     nx_full: int,
     return_indices: bool,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[NDArrayNum, NDArrayNum | NDArrayBool]:
     """
     Return up to k candidates from one tile as (keys, payload).
 
@@ -731,8 +751,9 @@ def _wrapper_multiproc_topk_candidates_block(
         vals = arr.ravel()[flat[sel]]
     return key_sel, vals
 
+
 def _multiproc_subsample(
-    rst: Raster,
+    rst: RasterBase,
     config: MultiprocConfig,
     subsample: int | float = 1,
     return_indices: bool = False,
@@ -853,7 +874,7 @@ def _multiproc_subsample(
             config.cluster.launch_task(
                 fun=_wrapper_multiproc_topk_candidates_block,
                 args=[rst, tile_ids[i]],
-                kwargs=dict(seed=seed, k=subsample_size, nx_full=nx_full, return_indices=return_indices),
+                kwargs={"seed": seed, "k": subsample_size, "nx_full": nx_full, "return_indices": return_indices},
             )
             for i in range(num_blocks)
         ]
@@ -890,11 +911,13 @@ def _multiproc_subsample(
         return rows.astype(np.int64), cols.astype(np.int64)
 
     else:
-        raise ValueError(f"Unknown strategy {method!r}. Choose 'sequential' or 'topk'.")
+        raise ValueError(f"Unknown strategy {strategy!r}. Choose 'sequential' or 'topk'.")
+
 
 ######################################################
 # Wrapper dispatching to NumPy or Dask/Multiprocessing
 ######################################################
+
 
 def _subsample(
     source_raster: RasterBase,
@@ -933,11 +956,22 @@ def _subsample(
             "from reproject(). To use Multiprocessing, open the file without chunks."
         )
 
-    subsample_kwargs = {"subsample": subsample, "return_indices": return_indices, "random_state": random_state,
-                        "strategy": strategy}
+    class _SubsampleKwargs(TypedDict):
+        subsample: int | float
+        return_indices: bool
+        random_state: int | np.random.Generator | None
+        strategy: Literal["sequential", "topk"]
+
+    subsample_kwargs: _SubsampleKwargs = {
+        "subsample": subsample,
+        "return_indices": return_indices,
+        "random_state": random_state,
+        "strategy": strategy,
+    }
 
     # Multiprocessing (out-of-memory)
     if mp_backend:
+        assert mp_config is not None
         # Temporary switch bands
         orig_bands = source_raster.bands
         source_raster._bands = (band,)
@@ -954,4 +988,4 @@ def _subsample(
             return _dask_subsample(arr, **subsample_kwargs)
         # NumPy
         else:
-            return _subsample_numpy(arr, **subsample_kwargs)
+            return _subsample_numpy(arr, **subsample_kwargs)  # type: ignore

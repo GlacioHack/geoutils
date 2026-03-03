@@ -17,14 +17,14 @@
 # limitations under the License.
 """Module defining array and configuration routines for chunked operations with Multiprocessing."""
 
-from typing import TypeVar, Any, Literal
+from typing import Any, Literal, TypeVar
 
-import numpy as np
-import rasterio as rio
 import geopandas as gpd
+import numpy as np
 import pandas as pd
+import rasterio as rio
 
-from geoutils.projtools import _get_footprint_projected, _get_bounds_projected
+from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 
 # We define a GeoGrid and GeoTiling class (which composes GeoGrid) to consistently deal with georeferenced footprints
 # of chunked grids
@@ -181,10 +181,9 @@ class ChunkedGeoGrid:
             raise IndexError(chunk_location)
         return iy * nx + ix
 
-    def iter_block_geogrids(self):
+    def iter_block_geogrids(self) -> Any:
         """Yield (flat_index, GeoGrid) in same order as get_blocks_as_geogrids()"""
-        for i, gg in enumerate(self.get_blocks_as_geogrids()):
-            yield i, gg
+        yield from enumerate(self.get_blocks_as_geogrids())
 
     def get_block_locations(self) -> list[dict[str, int]]:
         """Get block locations in 2D: xstart, xend, ystart, yend."""
@@ -215,6 +214,7 @@ class ChunkedGeoGrid:
 
         return pd.concat(footprints)
 
+
 def _chunks2d_from_chunksizes_shape(
     chunksizes: tuple[int, int], shape: tuple[int, int]
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -237,4 +237,3 @@ def _chunks2d_from_chunksizes_shape(
     )
 
     return chunks_y, chunks_x
-

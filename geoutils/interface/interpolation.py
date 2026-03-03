@@ -21,8 +21,8 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 import warnings
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, overload
 
 import numpy as np
 import rasterio as rio
@@ -30,11 +30,11 @@ from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
 from geoutils._dispatch import _check_match_points
-from geoutils._typing import NDArrayNum, Number
 from geoutils._misc import import_optional
-from geoutils.projtools import reproject_from_latlon
-from geoutils.raster.referencing import _coords, _outside_bounds, _res, _xy2ij, _bounds
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig, compute_tiling
+from geoutils.projtools import reproject_from_latlon
+from geoutils.raster.referencing import _bounds, _coords, _outside_bounds, _res, _xy2ij
 
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
 
@@ -52,6 +52,7 @@ try:
 except ImportError:
 
     da = None
+
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Fake delayed decorator if dask is not installed
@@ -62,9 +63,11 @@ except ImportError:
 
         return decorator
 
+
 ####################################################
 # 1/ REGULAR GRID INTERPOLATION AT POINT COORDINATES
 ####################################################
+
 
 def _get_dist_nodata_spread(order: int, dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int) -> int:
     """
@@ -237,6 +240,7 @@ def _map_coordinates_nodata_propag(
 
 # BASE FUNCTION FOR INTERP POINTS (WHOLE ARRAY IN MEMORY, USED BY CHUNKED FUNCTIONS + MAIN API)
 
+
 @overload
 def _interp_points_base(
     array: NDArrayNum,
@@ -314,10 +318,12 @@ def _interp_points_base(
     mapcoords_supported = method in method_to_order_mapcoords.keys()
 
     res = _res(transform)
-    use_mapcoords = ((res[0] == res[1] or force_map_coords) and not force_interpn and
-                     mapcoords_supported and not return_interpolator)
+    use_mapcoords = (
+        (res[0] == res[1] or force_map_coords) and not force_interpn and mapcoords_supported and not return_interpolator
+    )
 
     if not return_interpolator:
+        assert points is not None
         x, y = points
 
     if use_mapcoords:
@@ -342,7 +348,7 @@ def _interp_points_base(
         # Get lower-left corner coordinates
         xycoords = _coords(
             transform=transform,
-            shape=array.shape[0:2],
+            shape=(array.shape[0], array.shape[1]),
             area_or_point=area_or_point,
             grid=False,
             shift_area_or_point=shift_area_or_point,
@@ -371,6 +377,7 @@ def _interp_points_base(
 
     return rpoints
 
+
 # CHUNKED LOGIC: POINT INTERPOLATION ON REGULAR OR EQUAL GRID
 # Notes at the date of April 2024:
 # This functionality is not covered efficiently by Dask/Xarray, because they need to support rectilinear grids, which
@@ -380,6 +387,7 @@ def _interp_points_base(
 # the location of the blocks required for interpolation, which requires little memory usage.
 
 # Code structure inspired by https://blog.dask.org/2021/07/02/ragged-output and the "block_id" in map_blocks
+
 
 def _get_interp_indices_per_block(
     interp_x: NDArrayNum,
@@ -411,9 +419,13 @@ def _get_interp_indices_per_block(
 
     return ind_per_block
 
+
 @delayed
 def _delayed_interp_points_block(
-    arr_chunk: NDArrayNum, block_id: dict[str, Any], interp_coords: NDArrayNum, **kwargs,
+    arr_chunk: NDArrayNum,
+    block_id: dict[str, Any],
+    interp_coords: NDArrayNum,
+    **kwargs: Any,
 ) -> NDArrayNum:
     """
     Interpolate block in 2D out-of-memory for a regular or equal grid.
@@ -435,6 +447,7 @@ def _delayed_interp_points_block(
 
     # And return the interpolated array
     return interp_chunk
+
 
 def _dask_interp_points(
     darr: da.Array,
@@ -467,7 +480,7 @@ def _dask_interp_points(
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
     res = _res(transform)
     bounds = _bounds(transform=transform, shape=darr.shape)
-    left, right, top, bottom = bounds.left, bounds.right, bounds.top, bounds.bottom
+    left, top = bounds.left, bounds.top
 
     # Expand dask array for overlapping computations
     chunksize = darr.chunksize
@@ -481,7 +494,15 @@ def _dask_interp_points(
 
     # Get samples indices per blocks
     ind_per_block = _get_interp_indices_per_block(
-        points_arr[0, :], points_arr[1, :], starts, num_chunks, chunksize, res[0], res[1], left, top,
+        points_arr[0, :],
+        points_arr[1, :],
+        starts,
+        num_chunks,
+        chunksize,
+        res[0],
+        res[1],
+        left,
+        top,
     )
 
     # Create a delayed object for each block, and flatten the blocks into a 1d shape
@@ -502,19 +523,21 @@ def _dask_interp_points(
     # Compute values delayed
     used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
     list_interp = [
-        _delayed_interp_points_block(blocks[i], block_ids[i], points_arr[:, ind_per_block[i]], **kwargs)
-        for i in used
+        _delayed_interp_points_block(blocks[i], block_ids[i], points_arr[:, ind_per_block[i]], **kwargs) for i in used
     ]
 
     # We concatenate and re-order in a delayed manner
-    def _concat_reorder(list_vals, list_inds):
+    def _concat_reorder(list_vals, list_inds):  # type: ignore
         # Flatten outputs to 1D and concatenate
         vals = [np.asarray(v).ravel() for v in list_vals]
         vcat = np.concatenate(vals) if vals else np.array([], dtype=np.float32)
 
         # Build index array and argsort
-        inds = np.concatenate([np.asarray(ii, dtype=np.int64) for ii in list_inds]) if list_inds else np.array([],
-                                                                                                     dtype=np.int64)
+        inds = (
+            np.concatenate([np.asarray(ii, dtype=np.int64) for ii in list_inds])
+            if list_inds
+            else np.array([], dtype=np.int64)
+        )
         order = np.argsort(inds)
         return vcat[order]
 
@@ -527,13 +550,15 @@ def _dask_interp_points(
 
     return interp_points
 
+
 # SAME WITH MULTIPROCESSING
+
 
 def _wrapper_multiproc_interp_per_block(
     rst: Raster,
     block_id: dict[str, Any],
     interp_coords: NDArrayNum,
-    **kwargs,
+    **kwargs: Any,
 ) -> NDArrayNum:
     """Wrapper to use interpolation per block."""
 
@@ -554,9 +579,10 @@ def _wrapper_multiproc_interp_per_block(
     # And return the interpolated array
     return interp_chunk
 
+
 def _multiproc_interp_points(
-    rst: Raster,
-    points: tuple[list[float], list[float]],
+    rst: RasterBase,
+    points: tuple[NDArrayNum, NDArrayNum],
     config: MultiprocConfig,
     **kwargs: Any,
 ) -> NDArrayNum:
@@ -571,7 +597,7 @@ def _multiproc_interp_points(
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
     res = _res(rst.transform)
     bounds = _bounds(transform=rst.transform, shape=rst.shape)
-    left, right, top, bottom = bounds.left, bounds.right, bounds.top, bounds.bottom
+    left, top = bounds.left, bounds.top
 
     # Get multiprocessing chunk sizes
     chunksize = (config.chunk_size, config.chunk_size)
@@ -597,14 +623,24 @@ def _multiproc_interp_points(
     # Get starting 2D index for each chunk of the full array
     # (mirroring what is done in block_id of dask.array.map_blocks)
     tiling = compute_tiling(tile_size=config.chunk_size, raster_shape=rst.shape, overlap=depth)
-    starts = [cached_cumsum(_chunk_sizes_1d(n=rst.shape[0], chunk=config.chunk_size), initial_zero=True),
-              cached_cumsum(_chunk_sizes_1d(n=rst.shape[1], chunk=config.chunk_size), initial_zero=True)]
+    starts = [
+        cached_cumsum(_chunk_sizes_1d(n=rst.shape[0], chunk=config.chunk_size), initial_zero=True),
+        cached_cumsum(_chunk_sizes_1d(n=rst.shape[1], chunk=config.chunk_size), initial_zero=True),
+    ]
     num_chunks = (tiling.shape[0], tiling.shape[1])
     num_blocks = np.prod(num_chunks)
 
     # Get samples indices per blocks
     ind_per_block = _get_interp_indices_per_block(
-        points_arr[0, :], points_arr[1, :], starts, num_chunks, chunksize, res[0], res[1], left, top,
+        points_arr[0, :],
+        points_arr[1, :],
+        starts,  # type: ignore
+        num_chunks,
+        chunksize,
+        res[0],
+        res[1],
+        left,
+        top,
     )
 
     # Build the block IDs by unravelling starting indexes for each block
@@ -616,9 +652,11 @@ def _multiproc_interp_points(
     for i in range(len(block_ids)):
         # Launch the task on the cluster to process each tile
         tasks.append(
-            config.cluster.launch_task(fun=_wrapper_multiproc_interp_per_block,
-                                       args=[rst, block_ids[i], points_arr[:, ind_per_block[i]]],
-                                       kwargs=kwargs)
+            config.cluster.launch_task(
+                fun=_wrapper_multiproc_interp_per_block,
+                args=[rst, block_ids[i], points_arr[:, ind_per_block[i]]],
+                kwargs=kwargs,
+            )
         )
 
     # Collect results
@@ -645,6 +683,7 @@ def _multiproc_interp_points(
 
 # MAIN API FUNCTION CHECKING USER INPUTS AND DISPATCHING TO BASE, DASK OR MULTIPROCESSING
 
+
 def _interp_points(
     source_raster: RasterBase,
     points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
@@ -658,13 +697,13 @@ def _interp_points(
     return_interpolator: bool = False,
     mp_config: MultiprocConfig | None = None,
     **kwargs: Any,
-):
+) -> Any:
     """See description of Raster.interp_points."""
 
     # 1/ Input checks
 
     # Check and normalize input points
-    pts, input_scalar = _check_match_points(source_raster, points)
+    pts_xy, input_scalar = _check_match_points(source_raster, points)
 
     # Extract raster metadata for later checks and conversions
     transform = source_raster.transform
@@ -672,22 +711,27 @@ def _interp_points(
     shape = source_raster.shape
 
     # Convert from latlon if necessary
+    pts = pts_xy
     if input_latlon:
-        pts = reproject_from_latlon(pts, out_crs=source_raster.crs)
+        pts = reproject_from_latlon(pts_xy, out_crs=source_raster.crs)
 
     # If we evaluate points (not returning interpolator), remove those outside of bounds
     # (Out of bounds points are hard to deal with for chunked operations otherwise)
+    pts_inbounds: tuple[NDArrayNum, NDArrayNum] | None
     if not return_interpolator:
         if pts is None:
             raise ValueError("Input 'points' cannot be None if 'return_interpolator' is False.")
-        x, y = pts
+        x0, y0 = pts
+        # Normalize to 1D arrays for typing + uniform downstream logic
+        x: NDArrayNum = np.atleast_1d(np.asarray(x0))
+        y: NDArrayNum = np.atleast_1d(np.asarray(y0))
+
         i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
 
         # Get index of points outside of bounds
-        ind_outofbounds = np.vectorize(
+        ind_outofbounds: NDArrayBool = np.vectorize(
             lambda k1, k2: _outside_bounds(
-                k1, k2, transform=transform, area_or_point=area_or_point,
-                shape=shape, index=True
+                k1, k2, transform=transform, area_or_point=area_or_point, shape=shape, index=True
             )
         )(j, i)
 
@@ -702,6 +746,7 @@ def _interp_points(
                 from geoutils.pointcloud import (
                     PointCloud,  # Runtime import to avoid circular issues
                 )
+
                 return PointCloud.from_xyz(x=points[0], y=points[1], z=output, crs=source_raster.crs)
 
         # Only work on points inside bounds
@@ -710,10 +755,22 @@ def _interp_points(
         pts_inbounds = None
 
     # 2/ Dispatch to either base (in-memory) function, Dask function, or Multiprocessing function
-    interp_kwargs = {"area_or_point": area_or_point, "method": method, "dist_nodata_spread": dist_nodata_spread,
-                     "shift_area_or_point": shift_area_or_point, "force_scipy_function": force_scipy_function,
-                     "return_interpolator": return_interpolator}
-    interp_kwargs.update(kwargs)
+    class _InterpKwargs(TypedDict):
+        area_or_point: Literal["Area", "Point"] | None
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int
+        shift_area_or_point: bool | None
+        force_scipy_function: Literal["map_coordinates", "interpn"] | None
+        return_interpolator: bool
+
+    interp_kwargs: _InterpKwargs = {
+        "area_or_point": area_or_point,
+        "method": method,
+        "dist_nodata_spread": dist_nodata_spread,
+        "shift_area_or_point": shift_area_or_point,
+        "force_scipy_function": force_scipy_function,
+        "return_interpolator": return_interpolator,
+    }
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
@@ -726,17 +783,22 @@ def _interp_points(
             "from reproject(). To use Multiprocessing, open the file without chunks."
         )
 
-    if (dask_backend or mp_backend) and return_interpolator:
-        raise ValueError("Option 'return_interpolator' of interp_points cannot be used with Dask or Multiprocessing, "
-                         "only with in-memory array.")
+    if (dask_backend or mp_backend) and (return_interpolator or pts_inbounds is None):
+        raise ValueError(
+            "Option 'return_interpolator' of interp_points cannot be used with Dask or Multiprocessing, "
+            "only with in-memory array."
+        )
 
     # If using Multiprocessing backend, process and return NumPy array (ragged output)
     if mp_backend:
+        assert mp_config is not None
+        assert pts_inbounds is not None
         # Temporary switch bands
         orig_bands = source_raster.bands
         source_raster._bands = (band,)
-        z_inbounds = _multiproc_interp_points(rst=source_raster, points=pts_inbounds,
-                                              config=mp_config, **interp_kwargs)
+        z_inbounds = _multiproc_interp_points(
+            rst=source_raster, points=pts_inbounds, config=mp_config, **interp_kwargs, **kwargs
+        )
         # Rewrite original bands
         source_raster._bands = orig_bands
     # For both Dask and NumPy array:
@@ -747,10 +809,15 @@ def _interp_points(
             arr = source_raster.data
         # If using Dask backend, process and return NumPy array (ragged output)
         if dask_backend:
-            z_inbounds = _dask_interp_points(darr=arr, transform=transform, points=pts_inbounds, **interp_kwargs)
+            assert pts_inbounds is not None
+            z_inbounds = _dask_interp_points(
+                darr=arr, transform=transform, points=pts_inbounds, **interp_kwargs, **kwargs
+            )
         # If using direct reprojection, process and return NumPy array
         else:
-            z_inbounds = _interp_points_base(array=arr, transform=transform, points=pts_inbounds, **interp_kwargs)
+            z_inbounds = _interp_points_base(
+                array=arr, transform=transform, points=pts_inbounds, **interp_kwargs, **kwargs  # type: ignore
+            )
 
     # 3/ Output preparation and return
 
@@ -765,7 +832,7 @@ def _interp_points(
         dtype = source_raster.dtype
 
         # Rebuild array (delayed if Dask, normal if NumPy)
-        def _rebuild_with_nans(z_inbounds: np.ndarray, mask_out: np.ndarray, n: int, dtype):
+        def _rebuild_with_nans(z_inbounds: NDArrayNum, mask_out: NDArrayBool, n: int, dtype: DTypeLike) -> NDArrayNum:
             out = np.full(n, np.nan, dtype=np.float32 if np.issubdtype(dtype, np.integer) else dtype)
             out[~mask_out] = z_inbounds
             return out
@@ -784,12 +851,14 @@ def _interp_points(
             from geoutils.pointcloud import (
                 PointCloud,  # Runtime import to avoid circular issues
             )
+
             return PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=source_raster.crs)
 
 
 ##############################################################
 # 2/ REGULAR GRID REDUCTION IN WINDOW AROUND POINT COORDINATES
 ##############################################################
+
 
 def _reduce_points(
     source_raster: RasterBase,

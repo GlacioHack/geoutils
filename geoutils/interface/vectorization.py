@@ -20,28 +20,31 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Callable, Generic, TypeVar, Any
 import warnings
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar
 
 import geopandas as gpd
 import numpy as np
-import rasterio as rio
 import pandas as pd
-from rasterio import features
+import rasterio as rio
 import shapely
+from rasterio import features
 from shapely.geometry import box
 from shapely.ops import unary_union
 
 from geoutils._misc import import_optional, silence_rasterio_message
-from geoutils._typing import NDArrayBool, NDArrayNum
-from geoutils.multiproc.chunked import GeoGrid, ChunkedGeoGrid, _chunks2d_from_chunksizes_shape
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.multiproc.chunked import (
+    ChunkedGeoGrid,
+    GeoGrid,
+    _chunks2d_from_chunksizes_shape,
+)
 from geoutils.multiproc.mparray import MultiprocConfig
 
 if TYPE_CHECKING:
     from geoutils.raster.base import Raster, RasterBase, RasterType
     from geoutils.vector.vector import Vector
-    import dask.array as da
 
 try:
     import dask.array as da
@@ -58,7 +61,8 @@ T = TypeVar("T")
 # Base polygonize (using Rasterio/GeoPandas) + a custom canonicalize for consistent float32 behaviour
 #####################################################################################################
 
-def _canon_values(values, atol: float, *, out_dtype=None):
+
+def _canon_values(values: NDArrayNum, atol: float, *, out_dtype: DTypeLike = None) -> NDArrayNum:
     """Canonicalize array values for equality-based float grouping."""
 
     # Integers or zero tolerances: do nothing
@@ -79,7 +83,7 @@ def _canon_values(values, atol: float, *, out_dtype=None):
     return snapped64.astype(out_dtype, copy=False)
 
 
-def _canon_scalar(v, *, atol: float, out_dtype=None):
+def _canon_scalar(v: Number, *, atol: float, out_dtype: DTypeLike = None) -> Number:
     """Canonicalize scalar values for equality-based float grouping."""
 
     if v is None:
@@ -100,6 +104,7 @@ def _canon_scalar(v, *, atol: float, out_dtype=None):
     if out_dtype is None:
         out_dtype = vv.dtype
     return np.asarray(snapped64).astype(out_dtype).item()
+
 
 def _polygonize_base(
     values: NDArrayNum,
@@ -166,6 +171,7 @@ def _polygonize_base(
 
 # Input check helper
 # ##################
+
 
 def _choose_polygonize_dtype(dtype: Any) -> str:
     """Choose a GeoPandas-compatible dtype for polygonize values."""
@@ -258,8 +264,11 @@ def _polygonize_prepare(
             not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]
         ):
             import warnings
-            warnings.warn("Raster mask (boolean type) passed, using target value of 1 (True) and ignoring target "
-                          f"values input {target_values!r}.")
+
+            warnings.warn(
+                "Raster mask (boolean type) passed, using target value of 1 (True) and ignoring target "
+                f"values input {target_values!r}."
+            )
         eff = True
 
     # 2/ Decide whether labeling can be boolean-only (faster computations)
@@ -267,10 +276,7 @@ def _polygonize_prepare(
     # Fast path is valid whenever all selected pixels are a single “class”:
     # - mask raster (eff=True)
     # - scalar target
-    use_boolean_labeling = (
-            is_mask_raster
-            or isinstance(eff, (int, float, np.integer, np.floating))
-    )
+    use_boolean_labeling = is_mask_raster or isinstance(eff, (int, float, np.integer, np.floating))
 
     # 3/ Choose dtype for polygonize values (GeoPandas compatibility)
     final_dtype = _choose_polygonize_dtype(getattr(source_raster, "dtype", np.float32))
@@ -303,8 +309,9 @@ def _polygonize_prepare(
         id_column=id_column,
         data_column_name=data_column_name,
         halo=halo,
-        float_tol=float_tol
+        float_tol=float_tol,
     )
+
 
 def _build_selection_mask(
     values: Any,
@@ -318,14 +325,16 @@ def _build_selection_mask(
     eff = prepared.target_values
 
     # Helper to pick NumPy or Dask ufunc/module based on the array type
-    def _xp(x):
+    def _xp(x):  # type: ignore
         try:
             import dask.array as da  # type: ignore
+
             if isinstance(x, da.Array):
                 return da
         except Exception:
             pass
         return np
+
     xp = _xp(values)
 
     v_dtype = np.dtype(getattr(values, "dtype", np.asarray(values).dtype))
@@ -368,6 +377,7 @@ def _build_selection_mask(
 
 # Chunked execution abstractions (runner + reader)
 ##################################################
+
 
 class _ChunkedRunner(Generic[T]):
     """
@@ -418,6 +428,7 @@ class _MultiprocRunner(_ChunkedRunner[T]):
             out.append(res)
         return out
 
+
 @dataclass(frozen=True)
 class _ChunkedDaskReader:
     """
@@ -429,17 +440,16 @@ class _ChunkedDaskReader:
       - The seam strip reads return label/value/mask strips sliced from the SAME arrays, guaranteeing consistent
       label ids between seam building and polygonization.
     """
-    values: Any   # Dask array
-    mask: Any     # Dask array (uint8-ish)
-    labels: Any   # Dask array (int32)
+
+    values: Any  # Dask array
+    mask: Any  # Dask array (uint8-ish)
+    labels: Any  # Dask array (int32)
     prepared: _PolygonizePrepared
 
     def read_block(
         self,
         b: dict[str, int],
-        *,
-        tiling_transform: rio.Affine | None = None,  # To maintain same signature with RasterReader
-    ):
+    ) -> tuple[NDArrayNum, NDArrayBool, NDArrayNum]:
         ys, ye, xs, xe = b["ys"], b["ye"], b["xs"], b["xe"]
         return (
             self.values[ys:ye, xs:xe],
@@ -447,7 +457,7 @@ class _ChunkedDaskReader:
             self.labels[ys:ye, xs:xe],
         )
 
-    def read_vseam_strips(self, bL, bR, *, halo: int, shape, tiling_transform=None):
+    def read_vseam_strips(self, bL: dict[str, int], bR: dict[str, int]) -> tuple[NDArrayNum, ...]:
         """Read vertical seam for labels, values and mask."""
 
         # Left and right indexes
@@ -466,7 +476,7 @@ class _ChunkedDaskReader:
             self.mask[ys:ye, xR0:xR1],
         )
 
-    def read_hseam_strips(self, bT, bB, *, halo: int, shape, tiling_transform=None):
+    def read_hseam_strips(self, bT: dict[str, int], bB: dict[str, int]) -> tuple[NDArrayNum, ...]:
         """Read horizontal seam for labels, values and mask."""
 
         # Top and bottom indexes
@@ -485,7 +495,7 @@ class _ChunkedDaskReader:
             self.mask[yB0:yB1, xs:xe],
         )
 
-    def read_diag_corners(self, bTL, bBR):
+    def read_diag_corners(self, bTL: dict[str, int], bBR: dict[str, int]) -> tuple[NDArrayNum, ...]:
         """Read diagonal corners (8-connectivity only) for labels, values and mask."""
 
         # Bottom-right of TL and top-left of BR
@@ -494,15 +504,15 @@ class _ChunkedDaskReader:
         yBR = bBR["ys"]
         xBR = bBR["xs"]
         return (
-            self.labels[yTL:yTL + 1, xTL:xTL + 1],
-            self.labels[yBR:yBR + 1, xBR:xBR + 1],
-            self.values[yTL:yTL + 1, xTL:xTL + 1],
-            self.values[yBR:yBR + 1, xBR:xBR + 1],
-            self.mask[yTL:yTL + 1, xTL:xTL + 1],
-            self.mask[yBR:yBR + 1, xBR:xBR + 1],
+            self.labels[yTL : yTL + 1, xTL : xTL + 1],
+            self.labels[yBR : yBR + 1, xBR : xBR + 1],
+            self.values[yTL : yTL + 1, xTL : xTL + 1],
+            self.values[yBR : yBR + 1, xBR : xBR + 1],
+            self.mask[yTL : yTL + 1, xTL : xTL + 1],
+            self.mask[yBR : yBR + 1, xBR : xBR + 1],
         )
 
-    def read_antidiag_corners(self, bTR, bBL):
+    def read_antidiag_corners(self, bTR: dict[str, int], bBL: dict[str, int]) -> tuple[NDArrayNum, ...]:
         """Read anti-diagonal corners (8-connectivity only) for labels, values and mask."""
 
         # Bottom-left of TR vs top-right of BL
@@ -511,21 +521,19 @@ class _ChunkedDaskReader:
         yBL = bBL["ys"]
         xBL = bBL["xe"] - 1
         return (
-            self.labels[yTR:yTR + 1, xTR:xTR + 1],
-            self.labels[yBL:yBL + 1, xBL:xBL + 1],
-            self.values[yTR:yTR + 1, xTR:xTR + 1],
-            self.values[yBL:yBL + 1, xBL:xBL + 1],
-            self.mask[yTR:yTR + 1, xTR:xTR + 1],
-            self.mask[yBL:yBL + 1, xBL:xBL + 1],
+            self.labels[yTR : yTR + 1, xTR : xTR + 1],
+            self.labels[yBL : yBL + 1, xBL : xBL + 1],
+            self.values[yTR : yTR + 1, xTR : xTR + 1],
+            self.values[yBL : yBL + 1, xBL : xBL + 1],
+            self.mask[yTR : yTR + 1, xTR : xTR + 1],
+            self.mask[yBL : yBL + 1, xBL : xBL + 1],
         )
 
 
 def _chunked_structure_from_connectivity(connectivity: Literal[4, 8]) -> NDArrayBool:
     """Helper to get structuring element depending on connectivity level."""
     if connectivity == 4:
-        return np.array([[0, 1, 0],
-                         [1, 1, 1],
-                         [0, 1, 0]], dtype=bool)
+        return np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
     if connectivity == 8:
         return np.ones((3, 3), dtype=bool)
     raise ValueError("connectivity must be 4 or 8")
@@ -599,7 +607,7 @@ def _chunked_label_block_per_value(
 
         # Shift local labels to global block label space
         lab = lab.astype(np.int32, copy=False)
-        lab[lab > 0] += (next_id - 1)
+        lab[lab > 0] += next_id - 1
 
         # Write labeled pixels into output array
         out[lab > 0] = lab[lab > 0]
@@ -608,6 +616,7 @@ def _chunked_label_block_per_value(
 
     return out
 
+
 @dataclass(frozen=True)
 class _ChunkedRasterReader:
     """
@@ -615,14 +624,15 @@ class _ChunkedRasterReader:
 
     This reader mirrors Dask selection/label semantics via `_build_selection_mask` and `prepared.use_boolean_labeling`.
     """
+
     raster: Raster
     prepared: _PolygonizePrepared
 
-    _cache: dict[tuple[int,int,int,int], tuple[NDArrayNum, NDArrayBool, NDArrayNum]] = field(
-        default_factory=dict
-    )
+    _cache: dict[tuple[int, int, int, int], tuple[NDArrayNum, NDArrayNum, NDArrayNum]] = field(default_factory=dict)
 
-    def _get_block_np(self, b: dict[str, int], tiling_transform: rio.Affine) -> tuple[NDArrayNum, NDArrayBool, NDArrayNum]:
+    def _get_block_np(
+        self, b: dict[str, int], tiling_transform: rio.Affine
+    ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
 
         # Get coordinates of window
         key = (b["ys"], b["ye"], b["xs"], b["xe"])
@@ -630,10 +640,7 @@ class _ChunkedRasterReader:
             return self._cache[key]
 
         # Convert to bounds
-        w = rio.windows.Window(
-            col_off=b["xs"], row_off=b["ys"],
-            width=b["xe"] - b["xs"], height=b["ye"] - b["ys"]
-        )
+        w = rio.windows.Window(col_off=b["xs"], row_off=b["ys"], width=b["xe"] - b["xs"], height=b["ye"] - b["ys"])
         bb = rio.coords.BoundingBox(*rio.windows.bounds(w, tiling_transform))
 
         # Get values, mask and labels for this block
@@ -655,7 +662,7 @@ class _ChunkedRasterReader:
         arr = np.asarray(blk.data.filled(fill_value))
         return arr.astype(self.prepared.final_dtype, copy=False)
 
-    def _read_block_bounds(self, bounds: rio.coords.BoundingBox) -> tuple[NDArrayNum, NDArrayBool, NDArrayNum]:
+    def _read_block_bounds(self, bounds: rio.coords.BoundingBox) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
         """Core window read: values + mask + labels."""
 
         # Read values
@@ -668,19 +675,23 @@ class _ChunkedRasterReader:
         if self.prepared.use_boolean_labeling:
             labels = _chunked_label_block_boolean(mask, connectivity=self.prepared.connectivity)
         else:
-            labels = _chunked_label_block_per_value(values, mask, connectivity=self.prepared.connectivity,
-                                                    float_tol=self.prepared.float_tol)
-
+            labels = _chunked_label_block_per_value(
+                values, mask, connectivity=self.prepared.connectivity, float_tol=self.prepared.float_tol
+            )
         return values, mask, labels
 
-    def read_block(self, b: dict[str, int], *, tiling_transform: rio.Affine):
+    def read_block(
+        self, b: dict[str, int], *, tiling_transform: rio.Affine
+    ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
         return self._get_block_np(b, tiling_transform)
 
-    def read_strip_bounds(self, bounds: rio.coords.BoundingBox) -> tuple[NDArrayNum, NDArrayBool, NDArrayNum]:
+    def read_strip_bounds(self, bounds: rio.coords.BoundingBox) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
         """Read a thin strip by bounds (used by seam helpers)."""
         return self._read_block_bounds(bounds)
 
-    def read_vseam_strips(self, bL, bR, *, halo: int, shape, tiling_transform: rio.Affine):
+    def read_vseam_strips(
+        self, bL: dict[str, int], bR: dict[str, int], *, tiling_transform: rio.Affine
+    ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum]:
         """Read vertical seam for labels, values and mask."""
 
         ys = max(bL["ys"], bR["ys"])
@@ -707,7 +718,9 @@ class _ChunkedRasterReader:
             mR[slR0:slR1, :1],
         )
 
-    def read_hseam_strips(self, bT, bB, *, halo: int, shape, tiling_transform: rio.Affine):
+    def read_hseam_strips(
+        self, bT: dict[str, int], bB: dict[str, int], *, tiling_transform: rio.Affine
+    ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum]:
         """Read horizontal seam for labels, values and mask."""
 
         xs = max(bT["xs"], bB["xs"])
@@ -733,7 +746,9 @@ class _ChunkedRasterReader:
             mB[:1, slB0:slB1],
         )
 
-    def read_diag_corners(self, bTL, bBR, *, tiling_transform: rio.Affine):
+    def read_diag_corners(
+        self, bTL: dict[str, int], bBR: dict[str, int], *, tiling_transform: rio.Affine
+    ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum]:
         """Read diagonal corners (8-connectivity only) for labels, values and mask."""
 
         vTL, mTL, labTL = self._get_block_np(bTL, tiling_transform)
@@ -748,7 +763,9 @@ class _ChunkedRasterReader:
             mBR[:1, :1],
         )
 
-    def read_antidiag_corners(self, bTR, bBL, *, tiling_transform: rio.Affine):
+    def read_antidiag_corners(
+        self, bTR: dict[str, int], bBL: dict[str, int], *, tiling_transform: rio.Affine
+    ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum]:
         """Read anti-diagonal corners (8-connectivity only) for labels, values and mask."""
 
         vTR, mTR, labTR = self._get_block_np(bTR, tiling_transform)
@@ -766,6 +783,7 @@ class _ChunkedRasterReader:
 
 # Chunked tiling helper (based on GeoGrid/ChunkedGeoGrid)
 #########################################################
+
 
 def _chunked_build_dst_geotiling(
     *,
@@ -788,8 +806,10 @@ def _chunked_build_dst_geotiling(
 
     return dst_geotiling, block_geogrids, block_ids
 
+
 # Step 1: Build global seam
 ###########################
+
 
 def _chunked_seam_pairs_from_strips(
     left_labels: NDArrayNum,
@@ -842,11 +862,7 @@ def _chunked_seam_pairs_from_strips(
         pairs.extend(zip(left_nodes.tolist(), right_nodes.tolist()))
 
     # Aligned adjacency (always, both 4 and 8)
-    ok0 = (
-        l_m & r_m &
-        (l_lab > 0) & (r_lab > 0) &
-        (l_val == r_val)
-    )
+    ok0 = l_m & r_m & (l_lab > 0) & (r_lab > 0) & (l_val == r_val)
 
     _pairs_from_ok(ok0, l_lab, r_lab)
 
@@ -859,41 +875,26 @@ def _chunked_seam_pairs_from_strips(
     # Horizontal seam strips are shape (1, W): allow col shifts +/-1
     if axis == "v":
         # Right shifted up: left[r] adjacent to right[r-1]  (exclude first row of left)
-        ok_up = (
-            l_m[1:, :] & r_m[:-1, :] &
-            (l_lab[1:, :] > 0) & (r_lab[:-1, :] > 0) &
-            (l_val[1:, :] == r_val[:-1, :])
-        )
+        ok_up = l_m[1:, :] & r_m[:-1, :] & (l_lab[1:, :] > 0) & (r_lab[:-1, :] > 0) & (l_val[1:, :] == r_val[:-1, :])
         _pairs_from_ok(ok_up, l_lab[1:, :], r_lab[:-1, :])
 
         # Right shifted down: left[r] adjacent to right[r+1] (exclude last row of left)
-        ok_down = (
-            l_m[:-1, :] & r_m[1:, :] &
-            (l_lab[:-1, :] > 0) & (r_lab[1:, :] > 0) &
-            (l_val[:-1, :] == r_val[1:, :])
-        )
+        ok_down = l_m[:-1, :] & r_m[1:, :] & (l_lab[:-1, :] > 0) & (r_lab[1:, :] > 0) & (l_val[:-1, :] == r_val[1:, :])
         _pairs_from_ok(ok_down, l_lab[:-1, :], r_lab[1:, :])
 
     elif axis == "h":
         # Horizontal strips are (1, W): allow col shifts +/-1
-        ok_left = (
-            l_m[:, 1:] & r_m[:, :-1] &
-            (l_lab[:, 1:] > 0) & (r_lab[:, :-1] > 0) &
-            (l_val[:, 1:] == r_val[:, :-1])
-        )
+        ok_left = l_m[:, 1:] & r_m[:, :-1] & (l_lab[:, 1:] > 0) & (r_lab[:, :-1] > 0) & (l_val[:, 1:] == r_val[:, :-1])
         _pairs_from_ok(ok_left, l_lab[:, 1:], r_lab[:, :-1])
 
-        ok_right = (
-            l_m[:, :-1] & r_m[:, 1:] &
-            (l_lab[:, :-1] > 0) & (r_lab[:, 1:] > 0) &
-            (l_val[:, :-1] == r_val[:, 1:])
-        )
+        ok_right = l_m[:, :-1] & r_m[:, 1:] & (l_lab[:, :-1] > 0) & (r_lab[:, 1:] > 0) & (l_val[:, :-1] == r_val[:, 1:])
         _pairs_from_ok(ok_right, l_lab[:, :-1], r_lab[:, 1:])
 
     else:
         raise ValueError("axis must be 'v' or 'h'.")
 
     return pairs
+
 
 # Union-find for seam stitching
 class _UnionFind:
@@ -936,6 +937,7 @@ class _UnionFind:
     def nodes(self) -> list[int]:
         return list(self._parent.keys())
 
+
 def _chunked_union_mapping_from_pairs(pair_lists: list[list[tuple[int, int]]]) -> dict[int, int]:
     """
     Convert seam union pairs into a mapping node -> global component id.
@@ -952,8 +954,9 @@ def _chunked_union_mapping_from_pairs(pair_lists: list[list[tuple[int, int]]]) -
         mapping[node] = root_to_gid[uf.find(node)]
     return mapping
 
+
 def _build_seam_mapping(
-    runner: _ChunkedRunner,
+    runner: _ChunkedRunner[Any],
     reader: Any,
     *,
     tiling: ChunkedGeoGrid,
@@ -993,7 +996,7 @@ def _build_seam_mapping(
 
     seam_tasks: list[Any] = []
 
-    def _seam_task(labA, labB, valA, valB, mA, mB, bidA, bidB, axis):
+    def _seam_task(labA, labB, valA, valB, mA, mB, bidA, bidB, axis):  # type: ignore
         return _chunked_seam_pairs_from_strips(
             np.asarray(labA),
             np.asarray(labB),
@@ -1091,14 +1094,16 @@ def _build_seam_mapping(
     seam_pairs_lists = runner.gather(seam_tasks)
     return _chunked_union_mapping_from_pairs(seam_pairs_lists)
 
+
 # Step 2: Polygonize per block
 ##############################
+
 
 def _touches_block_fast(
     gdf: gpd.GeoDataFrame,
     *,
     block_bounds: rio.coords.BoundingBox,
-) -> np.ndarray:
+) -> NDArrayNum:
     """
     Fast conservative test for polygons touching the block boundary.
 
@@ -1110,10 +1115,8 @@ def _touches_block_fast(
     minx, miny, maxx, maxy = gdf.geometry.bounds.T.values
     bminx, bminy, bmaxx, bmaxy = block_bounds
 
-    return (
-        np.isclose(minx, bminx) | np.isclose(maxx, bmaxx) |
-        np.isclose(miny, bminy) | np.isclose(maxy, bmaxy)
-    )
+    return np.isclose(minx, bminx) | np.isclose(maxx, bmaxx) | np.isclose(miny, bminy) | np.isclose(maxy, bmaxy)
+
 
 def _chunked_polygonize_block_labels(
     labels: NDArrayNum,
@@ -1248,7 +1251,7 @@ def _attach_label_union_ids(
     return g
 
 
-def _polygonal_only(g):
+def _polygonal_only(g: gpd.GeoSeries) -> gpd.GeoSeries | None:
     """
     Return a Polygon/MultiPolygon containing only polygonal parts of `g`.
     Returns None if no polygonal area exists.
@@ -1308,6 +1311,7 @@ def _polygonal_only(g):
     out2 = _polygonal_only(out)
     return out2
 
+
 def _chunked_clip_gdf_to_bounds_polygonal(
     gdf: gpd.GeoDataFrame,
     bounds: rio.coords.BoundingBox,
@@ -1333,7 +1337,7 @@ def _chunked_clip_gdf_to_bounds_polygonal(
     out = gdf.loc[sel].copy()
 
     # Intersection can produce None in some cases, so guard it
-    def _safe_intersection(geom):
+    def _safe_intersection(geom: gpd.GeoSeries) -> gpd.GeoSeries | None:
         if geom is None or geom.is_empty:
             return None
         try:
@@ -1344,7 +1348,7 @@ def _chunked_clip_gdf_to_bounds_polygonal(
     out["geometry"] = out.geometry.apply(_safe_intersection)
 
     # Clean + polygonal-only extraction
-    def _clean_poly(geom):
+    def _clean_poly(geom: gpd.GeoSeries) -> gpd.GeoSeries | None:
         if geom is None or geom.is_empty:
             return None
 
@@ -1381,6 +1385,7 @@ def _chunked_clip_gdf_to_bounds_polygonal(
     out = out[~out.geometry.is_empty]
 
     return out
+
 
 def _polygonize_block_geometry_halo(
     reader: Any,
@@ -1448,6 +1453,7 @@ def _polygonize_block_geometry_halo(
     # Drop per-call id; re-index later
     return g.drop(columns=[data_column_name], errors="ignore")
 
+
 def _concat_nonempty(parts: list[gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
     """Concatenate GeoDataFrames, skipping empty/None entries."""
     keep = [p for p in parts if p is not None and len(p) > 0]
@@ -1456,6 +1462,7 @@ def _concat_nonempty(parts: list[gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
 
 # Step 3: Stitching or union of chunked polygons
 ################################################
+
 
 def _chunked_stitch_geometries_by_value_graph_connectivity(
     gdf: gpd.GeoDataFrame,
@@ -1513,7 +1520,7 @@ def _chunked_stitch_geometries_by_value_graph_connectivity(
                 inter = g1.boundary.intersection(g2.boundary)
                 keep.append(inter.length > 0)
 
-            keep = np.asarray(keep, dtype=bool)
+            keep = np.asarray(keep, dtype=bool)  # type: ignore
             sj = sj.iloc[keep.nonzero()[0]]
             if len(sj) == 0:
                 out_parts.append(sub)
@@ -1588,9 +1595,9 @@ def _chunked_stitch_by_value_neighbor_blocks(
 
     # For each value group, stitch only neighbor-block pairs
     # We only compare candidates, but unions are applied to the full gdf indices.
-    for val, sub in cand.groupby(value_column, sort=False):
+    for _, sub in cand.groupby(value_column, sort=False):
         # map block -> indices in original gdf
-        by_block: dict[int, np.ndarray] = {}
+        by_block: dict[int, NDArrayNum] = {}
         for bid, sbb in sub.groupby("_block_id", sort=False):
             by_block[int(bid)] = sbb.index.to_numpy()
 
@@ -1643,11 +1650,13 @@ def _chunked_stitch_by_value_neighbor_blocks(
 
     return out.reset_index(drop=True)
 
+
 # Common chunked strategy wrapper
 ##################################
 
+
 def _chunked_polygonize_core(
-    runner: _ChunkedRunner,
+    runner: _ChunkedRunner[Any],
     reader: Any,
     tiling: ChunkedGeoGrid,
     block_geogrids: list[GeoGrid],
@@ -1711,7 +1720,7 @@ def _chunked_polygonize_core(
     # 2) Per-block polygonization (shared dispatch)
     if prepared.strategy in ("label_union", "label_stitch"):
 
-        def _block_task(
+        def _block_task_lab(
             i: int,
             b: dict[str, int],
             block_transform: rio.Affine,
@@ -1745,13 +1754,13 @@ def _chunked_polygonize_core(
             return g.drop(columns=["local_id"], errors="ignore")
 
         handles = [
-            runner.submit(_block_task, i, block_ids[i], block_geogrids[i].transform, block_geogrids[i].bounds)
+            runner.submit(_block_task_lab, i, block_ids[i], block_geogrids[i].transform, block_geogrids[i].bounds)
             for i in range(len(block_ids))
         ]
 
     elif prepared.strategy == "geometry_stitch":
 
-        def _block_task(b: dict[str, int]) -> gpd.GeoDataFrame:
+        def _block_task_geom(b: dict[str, int]) -> gpd.GeoDataFrame:
             return _polygonize_block_geometry_halo(
                 reader,
                 b=b,
@@ -1765,7 +1774,7 @@ def _chunked_polygonize_core(
                 shape=shape,
             )
 
-        handles = [runner.submit(_block_task, block_ids[i]) for i in range(len(block_ids))]
+        handles = [runner.submit(_block_task_geom, block_ids[i]) for i in range(len(block_ids))]
 
     else:
         raise ValueError(
@@ -1804,6 +1813,7 @@ def _chunked_polygonize_core(
 # Dask and Multiprocessing wrappers
 ###################################
 
+
 def _dask_polygonize(
     array: da.Array,
     prepared: _PolygonizePrepared,
@@ -1835,8 +1845,9 @@ def _dask_polygonize(
             m_np = np.asarray(m_blk)
             if prepared.use_boolean_labeling:
                 return _chunked_label_block_boolean(m_np, connectivity=prepared.connectivity)
-            return _chunked_label_block_per_value(v_np, m_np, connectivity=prepared.connectivity,
-                                                  float_tol=prepared.float_tol)
+            return _chunked_label_block_per_value(
+                v_np, m_np, connectivity=prepared.connectivity, float_tol=prepared.float_tol
+            )
 
         labels = da.map_blocks(_label_wrap, values, mask, dtype=np.int32, chunks=values.chunks)
     else:
@@ -1919,6 +1930,7 @@ def _multiproc_polygonize(
 # Parent polygonize (dispatch only)
 ###################################
 
+
 def _polygonize(
     source_raster: RasterType,
     target_values: Any,
@@ -1927,7 +1939,7 @@ def _polygonize(
     band: int = 1,
     connectivity: Literal[4, 8] = 4,
     strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
-    mp_config: "MultiprocConfig | None" = None,
+    mp_config: MultiprocConfig | None = None,
     float_tol: float = 0.1,
 ) -> Vector:
     """
@@ -1970,6 +1982,7 @@ def _polygonize(
 
     # For Multiprocessing
     if mp_backend:
+        assert mp_config is not None
         # Temporary switch bands
         orig_bands = source_raster.bands
         source_raster._bands = (band,)
@@ -2065,7 +2078,6 @@ def _polygonize(
         #             diffs = [abs(float(val) - n) for n in neigh]
         #             print(f"    4-neigh vals={neigh} abs_diffs={diffs}")
 
-
         return Vector(gdf)
 
     # Finalize Vector output
@@ -2079,5 +2091,3 @@ def _polygonize(
         gdf = gdf.set_crs(source_raster.crs)
 
     return Vector(gdf)
-
-

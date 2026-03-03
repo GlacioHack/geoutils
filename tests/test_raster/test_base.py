@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import geopandas as gpd
@@ -15,7 +14,7 @@ from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
-from geoutils import Raster, Vector, examples, open_raster
+from geoutils import Raster, Vector, open_raster
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
@@ -366,10 +365,19 @@ class TestClassVsAccessorConsistency:
         if len(list_missing) != 0:
             raise AssertionError(f"RasterBase methods not covered by tests: {list_missing}")
 
-    chunked_methods_and_args = (("reproject", {"crs": CRS.from_epsg(4326)}),
-                                ("interp_points", {"points": "random", "as_array": True}),
-                                ("subsample", {"subsample": 100, "strategy": "topk"},),
-                                ("subsample", {"subsample": 100, "strategy": "topk", "return_indices": True},))
+    chunked_methods_and_args = (
+        ("reproject", {"crs": CRS.from_epsg(4326)}),
+        ("interp_points", {"points": "random", "as_array": True}),
+        (
+            "subsample",
+            {"subsample": 100, "strategy": "topk"},
+        ),
+        (
+            "subsample",
+            {"subsample": 100, "strategy": "topk", "return_indices": True},
+        ),
+    )
+
     @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])
     def test_chunked_methods__equality_loading_laziness(
@@ -485,7 +493,6 @@ class TestClassVsAccessorConsistency:
         assert_output_equal(output_raster, output_ds, use_allclose=True)
         assert_output_equal(output_raster, output_raster2, use_allclose=True, strict_masked=False)
         assert_output_equal(output_raster, output_ds2, use_allclose=True)
-
 
     match_methods = ["reproject", "crop", "create_mask", "rasterize", "proximity", "grid"]
 

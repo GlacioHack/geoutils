@@ -1,13 +1,16 @@
 """Test configuration."""
+
 from __future__ import annotations
-import os
+
 import logging
+import os
 from typing import Any
 
+import numpy as np
 import pytest
 
-import numpy as np
-from geoutils import examples, Raster
+from geoutils import Raster, examples
+
 
 class LoggingWarningCollector(logging.Handler):
     """Helper class to collect logging warnings."""
@@ -27,6 +30,7 @@ class LoggingWarningCollector(logging.Handler):
         # Override default behavior (which can print to stderr) and never raise
         return
 
+
 def _safe_record_line(r: logging.LogRecord) -> str:
     # Helper to avoid record.getMessage() raising errors if msg/args formatting is invalid
     try:
@@ -36,6 +40,7 @@ def _safe_record_line(r: logging.LogRecord) -> str:
         msg = f"<message formatting failed: {type(e).__name__}: {e}; msg={r.msg!r} args={r.args!r}>"
 
     return f"{r.levelname}:{r.name}:{msg}"
+
 
 @pytest.fixture(autouse=True)
 def fail_on_logging_warnings(request: Any) -> Any:
@@ -70,6 +75,7 @@ def fail_on_logging_warnings(request: Any) -> Any:
     if bad:
         msgs = "\n".join(_safe_record_line(r) for r in bad)
         pytest.fail("Logging warning/error detected:\n" + msgs, pytrace=False)
+
 
 @pytest.fixture(scope="module")
 def lazy_test_files(tmp_path_factory: Any) -> list[str]:

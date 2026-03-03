@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import warnings
+
 import numpy as np
 import pytest
 
-import geoutils as gu
 from geoutils._typing import NDArrayNum
 from geoutils.stats.sampling import _dask_subsample, _subsample_numpy
+
 
 class TestSampling:
     """
@@ -170,4 +171,3 @@ class TestDask:
         sub_bool = np.array(darr.vindex[indices_bool])
         assert np.array_equal(sub, sub_bool)
         assert np.array_equal(indices, indices_bool)
-
