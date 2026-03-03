@@ -147,10 +147,10 @@ def _filter_base(
     else:
         filter_map = {
             "gaussian": gaussian_filter,
-            "median": median_filter,
-            "mean": mean_filter,
-            "max": max_filter,
-            "min": min_filter,
+            "median": lambda arr, size=size, **_: median_filter(arr, size=size),
+            "mean": lambda arr, size=size, **_: mean_filter(arr, size=size),
+            "max": lambda arr, size=size, **_: max_filter(arr, size=size),
+            "min": lambda arr, size=size, **_: min_filter(arr, size=size),
             "distance": distance_filter,
         }
 
