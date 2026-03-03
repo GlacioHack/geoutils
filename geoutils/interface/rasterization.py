@@ -589,7 +589,6 @@ def _create_mask_raster(
         if rst01.is_loaded:
             rst_bool = rst01.astype(np.bool_)
         # If unloaded, set the is_mask attribute for later loading as boolean
-        # TODO: Move that behaviour to astype eventually? Maybe issue to open
         else:
             rst01._is_mask = True
             rst_bool = rst01

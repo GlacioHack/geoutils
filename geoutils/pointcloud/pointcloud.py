@@ -409,7 +409,7 @@ class PointCloud(Vector):  # type: ignore[misc]
             return pd.Index(list(self._nongeo_columns) + ["geometry"])
 
     #####################################
-    # NEW METHODS SPECIFIC TO POINT CLOUD
+    # METHODS SPECIFIC TO POINT CLOUD
     #####################################
 
     @property
