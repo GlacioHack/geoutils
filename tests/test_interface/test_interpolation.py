@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import warnings
-
 import re
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -12,18 +10,15 @@ from scipy.interpolate import interpn
 from scipy.ndimage import binary_dilation
 
 import geoutils as gu
-from geoutils import examples
+from geoutils import examples, open_raster
 from geoutils.interface.interpolation import (
-    _dask_interp_points,
     _get_dist_nodata_spread,
     _interp_points,
-    _interp_points_base,
     _interpn_interpolator,
     method_to_order,
 )
-from geoutils.projtools import reproject_to_latlon
 from geoutils.multiproc import MultiprocConfig
-from geoutils import open_raster
+from geoutils.projtools import reproject_to_latlon
 
 
 class TestInterpolate:
@@ -816,7 +811,7 @@ class TestInterpPointsChunked:
         core = in_bounds & ~at_boundary
 
         if method == "nearest":
-            # Nearest should be identical everywhere (including near boundaries) given identical bounds filtering # Linear: compare only away from the raster boundary
+            # Nearest should be identical everywhere (including near boundaries) given identical bounds filtering
             assert np.array_equal(out_raster_np[core], out_xr_np[core], equal_nan=True)
             assert np.array_equal(out_raster_np[core], out_dask_np[core], equal_nan=True)
             assert np.array_equal(out_raster_np[core], out_mp_np[core], equal_nan=True)
@@ -829,6 +824,8 @@ class TestInterpPointsChunked:
         # Still require that truly out-of-bounds points map to NaNs consistently
         oob = ~in_bounds
         assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_xr_np[oob]))
-        # Need to fix Dask behaviour near edges, see issue #876
+
+        # Need to fix Dask behaviour near edges, see issue #876...
         # assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_dask_np[oob]))
+
         assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_mp_np[oob]))

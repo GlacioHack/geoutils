@@ -8,13 +8,12 @@ from typing import Literal
 import numpy as np
 import pytest
 
-from geoutils._typing import NDArrayNum
-from geoutils.stats.sampling import _dask_subsample, _subsample_numpy
-from geoutils.raster.array import get_mask_from_array
 import geoutils as gu
 from geoutils import open_raster
+from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
-
+from geoutils.raster.array import get_mask_from_array
+from geoutils.stats.sampling import _subsample_numpy
 
 
 class TestSampling:
@@ -86,7 +85,6 @@ class TestSampling:
         sub42_gen = _subsample_numpy(array, subsample=10, random_state=rng)
         # Both should be equal
         assert np.array_equal(sub42, sub42_gen)
-
 
 
 class TestSubsampleChunked:
@@ -207,7 +205,7 @@ class TestSubsampleChunked:
 
         def _as_numpy(
             out: object,
-        ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
             """Convert backend outputs to NumPy arrays for comparison."""
             if isinstance(out, tuple):
                 r, c = out
