@@ -2020,13 +2020,12 @@ def _polygonize(
                 fill_value = _cast_nodata(out_dtype=prepared.final_dtype, nodata=source_raster.nodata)
             else:
                 fill_value = np.nan
-            arr = source_raster.data.astype(prepared.final_dtype, copy=False)
+            arr = arr.astype(prepared.final_dtype, copy=False)
             if np.ma.isMaskedArray(arr):
                 values = arr.filled(fill_value)  # type: ignore
             else:
                 values = arr
             mask = np.asarray(_build_selection_mask(values, prepared))
-
             gdf = _polygonize_base(
                 values,
                 mask,
