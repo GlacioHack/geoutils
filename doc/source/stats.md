@@ -106,77 +106,43 @@ Once these bins are created, we reapply them and compute the mean, minimum, and 
 for each sub-interval. It is also possible to use a reference other than the raster itself for the group_by.
 
 A dictionary containing the masks that have been created during the computation will also be returned by the function.
-Using geoUtils functions makes it very easy to visualise them.
+Using GeoUtils functions makes it very easy to visualise them.
 
 ```{code-cell} ipython3
-from geoutils.stats import grouped_stats
-import math
-import matplotlib.pyplot as plt
-
-group_by = {"rast": rast}
-bins = {"rast": [400, 1000, 2000, 3000, np.inf]}
-to_aggregate = {"rast": rast}
+group_by = {"raster": rast.data}
+bins = [[1000, 2000, 3000]]
 statistics = ["mean", "min", "max"]
 
-df, masks = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
+df = rast.grouped_stats(group_by, bins, statistics)
 df
 ```
 
-```{code-cell} ipython3
-:tags: [hide-input]
-:mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
-
-groups = list(masks["groupby_rast"].keys())
-n = len(groups)
-
-ncols = 3
-nrows = math.ceil(n / ncols)
-
-fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 5*nrows))
-axes = axes.flatten()
-
-for ax, group in zip(axes, groups):
-    masks["groupby_rast"][group].plot(ax=ax)
-    ax.set_title(group)
-
-for ax in axes[n:]:
-    ax.axis("off")
-
-plt.tight_layout()
-```
-
-```{warning}
-Bins can be presented in different ways. It is possible to integrate an interval of minimum 2 values, a mask or a
-segmentation map in raster format.
-```
-
-
-### Example with altitude masks
+### Example with vector outlines masks
 
 In this example, we will create a mask such as altitude is more than 2000 meters.
 Once these masks are created as a raster, we reapply them and compute the mean, minimum, and maximum values of the same raster
 for masks = True. It is also possible to use a reference other than the raster itself for the group_by.
 
 ```{code-cell} ipython3
-from geoutils.stats import grouped_stats
+import matplotlib.pyplot as plt
 
-group_by = {"rast": rast}
-elev_mask = rast > 2000
-bins = {"rast": elev_mask}
+filename_rast = gu.examples.get_path("everest_landsat_b4")
+filename_vect = gu.examples.get_path("everest_rgi_outlines")
+rast = gu.Raster(filename_rast)
+vect = gu.Vector(filename_vect)
+vect_rasterized = vect.create_mask(rast)
 
-to_aggregate = {"rast": rast}
+vect_rasterized.plot()
+plt.show()
+
+group_by = {"elevation": rast.data}
+bins = [vect_rasterized.data]
 statistics = ["mean", "min", "max"]
 
-df, _ = grouped_stats.grouped_stats(group_by, bins, to_aggregate, statistics)
+df = rast.grouped_stats(group_by, bins, statistics)
 df
 ```
 
-```{code-cell} ipython3
-elev_mask.plot()
-plt.show()
-```
 ## Subsampling
 
 The {func}`~geoutils.Raster.subsample` method allows to efficiently extract a valid random subsample from a raster or a point cloud. It can conveniently

@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import pathlib
 import struct
@@ -38,6 +39,7 @@ from typing import (
 )
 
 import numpy as np
+import pandas as pd
 import rasterio as rio
 import xarray as xr
 from affine import Affine
@@ -794,6 +796,97 @@ class RasterBase(ABC):
                 return stats_name(data)  # type: ignore
             else:
                 warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
+
+    @overload
+    def grouped_stats(
+        self,
+        groupby_arrays: dict[str, RasterType | NDArrayNum],
+        bins: list[Any],
+        statistics: list[str],
+    ) -> pd.DataFrame: ...
+
+    @overload
+    def grouped_stats(
+        self,
+        groupby_arrays: dict[str, RasterType | NDArrayNum],
+        bins: list[Any],
+        statistics: list[str],
+    ) -> pd.DataFrame: ...
+
+    @profiler.profile("geoutils.raster.stats.grouped_stats", memprof=True)  # type: ignore
+    def grouped_stats(
+        self,
+        groupby_arrays: dict[str, NDArrayNum],
+        bins: list[NDArrayNum],
+        statistics: list[str],
+    ) -> pd.DataFrame:
+        """ """
+
+        if not isinstance(bins, list):
+            raise ValueError("Bins should be provided as a list of arrays or lists, one per groupby variable.")
+
+        if not isinstance(groupby_arrays, dict):
+            raise ValueError(
+                "Groupby arrays should be provided as a dictionary of RasterType, one per groupby variable."
+            )
+        if not isinstance(statistics, list):
+            raise ValueError("Statistics should be provided as a list of strings. Ex: ['mean', 'median']")
+
+        if len(groupby_arrays) != len(bins):
+            raise ValueError("One bins array must be provided per input array.")
+
+        # Flattened data to aggregate
+        if isinstance(self.data, np.ma.MaskedArray):
+            values = self.data.filled(np.nan).ravel()
+        else:
+            values = self.data.ravel()
+
+        # Working on bins when list
+        for idx, one_bin in enumerate(bins):
+            if isinstance(one_bin, list) and len(one_bin) == 1 and isinstance(one_bin[0], (int, float)):
+                logging.info(
+                    f"Only one bin edge provided for groupby_arrays variable {list(groupby_arrays.keys())[idx]}"
+                    " creating two bins with -inf and inf as limits."
+                )
+                bins[idx] = [-np.inf, one_bin[0], np.inf]
+
+        # Transform groupby arrays into a DataFrame for grouping and aggregation
+        df = pd.DataFrame(
+            {**{key_groupby: values_groupby.ravel() for key_groupby, values_groupby in groupby_arrays.items()}}
+        )
+        # Add the values to be aggregated to the DataFrame
+        df["values"] = values
+
+        # Apply binning
+        group_keys = []
+        for key, bin_edges in zip(groupby_arrays.keys(), bins):
+            bin_col = f"bin_{key}"
+            # Test boolean mask case
+            if isinstance(bin_edges, (np.ndarray, np.ma.MaskedArray)):
+                if bin_edges.dtype == bool:
+                    logging.info(
+                        f"Boolean mask provided for groupby variable {key}. "
+                        "It will be treated as binary binning with False(0) and True(1). "
+                        "If this is not intended, provide a list of bin edges instead."
+                    )
+                    df[bin_col] = bin_edges.ravel().astype(int)
+                else:
+                    df[bin_col] = bin_edges.ravel()
+
+            elif isinstance(bin_edges, list):
+                df[bin_col] = pd.cut(df[key], bins=bin_edges, include_lowest=False)
+
+            else:
+                raise ValueError(
+                    f"Bin edges for groupby variable {key} must be either "
+                    "a list of numeric edges or a numpy array (boolean or numeric)."
+                )
+
+            group_keys.append(bin_col)
+        # Perform aggregation
+        result = df.groupby(group_keys, observed=False)["values"].agg(statistics)
+
+        return result
 
     def _raster_equal_allclose(
         self,
