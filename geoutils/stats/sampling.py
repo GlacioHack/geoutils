@@ -230,6 +230,7 @@ def _subsample_numpy(
 
         # Global linear indices of chosen valid pixels
         sel = np.argpartition(keys, subsample_size - 1)[:subsample_size]
+        sel = sel[np.lexsort((gids[sel], keys[sel]))]  # Stable: key then gid
         chosen = valids[sel]
 
         # Unravel indexes, and return values or indexes
