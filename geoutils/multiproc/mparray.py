@@ -1,3 +1,4 @@
+# Copyright (c) 2026 GeoUtils developers
 # Copyright (c) 2025 Centre National d'Etudes Spatiales (CNES)
 #
 # This file is part of the GeoUtils project:
