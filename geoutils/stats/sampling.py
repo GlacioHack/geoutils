@@ -42,6 +42,7 @@ try:
     from dask.utils import cached_cumsum
 except ImportError:
 
+    da = None
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Fake delayed decorator if dask is not installed
@@ -898,6 +899,7 @@ def _multiproc_subsample(
 def _subsample(
     source_raster: RasterBase,
     subsample: float | int = 1,
+    band: int = 1,
     return_indices: bool = False,
     *,
     random_state: int | np.random.Generator | None = None,
@@ -909,6 +911,7 @@ def _subsample(
 
     :param source_raster: Input array (NumPy/masked or Dask).
     :param subsample: Subsample size or fraction.
+    :param band: Band to subsample.
     :param return_indices: If True, return (rows, cols) indices instead of values.
     :param random_state: Seed or Generator.
     :param strategy: Either "sequential" (chunk/order dependent) or "topk" (chunk-invariant).
@@ -935,10 +938,20 @@ def _subsample(
 
     # Multiprocessing (out-of-memory)
     if mp_backend:
+        # Temporary switch bands
+        orig_bands = source_raster.bands
+        source_raster._bands = (band,)
         return _multiproc_subsample(source_raster, config=mp_config, **subsample_kwargs)
-    # Dask (out-of-memory)
-    elif dask_backend:
-        return _dask_subsample(source_raster.data, **subsample_kwargs)
-    # NumPy
+        # Rewrite original bands
+        source_raster._bands = orig_bands
     else:
-        return _subsample_numpy(source_raster.data, **subsample_kwargs)
+        if source_raster.data.ndim != 2:
+            arr = source_raster.data[band - 1, :, :]
+        else:
+            arr = source_raster.data
+        # Dask (out-of-memory)
+        if dask_backend:
+            return _dask_subsample(arr, **subsample_kwargs)
+        # NumPy
+        else:
+            return _subsample_numpy(arr, **subsample_kwargs)

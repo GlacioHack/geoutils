@@ -1841,6 +1841,7 @@ class RasterBase(ABC):
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
         connectivity: Literal[4, 8] = 4,
+        band: int = 1,
         data_column_name: str = "id",
         strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
         mp_config: "MultiprocConfig | None" = None,
@@ -1856,7 +1857,7 @@ class RasterBase(ABC):
         :returns: Vector containing the polygonized geometries associated to target values.
         """
 
-        return _polygonize(source_raster=self, target_values=target_values, connectivity=connectivity,
+        return _polygonize(source_raster=self, target_values=target_values, connectivity=connectivity, band=band,
                            data_column_name=data_column_name, strategy=strategy, mp_config=mp_config)
 
     def proximity(
@@ -1911,6 +1912,7 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: int | float,
+        band: int = 1,
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
@@ -1922,7 +1924,8 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[True],
+        band: int = 1,
+        return_indices: Literal[True] = False,
         *,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
@@ -1933,6 +1936,7 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: float | int,
+        band: int = 1,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
@@ -1943,6 +1947,7 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: float | int,
+        band: int = 1,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
@@ -1953,6 +1958,8 @@ class RasterBase(ABC):
 
         :param subsample: Subsample size. If <= 1, a fraction of the total pixels to extract.
             If > 1, the number of pixels.
+        :param band: Band to subsample. Use return_indices=True and indexing to subsample the same points over
+            several bands.
         :param return_indices: Whether to return the extracted indices only.
         :param random_state: Random state or seed number.
 

@@ -43,6 +43,11 @@ if TYPE_CHECKING:
     from geoutils.vector.vector import Vector
     import dask.array as da
 
+try:
+    import dask.array as da
+except ImportError:
+    da = None
+
 ###################
 # 1/ POLYGONIZATION
 ###################
@@ -1919,6 +1924,7 @@ def _polygonize(
     target_values: Any,
     data_column_name: str,
     *,
+    band: int = 1,
     connectivity: Literal[4, 8] = 4,
     strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
     mp_config: "MultiprocConfig | None" = None,
@@ -1934,6 +1940,7 @@ def _polygonize(
 
     :param connectivity: Pixel connectivity for label-based strategies (4 or 8).
     :param strategy: Chunked strategy. Has no effect for base backend.
+    :param band: Raster band to polygonize.
     :param mp_config: Multiprocessing configuration.
     :param float_tol: Absolute tolerance to distinguish two classes for floating input.
     """
@@ -1941,7 +1948,7 @@ def _polygonize(
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
-    dask_backend = source_raster._chunks is not None
+    dask_backend = da is not None and source_raster._chunks is not None
 
     if mp_backend and dask_backend:
         raise ValueError(
@@ -1963,39 +1970,54 @@ def _polygonize(
 
     # For Multiprocessing
     if mp_backend:
+        # Temporary switch bands
+        orig_bands = source_raster.bands
+        source_raster._bands = (band,)
         gdf = _multiproc_polygonize(
             source_raster=source_raster,
             prepared=prepared,
             mp_config=mp_config,
         )
+        # Rewrite original bands
+        source_raster._bands = orig_bands
     # For Dask
-    elif dask_backend:
-        gdf = _dask_polygonize(
-            source_raster.data,
-            prepared=prepared,
-            transform=source_raster.transform,
-            crs=source_raster.crs,
-        )
-    # For base implementation
     else:
-        # Eager: materialize values and build selection mask with SAME semantics as chunked backends
-        if np.issubdtype(prepared.final_dtype, np.integer):
-            fill_value = source_raster.nodata
+        if source_raster.data.ndim != 2:
+            arr = source_raster.data[band - 1, :, :]
         else:
-            fill_value = np.nan
-        values = np.asarray(source_raster.data.filled(fill_value)).astype(prepared.final_dtype, copy=False)
-        mask = np.asarray(_build_selection_mask(values, prepared))
+            arr = source_raster.data
 
-        gdf = _polygonize_base(
-            values,
-            mask,
-            transform=source_raster.transform,
-            crs=source_raster.crs,
-            data_column_name=data_column_name,
-            value_column=prepared.value_column,
-            connectivity=prepared.connectivity,
-            float_tol=prepared.float_tol,
-        )
+        if dask_backend:
+            gdf = _dask_polygonize(
+                arr,
+                prepared=prepared,
+                transform=source_raster.transform,
+                crs=source_raster.crs,
+            )
+        # For base implementation
+        else:
+            # Eager: materialize values and build selection mask with SAME semantics as chunked backends
+            if np.issubdtype(prepared.final_dtype, np.integer):
+                fill_value = source_raster.nodata
+            else:
+                fill_value = np.nan
+            if np.ma.is_masked(arr):
+                source_arr = arr.filled(fill_value)
+            else:
+                source_arr = arr
+            values = source_arr.astype(prepared.final_dtype, copy=False)
+            mask = np.asarray(_build_selection_mask(values, prepared))
+
+            gdf = _polygonize_base(
+                values,
+                mask,
+                transform=source_raster.transform,
+                crs=source_raster.crs,
+                data_column_name=data_column_name,
+                value_column=prepared.value_column,
+                connectivity=prepared.connectivity,
+                float_tol=prepared.float_tol,
+            )
 
         # Very useful debugger: Extract neighbours array locations that were polygonized different,
         # and displays them in a practical way

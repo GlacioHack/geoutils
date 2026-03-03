@@ -59,6 +59,7 @@ try:
     from dask.utils import cached_cumsum
 except ImportError:
 
+    da = None
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Fake delayed decorator if dask is not installed
