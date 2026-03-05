@@ -101,7 +101,7 @@ across classes, bins, or segmentation derived from the data itself.
 
 
 ### Example with altitude intervals
-In this example, we will create different altitude classes from a chosen interval [400, 1000, 2000, 3000, >3000].
+In this example, we will create different altitude classes from a chosen interval [1000, 2000, 3000].
 Once these bins are created, we reapply them and compute the mean, minimum, and maximum values of the same raster
 for each sub-interval. It is also possible to use a reference other than the raster itself for the group_by.
 
@@ -126,10 +126,8 @@ for masks = True. It is also possible to use a reference other than the raster i
 ```{code-cell} ipython3
 import matplotlib.pyplot as plt
 
-filename_rast = gu.examples.get_path("everest_landsat_b4")
-filename_vect = gu.examples.get_path("everest_rgi_outlines")
-rast = gu.Raster(filename_rast)
-vect = gu.Vector(filename_vect)
+rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
+vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
 vect_rasterized = vect.create_mask(rast)
 
 vect_rasterized.plot()
