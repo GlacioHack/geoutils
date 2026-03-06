@@ -1265,7 +1265,10 @@ class RasterBase(ABC):
 
         # If return copy is True (target georeferenced grid was the same as input)
         if return_copy:
-            return self
+            if self._is_xr:
+                return self._obj
+            else:
+                return self
 
         # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
         # assert data is not None
