@@ -817,10 +817,44 @@ class RasterBase(ABC):
     def grouped_stats(
         self,
         groupby_arrays: dict[str, NDArrayNum],
-        bins: list[NDArrayNum],
+        bins: list[NDArrayNum | list[float] | list[int] | list[bool]],
         statistics: list[str],
     ) -> pd.DataFrame:
-        """ """
+        """
+        Compute statistics of the raster values grouped by one or several variables.
+
+        The function groups the values stored in `self.data` according to one or
+        several arrays provided in `groupby_arrays` and computes the requested
+        statistics within bins defined in `bins`. Each groupby variable must have
+        a corresponding bin specification.
+
+        Binning can be defined either by:
+        - a list of bin edges (used with `pandas.cut`), or
+        - a numpy array providing a precomputed bin or mask.
+
+        Notes :
+        - Boolean arrays are interpreted as binary bins (False=0, True=1).
+        - Masked arrays in `self.data` are converted to `NaN` before aggregation.
+        - If a single bin edge is provided (e.g. `[x]`), it is automatically expanded to `[-inf, x, inf]` to create
+        two bins.
+        - All arrays are flattened before grouping and aggregation.
+
+        :param groupby_arrays: Dictionary of arrays used to group the data. Keys correspond to the variable names and
+        values are arrays with the same shape as `self.data`. Each array defines a grouping variable.
+
+        :param bins: List defining the binning strategy for each groupby variable. The list length must match the number
+         of variables in `groupby_arrays`.
+
+            Each element can be:
+            - a list of numeric bin edges (used with `pandas.cut`),
+            - a numpy array providing precomputed bin values,
+            - a boolean array interpreted as binary bins.
+
+        :param statistics: List of aggregation statistics to compute. These must be valid pandas aggregation functions
+        such as `'mean'`, `'median'`,`'min'`, `'max'`, `'std'`, `'count'`, etc.
+        :returns: A DataFrame indexed by the bin combinations of the groupby variables, containing the requested
+        statistics computed on the flattened values of `self.data`
+        """
 
         if not isinstance(bins, list):
             raise ValueError("Bins should be provided as a list of arrays or lists, one per groupby variable.")
@@ -1210,7 +1244,7 @@ class RasterBase(ABC):
         current coordinates. To match the extent of another dataset exactly, use reproject().
 
         :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
-            coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
+            coordinates. If `bbox` is a raster or vector, will crop to the bounds. If `bbox` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
         :param inplace: (DEPRECATED. Use rast = rast.crop() instead) Whether to crop in-place or not.
         :returns: A new cropped raster.
@@ -1315,14 +1349,14 @@ class RasterBase(ABC):
         The reprojected raster is written to disk under the path specified in the configuration
 
         :param ref: Reference raster to match resolution, bounds and CRS.
-        :param crs: Destination coordinate reference system as a string or EPSG. If ``ref`` not set,
+        :param crs: Destination coordinate reference system as a string or EPSG. If `ref` not set,
             defaults to this raster's CRS.
         :param res: Destination resolution (pixel size) in units of destination CRS. Single value or (xres, yres).
-            Do not use with ``grid_size``.
-        :param grid_size: Destination grid size as (x, y). Do not use with ``res``.
+            Do not use with `grid_size`.
+        :param grid_size: Destination grid size as (x, y). Do not use with `res`.
         :param bounds: Destination bounds as a Rasterio bounding box, or a dictionary containing left, bottom,
             right, top bounds in the destination CRS.
-        :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
+        :param nodata: Destination nodata value. If set to `None`, will use the same as source. If source does
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
         :param resampling: A Rasterio resampling method, can be passed as a string.
@@ -1566,9 +1600,9 @@ class RasterBase(ABC):
 
         :param xi: Indices (or coordinates) of x direction to check.
         :param yj: Indices (or coordinates) of y direction to check.
-        :param index: Interpret ij as raster indices (default is ``True``). If False, assumes ij is coordinates.
+        :param index: Interpret ij as raster indices (default is `True`). If False, assumes ij is coordinates.
 
-        :returns is_outside: ``True`` if ij is outside the bounds.
+        :returns is_outside: `True` if ij is outside the bounds.
         """
 
         return _outside_bounds(
