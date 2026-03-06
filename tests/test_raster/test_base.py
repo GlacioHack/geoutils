@@ -7,6 +7,7 @@ from typing import Any
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pandas.testing as pdt
 import pytest
 import rasterio as rio
 import xarray as xr
@@ -14,6 +15,7 @@ from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
+from geoutils import examples  # flake8 error
 from geoutils import Raster, Vector, open_raster
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
@@ -54,6 +56,11 @@ def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, 
         df1 = pd.DataFrame(index=[0], data=output1)
         df2 = pd.DataFrame(index=[0], data=output2)
         assert_frame_equal(df1, df2, check_dtype=False)
+
+    # For pandas DataFrame
+    elif isinstance(output1, pd.DataFrame) and isinstance(output2, pd.DataFrame):
+        pdt.assert_frame_equal(output1, output2)
+
     # For any other object type
     else:
         assert output1 == output2
@@ -219,6 +226,14 @@ class TestClassVsAccessorConsistency:
         ("subsample", {"subsample": 1000, "random_state": 42}),
         ("filter", {"method": "median", "size": 7}),
         ("get_stats", {}),
+        (
+            "grouped_stats",
+            {
+                "groupby_arrays": {"self"},
+                "bins": [[0, 5, 20]],
+                "statistics": ["mean"],
+            },
+        ),
         # 2.2. In-place methods
         ("load", {}),
     ]
@@ -267,6 +282,8 @@ class TestClassVsAccessorConsistency:
             args.update({"other": ds.copy(deep=False)})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
+        elif method == "grouped_stats":
+            args.update({"groupby_arrays": {"raster_data": raster.data}})
 
         # Apply method for each class
         output_raster = getattr(raster, method)(**args)
@@ -504,3 +521,151 @@ class TestClassVsAccessorConsistency:
 
         # TODO: Finalize after consistent input check function #850
         assert True
+
+
+class TestGroupedStatsRaster:
+    """Test the grouped_stats method of Raster"""
+
+    data = np.array([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20]])
+    transform = 30.0, 0.0, 478000.0, 0.0, -30.0, 3108140.0
+    test_raster = Raster.from_array(data, transform, 32645)
+
+    def test_wrong_inputs(self) -> None:
+        """Test that wrong inputs raise the expected errors."""
+
+        raster = Raster(examples.get_path_test("exploradores_aster_dem"))
+
+        with pytest.raises(
+            ValueError, match="Bins should be provided as a list of arrays or lists, one per groupby variable."
+        ):
+            raster.grouped_stats(groupby_arrays={"slope": np.array([1, 2, 3])}, bins="not_a_list", statistics=["mean"])
+
+        with pytest.raises(
+            ValueError,
+            match="Groupby arrays should be provided as a dictionary of RasterType, one per groupby variable.",
+        ):
+            raster.grouped_stats(groupby_arrays=["slope", "aspect"], bins=[np.array([0, 1, 2])], statistics=["mean"])
+
+        with pytest.raises(ValueError, match="Statistics should be provided as a list of strings."):
+            raster.grouped_stats(
+                groupby_arrays={"slope": np.array([1, 2, 3])},
+                bins=[np.array([0, 1, 2])],
+                statistics="mean",
+            )
+
+        with pytest.raises(ValueError, match="One bins array must be provided per input array."):
+            raster.grouped_stats(
+                groupby_arrays={"slope": np.array([1, 2, 3]), "aspect": np.array([4, 5, 6])},
+                bins=[np.array([0, 1, 2])],
+                statistics=["mean"],
+            )
+
+    def test_interval_bins(self) -> None:
+        """Test that the method works with interval bins."""
+
+        bins = [[0, 10, 20]]
+        arrays = {"test_interval": self.test_raster.data}
+
+        # Ground truth
+        expected = pd.DataFrame(
+            {
+                "mean": [5.5, 15.5],
+                "std": [3.02765, 3.02765],
+            },
+            index=pd.CategoricalIndex(
+                pd.IntervalIndex.from_tuples([(0, 10), (10, 20)], closed="right"),
+                ordered=True,
+                name="bin_test_interval",
+            ),
+        )
+
+        grouped_stats_test = self.test_raster.grouped_stats(
+            groupby_arrays=arrays, bins=bins, statistics=["mean", "std"]
+        )
+
+        pdt.assert_frame_equal(expected, grouped_stats_test)
+
+    def test_boolean_mask(self) -> None:
+        """Test grouped stats with a boolean mask as bins."""
+
+        arrays = {"test_bool_mask": self.test_raster.data}
+
+        # Create mask for odd values
+        bins = [self.test_raster.data % 2 == 1]
+
+        # Ground truth
+        expected = pd.DataFrame(
+            {
+                "mean": [11.0, 10.0],
+                "std": [6.055301, 6.055301],
+            },
+            index=pd.Index([0, 1], name="bin_test_bool_mask"),
+        )
+
+        grouped_stats_test = self.test_raster.grouped_stats(
+            groupby_arrays=arrays, bins=bins, statistics=["mean", "std"]
+        )
+
+        pdt.assert_frame_equal(expected, grouped_stats_test)
+
+    def test_multimodal_mask(self) -> None:
+        """Test grouped stats with a boolean mask as bins."""
+
+        arrays = {"test_multimodal_mask": self.test_raster.data}
+
+        # Create boolean mask for odd and prime values
+        bins = [np.array([[1, 0, 2, 0, 2], [0, 2, 0, 1, 0], [2, 0, 2, 0, 1], [0, 2, 0, 2, 0]])]
+
+        # Ground truth
+        expected = pd.DataFrame(
+            {
+                "mean": [11.0, 8.333333, 10.714286],
+                "std": [6.055301, 7.023769, 6.047432],
+            },
+            index=pd.Index([0, 1, 2], name="bin_test_multimodal_mask"),
+        )
+
+        grouped_stats_test = self.test_raster.grouped_stats(
+            groupby_arrays=arrays, bins=bins, statistics=["mean", "std"]
+        )
+
+        pdt.assert_frame_equal(expected, grouped_stats_test)
+
+    def test_multi_bins(self) -> None:
+        """"""
+
+        arrays = {"test_multimodal_mask": self.test_raster.data, "test_elev": self.test_raster.data}
+
+        # Create boolean mask for odd and prime values
+        bins = [
+            np.array([[1, 0, 2, 0, 2], [0, 2, 0, 1, 0], [2, 0, 2, 0, 1], [0, 2, 0, 2, 0]]),
+            self.test_raster.data > 10,
+        ]
+
+        # Ground truth
+        index = pd.MultiIndex.from_tuples(
+            [
+                (0, 0),
+                (0, 1),
+                (1, 0),
+                (1, 1),
+                (2, 0),
+                (2, 1),
+            ],
+            names=["bin_test_multimodal_mask", "bin_test_elev"],
+        )
+
+        # Ground truth
+        expected = pd.DataFrame(
+            {
+                "mean": [6.0, 16.0, 5.0, 15.0, 5.0, 15.0],
+                "std": [3.162278, 3.162278, 5.656854, np.nan, 2.0, 3.651484],
+            },
+            index=index,
+        )
+
+        grouped_stats_test = self.test_raster.grouped_stats(
+            groupby_arrays=arrays, bins=bins, statistics=["mean", "std"]
+        )
+
+        pdt.assert_frame_equal(expected, grouped_stats_test)
