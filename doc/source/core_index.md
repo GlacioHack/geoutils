@@ -13,4 +13,5 @@ core_array_funcs
 core_lazy_load
 core_parsing
 core_inheritance
+core_scalability
 ```

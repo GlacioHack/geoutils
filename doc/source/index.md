@@ -98,6 +98,7 @@ about_geoutils
 how_to_install
 quick_start
 feature_overview
+summary
 ```
 
 ```{toctree}
@@ -105,14 +106,24 @@ feature_overview
 :maxdepth: 2
 
 core_index
+scalability_index
 data_object_index
-georeferencing
-geotransformations
+referencing
+transformations
 raster_vector_point
 distance_ops
 stats
 filters
 ```
+
+```{toctree}
+:caption: Resources
+:maxdepth: 2
+
+cheatsheet_osgeo
+ecosystem
+```
+
 
 ```{toctree}
 :caption: Examples
