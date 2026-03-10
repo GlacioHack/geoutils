@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
 project = "GeoUtils"
-copyright = "2025, GeoUtils Developers"
+copyright = "2026, GeoUtils Developers"
 author = "GeoUtils Developers"
 
 
@@ -69,6 +69,7 @@ intersphinx_mapping = {
     "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "dask": ("https://docs.dask.org/en/stable/", None),
 }
 
 example_path = os.path.join("../", "../", "examples")

@@ -12,7 +12,7 @@ kernelspec:
 ---
 (vector-class)=
 
-# The georeferenced vector ({class}`~geoutils.Vector`)
+# The georeferenced vector
 
 Below, a summary of the {class}`~geoutils.Vector` object and its methods.
 

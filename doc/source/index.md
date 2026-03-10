@@ -21,7 +21,7 @@ title: GeoUtils
 :class: sd-fs-3
 :child-align: center
 
-GeoUtils is a Python package for **accessible** and **consistent** geospatial analysis.
+GeoUtils is a Python package for **accessible**, **consistent** and **scalable** geospatial analysis.
 ::::
 
 ```{important}
@@ -30,12 +30,14 @@ GeoUtils ``v0.2`` is released with more consistent point cloud support! We are w
 ```
 
 GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages
-(NumPy, Xarray, SciPy) to provide **consistent higher-level functionalities at the interface of raster, vector and point
+(NumPy, SciPy, Numba) to provide **consistent higher-level functionalities at the interface of raster, vector and point
 cloud objects** (such as match-reference reprojection, point interpolation or gridding).
 
-It is **tailored to perform quantitative analysis that implicitly understands the intricacies of geospatial data**
-(nodata values, projection, pixel interpretation), through **an intuitive object-based API to foster accessibility**,
-and strives **to be computationally scalable** (Dask support in development for future Xarray accessor).
+It strives **to be computationally scalable** by adding **lazy and chunked implementations** to most **raster and point cloud** operations (Dask, Multiprocessing) 
+and **provides accessors to naturally extend existing Python data-structures** (Xarray, Pandas).
+
+GeoUtils is **tailored to perform quantitative analysis that implicitly understands the intricacies of geospatial data**
+(nodata values, projection, pixel interpretation), through **an intuitive API to foster accessibility** (similar spirit as GDAL's new overhauled CLI).
 
 If you are looking to **port your GDAL or QGIS workflow in Python**, GeoUtils is made for you!
 
@@ -105,14 +107,24 @@ feature_overview
 :maxdepth: 2
 
 core_index
+scalability_index
 data_object_index
-georeferencing
-geotransformations
+referencing
+transformations
 raster_vector_point
 distance_ops
 stats
 filters
 ```
+
+```{toctree}
+:caption: Resources
+:maxdepth: 2
+
+cheatsheet_osgeo
+ecosystem
+```
+
 
 ```{toctree}
 :caption: Examples
