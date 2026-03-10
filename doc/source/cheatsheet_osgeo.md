@@ -5,7 +5,7 @@ This page helps users familiar with **GDAL/OGR** migrate their operations to the
 
 Regarding function names, GeoUtils exposes **an API almost entirely consistent with the recently overhauled GDAL CLI**. 
 
-Note that GeoUtils is **object-oriented** (methods run on {class}`~geoutils.Raster`, {class}`~geoutils.Vector`, {class}`~geoutils.PointCloud`, or on {class}`~xarray.DataArray` and {class}`~geopandas.GeoDataFrame` through `rst`, `vct` and `pc` accessors), while GDAL/OGR utilities are typically **file-oriented** (read from disk, write to disk).
+Note that GeoUtils is **object-oriented** (methods run on {class}`~geoutils.Raster`, {class}`~geoutils.Vector`, {class}`~geoutils.PointCloud`, or on {class}`~xarray.DataArray` and {class}`~geopandas.GeoDataFrame` through {class}`rst <geoutils.RasterAccessor>`, `vct` and `pc` accessors), while GDAL/OGR utilities are typically **file-oriented** (read from disk, write to disk).
 
 We also provide a conversion table for operations specific to DEMs (e.g. slope, aspect, roughness indexes) that are supported through our sister-package [xDEM](https://xdem.readthedocs.io/en/stable/).
 

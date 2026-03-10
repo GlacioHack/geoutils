@@ -69,6 +69,7 @@ intersphinx_mapping = {
     "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "dask": ("https://docs.dask.org/en/stable/", None),
 }
 
 example_path = os.path.join("../", "../", "examples")

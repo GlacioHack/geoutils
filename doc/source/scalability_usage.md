@@ -17,7 +17,7 @@ GeoUtils supports scalable execution for most of its **raster** and (soon) **poi
 
 It relies on two execution backends:
 
-- **Dask**, through its `rst` Xarray accessor and `pc` Pandas accessor (**lazy** and **chunked** execution),
+- **Dask**, through its {class}`rst <geoutils.RasterAccessor>` Xarray accessor and `pc` Pandas accessor (**lazy** and **chunked** execution),
 - **Multiprocessing**, through its {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects (**chunked** execution only) .
 
 Both backends mirror the **exact same object operations and chunked logic**, and yield **identical** results as in-memory operations.
@@ -26,13 +26,17 @@ For details on scalability concepts, see the {ref}`scalability-concept` page.
 
 As a rule of thumb:
 
-- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors `rst` and `pc`, and if you want to chain several operations lazily.
+- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors {class}`rst <geoutils.RasterAccessor>` and `pc`, and if you want to chain several operations lazily.
 - Use **Multiprocessing** to work with our {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects, and if you are fine with intermediate writing/reading between steps.
 - Use standard **in-memory execution** to work efficiently on small rasters, which is possible even if those were loaded from larger rasters (use {class}`~geoutils.Raster.crop`).
 
+```{note}
+GeoUtils currently targets **scalable CPU execution**. However, as many of our numerical operations rely on **NumPy**, **SciPy** or **Numba**, those are planned to be linked to their **GPU** counterparts (**CuPy** and **Numba CUDA**).
+```
+
 ## Using Dask through accessors
 
-With Dask, raster operations are both **chunked** and **lazy**.
+With **Dask**, raster operations are both **chunked** and **lazy**.
 This behavior is enabled by opening a raster with the `chunks` argument, which returns an Xarray object backed by Dask arrays.
 
 ```{code-cell} python
@@ -45,7 +49,7 @@ ds = gu.open_raster(filename_rast, chunks={"x": 200, "y": 200})
 ds
 ```
 
-GeoUtils, through the `rst` accessor, automatically detects the **Dask** input and switches to a chunked implementation.
+GeoUtils, through the {class}`rst <geoutils.RasterAccessor>` accessor, automatically detects the **Dask** input and switches to a chunked implementation.
 
 ```{code-cell} python
 # Change output resolution
@@ -60,7 +64,7 @@ ds_reproj = ds.rst.reproject(
 ds_reproj
 ```
 
-The resulting raster remains **lazy**. Computation only happens when explicitly requested with `compute()`.
+The resulting raster remains **lazy**. Computation only happens when explicitly requested with {meth}`~dask.array.Array.compute()`.
 
 For a raster output, one typically wants to write to file lazily to avoid loading it in-memory:
 
@@ -81,7 +85,7 @@ sub_ds = ds_reproj.rst.subsample(
 sub_ds
 ```
 
-The output array is again lazy, and in this case we can use `compute()` to return the in-memory NumPy array:
+The output array is again lazy, and in this case we can use {meth}`~dask.array.Array.compute()` to return the in-memory NumPy array:
 ```{code-cell} python
 sub_ds.compute()
 ```
@@ -132,6 +136,12 @@ samp_rast_mp = rast_reproj_mp.subsample(
 samp_rast_mp
 ```
 
+```{code-cell} ipython3
+:tags: [remove-cell]
+import os
+os.remove(mp_config.outfile)
+```
+
 This backend is convenient when working directly with {class}`~geoutils.Raster` objects and performing **step-by-step processing**.
 
 ## Good practices with chunked and lazy operations
@@ -139,6 +149,7 @@ This backend is convenient when working directly with {class}`~geoutils.Raster` 
 - If **memory** is the limitating factor for you, use a **single-threaded scheduler** through Dask (```dask.config.set(scheduler='single-threaded')```) or Multiprocessing (default cluster),
 - If **speed** is the limiting factor for you, use **parallelized processes** through Dask (see [Dask scheduler configuration](https://docs.dask.org/en/stable/scheduler-overview.html#scheduler-overview)) or Multiprocessing (see our Cluster configuration),
 - Choose chunk sizes large enough to reduce scheduling overhead, but **small enough to fit comfortably in memory**,
+- Check that your data files have **on-disk chunksizes** (otherwise loads everything) and use a multiple of it for optimal **in-memory chunking**,
 - Keep chunk sizes **consistent across operations** to avoid unnecessary rechunking,
 - Insert **breakpoints** (for example by writing intermediate results to disk) to prevent building overly large Dask graphs.
 

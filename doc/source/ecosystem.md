@@ -6,7 +6,7 @@ It extends commonly used tools and works alongside many other for geospatial dat
 
 See the {ref}`accessors` page for details on GeoUtils' accessors.
 
-```{see-also}
+```{seealso}
 **[xDEM](https://github.com/GlacioHack/xdem)** is the sister package of GeoUtils, focused on the **analysis of digital elevation models (DEMs) and elevation point clouds**, including terrain attributes, coregistration and uncertainty propagation.
 ```
 
