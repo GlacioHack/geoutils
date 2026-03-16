@@ -42,7 +42,7 @@ import rasterio as rio
 import xarray as xr
 from affine import Affine
 from packaging.version import Version
-from rasterio.crs import CRS
+from pyproj import CRS
 from rasterio.enums import Resampling
 
 from geoutils import profiler
@@ -636,7 +636,7 @@ class RasterBase(ABC):
             f"Grid size:            {self.width}, {self.height}\n",
             f"Number of bands:      {self.count:d}\n",
             f"Data types:           {self.dtype}\n",
-            f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}\n",
+            f"Coordinate system:    {[CRS(self.crs).name if self.crs is not None else None]}\n",
             f"Nodata value:         {self.nodata}\n",
             f"Pixel interpretation: {self.area_or_point}\n",
             "Pixel size:           {}, {}\n".format(*self.res),
@@ -942,11 +942,12 @@ class RasterBase(ABC):
             rtol=rtol,
         )
 
-    def georeferenced_grid_equal(self: RasterType, other: RasterType) -> bool:
+    def georeferenced_grid_equal(self: RasterType, other: RasterType, warn_3d_crs: bool = True) -> bool:
         """
         Check that raster shape, geotransform and CRS are equal.
 
         :param other: Another raster.
+        :param warn_3d_crs: Whether to warn if 3D CRS differs.
 
         :return: Whether the two objects have the same georeferenced grid.
         """
@@ -955,13 +956,25 @@ class RasterBase(ABC):
         if isinstance(other, xr.DataArray):
             transform = other.rst.transform
             shape = other.rst.shape
+            crs2d = CRS(other.rst.crs).to_2d()
             crs = other.rst.crs
         else:
             transform = other.transform
             shape = other.shape
+            crs2d = CRS(other.crs).to_2d()
             crs = other.crs
 
-        return all([self.shape == shape, self.transform == transform, self.crs == crs])
+        # 2D CRS for self
+        self_crs2d = CRS(self.crs).to_2d()
+
+        gge = all([self.shape == shape, self.transform == transform, self_crs2d == crs2d])
+
+        # The only way they differ is if the vertical CRS is different
+        if gge and crs != self.crs:
+            warnings.warn("The two rasters have the same 2D CRS but a different vertical CRS: "
+                          f"{CRS(self.crs).name} and {CRS(crs).name}.")
+
+        return gge
 
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
