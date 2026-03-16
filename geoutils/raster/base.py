@@ -972,7 +972,8 @@ class RasterBase(ABC):
         # The only way they differ is if the vertical CRS is different
         if gge and crs != self.crs:
             warnings.warn("The two rasters have the same 2D CRS but a different vertical CRS: "
-                          f"{CRS(self.crs).name} and {CRS(crs).name}.")
+                          f"{CRS(self.crs).name} and {CRS(crs).name}.",
+                          category=UserWarning)
 
         return gge
 
