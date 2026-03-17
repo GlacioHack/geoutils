@@ -12,7 +12,7 @@ kernelspec:
 ---
 (point-cloud)=
 
-# The georeferenced point cloud ({class}`~geoutils.PointCloud`)
+# The georeferenced point cloud
 
 A point cloud represents 2D point geometries of georeferenced coordinates associated with a main 1D data array, and optionally auxiliary data.
 
