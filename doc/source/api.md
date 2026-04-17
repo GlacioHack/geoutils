@@ -2,37 +2,59 @@
 # API reference
 
 This page provides a summary of GeoUtils’ API.
-For more details and examples, refer to the relevant chapters in the main part of the
-documentation.
+For more details and examples, refer to the relevant chapters in the main part of the documentation.
 
 ```{eval-rst}
 .. currentmodule:: geoutils
 ```
 
-## Raster
 
-```{eval-rst}
-.. minigallery:: geoutils.Raster
-      :add-heading:
+<!--
+Hidden toctree so Raster and RasterAccessor pages are generated and discoverable via cross-references, without duplicating the main API
+method summary. This needs to be listed before any other raster API.
+-->
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+Raster <api_raster>
+RasterAccessor <api_rst>
 ```
 
-### Opening a file
+(raster-api)=
+## Raster API
+
+GeoUtils exposes the raster API through two mirrored interfaces:
+- {class}`~geoutils.Raster`, an interface operating directly on a GeoUtils object,
+- A {class}`rst <geoutils.RasterAccessor>` accessor extending {class}`xarray.DataArray` objects as rasters.
+
+
+Both expose the **same methods and attributes**.
+
+Only **file opening** and **scalable execution** differ between the two interfaces:
+- **File opening:** {class}`~geoutils.Raster` objects are opened by instantiating the class, whereas {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object,
+- **Scalable execution:** the {class}`rst <geoutils.RasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
+
+### Opening a raster file
+
+Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantiate for a {class}`~geoutils.Raster`.
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
-    Raster
-    Raster.info
+    open_raster
+    Raster.__init__
 ```
 
-### Create from an array
+### Create raster from an array
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
-
-    Raster.from_array
+    :template: raster_method.rst
+   
+    ~raster.base.RasterBase.from_array
 ```
 
 (api-raster-attrs)=
@@ -42,12 +64,13 @@ documentation.
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
-
-    Raster.data
-    Raster.crs
-    Raster.transform
-    Raster.nodata
-    Raster.area_or_point
+    :template: raster_method.rst
+    
+    ~raster.base.RasterBase.data
+    ~raster.base.RasterBase.crs
+    ~raster.base.RasterBase.transform
+    ~raster.base.RasterBase.nodata
+    ~raster.base.RasterBase.area_or_point
 ```
 
 ### Derived attributes
@@ -55,15 +78,17 @@ documentation.
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.shape
-    Raster.height
-    Raster.width
-    Raster.count
-    Raster.bands
-    Raster.res
-    Raster.bounds
-    Raster.dtype
+    ~raster.base.RasterBase.shape
+    ~raster.base.RasterBase.height
+    ~raster.base.RasterBase.width
+    ~raster.base.RasterBase.count
+    ~raster.base.RasterBase.bands
+    ~raster.base.RasterBase.res
+    ~raster.base.RasterBase.bounds
+    ~raster.base.RasterBase.footprint
+    ~raster.base.RasterBase.dtype
 ```
 
 ### Other attributes
@@ -71,30 +96,32 @@ documentation.
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.is_mask
-    Raster.is_loaded
-    Raster.name
-    Raster.driver
-    Raster.tags
+    ~raster.base.RasterBase.is_mask
+    ~raster.base.RasterBase.is_loaded
+    ~raster.base.RasterBase.name
+    ~raster.base.RasterBase.driver
+    ~raster.base.RasterBase.tags
 ```
 
 (api-geo-handle)=
 
-### Geospatial handling methods
+### Geospatial operations
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.crop
-    Raster.icrop
-    Raster.reproject
-    Raster.polygonize
-    Raster.proximity
-    Raster.interp_points
-    Raster.reduce_points
-    Raster.filter
+    ~raster.base.RasterBase.crop
+    ~raster.base.RasterBase.icrop
+    ~raster.base.RasterBase.reproject
+    ~raster.base.RasterBase.polygonize
+    ~raster.base.RasterBase.proximity
+    ~raster.base.RasterBase.interp_points
+    ~raster.base.RasterBase.reduce_points
+    ~raster.base.RasterBase.filter
 ```
 
 ### Plotting
@@ -102,126 +129,91 @@ documentation.
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.plot
+    ~raster.base.RasterBase.plot
 ```
 
-### Get statistics
+### Statistics
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.get_stats
+    ~raster.base.RasterBase.get_stats
 ```
 
-### Get or update data methods
+### Data manipulation
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.copy
-    Raster.astype
-    Raster.set_mask
-    Raster.set_nodata
-    Raster.get_nanarray
-    Raster.get_mask
-    Raster.subsample
+    ~raster.base.RasterBase.copy
+    ~raster.base.RasterBase.astype
+    ~raster.base.RasterBase.set_mask
+    ~raster.base.RasterBase.set_nodata
+    ~raster.base.RasterBase.get_nanarray
+    ~raster.base.RasterBase.get_mask
+    ~raster.base.RasterBase.subsample
 ```
 
-### I/O methods
+### Loading, writing and converting
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.load
-    Raster.to_file
-    Raster.to_pointcloud
-    Raster.from_pointcloud_regular
-    Raster.to_rio_dataset
-    Raster.to_xarray
+    ~raster.base.RasterBase.load
+    ~raster.base.RasterBase.to_file
+    ~raster.base.RasterBase.to_pointcloud
+    ~raster.base.RasterBase.from_pointcloud_regular
+    ~raster.base.RasterBase.to_rio_dataset
+    ~raster.base.RasterBase.to_xarray
 ```
 
-### Coordinate and extent methods
+### Georeferencing utilities
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.xy2ij
-    Raster.ij2xy
-    Raster.coords
-    Raster.translate
-    Raster.outside_image
+    ~raster.base.RasterBase.xy2ij
+    ~raster.base.RasterBase.ij2xy
+    ~raster.base.RasterBase.coords
+    ~raster.base.RasterBase.translate
+    ~raster.base.RasterBase.outside_image
 ```
 
-### Projection methods
+### Projection utilities
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.get_metric_crs
-    Raster.get_bounds_projected
-    Raster.get_footprint_projected
-    Raster.intersection
+    ~raster.base.RasterBase.get_metric_crs
+    ~raster.base.RasterBase.get_bounds_projected
+    ~raster.base.RasterBase.get_footprint_projected
+    ~raster.base.RasterBase.intersection
 ```
 
-### Testing methods
+### Testing utilities
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: raster_method.rst
 
-    Raster.raster_equal
-    Raster.georeferenced_grid_equal
+    ~raster.base.RasterBase.raster_equal
+    ~raster.base.RasterBase.georeferenced_grid_equal
 ```
 
-### Arithmetic with other rasters, arrays or numbers
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    Raster.__add__
-    Raster.__sub__
-    Raster.__neg__
-    Raster.__mul__
-    Raster.__truediv__
-    Raster.__floordiv__
-    Raster.__mod__
-    Raster.__pow__
-```
-
-And reverse operations.
-
-### Logical operators casting to mask (boolean raster)
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    Raster.__eq__
-    Raster.__ne__
-    Raster.__lt__
-    Raster.__le__
-    Raster.__gt__
-    Raster.__ge__
-```
-
-### Array interface with NumPy
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    Raster.__array_ufunc__
-    Raster.__array_function__
-```
-
-## Multiple rasters
+### Multiple rasters
 
 ```{eval-rst}
 .. autosummary::
@@ -231,21 +223,6 @@ And reverse operations.
     raster.stack_rasters
     raster.merge_rasters
 ```
-
-[//]: # (## Multiprocessing)
-
-[//]: # ()
-[//]: # (```{eval-rst})
-
-[//]: # (.. autosummary::)
-
-[//]: # (    :toctree: gen_modules/)
-
-[//]: # ()
-[//]: # (    raster.MultiprocConfig)
-
-[//]: # ()
-[//]: # (```)
 
 ## Vector
 
@@ -625,4 +602,15 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 
     PointCloud.pointcloud_equal
     PointCloud.georeferenced_coords_equal
+```
+
+## Multiprocessing configuration
+
+To performed **chunked execution** on GeoUtils objects, pass this Multiprocessing configuration to function that support it.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    multiproc.MultiprocConfig
 ```

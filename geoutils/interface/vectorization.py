@@ -1677,7 +1677,7 @@ def _chunked_polygonize_core(
 
     The function supports three chunked strategies:
 
-    1) ``label_union`` (exact, label-based)
+    1) ``label_union`` (label-based)
        - Build connected-component labels per block.
        - Scan seams between neighboring blocks and build a union-find mapping that merges labels
          that touch across seams (and have identical raster value).

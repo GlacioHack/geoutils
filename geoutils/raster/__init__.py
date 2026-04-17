@@ -16,6 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from geoutils.raster.base import RasterBase
 from geoutils.raster.raster import Raster, RasterType, handled_array_funcs  # noqa isort:skip
 from geoutils.raster.array import *  # noqa
 from geoutils.raster.multiraster import *  # noqa
