@@ -61,7 +61,7 @@ import numpy as np
 
 # Instantiate a raster from a filename on disk
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
-rast = gu.Raster(filename_rast)
+rast = gu.Raster(filename_rast, force_nodata=-9999)
 rast
 ```
 
@@ -91,6 +91,54 @@ Passing an inlier mask:
 ```{code-cell} ipython3
 inlier_mask = rast > 1500
 rast.get_stats(inlier_mask=inlier_mask)
+```
+
+## Grouped statistics
+
+GeoUtils provides support for grouped statistics, allowing statistics to be computed independently over subsets of data
+defined by one or more grouping bins. This is particularly useful when analyzing how statistical properties vary
+across classes, bins, or segmentation derived from the data itself.
+
+
+### Example with altitude intervals
+In this example, we will create different altitude classes from a chosen interval [1000, 2000, 3000].
+Once these bins are created, we reapply them and compute the mean, minimum, and maximum values of the same raster
+for each sub-interval. It is also possible to use a reference other than the raster itself for the group_by.
+
+A dictionary containing the masks that have been created during the computation will also be returned by the function.
+Using GeoUtils functions makes it very easy to visualise them.
+
+```{code-cell} ipython3
+group_by = {"raster": rast.data}
+bins = [[1000, 2000, 3000]]
+statistics = ["mean", "min", "max"]
+
+df = rast.grouped_stats(group_by, bins, statistics)
+df
+```
+
+### Example with vector outlines masks
+
+In this example, we will create a mask such as altitude is more than 2000 meters.
+Once these masks are created as a raster, we reapply them and compute the mean, minimum, and maximum values of the same raster
+for masks = True. It is also possible to use a reference other than the raster itself for the group_by.
+
+```{code-cell} ipython3
+import matplotlib.pyplot as plt
+
+rast = gu.Raster(gu.examples.get_path("everest_landsat_b4"))
+vect = gu.Vector(gu.examples.get_path("everest_rgi_outlines"))
+vect_rasterized = vect.create_mask(rast)
+
+vect_rasterized.plot()
+plt.show()
+
+group_by = {"elevation": rast.data}
+bins = [vect_rasterized.data]
+statistics = ["mean", "min", "max"]
+
+df = rast.grouped_stats(group_by, bins, statistics)
+df
 ```
 
 ## Subsampling
