@@ -2161,13 +2161,16 @@ class Raster(RasterBase):
 
         # Create colorbar
         # Use rcParam default
-        if cmap is None:
-            cmap = plt.get_cmap(plt.rcParams["image.cmap"])
-        elif isinstance(cmap, str):
+        print ("cmap =", cmap)
+        print ("type bands =",  type(bands))
+        print ("default cmap", plt.rcParams["image.cmap"])
+        #if cmap is None:
+        #    cmap = plt.get_cmap(plt.rcParams["image.cmap"])
+        if isinstance(cmap, str):
             cmap = plt.get_cmap(cmap)
         elif isinstance(cmap, matplotlib.colors.Colormap):
             pass
-
+        cmap = None
         # Set colorbar min/max values (needed for ScalarMappable)
         if vmin is None:
             vmin = float(np.nanmin(data))
