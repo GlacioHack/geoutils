@@ -97,7 +97,8 @@ def _interpn_interpolator(
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
     Create SciPy interpolator with nodata spreading. Default is spreading at distance of half the method order
-    rounded up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
+    rounded up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic ... defaults to linear.
+    Can be configured with the global setting geoutils.config["interpolation_method"].).
 
     Gives the exact same result as scipy.interpolate.interpn, and allows interpolator to be re-used if required (
     for speed).

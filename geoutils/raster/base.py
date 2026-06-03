@@ -1232,7 +1232,8 @@ class RasterBase(ABC):
         :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
-        :param resampling: A Rasterio resampling method, can be passed as a string.
+        :param resampling: A Rasterio resampling method, can be passed as a string. Defaults to bilinear.
+            Can be configured with the global setting geoutils.config["resampling_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
@@ -1243,7 +1244,6 @@ class RasterBase(ABC):
         :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
         :returns: Reprojected raster.
-
         """
 
         # If resampling undefined, default to the global system config
