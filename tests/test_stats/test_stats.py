@@ -83,10 +83,18 @@ class TestStats:
             stats_masked.pop(name)
         assert stats_masked == stats
 
+        # Test case sensitive + space/underscore possibilities
         stats_masked = raster.get_stats(inlier_mask=inlier_mask)
         for name in expected_stats + expected_stats_count + expected_stats_mask:
             assert stats_masked[name] == raster.get_stats(stats_name=name.lower(), inlier_mask=inlier_mask)
             assert stats_masked[name] == raster.get_stats(stats_name="".join(name.split()), inlier_mask=inlier_mask)
+            assert stats_masked[name] == raster.get_stats(
+                stats_name="".join(name.lower().split()), inlier_mask=inlier_mask
+            )
+            assert stats_masked[name] == raster.get_stats(stats_name="_".join(name.split()), inlier_mask=inlier_mask)
+            assert stats_masked[name] == raster.get_stats(
+                stats_name="_".join(name.lower().split()), inlier_mask=inlier_mask
+            )
 
         # Empty mask (=False)
         empty_mask = np.zeros_like(inlier_mask)

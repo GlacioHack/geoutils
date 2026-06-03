@@ -52,13 +52,9 @@ _STATS_ALIASES = {
     "rms": "RMSE",
     "std": "Standard deviation",
     "standarddeviation": "Standard deviation",
-    "standard_deviation": "Standard deviation",
     "validcount": "Valid count",
-    "valid_count": "Valid count",
     "totalcount": "Total count",
-    "total_count": "Total count",
     "percentagevalidpoints": "Percentage valid points",
-    "percentage_valid_points": "Percentage valid points",
 }  # type: ignore
 
 STATS_LIST = [
@@ -88,13 +84,9 @@ STATS_LIST_MASK = [
 
 _ALIAS_STATS_LIST_MASK = {
     "validinliercount": "Valid inlier count",
-    "valid_inlier_count": "Valid inlier count",
     "totalinliercount": "Total inlier count",
-    "total_inlier_count": "Total inlier count",
     "percentagevalidinlierpoints": "Percentage valid inlier points",
-    "percentage_valid_inlier_points": "Percentage valid inlier points",
     "percentageinlierpoints": "Percentage inlier points",
-    "percentage_inlier_points": "Percentage inlier points",
 }
 
 _ALIAS_STATS = _STATS_ALIASES | _ALIAS_STATS_LIST_MASK
@@ -152,7 +144,7 @@ def _statistics(
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
-            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
+            `valid inlier count`, `total inlier count`, `percentage inlier points`, `percentage valid inlier points`.
             Custom callables can also be provided.
     :param counts: Tuple with number of finite data points in array and number of valid points in inlier_mask.
 
@@ -225,11 +217,14 @@ def _statistics(
             }
         )
 
-    def get_stat_common_name(stat_name):
+    def get_stat_common_name(stat_name: str) -> str | None:
+        print(stat_name)
         if stat_name in stats_dict.keys():
             return stat_name
         elif "".join(stat_name.lower().split()) in _ALIAS_STATS.keys():
             return _ALIAS_STATS["".join(stat_name.lower().split())]
+        elif "".join(stat_name.lower().split("_")) in _ALIAS_STATS.keys():
+            return _ALIAS_STATS["".join(stat_name.lower().split("_"))]
         else:
             return None
 
