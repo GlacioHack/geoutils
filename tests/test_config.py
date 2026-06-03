@@ -1,5 +1,8 @@
 """Test configuration file."""
 
+import numpy as np
+import rasterio as rio
+
 import geoutils as gu
 
 
@@ -37,3 +40,41 @@ class TestConfig:
         # Leave the test with initial default
         gu.config["shift_area_or_point"] = 1
         assert gu.config["shift_area_or_point"]
+
+    def test_default_resampling_method(self) -> None:
+        landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
+        raster = gu.Raster(landsat_b4_crop_path)
+        raster.set_nodata(0)
+
+        # test resampling_method for reproject
+        out_size = (raster.shape[1] // 2, raster.shape[0] // 2)  # Outsize is (ncol, nrow)
+        raster_reproj_force = raster.reproject(grid_size=out_size, resampling=gu.config["resampling_method"])
+        raster_reproj = raster.reproject(grid_size=out_size)
+        assert raster_reproj_force.raster_equal(raster_reproj)
+
+        # test resampling_method for _reproject
+        _, data, transform, crs, nodata = gu.raster.transformation._reproject(raster, None, grid_size=out_size)
+        raster__reproject = gu.Raster.from_array(
+            data=data, transform=transform, crs=crs, nodata=nodata, area_or_point=raster.area_or_point, tags=raster.tags
+        )
+        assert raster__reproject.raster_equal(raster_reproj)
+
+    def test_default_interpolation_method(self) -> None:
+        arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
+        transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
+        raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
+        raster.set_area_or_point("Point", shift_area_or_point=False)
+
+        # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
+        index_x = [0, 1, 2, 0, 1, 2, 0, 1, 2]
+        index_y = [0, 0, 0, 1, 1, 1, 2, 2, 2]
+
+        # The actual X/Y coords will be offset by one because Y axis is inverted and pixel coords is upper-left corner
+        points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
+
+        raster_points_force = raster.interp_points(
+            (points_x, points_y), method=gu.config["interpolation_method"], as_array=True
+        )
+        raster_points = raster.interp_points((points_x, points_y), as_array=True)
+
+        assert np.array_equal(raster_points, raster_points_force)

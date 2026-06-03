@@ -1200,7 +1200,7 @@ class RasterBase(ABC):
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
-        resampling: Resampling | str = "bilinear",
+        resampling: Resampling | str = None,
         force_source_nodata: int | float | None = None,
         silent: bool = False,
         inplace: bool = False,
@@ -1245,6 +1245,11 @@ class RasterBase(ABC):
         :returns: Reprojected raster.
 
         """
+
+        # If resampling undefined, default to the global system config
+        if resampling is None:
+            resampling = config["resampling_method"]
+
         # Reproject
         return_copy, data, transformed, crs, nodata = _reproject(
             source_raster=self,

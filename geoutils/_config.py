@@ -24,6 +24,8 @@ import configparser
 import os
 from typing import Any
 
+from rasterio.enums import Resampling
+
 # The setup is inspired by that of Matplotlib and Geowombat
 # https://github.com/matplotlib/matplotlib/blob/main/lib/matplotlib/rcsetup.py
 # https://github.com/jgrss/geowombat/blob/main/src/geowombat/config.py
@@ -45,10 +47,39 @@ def validate_bool(b: bool | str | int) -> bool:
         raise ValueError(f"Cannot convert {b!r} to bool")
 
 
+def validate_resampling_method(resampling_method: bool | str | int) -> str:
+    """Test resampling_method"""
+    if isinstance(resampling_method, str):
+        for method in Resampling:
+            if method.name == resampling_method:
+                return resampling_method
+
+    raise ValueError("error")
+
+
+def validate_interpolation_method(interpolation_method: bool | str | int) -> str:
+    """Test interpolation_method"""
+    print(interpolation_method)
+    if isinstance(interpolation_method, str) and interpolation_method in [
+        "nearest",
+        "linear",
+        "cubic",
+        "quintic",
+        "slinear",
+        "pchip",
+        "splinef2d",
+    ]:
+        return interpolation_method
+    else:
+        raise ValueError("error")
+
+
 # Map the parameter names with a validating function to check user input
 _validators = {
     "shift_area_or_point": validate_bool,
     "warn_area_or_point": validate_bool,
+    "resampling_method": validate_resampling_method,
+    "interpolation_method": validate_interpolation_method,
 }
 
 

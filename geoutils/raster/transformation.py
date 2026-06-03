@@ -36,6 +36,7 @@ from shapely.geometry import box
 from shapely.strtree import STRtree
 
 from geoutils import profiler
+from geoutils._config import config
 from geoutils._dispatch import _check_match_bbox, _check_match_grid
 from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
@@ -744,7 +745,7 @@ def _reproject(
     bounds: tuple[float, float, float, float] | rio.coords.BoundingBox | None = None,
     nodata: int | float | None = None,
     dtype: DTypeLike | None = None,
-    resampling: Resampling | str = Resampling.bilinear,
+    resampling: Resampling | str = None,
     force_source_nodata: int | float | None = None,
     silent: bool = False,
     n_threads: int = 0,
@@ -754,6 +755,10 @@ def _reproject(
     """
     Reproject raster. See Raster.reproject() for details.
     """
+
+    # If resampling undefined, default to the global system config
+    if resampling is None:
+        resampling = config["resampling_method"]
 
     # 1/ Check and normalize match-grid inputs
     dst_shape, dst_transform, dst_crs = _check_match_grid(

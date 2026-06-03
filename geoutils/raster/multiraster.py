@@ -27,6 +27,7 @@ import numpy as np
 import rasterio as rio
 import rasterio.warp
 
+from geoutils._config import config
 from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
 from geoutils.raster.array import get_array_and_mask
@@ -128,7 +129,7 @@ def load_multiple_rasters(
 def stack_rasters(
     rasters: list[Raster],
     reference: int | Raster = 0,
-    resampling_method: str | rio.enums.Resampling = "bilinear",
+    resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
     diff: bool = False,
     progress: bool = True,
@@ -157,8 +158,11 @@ def stack_rasters(
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
-    # Check resampling method
-    if isinstance(resampling_method, str):
+
+    # If resampling undefined, default to the global system config
+    if resampling_method is None:
+        resampling_method = _resampling_method_from_str(config["resampling"])
+    elif isinstance(resampling_method, str):
         resampling_method = _resampling_method_from_str(resampling_method)
 
     # Check raster has a single band
@@ -252,7 +256,7 @@ def merge_rasters(
     rasters: list[Raster],
     reference: int | Raster = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
-    resampling_method: str | rio.enums.Resampling = "bilinear",
+    resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
     progress: bool = True,
 ) -> Raster:
@@ -278,11 +282,16 @@ def merge_rasters(
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
+
     # Make sure merge_algorithm is a list
     if not isinstance(merge_algorithm, (list, tuple)):
         merge_algorithm = [
             merge_algorithm,
         ]
+
+    # If resampling undefined, default to the global system config
+    if resampling_method is None:
+        resampling_method = _resampling_method_from_str(config["resampling"])
 
     # Try to run the merge_algorithm with an arbitrary list. Raise an error if the algorithm is incompatible.
     for algo in merge_algorithm:

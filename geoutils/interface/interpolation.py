@@ -29,6 +29,7 @@ import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
+from geoutils._config import config
 from geoutils._dispatch import _check_match_points
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
@@ -92,7 +93,7 @@ def _interpn_interpolator(
     fill_value: Number = np.nan,
     bounds_error: bool = False,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
     Create SciPy interpolator with nodata spreading. Default is spreading at distance of half the method order
@@ -109,6 +110,10 @@ def _interpn_interpolator(
     Adapted from:
     https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743.
     """
+
+    # If interpolation method undefined, default to the global system config
+    if method is None:
+        method = config["interpolation_method"]
 
     # Derive distance to spread nodata to depending on method order
     order = method_to_order[method]
@@ -247,7 +252,7 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
@@ -263,7 +268,7 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
@@ -279,7 +284,7 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "None",
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
@@ -294,13 +299,17 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | None,
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
+
+    # If interpolation method undefined, default to the global system config
+    if method is None:
+        method = config["interpolation_method"]
 
     # If array is not a floating dtype (to support NaNs), convert dtype
     if not np.issubdtype(array.dtype, np.floating):
