@@ -97,6 +97,8 @@ _ALIAS_STATS_LIST_MASK = {
     "percentage_inlier_points": "Percentage inlier points",
 }
 
+_ALIAS_STATS = _STATS_ALIASES | _ALIAS_STATS_LIST_MASK
+
 
 @profiler.profile("geoutils.stats.stats._statistics", memprof=True)
 def _statistics(
@@ -213,29 +215,42 @@ def _statistics(
         }
     )
 
+    if counts is not None:
+        stats_dict.update(
+            {
+                "Valid inlier count": final_count_nonzero,
+                "Total inlier count": counts[1],
+                "Percentage inlier points": (final_count_nonzero / counts[0]) * 100,
+                "Percentage valid inlier points": (final_count_nonzero / counts[1]) * 100 if counts[1] != 0 else 0,
+            }
+        )
+
+    def get_stat_common_name(stat_name):
+        if stat_name in stats_dict.keys():
+            return stat_name
+        elif "".join(stat_name.lower().split()) in _ALIAS_STATS.keys():
+            return _ALIAS_STATS["".join(stat_name.lower().split())]
+        else:
+            return None
+
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
         warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
         if stats_name is None:
             stat_data_valid = STATS_LIST  # type: ignore
+            if counts is not None:
+                stat_data_valid = stat_data_valid + STATS_LIST_MASK
         else:
             stat_data_valid = stats_name  # type: ignore
+
         res_dict = {
             stat_name: (
-                stats_dict[stat_name] if (stat_name in STATS_LIST and not callable(stats_dict[stat_name])) else np.nan
+                stats_dict[get_stat_common_name(stat_name)]
+                if (get_stat_common_name(stat_name) and not callable(stats_dict[get_stat_common_name(stat_name)]))
+                else np.nan
             )
             for stat_name in stat_data_valid
         }  # type: ignore
-
-        if stats_name is not None:
-            stat_with_alias = set(stats_name).intersection(list(_STATS_ALIASES.keys()))  # type: ignore
-            if stat_with_alias:
-                for stat_name in stat_with_alias:
-                    alias = _STATS_ALIASES[stat_name]  # type: ignore
-                    if callable(stats_dict[alias]):
-                        res_dict[stat_name] = np.nan  # type: ignore
-                    else:
-                        res_dict[stat_name] = stats_dict[alias]  # type: ignore
 
     else:
         if stats_name is None:
@@ -248,17 +263,17 @@ def _statistics(
             res_dict = {}  # type: ignore
             for stat_name in stats_name:
                 # Compute stat if in stats_dict keys
-                if isinstance(stat_name, str) and stat_name in stats_dict.keys():
-                    if callable(stats_dict[stat_name]):
-                        res_dict[stat_name] = stats_dict[stat_name](data)  # type: ignore
+                if isinstance(stat_name, str):
+                    stat_common_name = get_stat_common_name(stat_name)
+                    if stat_common_name:
+                        if callable(stats_dict[stat_common_name]):
+                            res_dict[stat_name] = stats_dict[stat_common_name](data)  # type: ignore
+                        else:
+                            res_dict[stat_name] = stats_dict[stat_common_name]  # type: ignore
                     else:
-                        res_dict[stat_name] = stats_dict[stat_name]  # type: ignore
-                # Compute stat if in _STATS_ALIASES keys
-                elif isinstance(stat_name, str) and stat_name in _STATS_ALIASES.keys():
-                    if callable(stats_dict[_STATS_ALIASES[stat_name]]):
-                        res_dict[stat_name] = stats_dict[_STATS_ALIASES[stat_name]](data)  # type: ignore
-                    else:
-                        res_dict[stat_name] = stats_dict[_STATS_ALIASES[stat_name]]  # type: ignore
+                        warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+                        res_dict[stat_name] = np.float32(np.nan)  # type: ignore
+
                 # Compute stat if callable
                 elif callable(stat_name):
                     res_dict[stat_name.__name__] = stat_name(data)  # type: ignore
@@ -269,31 +284,4 @@ def _statistics(
                         warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
                         res_dict[stat_name] = np.float32(np.nan)  # type: ignore
 
-    # If inlier mask parameter given before in get_stats() and if one of these stats is wanted
-    if counts is not None and (
-        stats_name is None
-        or list(
-            set(STATS_LIST_MASK).intersection(stats_name) or list(set(_ALIAS_STATS_LIST_MASK).intersection(stats_name))
-        )
-    ):
-        dict_c = {
-            "Valid inlier count": final_count_nonzero,
-            "Total inlier count": counts[1],
-            "Percentage inlier points": (final_count_nonzero / counts[0]) * 100,
-            "Percentage valid inlier points": (final_count_nonzero / counts[1]) * 100 if counts[1] != 0 else 0,
-        }
-
-        if stats_name is None:
-            # Add all stats
-            res_dict.update(dict_c)
-        else:
-            # Add all stats if the name is on the list
-            res_dict.update({k: dict_c[k] for k in list(set(STATS_LIST_MASK).intersection(stats_name))})
-            # and the stats from alias stats
-            res_dict.update(
-                {
-                    k: dict_c[_ALIAS_STATS_LIST_MASK[k]]
-                    for k in list(set(_ALIAS_STATS_LIST_MASK).intersection(stats_name))
-                }
-            )
     return res_dict  # type: ignore

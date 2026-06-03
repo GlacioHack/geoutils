@@ -69,6 +69,7 @@ class TestStats:
         # Full stats
         stats = raster.get_stats()
         assert len(stats) == len(expected_stats + expected_stats_count)
+
         for name in expected_stats + expected_stats_count:
             assert name in stats
             assert isinstance(stats.get(name), stat_types)
@@ -81,6 +82,11 @@ class TestStats:
             assert name in stats_masked
             stats_masked.pop(name)
         assert stats_masked == stats
+
+        stats_masked = raster.get_stats(inlier_mask=inlier_mask)
+        for name in expected_stats + expected_stats_count + expected_stats_mask:
+            assert stats_masked[name] == raster.get_stats(stats_name=name.lower(), inlier_mask=inlier_mask)
+            assert stats_masked[name] == raster.get_stats(stats_name="".join(name.split()), inlier_mask=inlier_mask)
 
         # Empty mask (=False)
         empty_mask = np.zeros_like(inlier_mask)
@@ -109,8 +115,10 @@ class TestStats:
         assert stats_masked == 0
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
-            stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name="validinliercount")
-        assert stats_masked == 0
+            stats_masked = raster.get_stats(inlier_mask=inlier_mask)
+            for name in expected_stats + expected_stats_count + expected_stats_mask:
+                assert stats_masked[name] == raster.get_stats(stats_name=name.lower(), inlier_mask=inlier_mask)
+                assert stats_masked[name] == raster.get_stats(stats_name="".join(name.split()), inlier_mask=inlier_mask)
 
         # Empty DEM
         dem_empty = gu.Raster.from_array(
@@ -438,11 +446,6 @@ class TestStats:
             warnings.filterwarnings("ignore", category=UserWarning, message="New nodata.*")
             rast_crop.set_nodata(255)  # Needs to be defined for reprojection
         rast_crop_proj = rast_crop.reproject(rast, resampling=rio.warp.Resampling.nearest)
-        for data in [rast_crop_proj, rast_crop, rast]:
-            print(
-                "# data shape:", data.shape, data.shape[0] * rast_crop.shape[1], "->", len(data.to_pointcloud()["b1"])
-            )
-            print("    ", data.to_pointcloud()["b1"].min(), "to", data.to_pointcloud()["b1"].max())
         rast_crop_proj_pc = rast_crop_proj.to_pointcloud()
 
         rast_stats_crop_proj_pc = {
