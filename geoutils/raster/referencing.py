@@ -139,14 +139,14 @@ def _coords(
     # The coordinates are extracted from indexes 0 to shape
     _, yy = _ij2xy(
         i=np.arange(shape[0] - 1, -1, -1),
-        j=np.array(0),
+        j=0,
         transform=transform,
         area_or_point=area_or_point,
         shift_area_or_point=shift_area_or_point,
         force_offset=force_offset,
     )
     xx, _ = _ij2xy(
-        i=np.array([0]),
+        i=0,
         j=np.arange(shape[1]),
         transform=transform,
         area_or_point=area_or_point,
