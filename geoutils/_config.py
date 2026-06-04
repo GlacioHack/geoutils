@@ -50,28 +50,24 @@ def validate_bool(b: bool | str | int) -> bool:
 def validate_resampling_method(resampling_method: bool | str | int) -> str:
     """Test resampling_method"""
     if isinstance(resampling_method, str):
-        for method in Resampling:
-            if method.name == resampling_method:
-                return resampling_method
-
-    raise ValueError("error")
+        if resampling_method in [method.name for method in Resampling]:
+            return resampling_method
+    raise ValueError(
+        f"'{resampling_method}' is not a valid rasterio.enums.Resampling method. "
+        f"Valid methods: {[method.name for method in Resampling]}"
+    )
 
 
 def validate_interpolation_method(interpolation_method: bool | str | int) -> str:
     """Test interpolation_method"""
-    print(interpolation_method)
-    if isinstance(interpolation_method, str) and interpolation_method in [
-        "nearest",
-        "linear",
-        "cubic",
-        "quintic",
-        "slinear",
-        "pchip",
-        "splinef2d",
-    ]:
+    valid_methods = ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+    if isinstance(interpolation_method, str) and interpolation_method in valid_methods:
         return interpolation_method
     else:
-        raise ValueError("error")
+        raise ValueError(
+            f"'{interpolation_method}' is not a valid rasterio.enums.Resampling method. "
+            f"Valid methods: {valid_methods}"
+        )
 
 
 # Map the parameter names with a validating function to check user input

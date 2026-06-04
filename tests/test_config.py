@@ -1,6 +1,7 @@
 """Test configuration file."""
 
 import numpy as np
+import pytest
 import rasterio as rio
 
 import geoutils as gu
@@ -40,6 +41,22 @@ class TestConfig:
         # Leave the test with initial default
         gu.config["shift_area_or_point"] = 1
         assert gu.config["shift_area_or_point"]
+
+        # sampling_method validator
+        gu.config["resampling_method"] = "bilinear"
+        with pytest.raises(
+            ValueError,
+            match="'splinef2d' is not a valid*",
+        ):
+            gu.config["resampling_method"] = "splinef2d"
+
+        # interpolation_method validator
+        gu.config["interpolation_method"] = "linear"
+        with pytest.raises(
+            ValueError,
+            match="'bilinear' is not a valid*",
+        ):
+            gu.config["interpolation_method"] = "bilinear"
 
     def test_default_resampling_method(self) -> None:
         landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
