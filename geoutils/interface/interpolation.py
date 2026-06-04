@@ -348,7 +348,13 @@ def _interp_points_base(
             kwargs.update({"cval": np.nan})
 
         # Use map coordinates with nodata propagation
-        i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
+        i, j = _xy2ij(
+            np.array(x),
+            np.array(y),
+            transform=transform,
+            area_or_point=area_or_point,
+            shift_area_or_point=shift_area_or_point,
+        )
         rpoints = _map_coordinates_nodata_propag(
             values=array, indices=(i, j), order=order, dist_nodata_spread=dist_nodata_spread, **kwargs
         )
