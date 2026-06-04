@@ -291,7 +291,7 @@ def merge_rasters(
 
     # If resampling undefined, default to the global system config
     if resampling_method is None:
-        resampling_method = _resampling_method_from_str(config["resampling"])
+        resampling_method = _resampling_method_from_str(config["resampling_method"])
 
     # Try to run the merge_algorithm with an arbitrary list. Raise an error if the algorithm is incompatible.
     for algo in merge_algorithm:

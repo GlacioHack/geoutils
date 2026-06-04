@@ -59,17 +59,22 @@ class TestConfig:
         )
         assert raster__reproject.raster_equal(raster_reproj)
 
+        # test resampling_method for merge_rasters
+        merged_img_force = gu.raster.merge_rasters(
+            [raster, raster_reproj_force], resampling_method=gu.config["resampling_method"]
+        )
+        merged_img = gu.raster.merge_rasters([raster, raster_reproj_force])
+        assert merged_img_force.raster_equal(merged_img)
+
     def test_default_interpolation_method(self) -> None:
+
+        # Test from test_interpolation.py::TestInterpolate::test_interp_points__synthetic
         arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
         transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
         raster.set_area_or_point("Point", shift_area_or_point=False)
-
-        # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
         index_x = [0, 1, 2, 0, 1, 2, 0, 1, 2]
         index_y = [0, 0, 0, 1, 1, 1, 2, 2, 2]
-
-        # The actual X/Y coords will be offset by one because Y axis is inverted and pixel coords is upper-left corner
         points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
 
         raster_points_force = raster.interp_points(
