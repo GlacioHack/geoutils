@@ -240,8 +240,11 @@ def _statistics(
 
         res_dict = {
             stat_name: (
-                stats_dict[get_stat_common_name(stat_name)]
-                if (get_stat_common_name(stat_name) and not callable(stats_dict[get_stat_common_name(stat_name)]))
+                stats_dict[get_stat_common_name(stat_name)]  # type: ignore
+                if (
+                    get_stat_common_name(stat_name) is not None
+                    and not callable(stats_dict[get_stat_common_name(stat_name)])  # type: ignore
+                )
                 else np.nan
             )
             for stat_name in stat_data_valid
