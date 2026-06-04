@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from geoutils.raster.base import RasterType
 
 
-def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:  # type : ignore
+def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
     """
     Return the mask of invalid values, whether array is a ndarray with NaNs or a np.ma.masked_array.
 
@@ -40,10 +40,8 @@ def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayB
 
     :returns invalid_mask: boolean array, True where array is masked or Nan.
     """
-    mask = (
-        (np.ma.getmaskarray(array) | ~np.isfinite(array.data)) if np.ma.isMaskedArray(array) else ~np.isfinite(array)
-    )  # type : ignore
-    return mask.squeeze()  # type : ignore
+    mask = (np.ma.getmaskarray(array) | ~np.isfinite(array.data)) if np.ma.isMaskedArray(array) else ~np.isfinite(array)
+    return mask.squeeze()
 
 
 def get_array_and_mask(

@@ -599,7 +599,7 @@ class Raster(RasterBase):
         elif not np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data)) > 0:
             self._data = np.ma.masked_array(
                 data=np.asarray(new_data), mask=~np.isfinite(new_data.data), fill_value=self.nodata
-            )  # type : ignore
+            )
 
         # 2/ If the new data is masked but some non-finite values aren't masked, add them to the mask
         elif np.ma.is_masked(new_data) and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0:
