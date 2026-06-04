@@ -161,7 +161,7 @@ def stack_rasters(
 
     # If resampling undefined, default to the global system config
     if resampling_method is None:
-        resampling_method = _resampling_method_from_str(config["resampling"])
+        resampling_method = _resampling_method_from_str(config["resampling_method"])
     elif isinstance(resampling_method, str):
         resampling_method = _resampling_method_from_str(resampling_method)
 

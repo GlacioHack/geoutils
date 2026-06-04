@@ -66,6 +66,12 @@ class TestConfig:
         merged_img = gu.raster.merge_rasters([raster, raster_reproj_force])
         assert merged_img_force.raster_equal(merged_img)
 
+        stack_force = gu.raster.stack_rasters(
+            [raster.copy(), raster_reproj_force.copy()], resampling_method=gu.config["resampling_method"]
+        )
+        stack = gu.raster.stack_rasters([raster.copy(), raster_reproj_force.copy()])
+        assert stack_force.raster_equal(stack)
+
     def test_default_interpolation_method(self) -> None:
 
         # Test from test_interpolation.py::TestInterpolate::test_interp_points__synthetic
