@@ -47,13 +47,13 @@ def validate_bool(b: bool | str | int) -> bool:
         raise ValueError(f"Cannot convert {b!r} to bool")
 
 
-def validate_resampling_method(resampling_method: bool | str | int) -> str:
-    """Test resampling_method"""
-    if isinstance(resampling_method, str):
-        if resampling_method in [method.name for method in Resampling]:
-            return resampling_method
+def validate_reproject_method(reproject_method: bool | str | int) -> str:
+    """Test reproject_method"""
+    if isinstance(reproject_method, str):
+        if reproject_method.lower() in [method.name for method in Resampling]:
+            return reproject_method.lower()
     raise ValueError(
-        f"'{resampling_method}' is not a valid rasterio.enums.Resampling method. "
+        f"'{reproject_method}' is not a valid rasterio.enums.Resampling method. "
         f"Valid methods: {[method.name for method in Resampling]}"
     )
 
@@ -61,8 +61,8 @@ def validate_resampling_method(resampling_method: bool | str | int) -> str:
 def validate_interpolation_method(interpolation_method: bool | str | int) -> str:
     """Test interpolation_method"""
     valid_methods = ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    if isinstance(interpolation_method, str) and interpolation_method in valid_methods:
-        return interpolation_method
+    if isinstance(interpolation_method, str) and interpolation_method.lower() in valid_methods:
+        return interpolation_method.lower()
     else:
         raise ValueError(
             f"'{interpolation_method}' is not a valid rasterio.enums.Resampling method. "
@@ -74,7 +74,7 @@ def validate_interpolation_method(interpolation_method: bool | str | int) -> str
 _validators = {
     "shift_area_or_point": validate_bool,
     "warn_area_or_point": validate_bool,
-    "resampling_method": validate_resampling_method,
+    "reproject_method": validate_reproject_method,
     "interpolation_method": validate_interpolation_method,
 }
 

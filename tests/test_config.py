@@ -43,12 +43,12 @@ class TestConfig:
         assert gu.config["shift_area_or_point"]
 
         # sampling_method validator
-        gu.config["resampling_method"] = "bilinear"
+        gu.config["reproject_method"] = "bilinear"
         with pytest.raises(
             ValueError,
             match="'splinef2d' is not a valid*",
         ):
-            gu.config["resampling_method"] = "splinef2d"
+            gu.config["reproject_method"] = "splinef2d"
 
         # interpolation_method validator
         gu.config["interpolation_method"] = "linear"
@@ -65,7 +65,7 @@ class TestConfig:
 
         # test resampling_method for reproject
         out_size = (raster.shape[1] // 2, raster.shape[0] // 2)  # Outsize is (ncol, nrow)
-        raster_reproj_force = raster.reproject(grid_size=out_size, resampling=gu.config["resampling_method"])
+        raster_reproj_force = raster.reproject(grid_size=out_size, resampling=gu.config["reproject_method"])
         raster_reproj = raster.reproject(grid_size=out_size)
         assert raster_reproj_force.raster_equal(raster_reproj)
 
@@ -78,13 +78,13 @@ class TestConfig:
 
         # test resampling_method for merge_rasters
         merged_img_force = gu.raster.merge_rasters(
-            [raster, raster_reproj_force], resampling_method=gu.config["resampling_method"]
+            [raster, raster_reproj_force], resampling_method=gu.config["reproject_method"]
         )
         merged_img = gu.raster.merge_rasters([raster, raster_reproj_force])
         assert merged_img_force.raster_equal(merged_img)
 
         stack_force = gu.raster.stack_rasters(
-            [raster.copy(), raster_reproj_force.copy()], resampling_method=gu.config["resampling_method"]
+            [raster.copy(), raster_reproj_force.copy()], resampling_method=gu.config["reproject_method"]
         )
         stack = gu.raster.stack_rasters([raster.copy(), raster_reproj_force.copy()])
         assert stack_force.raster_equal(stack)

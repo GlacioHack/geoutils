@@ -758,7 +758,7 @@ def _reproject(
 
     # If resampling undefined, default to the global system config
     if resampling is None:
-        resampling = config["resampling_method"]
+        resampling = config["reproject_method"]
 
     # 1/ Check and normalize match-grid inputs
     dst_shape, dst_transform, dst_crs = _check_match_grid(
