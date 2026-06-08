@@ -152,7 +152,7 @@ def stack_rasters(
     :param reference: Index of reference raster in the list or separate reference raster.
         Defaults to the first raster in the list.
     :param resampling_method: Resampling method for reprojection. Defaults to bilinear.
-            Can be configured with the global setting geoutils.config["reprojection_method"].
+        Can be configured with the global setting geoutils.config["reprojection_method"].
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
     :param diff: If True, will return the difference to the reference raster.
     :param progress: If True, will display a progress bar. Default is True.
@@ -160,7 +160,7 @@ def stack_rasters(
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
 
-    # If resampling undefined, default to the global system config
+    # If resampling method undefined, default to the global system config
     if resampling_method is None:
         resampling_method = _resampling_method_from_str(config["reprojection_method"])
     elif isinstance(resampling_method, str):
@@ -278,22 +278,21 @@ def merge_rasters(
     :param merge_algorithm: Reductor function (or list of functions) to merge the rasters with. Defaults to the mean.
         If several algorithms are provided, each result is returned as a separate band.
     :param resampling_method: Resampling method for reprojection. Defaults to bilinear.
-            Can be configured with the global setting geoutils.config["reprojection_method"].
+        Can be configured with the global setting geoutils.config["reprojection_method"].
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
     :param progress: If True, will display a progress bar. Default is True.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
-
     # Make sure merge_algorithm is a list
     if not isinstance(merge_algorithm, (list, tuple)):
         merge_algorithm = [
             merge_algorithm,
         ]
 
-    # If resampling undefined, default to the global system config
+    # If resampling method undefined, default to the global system config
     if resampling_method is None:
-        resampling_method = _resampling_method_from_str(config["reprojection_method"])
+        resampling_method = config["reprojection_method"]
 
     # Try to run the merge_algorithm with an arbitrary list. Raise an error if the algorithm is incompatible.
     for algo in merge_algorithm:

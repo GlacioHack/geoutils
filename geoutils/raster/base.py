@@ -1246,7 +1246,7 @@ class RasterBase(ABC):
         :returns: Reprojected raster.
         """
 
-        # If resampling undefined, default to the global system config
+        # If resampling method undefined, default to the global system config
         if resampling is None:
             resampling = config["reprojection_method"]
 
@@ -1563,11 +1563,11 @@ class RasterBase(ABC):
             If points fall outside of image, value returned is nan.
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
-            Default is linear.
+            Default is linear. Can be configured with the global setting geoutils.config["interpolation_method"].
         :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
             rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
             quintic method), or rounded down, or a fixed integer. Defaults to "half_order_up".
-                        Can be configured with the global setting geoutils.config["interpolation_dist_nodata_spread"].
+            Can be configured with the global setting geoutils.config["interpolation_dist_nodata_spread"].
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.

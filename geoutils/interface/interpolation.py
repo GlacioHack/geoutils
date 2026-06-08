@@ -96,9 +96,8 @@ def _interpn_interpolator(
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
-    Create SciPy interpolator with nodata spreading. Default is spreading at distance of half the method order
-    rounded up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic ...
-    Can be configured with the global setting geoutils.config["interpolation_method"].).
+    Create SciPy interpolator with nodata spreading. Default method is linear.
+    Can be configured with the global setting geoutils.config["interpolation_method"].
 
     Gives the exact same result as scipy.interpolate.interpn, and allows interpolator to be re-used if required (
     for speed).
@@ -360,13 +359,7 @@ def _interp_points_base(
             kwargs.update({"cval": np.nan})
 
         # Use map coordinates with nodata propagation
-        i, j = _xy2ij(
-            np.array(x),
-            np.array(y),
-            transform=transform,
-            area_or_point=area_or_point,
-            shift_area_or_point=shift_area_or_point,
-        )
+        i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
         rpoints = _map_coordinates_nodata_propag(
             values=array, indices=(i, j), order=order, dist_nodata_spread=dist_nodata_spread, **kwargs
         )

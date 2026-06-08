@@ -2160,10 +2160,9 @@ class Raster(RasterBase):
             data = np.moveaxis(data, 0, -1)  # type: ignore
 
         # Create colorbar
-        print(plt.get_cmap(plt.rcParams["image.cmap"]))
         # Use rcParam default
         if cmap is None:
-            cmap = None  # plt.get_cmap(plt.rcParams["image.cmap"])
+            cmap = plt.get_cmap(plt.rcParams["image.cmap"])
         elif isinstance(cmap, str):
             cmap = plt.get_cmap(cmap)
         elif isinstance(cmap, matplotlib.colors.Colormap):

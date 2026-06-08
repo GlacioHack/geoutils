@@ -32,7 +32,6 @@ from rasterio.enums import Resampling
 
 _config_ini_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "config.ini"))
 
-
 # Validators: to check the format of user inputs
 
 

@@ -756,7 +756,7 @@ def _reproject(
     Reproject raster. See Raster.reproject() for details.
     """
 
-    # If resampling undefined, default to the global system config
+    # If resampling method undefined, default to the global system config
     if resampling is None:
         resampling = config["reprojection_method"]
 
