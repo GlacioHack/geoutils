@@ -1233,7 +1233,7 @@ class RasterBase(ABC):
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
         :param resampling: A Rasterio resampling method, can be passed as a string. Defaults to bilinear.
-            Can be configured with the global setting geoutils.config["reproject_method"].
+            Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
@@ -1248,7 +1248,7 @@ class RasterBase(ABC):
 
         # If resampling undefined, default to the global system config
         if resampling is None:
-            resampling = config["reproject_method"]
+            resampling = config["reprojection_method"]
 
         # Reproject
         return_copy, data, transformed, crs, nodata = _reproject(
@@ -1491,8 +1491,8 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
@@ -1506,8 +1506,8 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
@@ -1521,8 +1521,8 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
@@ -1536,8 +1536,8 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         as_array: bool = False,
@@ -1566,7 +1566,8 @@ class RasterBase(ABC):
             Default is linear.
         :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
             rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
-            quintic method), or rounded down, or a fixed integer.
+            quintic method), or rounded down, or a fixed integer. Defaults to "half_order_up".
+                        Can be configured with the global setting geoutils.config["interpolation_dist_nodata_spread"].
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
@@ -1578,6 +1579,14 @@ class RasterBase(ABC):
 
         :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
+
+        # If interpolation method undefined, default to the global system config
+        if method is None:
+            method = config["interpolation_method"]
+
+        # If dist_nodata_spread undefined, default to the global system config
+        if dist_nodata_spread is None:
+            dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
         return _interp_points(
             self,

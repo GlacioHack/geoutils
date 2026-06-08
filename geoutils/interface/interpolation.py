@@ -92,12 +92,12 @@ def _interpn_interpolator(
     values: NDArrayNum,
     fill_value: Number = np.nan,
     bounds_error: bool = False,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
     Create SciPy interpolator with nodata spreading. Default is spreading at distance of half the method order
-    rounded up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic ... defaults to linear.
+    rounded up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic ...
     Can be configured with the global setting geoutils.config["interpolation_method"].).
 
     Gives the exact same result as scipy.interpolate.interpn, and allows interpolator to be re-used if required (
@@ -115,6 +115,10 @@ def _interpn_interpolator(
     # If interpolation method undefined, default to the global system config
     if method is None:
         method = config["interpolation_method"]
+
+    # If dist_nodata_spread undefined, default to the global system config
+    if dist_nodata_spread is None:
+        dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
     # Derive distance to spread nodata to depending on method order
     order = method_to_order[method]
@@ -203,7 +207,7 @@ def _map_coordinates_nodata_propag(
     values: NDArrayNum,
     indices: tuple[NDArrayNum, NDArrayNum],
     order: int,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     **kwargs: Any,
 ) -> NDArrayNum:
     """
@@ -215,6 +219,10 @@ def _map_coordinates_nodata_propag(
     For input arguments, see scipy.ndimage.map_coordinates.
     For additional argument "dist_nodata_spread", see description of Raster.interp_points.
     """
+
+    # If dist_nodata_spread undefined, default to the global system config
+    if dist_nodata_spread is None:
+        dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
     # Derive distance of nodata spreading
     d = _get_dist_nodata_spread(order=order, dist_nodata_spread=dist_nodata_spread)
@@ -254,7 +262,7 @@ def _interp_points_base(
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     *,
@@ -270,7 +278,7 @@ def _interp_points_base(
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     *,
@@ -286,7 +294,7 @@ def _interp_points_base(
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     *,
@@ -301,7 +309,7 @@ def _interp_points_base(
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | None,
     area_or_point: Literal["Area", "Point"] | None = None,
     method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
@@ -311,6 +319,10 @@ def _interp_points_base(
     # If interpolation method undefined, default to the global system config
     if method is None:
         method = config["interpolation_method"]
+
+    # If dist_nodata_spread undefined, default to the global system config
+    if dist_nodata_spread is None:
+        dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
     # If array is not a floating dtype (to support NaNs), convert dtype
     if not np.issubdtype(array.dtype, np.floating):
@@ -693,11 +705,11 @@ def _multiproc_interp_points(
 def _interp_points(
     source_raster: RasterBase,
     points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
+    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
     band: int = 1,
     input_latlon: bool = False,
     as_array: bool = False,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
@@ -705,6 +717,14 @@ def _interp_points(
     **kwargs: Any,
 ) -> Any:
     """See description of Raster.interp_points."""
+
+    # If interpolation method undefined, default to the global system config
+    if method is None:
+        method = config["interpolation_method"]
+
+    # If dist_nodata_spread undefined, default to the global system config
+    if dist_nodata_spread is None:
+        dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
     # 1/ Input checks
 

@@ -43,12 +43,12 @@ class TestConfig:
         assert gu.config["shift_area_or_point"]
 
         # sampling_method validator
-        gu.config["reproject_method"] = "bilinear"
+        gu.config["reprojection_method"] = "bilinear"
         with pytest.raises(
             ValueError,
             match="'splinef2d' is not a valid*",
         ):
-            gu.config["reproject_method"] = "splinef2d"
+            gu.config["reprojection_method"] = "splinef2d"
 
         # interpolation_method validator
         gu.config["interpolation_method"] = "linear"
@@ -58,14 +58,23 @@ class TestConfig:
         ):
             gu.config["interpolation_method"] = "bilinear"
 
-    def test_default_resampling_method(self) -> None:
+        # interpolation_dist_nodata_spread validator
+        gu.config["interpolation_dist_nodata_spread"] = "half_order_up"
+        gu.config["interpolation_dist_nodata_spread"] = 1
+        with pytest.raises(
+            ValueError,
+            match="'bilinear' is not a valid*",
+        ):
+            gu.config["interpolation_dist_nodata_spread"] = "bilinear"
+
+    def test_default_reproject(self) -> None:
         landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
         raster = gu.Raster(landsat_b4_crop_path)
         raster.set_nodata(0)
 
         # test resampling_method for reproject
         out_size = (raster.shape[1] // 2, raster.shape[0] // 2)  # Outsize is (ncol, nrow)
-        raster_reproj_force = raster.reproject(grid_size=out_size, resampling=gu.config["reproject_method"])
+        raster_reproj_force = raster.reproject(grid_size=out_size, resampling=gu.config["reprojection_method"])
         raster_reproj = raster.reproject(grid_size=out_size)
         assert raster_reproj_force.raster_equal(raster_reproj)
 
@@ -78,19 +87,18 @@ class TestConfig:
 
         # test resampling_method for merge_rasters
         merged_img_force = gu.raster.merge_rasters(
-            [raster, raster_reproj_force], resampling_method=gu.config["reproject_method"]
+            [raster, raster_reproj_force], resampling_method=gu.config["reprojection_method"]
         )
         merged_img = gu.raster.merge_rasters([raster, raster_reproj_force])
         assert merged_img_force.raster_equal(merged_img)
 
         stack_force = gu.raster.stack_rasters(
-            [raster.copy(), raster_reproj_force.copy()], resampling_method=gu.config["reproject_method"]
+            [raster.copy(), raster_reproj_force.copy()], resampling_method=gu.config["reprojection_method"]
         )
         stack = gu.raster.stack_rasters([raster.copy(), raster_reproj_force.copy()])
         assert stack_force.raster_equal(stack)
 
-    def test_default_interpolation_method(self) -> None:
-
+    def test_default_interpolation(self) -> None:
         # Test from test_interpolation.py::TestInterpolate::test_interp_points__synthetic
         arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
         transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
@@ -101,8 +109,15 @@ class TestConfig:
         points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
 
         raster_points_force = raster.interp_points(
-            (points_x, points_y), method=gu.config["interpolation_method"], as_array=True
+            (points_x, points_y),
+            method=gu.config["interpolation_method"],
+            dist_nodata_spread=gu.config["interpolation_dist_nodata_spread"],
+            as_array=True,
         )
         raster_points = raster.interp_points((points_x, points_y), as_array=True)
-
         assert np.array_equal(raster_points, raster_points_force)
+
+        raster_points_sub = gu.interface.interpolation._interp_points(
+            source_raster=raster, points=(points_x, points_y), as_array=True
+        )
+        assert np.array_equal(raster_points_force, raster_points_sub)

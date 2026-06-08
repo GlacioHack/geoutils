@@ -32,6 +32,7 @@ from rasterio.enums import Resampling
 
 _config_ini_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "config.ini"))
 
+
 # Validators: to check the format of user inputs
 
 
@@ -47,13 +48,13 @@ def validate_bool(b: bool | str | int) -> bool:
         raise ValueError(f"Cannot convert {b!r} to bool")
 
 
-def validate_reproject_method(reproject_method: bool | str | int) -> str:
-    """Test reproject_method"""
-    if isinstance(reproject_method, str):
-        if reproject_method.lower() in [method.name for method in Resampling]:
-            return reproject_method.lower()
+def validate_reprojection_method(reprojection_method: bool | str | int) -> str:
+    """Test reprojection_method"""
+    if isinstance(reprojection_method, str):
+        if reprojection_method.lower() in [method.name for method in Resampling]:
+            return reprojection_method.lower()
     raise ValueError(
-        f"'{reproject_method}' is not a valid rasterio.enums.Resampling method. "
+        f"'{reprojection_method}' is not a valid rasterio.enums.Resampling method"
         f"Valid methods: {[method.name for method in Resampling]}"
     )
 
@@ -65,8 +66,21 @@ def validate_interpolation_method(interpolation_method: bool | str | int) -> str
         return interpolation_method.lower()
     else:
         raise ValueError(
-            f"'{interpolation_method}' is not a valid rasterio.enums.Resampling method. "
-            f"Valid methods: {valid_methods}"
+            f"'{interpolation_method}' is not a valid interpolation method" f"Valid methods: {valid_methods}"
+        )
+
+
+def validate_dist_nodata_spread(dist_nodata_spread: bool | str | int) -> str | int:
+    """Test interpolation_method"""
+    valid_spreads = ["half_order_up", "half_order_down"]
+    if isinstance(dist_nodata_spread, str) and dist_nodata_spread.lower() in valid_spreads:
+        return dist_nodata_spread.lower()
+    elif isinstance(dist_nodata_spread, int):
+        return dist_nodata_spread
+    else:
+        raise ValueError(
+            f"'{dist_nodata_spread}' is not a valid dist_nodata_spread parameter"
+            f"Valid value: {valid_spreads} or integer"
         )
 
 
@@ -74,8 +88,9 @@ def validate_interpolation_method(interpolation_method: bool | str | int) -> str
 _validators = {
     "shift_area_or_point": validate_bool,
     "warn_area_or_point": validate_bool,
-    "reproject_method": validate_reproject_method,
+    "reprojection_method": validate_reprojection_method,
     "interpolation_method": validate_interpolation_method,
+    "interpolation_dist_nodata_spread": validate_dist_nodata_spread,
 }
 
 
