@@ -414,8 +414,7 @@ class RasterBase(ABC):
         :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"]
-            (or in config.ini).
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
 
         :return: None.
         """
@@ -1234,7 +1233,7 @@ class RasterBase(ABC):
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
         :param resampling: A Rasterio resampling method, can be passed as a string. Defaults to bilinear.
-            Can be configured with the global setting geoutils.config["reprojection_method"] (or in config.ini).
+            Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
@@ -1401,8 +1400,7 @@ class RasterBase(ABC):
         :param precision: Precision passed to :func:`rasterio.transform.rowcol`.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"]
-            (or in config.ini).
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
 
         :returns i, j: Indices of (x,y) in the image.
         """
@@ -1433,8 +1431,7 @@ class RasterBase(ABC):
         :param j: Column (j) index of pixel.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"]
-            (or in config.ini).
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
             any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
 
@@ -1459,8 +1456,7 @@ class RasterBase(ABC):
         :param grid: Whether to return mesh grids of coordinates matrices.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"]
-            (or in config.ini).
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
             any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
 
@@ -1567,13 +1563,11 @@ class RasterBase(ABC):
             If points fall outside of image, value returned is nan.
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
-            Default is linear. Can be configured with the global setting geoutils.config["interpolation_method"]
-            (or in config.ini).
+            Default is linear. Can be configured with the global setting geoutils.config["interpolation_method"].
         :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
             rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
             quintic method), or rounded down, or a fixed integer. Defaults to "half_order_up".
-            Can be configured with the global setting geoutils.config["interpolation_dist_nodata_spread"]
-            (or in config.ini).
+            Can be configured with the global setting geoutils.config["interpolation_dist_nodata_spread"].
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
@@ -1581,8 +1575,7 @@ class RasterBase(ABC):
             array of interpolated values.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"]
-            (or in config.ini).
+            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
 
         :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
