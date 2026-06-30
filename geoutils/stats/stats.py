@@ -33,69 +33,70 @@ from geoutils import profiler
 from geoutils._typing import NDArrayNum
 from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
 
-_STATS_ALIASES = {
+_STATS_ALIAS_OP = {
     "mean": "Mean",
     "median": "Median",
     "max": "Max",
-    "maximum": "Max",
     "min": "Min",
-    "minimum": "Min",
     "sum": "Sum",
     "sumofsquares": "Sum of squares",
-    "sum2": "Sum of squares",
     "90thpercentile": "90th percentile",
-    "90percentile": "90th percentile",
     "iqr": "IQR",
     "le90": "LE90",
     "nmad": "NMAD",
     "rmse": "RMSE",
-    "rms": "RMSE",
     "std": "Standard deviation",
-    "standarddeviation": "Standard deviation",
+}
+
+_STATS_ALIAS_COUNTS = {
     "validcount": "Valid count",
     "totalcount": "Total count",
     "percentagevalidpoints": "Percentage valid points",
-}  # type: ignore
+}
 
-STATS_LIST = [
-    "Mean",
-    "Median",
-    "Max",
-    "Min",
-    "Sum",
-    "Sum of squares",
-    "90th percentile",
-    "IQR",
-    "LE90",
-    "NMAD",
-    "RMSE",
-    "Standard deviation",
-    "Valid count",
-    "Total count",
-    "Percentage valid points",
-]
+_STATS_ALIAS_GEN = _STATS_ALIAS_OP | _STATS_ALIAS_COUNTS
 
-STATS_LIST_MASK = [
-    "Valid inlier count",
-    "Total inlier count",
-    "Percentage inlier points",
-    "Percentage valid inlier points",
-]
+_SYNONYMES = {
+    "maximum": "max",
+    "minimum": "min",
+    "sum": "Sum",
+    "sum2": "sumofsquares",
+    "90percentile": "90thpercentile",
+    "rms": "rmse",
+    "standarddeviation": "std",
+}
 
-_ALIAS_STATS_LIST_MASK = {
+_STATS_ALIAS_MASK = {
     "validinliercount": "Valid inlier count",
     "totalinliercount": "Total inlier count",
     "percentagevalidinlierpoints": "Percentage valid inlier points",
     "percentageinlierpoints": "Percentage inlier points",
-}
+}  # type: ignore
 
-_ALIAS_STATS = _STATS_ALIASES | _ALIAS_STATS_LIST_MASK
+
+_STATS_ALIAS_ALL = _STATS_ALIAS_GEN | _STATS_ALIAS_MASK
+_ALIAS_STATS_GEN = {v: k for k, v in _STATS_ALIAS_GEN.items()}
+_ALIAS_STATS_MASK = {v: k for k, v in _STATS_ALIAS_MASK.items()}
+_ALIAS_STATS_ALL = _ALIAS_STATS_GEN | _ALIAS_STATS_MASK
+
+
+_STATS_LIST_MIN = [
+    "min",
+    "max",
+    "mean",
+    "median",
+    "std",
+    "nmad",
+    "validcount",
+    "totalcount",
+    "percentagevalidpoints",
+]
 
 
 @profiler.profile("geoutils.stats.stats._statistics", memprof=True)
 def _statistics(
     data: NDArrayNum,
-    stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
+    stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | str | None = None,
     counts: tuple[int, int] | None = None,
 ) -> dict[str, float]:
     """
@@ -161,18 +162,18 @@ def _statistics(
         valid_count = final_count_nonzero if counts is None else counts[0]
 
         stats_dict = {
-            "Mean": np.ma.mean,
-            "Median": np.ma.median,
-            "Max": np.ma.max,
-            "Min": np.ma.min,
-            "Sum": np.ma.sum,
-            "Sum of squares": sum_square,
-            "90th percentile": partial(lambda x: mquantiles(x, prob=0.9, alphap=1, betap=1)[0]),
-            "LE90": partial(linear_error, interval=90),
-            "IQR": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
-            "NMAD": nmad,
-            "RMSE": rmse,
-            "Standard deviation": np.ma.std,
+            "mean": np.ma.mean,
+            "median": np.ma.median,
+            "max": np.ma.max,
+            "min": np.ma.min,
+            "sum": np.ma.sum,
+            "sumofsquares": sum_square,
+            "90thpercentile": partial(lambda x: mquantiles(x, prob=0.9, alphap=1, betap=1)[0]),
+            "le90": partial(linear_error, interval=90),
+            "iqr": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
+            "nmad": nmad,
+            "rmse": rmse,
+            "std": np.ma.std,
         }  # type: ignore
 
     else:
@@ -184,61 +185,71 @@ def _statistics(
         valid_count = final_count_nonzero if counts is None else counts[0]
 
         stats_dict = {
-            "Mean": np.nanmean,
-            "Median": np.nanmedian,
-            "Max": np.nanmax,
-            "Min": np.nanmin,
-            "Sum": np.nansum,
-            "Sum of squares": sum_square,
-            "90th percentile": partial(np.nanpercentile, q=90),
-            "LE90": partial(linear_error, interval=90),
-            "IQR": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
-            "NMAD": nmad,
-            "RMSE": rmse,
-            "Standard deviation": np.nanstd,
+            "mean": np.nanmean,
+            "median": np.nanmedian,
+            "max": np.nanmax,
+            "min": np.nanmin,
+            "sum": np.nansum,
+            "sumofsquares": sum_square,
+            "90thpercentile": partial(np.nanpercentile, q=90),
+            "le90": partial(linear_error, interval=90),
+            "iqr": partial(iqr, nan_policy="omit"),  # ignore masked value (nan),
+            "nmad": nmad,
+            "rmse": rmse,
+            "std": np.nanstd,
         }  # type: ignore
 
     # Pixels counts
     stats_dict.update(
         {
-            "Valid count": valid_count,
-            "Total count": data.size,
-            "Percentage valid points": (valid_count / data.size) * 100 if data.size else np.nan,
+            "validcount": valid_count,
+            "totalcount": data.size,
+            "percentagevalidpoints": (valid_count / data.size) * 100 if data.size else np.nan,
         }
     )
 
     if counts is not None:
         stats_dict.update(
             {
-                "Valid inlier count": final_count_nonzero,
-                "Total inlier count": counts[1],
-                "Percentage inlier points": (final_count_nonzero / counts[0]) * 100,
-                "Percentage valid inlier points": (final_count_nonzero / counts[1]) * 100 if counts[1] != 0 else 0,
+                "validinliercount": final_count_nonzero,
+                "totalinliercount": counts[1],
+                "percentageinlierpoints": (final_count_nonzero / counts[0]) * 100,
+                "percentagevalidinlierpoints": (final_count_nonzero / counts[1]) * 100 if counts[1] != 0 else 0,
             }
         )
 
     def get_stat_common_name(stat_name: str) -> str | None:
         if stat_name in stats_dict.keys():
             return stat_name
-        elif "".join(stat_name.lower().split()) in _ALIAS_STATS.keys():
-            return _ALIAS_STATS["".join(stat_name.lower().split())]
-        elif "".join(stat_name.lower().split("_")) in _ALIAS_STATS.keys():
-            return _ALIAS_STATS["".join(stat_name.lower().split("_"))]
         else:
+            for split_v in [None, "_"]:
+                if "".join(stat_name.lower().split(split_v)) in _STATS_ALIAS_ALL.keys():
+                    return "".join(stat_name.lower().split(split_v))
+                if "".join(stat_name.lower().split(split_v)) in _ALIAS_STATS_ALL.keys():
+                    return _ALIAS_STATS_GEN["".join(stat_name.lower().split(split_v))]
+                elif "".join(stat_name.lower().split(split_v)) in _SYNONYMES:
+                    return _SYNONYMES["".join(stat_name.lower().split(split_v))]
+
             return None
+
+    def create_list(counts_is_none: bool, stats_name: str | None) -> list[str]:
+        if stats_name is None:
+            stat_names_res = _STATS_LIST_MIN
+        else:
+            stat_names_res = list(_STATS_ALIAS_GEN)
+            if counts_is_none:
+                stat_names_res = stat_names_res + list(_STATS_ALIAS_MASK.keys())
+        return stat_names_res
 
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
         warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
-        if stats_name is None:
-            stat_data_valid = STATS_LIST  # type: ignore
-            if counts is not None:
-                stat_data_valid = stat_data_valid + STATS_LIST_MASK
-        else:
-            stat_data_valid = stats_name  # type: ignore
-
+        alias = False
+        if stats_name is None or stats_name == "all":
+            stat_names_res = create_list(counts is not None, stats_name)  # type: ignore
+            alias = True
         res_dict = {
-            stat_name: (
+            (_STATS_ALIAS_ALL[stat_name] if alias else stat_name): (
                 stats_dict[get_stat_common_name(stat_name)]  # type: ignore
                 if (
                     get_stat_common_name(stat_name) is not None
@@ -246,27 +257,36 @@ def _statistics(
                 )
                 else np.nan
             )
-            for stat_name in stat_data_valid
+            for stat_name in stat_names_res
         }  # type: ignore
 
     else:
-        if stats_name is None:
-            res_dict = stats_dict  # type: ignore
-            if stats_name is None:
-                for key in stats_dict.keys():
-                    if callable(stats_dict[key]):
-                        res_dict[key] = stats_dict[key](data)  # type: ignore
+        if stats_name is None or stats_name == "all":
+            stat_names_res = create_list(counts is not None, stats_name)  # type: ignore
+
+            res_dict = {
+                _STATS_ALIAS_ALL[stat_name]: (
+                    stats_dict[stat_name](data)  # type: ignore
+                    if (callable(stats_dict[stat_name]))
+                    else stats_dict[stat_name]
+                )
+                for stat_name in stat_names_res
+            }  # type: ignore
+
         else:
             res_dict = {}  # type: ignore
             for stat_name in stats_name:
+
                 # Compute stat if in stats_dict keys
                 if isinstance(stat_name, str):
                     stat_common_name = get_stat_common_name(stat_name)
                     if stat_common_name:
-                        if callable(stats_dict[stat_common_name]):
-                            res_dict[stat_name] = stats_dict[stat_common_name](data)  # type: ignore
+                        if stat_common_name in stats_dict:
+                            res_dict[stat_name] = stats_dict[stat_common_name]
+                            if callable(res_dict[stat_name]):
+                                res_dict[stat_name] = res_dict[stat_name](data)  # type: ignore
                         else:
-                            res_dict[stat_name] = stats_dict[stat_common_name]  # type: ignore
+                            res_dict[stat_name] = np.nan
                     else:
                         warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
                         res_dict[stat_name] = np.float32(np.nan)  # type: ignore
@@ -276,9 +296,7 @@ def _statistics(
                     res_dict[stat_name.__name__] = stat_name(data)  # type: ignore
 
                 else:
-                    # if none of the above conditions are met and if stats_name is not about the inlier mask
-                    if stat_name not in STATS_LIST_MASK and stat_name not in _ALIAS_STATS_LIST_MASK:
-                        warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
-                        res_dict[stat_name] = np.float32(np.nan)  # type: ignore
+                    warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+                    res_dict[stat_name] = np.float32(np.nan)  # type: ignore
 
-    return res_dict  # type: ignore
+    return {k: (v.item() if isinstance(v, np.generic) else v) for k, v in res_dict.items()}  # type: ignore

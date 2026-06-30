@@ -1440,7 +1440,7 @@ class PointCloud(Vector):  # type: ignore[misc]
         data = self.data
 
         # Given list or all attributes to compute if None
-        if isinstance(stats_name, list) or stats_name is None:
+        if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
             return _statistics(data, stats_name)  # type: ignore
         else:
             # Single attribute to compute
