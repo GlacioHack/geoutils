@@ -27,12 +27,10 @@ import numpy as np
 import rasterio as rio
 import rasterio.warp
 
-from geoutils._config import config
 from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
 from geoutils.raster.array import get_array_and_mask
 from geoutils.raster.raster import Raster, _default_nodata
-from geoutils.raster.transformation import _resampling_method_from_str
 
 
 def load_multiple_rasters(
