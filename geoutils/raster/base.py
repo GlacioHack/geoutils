@@ -1565,8 +1565,8 @@ class RasterBase(ABC):
             Default is linear. Can be configured with the global setting geoutils.config["interpolation_method"].
         :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
             rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
-            quintic method), or rounded down, or a fixed integer. Defaults to "half_order_up".
-            Can be configured with the global setting geoutils.config["interpolation_dist_nodata_spread"].
+            quintic method), or rounded down, or a fixed integer. Can be configured with the global setting
+            geoutils.config["interpolation_dist_nodata_spread"].
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
