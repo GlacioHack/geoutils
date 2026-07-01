@@ -249,6 +249,36 @@ class TestInterpolate:
             assert all(~np.isfinite(raster_points_mapcoords_edge))
             assert all(~np.isfinite(raster_points_interpn_edge))
 
+    @pytest.mark.parametrize("shape", [(3, 7), (7, 3)])  # landscape and portrait exercise different bounds axes
+    def test_interp_points__nonsquare(self, shape: tuple[int, int]) -> None:
+        """
+        Regression test: interp_points must not drop valid points on a non-square raster.
+
+        The buggy out-of-bounds mask compared the row index against the number of columns and the column
+        index against the number of rows (axes swapped), so points whose index exceeded the smaller raster
+        dimension were wrongly flagged as out-of-bounds and returned as NaN. Square rasters hide this, so we
+        test both a landscape (rows < cols) and a portrait (rows > cols) raster, which exercise the two axes
+        independently.
+        """
+        nrows, ncols = shape
+        # Unique value per pixel so nearest-neighbour sampling is an exact ground-truth check
+        arr = (np.arange(nrows)[:, None] * ncols + np.arange(ncols)[None, :]).astype("float32")
+        transform = rio.transform.from_bounds(0, 0, ncols, nrows, ncols, nrows)
+        raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
+        raster.set_area_or_point("Area", shift_area_or_point=False)
+
+        # Sample every pixel centre, plus one clearly out-of-bounds point, in the same call.
+        index_i, index_j = np.meshgrid(np.arange(nrows), np.arange(ncols), indexing="ij")
+        x, y = raster.ij2xy(i=index_i.ravel(), j=index_j.ravel(), shift_area_or_point=True)
+        x = np.append(x, -5.0)
+        y = np.append(y, -5.0)
+        vals = raster.interp_points((x, y), method="nearest", shift_area_or_point=True, as_array=True)
+
+        # Every valid pixel centre is finite and equals its pixel value; the out-of-bounds point stays NaN
+        assert np.all(np.isfinite(vals[:-1]))
+        np.testing.assert_allclose(vals[:-1], raster.get_nanarray()[index_i.ravel(), index_j.ravel()])
+        assert not np.isfinite(vals[-1])
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
