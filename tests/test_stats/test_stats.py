@@ -29,7 +29,8 @@ def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
         if dict1[key] is not np.nan:
             assert dict2[key] == pytest.approx(dict1[key], abs=1e-10)
         else:
-            assert dict2[key] is np.nan
+            print(dict1[key], dict2[key])
+            assert isnan(dict2[key])
 
 
 class TestStats:
@@ -110,6 +111,11 @@ class TestStats:
         assert stats_masked.get("Valid count") == stats.get("Valid count")
         assert stats_masked.get("Total count") == stats.get("Total count")
         assert stats_masked.get("Percentage valid points") == stats.get("Percentage valid points")
+
+        for stat in _STATS_ALIAS_ALL:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
+                stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name=stat)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")

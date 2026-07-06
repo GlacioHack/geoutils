@@ -218,7 +218,7 @@ def _statistics(
             }
         )
 
-    def get_stat_common_name(stat_name: str) -> str | None:
+    def get_stat_common_alias(stat_name: str) -> str | None:
         if stat_name in stats_dict.keys():
             return stat_name
         else:
@@ -234,7 +234,7 @@ def _statistics(
 
     def create_list(counts_is_none: bool, stats_name: str | None) -> list[str]:
         if isinstance(stats_name, list):
-            return stats_name, False
+            return stats_name
         else:
             if stats_name is None:
                 stat_names_res = _STATS_LIST_MIN
@@ -242,61 +242,58 @@ def _statistics(
                 stat_names_res = list(_STATS_ALIAS_GEN)
                 if counts_is_none:
                     stat_names_res = stat_names_res + list(_STATS_ALIAS_MASK.keys())
-            return stat_names_res, True
+            return stat_names_res
 
-    # If there are no valid data points, set all statistics to NaN
+    # If there are no valid data points, raise a warning
     if final_count_nonzero == 0:
         warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
-        stat_names_res, alias = create_list(counts is not None, stats_name)  # type: ignore
+
+    if stats_name is None or stats_name == "all":
+        stat_names_res = create_list(counts is not None, stats_name)  # type: ignore
+
         res_dict = {
-            (_STATS_ALIAS_ALL[stat_name] if alias else stat_name): (
-                stats_dict[get_stat_common_name(stat_name)]  # type: ignore
-                if (
-                    get_stat_common_name(stat_name) is not None
-                    and not callable(stats_dict[get_stat_common_name(stat_name)])  # type: ignore
+            _STATS_ALIAS_ALL[stat_name]: (
+                stats_dict[stat_name](data)  # type: ignore
+                if (callable(stats_dict[stat_name]) and final_count_nonzero != 0)
+                else (
+                    np.nan
+                    # If there are no valid data points, set callable statistics to NaN
+                    if (callable(stats_dict[stat_name]) and final_count_nonzero == 0)
+                    else stats_dict[stat_name]
                 )
-                else np.nan
             )
             for stat_name in stat_names_res
         }  # type: ignore
 
     else:
-        if stats_name is None or stats_name == "all":
-            stat_names_res, alias = create_list(counts is not None, stats_name)  # type: ignore
+        res_dict = {}  # type: ignore
+        for stat_name in stats_name:
 
-            res_dict = {
-                _STATS_ALIAS_ALL[stat_name]: (
-                    stats_dict[stat_name](data)  # type: ignore
-                    if (callable(stats_dict[stat_name]))
-                    else stats_dict[stat_name]
-                )
-                for stat_name in stat_names_res
-            }  # type: ignore
+            # Compute stat if in stats_dict keys
+            if isinstance(stat_name, str):
 
-        else:
-            res_dict = {}  # type: ignore
-            for stat_name in stats_name:
-
-                # Compute stat if in stats_dict keys
-                if isinstance(stat_name, str):
-                    stat_common_name = get_stat_common_name(stat_name)
-                    if stat_common_name:
-                        if stat_common_name in stats_dict:
-                            res_dict[stat_name] = stats_dict[stat_common_name]
-                            if callable(res_dict[stat_name]):
+                # Get common alias
+                stat_common_alias = get_stat_common_alias(stat_name)
+                if stat_common_alias:
+                    if stat_common_alias in stats_dict:
+                        res_dict[stat_name] = stats_dict[stat_common_alias]
+                        if callable(res_dict[stat_name]):
+                            if final_count_nonzero == 0:
+                                res_dict[stat_name] = np.nan
+                            else:
                                 res_dict[stat_name] = res_dict[stat_name](data)  # type: ignore
-                        else:
-                            res_dict[stat_name] = np.nan
                     else:
-                        warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
-                        res_dict[stat_name] = np.float32(np.nan)  # type: ignore
-
-                # Compute stat if callable
-                elif callable(stat_name):
-                    res_dict[stat_name.__name__] = stat_name(data)  # type: ignore
-
+                        res_dict[stat_name] = np.nan
                 else:
                     warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
                     res_dict[stat_name] = np.float32(np.nan)  # type: ignore
+
+            # Compute stat if callable
+            elif callable(stat_name):
+                res_dict[stat_name.__name__] = stat_name(data)  # type: ignore
+
+            else:
+                warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+                res_dict[stat_name] = np.float32(np.nan)  # type: ignore
 
     return {k: (v.item() if isinstance(v, np.generic) else v) for k, v in res_dict.items()}  # type: ignore
