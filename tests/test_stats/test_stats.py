@@ -15,7 +15,7 @@ from geoutils.stats.stats import (
     _STATS_ALIAS_ALL,
     _STATS_ALIAS_GEN,
     _STATS_ALIAS_MASK,
-    _STATS_ALIAS_OP,
+    _STATS_ALIAS_CALLABLE,
     _STATS_LIST_MIN,
 )
 
@@ -105,7 +105,7 @@ class TestStats:
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats("all", inlier_mask=empty_mask)
         assert len(stats_masked) == len(_STATS_ALIAS_ALL)
-        for name in _STATS_ALIAS_OP.values():
+        for name in _STATS_ALIAS_CALLABLE.values():
             assert np.isnan(stats_masked.get(name))
 
         assert stats_masked.get("Valid count") == stats.get("Valid count")
@@ -146,7 +146,7 @@ class TestStats:
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_empty = dem_empty.get_stats("all")
         assert len(stats_empty) == len(_STATS_ALIAS_GEN)
-        for name in _STATS_ALIAS_OP.values():
+        for name in _STATS_ALIAS_CALLABLE.values():
             assert np.isnan(stats_empty.get(name))
         assert stats_empty.get("Valid count") == 0
         assert stats_empty.get("Total count") == 0
@@ -276,7 +276,7 @@ class TestStats:
             warnings.filterwarnings("ignore", message="Empty raster")
             stats_masked = pointcloud.get_stats("all")
         assert len(stats_masked) == len(_STATS_ALIAS_GEN)
-        for name in _STATS_ALIAS_OP.values():
+        for name in _STATS_ALIAS_CALLABLE.values():
 
             assert np.isnan(stats_masked.get(name))
         assert stats_masked.get("Valid count") == 0

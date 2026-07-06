@@ -33,7 +33,7 @@ from geoutils import profiler
 from geoutils._typing import NDArrayNum
 from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
 
-_STATS_ALIAS_OP = {
+_STATS_ALIAS_CALLABLE = {
     "mean": "Mean",
     "median": "Median",
     "max": "Max",
@@ -54,7 +54,7 @@ _STATS_ALIAS_COUNTS = {
     "percentagevalidpoints": "Percentage valid points",
 }
 
-_STATS_ALIAS_GEN = _STATS_ALIAS_OP | _STATS_ALIAS_COUNTS
+_STATS_ALIAS_GEN = _STATS_ALIAS_CALLABLE | _STATS_ALIAS_COUNTS
 
 _SYNONYMES = {
     "maximum": "max",
