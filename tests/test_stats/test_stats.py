@@ -105,8 +105,6 @@ class TestStats:
             stats_masked = raster.get_stats("all", inlier_mask=empty_mask)
         assert len(stats_masked) == len(_STATS_ALIAS_ALL)
         for name in _STATS_ALIAS_OP.values():
-            print(name)
-            print(stats_masked.get(name))
             assert np.isnan(stats_masked.get(name))
 
         assert stats_masked.get("Valid count") == stats.get("Valid count")
@@ -258,12 +256,12 @@ class TestStats:
         assert isnan(stat)
 
         with warnings.catch_warnings():
-            print("ici")
             warnings.filterwarnings("ignore", message="Statistic name 42 is a not recognized string")
             stat = pointcloud.get_stats(stats_name=42)
         assert stat is None
 
         # Empty mask (=False)
+        inlier_mask = ~raster.get_mask()
         inlier_mask = ~raster.get_mask()
         empty_mask = np.zeros_like(inlier_mask)
         raster.set_mask(~empty_mask)
