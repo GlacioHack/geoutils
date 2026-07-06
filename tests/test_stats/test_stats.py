@@ -45,10 +45,17 @@ class TestStats:
         """
         raster = gu.Raster(example)
 
+        # Default stats
+        stats = raster.get_stats()
+        assert len(stats) == len(_STATS_LIST_MIN)
+        assert list(stats.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_LIST_MIN]
+        for name in _STATS_LIST_MIN:
+            assert _STATS_ALIAS_ALL[name] in stats
+            assert isinstance(stats.get(_STATS_ALIAS_ALL[name]), stat_types)
+
         # Full stats
         stats = raster.get_stats("all")
         assert len(stats) == len(_STATS_ALIAS_GEN)
-
         for name in _STATS_ALIAS_GEN.values():
             assert name in stats
             assert isinstance(stats.get(name), stat_types)
@@ -57,14 +64,23 @@ class TestStats:
         inlier_mask = ~raster.get_mask()
         stats_masked = raster.get_stats("all", inlier_mask=inlier_mask)
         assert len(stats_masked) == len(_STATS_ALIAS_ALL)
+        assert list(stats_masked.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_ALIAS_ALL]
         for name in _STATS_ALIAS_MASK.values():
             assert name in stats_masked
             stats_masked.pop(name)
         assert stats_masked == stats
 
+        # Print of the values
+        stats = raster.get_stats("all", inlier_mask=inlier_mask)
+        for stat in stats:
+            assert not isinstance(stat, np.generic)
+        for stat in _STATS_ALIAS_ALL:
+            assert not isinstance(raster.get_stats(stat, inlier_mask=inlier_mask), np.generic)
+
         # With mask (inlier=True) and default list
         stats_masked = raster.get_stats(inlier_mask=inlier_mask)
         assert len(stats_masked) == len(_STATS_LIST_MIN)
+        assert list(stats_masked.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_LIST_MIN]
         for name in _STATS_LIST_MIN:
             assert _STATS_ALIAS_ALL[name] in stats_masked
 
@@ -88,8 +104,6 @@ class TestStats:
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
             stats_masked = raster.get_stats("all", inlier_mask=empty_mask)
         assert len(stats_masked) == len(_STATS_ALIAS_ALL)
-        print("")
-        print(stats_masked)
         for name in _STATS_ALIAS_OP.values():
             print(name)
             print(stats_masked.get(name))
@@ -190,21 +204,38 @@ class TestStats:
         parameters.
         """
         raster = gu.Raster(example)
+        pointcloud = raster.to_pointcloud()
+
+        # Default stats
+        stats = pointcloud.get_stats()
+        assert len(stats) == len(_STATS_LIST_MIN)
+        assert list(stats.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_LIST_MIN]
+        for name in _STATS_LIST_MIN:
+            assert _STATS_ALIAS_ALL[name] in stats
+            assert isinstance(stats.get(_STATS_ALIAS_GEN[name]), stat_types)
 
         # Full stats
-        stats = raster.to_pointcloud().get_stats("all")
+        stats = pointcloud.get_stats("all")
         assert len(stats) == len(_STATS_ALIAS_GEN)
+        assert list(stats.keys()) == [_STATS_ALIAS_GEN[key] for key in _STATS_ALIAS_GEN]
         for name in _STATS_ALIAS_GEN.values():
             assert name in stats
             assert isinstance(stats.get(name), stat_types)
 
         # Single stat
         for name in _STATS_ALIAS_GEN:
-            stat = raster.to_pointcloud().get_stats(stats_name=name)
+            stat = pointcloud.get_stats(stats_name=name)
             assert np.isfinite(stat)
         for name in _STATS_ALIAS_MASK:
-            stat = raster.to_pointcloud().get_stats(stats_name=name)
+            stat = pointcloud.get_stats(stats_name=name)
             assert np.isnan(stat)
+
+        # Print of the values
+        stats = pointcloud.get_stats("all")
+        for stat in stats:
+            assert not isinstance(stat, np.generic)
+        for stat in _STATS_ALIAS_ALL:
+            assert not isinstance(pointcloud.get_stats(stat), np.generic)
 
         # Callable
         def percentile_95(data: NDArrayNum) -> np.floating[Any]:
@@ -214,7 +245,7 @@ class TestStats:
 
         # Selected stats and callable
         stats_name = ["mean", "max", "std", "percentile_95"]
-        stats = raster.to_pointcloud().get_stats(stats_name=["mean", "max", "std", percentile_95])
+        stats = pointcloud.get_stats(stats_name=["mean", "max", "std", percentile_95])
         assert len(stats) == len(stats_name)
         for name in stats_name:
             assert name in stats
@@ -223,21 +254,23 @@ class TestStats:
         # Non-existing stats
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Statistic name 80 percentile is not recognized")
-            stat = raster.get_stats(stats_name="80 percentile")
-            assert isnan(stat)
+            stat = pointcloud.get_stats(stats_name="80 percentile")
+        assert isnan(stat)
 
         with warnings.catch_warnings():
+            print("ici")
             warnings.filterwarnings("ignore", message="Statistic name 42 is a not recognized string")
-            stat = raster.get_stats(stats_name=42)
-            assert stat is None
+            stat = pointcloud.get_stats(stats_name=42)
+        assert stat is None
 
         # Empty mask (=False)
         inlier_mask = ~raster.get_mask()
         empty_mask = np.zeros_like(inlier_mask)
         raster.set_mask(~empty_mask)
+        pointcloud = raster.to_pointcloud()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Empty raster")
-            stats_masked = raster.to_pointcloud().get_stats("all")
+            stats_masked = pointcloud.get_stats("all")
         assert len(stats_masked) == len(_STATS_ALIAS_GEN)
         for name in _STATS_ALIAS_OP.values():
 
@@ -471,16 +504,3 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.get_stats("all"))
-
-    def test_print(self) -> None:
-        filename_rast = gu.examples.get_path("everest_landsat_b4")
-        filename_vect = gu.examples.get_path("everest_rgi_outlines")
-        rast = gu.Raster(filename_rast)
-        vect = gu.Vector(filename_vect)
-        inlier_mask = ~vect.create_mask(rast)
-
-        stats = rast.get_stats("all", inlier_mask=inlier_mask)
-        for stat in stats:
-            assert not isinstance(stat, np.generic)
-        for stat in _STATS_ALIAS_ALL:
-            assert not isinstance(rast.get_stats(stat, inlier_mask=inlier_mask), np.generic)

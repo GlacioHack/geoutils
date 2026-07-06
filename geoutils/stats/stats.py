@@ -233,21 +233,21 @@ def _statistics(
             return None
 
     def create_list(counts_is_none: bool, stats_name: str | None) -> list[str]:
-        if stats_name is None:
-            stat_names_res = _STATS_LIST_MIN
+        if isinstance(stats_name, list):
+            return stats_name, False
         else:
-            stat_names_res = list(_STATS_ALIAS_GEN)
-            if counts_is_none:
-                stat_names_res = stat_names_res + list(_STATS_ALIAS_MASK.keys())
-        return stat_names_res
+            if stats_name is None:
+                stat_names_res = _STATS_LIST_MIN
+            else:
+                stat_names_res = list(_STATS_ALIAS_GEN)
+                if counts_is_none:
+                    stat_names_res = stat_names_res + list(_STATS_ALIAS_MASK.keys())
+            return stat_names_res, True
 
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
         warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
-        alias = False
-        if stats_name is None or stats_name == "all":
-            stat_names_res = create_list(counts is not None, stats_name)  # type: ignore
-            alias = True
+        stat_names_res, alias = create_list(counts is not None, stats_name)  # type: ignore
         res_dict = {
             (_STATS_ALIAS_ALL[stat_name] if alias else stat_name): (
                 stats_dict[get_stat_common_name(stat_name)]  # type: ignore
@@ -262,7 +262,7 @@ def _statistics(
 
     else:
         if stats_name is None or stats_name == "all":
-            stat_names_res = create_list(counts is not None, stats_name)  # type: ignore
+            stat_names_res, alias = create_list(counts is not None, stats_name)  # type: ignore
 
             res_dict = {
                 _STATS_ALIAS_ALL[stat_name]: (

@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import logging
 import os.path
 import pathlib
 import warnings
@@ -1449,7 +1448,7 @@ class PointCloud(Vector):  # type: ignore[misc]
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
             else:
-                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
+                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
 
     @overload
     def subsample(
