@@ -13,9 +13,9 @@ from geoutils import examples
 from geoutils._typing import NDArrayNum
 from geoutils.stats.stats import (
     _STATS_ALIAS_ALL,
+    _STATS_ALIAS_CALLABLE,
     _STATS_ALIAS_GEN,
     _STATS_ALIAS_MASK,
-    _STATS_ALIAS_CALLABLE,
     _STATS_LIST_MIN,
 )
 
