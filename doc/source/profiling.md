@@ -60,15 +60,15 @@ Currently, some processes are already profiled by GeoUtils with a memory consump
 
 ### Modifying the profiled functions
 
-To profile other functions and add them to the summary graphs and data, simply add the *@profile_tool* decorator before them, providing a descriptive name.
+To profile other functions and add them to the summary graphs and data, simply add the *@profile* decorator before them, providing a descriptive name.
 
 If you also want to track memory usage over time for a specific function call, set `memprof=True` in the decorator.
 If the function is too fast (or slow) for the default memory sampling interval, you can modify it with *interval* (in seconds).
 
 ```{code-cell} ipython3
-from geoutils import profiler
+from geoutils.profiler import profile
 
-@profiler.profile("my profiled function name", memprof=True, interval=0.5)  # type: ignore
+@profile("my profiled function name", memprof=True, interval=0.5)  # type: ignore
 def my_function():
     ...
 ```
@@ -84,7 +84,7 @@ def my_function():
 
 Here are two examples of graphs with a personal profiled function `my_program`, containing the computation of a few attributes and a co-registration:
 
-![memory_my_program.html](imgs/profiling_memory_my_program.html.png)
-![time_graph.html](imgs/profilingprofiling_time_graph.html.png)
+![memory_my_program.html](imgs/profiling_memory_my_program.png)
+![time_graph.html](imgs/profiling_time_graph.png)
 
 You can experiment with these graphs here : [memory_my_program.html](html/profiling/memory_my_program.html) and [time_graph.html](html/profiling/time_graph.html).
