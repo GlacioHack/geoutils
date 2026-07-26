@@ -718,12 +718,8 @@ def _interp_points(
 
         i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
 
-        # Get index of points outside of bounds
-        ind_outofbounds: NDArrayBool = np.vectorize(
-            lambda k1, k2: _outside_bounds(
-                k1, k2, transform=transform, area_or_point=area_or_point, shape=shape, index=True
-            )
-        )(j, i)
+        # Get index of points outside of bounds (i = row index vs shape[0], j = column index vs shape[1])
+        ind_outofbounds: NDArrayBool = (i < 0) | (j < 0) | (i >= shape[0]) | (j >= shape[1])
 
         # If all points fell outside of bounds
         if np.count_nonzero(~ind_outofbounds) == 0:
