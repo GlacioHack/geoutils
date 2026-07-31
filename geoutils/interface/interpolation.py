@@ -704,7 +704,7 @@ def _interp_points(
     band: int = 1,
     input_latlon: bool = False,
     as_array: bool = False,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
