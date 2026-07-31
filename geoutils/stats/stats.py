@@ -218,7 +218,6 @@ def _statistics(
         )
 
     def get_stat_common_name(stat_name: str) -> str | None:
-        print(stat_name)
         if stat_name in stats_dict.keys():
             return stat_name
         elif "".join(stat_name.lower().split()) in _ALIAS_STATS.keys():
