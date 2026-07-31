@@ -98,8 +98,8 @@ def _interpn_interpolator(
     """
     Create SciPy interpolator with nodata spreading. Default method is linear and default spreading is at distance of
     half the method order rounded up (i.e., linear spreads 1 nodata in each direction, cubic spreads 2, quintic 3).
-    Can be configured with the global respectively setting geoutils.config["interpolation_method"] and
-    geoutils.config["interpolation_dist_nodata_spread"].
+    They can be configured with the global settings geoutils.config["interpolation_method"] and
+    geoutils.config["interpolation_dist_nodata_spread"] respectively.
 
     Gives the exact same result as scipy.interpolate.interpn, and allows interpolator to be re-used if required (
     for speed).
@@ -704,7 +704,7 @@ def _interp_points(
     band: int = 1,
     input_latlon: bool = False,
     as_array: bool = False,
-    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
