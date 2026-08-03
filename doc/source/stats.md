@@ -65,9 +65,15 @@ rast = gu.Raster(filename_rast)
 rast
 ```
 
-Get all default statistics:
+By default and without any specification, this function computes the following main statistics:
+minimum, maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
 ```{code-cell} ipython3
 rast.get_stats()
+```
+
+To compute all available statistics, set `stats_name` to `all`.
+```{code-cell} ipython3
+rast.get_stats("all")
 ```
 
 Get a single statistic (e.g., 'mean') as a float:

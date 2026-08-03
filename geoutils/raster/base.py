@@ -706,7 +706,7 @@ class RasterBase(ABC):
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
 
-        Common statistics are :
+        Statistics are :
 
         - Mean: arithmetic mean of the data, ignoring masked values.
         - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
@@ -749,12 +749,17 @@ class RasterBase(ABC):
 
         Callable functions are supported as well.
 
-        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+        By default and without any specification, this function computes the following main statistics: minimum,
+        maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
+        To compute all available statistics, set `stats_name` to `all`.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, main statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
+            To compute all available statistics, set `stats_name` to `all`.
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
