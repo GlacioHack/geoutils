@@ -706,7 +706,7 @@ class RasterBase(ABC):
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
 
-        Statistics are :
+        Common statistics are :
 
         - Mean: arithmetic mean of the data, ignoring masked values.
         - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
