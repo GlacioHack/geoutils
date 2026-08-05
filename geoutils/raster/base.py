@@ -727,7 +727,7 @@ class RasterBase(ABC):
         - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
         ignoring masked values.
         - Valid count: number of finite data points in the array. It counts the non-masked elements.
-        - Total count: total size of the raster.
+        - Total count: total size (width x height) of the raster.
         - Percentage valid points: ratio between Valid count and Total count.
 
         For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
