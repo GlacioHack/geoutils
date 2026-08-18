@@ -66,7 +66,7 @@ rast
 ```
 
 By default and without any specification, this function computes the following main statistics:
-minimum, maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
+minimum, maximum, mean, standard deviation, normalized median absolute deviation, total count, and percentage of valid points.
 ```{code-cell} ipython3
 rast.get_stats()
 ```

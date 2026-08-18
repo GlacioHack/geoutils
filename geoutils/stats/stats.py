@@ -23,7 +23,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 from functools import partial
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from scipy.stats import iqr
@@ -96,7 +96,7 @@ _STATS_LIST_MIN = [
 @profiler.profile("geoutils.stats.stats._statistics", memprof=True)
 def _statistics(
     data: NDArrayNum,
-    stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | str | None = None,
+    stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | Literal["all"] | None = None,
     counts: tuple[int, int] | None = None,
 ) -> dict[str, float]:
     """
