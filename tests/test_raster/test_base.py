@@ -14,7 +14,7 @@ from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
-from geoutils import Raster, Vector, open_raster
+from geoutils import Raster, Vector, examples, open_raster
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
@@ -77,6 +77,17 @@ def should_be_loaded(method: str, args: dict[str, Any], noload: list[str], noloa
         should_output_be_loaded = any_different
 
     return should_output_be_loaded
+
+
+def test_coords_crs() -> None:
+    """Test coords functions with a target crs"""
+    dem = Raster(examples.get_path_test("everest_landsat_b4"))
+    print(dem.nodata)
+    dem.set_nodata(0)
+    dem_4326 = dem.reproject(crs=4326)
+    coords_proj_4326 = dem.coords(grid=True, shift_area_or_point=None, force_offset=None, dst_crs=4326)
+    coords_4326 = dem_4326.coords(grid=True, shift_area_or_point=None, force_offset=None)
+    assert np.array_equal(coords_4326, coords_proj_4326)
 
 
 class NeedsTestError(ValueError):

@@ -47,6 +47,7 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
+from geoutils._dispatch import _check_match_grid
 from geoutils._misc import deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -1443,7 +1444,11 @@ class RasterBase(ABC):
         )
 
     def coords(
-        self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None
+        self,
+        grid: bool = True,
+        shift_area_or_point: bool | None = None,
+        force_offset: str | None = None,
+        dst_crs: CRS | int | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of all pixels in the raster.
@@ -1454,12 +1459,18 @@ class RasterBase(ABC):
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
             any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
+        :param dst_crs: Coordinate reference system of the coordinates wanted.
 
         :returns x,y: Arrays of the (x,y) coordinates.
         """
+        dst_transform = self.transform
+        if dst_crs:
+            _, dst_transform, _ = _check_match_grid(
+                src=self, crs=dst_crs, ref=None, res=None, shape=None, bounds=None, coords=None
+            )
 
         return _coords(
-            transform=self.transform,
+            transform=dst_transform,
             shape=self.shape,
             area_or_point=self.area_or_point,
             grid=grid,
