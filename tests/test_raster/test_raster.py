@@ -1873,11 +1873,12 @@ class TestRaster:
         # Test saving file in COG format
         img.to_file(temp_file, driver="COG")
         saved = gu.Raster(temp_file)
-        print (img.data)
-        print (saved.data)
+        print ("img.data", img.data)
+        print ("saved.data", saved.data)
         print ("Sum des errors =", np.nansum(img.data.data - saved.data.data))
-        print (img.data[0][0])
-        print (saved.data[0][0])
+        print ("img.data[0][0]", img.data[0][0])
+        print ("saved.data[0][0]", saved.data[0][0])
+        print ("saved normal.data", gu.Raster(img.to_file(temp_file).data)
         assert img.raster_equal(saved, warn_failure_reason=True, strict_masked=False)
         assert saved.tags["LAYOUT"] == "COG"
 
