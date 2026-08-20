@@ -1881,7 +1881,7 @@ class TestRaster:
         saved = gu.Raster(temp_file)
         assert np.ma.allequal(img.data, saved.data)
         assert saved.nodata == 0
-
+        print ("l")
         # Test that mask is preserved if nodata value is valid
         mask = img.data == np.min(img.data)
         img.set_mask(mask)
