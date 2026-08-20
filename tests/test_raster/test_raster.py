@@ -1883,8 +1883,8 @@ class TestRaster:
         img.to_file(temp_file)
         saved_normal =  gu.Raster(temp_file)
         
-        print ("saved normal.data", saved_normal.data)).
-        print ("saved normal.dtype", saved_normal.dtype))
+        print ("saved normal.data", saved_normal.data)
+        print ("saved normal.dtype", saved_normal.dtype)
         assert img.raster_equal(saved, warn_failure_reason=True, strict_masked=False)
         assert saved.tags["LAYOUT"] == "COG"
 
