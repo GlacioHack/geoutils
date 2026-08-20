@@ -1938,6 +1938,10 @@ class Raster(RasterBase):
             nodata=nodata,
             **co_opts,
         ) as dst:
+            print ("# to_file")
+            print ("save_data", save_data)
+            print ("save_data.dtype", save_data.dtype)
+
             dst.write(save_data)
 
             # Add metadata (tags in rio)
