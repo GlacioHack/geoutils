@@ -1878,7 +1878,7 @@ class TestRaster:
         print ("Sum des errors =", np.nansum(img.data.data - saved.data.data))
         print ("img.data[0][0]", img.data[0][0])
         print ("saved.data[0][0]", saved.data[0][0])
-        print ("saved normal.data", gu.Raster(img.to_file(temp_file).data)
+        print ("saved normal.data", gu.Raster(img.to_file(temp_file).data))
         assert img.raster_equal(saved, warn_failure_reason=True, strict_masked=False)
         assert saved.tags["LAYOUT"] == "COG"
 
