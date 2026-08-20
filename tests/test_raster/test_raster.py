@@ -1873,7 +1873,7 @@ class TestRaster:
         # Test saving file in COG format
         img.to_file(temp_file, driver="COG")
         saved = gu.Raster(temp_file)
-        assert img.raster_equal(saved)
+        assert img.raster_equal(saved, warn_failure_reason=True)
         assert saved.tags["LAYOUT"] == "COG"
 
         # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
