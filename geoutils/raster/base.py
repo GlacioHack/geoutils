@@ -701,7 +701,7 @@ class RasterBase(ABC):
         inlier_mask: RasterType | NDArrayBool | None = None,
         band: int | None = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any] | dict[str, np.floating[Any]]]:
+    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, np.floating[Any] | dict[str, np.floating[Any]]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
