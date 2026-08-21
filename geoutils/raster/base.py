@@ -804,7 +804,7 @@ class RasterBase(ABC):
         else:
             stats = {}
             for band in range(self.count):
-                stats["band " + str(band)] = self.get_stats(
+                stats[f"Band {band + 1}"] = self.get_stats(
                     stats_name=stats_name, inlier_mask=inlier_mask, band=band, counts=counts
                 )
 
