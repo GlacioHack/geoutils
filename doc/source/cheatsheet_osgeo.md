@@ -11,6 +11,10 @@ We also provide a conversion table for operations specific to DEMs (e.g. slope, 
 
 ## GDAL/OGR utilities
 
+```{admonition} Legend
+The **`⟶`** symbol denotes methods interfacing from one specific object type to another.
+```
+
 ```{list-table} GDAL/OGR ⟶ GeoUtils
 :header-rows: 1
 :widths: 3 4 4 2
@@ -80,7 +84,7 @@ We also provide a conversion table for operations specific to DEMs (e.g. slope, 
 * - Raster calculator
   - `gdal_calc.py`
   - `gdal raster calc`
-  - NumPy array interface on {attr}`~geoutils.Raster.data`)
+  - NumPy array interface on {attr}`~geoutils.Raster.data`
 
 * - Mosaic / merge rasters
   - `gdal_merge.py`
@@ -180,7 +184,8 @@ We also provide a conversion table for operations specific to DEMs (e.g. slope, 
 
 ## GDAL DEM utilities
 
-The table below maps common **GDAL DEM analysis utilities** (historically provided by `gdaldem`) to their equivalents in **xDEM**.
+The table below maps common **GDAL DEM analysis utilities** (historically provided by `gdaldem`) to their equivalents in **[xDEM](https://xdem.readthedocs.io/en/stable/)**.
+Note that only attributes with equivalences are listed, as **xDEM** supports more terrain attributes.
 
 ```{list-table}
 :header-rows: 1

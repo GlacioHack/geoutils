@@ -1,7 +1,7 @@
 (scalability-logic)=
 # Implementation strategies
 
-Implementing **chunked execution** requires developping substantial internal logic often invisible to the user, making it difficult to understand what is happening in the background and how to potentially address a scalability issue.
+Implementing **chunked execution** requires developing substantial internal logic often invisible to the user, making it difficult to understand what is happening in the background and how to potentially address a scalability issue.
 
 Additionally, for certain methods, there is often no single best solution. We therefore propose several **strategies** to further improve performance based on the nature of the input data.
 
@@ -13,7 +13,7 @@ Several operations are easy to support for **chunked execution** as they directl
 - The {meth}`~geoutils.Raster.filter` function uses {func}`~dask.array.map_overlap` with a `depth` (overlap) half the `size` of the filter,
 - The {meth}`~geoutils.Raster.proximity` function uses {func}`~dask.array.map_overlap` with a `max_distance` parameter.
 
-Other operations are more complex and require specific logic {ref}`specific logic described further below<specific-logic>` and summarized as:
+Other operations are more complex and require {ref}`specific logic described further below<specific-logic>` and summarized as:
 - The {meth}`~geoutils.Raster.reproject` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds), and defines default output chunksizes based on resolution change to avoid unexpected memory blowup,
 - The {meth}`~geoutils.Raster.polygonize` function polygonizes implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
 - The {meth}`~geoutils.Vector.rasterize` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries.
@@ -105,7 +105,7 @@ Interpolation is then performed independently on each required raster chunk. To 
 
 Because points within a point chunk may fall into different raster chunks, interpolation proceeds by **looping over the intersecting raster chunks** for that point chunk. The resulting interpolated values are then **concatenated and reordered** to match the original point order.
 
-This approach keeps memory usage low, as only the raster chunks needed for the current point chunk are loaded at any given time.
+This approach keeps memory usage low, as only the raster chunks needed for the current point chunk are loaded at any given time, and minimizes speed loss by evaluating all points belonging in a same raster chunk at once.
 
 Finally, note that **using eager (in-memory) point coordinates is typically much faster** when the number of points is moderate. Unless necessary, keep points in memory to avoid additional chunking overhead.
 

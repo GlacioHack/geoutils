@@ -31,7 +31,7 @@ As a rule of thumb:
 - Use standard **in-memory execution** to work efficiently on small rasters, which is possible even if those were loaded from larger rasters (use {class}`~geoutils.Raster.crop`).
 
 ```{note}
-GeoUtils currently targets **scalable CPU execution**. However, as many of our numerical operations rely on **NumPy**, **SciPy** or **Numba**, those are planned to be linked to their **GPU** counterparts (**CuPy** and **Numba CUDA**).
+GeoUtils currently targets scalable **CPU** execution. However, as many of our numerical operations rely on **NumPy**, **SciPy** or **Numba**, those are planned to be linked to their **GPU** counterparts (**CuPy** and **Numba CUDA**).
 ```
 
 ## Using Dask through accessors
@@ -49,7 +49,7 @@ ds = gu.open_raster(filename_rast, chunks={"x": 200, "y": 200})
 ds
 ```
 
-GeoUtils, through the {class}`rst <geoutils.RasterAccessor>` accessor, automatically detects the **Dask** input and switches to a chunked implementation.
+GeoUtils, through the {class}`rst <geoutils.RasterAccessor>` accessor, automatically detects the **Dask** input and switches to a chunked implementation for the given operation, for example to {meth}`~geoutils.Raster.reproject` to a different resolution:
 
 ```{code-cell} python
 # Change output resolution
@@ -64,9 +64,9 @@ ds_reproj = ds.rst.reproject(
 ds_reproj
 ```
 
-The resulting raster remains **lazy**. Computation only happens when explicitly requested with {meth}`~dask.array.Array.compute()`.
+The resulting raster remains **lazy**. Computation (reading input files and applying all chained operations) only happens when later explicitly requested with {meth}`~dask.array.Array.compute()`.
 
-For a raster output, one typically wants to write to file lazily to avoid loading it in-memory:
+For a raster output, one typically wants to write to file lazily to avoid loading it in-memory, using the `compute=True` option:
 
 ```{code-cell} python
 # ds_reproj.rst.to_file("reproj_rast.tif", compute=True)
@@ -123,7 +123,7 @@ rast_reproj_mp
 ```
 
 If the output is a {class}`~geoutils.Raster`, it is written to disk out-of-memory, and the returned object is a {class}`~geoutils.Raster` of that file without data loaded.
-This keeps syntax consistent with in-memory code, and allow to easily chain operations. 
+This keeps syntax consistent with in-memory code, and allows to easily chain operations. 
 
 For other output types, the Multiprocessing backends will load the result in-memory. 
 
@@ -155,5 +155,5 @@ This backend is convenient when working directly with {class}`~geoutils.Raster` 
 
 For more guidance on chunk sizing and performance, see the [Dask array best practices](https://docs.dask.org/en/stable/array-best-practices.html).
 
-Finally, note that currently, operations returning **point** or **vector** outputs are often **eager** and scalable execution applies mostly to the **raster input/output**.
+Finally, note that currently, operations returning **point clouds** or **vector** outputs are often **eager** and scalable execution applies mostly to the **raster input/output**.
 The full description of supported methods is available on the {ref}`scalability-support` page.

@@ -13,10 +13,14 @@ The table below summarizes the **scalability support** of GeoUtils operations wi
 
 If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, see the {ref}`scalability-concept` page. 
 
-**Legend:**
-- {bdg-success}`Chunked` —  Processes in chunks, without loading (for input) and/or returning (for output) the full data. This is **also lazy (deferred execution) when using Dask**, but not when using Multiprocessing.
+```{admonition} Legend
+- {bdg-success}`Chunked` — Processes in chunks, without loading (for input) and/or returning (for output) the full data. This is **also lazy (deferred execution) when using Dask**, but not when using Multiprocessing.
 - {bdg-secondary}`In-memory` — Loads (for input) or returns (for output) full data in-memory.
 - {bdg-primary}`Deferred I/O` — Deferred input/output by updating internal metadata (as Xarray's {meth}`~xarray.DataArray.isel`).
+
+The **`⟶`** symbol denotes methods interfacing from one specific object type to another, with point-cloud type shortened to "Point".
+The **memory usage** column lists the number of input chunks loaded in memory for a given operation.
+```
 
 ```{list-table} 
 :name: Scalability summary
@@ -38,7 +42,7 @@ If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, s
 * - {meth}`~geoutils.Raster.reproject`
   - {bdg-success}`Chunked`
   - {bdg-success}`Chunked`
-  - ~4 (default), or ~downsampling²
+  - ~4 (with default output chunking)
 * - {meth}`~geoutils.Raster.crop` / {meth}`~geoutils.Raster.icrop`
   - {bdg-primary}`Deferred I/O`
   - {bdg-primary}`Deferred I/O`

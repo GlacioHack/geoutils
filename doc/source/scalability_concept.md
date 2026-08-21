@@ -51,23 +51,23 @@ ds = gu.open_raster(filename_rast)
 # We crop the data
 ds_cropped = ds.rst.icrop((0, 0, 100, 100))
 
-# Neither input nor output dataset are loaded yet
-print(f"Input loaded by deferred I/O? {ds.rst.is_loaded}")
-print(f"Output loaded by deferred I/O? {ds_cropped.rst.is_loaded}")
+# Neither input nor output raster are loaded yet
+print(f"Is input raster loaded after cropping (deferred I/O)? {ds.rst.is_loaded}")
+print(f"Is output raster loaded after cropping (deferred I/O)? {ds_cropped.rst.is_loaded}")
 ```
 
 This behaviour pairs intrinsically with **implicit loading:** When an object is opened, only metadata is loaded. 
 Accessing {attr}`~geoutils.Raster.data`, or calling operations that require the underlying array or geometries will **implicitly load the data into memory**.
 
 ```{code-cell}
-# Is the above dataset loaded?
-print(f"Loaded before data operation? {ds.rst.is_loaded}")
+# Is the above raster loaded?
+print(f"Is raster loaded before data operation? {ds.rst.is_loaded}")
 
 # We compute statistics, which loads the array
 ds.rst.get_stats()
 
-# The dataset is now loaded
-print(f"Loaded after data operation? {ds.rst.is_loaded}")
+# The raster is now loaded
+print(f"Is raster loaded after data operation? {ds.rst.is_loaded}")
 ```
 
 ## Chunked execution
@@ -97,15 +97,15 @@ rast_filt = rast.filter(method="gaussian", sigma=4, mp_config=mp_config)
 
 # The operation happened out-of-memory in chunk-by-chunk
 print(f"Temporary raster file created during operation: {rast_filt.name}")
-print(f"Is input raster loaded? {rast.is_loaded}")
-print(f"Is output raster loaded? {rast_filt.is_loaded}")
+print(f"Is input raster loaded after filtering? {rast.is_loaded}")
+print(f"Is output raster loaded after filtering? {rast_filt.is_loaded}")
 ```
 
 ## Lazy execution
 
 Lazy execution refers to **deferring computation until results are explicitly requested**.
 
-In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.RasterAccessor>` accessor with **Dask-backed arrays**.
+In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.RasterAccessor>` accessor with **Dask arrays**.
 
 Operations build a **Dask computation graph** instead of executing immediately. The computation is triggered only when required, for example when calling
 `compute()` or when writing results to disk. It is particularly useful when **chaining multiple raster operations**, because intermediate results do not need to be materialized or 
@@ -114,12 +114,14 @@ written/read from disk (which costs extra I/O time, often much longer than compu
 Lazy execution always relies on **chunked execution**, but the reverse is not true: chunked processing can also run eagerly, as in the Multiprocessing backend.
 
 ```{code-cell}
-# Open raster lazily with chunks (enables Dask)
+# Open raster lazily with chunks (automatically enables Dask)
 ds = gu.open_raster(filename_rast, chunks={"x": 200, "y": 200})
 
 print("Input is lazy (Dask arrays):\n")
 ds
 ```
+
+If the output returned is still a Dask array, the operation was lazy.
 
 ```{code-cell}
 # Interpolate 30 points from array in chunk-by-chunk
@@ -134,8 +136,9 @@ print("Result is still lazy after raster interpolation:\n")
 ds_interp
 ```
 
-We can materialize it with `compute()`:
+We can materialize it with `compute()`, which now returns a NumPy array:
 
 ```{code-cell}
-ds_interp.compute()
+ds_interp = ds_interp.compute()
+ds_interp
 ```

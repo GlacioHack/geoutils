@@ -606,7 +606,7 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 
 ## Multiprocessing configuration
 
-To performed **chunked execution** on GeoUtils objects, pass this Multiprocessing configuration to function that support it.
+To perform **chunked execution** on GeoUtils objects, pass this Multiprocessing configuration to function that support it.
 
 ```{eval-rst}
 .. autosummary::

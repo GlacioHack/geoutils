@@ -6,7 +6,6 @@ GeoUtils provides a unified API for manipulating **raster**, **vector**, and **p
 As many of our numerical operations rely on **NumPy, SciPy or Numba**, those are planned to be linked to their **GPU** counterparts (**CuPy** and **Numba CUDA**) in the future.
 
 The **{ref}`summary tables<tables-overview>` directly below** lists the core features of GeoUtils, their scalability and available backends.
-Further below, a series of **{ref}`illustrated examples<examples-overview>`** demonstrate these features. 
 
 ```{seealso}
 If you are interested in porting from GDAL/OGR, see our {ref}`cheatsheet-osgeo` page.
@@ -27,12 +26,16 @@ Nearly all **raster operations** support **scalable execution** using [Dask](htt
 Additionally, some numerical routines of GeoUtils provide multiple computational **backends** (e.g., SciPy or Numba implementations).
 
 All methods are tested to ensure they produce **identical results** whether executed **in-memory**, **chunked**, or with **different computational backends**.
+
 (tables-overview)=
 ## Data operations
 
 We first describe GeoUtils' core **data operations**, which operate on underlying arrays or geometries and can therefore benefit from **scalable execution**.
 
-**Legend:** **“/”** indicates methods **shared across object types**, while **“⟷”** indicates methods **interfacing between two object types**.
+```{admonition} Legend
+- **`/`** denotes methods **shared across object types**.
+- **`⟷`** denotes methods **interfacing between two object types**.
+```
 
 ```{list-table} Common API for data operations
 :widths: 3 5 1 2
@@ -51,7 +54,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   -
 
 * - {meth}`~geoutils.Raster.reproject()`
-  - Reproject to other CRS. Default tolerance parameters ensure chunk-invariance.
+  - Reproject to other CRS. Also resamples to new grid for rasters, with default parameters ensuring chunk-invariance.
   - ✅
   - Rasterio / PyProj
 
@@ -150,7 +153,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
 ## Metadata properties and operations
 
 In addition to data operations, GeoUtils exposes **metadata** properties and methods consistently across geospatial objects. 
-These operate only on metadata and therefore **do not load or modify underlying data arrays**.
+These rely only on metadata and therefore **do not load or modify underlying data arrays**.
 
 ```{list-table} Common API from metadata operations
 :widths: 3 7
@@ -195,7 +198,7 @@ These operate only on metadata and therefore **do not load or modify underlying 
   -
 
 * - {attr}`~geoutils.Raster.data`
-  - Data array (2D grid for raster, 1D for point cloud).
+  - Data array (2D or 3D for raster, 1D for point cloud).
 
 * - {attr}`~geoutils.Raster.shape`
   - Shape of data array.
@@ -207,13 +210,13 @@ These operate only on metadata and therefore **do not load or modify underlying 
   -
 
 * - {attr}`~geoutils.Raster.transform`
-  - Geotransform to map raster indices to spatial coordinates.
+  - Geotransform to map raster cells to spatial coordinates.
 
 * - {attr}`~geoutils.Raster.nodata`
   - Nodata value used to represent missing data on disk.
   
 * - {attr}`~geoutils.Raster.area_or_point`
-  - Pixel interpretation of raster values, either center point or area average.
+  - Interpretation of raster cell values, either an area-average or point-center.
 
 * - <span class="gu-table-section">Point</span>
   -

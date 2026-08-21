@@ -2,9 +2,9 @@
 # Ecosystem
 
 GeoUtils integrates naturally with the broader **geospatial ecosystem**.  
-It extends commonly used tools and works alongside many other for geospatial data access, processing, and analysis.
+It extends commonly used tools and works alongside many others for geospatial data access, processing, and analysis.
 
-See the {ref}`accessors` page for details on GeoUtils' accessors.
+See the {ref}`dependencies` section for details on our dependencies
 
 ```{seealso}
 **[xDEM](https://github.com/GlacioHack/xdem)** is the sister package of GeoUtils, focused on the **analysis of digital elevation models (DEMs) and elevation point clouds**, including terrain attributes, coregistration and uncertainty propagation.
@@ -43,6 +43,7 @@ Several platforms provide geospatial datasets, cloud environments and learning r
 
 - **[STAC](https://stacspec.org)** — SpatioTemporal Asset Catalog standard for geospatial data discovery
 - **[NASA EarthData](https://earthdata.nasa.gov/)** — NASA Earth observation datasets
+- **[Geodes](https://geodes-portal.cnes.fr/)** and **[Geodes-Tools](https://geodes-tools.cnes.fr/en/)** — CNES portals for distributing satellite datasets, and sharing tools and resources for their processing
 - **[USGS EarthExplorer](https://earthexplorer.usgs.gov/)** — satellite and elevation data
 - **[Copernicus Data Space](https://dataspace.copernicus.eu/)** — Sentinel satellite data
 - **[Radiant Earth MLHub](https://mlhub.earth/)** — open Earth observation datasets
