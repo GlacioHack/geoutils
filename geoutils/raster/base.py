@@ -798,7 +798,9 @@ class RasterBase(ABC):
                 elif callable(stats_name):
                     return stats_name(data)  # type: ignore
                 else:
-                    warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
+                    warnings.warn(
+                        "Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning
+                    )
         else:
             stats = {}
             for band in range(self.count):

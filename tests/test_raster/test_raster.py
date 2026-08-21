@@ -163,7 +163,6 @@ class TestRaster:
             with pytest.warns(UserWarning):
                 r.set_nodata(-99999)
 
-
         # Test stats param
         nb_lines = len(r.info(verbose=False).split("\n"))
         output_with_stats = r.info(stats=True, verbose=False)
