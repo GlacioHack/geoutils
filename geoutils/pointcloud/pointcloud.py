@@ -1360,6 +1360,44 @@ class PointCloud(Vector):  # type: ignore[misc]
         )
 
     @overload
+    def info(self, verbose: Literal[True] = ..., stats: bool = False) -> None: ...
+
+    @overload
+    def info(self, verbose: Literal[False], stats: bool = False) -> str: ...
+
+    def info(self, verbose: bool = True, stats: bool = False) -> None | str:
+        """
+        Print summary information about the DEM.
+
+        :param stats: Add statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
+            not calculate statistics.
+        :param verbose: If set to True (default) will directly print to screen and return None
+
+        :returns: Summary string or None.
+        """
+
+        # Get raster.info()
+        as_str = super().info(verbose=False)  # type: ignore
+        as_str_split = as_str.split("\n")
+
+        if stats:
+            as_str_split.append("\nStatistics:")
+            statistics = self.get_stats()
+
+            # Determine the maximum length of the stat names for alignment
+            max_len = max(len(name) for name in statistics.keys())
+
+            # Format the stats with aligned names
+            for name, value in statistics.items():
+                as_str_split.append(f"{name.ljust(max_len)}: {value:.2f}")
+
+        if verbose:
+            print("\n".join(as_str_split))
+            return None
+        else:
+            return "\n".join(as_str_split)
+
+    @overload
     def get_stats(
         self,
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],

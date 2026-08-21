@@ -526,6 +526,34 @@ class TestArithmetic:
 
     pc1_wrong_coords = gu.PointCloud.from_array(arr_wrong_coord, crs=crs)
 
+    def test_info(self) -> None:
+        """Test that the information summary is consistent"""
+        fn_las = gu.examples.get_path_test("coromandel_lidar")
+        pc = gu.PointCloud(fn_las)
+
+        # Check default runs without error (prints to screen)
+        output = pc.info()
+        assert output is None
+
+        # Otherwise returns info
+        output2 = pc.info(verbose=False)
+        assert isinstance(output2, str)
+        list_prints = ["Filename", "Coordinate system", "Extent", "Number of features", "Attributes"]
+        assert all(p in output2 for p in list_prints)
+
+        # Test stats param
+        nb_lines = len(output2.split("\n"))
+        output_with_stats = pc.info(stats=True, verbose=False)
+        output_with_stats_split = output_with_stats.split("\n")
+        stats = pc.get_stats()
+        nb_lines_with_stats = len(output_with_stats_split)
+        assert nb_lines + len(stats) + 2 == nb_lines_with_stats
+
+        assert output_with_stats.split("\n")[nb_lines + 1] == "Statistics:"
+        for s, stat in enumerate(stats.keys()):
+            assert output_with_stats_split[nb_lines + 2 + s].startswith(stat)
+            assert f"{stats[stat]:.2f}" in output_with_stats_split[nb_lines + 2 + s]
+
     def test_pointcloud_equal(self) -> None:
         """
         Test that pointcloud_equal() works as expected.
@@ -568,6 +596,7 @@ class TestArithmetic:
         assert pc1.georeferenced_coords_equal(pc2)
 
         # Change dtype
+        pc2 = pc1.copy()
         pc2 = pc1.copy()
         pc2 = pc2.astype("float32")
         assert pc1.georeferenced_coords_equal(pc2)
