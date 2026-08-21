@@ -39,6 +39,14 @@ jobs:
         activate-environment: geoutils-dev
         python-version:
 
+    - name: Debug conda init
+      shell: bash
+      run: |
+        echo "CONDA=$CONDA"
+        "$CONDA/bin/conda" --version
+        command -v conda || true
+        nl -ba ~/.profile || true
+
     - name: Get month for resetting cache
       id: get-date
       run: echo "cache_date=$(/bin/date -u '+%Y%m')" >> $GITHUB_ENV
