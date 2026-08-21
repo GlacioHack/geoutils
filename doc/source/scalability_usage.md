@@ -15,7 +15,9 @@ kernelspec:
 
 GeoUtils supports scalable execution for most of its **raster** and (soon) **point cloud** operations (**vector** support may be added in the future, but is usually less limiting).
 
-It relies on two execution backends:
+This **summary page** introduces scalability concepts, demonstrates usage, and lists good practices. For more details on scalability concepts, support or implementations, refer to the next pages.
+
+GeoUtils relies on two execution backends:
 
 - **Dask**, through its {class}`rst <geoutils.RasterAccessor>` Xarray accessor and `pc` Pandas accessor (**lazy** and **chunked** execution),
 - **Multiprocessing**, through its {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects (**chunked** execution only) .

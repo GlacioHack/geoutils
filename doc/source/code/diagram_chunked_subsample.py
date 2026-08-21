@@ -1,9 +1,10 @@
-"""Script to make diagram for chunked polygonize in documentation."""
+"""Script to make diagram for chunked subsample in documentation."""
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
+from matplotlib.offsetbox import AnnotationBbox, HPacker, TextArea
 from matplotlib.patches import Rectangle
 from geoutils.raster.array import get_mask_from_array
 from geoutils.stats.sampling import (
@@ -49,6 +50,8 @@ CHUNK_COLOR = "#222222"
 VALID_COLOR = "#6BAED6"
 VALID_EDGE = "#4C78A8"
 INVALID_COLOR = "#F7F7F7"
+INPUT_COLOR = "#B279A2"
+COUNT_COLOR = "#54A24B"
 HIGHLIGHT_COLOR = "#F58518"
 TOPK_COLOR = "#4C78A8"
 SEQUENTIAL_COLOR = "#F58518"
@@ -71,6 +74,7 @@ def _first_valid_gids_in_chunk(arr: np.ndarray, chunk_loc: tuple[int, int], n: i
     rr = flat_local // block.shape[1] + r0
     cc = flat_local % block.shape[1] + c0
     return np.ravel_multi_index((rr, cc), arr.shape).astype(np.int64)
+
 
 def _chunk_bounds(iy: int, ix: int) -> tuple[int, int, int, int]:
     """Return raster chunk bounds as (row0, row1, col0, col1)."""
@@ -203,7 +207,7 @@ def _draw_chunk_boundaries(ax: plt.Axes, *, nrows: int, ncols: int, extend: floa
         )
 
 
-def _draw_example_count_chunk(ax: plt.Axes, chunk_loc: tuple[int, int], *, color: str = HIGHLIGHT_COLOR) -> None:
+def _draw_example_count_chunk(ax: plt.Axes, chunk_loc: tuple[int, int], *, color: str = COUNT_COLOR) -> None:
     """Highlight one example chunk used for counting valid pixels."""
     r0, r1, c0, c1 = _chunk_bounds(*chunk_loc)
 
@@ -248,18 +252,19 @@ def _draw_chunk_count_labels(
                 ha="center",
                 va="center",
                 fontsize=10,
-                color=HIGHLIGHT_COLOR if is_example else NEUTRAL,
-                fontweight="bold" if is_example else None,
+                color=COUNT_COLOR,
+                fontweight="bold",
                 bbox=dict(
                     boxstyle="round,pad=0.20",
                     fc="white",
-                    ec=HIGHLIGHT_COLOR if is_example else "0.85",
+                    ec=COUNT_COLOR if is_example else "0.85",
                     lw=1.0 if is_example else 0.8,
                     alpha=0.95,
                 ),
                 zorder=6,
             )
             k += 1
+
 
 def _draw_topk_selected(ax: plt.Axes, arr: np.ndarray, chosen_gids: np.ndarray) -> None:
     """Draw topk-selected pixels as orange dots."""
@@ -299,14 +304,16 @@ def _add_visual_legend(ax: plt.Axes) -> None:
     x_sym1 = 1.0
     x_txt = 1.03
 
-    y0 = 0.68
-    dy = 0.1
+    y0 = 0.78
+    dy = 0.085
 
     entries = [
         ("pixel_grid", "Pixel grid"),
         ("chunk_boundary", "Chunk boundary"),
         ("valid", "Valid pixel"),
         ("invalid", "Invalid / nodata"),
+        ("input", "User subsampling input"),
+        ("count", "Valid-value count"),
         ("example", "Illustrated example pixel"),
         ("selected", "Selected sample pixel"),
     ]
@@ -363,6 +370,34 @@ def _add_visual_legend(ax: plt.Axes) -> None:
             )
             ax.add_patch(rect)
 
+        elif kind == "input":
+            ax.text(
+                0.5 * (x_sym0 + x_sym1),
+                y,
+                "0.25",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=8,
+                fontweight="bold",
+                color=INPUT_COLOR,
+                clip_on=False,
+            )
+
+        elif kind == "count":
+            ax.text(
+                0.5 * (x_sym0 + x_sym1),
+                y,
+                "n",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=9,
+                fontweight="bold",
+                color=COUNT_COLOR,
+                clip_on=False,
+            )
+
         elif kind == "example":
             ax.scatter(
                 [0.5 * (x_sym0 + x_sym1)],
@@ -400,10 +435,12 @@ def _add_visual_legend(ax: plt.Axes) -> None:
             color=NEUTRAL,
         )
 
+
 def _valid_rank_map(arr: np.ndarray) -> dict[int, int]:
     """Map global linear index -> rank in flattened valid-value order."""
     valids = _global_valid_indices(arr).astype(np.int64)
     return {int(gid): i for i, gid in enumerate(valids)}
+
 
 def _draw_sequential_selected(ax: plt.Axes, arr: np.ndarray, chosen_gids: np.ndarray) -> None:
     """Draw sequentially selected pixels as orange dots."""
@@ -421,6 +458,7 @@ def _draw_sequential_selected(ax: plt.Axes, arr: np.ndarray, chosen_gids: np.nda
             linewidth=1.0,
             zorder=7,
         )
+
 
 def _draw_topk_example_labels(
     ax: plt.Axes,
@@ -462,6 +500,7 @@ def _draw_topk_example_labels(
             zorder=8,
         )
 
+
 def _sequential_chunk_order_rank_map(arr: np.ndarray) -> dict[int, int]:
     """
     Map global linear index to rank in flattened valid order by chunk.
@@ -490,6 +529,7 @@ def _sequential_chunk_order_rank_map(arr: np.ndarray) -> dict[int, int]:
                 rank += 1
 
     return rank_map
+
 
 def _draw_sequential_example_labels(
     ax: plt.Axes,
@@ -528,6 +568,7 @@ def _draw_sequential_example_labels(
             zorder=8,
         )
 
+
 def _example_valid_gids_sparse(arr: np.ndarray) -> np.ndarray:
     """
     Return example valid gids through the first row and into the middle of the
@@ -540,6 +581,7 @@ def _example_valid_gids_sparse(arr: np.ndarray) -> np.ndarray:
 
     gids = valids[valids < row_break_2]
     return gids[::2]
+
 
 def _draw_example_reference_dots(
     ax: plt.Axes,
@@ -569,6 +611,7 @@ def _draw_example_reference_dots(
             zorder=6.5,
         )
 
+
 def _lowest_key_example_gids(example_gids: np.ndarray, *, seed: int, n_low: int = 2) -> np.ndarray:
     """Return gids of the n_low smallest keys among example gids."""
     gids_u64 = example_gids.astype(np.uint64)
@@ -577,6 +620,7 @@ def _lowest_key_example_gids(example_gids: np.ndarray, *, seed: int, n_low: int 
     m = min(n_low, len(example_gids))
     sel = np.argpartition(keys, m - 1)[:m]
     return example_gids[sel].astype(np.int64)
+
 
 # -----------------------------------------------------------------------------
 # Main figure
@@ -634,15 +678,28 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     _draw_example_count_chunk(ax_top, EXAMPLE_CHUNK)
 
     ax_top.text(
-        0.5,
-        1.0,
+        NCOLS / 2,
+        1.07,
         "Count valid values per chunk",
-        transform=ax_top.transAxes,
+        transform=ax_top.get_xaxis_transform(),
         ha="center",
         va="bottom",
         fontsize=13,
         fontweight="bold",
         color=NEUTRAL,
+    )
+
+    ax_top.text(
+        NCOLS / 2,
+        0.97,
+        f"User input: subsample = {USER_SUBSAMPLE:g} "
+        f"({USER_SUBSAMPLE * 100:g}% of valid values)",
+        transform=ax_top.get_xaxis_transform(),
+        ha="center",
+        va="bottom",
+        fontsize=10.2,
+        fontweight="bold",
+        color=INPUT_COLOR,
     )
 
     ax_top.text(
@@ -656,6 +713,62 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
         fontsize=10.2,
         color=NEUTRAL,
         linespacing=1.3,
+    )
+
+    calc = HPacker(
+        children=[
+            TextArea(
+                f"{USER_SUBSAMPLE:g}",
+                textprops=dict(
+                    fontsize=10.5,
+                    fontweight="bold",
+                    color=INPUT_COLOR,
+                ),
+            ),
+            TextArea(
+                " × ",
+                textprops=dict(
+                    fontsize=10.5,
+                    color=NEUTRAL,
+                ),
+            ),
+            TextArea(
+                f"{total_valids} valid values",
+                textprops=dict(
+                    fontsize=10.5,
+                    fontweight="bold",
+                    color=COUNT_COLOR,
+                ),
+            ),
+            TextArea(
+                "  →  ",
+                textprops=dict(
+                    fontsize=10.5,
+                    color=NEUTRAL,
+                ),
+            ),
+            TextArea(
+                f"N = {k} samples",
+                textprops=dict(
+                    fontsize=10.5,
+                    fontweight="bold",
+                    color=HIGHLIGHT_COLOR,
+                ),
+            ),
+        ],
+        align="baseline",
+        pad=0,
+        sep=0,
+    )
+
+    ax_top.add_artist(
+        AnnotationBbox(
+            calc,
+            (NCOLS / 2, -0.04),
+            xycoords=ax_top.get_xaxis_transform(),
+            box_alignment=(0.5, 1.0),
+            frameon=False,
+        )
     )
 
     _add_visual_legend(ax_top)
@@ -674,7 +787,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
         ARR,
         EXAMPLE_GIDS,
         seed=SEED,
-        selected_gids=LOW_KEY_EXAMPLE_GIDS
+        selected_gids=LOW_KEY_EXAMPLE_GIDS,
     )
 
     ax_bl.text(
@@ -688,11 +801,12 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
         fontweight="bold",
         color=NEUTRAL,
     )
+
     ax_bl.text(
         0.5,
         -0.02,
         "Each valid pixel gets a deterministic uint64 key\nfrom its row/col indexes (rounded rank shown)\n"
-        "the k smallest keys are selected",
+        f"the N = {k} smallest keys are selected",
         transform=ax_bl.transAxes,
         ha="center",
         va="top",
@@ -700,6 +814,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
         color=NEUTRAL,
         linespacing=1.25,
     )
+
     _setup_axis(ax_bl, xlim=(-0.5, NCOLS + 0.5), ylim=(-0.5, NROWS + 0.5))
 
     # Bottom right: sequential
@@ -727,7 +842,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     ax_br.text(
         0.5,
         -0.02,
-        "A random draw is applied to flattened valid indexes,\n"
+        f"A random draw of N = {k} flattened\nvalid indexes is applied,\n"
         "fast selection but depends on chunking",
         transform=ax_br.transAxes,
         ha="center",
