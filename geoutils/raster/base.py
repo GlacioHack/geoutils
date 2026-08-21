@@ -699,9 +699,9 @@ class RasterBase(ABC):
             str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
+    ) -> np.floating[Any] | dict[str, np.floating[Any] | dict[str, np.floating[Any]]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
@@ -762,38 +762,51 @@ class RasterBase(ABC):
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
 
-        # Get data band
-        data = self.data[band - 1, :, :] if self.count > 1 else self.data
+        # Case monoband
+        if self.count == 1 and band is None:
+            band = 1
 
-        # Derive inlier mask
-        if inlier_mask is not None:
-            valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
-            if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
-                mask = inlier_mask.data
+        if band is not None:
+            # Get data band
+            data = self.data[band - 1, :, :] if self.count > 1 else self.data
+
+            # Derive inlier mask
+            if inlier_mask is not None:
+                valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
+                if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
+                    mask = inlier_mask.data
+                else:
+                    mask = inlier_mask
+                inlier_points = np.count_nonzero(mask)
+
+                rast = self.copy()
+
+                # Mask pixels from the inlier_mask
+                if not np.ma.isMaskedArray(rast.data):
+                    rast[~mask] = np.nan  # type: ignore
+                else:
+                    rast.set_mask(~mask)  # type: ignore
+                return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+
+            # Given list or all attributes to compute if None
+            if isinstance(stats_name, list) or stats_name is None:
+                return _statistics(data, stats_name, counts)  # type: ignore
             else:
-                mask = inlier_mask
-            inlier_points = np.count_nonzero(mask)
-
-            rast = self.copy()
-
-            # Mask pixels from the inlier_mask
-            if not np.ma.isMaskedArray(rast.data):
-                rast[~mask] = np.nan  # type: ignore
-            else:
-                rast.set_mask(~mask)  # type: ignore
-            return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
-
-        # Given list or all attributes to compute if None
-        if isinstance(stats_name, list) or stats_name is None:
-            return _statistics(data, stats_name, counts)  # type: ignore
+                # Single attribute to compute
+                if isinstance(stats_name, str):
+                    return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
+                elif callable(stats_name):
+                    return stats_name(data)  # type: ignore
+                else:
+                    warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
         else:
-            # Single attribute to compute
-            if isinstance(stats_name, str):
-                return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
-            elif callable(stats_name):
-                return stats_name(data)  # type: ignore
-            else:
-                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
+            stats = {}
+            for band in range(self.count):
+                stats["band " + str(band)] = self.get_stats(
+                    stats_name=stats_name, inlier_mask=inlier_mask, band=band, counts=counts
+                )
+
+            return stats
 
     def _raster_equal_allclose(
         self,

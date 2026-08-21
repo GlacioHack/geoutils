@@ -163,11 +163,35 @@ class TestRaster:
             with pytest.warns(UserWarning):
                 r.set_nodata(-99999)
 
-        new_stats = r.info(stats=True, verbose=False)
-        for i, line in enumerate(stats.splitlines()):
-            if "MINIMUM" not in line:
-                continue
-            assert line == new_stats.splitlines()[i]
+
+        # Test stats param
+        nb_lines = len(r.info(verbose=False).split("\n"))
+        output_with_stats = r.info(stats=True, verbose=False)
+        stats = r.get_stats()
+        output_with_stats_split = output_with_stats.split("\n")
+        nb_lines_with_stats = len(output_with_stats_split)
+
+        assert output_with_stats_split[nb_lines] == "Statistics:"
+
+        if r.count == 1:
+            assert nb_lines + len(stats) + 2 == nb_lines_with_stats
+            for s, stat in enumerate(stats.keys()):
+                assert output_with_stats_split[nb_lines + 1 + s].startswith(stat)
+                assert f"{stats[stat]:.2f}" in output_with_stats_split[nb_lines + 1 + s]
+        else:
+            assert nb_lines + r.count * len(r.get_stats(band=1)) + r.count + 2 == nb_lines_with_stats
+            start = nb_lines + 1
+            for band in range(r.count):
+                assert output_with_stats_split[start + band * len(r.get_stats(band=1)) + band] == f"Band {band + 1}:"
+                stats_band = r.get_stats(band=band)
+                for s, stat in enumerate(r.get_stats(band=band).keys()):
+                    assert output_with_stats_split[start + band * len(r.get_stats(band=1)) + band + 1 + s].startswith(
+                        stat
+                    )
+                    assert (
+                        f"{stats_band[stat]:.2f}"
+                        in output_with_stats_split[start + band * len(r.get_stats(band=1)) + band + 1 + s]
+                    )
 
     def test_load(self) -> None:
         """
