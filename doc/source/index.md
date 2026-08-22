@@ -33,7 +33,7 @@ GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyPro
 (NumPy, SciPy, Numba) to provide **consistent higher-level functionalities at the interface of raster, vector and point
 cloud objects** (such as match-reference reprojection, point interpolation or gridding).
 
-It strives **to be computationally scalable** by adding **lazy and chunked implementations** to most **raster and point cloud** operations (Dask, Multiprocessing) 
+It strives **to be computationally scalable** by adding **lazy and chunked implementations** to most **raster and point cloud** operations (Dask, Multiprocessing)
 and **provides accessors to naturally extend existing Python data-structures** (Xarray, Pandas).
 
 GeoUtils is **tailored to perform quantitative analysis that implicitly understands the intricacies of geospatial data**

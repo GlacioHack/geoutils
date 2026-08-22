@@ -67,7 +67,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Apply a grid shift to object.
   - ✅
   - NumPy / GeoPandas
-  
+
 * - {meth}`~geoutils.Raster.plot()`
   - Visualization helper.
   - ❌
@@ -77,7 +77,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   -
   -
   -
-  
+
 * - {meth}`~geoutils.Vector.create_mask()`
   - Create boolean mask of a vector geometries over raster or point.
   - ✅
@@ -87,22 +87,22 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Compute statistics of valid values over a valid mask.
   - ❌
   - NumPy / SciPy
-  
+
 * - {meth}`~geoutils.Raster.subsample()`
   - Randomly sample valid values. Chunk-invariant seed ensures reproducibility.
   - ✅
   - NumPy
-  
+
 * - {meth}`~geoutils.Raster.filter()`
   - Filter over window. Fast vectorized logic with NaN support.
   - ✅
   - SciPy
-  
+
 * - {meth}`~geoutils.Raster.proximity()`
   - Estimate proximity distance to target values.
   - ❌
   - SciPy
-  
+
 
 * - <span class="gu-table-section">Raster ⟷ Vector</span>
   -
@@ -135,7 +135,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - NumPy
 
 * - {meth}`~geoutils.PointCloud.grid()`
-  - Grid irregular points onto a raster grid. Multiple approaches with added NaN propagation. 
+  - Grid irregular points onto a raster grid. Multiple approaches with added NaN propagation.
   - ❌
   - SciPy
 
@@ -143,7 +143,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Direct conversion when points lie on a regular grid.
   - ❌
   - NumPy
-  
+
 * - {meth}`~geoutils.Raster.to_pointcloud()`
   - Conversion to point cloud.
   - ❌
@@ -152,7 +152,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
 
 ## Metadata properties and operations
 
-In addition to data operations, GeoUtils exposes **metadata** properties and methods consistently across geospatial objects. 
+In addition to data operations, GeoUtils exposes **metadata** properties and methods consistently across geospatial objects.
 These rely only on metadata and therefore **do not load or modify underlying data arrays**.
 
 ```{list-table} Common API from metadata operations
@@ -175,25 +175,25 @@ These rely only on metadata and therefore **do not load or modify underlying dat
 
 * - {attr}`~geoutils.Raster.footprint`
   - Footprint polygon geometry of object.
-  
+
 * - {attr}`~geoutils.Raster.is_loaded`
   - Whether geospatial object is loaded in-memory.
 
 * - {attr}`~geoutils.Raster.name`
   - Filename of object on disk, if it exists.
-  
+
 * - {meth}`~geoutils.Raster.get_bounds_projected()`
   - Bounds projected in other CRS.
 
 * - {meth}`~geoutils.Raster.get_footprint_projected()`
   - Footprint polygon geometry in other CRS.
- 
+
 * - {meth}`~geoutils.Raster.get_metric_crs()`
   - Get metric CRS suitable for this object.
-  
+
 * - {meth}`~geoutils.Raster.info()`
   - Summary of attributes for geospatial object.
-  
+
 * - <span class="gu-table-section">Raster / Point</span>
   -
 
@@ -214,7 +214,7 @@ These rely only on metadata and therefore **do not load or modify underlying dat
 
 * - {attr}`~geoutils.Raster.nodata`
   - Nodata value used to represent missing data on disk.
-  
+
 * - {attr}`~geoutils.Raster.area_or_point`
   - Interpretation of raster cell values, either an area-average or point-center.
 
@@ -224,4 +224,3 @@ These rely only on metadata and therefore **do not load or modify underlying dat
 * - {attr}`~geoutils.PointCloud.point_count`
   - Number of points in the point cloud.
 ```
-

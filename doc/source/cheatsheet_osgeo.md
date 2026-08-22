@@ -3,7 +3,7 @@
 
 This page helps users familiar with **GDAL/OGR** migrate their operations to the GeoUtils API.
 
-Regarding function names, GeoUtils exposes **an API almost entirely consistent with the recently overhauled GDAL CLI**. 
+Regarding function names, GeoUtils exposes **an API almost entirely consistent with the recently overhauled GDAL CLI**.
 
 Note that GeoUtils is **object-oriented** (methods run on {class}`~geoutils.Raster`, {class}`~geoutils.Vector`, {class}`~geoutils.PointCloud`, or on {class}`~xarray.DataArray` and {class}`~geopandas.GeoDataFrame` through {class}`rst <geoutils.RasterAccessor>`, `vct` and `pc` accessors), while GDAL/OGR utilities are typically **file-oriented** (read from disk, write to disk).
 
@@ -80,7 +80,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
   - `gdal_proximity`
   - `gdal raster proximity`
   - {meth}`~geoutils.Raster.proximity`
-  
+
 * - Raster calculator
   - `gdal_calc.py`
   - `gdal raster calc`
@@ -90,7 +90,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
   - `gdal_merge.py`
   - `gdalbuildvrt`+`gdal raster reproject`
   - {func}`~geoutils.raster.merge_rasters`
-  
+
 * - Stack rasters into multiband raster
   - `gdal_stack.py`
   - `gdal raster stack`
@@ -155,7 +155,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
   - `ogr2ogr`
   - `gdal vector convert`
   - {meth}`~geoutils.Vector.copy`
-  
+
 * - Geometric operations
   - `ogr2ogr` (specific)
   - `gdal vector simplify/buffer/...`

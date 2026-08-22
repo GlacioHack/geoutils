@@ -1,4 +1,5 @@
 """Script to make diagram for chunked subsample in documentation."""
+
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
@@ -6,13 +7,13 @@ import numpy as np
 from matplotlib.collections import LineCollection
 from matplotlib.offsetbox import AnnotationBbox, HPacker, TextArea
 from matplotlib.patches import Rectangle
+
 from geoutils.raster.array import get_mask_from_array
 from geoutils.stats.sampling import (
     _get_subsample_size_from_user_input,
     _splitmix64,
     _subsample_numpy,
 )
-
 
 # -----------------------------------------------------------------------------
 # Example data
@@ -60,6 +61,7 @@ SEQUENTIAL_COLOR = "#F58518"
 # -----------------------------------------------------------------------------
 # Helpers for subsampling and valid values per chunk
 # -----------------------------------------------------------------------------
+
 
 def _first_valid_gids_in_chunk(arr: np.ndarray, chunk_loc: tuple[int, int], n: int = 5) -> np.ndarray:
     """Return the first n valid global linear indices in one chunk, in flattened local order."""
@@ -111,6 +113,7 @@ def _topk_choice_with_keys(arr: np.ndarray, k: int, seed: int) -> tuple[np.ndarr
 # -----------------------------------------------------------------------------
 # Plot helpers
 # -----------------------------------------------------------------------------
+
 
 def _setup_axis(ax: plt.Axes, *, xlim: tuple[float, float], ylim: tuple[float, float], equal: bool = True) -> None:
     """Common axis formatting."""
@@ -626,6 +629,7 @@ def _lowest_key_example_gids(example_gids: np.ndarray, *, seed: int, n_low: int 
 # Main figure
 # -----------------------------------------------------------------------------
 
+
 def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     """Build a 3-panel schematic for chunked subsampling."""
 
@@ -692,8 +696,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     ax_top.text(
         NCOLS / 2,
         0.97,
-        f"User input: subsample = {USER_SUBSAMPLE:g} "
-        f"({USER_SUBSAMPLE * 100:g}% of valid values)",
+        f"User input: subsample = {USER_SUBSAMPLE:g} " f"({USER_SUBSAMPLE * 100:g}% of valid values)",
         transform=ax_top.get_xaxis_transform(),
         ha="center",
         va="bottom",
@@ -842,8 +845,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     ax_br.text(
         0.5,
         -0.02,
-        f"A random draw of N = {k} flattened\nvalid indexes is applied,\n"
-        "fast selection but depends on chunking",
+        f"A random draw of N = {k} flattened\nvalid indexes is applied,\n" "fast selection but depends on chunking",
         transform=ax_br.transAxes,
         ha="center",
         va="top",

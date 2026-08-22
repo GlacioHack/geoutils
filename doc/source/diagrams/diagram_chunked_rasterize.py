@@ -1,4 +1,5 @@
 """Script to make diagram for chunked rasterize in documentation."""
+
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
@@ -6,7 +7,9 @@ import numpy as np
 import rasterio as rio
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
-from matplotlib.patches import FancyArrowPatch, Polygon as MplPolygon, Rectangle, ConnectionPatch
+from matplotlib.patches import ConnectionPatch, FancyArrowPatch
+from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.patches import Rectangle
 from shapely.geometry import Polygon, box
 
 from geoutils.interface.rasterization import _rasterio_rasterize_burn
@@ -45,11 +48,13 @@ POLY_VALUES = np.array([1, 2, 3], dtype=np.uint8)
 # Geometry helpers
 # -----------------------------------------------------------------------------
 
+
 def _data_point_to_fig(fig: plt.Figure, ax: plt.Axes, x_data: float, y_data: float) -> tuple[float, float]:
     """Convert a data-coordinate point to figure coordinates."""
     xy_disp = ax.transData.transform((x_data, y_data))
     xy_fig = fig.transFigure.inverted().transform(xy_disp)
     return float(xy_fig[0]), float(xy_fig[1])
+
 
 def chunk_bounds(chunk_location: tuple[int, int]) -> tuple[float, float, float, float]:
     """Return chunk bounds as (left, bottom, right, top)."""
@@ -120,6 +125,7 @@ def build_rasterized_chunk(
 # Plot helpers
 # -----------------------------------------------------------------------------
 
+
 def draw_pixel_grid(ax: plt.Axes, *, nrows: int, ncols: int, extend: float = 1.0) -> None:
     """Draw thin pixel grid, extended slightly outside the plotted raster."""
     segments: list[np.ndarray] = []
@@ -142,6 +148,7 @@ def draw_pixel_grid(ax: plt.Axes, *, nrows: int, ncols: int, extend: float = 1.0
         clip_on=False,
     )
     ax.add_collection(coll)
+
 
 def draw_chunk_boundaries(ax: plt.Axes, *, extend: float = 1.0) -> None:
     """Draw all chunk boundaries, extended slightly outside the plotted raster."""
@@ -173,6 +180,7 @@ def draw_chunk_boundaries(ax: plt.Axes, *, extend: float = 1.0) -> None:
             clip_on=False,
         )
 
+
 def draw_highlight_chunk(ax: plt.Axes, bounds: tuple[float, float, float, float]) -> None:
     """Draw highlighted chunk bbox."""
     left, bottom, right, top = bounds
@@ -186,6 +194,7 @@ def draw_highlight_chunk(ax: plt.Axes, bounds: tuple[float, float, float, float]
         zorder=5,
     )
     ax.add_patch(rect)
+
 
 def draw_polygon_ids(
     ax: plt.Axes,
@@ -218,6 +227,7 @@ def draw_polygon_ids(
                 alpha=0.8,
             ),
         )
+
 
 def draw_chunk_query_box(ax: plt.Axes, bounds: tuple[float, float, float, float]) -> None:
     """Draw filled highlight for candidate-query chunk."""
@@ -450,6 +460,7 @@ def add_visual_legend(fig: plt.Figure) -> None:
     fig.add_artist(poly)
     fig.text(x + 0.038, y, "Candidate geometry", transform=fig.transFigure, va="center", fontsize=10)
 
+
 def chunk_center(bounds: tuple[float, float, float, float]) -> tuple[float, float]:
     """Return center of chunk bounds."""
     left, bottom, right, top = bounds
@@ -508,9 +519,11 @@ def add_between_panel_arrows(
     )
     fig.add_artist(arr12)
 
+
 # -----------------------------------------------------------------------------
 # Main figure
 # -----------------------------------------------------------------------------
+
 
 def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
     """Build a 3-panel schematic for chunked rasterize."""
@@ -625,7 +638,6 @@ def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
         linespacing=1.25,
     )
     setup_axis(ax2, nrows=chunk_result.shape[0], ncols=chunk_result.shape[1], pad=0.6)
-
 
     add_mapblocks_title(fig, [ax0, ax2])
     add_visual_legend(fig)

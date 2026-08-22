@@ -53,7 +53,7 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
 .. autosummary::
     :toctree: gen_modules/
     :template: raster_method.rst
-   
+
     ~raster.base.RasterBase.from_array
 ```
 
@@ -65,7 +65,7 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
 .. autosummary::
     :toctree: gen_modules/
     :template: raster_method.rst
-    
+
     ~raster.base.RasterBase.data
     ~raster.base.RasterBase.crs
     ~raster.base.RasterBase.transform

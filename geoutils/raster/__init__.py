@@ -16,9 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from geoutils.raster.base import RasterBase
-from geoutils.raster.raster import Raster, RasterType, handled_array_funcs  # noqa isort:skip
 from geoutils.raster.array import *  # noqa
+from geoutils.raster.base import RasterBase  # noqa
 from geoutils.raster.multiraster import *  # noqa
 
 # To-be-deprecated
@@ -27,5 +26,8 @@ from geoutils.raster.referencing import *  # noqa
 from geoutils.raster.satimg import *  # noqa
 from geoutils.raster.tiling import *  # noqa
 from geoutils.raster.transformation import *  # noqa
+
+from geoutils.raster.raster import Raster, RasterType, handled_array_funcs  # noqa isort:skip
+
 
 __all__ = ["RasterType", "Raster"]

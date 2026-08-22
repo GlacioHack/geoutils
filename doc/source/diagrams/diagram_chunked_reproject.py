@@ -1,22 +1,22 @@
 """Script to make diagram for chunked reproject in documentation."""
+
 from __future__ import annotations
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon as MplPolygon
-from matplotlib.collections import PatchCollection
 import numpy as np
 import rasterio as rio
-from shapely.geometry import Polygon, MultiPolygon
+from matplotlib.collections import LineCollection, PatchCollection
 from matplotlib.patches import FancyArrowPatch
-from matplotlib.collections import LineCollection
-from shapely.geometry import LineString, MultiLineString
-from geoutils.multiproc.chunked import GeoGrid, ChunkedGeoGrid, cached_cumsum
+from matplotlib.patches import Polygon as MplPolygon
+from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
 
+from geoutils.multiproc.chunked import ChunkedGeoGrid, GeoGrid, cached_cumsum
 
 # -----------------------------------------------------------------------------
 # Plotting utilities
 # -----------------------------------------------------------------------------
+
 
 def _geom_to_lines(geom) -> list[np.ndarray]:
     """Convert shapely line geometry to matplotlib line segments."""
@@ -165,6 +165,7 @@ def _add_rectilinear_grid(
     )
     ax.add_collection(collection)
 
+
 def _add_chunk_size_arrows(
     ax: plt.Axes,
     chunk: GeoGrid,
@@ -267,6 +268,7 @@ def _add_chunk_size_arrows(
         color=color,
     )
 
+
 def _add_line_legend(
     ax: plt.Axes,
     *,
@@ -346,6 +348,7 @@ def _add_line_legend(
         color="#333333",
         zorder=3,
     )
+
 
 def build_demo_destination_grid(
     source_grid: GeoGrid,
@@ -599,7 +602,7 @@ def plot_reprojection_chunk_diagram(
     target = dst_blocks_one.geometry.iloc[0].centroid
     tx, ty = target.x, target.y
 
-    from matplotlib.offsetbox import AnnotationBbox, HPacker, VPacker, TextArea
+    from matplotlib.offsetbox import AnnotationBbox, HPacker, TextArea, VPacker
 
     # Build colored text pieces
     line1 = HPacker(
@@ -775,9 +778,7 @@ def plot_reprojection_chunk_diagram(
     ax1.text(
         0.7,
         1.65,
-        "Chunk size adapts "
-        "\nto resolution change\n"
-        "4×4 px → 2×2 px",
+        "Chunk size adapts " "\nto resolution change\n" "4×4 px → 2×2 px",
         transform=ax1.transAxes,
         ha="center",
         va="top",
@@ -798,6 +799,7 @@ def plot_reprojection_chunk_diagram(
     )
 
     return fig, axes
+
 
 # -----------------------------------------------------------------------------
 # Main figure

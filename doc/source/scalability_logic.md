@@ -9,7 +9,7 @@ Below, we detail the logic behind our **chunked execution** implementations, bot
 
 ## Summary
 
-Several operations are easy to support for **chunked execution** as they directly re-use existing **Dask** methods:
+Several operations are easy to support for **chunked execution** as they directly reuse existing **Dask** methods:
 - The {meth}`~geoutils.Raster.filter` function uses {func}`~dask.array.map_overlap` with a `depth` (overlap) half the `size` of the filter,
 - The {meth}`~geoutils.Raster.proximity` function uses {func}`~dask.array.map_overlap` with a `max_distance` parameter.
 
@@ -56,7 +56,7 @@ The diagram below illustrates the three strategies implemented in GeoUtils for p
 
 All strategies begin by processing individual raster chunks independently, then reconstruct continuous polygons that span chunk boundaries.
 
-Conceptually, the methods differ in how cross-chunk regions are reconstructed: 
+Conceptually, the methods differ in how cross-chunk regions are reconstructed:
 - **`label_union`** labels values in each chunk, then finds the **union of matching labels across chunk seams** before polygonization, avoiding vector comparisons and requiring only a final dissolve step,
 - **`label_stitch`** labels values as in **`label_union`**, then polygonizes each chunk independently and **stitches polygons afterward in vector space**, avoiding the need for a union–find structure,
 - **`geometry_stitch`** bypasses labeling entirely by performing **polygonization on halo-expanded chunks** (1-pixel overlap), then stitches polygons similarly as in **`label_stitch`** after clipping.
@@ -83,7 +83,7 @@ For every chunk, GeoUtils first performs a **spatial query on the vector geometr
 
 The memory footprint during chunked rasterization is therefore approximately limited to:
 
-- **One output chunk array**, and  
+- **One output chunk array**, and
 - **The subset of geometries intersecting that chunk**.
 
 Unlike chunked reprojection or polygonization, rasterization does not require overlap or cross-chunk reconciliation, since each pixel value is determined independently of the vector intersections within the chunk.

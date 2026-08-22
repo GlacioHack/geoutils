@@ -125,9 +125,9 @@ rast_reproj_mp
 ```
 
 If the output is a {class}`~geoutils.Raster`, it is written to disk out-of-memory, and the returned object is a {class}`~geoutils.Raster` of that file without data loaded.
-This keeps syntax consistent with in-memory code, and allows to easily chain operations. 
+This keeps syntax consistent with in-memory code, and allows to easily chain operations.
 
-For other output types, the Multiprocessing backends will load the result in-memory. 
+For other output types, the Multiprocessing backends will load the result in-memory.
 
 ```{code-cell} python
 # Subsample out-of-memory and return loaded array

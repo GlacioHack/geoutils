@@ -1,4 +1,5 @@
 """Script to generate a diagram for chunked raster-to-point interpolation."""
+
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
@@ -6,7 +7,6 @@ import numpy as np
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch, Rectangle
-
 
 # -----------------------------------------------------------------------------
 # Example data
@@ -77,6 +77,7 @@ OVERLAP_FILL_ALPHA = 0.18
 # Geometry helpers
 # -----------------------------------------------------------------------------
 
+
 def raster_chunk_bounds(chunk_loc: tuple[int, int]) -> tuple[float, float, float, float]:
     """Return chunk bounds as (left, bottom, right, top)."""
     iy, ix = chunk_loc
@@ -110,6 +111,7 @@ def expanded_chunk_bounds(
 # -----------------------------------------------------------------------------
 # Plot helpers
 # -----------------------------------------------------------------------------
+
 
 def _setup_axis(ax: plt.Axes, *, xlim: tuple[float, float], ylim: tuple[float, float]) -> None:
     """Common axis formatting."""
@@ -367,6 +369,7 @@ def _add_workflow_arrow(
     )
     fig.add_artist(arrow)
 
+
 def _add_visual_legend(fig: plt.Figure) -> None:
     """Draw a two-row horizontal legend with balanced spacing."""
     y1 = 0.05
@@ -456,8 +459,14 @@ def _add_visual_legend(fig: plt.Figure) -> None:
         linewidth=SELECTED_CHUNK_LW,
     )
     fig.add_artist(rect1)
-    fig.text(x + sym_w + txt_gap, y2, "Raster chunks used by this point chunk", transform=fig.transFigure,
-             va="center", fontsize=10)
+    fig.text(
+        x + sym_w + txt_gap,
+        y2,
+        "Raster chunks used by this point chunk",
+        transform=fig.transFigure,
+        va="center",
+        fontsize=10,
+    )
 
     # Example raster chunk / overlap
     cx = centers[3]
@@ -482,7 +491,14 @@ def _add_visual_legend(fig: plt.Figure) -> None:
     )
     fig.add_artist(rect_fill)
     fig.add_artist(rect_edge)
-    fig.text(x + sym_w + txt_gap, y2, "Example chunk processed with overlap", transform=fig.transFigure, va="center", fontsize=10)
+    fig.text(
+        x + sym_w + txt_gap,
+        y2,
+        "Example chunk processed with overlap",
+        transform=fig.transFigure,
+        va="center",
+        fontsize=10,
+    )
 
 
 def _add_left_column_separator(fig: plt.Figure, ax_top_left: plt.Axes, ax_bottom_left: plt.Axes) -> None:
@@ -505,6 +521,7 @@ def _add_left_column_separator(fig: plt.Figure, ax_top_left: plt.Axes, ax_bottom
         zorder=50,
     )
     fig.add_artist(line)
+
 
 def _draw_highlight_chunks(
     ax: plt.Axes,
@@ -534,9 +551,11 @@ def _draw_highlight_chunks(
         )
         ax.add_patch(rect)
 
+
 # -----------------------------------------------------------------------------
 # Main figure
 # -----------------------------------------------------------------------------
+
 
 def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     """Build a 4-panel schematic for chunked raster-to-point interpolation."""
@@ -551,8 +570,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     axes = np.array([ax_ul, ax_ur, ax_bl, ax_br], dtype=object)
 
     chunk_bounds_list = [raster_chunk_bounds(ch) for ch in HIGHLIGHTED_RASTER_CHUNKS]
-    chunk_bounds = max(chunk_bounds_list, key=lambda b: (b[3], b[
-        2]))  # Use upper-right selected chunk
+    chunk_bounds = max(chunk_bounds_list, key=lambda b: (b[3], b[2]))  # Use upper-right selected chunk
     overlap_bounds = expanded_chunk_bounds(chunk_bounds, depth_px=1.0)
 
     # -------------------------------------------------------------------------
@@ -642,8 +660,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     ax_br.text(
         0.5,
         -0.05,
-        f"Loop on expanded raster chunks to interpolate\n"
-        f"(overlap size depends on resampling method)",
+        f"Loop on expanded raster chunks to interpolate\n" f"(overlap size depends on resampling method)",
         transform=ax_br.transAxes,
         ha="center",
         va="top",

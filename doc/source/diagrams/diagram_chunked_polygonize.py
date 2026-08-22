@@ -1,4 +1,5 @@
 """Script to make diagram for chunked polygonize in documentation."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +12,6 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import ConnectionPatch, FancyArrowPatch, Rectangle
 
-from geoutils.multiproc.chunked import ChunkedGeoGrid, GeoGrid
 from geoutils.interface.vectorization import (
     _chunked_build_dst_geotiling,
     _chunked_clip_gdf_to_bounds_polygonal,
@@ -20,7 +20,7 @@ from geoutils.interface.vectorization import (
     _chunked_seam_pairs_from_strips,
     _polygonize_base,
 )
-
+from geoutils.multiproc.chunked import ChunkedGeoGrid, GeoGrid
 
 # -----------------------------------------------------------------------------
 # Example raster data and chunk layout
@@ -61,9 +61,11 @@ POLYGON_COLOR = "#555555"
 # Small containers
 # -----------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class BlockData:
     """Per-block arrays and metadata used for the schematic."""
+
     block_id: int
     block_id_dict: dict[str, int]
     geogrid: GeoGrid
@@ -77,6 +79,7 @@ class BlockData:
 # -----------------------------------------------------------------------------
 # Coordinate helpers
 # -----------------------------------------------------------------------------
+
 
 def cell_xy(i: int, j: int, nrows: int) -> tuple[float, float]:
     """Bottom-left of a raster cell in plotting coordinates."""
@@ -103,6 +106,7 @@ def centroid_from_cells(cells: list[tuple[int, int]], nrows: int) -> tuple[float
 # -----------------------------------------------------------------------------
 # Build block data using our package functions
 # -----------------------------------------------------------------------------
+
 
 def build_demo_blocks() -> tuple[ChunkedGeoGrid, list[GeoGrid], list[dict[str, int]], list[BlockData]]:
     """Build a 2-chunk horizontal tiling and derive block products with package helpers."""
@@ -248,6 +252,7 @@ def build_seam_pairs(left: BlockData, right: BlockData) -> list[tuple[int, int, 
 # Plot helpers
 # -----------------------------------------------------------------------------
 
+
 def draw_cells(ax: plt.Axes, arr: np.ndarray, *, alpha: float = 1.0) -> None:
     """Draw colored raster cells."""
     for i in range(arr.shape[0]):
@@ -387,7 +392,9 @@ def draw_local_labels(ax: plt.Axes, block: BlockData, *, prefix: str) -> None:
         )
 
 
-def draw_union_links(ax: plt.Axes, seam_pairs: list[tuple[int, int, int, int]], left: BlockData, right: BlockData) -> None:
+def draw_union_links(
+    ax: plt.Axes, seam_pairs: list[tuple[int, int, int, int]], left: BlockData, right: BlockData
+) -> None:
     """Draw seam equivalence links for label_union."""
     for gid, (value, ll, rr, row) in enumerate(seam_pairs, start=1):
         left_cells = label_cells_global(left.labels, left, ll)
@@ -431,7 +438,9 @@ def draw_union_links(ax: plt.Axes, seam_pairs: list[tuple[int, int, int, int]], 
         )
 
 
-def draw_stitch_links(ax: plt.Axes, seam_pairs: list[tuple[int, int, int, int]], left: BlockData, right: BlockData) -> None:
+def draw_stitch_links(
+    ax: plt.Axes, seam_pairs: list[tuple[int, int, int, int]], left: BlockData, right: BlockData
+) -> None:
     """Draw vector-stitch links across the seam."""
     for _, ll, rr, _row in seam_pairs:
         left_rows = np.where(left.labels[:, -1] == ll)[0]
@@ -586,6 +595,7 @@ def _add_visual_legend(ax: plt.Axes) -> None:
     ax.add_patch(rect)
     ax.text(x0 + text_dx, y, "Halo window", **text_kw)
 
+
 def _add_polygonize_title(fig: plt.Figure, strategy_axes: list[plt.Axes]) -> None:
     """Add grouped title and underline above the three strategy panels."""
     pos_left = strategy_axes[0].get_position()
@@ -622,6 +632,7 @@ def _add_polygonize_title(fig: plt.Figure, strategy_axes: list[plt.Axes]) -> Non
 # -----------------------------------------------------------------------------
 # Main figure
 # -----------------------------------------------------------------------------
+
 
 def make_chunked_polygonize_diagram() -> tuple[plt.Figure, np.ndarray]:
     """Build a 2-row schematic diagram for the chunked polygonize strategies."""

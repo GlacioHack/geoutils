@@ -1,7 +1,7 @@
 (ecosystem)=
 # Ecosystem
 
-GeoUtils integrates naturally with the broader **geospatial ecosystem**.  
+GeoUtils integrates naturally with the broader **geospatial ecosystem**.
 It extends commonly used tools and works alongside many others for geospatial data access, processing, and analysis.
 
 See the {ref}`dependencies` section for details on our dependencies

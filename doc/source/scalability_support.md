@@ -11,7 +11,7 @@ Both object types (accessors or GeoUtils) expose the **exact same API**, and bot
 
 The table below summarizes the **scalability support** of GeoUtils operations with respect to their input and output behavior.
 
-If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, see the {ref}`scalability-concept` page. 
+If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, see the {ref}`scalability-concept` page.
 
 ```{admonition} Legend
 - {bdg-success}`Chunked` — Processes in chunks, without loading (for input) and/or returning (for output) the full data. This is **also lazy (deferred execution) when using Dask**, but not when using Multiprocessing.
@@ -22,7 +22,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 The **memory usage** column lists the number of input chunks loaded in memory for a given operation.
 ```
 
-```{list-table} 
+```{list-table}
 :name: Scalability summary
 :widths: 1 1 1 2
 :header-rows: 1
@@ -72,7 +72,7 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
 * - {meth}`~geoutils.Raster.subsample`
   - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
-  - ~1 
+  - ~1
 * - {meth}`~geoutils.Raster.interp_points`
   - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`

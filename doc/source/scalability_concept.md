@@ -32,13 +32,13 @@ Naturally, all **metadata operations** (e.g., accessing {attr}`~geoutils.Raster.
 
 **Deferred input/output** refers to operations that modify only **internal I/O metadata**, avoiding reading the data entirely and postponing loading.
 
-Typical examples include {meth}`~geoutils.Raster.crop`, {meth}`~geoutils.Raster.copy`, and {meth}`~geoutils.Raster.translate`, 
+Typical examples include {meth}`~geoutils.Raster.crop`, {meth}`~geoutils.Raster.copy`, and {meth}`~geoutils.Raster.translate`,
 which behave similarly as Xarray's {meth}`~xarray.DataArray.sel`, {meth}`~xarray.DataArray.copy`, or {meth}`~xarray.DataArray.assign_coords`.
 
 When using the Xarray {class}`rst <geoutils.RasterAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
-same behavior so that both APIs have consistent semantics. 
+same behavior so that both APIs have consistent semantics.
 
-An important aspect of **deferred I/O** is that it works with both **in-memory** (NumPy) and **scalable backends** (Dask), allowing 
+An important aspect of **deferred I/O** is that it works with both **in-memory** (NumPy) and **scalable backends** (Dask), allowing
 to extract parts of large files without any chunked or lazy considerations.
 
 ```{code-cell}
@@ -56,7 +56,7 @@ print(f"Is input raster loaded after cropping (deferred I/O)? {ds.rst.is_loaded}
 print(f"Is output raster loaded after cropping (deferred I/O)? {ds_cropped.rst.is_loaded}")
 ```
 
-This behaviour pairs intrinsically with **implicit loading:** When an object is opened, only metadata is loaded. 
+This behaviour pairs intrinsically with **implicit loading:** When an object is opened, only metadata is loaded.
 Accessing {attr}`~geoutils.Raster.data`, or calling operations that require the underlying array or geometries will **implicitly load the data into memory**.
 
 ```{code-cell}
@@ -82,7 +82,7 @@ In GeoUtils, chunked execution is implemented through two backends:
 - **Multiprocessing**, used through the {class}`~geoutils.Raster` object.
 
 Both backends read and process raster chunks sequentially, keeping peak memory usage proportional to the chunk size rather than the full dataset size.
-Chunked execution therefore allows GeoUtils to scale to large datasets while maintaining a **predictable memory footprint**. 
+Chunked execution therefore allows GeoUtils to scale to large datasets while maintaining a **predictable memory footprint**.
 For a list of expected memory usage per operation, see the {ref}`scalability-support` page.
 
 ```{code-cell}
@@ -108,7 +108,7 @@ Lazy execution refers to **deferring computation until results are explicitly re
 In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.RasterAccessor>` accessor with **Dask arrays**.
 
 Operations build a **Dask computation graph** instead of executing immediately. The computation is triggered only when required, for example when calling
-`compute()` or when writing results to disk. It is particularly useful when **chaining multiple raster operations**, because intermediate results do not need to be materialized or 
+`compute()` or when writing results to disk. It is particularly useful when **chaining multiple raster operations**, because intermediate results do not need to be materialized or
 written/read from disk (which costs extra I/O time, often much longer than compute time).
 
 Lazy execution always relies on **chunked execution**, but the reverse is not true: chunked processing can also run eagerly, as in the Multiprocessing backend.
