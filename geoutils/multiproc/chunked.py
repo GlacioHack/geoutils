@@ -18,7 +18,7 @@
 # limitations under the License.
 """Module defining array and configuration routines for chunked operations with Multiprocessing."""
 
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 import geopandas as gpd
 import numpy as np
@@ -30,6 +30,7 @@ from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
 # We define a GeoGrid and GeoTiling class (which composes GeoGrid) to consistently deal with georeferenced footprints
 # of chunked grids
 GeoGridType = TypeVar("GeoGridType", bound="GeoGrid")
+ChunkSpec = int | tuple[int, int] | tuple[tuple[int, ...], tuple[int, ...]]
 
 
 class GeoGrid:
@@ -122,7 +123,7 @@ class GeoGrid:
         return self.from_dict({"transform": shifted_transform, "crs": self.crs, "shape": self.shape})
 
 
-def _get_block_ids_per_chunk(chunks: tuple[tuple[int, ...], tuple[int, ...]]) -> list[dict[str, int]]:
+def _get_block_ids_per_chunk(chunks: tuple[tuple[int, ...], tuple[int, ...]]) -> list[dict[str, Any]]:
     """Get location of chunks based on array shape and list of chunk sizes."""
 
     # Get number of chunks
@@ -135,16 +136,23 @@ def _get_block_ids_per_chunk(chunks: tuple[tuple[int, ...], tuple[int, ...]]) ->
     nb_blocks = num_chunks[0] * num_chunks[1]
     ixi, iyi = np.unravel_index(np.arange(nb_blocks), shape=(num_chunks[0], num_chunks[1]))
     # Starting and ending indexes "s" and "e" for both X/Y, to place the chunk in the full array
-    block_ids = [
-        {
-            "num_block": i,
-            "ys": starts[0][ixi[i]],
-            "xs": starts[1][iyi[i]],
-            "ye": starts[0][ixi[i] + 1],
-            "xe": starts[1][iyi[i] + 1],
-        }
-        for i in range(nb_blocks)
-    ]
+    block_ids = []
+    for i in range(nb_blocks):
+        ys = starts[0][ixi[i]]
+        xs = starts[1][iyi[i]]
+        ye = starts[0][ixi[i] + 1]
+        xe = starts[1][iyi[i] + 1]
+        block_ids.append(
+            {
+                "num_block": i,
+                "ys": ys,
+                "xs": xs,
+                "ye": ye,
+                "xe": xe,
+                "chunk-location": (ixi[i], iyi[i]),
+                "array-location": ((ys, ye), (xs, xe)),
+            }
+        )
 
     return block_ids
 
@@ -170,29 +178,54 @@ class ChunkedGeoGrid:
         return self._chunks
 
     @property
-    def num_chunks(self) -> tuple[int, int]:
+    def numblocks(self) -> tuple[int, int]:
+        """Number of blocks along each array axis, matching Dask array's ``numblocks``."""
         return len(self.chunks[0]), len(self.chunks[1])
 
-    def flat_block_index(self, chunk_location: tuple[int, int]) -> int:
+    @property
+    def num_chunks(self) -> tuple[int, int]:
+        """Number of chunks along each array axis. Alias for :attr:`numblocks`."""
+        return self.numblocks
+
+    @property
+    def npartitions(self) -> int:
+        """Total number of blocks, matching Dask dataframe's ``npartitions`` concept."""
+        return self.numblocks[0] * self.numblocks[1]
+
+    def ravel_block_index(self, chunk_location: tuple[int, int]) -> int:
         """"""
         iy, ix = chunk_location
-        ny, nx = self.num_chunks
+        ny, nx = self.numblocks
         if not (0 <= iy < ny and 0 <= ix < nx):
             raise IndexError(chunk_location)
         return iy * nx + ix
 
-    def iter_block_geogrids(self) -> Any:
-        """Yield (flat_index, GeoGrid) in same order as get_blocks_as_geogrids()"""
-        yield from enumerate(self.get_blocks_as_geogrids())
+    def flat_block_index(self, chunk_location: tuple[int, int]) -> int:
+        """Return the flat block index. Alias for :meth:`ravel_block_index`."""
+        return self.ravel_block_index(chunk_location=chunk_location)
 
-    def get_block_locations(self) -> list[dict[str, int]]:
-        """Get block locations in 2D: xstart, xend, ystart, yend."""
+    def iter_blocks(self) -> Any:
+        """Yield ``(flat_index, GeoGrid)`` pairs in block order."""
+        yield from enumerate(self.blocks)
+
+    def iter_block_geogrids(self) -> Any:
+        """Yield ``(flat_index, GeoGrid)`` pairs. Alias for :meth:`iter_blocks`."""
+        yield from self.iter_blocks()
+
+    @property
+    def block_info(self) -> list[dict[str, Any]]:
+        """Per-block location metadata, following Dask's ``block_info`` naming."""
         return _get_block_ids_per_chunk(self._chunks)
 
-    def get_blocks_as_geogrids(self) -> list[GeoGrid]:
-        """Get blocks as geogrids with updated transform/shape."""
+    def get_block_locations(self) -> list[dict[str, Any]]:
+        """Get block locations in 2D: xstart, xend, ystart, yend."""
+        return self.block_info
 
-        block_ids = self.get_block_locations()
+    @property
+    def blocks(self) -> list[GeoGrid]:
+        """Blocks as geogrids with updated transform/shape."""
+
+        block_ids = self.block_info
 
         list_geogrids = []
         for bid in block_ids:
@@ -205,6 +238,15 @@ class ChunkedGeoGrid:
             list_geogrids.append(geogrid_block)
 
         return list_geogrids
+
+    def get_blocks_as_geogrids(self) -> list[GeoGrid]:
+        """Get blocks as geogrids with updated transform/shape."""
+        return self.blocks
+
+    @property
+    def partitions(self) -> list[GeoGrid]:
+        """Alias for :attr:`blocks` using Dask dataframe partition terminology."""
+        return self.blocks
 
     def get_block_footprints(self, crs: rio.crs.CRS = None) -> gpd.GeoDataFrame:
         """Get block projected footprints as a single geodataframe."""
@@ -237,6 +279,40 @@ def _chunks2d_from_chunksizes_shape(
     )
 
     return chunks_y, chunks_x
+
+
+def normalize_chunks(chunks: ChunkSpec, shape: tuple[int, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """
+    Normalize a Dask-like chunk specification into explicit 2D chunks.
+
+    Supports a single integer, a ``(y, x)`` chunk-size tuple, or an already-normalized
+    ``((y0, y1, ...), (x0, x1, ...))`` tuple.
+    """
+
+    if isinstance(chunks, int):
+        if chunks <= 0:
+            raise ValueError("Argument 'chunks' must contain strictly positive integers.")
+        return _chunks2d_from_chunksizes_shape(chunksizes=(chunks, chunks), shape=shape)
+
+    if len(chunks) != 2:
+        raise ValueError("Argument 'chunks' must define two axes.")
+
+    if all(isinstance(chunk, int) for chunk in chunks):
+        chunksizes = cast(tuple[int, int], chunks)
+        if chunksizes[0] <= 0 or chunksizes[1] <= 0:
+            raise ValueError("Argument 'chunks' must contain strictly positive integers.")
+        return _chunks2d_from_chunksizes_shape(chunksizes=chunksizes, shape=shape)
+
+    if not all(isinstance(axis_chunks, tuple) for axis_chunks in chunks):
+        raise TypeError("Argument 'chunks' must be an int, a tuple of ints, or a tuple of chunk tuples.")
+
+    normalized_chunks = cast(tuple[tuple[int, ...], tuple[int, ...]], chunks)
+    if any(any(chunk <= 0 for chunk in axis_chunks) for axis_chunks in normalized_chunks):
+        raise ValueError("Argument 'chunks' must contain strictly positive integers.")
+    if tuple(sum(axis_chunks) for axis_chunks in normalized_chunks) != shape:
+        raise ValueError("Explicit chunks must sum to the array shape.")
+
+    return normalized_chunks
 
 
 def cached_cumsum(chunks: tuple[int, ...], initial_zero: bool = True) -> tuple[int, ...]:

@@ -258,26 +258,38 @@ class RasterAccessor(RasterBase):
         if area_or_point is not None:
             tags.update({"AREA_OR_POINT": area_or_point})
 
+        # Xarray converts NumPy masked arrays to floating arrays with NaN, even when no values are masked. Preserve the
+        # original dtype when possible, and only materialize masked values when they exist.
+        if np.ma.isMaskedArray(data):
+            mask = np.ma.getmaskarray(data)
+            if mask.any():
+                if np.issubdtype(data.dtype, np.floating):
+                    data = data.filled(np.nan)
+                else:
+                    data = data.astype(np.float32).filled(np.nan)
+            else:
+                data = np.ma.getdata(data)
+
         # Squeeze data
         data = data.squeeze()
 
         # For a 2-d array
         if data.ndim == 2:
             # Get netCDF coordinates from transform and shape
-            coords = affine_to_coords(affine=transform, width=data.shape[0], height=data.shape[1])
-            # Need to order the coords as X then Y in dict, or it fails...
+            coords = affine_to_coords(affine=transform, width=data.shape[1], height=data.shape[0])
             out_ds = xr.DataArray(
                 data=data,
-                coords={"x": coords["x"], "y": coords["y"]},
+                dims=("y", "x"),
+                coords={"y": coords["y"], "x": coords["x"]},
                 attrs=tags,
             )
         elif data.ndim == 3:
             # Get netCDF coordinates from transform and shape
-            coords = affine_to_coords(affine=transform, width=data.shape[1], height=data.shape[2])
-            # Need to order the coords as band, then X, then Y in dict, or it fails...
+            coords = affine_to_coords(affine=transform, width=data.shape[2], height=data.shape[1])
             out_ds = xr.DataArray(
                 data=data,
-                coords={"band": np.arange(1, data.shape[0] + 1), "x": coords["x"], "y": coords["y"]},
+                dims=("band", "y", "x"),
+                coords={"band": np.arange(1, data.shape[0] + 1), "y": coords["y"], "x": coords["x"]},
                 attrs=tags,
             )
 

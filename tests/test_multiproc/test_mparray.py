@@ -24,8 +24,9 @@ from geoutils.multiproc.mparray import (
     _generate_tiling_grid,
     _load_raster_tile,
     _remove_tile_padding,
-    map_multiproc_collect,
-    map_overlap_multiproc_save,
+    block_bounds_from_chunks,
+    map_blocks,
+    map_overlap,
 )
 from geoutils.raster import RasterType
 
@@ -145,6 +146,13 @@ class TestTiling:
         with pytest.raises(TypeError):
             _generate_tiling_grid(0, 0, 100, 100, 50, 50, 0.5)  # type: ignore
 
+    def test_block_bounds_from_chunks(self) -> None:
+        block_bounds = block_bounds_from_chunks(chunks=(50, 25), shape=(100, 55), overlap=5)
+
+        assert block_bounds.shape == (2, 3, 4)
+        assert np.array_equal(block_bounds[0, 0], np.array([0, 55, 0, 30]))
+        assert np.array_equal(block_bounds[-1, -1], np.array([45, 100, 45, 55]))
+
 
 class TestMultiproc:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
@@ -208,20 +216,20 @@ class TestMultiproc:
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     @pytest.mark.parametrize("tile_size", [100, 200])
     @pytest.mark.parametrize("cluster", [None, cluster])
-    def test_map_overlap_multiproc_save(self, example: str, tile_size: int, cluster: None | AbstractCluster) -> None:
+    def test_map_overlap(self, example: str, tile_size: int, cluster: None | AbstractCluster) -> None:
         """
         Test the multiprocessing map function with a simple operation returning a raster.
         """
         raster = Raster(example)
         output_file = "output.tif"
         depth = 10
-        config = MultiprocConfig(tile_size, output_file, cluster=cluster)
+        config = MultiprocConfig(chunks=tile_size, outfile=output_file, cluster=cluster)
 
         addition = 5
         factor = 0.5
         # Apply the multiproc map function
 
-        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster = map_overlap(_custom_func, raster, config, addition, factor, depth=depth)
 
         # Ensure raster has not been loading during process
         assert not raster.is_loaded
@@ -242,21 +250,21 @@ class TestMultiproc:
 
         # With a tempfile :
         config = MultiprocConfig(tile_size)
-        output_raster = map_overlap_multiproc_save(_custom_func, raster, config, addition, factor, depth=depth)
+        output_raster = map_overlap(_custom_func, raster, config, addition, factor, depth=depth)
         output_raster_saved = Raster(config.outfile)
         assert output_raster_saved.raster_equal(output_raster)
 
         if raster.count == 1:
             # With a wrapper returning a Mask
-            output_mask = map_overlap_multiproc_save(_custom_func_mask, raster, config, depth=depth)
+            output_mask = map_overlap(_custom_func_mask, raster, config, depth=depth)
             assert np.array_equal(raster.get_mask(), output_mask.data)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     @pytest.mark.parametrize("tile_size", [10, 20])
     @pytest.mark.parametrize("cluster", [None, cluster])
-    @pytest.mark.parametrize("return_tile", [False, True])
-    def test_map_multiproc_collect(
-        self, example: str, tile_size: int, cluster: None | AbstractCluster, return_tile: bool
+    @pytest.mark.parametrize("return_block_info", [False, True])
+    def test_map_blocks(
+        self, example: str, tile_size: int, cluster: None | AbstractCluster, return_block_info: bool
     ) -> None:
         """
         Test the multiprocessing map function with a simple operation returning not a raster.
@@ -265,8 +273,8 @@ class TestMultiproc:
         config = MultiprocConfig(tile_size, cluster=cluster)
 
         # Apply the multiproc map function
-        results = map_multiproc_collect(_custom_func_stats, raster, config, return_tile=return_tile)  # type: ignore
-        if return_tile:
+        results = map_blocks(_custom_func_stats, raster, config, return_block_info=return_block_info)  # type: ignore
+        if return_block_info:
             list_stats = [result[0] for result in results]
             list_tiles = [result[1] for result in results]
             assert np.array_equal(list_tiles[0], np.array([0, tile_size, 0, tile_size]))

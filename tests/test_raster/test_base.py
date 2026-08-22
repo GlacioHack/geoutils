@@ -14,7 +14,7 @@ from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
-from geoutils import Raster, Vector, open_raster
+from geoutils import PointCloud, Raster, Vector, open_raster
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
@@ -23,9 +23,24 @@ from geoutils.raster.xr_accessor import RasterAccessor
 def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, strict_masked: bool = True) -> None:
     """Return equality of different output types."""
 
-    # For two vectors
-    if isinstance(output1, Vector) and isinstance(output2, Vector):
-        assert output1.vector_equal(output2)
+    # For point clouds, accepting accessor-backed GeoDataFrames
+    if isinstance(output1, PointCloud) or isinstance(output2, PointCloud):
+        gdf1 = output1.ds if isinstance(output1, PointCloud) else output1
+        gdf2 = output2.ds if isinstance(output2, PointCloud) else output2
+        assert isinstance(gdf1, gpd.GeoDataFrame)
+        assert isinstance(gdf2, gpd.GeoDataFrame)
+        gpd.testing.assert_geodataframe_equal(
+            gdf1.reset_index(drop=True), gdf2.reset_index(drop=True), check_dtype=False
+        )
+        data_column1 = output1.data_column if isinstance(output1, PointCloud) else output1.pc.data_column
+        data_column2 = output2.data_column if isinstance(output2, PointCloud) else output2.pc.data_column
+        assert data_column1 == data_column2
+
+    # For vectors, accepting accessor-backed GeoDataFrames
+    elif isinstance(output1, (Vector, gpd.GeoDataFrame)) and isinstance(output2, (Vector, gpd.GeoDataFrame)):
+        vector1 = output1 if isinstance(output1, Vector) else Vector(output1)
+        vector2 = output2 if isinstance(output2, Vector) else Vector(output2)
+        assert vector1.vector_equal(vector2)
 
     # For two raster: Xarray or Raster objects
     elif isinstance(output1, (Raster, xr.DataArray)):
@@ -403,7 +418,7 @@ class TestClassVsAccessorConsistency:
         # Open lazily with Dask
         ds = open_raster(path_raster, chunks={"band": 1, "x": 25, "y": 25})
         # Open raster that will be processed using Multiprocessing
-        mp_config = MultiprocConfig(chunk_size=25)  # To pass to the function
+        mp_config = MultiprocConfig(chunks=25)  # To pass to the function
         raster = Raster(path_raster)
         # Open and load both DataArray/Raster with NumPy
         ds2 = open_raster(path_raster)

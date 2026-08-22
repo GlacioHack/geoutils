@@ -622,7 +622,7 @@ def _multiproc_interp_points(
     left, top = bounds.left, bounds.top
 
     # Get multiprocessing chunk sizes
-    chunksize = (config.chunk_size, config.chunk_size)
+    chunksize = (config.chunks, config.chunks)
 
     def _chunk_sizes_1d(n: int, chunk: int) -> tuple[int, ...]:
         """Return tuple of chunk lengths that partition length n."""
@@ -635,10 +635,10 @@ def _multiproc_interp_points(
 
     # Get starting 2D index for each chunk of the full array
     # (mirroring what is done in block_id of dask.array.map_blocks)
-    tiling = compute_tiling(tile_size=config.chunk_size, raster_shape=rst.shape, overlap=depth)
+    tiling = compute_tiling(tile_size=config.chunks, raster_shape=rst.shape, overlap=depth)
     starts = [
-        cached_cumsum(_chunk_sizes_1d(n=rst.shape[0], chunk=config.chunk_size), initial_zero=True),
-        cached_cumsum(_chunk_sizes_1d(n=rst.shape[1], chunk=config.chunk_size), initial_zero=True),
+        cached_cumsum(_chunk_sizes_1d(n=rst.shape[0], chunk=config.chunks), initial_zero=True),
+        cached_cumsum(_chunk_sizes_1d(n=rst.shape[1], chunk=config.chunks), initial_zero=True),
     ]
     num_chunks = (tiling.shape[0], tiling.shape[1])
     num_blocks = np.prod(num_chunks)
@@ -665,10 +665,12 @@ def _multiproc_interp_points(
     for i in range(len(block_ids)):
         # Launch the task on the cluster to process each tile
         tasks.append(
-            config.cluster.launch_task(
-                fun=_wrapper_multiproc_interp_per_block,
-                args=[rst, block_ids[i], points_arr[:, ind_per_block[i]]],
-                kwargs=kwargs,
+            config.cluster.submit(
+                _wrapper_multiproc_interp_per_block,
+                rst,
+                block_ids[i],
+                points_arr[:, ind_per_block[i]],
+                **kwargs,
             )
         )
 
@@ -677,7 +679,7 @@ def _multiproc_interp_points(
         list_interp = []
         # Iterate over the tasks and retrieve the processed results
         for results in tasks:
-            interp = config.cluster.get_res(results)
+            interp = config.cluster.compute(results)
             list_interp.append(interp)
     except Exception as e:
         raise RuntimeError(f"Error retrieving interpolated segments from multiprocessing tasks: {e}")

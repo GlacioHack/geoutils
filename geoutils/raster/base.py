@@ -137,6 +137,41 @@ class RasterBase(ABC):
         """Whether the underlying object is a Xarray Dataset through accessor, or not."""
         return self._obj is not None
 
+    def _cast_vector_output(self, vector: Any) -> Any:
+        """Return an accessor-backed vector when this raster is accessor-backed."""
+
+        if self._is_xr:
+            return vector.ds
+        return vector
+
+    def _cast_raster_output(self, raster: Any) -> Any:
+        """Return an accessor-backed raster when this raster is accessor-backed."""
+
+        if not self._is_xr or hasattr(raster, "rst"):
+            return raster
+
+        from geoutils.raster.xr_accessor import RasterAccessor, open_raster
+
+        if raster.name is not None and not raster.is_loaded:
+            return open_raster(raster.name, is_mask=raster.is_mask)
+        return RasterAccessor.from_array(
+            data=raster.data,
+            transform=raster.transform,
+            crs=raster.crs,
+            nodata=raster.nodata,
+            area_or_point=raster.area_or_point,
+            tags=raster.tags,
+        )
+
+    def _cast_pointcloud_output(self, pointcloud: Any) -> Any:
+        """Return an accessor-backed point cloud when this raster is accessor-backed."""
+
+        if self._is_xr:
+            ds = pointcloud.ds
+            ds.attrs["data_column"] = pointcloud.data_column
+            return ds
+        return pointcloud
+
     @property
     @abstractmethod
     def _chunks(self) -> tuple[tuple[int, ...], ...] | None: ...
@@ -997,11 +1032,12 @@ class RasterBase(ABC):
         # Runtime import for circular safety
         from geoutils.vector import Vector
 
-        return Vector(
-            _get_footprint_projected(
-                bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
-            )
+        footprint = _get_footprint_projected(
+            bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
         )
+        if self._is_xr:
+            return footprint  # type: ignore[return-value]
+        return Vector(footprint)
 
     def get_metric_crs(
         self,
@@ -1020,7 +1056,9 @@ class RasterBase(ABC):
 
         # For universal CRS (UTM or UPS)
         if local_crs_type == "universal":
-            return _get_utm_ups_crs(self.get_footprint_projected(out_crs=self.crs).ds, method=method)
+            footprint = self.get_footprint_projected(out_crs=self.crs)
+            footprint_ds = getattr(footprint, "ds", footprint)
+            return _get_utm_ups_crs(footprint_ds, method=method)
         # For a custom CRS
         else:
             raise NotImplementedError("This is not implemented yet.")
@@ -1306,8 +1344,13 @@ class RasterBase(ABC):
 
         # If multiprocessing -> results on disk -> load metadata
         if mp_config:
-            result_raster = self.__class__(mp_config.outfile)
-            return result_raster  # type: ignore
+            if self._is_xr:
+                from geoutils.raster.xr_accessor import open_raster
+
+                result_raster = open_raster(mp_config.outfile, is_mask=self.is_mask)
+            else:
+                result_raster = self.__class__(mp_config.outfile)
+            return self._cast_raster_output(result_raster)  # type: ignore
 
         # Not in-place
         return self.from_array(
@@ -1591,7 +1634,7 @@ class RasterBase(ABC):
         if dist_nodata_spread is None:
             dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
-        return _interp_points(
+        output = _interp_points(
             self,
             points=points,
             method=method,
@@ -1603,6 +1646,9 @@ class RasterBase(ABC):
             mp_config=mp_config,
             **kwargs,
         )
+        if not as_array and not kwargs.get("return_interpolator", False):
+            return self._cast_pointcloud_output(output)
+        return output
 
     def reduce_points(
         self,
@@ -1641,7 +1687,7 @@ class RasterBase(ABC):
             In addition, if return_window=True, return tuple of (values, arrays).
         """
 
-        return _reduce_points(
+        output = _reduce_points(
             self,
             points=points,
             reducer_function=reducer_function,
@@ -1653,6 +1699,12 @@ class RasterBase(ABC):
             as_array=as_array,
             boundless=boundless,
         )
+        if as_array:
+            return output
+        if return_window:
+            pointcloud, output_window = output
+            return self._cast_pointcloud_output(pointcloud), output_window
+        return self._cast_pointcloud_output(output)
 
     def filter(
         self: RasterType,
@@ -1688,7 +1740,7 @@ class RasterBase(ABC):
         if "inplace" in kwargs:
             raise DeprecationWarning("Argument 'inplace' is deprecated, use rst = rst.filter() instead.")
 
-        return _filter(
+        output = _filter(
             source_raster=self,
             method=method,
             size=size,
@@ -1698,6 +1750,7 @@ class RasterBase(ABC):
             outlier_threshold=outlier_threshold,
             **kwargs,
         )
+        return self._cast_raster_output(output)
 
     @deprecate(
         Version("0.3.0"),
@@ -1810,7 +1863,7 @@ class RasterBase(ABC):
         :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
-        return _raster_to_pointcloud(
+        output = _raster_to_pointcloud(
             source_raster=self,
             data_column_name=data_column_name,
             data_band=data_band,
@@ -1822,6 +1875,9 @@ class RasterBase(ABC):
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
         )
+        if as_array:
+            return output
+        return self._cast_pointcloud_output(output)
 
     @classmethod
     def from_pointcloud_regular(
@@ -1883,7 +1939,7 @@ class RasterBase(ABC):
         :returns: Vector containing the polygonized geometries associated to target values.
         """
 
-        return _polygonize(
+        vector = _polygonize(
             source_raster=self,
             target_values=target_values,
             connectivity=connectivity,
@@ -1892,6 +1948,7 @@ class RasterBase(ABC):
             strategy=strategy,
             mp_config=mp_config,
         )
+        return self._cast_vector_output(vector)
 
     def proximity(
         self,

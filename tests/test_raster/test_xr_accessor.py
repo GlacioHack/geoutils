@@ -1,8 +1,11 @@
 """Tests on Xarray accessor mirroring Raster API."""
 
+import geopandas as gpd
 import numpy as np
 import pytest
+from rasterio.transform import from_origin
 
+import geoutils as gu
 from geoutils import examples, open_raster
 
 
@@ -79,3 +82,26 @@ class TestAccessor:
         ds_comp = ds.compute()
         assert isinstance(ds_comp.data, np.ndarray)
         assert ds_comp._in_memory
+
+    def test_cross_type_outputs_are_accessors(self) -> None:
+        ds = gu.RasterAccessor.from_array(
+            data=np.array([[1, 1], [0, 0]], dtype=np.uint8),
+            transform=from_origin(0, 2, 1, 1),
+            crs=4326,
+            nodata=None,
+        )
+
+        vector = ds.rst.polygonize(target_values=1)
+        assert isinstance(vector, gpd.GeoDataFrame)
+        assert vector.vct.to_geoutils().vector_equal(gu.Vector(vector))
+
+        pointcloud = ds.rst.to_pointcloud(skip_nodata=False)
+        assert isinstance(pointcloud, gpd.GeoDataFrame)
+        assert pointcloud.pc.data_column == "b1"
+
+        interpolated = ds.rst.interp_points((np.array([0.5]), np.array([1.5])), method="nearest")
+        assert isinstance(interpolated, gpd.GeoDataFrame)
+        assert interpolated.pc.data_column == "z"
+
+        footprint = ds.rst.get_footprint_projected(ds.rst.crs)
+        assert isinstance(footprint, gpd.GeoDataFrame)

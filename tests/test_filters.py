@@ -416,7 +416,7 @@ class TestFilterChunked:
         xr_base.load()
         # Multiprocessing input (keep lazy)
         raster_mp = gu.Raster(path_raster)
-        mp_config = MultiprocConfig(chunk_size=10)
+        mp_config = MultiprocConfig(chunks=10)
         # Dask input (lazy)
         ds = gu.open_raster(path_raster, chunks={"x": 10, "y": 10})
         assert not ds._in_memory

@@ -16,4 +16,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from geoutils.pointcloud.pd_accessor import PointCloudAccessor, open_pointcloud  # noqa
 from geoutils.pointcloud.pointcloud import PointCloud  # noqa

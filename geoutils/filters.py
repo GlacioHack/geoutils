@@ -34,7 +34,7 @@ from packaging.version import Version
 
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
-from geoutils.multiproc import MultiprocConfig, map_overlap_multiproc_save
+from geoutils.multiproc import MultiprocConfig, map_overlap
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterBase
@@ -216,7 +216,7 @@ def _multiproc_filter(
         return block.copy(new_array=filtered_block)
 
     # Call Multiprocessing map_overlap
-    return map_overlap_multiproc_save(filter_block, rst, mp_config, depth=depth)
+    return map_overlap(filter_block, rst, mp_config, depth=depth)
 
 
 def _filter(

@@ -90,7 +90,7 @@ For a list of expected memory usage per operation, see the {ref}`scalability-sup
 rast = gu.Raster(filename_rast)
 
 # Create Multiprocessing config, output filepath optional (temporary file by default)
-mp_config = gu.multiproc.MultiprocConfig(chunk_size=200)
+mp_config = gu.multiproc.MultiprocConfig(chunks=200)
 
 # Filter raster with a gaussian in a chunked manner through Multiprocessing
 rast_filt = rast.filter(method="gaussian", sigma=4, mp_config=mp_config)

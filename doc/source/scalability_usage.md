@@ -106,13 +106,13 @@ rast
 ```
 
 By passing a {class}`~geoutils.multiproc.MultiprocConfig` configuration to an operation, the out-of-memory behaviour is triggered.
-The configuration requires a `chunk_size`, and can optionally define the output file and cluster to use (defaults to temporary instances for both).
+The configuration requires `chunks`, and can optionally define the output file and cluster to use (defaults to temporary instances for both).
 
 ```{code-cell} python
 from geoutils.multiproc import MultiprocConfig
 
 # Optional: specify output file (otherwise a temporary file is created)
-mp_config = MultiprocConfig(chunk_size=200, outfile="reproj_rast.tif")
+mp_config = MultiprocConfig(chunks=200, outfile="reproj_rast.tif")
 
 # Reproject out-of-memory, reading and writing chunk-by-chunk
 rast_reproj_mp = rast.reproject(

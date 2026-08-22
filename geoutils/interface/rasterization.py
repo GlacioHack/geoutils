@@ -33,13 +33,18 @@ from rasterio.crs import CRS
 from shapely.geometry import box as shapely_box
 from shapely.strtree import STRtree
 
-from geoutils._dispatch import _check_match_grid, _check_match_points
+from geoutils._dispatch import (
+    _check_match_grid,
+    _check_match_points,
+    get_geo_attr,
+    has_geo_attr,
+)
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
-    _chunks2d_from_chunksizes_shape,
+    normalize_chunks,
 )
 from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
 
@@ -358,7 +363,7 @@ def _multiproc_rasterize(
     """
     block_ids = dst_geotiling.get_block_locations()
 
-    def rasterize_block(task: tuple[int, dict[str, int]]) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
+    def rasterize_block(task: tuple[int, dict[str, Any]]) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
         """
         Block function for multiprocessing.
 
@@ -373,14 +378,14 @@ def _multiproc_rasterize(
         return tile, dst_tile
 
     # Submit tasks to cluster interface
-    tasks = [mp_config.cluster.launch_task(rasterize_block, [(i, block_ids[i])]) for i in range(len(block_ids))]
+    tasks = [mp_config.cluster.submit(rasterize_block, (i, block_ids[i])) for i in range(len(block_ids))]
 
     # Write tiles as they complete
     return _write_multiproc_result(tasks=tasks, mp_config=mp_config, file_metadata=file_metadata)
 
 
 def _rasterize(
-    source_vector: Vector,
+    source_vector: Any,
     ref: RasterType | None = None,
     in_value: int | float | Iterable[int | float] | None = None,
     out_value: int | float = 0,
@@ -426,8 +431,8 @@ def _rasterize(
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
-    # If input reference raster is Dask-based, create Dask output by default
-    dask_backend = (da is not None and ref is not None and ref._chunks is not None) or bool(dask)
+    # Output type follows the caller; Dask output is opt-in.
+    dask_backend = bool(dask)
 
     if mp_backend and dask_backend:
         raise ValueError(
@@ -457,14 +462,15 @@ def _rasterize(
 
     # Build chunked geogrid (shared for Dask and multiproc)
     if chunksizes is None:
-        if ref is not None and ref._chunks is not None:
-            chunksizes = ref._chunks  # type: ignore
+        ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
+        if ref_chunks is not None:
+            chunksizes = ref_chunks
         else:
             chunksizes = (1024, 1024)
     assert chunksizes is not None
 
     dst_geogrid = GeoGrid(transform=out_transform, shape=out_shape, crs=out_crs)
-    dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=chunksizes, shape=out_shape)
+    dst_chunks = normalize_chunks(chunks=chunksizes, shape=out_shape)
     dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
     dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
 
@@ -517,14 +523,14 @@ def _create_mask_pointcloud(
     """Subfunction to create a point cloud mask using geopandas."""
 
     # Normalize input
-    points = _check_match_points(src=source_vector, points=points)
-    points_gs = gpd.points_from_xy(x=points[0], y=points[1])
+    points, _ = _check_match_points(src=source_vector, points=points)
+    points_gs = gpd.GeoSeries(gpd.points_from_xy(x=points[0], y=points[1]), crs=source_vector.crs)
 
     # Project to same CRS if required
     points_gs = points_gs.to_crs(crs=source_vector.crs)
 
-    # Check that points are contained no matter alignment
-    contained = points_gs.within(source_vector.ds, align=False)
+    # Check whether points are contained in any source geometry.
+    contained = points_gs.within(source_vector.ds.geometry.union_all())
 
     if as_array:
         # Extract resulting boolean array
@@ -599,7 +605,7 @@ def _create_mask_raster(
 
 
 def _create_mask(
-    source_vector: Vector,
+    source_vector: Any,
     ref: RasterLike | PointCloudLike | None = None,
     all_touched: bool = False,
     crs: CRS | None = None,

@@ -377,7 +377,7 @@ def _check_match_points(
 
 
 def _check_match_bbox(
-    src: RasterBase | Vector,
+    src: Any,
     bbox: RasterLike | VectorLike | rio.coords.BoundingBox | tuple[Number, Number, Number, Number],
 ) -> tuple[Number, Number, Number, Number]:
     """Function for checking and normalizing input of match feature on bounds consistently.
@@ -574,7 +574,7 @@ def _grid_from_coords(coords: tuple[NDArrayNum, NDArrayNum]) -> tuple[tuple[int,
 
 
 def _check_match_grid(
-    src: RasterBase | Vector,
+    src: Any,
     ref: RasterLike | VectorLike | None,
     res: Number | tuple[Number, Number] | None,
     shape: tuple[int, int] | None,

@@ -30,6 +30,7 @@ import rasterio as rio
 from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.multiproc.chunked import ChunkSpec, normalize_chunks
 from geoutils.multiproc.cluster import AbstractCluster, ClusterGenerator
 
 if TYPE_CHECKING:
@@ -41,22 +42,29 @@ class MultiprocConfig:
     Configuration class for handling multiprocessing parameters in raster processing.
 
     This class encapsulates settings related to multiprocessing, allowing users to specify
-    chunk size, output file, and an optional cluster for parallel processing.
+    chunks, output file, and an optional cluster for parallel processing.
     It is designed to be passed into functions that require multiprocessing capabilities.
     """
 
     def __init__(
-        self, chunk_size: int, outfile: str | None = None, driver: str = "GTiff", cluster: AbstractCluster | None = None
+        self,
+        chunks: int,
+        outfile: str | None = None,
+        driver: str = "GTiff",
+        cluster: AbstractCluster | None = None,
     ):
         """
         Initialize the MultiprocConfig instance with multiprocessing settings.
 
-        :param chunk_size: The size of the chunks for splitting raster data.
+        :param chunks: The size of the chunks for splitting raster data.
         :param outfile: The file path where the output will be written.
         :param driver: Driver to write file with.
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
-        self.chunk_size = chunk_size
+        if chunks <= 0:
+            raise ValueError("Argument 'chunks' must be a strictly positive integer.")
+
+        self.chunks = chunks
         if outfile is None:
             with tempfile.NamedTemporaryFile() as tmp:
                 self.outfile = tmp.name
@@ -70,7 +78,7 @@ class MultiprocConfig:
         self.cluster = cluster
 
     def copy(self) -> MultiprocConfig:
-        return MultiprocConfig(chunk_size=self.chunk_size, outfile=self.outfile, cluster=self.cluster)
+        return MultiprocConfig(chunks=self.chunks, outfile=self.outfile, driver=self.driver, cluster=self.cluster)
 
 
 def _generate_tiling_grid(
@@ -159,6 +167,38 @@ def compute_tiling(
 
     # Generate tiling
     tiling_grid = _generate_tiling_grid(0, 0, row_max, col_max, tile_size, tile_size, overlap=overlap)
+    return tiling_grid
+
+
+def block_bounds_from_chunks(chunks: ChunkSpec, shape: tuple[int, int], overlap: int = 0) -> NDArrayNum:
+    """
+    Build a 2D grid of block bounds from a Dask-like chunk specification.
+
+    :param chunks: Dask-like chunk specification.
+    :param shape: Array shape.
+    :param overlap: Size of overlap around each block.
+    :return: Array of block bounds ordered as ``[row_start, row_stop, col_start, col_stop]``.
+    """
+
+    if overlap < 0:
+        raise ValueError(f"Overlap negative : {overlap}, must be positive")
+    if not isinstance(overlap, int):
+        raise TypeError(f"Overlap : {overlap}, must be an integer")
+
+    normalized_chunks = normalize_chunks(chunks=chunks, shape=shape)
+    row_starts = np.asarray([0, *np.cumsum(normalized_chunks[0])])
+    col_starts = np.asarray([0, *np.cumsum(normalized_chunks[1])])
+    tiling_grid = np.zeros(shape=(len(normalized_chunks[0]), len(normalized_chunks[1]), 4), dtype=int)
+
+    for row in range(tiling_grid.shape[0]):
+        for col in range(tiling_grid.shape[1]):
+            tiling_grid[row, col] = [
+                max(int(row_starts[row]) - overlap, 0),
+                min(int(row_starts[row + 1]) + overlap, shape[0]),
+                max(int(col_starts[col]) - overlap, 0),
+                min(int(col_starts[col + 1]) + overlap, shape[1]),
+            ]
+
     return tiling_grid
 
 
@@ -267,7 +307,7 @@ def _apply_func_block(
     return result_tile, tile
 
 
-def map_overlap_multiproc_save(
+def map_overlap(
     func: Callable[..., Raster],
     raster_path: str | Raster,
     mp_config: MultiprocConfig,
@@ -276,24 +316,24 @@ def map_overlap_multiproc_save(
     **kwargs: Any,
 ) -> Raster:
     """
-    Applies a function to raster tiles in parallel and saves the result to a file.
+    Apply a function to raster blocks in parallel and save the result to a file.
 
-    This function divides the input raster into overlapping tiles, processes them in parallel using
-    multiprocessing, and writes the processed results to an output raster file.
+    This mirrors Dask array's ``map_overlap`` naming but computes eagerly because multiprocessing
+    tasks cannot stay lazy in this backend.
 
     Use this function when `func` returns a :class:`geoutils.Raster`,
     as it ensures the processed data is written to `config.outfile`.
 
     :param func: A function to apply to each raster tile. It must return a :class:`geoutils.Raster` object.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
-    :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
+    :param mp_config: Configuration object containing chunks, output file path, and an optional cluster.
         The `outfile` parameter in `config` must be provided.
     :param args: Additional positional arguments to pass to `func`.
-    :param depth: The overlap size between tiles to avoid edge effects, default is 0.
+    :param depth: The overlap size between blocks to avoid edge effects, default is 0.
     :param kwargs: Additional keyword arguments to pass to `func`.
 
     :raises ValueError: If `config.outfile` is not provided.
-    :raises RuntimeError: If an error occurs while processing the raster tiles.
+    :raises RuntimeError: If an error occurs while processing the raster blocks.
     """
 
     # To avoid circular import, runtime here
@@ -306,20 +346,18 @@ def map_overlap_multiproc_save(
         raster = raster_path
 
     # Generate tiling grid
-    tiling_grid = compute_tiling(mp_config.chunk_size, raster.shape, raster.shape, overlap=depth)
+    tiling_grid = compute_tiling(mp_config.chunks, raster.shape, raster.shape, overlap=depth)
 
     # Create tasks for multiprocessing
     tasks = []
     for row in range(tiling_grid.shape[0]):
         for col in range(tiling_grid.shape[1]):
             tile = tiling_grid[row, col]
-            # Launch the task on the cluster to process each tile
-            tasks.append(
-                mp_config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
-            )
+            # Submit the block processing task on the cluster.
+            tasks.append(mp_config.cluster.submit(_apply_func_block, func, raster, tile, depth, *args, **kwargs))
 
     # get first tile to retrieve dtype and nodata
-    result_tile0, _ = mp_config.cluster.get_res(tasks[0])
+    result_tile0, _ = mp_config.cluster.compute(tasks[0])
     file_metadata = {
         "width": raster.width,
         "height": raster.height,
@@ -354,9 +392,9 @@ def _write_multiproc_result(
     # Create a new raster file to save the processed results
     with rio.open(mp_config.outfile, "w", driver=mp_config.driver, **file_metadata, BIGTIFF="IF_NEEDED") as dst:
         try:
-            # Iterate over the tasks and retrieve the processed tiles
+            # Iterate over the tasks and retrieve the processed blocks.
             for results in tasks:
-                result_tile, dst_tile = mp_config.cluster.get_res(results)
+                result_tile, dst_tile = mp_config.cluster.compute(results)
                 is_mask = has_geo_attr(result_tile, "is_mask") and get_geo_attr(result_tile, "is_mask")
 
                 # Define the window in the output file where the tile should be written
@@ -374,11 +412,11 @@ def _write_multiproc_result(
                 else:
                     data = result_tile.data if result_tile.count > 1 else result_tile[np.newaxis, :, :]
 
-                # Write the processed tile to the appropriate location in the output file
+                # Write the processed block to the appropriate location in the output file.
                 dst.write(data, window=dst_window)
             logging.info(f"Raster saved under {mp_config.outfile}")
         except Exception as e:
-            raise RuntimeError(f"Error retrieving raster tiles from multiprocessing tasks: {e}")
+            raise RuntimeError(f"Error retrieving raster blocks from multiprocessing tasks: {e}")
 
     if is_mask:
         return Raster(mp_config.outfile, as_mask=True)
@@ -386,60 +424,60 @@ def _write_multiproc_result(
 
 
 @overload
-def map_multiproc_collect(
+def map_blocks(
     func: Callable[..., Any],
     raster_path: str | Any,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
-    return_tile: Literal[True],
+    return_block_info: Literal[True],
     **kwargs: Any,
 ) -> list[tuple[Any, NDArrayNum]]: ...
 
 
 @overload
-def map_multiproc_collect(
+def map_blocks(
     func: Callable[..., Any],
     raster_path: str | Any,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
-    return_tile: Literal[False] = False,
+    return_block_info: Literal[False] = False,
     **kwargs: Any,
 ) -> list[Any]: ...
 
 
-def map_multiproc_collect(
+def map_blocks(
     func: Callable[..., Any],
     raster_path: str | Raster,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
-    return_tile: bool = False,
+    return_block_info: bool = False,
     **kwargs: Any,
 ) -> list[Any] | list[tuple[Any, NDArrayNum]]:
     """
-    Applies a function to raster tiles in parallel and collects the results into a list.
+    Apply a function to raster blocks in parallel and collect the results into a list.
 
-    This function splits an input raster into overlapping tiles, processes them in parallel,
+    This function splits an input raster into overlapping blocks, processes them in parallel,
     and returns the results as a list. It is intended for cases where `func` does *not* return
     a :class:`geoutils.Raster`, but instead returns arbitrary values (e.g., numerical statistics, feature
     extractions, etc.).
 
-    If `return_tile=True`, the function returns a list of tuples, where each tuple contains
-    the computed result and the corresponding tile indices.
+    If `return_block_info=True`, the function returns a list of tuples, where each tuple contains
+    the computed result and the corresponding block indices.
 
-    :param func: A function to apply to each raster tile. It should return any type *except* :class:`geoutils.Raster`.
+    :param func: A function to apply to each raster block. It should return any type *except* :class:`geoutils.Raster`.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
-    :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
+    :param mp_config: Configuration object containing chunks, output file path, and an optional cluster.
     :param args: Additional positional arguments to pass to `func`.
-    :param depth: The overlap size between tiles to avoid edge effects.
-    :param return_tile: If `True`, the output includes the tile indices in addition to the results.
+    :param depth: The overlap size between blocks to avoid edge effects.
+    :param return_block_info: If `True`, the output includes the block indices in addition to the results.
     :param kwargs: Additional keyword arguments to pass to `func`.
 
     :returns:
-        - `list[Any]` if `return_tile=False` (default).
-        - `list[tuple[Any, NDArrayNum]]` if `return_tile=True`.
+        - `list[Any]` if `return_block_info=False` (default).
+        - `list[tuple[Any, NDArrayNum]]` if `return_block_info=True`.
 
     :raises RuntimeError: If an error occurs while processing the raster tiles.
     """
@@ -453,24 +491,22 @@ def map_multiproc_collect(
         raster = raster_path
 
     # Generate tiling grid
-    tiling_grid = compute_tiling(mp_config.chunk_size, raster.shape, raster.shape, overlap=depth)
+    tiling_grid = compute_tiling(mp_config.chunks, raster.shape, raster.shape, overlap=depth)
 
     # Create tasks for multiprocessing
     tasks = []
     for row in range(tiling_grid.shape[0]):
         for col in range(tiling_grid.shape[1]):
             tile = tiling_grid[row, col]
-            # Launch the task on the cluster to process each tile
-            tasks.append(
-                mp_config.cluster.launch_task(fun=_apply_func_block, args=[func, raster, tile, depth, *args], **kwargs)
-            )
+            # Submit the block processing task on the cluster.
+            tasks.append(mp_config.cluster.submit(_apply_func_block, func, raster, tile, depth, *args, **kwargs))
 
     try:
         list_results = []
         # Iterate over the tasks and retrieve the processed tiles
         for results in tasks:
-            result, dst_tile = mp_config.cluster.get_res(results)
-            if return_tile:
+            result, dst_tile = mp_config.cluster.compute(results)
+            if return_block_info:
                 list_results.append((result, dst_tile))
             else:
                 list_results.append(result)

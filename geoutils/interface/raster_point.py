@@ -28,7 +28,7 @@ import numpy as np
 import rasterio as rio
 from rasterio.crs import CRS
 
-from geoutils._dispatch import has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._typing import NDArrayNum
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.referencing import _default_nodata, _xy2ij
@@ -52,13 +52,15 @@ def _regular_pointcloud_to_raster(
     Convert a regular point cloud to a raster. See Raster.from_pointcloud_regular() for details.
     """
 
-    # Extract geodataframe and data column name depending on input
-    if has_geo_attr(pointcloud, "data_column"):
-        gdf_pc = pointcloud.ds
-        data_column_name = pointcloud.data_column
+    # Extract geodataframe and data column name depending on input. Plain GeoDataFrames can now expose a ``pc``
+    # accessor, so use accessor-aware retrieval instead of assuming the original object owns ``.ds`` directly.
+    if has_geo_attr(pointcloud, "ds", accessors=("pc",)):
+        gdf_pc = get_geo_attr(pointcloud, "ds", accessors=("pc",))
+        pc_data_column_name = get_geo_attr(pointcloud, "data_column", accessors=("pc",))
+        if pc_data_column_name is not None:
+            data_column_name = pc_data_column_name
     else:
         gdf_pc = pointcloud
-        data_column_name = data_column_name
 
     # Get transform and shape from input
     if grid_coords is not None:

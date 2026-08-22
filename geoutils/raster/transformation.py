@@ -43,7 +43,7 @@ from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
-    _chunks2d_from_chunksizes_shape,
+    normalize_chunks,
 )
 from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
 from geoutils.raster.referencing import (
@@ -368,7 +368,7 @@ def _build_geotiling_and_meta(
 
     # Create tilings
     src_geotiling = ChunkedGeoGrid(grid=src_geogrid, chunks=src_chunks)
-    dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=dst_chunksizes, shape=dst_shape)
+    dst_chunks = normalize_chunks(chunks=dst_chunksizes, shape=dst_shape)
     dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
 
     # 2/ Get bounds of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
@@ -672,9 +672,7 @@ def _multiproc_reproject(
     """
 
     # Prepare geotiling and reprojection metadata for source and destination grids
-    src_chunks = _chunks2d_from_chunksizes_shape(
-        chunksizes=(mp_config.chunk_size, mp_config.chunk_size), shape=rst.shape
-    )
+    src_chunks = normalize_chunks(chunks=(mp_config.chunks, mp_config.chunks), shape=rst.shape)
     src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids = (
         _build_geotiling_and_meta(
             src_count=rst.count,
@@ -685,7 +683,7 @@ def _multiproc_reproject(
             dst_transform=dst_transform,
             dst_crs=dst_crs,
             src_chunks=src_chunks,
-            dst_chunksizes=(mp_config.chunk_size, mp_config.chunk_size),
+            dst_chunksizes=(mp_config.chunks, mp_config.chunks),
         )
     )
 
@@ -706,17 +704,15 @@ def _multiproc_reproject(
     tasks = []
     for i in range(len(dest2source)):
         tasks.append(
-            mp_config.cluster.launch_task(
-                fun=_wrapper_multiproc_reproject_per_block,
-                args=[
-                    rst,
-                    src_block_ids,
-                    dst_block_ids[i],
-                    dest2source[i],
-                    meta_params[i][1],
-                    meta_params[i][0],
-                ],
-                kwargs=kwargs,
+            mp_config.cluster.submit(
+                _wrapper_multiproc_reproject_per_block,
+                rst,
+                src_block_ids,
+                dst_block_ids[i],
+                dest2source[i],
+                meta_params[i][1],
+                meta_params[i][0],
+                **kwargs,
             )
         )
 

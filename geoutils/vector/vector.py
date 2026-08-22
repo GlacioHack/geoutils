@@ -60,6 +60,7 @@ from geoutils.projtools import (
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
+from geoutils.vector.base import VectorBase, VectorBaseLike
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.transformation import _reproject
 
@@ -75,7 +76,7 @@ VectorType = TypeVar("VectorType", bound="Vector")
 VectorLike = Union["Vector", gpd.GeoDataFrame]
 
 
-class Vector:
+class Vector(VectorBase):
     """
     The georeferenced vector.
 
@@ -1647,7 +1648,10 @@ class Vector:
 
     @classmethod
     def from_bounds_projected(
-        cls, raster_or_vector: RasterType | VectorType, out_crs: CRS | None = None, densify_points: int = 5000
+        cls: type[VectorType],
+        raster_or_vector: RasterType | VectorBaseLike | Any,
+        out_crs: CRS | None = None,
+        densify_points: int = 5000,
     ) -> VectorType:
         """Create a vector polygon from projected bounds of a raster or vector.
 
@@ -1677,7 +1681,7 @@ class Vector:
         """
         # Modify inplace if wanted and return the self instance.
         if inplace:
-            self._ds = self.ds.query(expression, inplace=True)
+            self._ds = self.ds.query(expression)
             return None
 
         # Otherwise, create a new Vector from the queried dataset.

@@ -287,7 +287,7 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 
 [//]: # (cluster = ClusterGenerator&#40;"multi", nb_workers=4&#41;)
 
-[//]: # (mp_config = MultiprocConfig&#40;chunk_size=200, cluster=None&#41;  # Pass a cluster to perform reprojection in multiprocessing)
+[//]: # (mp_config = MultiprocConfig&#40;chunks=200, cluster=None&#41;  # Pass a cluster to perform reprojection in multiprocessing)
 
 [//]: # (rast_reproj = rast.reproject&#40;)
 

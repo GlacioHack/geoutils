@@ -38,7 +38,7 @@ from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
-    _chunks2d_from_chunksizes_shape,
+    normalize_chunks,
 )
 from geoutils.multiproc.mparray import MultiprocConfig
 from geoutils.raster.referencing import _cast_nodata
@@ -420,12 +420,12 @@ class _MultiprocRunner(_ChunkedRunner[T]):
         self._cluster = mp_config.cluster
 
     def submit(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Any:
-        return self._cluster.launch_task(func, [*args], **kwargs)
+        return self._cluster.submit(func, *args, **kwargs)
 
     def gather(self, handles: list[Any]) -> list[T]:
         out: list[T] = []
         for h in handles:
-            res = self._cluster.get_res(h)
+            res = self._cluster.compute(h)
             out.append(res)
         return out
 
@@ -1902,8 +1902,8 @@ def _multiproc_polygonize(
     shape = (int(source_raster.shape[0]), int(source_raster.shape[1]))
 
     # Determine chunks from mp_config
-    chunksizes = (mp_config.chunk_size, mp_config.chunk_size)
-    chunks = _chunks2d_from_chunksizes_shape(chunksizes=chunksizes, shape=shape)
+    chunksizes = (mp_config.chunks, mp_config.chunks)
+    chunks = normalize_chunks(chunks=chunksizes, shape=shape)
 
     # Build tiling from the chosen chunking scheme
     tiling, block_geogrids, block_ids = _chunked_build_dst_geotiling(

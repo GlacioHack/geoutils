@@ -28,7 +28,7 @@ class TestClusterGenerator:
         cluster = ClusterGenerator(name="basic")
         assert isinstance(cluster, BasicCluster)
 
-        result = cluster.launch_task(sample_function, args=[2, 3])
+        result = cluster.submit(sample_function, 2, 3)
         assert result == 5
 
     def test_mp_cluster_task(self) -> None:
@@ -36,8 +36,8 @@ class TestClusterGenerator:
         cluster = ClusterGenerator("multiprocessing", nb_workers=2)
         assert isinstance(cluster, MpCluster)
 
-        future = cluster.launch_task(sample_function, args=[2, 3])
-        result = cluster.get_res(future)
+        future = cluster.submit(sample_function, 2, 3)
+        result = cluster.compute(future)
         assert result == 5
 
     def test_mp_cluster_parallelism(self) -> None:
@@ -45,8 +45,8 @@ class TestClusterGenerator:
         cluster = ClusterGenerator("multiprocessing", nb_workers=2)
         assert isinstance(cluster, MpCluster)
 
-        futures = [cluster.launch_task(long_running_task, args=[i]) for i in range(4)]
-        results = [cluster.get_res(f) for f in futures]
+        futures = [cluster.submit(long_running_task, i) for i in range(4)]
+        results = cluster.gather(futures)
         assert results == [0, 2, 4, 6]
 
     def test_mp_cluster_termination(self) -> None:
@@ -59,4 +59,4 @@ class TestClusterGenerator:
 
         # Expect an error when trying to launch a task after closing
         with pytest.raises(ValueError):
-            cluster.launch_task(sample_function, args=[2, 3])
+            cluster.submit(sample_function, 2, 3)

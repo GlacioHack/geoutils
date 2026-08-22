@@ -203,8 +203,8 @@ def _assert_vectors_equal_ordered(g1: gpd.GeoDataFrame, g2: gpd.GeoDataFrame, ex
 
 
 def assert_vectors_equal(
-    v1: gu.Vector,
-    v2: gu.Vector,
+    v1: gu.Vector | gpd.GeoDataFrame,
+    v2: gu.Vector | gpd.GeoDataFrame,
     *,
     check_crs: bool = True,
     exact: bool = False,
@@ -217,7 +217,11 @@ def assert_vectors_equal(
     Setting "setwise = True" leaves more flexibility on the polygon definition (Multipolygon, etc...).
     """
 
-    # Both should be vectors
+    # Accept either GeoUtils Vector objects or accessor-backed GeoDataFrames.
+    if isinstance(v1, gpd.GeoDataFrame):
+        v1 = gu.Vector(v1)
+    if isinstance(v2, gpd.GeoDataFrame):
+        v2 = gu.Vector(v2)
     assert isinstance(v1, gu.Vector)
     assert isinstance(v2, gu.Vector)
 
@@ -395,7 +399,7 @@ class TestPolygonize:
         # Chunked polygonize with any strategy must match base exactly
         d8 = ds.rst.polygonize(target_values=1, connectivity=8, strategy=strategy)
         d4 = ds.rst.polygonize(target_values=1, connectivity=4, strategy=strategy)
-        mp_config = MultiprocConfig(chunk_size=2)
+        mp_config = MultiprocConfig(chunks=2)
         mp8 = rst_mp.polygonize(target_values=1, connectivity=8, strategy=strategy, mp_config=mp_config)
         mp4 = rst_mp.polygonize(target_values=1, connectivity=4, strategy=strategy, mp_config=mp_config)
 
@@ -442,7 +446,7 @@ class TestPolygonize:
         ds_base.load()
         # Multiprocessing input (lazy if we pass Multiprocessing later)
         raster_mp = gu.Raster(path_raster)
-        mp_config = MultiprocConfig(chunk_size=10)
+        mp_config = MultiprocConfig(chunks=10)
         # Dask input (lazy)
         ds = open_raster(path_raster, chunks={"x": 10, "y": 10})
         assert not ds._in_memory

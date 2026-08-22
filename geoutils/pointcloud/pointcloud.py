@@ -46,6 +46,9 @@ from geoutils._dispatch import _check_match_grid, get_geo_attr, has_geo_attr
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
+from geoutils.multiproc import MultiprocConfig
+from geoutils.pointcloud.base import PointCloudBase
+from geoutils.pointcloud.las import _load_laspy_data, _load_laspy_metadata, _write_laspy
 from geoutils.raster.referencing import _coords
 from geoutils.stats.sampling import _subsample_numpy
 from geoutils.stats.stats import _statistics
@@ -127,98 +130,6 @@ _HANDLED_FUNCTIONS_2NIN = [
 handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
 
 
-def _load_laspy_data(filename: str, columns: list[str]) -> gpd.GeoDataFrame:
-    """Load point cloud data from LAS/LAZ/COPC file as a geodataframe."""
-
-    laspy = import_optional("laspy")
-
-    # Read file
-    las = laspy.read(filename)
-
-    # Get data from main Z column and other requested columns
-    columns_no_z = [c for c in columns if c != "Z"]
-    data = np.vstack([las.z] + [las[n] for n in columns_no_z]).T
-    column_names = ["Z"] + columns_no_z
-
-    # Build geodataframe
-    gdf = gpd.GeoDataFrame(
-        geometry=gpd.points_from_xy(x=las.x, y=las.y, crs=las.header.parse_crs(prefer_wkt=False)),
-        data=data,
-        columns=column_names,
-    )
-
-    return gdf
-
-
-def _load_laspy_metadata(
-    filename: str,
-) -> tuple[CRS, int, BoundingBox, pd.Index]:
-    """Load point cloud metadata from LAS/LAZ/COPC file."""
-
-    laspy = import_optional("laspy")
-
-    with laspy.open(filename) as f:
-
-        # Parse CRS, point count and bounds
-        crs = f.header.parse_crs(prefer_wkt=False)
-        nb_points = f.header.point_count
-        bounds = BoundingBox(left=f.header.x_min, right=f.header.x_max, bottom=f.header.y_min, top=f.header.y_max)
-
-        # Parse column names as pandas index, removing X/Y that will be transformed into a geometry
-        columns_names = list(f.header.point_format.dimension_names)
-        columns_names = [c for c in columns_names if c not in ["X", "Y"]]
-        columns_names = pd.Index(columns_names)
-
-    return crs, nb_points, bounds, columns_names
-
-
-def _write_laspy(
-    filename: str | pathlib.Path,
-    pc: gpd.GeoDataFrame,
-    data_column: str | None,
-    version: Any = None,
-    point_format: Any = None,
-    offsets: tuple[float, float, float] = None,
-    scales: tuple[float, float, float] = None,
-    **kwargs: Any,
-) -> None:
-    """Write a point cloud geodataframe to a LAS/LAZ/COPC file."""
-
-    laspy = import_optional("laspy")
-
-    # Initiate header with user arguments
-    header = laspy.LasHeader(version=version, point_format=point_format)
-    if scales is not None:
-        header.scales = np.array(scales)
-    if offsets is not None:
-        header.offsets = np.array(offsets)
-    for k, v in kwargs.items():
-        setattr(header, k, v)
-
-    # Adding extra dimensions for auxiliary variables
-    aux_columns = [c for c in pc.columns if c not in [data_column, "geometry"]]
-    for c in aux_columns:
-        header.add_extra_dim(laspy.ExtraBytesParams(name=c, type=pc[c].dtype))
-
-    las = laspy.LasData(header)
-
-    # The las x,y,z will be automatically scaled into X,Y,Z based on the header scales
-    las.x = pc.geometry.x.values
-    las.y = pc.geometry.y.values
-    if data_column is not None:
-        las.z = pc[data_column].values
-    else:
-        las.z = pc.geometry.z.values
-
-    # Add auxiliary columns
-    for c in aux_columns:
-        setattr(las, c, pc[c].values)
-
-    las.write(filename)
-
-    return
-
-
 def _cast_numeric_array_pointcloud(
     pc: PointCloudType, other: PointCloudType | NDArrayNum | Number, operation_name: str
 ) -> NDArrayNum | Number:
@@ -275,7 +186,7 @@ def _cast_numeric_array_pointcloud(
     return other_data
 
 
-class PointCloud(Vector):  # type: ignore[misc]
+class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     """
     The georeferenced point cloud.
 
@@ -336,7 +247,7 @@ class PointCloud(Vector):  # type: ignore[misc]
                 if data_column is None:
                     data_column = "Z"
                 # Load only metadata, and not the data
-                fn = filename_or_dataset if isinstance(filename_or_dataset, str) else filename_or_dataset.name
+                fn = os.fspath(filename_or_dataset)
                 crs, nb_points, bounds, columns = _load_laspy_metadata(fn)
                 self._name = fn
                 self._crs = crs
@@ -461,7 +372,7 @@ class PointCloud(Vector):  # type: ignore[misc]
         return self._data_column
 
     @data_column.setter
-    def data_column(self, new_data_column: str) -> None:
+    def data_column(self, new_data_column: str | None) -> None:
         self.set_data_column(new_data_column=new_data_column)
 
     def set_data_column(self, new_data_column: str | None) -> None:
@@ -513,11 +424,16 @@ class PointCloud(Vector):  # type: ignore[misc]
 
         return np.dtype(self.data.dtype) == np.bool_
 
-    def load(self, columns: Literal["all", "main"] | list[str] = "main") -> None:
+    def load(
+        self,
+        columns: Literal["all", "main"] | list[str] = "main",
+        mp_config: MultiprocConfig | None = None,
+    ) -> None:
         """
         Load point cloud from disk (only supported for LAS files).
 
         :param columns: Columns to load. Defaults to main data column only.
+        :param mp_config: Optional multiprocessing configuration to load LAS/LAZ files by chunks.
         """
 
         if self.is_loaded:
@@ -535,24 +451,52 @@ class PointCloud(Vector):  # type: ignore[misc]
         else:
             columns_to_load = columns
 
-        ds = _load_laspy_data(filename=self.name, columns=columns_to_load)
+        if mp_config is None:
+            ds = _load_laspy_data(filename=self.name, columns=columns_to_load)
+        else:
+            from geoutils.multiproc.pointcloud import _load_laspy_data_partitions
+
+            ds = _load_laspy_data_partitions(
+                filename=self.name,
+                columns=columns_to_load,
+                point_count=self.point_count,
+                partition_size=mp_config.chunks,
+                mp_config=mp_config,
+            )
         self._ds = ds
 
     @overload
     def astype(
-        self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, *, inplace: Literal[False] = False
+        self: PointCloud,
+        dtype: DTypeLike,
+        convert_coords: bool = False,
+        *,
+        inplace: Literal[False] = False,
     ) -> PointCloud: ...
 
     @overload
-    def astype(self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, *, inplace: Literal[True]) -> None: ...
+    def astype(
+        self: PointCloud,
+        dtype: DTypeLike,
+        convert_coords: bool = False,
+        *,
+        inplace: Literal[True],
+    ) -> None: ...
 
     @overload
     def astype(
-        self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, *, inplace: bool = False
+        self: PointCloud,
+        dtype: DTypeLike,
+        convert_coords: bool = False,
+        *,
+        inplace: bool = False,
     ) -> PointCloud | None: ...
 
     def astype(
-        self: PointCloud, dtype: DTypeLike, convert_coords: bool = False, inplace: bool = False
+        self: PointCloud,
+        dtype: DTypeLike,
+        convert_coords: bool = False,
+        inplace: bool = False,
     ) -> PointCloud | None:
         """
         Convert data type of the point cloud data column.
@@ -620,8 +564,10 @@ class PointCloud(Vector):  # type: ignore[misc]
         filename: str | pathlib.Path,
         version: Any = None,
         point_format: Any = None,
-        offsets: tuple[float, float, float] = None,
-        scales: tuple[float, float, float] = None,
+        offsets: tuple[float, float, float] | None = None,
+        scales: tuple[float, float, float] | None = None,
+        chunks: int | None = None,
+        mp_config: MultiprocConfig | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -632,6 +578,8 @@ class PointCloud(Vector):  # type: ignore[misc]
         :param point_format: Point format.
         :param offsets: Offsets for X/Y/Z.
         :param scales: Scales for X/Y/Z.
+        :param chunks: Optional number of points per write chunk.
+        :param mp_config: Optional multiprocessing configuration for chunked writing.
         :param kwargs: Other keyword arguments to set the LAS file header (e.g., "offsets", "scales").
         """
 
@@ -643,12 +591,20 @@ class PointCloud(Vector):  # type: ignore[misc]
             point_format=point_format,
             offsets=offsets,
             scales=scales,
+            chunks=chunks,
+            mp_config=mp_config,
             **kwargs,
         )
 
     @classmethod
     def from_xyz(
-        cls, x: ArrayLike, y: ArrayLike, z: ArrayLike, crs: CRS, data_column: str | None = None, use_z: bool = False
+        cls,
+        x: ArrayLike,
+        y: ArrayLike,
+        z: ArrayLike,
+        crs: CRS,
+        data_column: str | None = None,
+        use_z: bool = False,
     ) -> PointCloud:
         """
         Create point cloud from three 1D array-like coordinates for X/Y/Z.
@@ -688,7 +644,13 @@ class PointCloud(Vector):  # type: ignore[misc]
             return cls(filename_or_dataset=gdf, data_column=data_column)
 
     @classmethod
-    def from_array(cls, data: NDArrayNum, crs: CRS, data_column: str | None = None, use_z: bool = False) -> PointCloud:
+    def from_array(
+        cls,
+        data: NDArrayNum,
+        crs: CRS,
+        data_column: str | None = None,
+        use_z: bool = False,
+    ) -> PointCloud:
         """
         Create point cloud from a 3 x N or N x 3 array of X coordinates, Y coordinates and Z values.
 
@@ -707,7 +669,14 @@ class PointCloud(Vector):  # type: ignore[misc]
         if data.shape[0] != 3:
             data = data.T
 
-        return cls.from_xyz(x=data[0, :], y=data[1, :], z=data[2, :], crs=crs, data_column=data_column, use_z=use_z)
+        return cls.from_xyz(
+            x=data[0, :],
+            y=data[1, :],
+            z=data[2, :],
+            crs=crs,
+            data_column=data_column,
+            use_z=use_z,
+        )
 
     @classmethod
     def from_tuples(
@@ -784,7 +753,10 @@ class PointCloud(Vector):  # type: ignore[misc]
             # Assign
             if self._has_z:
                 new_geo = gpd.points_from_xy(
-                    x=self.geometry.x.values[ind], y=self.geometry.y.values[ind], z=assign, crs=self.crs
+                    x=self.geometry.x.values[ind],
+                    y=self.geometry.y.values[ind],
+                    z=assign,
+                    crs=self.crs,
                 )
                 self.ds.loc[ind, "geometry"] = new_geo
             else:
@@ -798,7 +770,10 @@ class PointCloud(Vector):  # type: ignore[misc]
 
     def __array_ufunc__(
         self,
-        ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
+        ufunc: Callable[
+            [NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
+            NDArrayNum | tuple[NDArrayNum, NDArrayNum],
+        ],
         method: str,
         *inputs: tuple[PointCloud]
         | tuple[PointCloud, PointCloud]
@@ -864,7 +839,11 @@ class PointCloud(Vector):  # type: ignore[misc]
                 return self.copy(new_array=output[0]), self.copy(new_array=output[1])
 
     def __array_function__(
-        self, func: Callable[[NDArrayNum, Any], Any], types: tuple[type], args: Any, kwargs: Any
+        self,
+        func: Callable[[NDArrayNum, Any], Any],
+        types: tuple[type],
+        args: Any,
+        kwargs: Any,
     ) -> Any:
         """
         Method to cast NumPy array function directly on a Point cloud object by applying it to the masked array.
@@ -1541,7 +1520,13 @@ class PointCloud(Vector):  # type: ignore[misc]
         """
 
         out_shape, out_transform, out_crs = _check_match_grid(
-            self, ref=ref, coords=grid_coords, res=res, bounds=bounds, shape=shape, crs=None
+            self,
+            ref=ref,
+            coords=grid_coords,
+            res=res,
+            bounds=bounds,
+            shape=shape,
+            crs=None,
         )
         grid_coords = _coords(transform=out_transform, shape=out_shape, grid=False, area_or_point=None)
 

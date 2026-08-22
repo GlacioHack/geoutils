@@ -173,7 +173,7 @@ class TestRasterVectorInterface:
 
         # Multiprocessing config (writes tiles to file)
         mp_outfile = tmp_path / f"mp_rasterize_{all_touched}_{in_value_mode}.tif"
-        mp_config = MultiprocConfig(chunk_size=chunksizes[0], outfile=str(mp_outfile), driver="GTiff")
+        mp_config = MultiprocConfig(chunks=chunksizes[0], outfile=str(mp_outfile), driver="GTiff")
 
         # 1) RASTERIZE
         ##############

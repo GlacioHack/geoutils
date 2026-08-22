@@ -908,7 +908,7 @@ class TestReprojectChunked:
             raise ValueError
 
         # Multiprocessing config
-        mp_config = MultiprocConfig(chunk_size=tile_size)
+        mp_config = MultiprocConfig(chunks=tile_size)
 
         # 3/ Run reproject for each backend
         base = raster_base.reproject(

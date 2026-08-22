@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
 from rasterio.crs import CRS
@@ -29,11 +29,11 @@ from geoutils._dispatch import get_geo_attr, has_geo_attr
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike
-    from geoutils.vector.vector import Vector, VectorLike
+    from geoutils.vector.vector import VectorLike
 
 
 def _reproject(
-    source_vector: Vector,
+    source_vector: Any,
     ref: RasterLike | VectorLike | None = None,
     crs: CRS | str | int | None = None,
 ) -> gpd.GeoDataFrame:
