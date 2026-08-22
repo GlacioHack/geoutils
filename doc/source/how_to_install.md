@@ -35,6 +35,7 @@ mamba env create -f geoutils/dev-environment.yml
 
 After installing, you can check that everything is working by running the tests: `pytest -rA`.
 
+(dependencies)=
 ## Dependencies
 
 GeoUtils' required dependencies are:

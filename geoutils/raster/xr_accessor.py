@@ -306,10 +306,10 @@ class RasterAccessor(RasterBase):
             area_or_point=self.area_or_point,
         )
 
-    def to_file(self, **kwargs: Any) -> None:
+    def to_file(self, *args: Any, **kwargs: Any) -> None:
         """
         Write raster to file.
 
         Wrapper around rioxarray.to_raster().
         """
-        self._obj.rio.to_raster(**kwargs)
+        self._obj.rio.to_raster(*args, **kwargs)
