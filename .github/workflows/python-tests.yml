@@ -16,7 +16,7 @@ jobs:
 
     strategy:
       matrix:
-        os: ["ubuntu-latest", "macos-latest"]
+        os: ["ubuntu-latest", "macos-15"]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         dep-level: ["base", "opt"]
 
@@ -38,14 +38,6 @@ jobs:
         mamba-version: "2.0.5"
         activate-environment: geoutils-dev
         python-version:
-
-    - name: Debug conda init
-      shell: bash
-      run: |
-        echo "CONDA=$CONDA"
-        "$CONDA/bin/conda" --version
-        command -v conda || true
-        nl -ba ~/.profile || true
 
     - name: Get month for resetting cache
       id: get-date
