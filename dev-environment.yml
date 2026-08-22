@@ -32,7 +32,7 @@ dependencies:
   - dask # For out-of-memory operations
 
   # Test dependencies
-  - gdal  # To test functionalities against GDAL
+  - gdal<3.13.3  # To test functionalities against GDAL
   - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixtures
