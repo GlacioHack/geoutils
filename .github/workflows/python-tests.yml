@@ -39,6 +39,32 @@ jobs:
         activate-environment: geoutils-dev
         python-version:
 
+    - name: Debug conda init
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set +e
+
+        echo "CONDA=$CONDA"
+        echo "PATH=$PATH"
+
+        echo "--- conda installation ---"
+        ls -la "$CONDA" || true
+        ls -la "$CONDA/condabin" || true
+        ls -la "$CONDA/bin" || true
+
+        echo "--- executables ---"
+        command -v conda || true
+        command -v mamba || true
+        "$CONDA/condabin/conda" --version || true
+        "$CONDA/condabin/mamba" --version || true
+
+        echo "--- profiles ---"
+        for f in ~/.profile ~/.bash_profile ~/.bashrc; do
+          echo "### $f"
+          nl -ba "$f" 2>/dev/null || true
+        done
+
     - name: Get month for resetting cache
       id: get-date
       run: echo "cache_date=$(/bin/date -u '+%Y%m')" >> $GITHUB_ENV
