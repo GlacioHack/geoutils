@@ -6,3 +6,46 @@ div.cell details.hide > summary {
 div.cell details[open].above-input div.cell_input {
     border-top: None;
 }
+
+/* -------------------------------------------
+   GeoUtils tables: subsection rows
+   ------------------------------------------- */
+
+/* Put the band color on the row itself */
+table.tight-table tr:has(.gu-table-section) {
+  background-color: var(--pst-color-surface-secondary) !important;
+}
+
+/* Make all cells transparent so the row color shows through */
+table.tight-table tr:has(.gu-table-section) > td {
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+
+  /* slightly shorter row */
+  padding: 0.45rem 0.6rem !important;
+
+  /* remove vertical borders so cells look merged */
+  border-left: 0 !important;
+  border-right: 0 !important;
+
+  /* top + bottom edge */
+  border-top: 1px solid var(--pst-color-border) !important;
+  border-bottom: 1px solid var(--pst-color-border) !important;
+}
+
+/* left accent bar */
+table.tight-table tr:has(.gu-table-section) > td:first-child {
+  border-left: 4px solid var(--pst-color-primary) !important;
+}
+
+/* hide placeholder cells but keep layout */
+table.tight-table tr:has(.gu-table-section) > td:not(:first-child) {
+  visibility: hidden;
+}
+
+/* label styling */
+.gu-table-section {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
