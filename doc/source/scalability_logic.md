@@ -30,7 +30,7 @@ Other operations are more complex and require {ref}`specific logic described fur
 The diagram below illustrates this mapping procedure, with a new CRS and a downsampling of 2:
 
 ```{eval-rst}
-.. plot:: code/diagram_chunked_reproject.py
+.. plot:: diagrams/diagram_chunked_reproject.py
     :width: 100%
 ```
 
@@ -50,7 +50,7 @@ Finally, note that **chunked reprojection with GCPs or RCPs is currently not sup
 The diagram below illustrates the three strategies implemented in GeoUtils for performing this reconciliation:
 
 ```{eval-rst}
-.. plot:: code/diagram_chunked_polygonize.py
+.. plot:: diagrams/diagram_chunked_polygonize.py
     :width: 100%
 ```
 
@@ -75,7 +75,7 @@ Finally, note that **polygon stitching occurs only for polygons touching chunk b
 The diagram below illustrates the execution strategy:
 
 ```{eval-rst}
-.. plot:: code/diagram_chunked_rasterize.py
+.. plot:: diagrams/diagram_chunked_rasterize.py
     :width: 100%
 ```
 
@@ -95,7 +95,7 @@ Unlike chunked reprojection or polygonization, rasterization does not require ov
 The diagram below illustrates the workflow:
 
 ```{eval-rst}
-.. plot:: code/diagram_chunked_interp_points.py
+.. plot:: diagrams/diagram_chunked_interp_points.py
     :width: 100%
 ```
 
@@ -116,7 +116,7 @@ Finally, note that **using eager (in-memory) point coordinates is typically much
 The diagram below illustrates the workflow:
 
 ```{eval-rst}
-.. plot:: code/diagram_chunked_subsample.py
+.. plot:: diagrams/diagram_chunked_subsample.py
     :width: 100%
 ```
 
