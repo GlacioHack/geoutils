@@ -30,6 +30,7 @@ from scipy.stats import iqr
 from scipy.stats.mstats import mquantiles
 
 from geoutils import profiler
+from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
 
@@ -92,6 +93,101 @@ _ALIAS_STATS_LIST_MASK = {
 _ALIAS_STATS = _STATS_ALIASES | _ALIAS_STATS_LIST_MASK
 
 
+def _is_dask_array(data: Any) -> bool:
+    """Whether data is a Dask array, without importing Dask at module import time."""
+
+    return data.__class__.__module__.startswith("dask.array")
+
+
+def _get_stat_common_name(stat_name: str, stats_dict: dict[str, Any]) -> str | None:
+    """Return the canonical statistic name for a user-facing alias."""
+
+    if stat_name in stats_dict.keys():
+        return stat_name
+    if "".join(stat_name.lower().split()) in _ALIAS_STATS.keys():
+        return _ALIAS_STATS["".join(stat_name.lower().split())]
+    if "".join(stat_name.lower().split("_")) in _ALIAS_STATS.keys():
+        return _ALIAS_STATS["".join(stat_name.lower().split("_"))]
+    return None
+
+
+def _statistics_dask(
+    data: Any,
+    stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
+    counts: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    """Calculate common statistics on a Dask array while returning lazy scalar results."""
+
+    import_optional("dask")
+    import dask.array as da
+
+    finite = da.isfinite(data)
+    final_count_nonzero = finite.sum()
+    valid_count = final_count_nonzero if counts is None else counts[0]
+
+    # Dask requires explicit axes for full-array quantiles. This remains lazy, but exact global quantiles can still be
+    # memory-intensive at execution time because Dask has to combine data across chunks.
+    axes = tuple(range(data.ndim))
+
+    def _quantile(q: float) -> Any:
+        return da.nanquantile(data, q, axis=axes)
+
+    median = _quantile(0.50)
+    q05 = _quantile(0.05)
+    q25 = _quantile(0.25)
+    q75 = _quantile(0.75)
+    q90 = _quantile(0.90)
+    q95 = _quantile(0.95)
+
+    stats_dict: dict[str, Any] = {
+        "Mean": da.nanmean(data),
+        "Median": median,
+        "Max": da.nanmax(data),
+        "Min": da.nanmin(data),
+        "Sum": da.nansum(data),
+        "Sum of squares": da.nansum(da.square(data)),
+        "90th percentile": q90,
+        "LE90": q95 - q05,
+        "IQR": q75 - q25,
+        "NMAD": 1.4826 * da.nanquantile(da.fabs(data - median), 0.50, axis=axes),
+        "RMSE": da.sqrt(da.nanmean(da.square(data))),
+        "Standard deviation": da.nanstd(data),
+        "Valid count": valid_count,
+        "Total count": data.size,
+        "Percentage valid points": (valid_count / data.size) * 100 if data.size else np.nan,
+    }
+
+    if counts is not None:
+        stats_dict.update(
+            {
+                "Valid inlier count": final_count_nonzero,
+                "Total inlier count": counts[1],
+                "Percentage inlier points": (final_count_nonzero / counts[0]) * 100,
+                "Percentage valid inlier points": (final_count_nonzero / counts[1]) * 100 if counts[1] != 0 else 0,
+            }
+        )
+
+    if stats_name is None:
+        return stats_dict
+
+    res_dict: dict[str, Any] = {}
+    for stat_name in stats_name:
+        if isinstance(stat_name, str):
+            stat_common_name = _get_stat_common_name(stat_name, stats_dict)
+            if stat_common_name:
+                res_dict[stat_name] = stats_dict[stat_common_name]
+            else:
+                warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+                res_dict[stat_name] = np.float32(np.nan)
+        elif callable(stat_name):
+            res_dict[stat_name.__name__] = stat_name(data)
+        elif stat_name not in STATS_LIST_MASK and stat_name not in _ALIAS_STATS_LIST_MASK:
+            warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+            res_dict[stat_name] = np.float32(np.nan)
+
+    return res_dict
+
+
 @profiler.profile("geoutils.stats.stats._statistics", memprof=True)
 def _statistics(
     data: NDArrayNum,
@@ -150,6 +246,9 @@ def _statistics(
 
     :returns: A dictionary containing the calculated statistics for the selected band.
     """
+
+    if _is_dask_array(data):
+        return _statistics_dask(data=data, stats_name=stats_name, counts=counts)
 
     if np.ma.isMaskedArray(data):
 
@@ -217,16 +316,6 @@ def _statistics(
             }
         )
 
-    def get_stat_common_name(stat_name: str) -> str | None:
-        if stat_name in stats_dict.keys():
-            return stat_name
-        elif "".join(stat_name.lower().split()) in _ALIAS_STATS.keys():
-            return _ALIAS_STATS["".join(stat_name.lower().split())]
-        elif "".join(stat_name.lower().split("_")) in _ALIAS_STATS.keys():
-            return _ALIAS_STATS["".join(stat_name.lower().split("_"))]
-        else:
-            return None
-
     # If there are no valid data points, set all statistics to NaN
     if final_count_nonzero == 0:
         warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
@@ -239,10 +328,10 @@ def _statistics(
 
         res_dict = {
             stat_name: (
-                stats_dict[get_stat_common_name(stat_name)]  # type: ignore
+                stats_dict[_get_stat_common_name(stat_name, stats_dict)]  # type: ignore
                 if (
-                    get_stat_common_name(stat_name) is not None
-                    and not callable(stats_dict[get_stat_common_name(stat_name)])  # type: ignore
+                    _get_stat_common_name(stat_name, stats_dict) is not None
+                    and not callable(stats_dict[_get_stat_common_name(stat_name, stats_dict)])  # type: ignore
                 )
                 else np.nan
             )
@@ -261,7 +350,7 @@ def _statistics(
             for stat_name in stats_name:
                 # Compute stat if in stats_dict keys
                 if isinstance(stat_name, str):
-                    stat_common_name = get_stat_common_name(stat_name)
+                    stat_common_name = _get_stat_common_name(stat_name, stats_dict)
                     if stat_common_name:
                         if callable(stats_dict[stat_common_name]):
                             res_dict[stat_name] = stats_dict[stat_common_name](data)  # type: ignore

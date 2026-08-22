@@ -22,7 +22,16 @@ from __future__ import annotations
 
 import logging
 import warnings
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, TypeVar, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    Literal,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import geopandas as gpd
 import numpy as np
@@ -31,6 +40,7 @@ from pyproj import CRS
 
 from geoutils import profiler
 from geoutils._dispatch import get_geo_attr
+from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.gridding import _grid_pointcloud
 from geoutils.raster.referencing import _coords
@@ -93,8 +103,11 @@ def _cast_numeric_array_pointcloud(
             )
         return other.data
 
-    if hasattr(other, "pc") and isinstance(getattr(other, "pc"), PointCloudBase):
-        other_pc = getattr(other, "pc")
+    try:
+        other_pc = cast(Any, other).pc
+    except AttributeError:
+        other_pc = None
+    if isinstance(other_pc, PointCloudBase):
         if not pc.georeferenced_coords_equal(other_pc):
             raise ValueError(
                 "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + "."
@@ -357,6 +370,7 @@ class PointCloudBase(VectorBase):
 
         x, y, z = self.to_xyz()
         if self._is_dask:
+            import_optional("dask")
             import dask.array as da
 
             return da.stack([_as_dask_array(x), _as_dask_array(y), _as_dask_array(z)], axis=0)

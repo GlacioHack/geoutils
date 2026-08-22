@@ -154,7 +154,7 @@ class TestRasterVectorInterface:
         crs = "EPSG:4326"
 
         # Chunking
-        chunksizes = (10, 10)
+        chunksizes = (10, 7)
 
         # Burn value modes for rasterize
         if in_value_mode == "scalar":
@@ -173,7 +173,7 @@ class TestRasterVectorInterface:
 
         # Multiprocessing config (writes tiles to file)
         mp_outfile = tmp_path / f"mp_rasterize_{all_touched}_{in_value_mode}.tif"
-        mp_config = MultiprocConfig(chunks=chunksizes[0], outfile=str(mp_outfile), driver="GTiff")
+        mp_config = MultiprocConfig(chunks=chunksizes, outfile=str(mp_outfile), driver="GTiff")
 
         # 1) RASTERIZE
         ##############
@@ -216,7 +216,6 @@ class TestRasterVectorInterface:
             all_touched=all_touched,
             out_dtype=np.uint8,
             mp_config=mp_config,
-            chunksizes=chunksizes,
         )
         assert isinstance(rst_mp, gu.Raster)
         assert not rst_mp.is_loaded
@@ -260,7 +259,6 @@ class TestRasterVectorInterface:
             crs=crs,
             all_touched=all_touched,
             mp_config=mp_config,
-            chunksizes=chunksizes,
         )
         assert isinstance(m_mp, gu.Raster)
         assert not m_mp.is_loaded

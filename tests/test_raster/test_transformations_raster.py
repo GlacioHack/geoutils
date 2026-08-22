@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Literal
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -798,6 +798,33 @@ class TestReprojectChunked:
     pytest.importorskip("dask")
     import dask.array as da
 
+    def test_reproject__small_chunked_grid_matches_base(self, tmp_path: Any) -> None:
+        """Regression test for small-grid Dask/Multiprocessing block placement during reprojection."""
+
+        import dask.array as da
+
+        src_arr = np.linspace(0, 99, 100, dtype="float32").reshape(10, 10)
+        transform = rio.transform.from_origin(0, 5, 1, 1)
+        raster = gu.Raster.from_array(src_arr, transform=transform, crs=4326, nodata=200)
+        source_path = tmp_path / "reproject_source.tif"
+        raster.to_file(source_path)
+
+        dst_bounds = rio.coords.BoundingBox(left=-1, bottom=-6, right=11, top=6)
+        base = raster.reproject(bounds=dst_bounds, res=(1, 1), resampling="nearest")
+
+        raster_mp = gu.Raster(source_path)
+        mp_config = MultiprocConfig(chunks=5, outfile=str(tmp_path / "reproject_mp.tif"))
+        mp = raster_mp.reproject(bounds=dst_bounds, res=(1, 1), resampling="nearest", mp_config=mp_config)
+
+        ds = open_raster(source_path, chunks={"band": 1, "x": 5, "y": 5})
+        dask_r = ds.rst.reproject(bounds=dst_bounds, res=(1, 1), resampling="nearest")
+
+        assert not raster_mp.is_loaded
+        assert not ds._in_memory
+        assert isinstance(ds.data, da.Array)
+        assert np.allclose(base.get_nanarray(), mp.get_nanarray(), equal_nan=True)
+        assert np.allclose(base.get_nanarray(), dask_r.compute().data, equal_nan=True)
+
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("tile_size", [20])
     @pytest.mark.parametrize("crs_mode", ["epsg4326", "metric_utm"])
@@ -908,7 +935,7 @@ class TestReprojectChunked:
             raise ValueError
 
         # Multiprocessing config
-        mp_config = MultiprocConfig(chunks=tile_size)
+        mp_config = MultiprocConfig(chunks=(tile_size, tile_size + 5))
 
         # 3/ Run reproject for each backend
         base = raster_base.reproject(

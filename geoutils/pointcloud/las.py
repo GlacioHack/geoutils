@@ -832,9 +832,7 @@ def write_laspy_multiproc_partitions(
         tmp_paths = [pathlib.Path(tmp_dir) / f"chunk_{index}.las" for index, _ in enumerate(range(0, len(pc), chunks))]
         futures = []
         for tmp_path, part in zip(tmp_paths, _iter_dataframe_chunks(pc=pc, chunk_size=chunks)):
-            futures.append(
-                cluster.submit(_write_laspy_temp_chunk, tmp_path, part, data_column, header)
-            )
+            futures.append(cluster.submit(_write_laspy_temp_chunk, tmp_path, part, data_column, header))
 
         written_paths = cluster.gather(futures)
         _stitch_laspy_files(

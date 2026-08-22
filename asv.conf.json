@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "project": "geoutils",
+  "project_url": "https://github.com/GlacioHack/geoutils",
+  "repo": ".",
+  "branches": ["main"],
+  "dvcs": "git",
+  "environment_type": "virtualenv",
+  "install_command": "python -m pip install {wheel_file}[benchmark]",
+  "benchmark_dir": "benchmarks",
+  "env_dir": ".asv/env",
+  "results_dir": ".asv/results",
+  "html_dir": ".asv/html",
+  "matrix": {
+    "python": ["3.12"]
+  },
+  "show_commit_url": "https://github.com/GlacioHack/geoutils/commit/"
+}

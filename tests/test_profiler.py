@@ -1,4 +1,4 @@
-"""Test the xdem.profiling functions."""
+"""Test profiling tools."""
 
 from __future__ import annotations
 
@@ -12,10 +12,52 @@ import pytest
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.profiler import Profiler
+from geoutils.profiler import Profiler, profile_call
 
 
 class TestProfiling:
+
+    def test_profile_call__psutil_only(self) -> None:
+        """Profile a small local function without a distributed Dask client."""
+
+        pytest.importorskip("psutil")
+
+        result, metrics = profile_call(lambda: sum(range(10)), interval=0.001)
+
+        assert result == 45
+        assert metrics.runtime_s >= 0
+        assert metrics.peak_client_rss_mb > 0
+        assert metrics.peak_dask_worker_process_rss_mb is None
+        assert metrics.peak_dask_spilled_mb is None
+        assert not metrics.dask_client_detected
+
+    def test_profile_call__active_dask_client(self, tmp_path: str) -> None:
+        """Profile worker memory when a distributed Dask client is active."""
+
+        pytest.importorskip("dask")
+        pytest.importorskip("distributed")
+
+        import dask.array as da
+        from distributed import Client, LocalCluster
+
+        with LocalCluster(
+            n_workers=1,
+            threads_per_worker=1,
+            processes=False,
+            dashboard_address=":0",
+            scheduler_kwargs={"dashboard": False},
+            local_directory=tmp_path,
+        ) as cluster:
+            with Client(cluster) as client:
+                arr = da.ones((64, 64), chunks=(16, 16), dtype="float32")
+                result, metrics = profile_call(lambda: float(arr.mean().compute()), interval=0.001, client=client)
+
+        assert result == 1.0
+        assert metrics.peak_client_rss_mb > 0
+        assert metrics.peak_dask_worker_process_rss_mb is not None
+        assert metrics.peak_dask_worker_process_rss_mb > 0
+        assert metrics.peak_dask_spilled_mb is not None
+        assert metrics.dask_client_detected
 
     @pytest.mark.skipif(
         find_spec("psutil") is not None and find_spec("plotly") is not None,

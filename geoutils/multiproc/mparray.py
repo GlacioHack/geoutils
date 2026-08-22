@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import warnings
+from numbers import Integral
 from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 import numpy as np
@@ -37,6 +38,40 @@ if TYPE_CHECKING:
     from geoutils.raster.raster import Raster
 
 
+ChunkSize = int | tuple[int, int]
+
+
+def _validate_chunk_size(chunks: Any, argument_name: str = "chunks") -> ChunkSize:
+    """Validate a square or rectangular chunk size."""
+
+    type_error = f"Argument '{argument_name}' must be an integer or a tuple of two integers."
+    value_error = f"Argument '{argument_name}' must contain strictly positive integers."
+
+    def _validate_axis(axis_chunk: Any) -> int:
+        if isinstance(axis_chunk, bool) or not isinstance(axis_chunk, Integral):
+            raise TypeError(type_error)
+        axis_chunk = int(axis_chunk)
+        if axis_chunk <= 0:
+            raise ValueError(value_error)
+        return axis_chunk
+
+    if isinstance(chunks, tuple):
+        if len(chunks) != 2:
+            raise ValueError(f"Argument '{argument_name}' must define two axes.")
+        return _validate_axis(chunks[0]), _validate_axis(chunks[1])
+
+    return _validate_axis(chunks)
+
+
+def _split_chunk_size(chunks: ChunkSize) -> tuple[int, int]:
+    """Return a 2D ``(rows, cols)`` chunk-size tuple from a square or rectangular chunk size."""
+
+    chunks = _validate_chunk_size(chunks)
+    if isinstance(chunks, int):
+        return chunks, chunks
+    return chunks
+
+
 class MultiprocConfig:
     """
     Configuration class for handling multiprocessing parameters in raster processing.
@@ -48,7 +83,7 @@ class MultiprocConfig:
 
     def __init__(
         self,
-        chunks: int,
+        chunks: ChunkSize,
         outfile: str | None = None,
         driver: str = "GTiff",
         cluster: AbstractCluster | None = None,
@@ -56,15 +91,13 @@ class MultiprocConfig:
         """
         Initialize the MultiprocConfig instance with multiprocessing settings.
 
-        :param chunks: The size of the chunks for splitting raster data.
+        :param chunks: The size of the chunks for splitting raster data. Pass an integer for square chunks, or a
+            ``(rows, cols)`` tuple for rectangular chunks.
         :param outfile: The file path where the output will be written.
         :param driver: Driver to write file with.
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
-        if chunks <= 0:
-            raise ValueError("Argument 'chunks' must be a strictly positive integer.")
-
-        self.chunks = chunks
+        self.chunks = _validate_chunk_size(chunks)
         if outfile is None:
             with tempfile.NamedTemporaryFile() as tmp:
                 self.outfile = tmp.name
@@ -144,15 +177,16 @@ def _generate_tiling_grid(
 
 
 def compute_tiling(
-    tile_size: int,
+    tile_size: ChunkSize,
     raster_shape: tuple[int, int],
-    ref_shape: tuple[int, int] = None,
+    ref_shape: tuple[int, int] | None = None,
     overlap: int = 0,
 ) -> NDArrayNum:
     """
     Compute the raster tiling grid to coregister raster by block.
 
-    :param tile_size: Size of each tile (square tiles).
+    :param tile_size: Size of each tile. Pass an integer for square tiles, or a ``(rows, cols)`` tuple for rectangular
+        tiles.
     :param raster_shape: Shape of the raster to determine tiling parameters.
     :param ref_shape: Shape of another raster to coregister, use for validation (optional).
     :param overlap: Size of overlap between tiles (optional).
@@ -164,9 +198,10 @@ def compute_tiling(
     if ref_shape is not None and raster_shape != ref_shape:
         raise Exception("Reference and secondary rasters do not have the same shape")
     row_max, col_max = raster_shape
+    row_split, col_split = _split_chunk_size(tile_size)
 
     # Generate tiling
-    tiling_grid = _generate_tiling_grid(0, 0, row_max, col_max, tile_size, tile_size, overlap=overlap)
+    tiling_grid = _generate_tiling_grid(0, 0, row_max, col_max, row_split, col_split, overlap=overlap)
     return tiling_grid
 
 

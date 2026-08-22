@@ -34,6 +34,14 @@ from geoutils.pointcloud.las import (
 )
 
 
+def _point_partition_size(mp_config: MultiprocConfig) -> int:
+    """Return a scalar point partition size from a multiprocessing configuration."""
+
+    if not isinstance(mp_config.chunks, int):
+        raise ValueError("Point-cloud multiprocessing requires an integer chunk size.")
+    return mp_config.chunks
+
+
 def _load_laspy_data_partitions(
     filename: str | pathlib.Path,
     columns: list[str],
@@ -148,7 +156,7 @@ def _write_laspy_data_partitions(
         pc=pc,
         data_column=data_column,
         header=header,
-        chunks=mp_config.chunks,
+        chunks=_point_partition_size(mp_config),
         cluster=mp_config.cluster,
     )
 

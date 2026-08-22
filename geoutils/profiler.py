@@ -18,18 +18,186 @@
 
 """Contains profiling functions."""
 
+from __future__ import annotations
+
 import logging
 import os
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
 from functools import wraps
 from multiprocessing import Pipe, connection
-from threading import Thread
-from typing import Any
+from threading import Event, Thread
+from typing import Any, Callable
 
 import pandas as pd
 
 from geoutils._misc import import_optional
+
+MB = 1_000_000
+
+
+@dataclass
+class ProfileMetrics:
+    """
+    Normalized profiling metrics for one measured call.
+
+    Memory values are reported in decimal megabytes. Dask worker metrics are the cluster aggregate reported by
+    :class:`distributed.diagnostics.MemorySampler` when a distributed client is active.
+    """
+
+    runtime_s: float
+    peak_client_rss_mb: float
+    peak_dask_worker_process_rss_mb: float | None = None
+    peak_dask_spilled_mb: float | None = None
+    client_rss_mb: list[tuple[float, float]] = field(default_factory=list)
+    dask_worker_process_rss_mb: list[tuple[float, float]] = field(default_factory=list)
+    dask_spilled_mb: list[tuple[float, float]] = field(default_factory=list)
+    dask_client_detected: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return metrics as a plain dictionary."""
+
+        return asdict(self)
+
+
+class _ProcessRSSSampler(Thread):
+    """Sample RSS memory for one process in the background."""
+
+    def __init__(self, pid: int, interval: float) -> None:
+        psutil = import_optional("psutil")
+
+        super().__init__(daemon=True)
+        self.interval = interval
+        self.process = psutil.Process(pid)
+        self.samples_mb: list[tuple[float, float]] = []
+        self._stop_event = Event()
+
+    def stop(self) -> None:
+        """Stop sampling."""
+
+        self._stop_event.set()
+
+    def run(self) -> None:
+        """Run the sampler."""
+
+        while not self._stop_event.is_set():
+            self.samples_mb.append((time.time(), self.process.memory_info().rss / MB))
+            self._stop_event.wait(self.interval)
+        self.samples_mb.append((time.time(), self.process.memory_info().rss / MB))
+
+
+def _get_active_dask_client() -> Any | None:
+    """Return the active distributed client, if distributed is installed and one is active."""
+
+    try:
+        from distributed import get_client
+    except ImportError:
+        return None
+
+    try:
+        return get_client()
+    except ValueError:
+        return None
+
+
+def _memory_value_to_mb(value: Any) -> float:
+    """Normalize Dask memory sampler values to decimal megabytes."""
+
+    if value is None:
+        return 0.0
+    if hasattr(value, "memory"):
+        value = value.memory
+    elif isinstance(value, dict):
+        value = sum(_memory_value_to_mb(v) * MB for v in value.values())
+    return float(value) / MB
+
+
+def _memory_sampler_trace_mb(sampler: Any, label: str) -> list[tuple[float, float]]:
+    """Extract a normalized memory trace from a Dask MemorySampler."""
+
+    df = sampler.to_pandas()
+    if df.empty or label not in df:
+        return []
+
+    series = df[label].dropna()
+    return [(timestamp.timestamp(), _memory_value_to_mb(value)) for timestamp, value in series.items()]
+
+
+def profile_call(
+    func: Callable[..., Any],
+    *args: Any,
+    interval: float = 0.05,
+    dask: bool | None = None,
+    client: Any | None = None,
+    **kwargs: Any,
+) -> tuple[Any, ProfileMetrics]:
+    """
+    Profile one function call with the appropriate GeoUtils profiling backends.
+
+    The current/client Python process RSS is always sampled with psutil. If a distributed Dask client is active, or if
+    ``client`` is passed explicitly, Dask's :class:`distributed.diagnostics.MemorySampler` is also used to measure
+    aggregate worker process RSS and spilled memory.
+
+    :param func: Callable to execute.
+    :param args: Positional arguments passed to ``func``.
+    :param interval: Sampling interval in seconds.
+    :param dask: Whether to force Dask worker-memory sampling. By default, an active distributed client is detected.
+    :param client: Explicit distributed client to sample. If omitted, the active client is used when present.
+    :param kwargs: Keyword arguments passed to ``func``.
+    :returns: Tuple of ``(result, metrics)``.
+    """
+
+    if interval <= 0:
+        raise ValueError("Argument 'interval' must be strictly positive.")
+
+    if client is None:
+        client = _get_active_dask_client()
+    use_dask = client is not None if dask is None else dask
+
+    if use_dask and client is None:
+        distributed = import_optional("distributed", extra_name="benchmark")
+        try:
+            client = distributed.get_client()
+        except ValueError as exc:
+            raise ValueError("Dask profiling was requested, but no active distributed client was found.") from exc
+
+    process_sampler = _ProcessRSSSampler(os.getpid(), interval=interval)
+    process_sampler.start()
+    start_time = time.time()
+
+    try:
+        if use_dask:
+            from distributed.diagnostics import MemorySampler
+
+            worker_process = MemorySampler()
+            spilled = MemorySampler()
+            with worker_process.sample("worker_process", client=client, measure="process", interval=interval):
+                with spilled.sample("spilled", client=client, measure="spilled", interval=interval):
+                    result = func(*args, **kwargs)
+        else:
+            worker_process = None
+            spilled = None
+            result = func(*args, **kwargs)
+    finally:
+        runtime_s = time.time() - start_time
+        process_sampler.stop()
+        process_sampler.join()
+
+    client_trace = process_sampler.samples_mb
+    worker_process_trace = _memory_sampler_trace_mb(worker_process, "worker_process") if worker_process else []
+    spilled_trace = _memory_sampler_trace_mb(spilled, "spilled") if spilled else []
+    metrics = ProfileMetrics(
+        runtime_s=runtime_s,
+        peak_client_rss_mb=max((value for _, value in client_trace), default=0.0),
+        peak_dask_worker_process_rss_mb=max((value for _, value in worker_process_trace), default=None),
+        peak_dask_spilled_mb=max((value for _, value in spilled_trace), default=None),
+        client_rss_mb=client_trace,
+        dask_worker_process_rss_mb=worker_process_trace,
+        dask_spilled_mb=spilled_trace,
+        dask_client_detected=bool(use_dask),
+    )
+    return result, metrics
 
 
 class Profiler:

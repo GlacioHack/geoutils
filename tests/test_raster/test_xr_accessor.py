@@ -4,6 +4,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from rasterio.transform import from_origin
+from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import examples, open_raster
@@ -105,3 +106,66 @@ class TestAccessor:
 
         footprint = ds.rst.get_footprint_projected(ds.rst.crs)
         assert isinstance(footprint, gpd.GeoDataFrame)
+
+    def test_get_stats__dask_global_quantile_stats(self) -> None:
+        """Regression test for Dask-backed xarray stats that require global quantiles."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        base = open_raster(self.aster_dem_path)
+        ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
+
+        assert isinstance(ds.data, da.Array)
+        assert not ds._in_memory
+
+        for stat in ["median", "90th percentile", "le90", "nmad", "iqr"]:
+            expected = float(base.rst.get_stats(stat))
+            actual = ds.rst.get_stats(stat)
+
+            assert isinstance(actual, da.Array)
+            assert float(actual.compute()) == pytest.approx(expected, rel=1e-5)
+            assert not ds._in_memory
+
+    def test_reproject__dask_keeps_dimension_order_for_stats(self) -> None:
+        """Regression test for Dask xarray reprojection outputs with valid rioxarray dimension order."""
+
+        pytest.importorskip("dask")
+
+        ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
+
+        reprojected_crs = ds.rst.reproject(crs=4326)
+        reprojected_res = ds.rst.reproject(res=(ds.rst.res[0] * 2, ds.rst.res[1] / 2), resampling="bilinear")
+
+        for reprojected in [reprojected_crs, reprojected_res]:
+            assert reprojected.dims == ("y", "x")
+            assert hasattr(reprojected.rst.get_stats("mean"), "compute")
+            assert np.isfinite(float(reprojected.rst.get_stats("mean").compute()))
+
+    def test_chunked_rasterize_paths_accept_dask_chunk_tuples(self) -> None:
+        """Regression test for xarray/Dask rasterization paths receiving normalized chunk tuples."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        arr = np.zeros((12, 10), dtype=np.uint8)
+        arr[2:9, 3:8] = 1
+        dask_arr = da.from_array(arr, chunks=(5, 4))
+        ds = gu.RasterAccessor.from_array(
+            data=dask_arr,
+            transform=from_origin(0, 12, 1, 1),
+            crs=4326,
+            nodata=0,
+        )
+        vector = gu.Vector(gpd.GeoDataFrame({"geometry": [box(2, 4, 9, 11)]}, crs=4326))
+
+        mask = vector.create_mask(ds.rst, dask=True)
+        assert isinstance(mask.data, da.Array)
+        assert mask.data.chunks == dask_arr.chunks
+        assert bool(mask.compute().data[3, 3])
+
+        polygons = ds.rst.polygonize(target_values=1)
+        rasterized = polygons.vct.rasterize(ds.rst, in_value=1, out_value=0, out_dtype=np.uint8, dask=True)
+        assert isinstance(rasterized.data, da.Array)
+        assert rasterized.data.chunks == dask_arr.chunks
+        assert np.array_equal(rasterized.compute().data, arr)

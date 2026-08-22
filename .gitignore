@@ -4,6 +4,13 @@
 # pycharm
 .idea/
 
+# codex
+.codex
+AGENTS.md
+
+# asv
+.asv/
+
 # sphinx documentation
 doc/_build/
 

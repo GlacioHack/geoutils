@@ -31,6 +31,7 @@ import rasterio as rio
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
+from geoutils._misc import import_optional
 from geoutils.pointcloud.base import (
     PointCloudBase,
     _get_dataframe_attrs,
@@ -38,10 +39,10 @@ from geoutils.pointcloud.base import (
     _set_dataframe_attrs,
 )
 from geoutils.pointcloud.las import (
-    is_laspy_supported,
     _load_laspy_data_slice,
     _load_laspy_metadata,
     _write_laspy,
+    is_laspy_supported,
 )
 from geoutils.vector.pd_accessor import VectorAccessor, _replace_geodataframe
 
@@ -51,6 +52,7 @@ _DASK_ACCESSOR_REGISTERED = False
 def _import_dask_dataframe() -> Any:
     """Import Dask DataFrame while suppressing optional dask-expr warnings from older environments."""
 
+    import_optional("dask")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
         import dask.dataframe as dd
@@ -66,6 +68,7 @@ def _register_dask_pointcloud_accessor() -> None:
     if _DASK_ACCESSOR_REGISTERED:
         return
 
+    import_optional("dask")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
         warnings.filterwarnings("ignore", message="registration of accessor.*", category=UserWarning)
@@ -167,7 +170,7 @@ def open_pointcloud(
         _register_dask_pointcloud_accessor()
         df = _as_pandas_geometry_dataframe(pc.ds)
         npartitions = max(1, int(len(pc.ds) / chunks) + int(len(pc.ds) % chunks != 0))
-        import dask
+        dask = import_optional("dask")
 
         with dask.config.set({"dataframe.convert-string": False}):
             ddf = dd.from_pandas(df, npartitions=npartitions)
@@ -201,15 +204,14 @@ def open_pointcloud(
 
     dd = _import_dask_dataframe()
     _register_dask_pointcloud_accessor()
-    from dask import delayed
+    dask = import_optional("dask")
+    delayed = dask.delayed
 
     starts = list(range(0, point_count, chunks))
     parts = [
         delayed(_load_laspy_data_slice_dataframe)(filename, columns_to_load, start, min(chunks, point_count - start))
         for start in starts
     ]
-    import dask
-
     with dask.config.set({"dataframe.convert-string": False}):
         ddf = dd.from_delayed(parts, meta=_empty_las_meta(columns_to_load, crs=crs))
     _set_dataframe_attrs(

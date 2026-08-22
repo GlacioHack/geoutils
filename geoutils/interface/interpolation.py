@@ -34,7 +34,7 @@ from geoutils._dispatch import _check_match_points
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig, compute_tiling
-from geoutils.multiproc.chunked import cached_cumsum
+from geoutils.multiproc.chunked import cached_cumsum, normalize_chunks
 from geoutils.projtools import reproject_from_latlon
 from geoutils.raster.referencing import _bounds, _coords, _outside_bounds, _res, _xy2ij
 
@@ -622,23 +622,15 @@ def _multiproc_interp_points(
     left, top = bounds.left, bounds.top
 
     # Get multiprocessing chunk sizes
-    chunksize = (config.chunks, config.chunks)
-
-    def _chunk_sizes_1d(n: int, chunk: int) -> tuple[int, ...]:
-        """Return tuple of chunk lengths that partition length n."""
-        if chunk <= 0:
-            raise ValueError("chunk must be > 0")
-        full = n // chunk
-        rem = n % chunk
-        sizes = (chunk,) * full + ((rem,) if rem else ())
-        return sizes if sizes else (0,)
+    chunks = normalize_chunks(chunks=config.chunks, shape=rst.shape)
+    chunksize = (chunks[0][0], chunks[1][0])
 
     # Get starting 2D index for each chunk of the full array
     # (mirroring what is done in block_id of dask.array.map_blocks)
     tiling = compute_tiling(tile_size=config.chunks, raster_shape=rst.shape, overlap=depth)
     starts = [
-        cached_cumsum(_chunk_sizes_1d(n=rst.shape[0], chunk=config.chunks), initial_zero=True),
-        cached_cumsum(_chunk_sizes_1d(n=rst.shape[1], chunk=config.chunks), initial_zero=True),
+        cached_cumsum(chunks[0], initial_zero=True),
+        cached_cumsum(chunks[1], initial_zero=True),
     ]
     num_chunks = (tiling.shape[0], tiling.shape[1])
     num_blocks = np.prod(num_chunks)

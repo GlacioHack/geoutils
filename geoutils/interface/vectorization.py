@@ -1902,8 +1902,7 @@ def _multiproc_polygonize(
     shape = (int(source_raster.shape[0]), int(source_raster.shape[1]))
 
     # Determine chunks from mp_config
-    chunksizes = (mp_config.chunks, mp_config.chunks)
-    chunks = normalize_chunks(chunks=chunksizes, shape=shape)
+    chunks = normalize_chunks(chunks=mp_config.chunks, shape=shape)
 
     # Build tiling from the chosen chunking scheme
     tiling, block_geogrids, block_ids = _chunked_build_dst_geotiling(

@@ -1,0 +1,75 @@
+name: benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      stress-shape:
+        description: "Square shape for large-data stress tests"
+        required: false
+        default: "12288"
+      stress-memory-limit:
+        description: "Per-worker Dask memory limit for large-data stress tests"
+        required: false
+        default: "512MB"
+  schedule:
+    - cron: "0 3 * * 0"
+
+jobs:
+  large-dask-memory:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          use-mamba: true
+          channel-priority: strict
+          activate-environment: geoutils-dev
+
+      - name: Install base environment
+        run: |
+          mamba install pyyaml python=3.12
+          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3" "environment.yml"
+          mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
+          pip install -e .[test,benchmark]
+
+      - name: Run large Dask memory tests
+        env:
+          GEOUTILS_DASK_STRESS_SHAPE: ${{ inputs.stress-shape }}
+          GEOUTILS_DASK_STRESS_MEMORY_LIMIT: ${{ inputs.stress-memory-limit }}
+        run: pytest --run-large-data -m large_data tests/test_benchmark/test_dask_memory.py -ra
+
+  asv:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          use-mamba: true
+          channel-priority: strict
+          activate-environment: geoutils-dev
+
+      - name: Install benchmark environment
+        run: |
+          mamba install pyyaml python=3.12
+          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3" "environment.yml"
+          mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
+          pip install -e .[benchmark]
+
+      - name: Check ASV benchmarks
+        run: asv check -E existing
+
+      - name: Run ASV quick benchmark pass
+        run: asv run --quick --show-stderr -E existing

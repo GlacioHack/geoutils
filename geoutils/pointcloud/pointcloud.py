@@ -454,13 +454,16 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         if mp_config is None:
             ds = _load_laspy_data(filename=self.name, columns=columns_to_load)
         else:
-            from geoutils.multiproc.pointcloud import _load_laspy_data_partitions
+            from geoutils.multiproc.pointcloud import (
+                _load_laspy_data_partitions,
+                _point_partition_size,
+            )
 
             ds = _load_laspy_data_partitions(
                 filename=self.name,
                 columns=columns_to_load,
                 point_count=self.point_count,
-                partition_size=mp_config.chunks,
+                partition_size=_point_partition_size(mp_config),
                 mp_config=mp_config,
             )
         self._ds = ds

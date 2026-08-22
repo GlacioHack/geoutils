@@ -399,7 +399,7 @@ class TestPolygonize:
         # Chunked polygonize with any strategy must match base exactly
         d8 = ds.rst.polygonize(target_values=1, connectivity=8, strategy=strategy)
         d4 = ds.rst.polygonize(target_values=1, connectivity=4, strategy=strategy)
-        mp_config = MultiprocConfig(chunks=2)
+        mp_config = MultiprocConfig(chunks=(2, 3))
         mp8 = rst_mp.polygonize(target_values=1, connectivity=8, strategy=strategy, mp_config=mp_config)
         mp4 = rst_mp.polygonize(target_values=1, connectivity=4, strategy=strategy, mp_config=mp_config)
 

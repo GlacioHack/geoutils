@@ -46,7 +46,11 @@ from geoutils.multiproc.chunked import (
     GeoGrid,
     normalize_chunks,
 )
-from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
+from geoutils.multiproc.mparray import (
+    MultiprocConfig,
+    _split_chunk_size,
+    _write_multiproc_result,
+)
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -462,11 +466,15 @@ def _rasterize(
 
     # Build chunked geogrid (shared for Dask and multiproc)
     if chunksizes is None:
-        ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
-        if ref_chunks is not None:
-            chunksizes = ref_chunks
+        if mp_backend:
+            assert mp_config is not None
+            chunksizes = _split_chunk_size(mp_config.chunks)
         else:
-            chunksizes = (1024, 1024)
+            ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
+            if ref_chunks is not None:
+                chunksizes = ref_chunks
+            else:
+                chunksizes = (1024, 1024)
     assert chunksizes is not None
 
     dst_geogrid = GeoGrid(transform=out_transform, shape=out_shape, crs=out_crs)

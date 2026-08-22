@@ -781,7 +781,7 @@ class TestInterpPointsChunked:
 
         # For the wrapper, out-of-bounds points are removed for chunked work, then NaNs are rebuilt in output.
         # Dask/MP return arrays (ragged output), so we request as_array=True for all.
-        mp_config = MultiprocConfig(chunks=10)
+        mp_config = MultiprocConfig(chunks=(10, 7))
 
         # Base raster output (NumPy backend)
         out_raster = raster_base.interp_points(points=(x, y), method=method, as_array=as_array)

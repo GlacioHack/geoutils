@@ -25,6 +25,7 @@ from geoutils.multiproc.mparray import (
     _load_raster_tile,
     _remove_tile_padding,
     block_bounds_from_chunks,
+    compute_tiling,
     map_blocks,
     map_overlap,
 )
@@ -153,6 +154,18 @@ class TestTiling:
         assert np.array_equal(block_bounds[0, 0], np.array([0, 55, 0, 30]))
         assert np.array_equal(block_bounds[-1, -1], np.array([45, 100, 45, 55]))
 
+    def test_compute_tiling_rectangular_chunks(self) -> None:
+        tiling = compute_tiling(tile_size=(40, 25), raster_shape=(100, 55), overlap=5)
+
+        expected_tiling = np.array(
+            [
+                [[0, 45, 0, 30], [0, 45, 20, 55]],
+                [[35, 85, 0, 30], [35, 85, 20, 55]],
+                [[75, 100, 0, 30], [75, 100, 20, 55]],
+            ]
+        )
+        assert np.array_equal(tiling, expected_tiling)
+
 
 class TestMultiproc:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
@@ -160,6 +173,17 @@ class TestMultiproc:
 
     num_workers = min(2, cpu_count())  # Safer limit for CI
     cluster = ClusterGenerator("test", nb_workers=num_workers)
+
+    def test_multiproc_config_rectangular_chunks(self) -> None:
+        config = MultiprocConfig(chunks=(40, 25))
+
+        assert config.chunks == (40, 25)
+        assert config.copy().chunks == (40, 25)
+
+        with pytest.raises(ValueError, match="strictly positive"):
+            MultiprocConfig(chunks=(0, 25))
+        with pytest.raises(TypeError, match="integer or a tuple of two integers"):
+            MultiprocConfig(chunks=(40, 25.0))  # type: ignore
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     def test_load_raster_tile(self, example: str) -> None:
@@ -259,6 +283,15 @@ class TestMultiproc:
             output_mask = map_overlap(_custom_func_mask, raster, config, depth=depth)
             assert np.array_equal(raster.get_mask(), output_mask.data)
 
+    def test_map_overlap_rectangular_chunks(self, tmp_path: Any) -> None:
+        raster = Raster(self.aster_dem_path)
+        config = MultiprocConfig(chunks=(100, 160), outfile=str(tmp_path / "rectangular_overlap.tif"))
+
+        output_raster = map_overlap(_custom_func, raster, config, addition=5, factor=0.5, depth=10)
+
+        assert not raster.is_loaded
+        assert output_raster.raster_equal(_custom_func(raster, addition=5, factor=0.5))
+
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     @pytest.mark.parametrize("tile_size", [10, 20])
     @pytest.mark.parametrize("cluster", [None, cluster])
@@ -287,6 +320,23 @@ class TestMultiproc:
         # Compare tiled_stats with the stats on full raster
         total_stats = _custom_func_stats(raster)
 
+        tiled_count = np.nansum([stats["valid_count"] for stats in list_stats])
+        tiled_mean = np.nansum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count
+        assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
+        assert total_stats["valid_count"] == tiled_count
+
+    def test_map_blocks_rectangular_chunks(self) -> None:
+        raster = Raster(self.aster_dem_path)
+        config = MultiprocConfig(chunks=(10, 20))
+
+        results = map_blocks(_custom_func_stats, raster, config, return_block_info=True)  # type: ignore
+        list_stats = [result[0] for result in results]
+        list_tiles = [result[1] for result in results]
+
+        assert np.array_equal(list_tiles[0], np.array([0, 10, 0, 20]))
+        assert not raster.is_loaded
+
+        total_stats = _custom_func_stats(raster)
         tiled_count = np.nansum([stats["valid_count"] for stats in list_stats])
         tiled_mean = np.nansum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5

@@ -14,6 +14,7 @@ import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 
 import geoutils as gu
+import geoutils.pointcloud.pd_accessor as pd_accessor
 from geoutils.multiproc import MultiprocConfig
 
 
@@ -103,6 +104,21 @@ class TestPointCloudAccessor:
         summed = ds.pc + 1
         assert isinstance(summed, dd.DataFrame)
         assert np.array_equal(summed.compute()["z"].values, self.gdf["z"].values + 1)
+
+    def test_open_pointcloud__dask_missing_dep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.gdf.to_file(temp_file)
+        import_optional = pd_accessor.import_optional
+
+        def _missing_dask(import_name: str, package_name: str | None = None, extra_name: str = "opt") -> object:
+            if import_name == "dask":
+                raise ImportError("Optional dependency 'dask' required.")
+            return import_optional(import_name, package_name=package_name, extra_name=extra_name)
+
+        monkeypatch.setattr(pd_accessor, "import_optional", _missing_dask)
+        with pytest.raises(ImportError, match="Optional dependency 'dask' required.*"):
+            gu.open_pointcloud(temp_file, data_column="z", chunks=5)
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_open_pointcloud_las__dask(self) -> None:

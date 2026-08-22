@@ -261,14 +261,15 @@ class RasterAccessor(RasterBase):
         # Xarray converts NumPy masked arrays to floating arrays with NaN, even when no values are masked. Preserve the
         # original dtype when possible, and only materialize masked values when they exist.
         if np.ma.isMaskedArray(data):
-            mask = np.ma.getmaskarray(data)
+            masked = np.ma.asarray(data)
+            mask = np.ma.getmaskarray(masked)
             if mask.any():
-                if np.issubdtype(data.dtype, np.floating):
-                    data = data.filled(np.nan)
+                if np.issubdtype(masked.dtype, np.floating):
+                    data = masked.filled(np.nan)
                 else:
-                    data = data.astype(np.float32).filled(np.nan)
+                    data = masked.astype(np.float32).filled(np.nan)
             else:
-                data = np.ma.getdata(data)
+                data = np.ma.getdata(masked)
 
         # Squeeze data
         data = data.squeeze()

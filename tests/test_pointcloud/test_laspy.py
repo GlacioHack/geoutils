@@ -22,7 +22,6 @@ from geoutils.pointcloud.las import (
     write_laspy_spatial_chunks,
 )
 
-
 pytestmark = pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
 
 
