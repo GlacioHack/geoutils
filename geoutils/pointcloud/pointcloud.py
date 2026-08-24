@@ -1367,7 +1367,7 @@ class PointCloud(Vector):  # type: ignore[misc]
 
     def info(self, verbose: bool = True, stats: bool = False) -> None | str:
         """
-        Print summary information about the DEM.
+        Print summary information about the point cloud.
 
         :param stats: Add statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
             not calculate statistics.
@@ -1376,9 +1376,8 @@ class PointCloud(Vector):  # type: ignore[misc]
         :returns: Summary string or None.
         """
 
-        # Get raster.info()
-        as_str = super().info(verbose=False)  # type: ignore
-        as_str_split = as_str.split("\n")
+        # Get vector.info()
+        as_str_split = super().info(verbose=False).split("\n")  # type: ignore
 
         if stats:
             as_str_split.append("\nStatistics:")

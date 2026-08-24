@@ -630,22 +630,22 @@ class RasterBase(ABC):
         :returns: Summary string or None.
         """
         as_str = [
-            f"Driver:               {self.driver} \n",
-            f"Filename:             {self.name} \n",
-            f"Loaded?               {self.is_loaded} \n",
-            f"Grid size:            {self.width}, {self.height}\n",
-            f"Number of bands:      {self.count:d}\n",
-            f"Data types:           {self.dtype}\n",
-            f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}\n",
-            f"Nodata value:         {self.nodata}\n",
-            f"Pixel interpretation: {self.area_or_point}\n",
-            "Pixel size:           {}, {}\n".format(*self.res),
-            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}\n",
-            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}\n",
+            f"Driver:               {self.driver}",
+            f"Filename:             {self.name}",
+            f"Loaded?               {self.is_loaded}",
+            f"Grid size:            {self.width}, {self.height}",
+            f"Number of bands:      {self.count}",
+            f"Data types:           {self.dtype}",
+            f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}",
+            f"Nodata value:         {self.nodata}",
+            f"Pixel interpretation: {self.area_or_point}",
+            "Pixel size:           {}, {}".format(*self.res),
+            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}",
+            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}",
         ]
 
         if stats:
-            as_str.append("\nStatistics:\n")
+            as_str.append("\nStatistics:")
             if not self.is_loaded:
                 self.load()
 
@@ -657,22 +657,22 @@ class RasterBase(ABC):
 
                 # Format the stats with aligned names
                 for name, value in statistics.items():
-                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
+                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}")
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
-                    as_str.append(f"Band {b + 1}:\n")
+                    as_str.append(f"Band {b + 1}:")
                     statistics = self.get_stats(band=b)
                     if isinstance(statistics, dict):
                         max_len = max(len(name) for name in statistics.keys())
                         for name, value in statistics.items():
-                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
+                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}")
 
         if verbose:
-            print("".join(as_str))
+            print("\n".join(as_str))
             return None
         else:
-            return "".join(as_str)
+            return "\n".join(as_str)
 
     @overload
     def get_stats(
