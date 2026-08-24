@@ -679,18 +679,18 @@ class RasterBase(ABC):
         self,
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any]: ...
+    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
 
     @overload
     def get_stats(
         self,
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> dict[str, np.floating[Any]]: ...
+    ) -> dict[str, np.floating[Any]] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
 
     @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)
     def get_stats(
@@ -701,7 +701,7 @@ class RasterBase(ABC):
         inlier_mask: RasterType | NDArrayBool | None = None,
         band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any] | dict[str, np.floating[Any]]]:
+    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
@@ -762,7 +762,7 @@ class RasterBase(ABC):
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
 
-        # Case monoband
+        # Case mono-band
         if self.count == 1 and band is None:
             band = 1
 
@@ -802,13 +802,14 @@ class RasterBase(ABC):
                         "Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning
                     )
         else:
+            # Case multi-band
             stats = {}
             for band in range(self.count):
                 stats["band " + str(band)] = self.get_stats(
                     stats_name=stats_name, inlier_mask=inlier_mask, band=band, counts=counts
                 )
 
-            return stats
+            return stats  # type: ignore
 
     def _raster_equal_allclose(
         self,
