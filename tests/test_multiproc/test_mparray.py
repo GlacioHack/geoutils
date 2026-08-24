@@ -48,7 +48,7 @@ def _custom_func(raster: Raster, addition: float, factor: float) -> Raster:
 def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
-        return raster.get_stats(band=1, stats_name=["mean", "valid_count"])
+        return raster.get_stats(band=1, stats_name=["mean", "valid_count"])  # type: ignore
 
 
 # Define a simple function which return a Mask
