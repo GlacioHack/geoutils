@@ -1448,7 +1448,7 @@ class RasterBase(ABC):
         grid: bool = True,
         shift_area_or_point: bool | None = None,
         force_offset: str | None = None,
-        dst_crs: CRS | int | None = None,
+        crs: CRS | int | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of all pixels in the raster.
@@ -1459,14 +1459,15 @@ class RasterBase(ABC):
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
             any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
-        :param dst_crs: Coordinate reference system of the coordinates wanted.
+        :param crs: Coordinate reference system in which the coordinates are provided. Defaults to CRS of
+            the input raster.
 
         :returns x,y: Arrays of the (x,y) coordinates.
         """
         dst_transform = self.transform
-        if dst_crs:
+        if crs:
             _, dst_transform, _ = _check_match_grid(
-                src=self, crs=dst_crs, ref=None, res=None, shape=None, bounds=None, coords=None
+                src=self, crs=crs, ref=None, res=None, shape=None, bounds=None, coords=None
             )
 
         return _coords(
