@@ -37,8 +37,8 @@ class TestStats:
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
-    def test_get_stats_raster(self, example: str) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
+    def test_get_stats_raster_one_band(self, example: str) -> None:
         """
         Verify get_stats() method for a raster, especially output stats for different inputs
         parameters and some stats.
@@ -199,6 +199,18 @@ class TestStats:
         assert raster.get_stats(stats_name="iqr") == pytest.approx(
             np.nanpercentile(nan_arr, 75) - np.nanpercentile(nan_arr, 25)
         )
+
+    @pytest.mark.parametrize("example", [landsat_rgb_path])
+    def test_get_stats_multi_bands(self, example: str) -> None:
+        raster = gu.Raster(example)
+        stats = raster.get_stats()
+        assert list(stats.keys()) == ["band 0", "band 1", "band 2"]
+        for band in range(raster.count):
+            assert stats["band " + str(band)] == raster.get_stats(band=band)
+
+        stats = raster.get_stats("mean")
+        for band in range(raster.count):
+            assert stats["band " + str(band)] == raster.get_stats("mean", band=band)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_get_stats_raster_pointcloud(self, example: str) -> None:
