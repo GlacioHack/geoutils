@@ -170,16 +170,17 @@ class TestRaster:
         output_with_stats_split = output_with_stats.split("\n")
         nb_lines_with_stats = len(output_with_stats_split)
 
-        assert output_with_stats_split[nb_lines] == "Statistics:"
+        print(output_with_stats_split)
+        assert output_with_stats_split[nb_lines + 1] == "Statistics:"
 
         if r.count == 1:
             assert nb_lines + len(stats) + 2 == nb_lines_with_stats
             for s, stat in enumerate(stats.keys()):
-                assert output_with_stats_split[nb_lines + 1 + s].startswith(stat)
-                assert f"{stats[stat]:.2f}" in output_with_stats_split[nb_lines + 1 + s]
+                assert output_with_stats_split[nb_lines + 2 + s].startswith(stat)
+                assert f"{stats[stat]:.2f}" in output_with_stats_split[nb_lines + 2 + s]
         else:
             assert nb_lines + r.count * len(r.get_stats(band=1)) + r.count + 2 == nb_lines_with_stats
-            start = nb_lines + 1
+            start = nb_lines + 2
             for band in range(r.count):
                 assert output_with_stats_split[start + band * len(r.get_stats(band=1)) + band] == f"Band {band + 1}:"
                 stats_band = r.get_stats(band=band)

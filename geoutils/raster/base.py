@@ -795,7 +795,7 @@ class RasterBase(ABC):
                 return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
             # Given list or all attributes to compute if None
-            if isinstance(stats_name, list) or stats_name is None:
+            if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
                 return _statistics(data, stats_name, counts)  # type: ignore
             else:
                 # Single attribute to compute
