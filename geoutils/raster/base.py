@@ -727,7 +727,7 @@ class RasterBase(ABC):
         - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
         ignoring masked values.
         - Valid count: number of finite data points in the array. It counts the non-masked elements.
-        - Total count: total size of the raster.
+        - Total count: total size (width x height) of the raster.
         - Percentage valid points: ratio between Valid count and Total count.
 
         For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
@@ -749,12 +749,17 @@ class RasterBase(ABC):
 
         Callable functions are supported as well.
 
-        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+        By default and without any specification, this function computes the following main statistics: minimum,
+        maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
+        To compute all available statistics, set `stats_name` to `all`.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, main statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
+            To compute all available statistics, set `stats_name` to `all`.
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
@@ -784,7 +789,7 @@ class RasterBase(ABC):
             return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
 
         # Given list or all attributes to compute if None
-        if isinstance(stats_name, list) or stats_name is None:
+        if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
             return _statistics(data, stats_name, counts)  # type: ignore
         else:
             # Single attribute to compute
@@ -880,7 +885,6 @@ class RasterBase(ABC):
 
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
-            print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
             warnings.warn(
                 category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
             )
