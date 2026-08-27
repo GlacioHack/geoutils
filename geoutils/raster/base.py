@@ -34,6 +34,7 @@ from typing import (
     Literal,
     TypeVar,
     Union,
+    cast,
     overload,
 )
 
@@ -47,6 +48,7 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
+from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -57,6 +59,7 @@ from geoutils._typing import (
     Number,
 )
 from geoutils.filters import _filter
+from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.interpolation import _interp_points, _reduce_points
 from geoutils.interface.raster_point import (
@@ -72,6 +75,7 @@ from geoutils.projtools import (
     align_bounds,
     merge_bounds,
 )
+from geoutils.raster.processing import _fill_nodata, _sieve
 from geoutils.raster.referencing import (
     _bounds,
     _coords,
@@ -89,6 +93,7 @@ from geoutils.stats.stats import _statistics
 RasterType = TypeVar("RasterType", bound="RasterBase")
 # For inputs, we also accept a xr.DataArray
 RasterLike = Union["RasterBase", xr.DataArray]
+_UNSET = object()
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -165,6 +170,9 @@ class RasterBase(ABC):
 
     def _cast_pointcloud_output(self, pointcloud: Any) -> Any:
         """Return an accessor-backed point cloud when this raster is accessor-backed."""
+
+        if is_dask_dataframe(pointcloud):
+            return pointcloud
 
         if self._is_xr:
             ds = pointcloud.ds
@@ -496,6 +504,52 @@ class RasterBase(ABC):
                 yoff = -0.5
             # We perform the shift in place
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
+
+    def edit(
+        self: RasterType,
+        *,
+        crs: CRS | int | str | None | object = _UNSET,
+        transform: Affine | tuple[float, ...] | object = _UNSET,
+        nodata: int | float | None | object = _UNSET,
+        tags: dict[str, Any] | None | object = _UNSET,
+        area_or_point: Literal["Area", "Point"] | None | object = _UNSET,
+    ) -> RasterType:
+        """
+        Return a copy with selected raster metadata edited together.
+
+        This groups the core metadata changes provided by :program:`gdal_edit` without changing pixel values or the
+        source raster. Omitting an argument retains its existing value, while explicitly passing ``None`` clears CRS,
+        nodata, tags or pixel interpretation.
+
+        :param crs: New coordinate reference system.
+        :param transform: New affine geotransform.
+        :param nodata: New nodata metadata value without changing pixel values or their mask.
+        :param tags: Metadata tags to update, or ``None`` to clear all tags.
+        :param area_or_point: New pixel interpretation without shifting the geotransform.
+
+        :return: Raster copy with updated metadata.
+        """
+
+        # A shallow copy keeps the unchanged pixel storage unloaded and separates metadata edits
+        raster_copy = self.copy(deep=False)
+        edited = raster_copy.rst if isinstance(raster_copy, xr.DataArray) else raster_copy
+
+        if crs is not _UNSET:
+            edited.set_crs(cast(Any, crs))
+        if transform is not _UNSET:
+            edited.set_transform(cast(Any, transform))
+        if nodata is not _UNSET:
+            edited.set_nodata(cast(int | float | None, nodata), update_array=False, update_mask=False)
+        if tags is not _UNSET:
+            if tags is None:
+                edited.tags = None
+            else:
+                updated_tags = edited.tags.copy()
+                updated_tags.update(cast(dict[str, Any], tags))
+                edited.tags = updated_tags
+        if area_or_point is not _UNSET:
+            edited.set_area_or_point(cast(Literal["Area", "Point"] | None, area_or_point), shift_area_or_point=False)
+        return raster_copy
 
     @abstractmethod
     def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None: ...
@@ -1545,6 +1599,7 @@ class RasterBase(ABC):
         as_array: Literal[False] = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> PointCloud: ...
 
@@ -1560,6 +1615,7 @@ class RasterBase(ABC):
         as_array: Literal[True],
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> NDArrayNum: ...
 
@@ -1575,6 +1631,7 @@ class RasterBase(ABC):
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
@@ -1589,6 +1646,7 @@ class RasterBase(ABC):
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud:
         """
@@ -1610,9 +1668,8 @@ class RasterBase(ABC):
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
             Default is linear. Can be configured with the global setting geoutils.config["interpolation_method"].
-        :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
-            rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
-            quintic method), or rounded down, or a fixed integer. Can be configured with the global setting
+        :param dist_nodata_spread: Optional extra distance of nodata spreading, either half-interpolation order rounded
+            up or down, or a fixed integer. Higher-order methods default to
             geoutils.config["interpolation_dist_nodata_spread"].
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
@@ -1622,6 +1679,9 @@ class RasterBase(ABC):
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+        :param nodata_propagation: How invalid values affect nearest and linear interpolation. ``gdal`` uses finite
+            neighbors but keeps a cell invalid when its nearest source value is invalid, ``ignore`` uses every
+            available finite neighbor and ``propagate`` rejects values influenced by an invalid neighbor.
 
         :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
@@ -1629,10 +1689,6 @@ class RasterBase(ABC):
         # If interpolation method undefined, default to the global system config
         if method is None:
             method = config["interpolation_method"]
-
-        # If dist_nodata_spread undefined, default to the global system config
-        if dist_nodata_spread is None:
-            dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
         output = _interp_points(
             self,
@@ -1644,6 +1700,7 @@ class RasterBase(ABC):
             shift_area_or_point=shift_area_or_point,
             dist_nodata_spread=dist_nodata_spread,
             mp_config=mp_config,
+            nodata_propagation=nodata_propagation,
             **kwargs,
         )
         if not as_array and not kwargs.get("return_interpolator", False):
@@ -1751,6 +1808,60 @@ class RasterBase(ABC):
             **kwargs,
         )
         return self._cast_raster_output(output)
+
+    @profiler.profile("geoutils.raster.raster.sieve", memprof=True)
+    def sieve(
+        self: RasterType,
+        size: int,
+        connectivity: Literal[4, 8] = 4,
+        mask: RasterLike | NDArrayBool | None = None,
+    ) -> RasterType:
+        """
+        Remove connected integer regions smaller than a number of pixels.
+
+        This mirrors :program:`gdal_sieve` for each band. The complete array is processed eagerly because connected
+        regions can cross arbitrary chunk boundaries.
+
+        :param size: Minimum connected-region size in pixels.
+        :param connectivity: Pixel connectivity, either 4 or 8 (defaults to 4).
+        :param mask: Optional Boolean raster or array where ``True`` values can participate in regions.
+
+        :return: Raster copy with small regions replaced by their largest neighboring value.
+        """
+
+        output = _sieve(source_raster=self, size=size, connectivity=connectivity, mask=mask)
+        return self.copy(new_array=output)
+
+    @profiler.profile("geoutils.raster.raster.fill_nodata", memprof=True)
+    def fill_nodata(
+        self: RasterType,
+        max_search_distance: float = 100.0,
+        smoothing_iterations: int = 0,
+        interpolation: Literal["inv_dist", "nearest"] = "inv_dist",
+        mask: RasterLike | NDArrayBool | None = None,
+    ) -> RasterType:
+        """
+        Fill nodata cells from nearby finite values.
+
+        This mirrors :program:`gdal_fillnodata` for each band. Cells beyond the search distance remain nodata, and the
+        complete array is processed eagerly so interpolation can reach across chunk boundaries.
+
+        :param max_search_distance: Maximum search distance in pixels (defaults to 100).
+        :param smoothing_iterations: Number of 3 by 3 smoothing passes after filling (defaults to 0).
+        :param interpolation: ``inv_dist`` for inverse-distance weighting or ``nearest`` (defaults to ``inv_dist``).
+        :param mask: Optional Boolean raster or array where ``True`` values can provide interpolation values.
+
+        :return: Raster copy with reachable nodata cells filled.
+        """
+
+        output = _fill_nodata(
+            source_raster=self,
+            max_search_distance=max_search_distance,
+            smoothing_iterations=smoothing_iterations,
+            interpolation=interpolation,
+            mask=mask,
+        )
+        return self.copy(new_array=output)
 
     @deprecate(
         Version("0.3.0"),

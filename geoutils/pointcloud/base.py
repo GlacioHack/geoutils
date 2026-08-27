@@ -39,32 +39,33 @@ import pandas as pd
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr
+from geoutils._dispatch import get_geo_attr, is_dask_array
+from geoutils._dispatch import is_dask_dataframe as _is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum, Number
-from geoutils.interface.gridding import _grid_pointcloud
-from geoutils.raster.referencing import _coords
+from geoutils.interface._nodata import NodataPropagation
+from geoutils.interface.gridding import (
+    GriddingEngine,
+    GriddingMethod,
+    _grid_pointcloud_to_raster,
+)
 from geoutils.stats.sampling import _subsample_numpy
 from geoutils.stats.stats import _statistics
 from geoutils.vector.base import VectorBase
 
 if TYPE_CHECKING:
-    from geoutils.raster.base import RasterType
+    from geoutils.multiproc import MultiprocConfig
+    from geoutils.raster.base import RasterLike
 
 
 PointCloudBaseType = TypeVar("PointCloudBaseType", bound="PointCloudBase")
 
 
-def _is_dask_dataframe(obj: Any) -> bool:
-    """Return True for Dask DataFrame-like objects without importing Dask at module import time."""
-
-    return obj.__class__.__module__.startswith("dask.dataframe")
-
-
 def _as_dask_array(values: Any) -> Any:
     """Convert a Dask Series to a Dask Array when possible, otherwise return the input unchanged."""
 
-    if values.__class__.__module__.startswith("dask.dataframe"):
+    # Dask Series exposes this conversion without computing its partitions
+    if hasattr(values, "to_dask_array"):
         return values.to_dask_array(lengths=True)
     return values
 
@@ -72,6 +73,7 @@ def _as_dask_array(values: Any) -> Any:
 def _get_dataframe_attrs(ds: Any) -> dict[str, Any]:
     """Get GeoUtils metadata from Pandas or Dask dataframes."""
 
+    # Dask does not carry Pandas ``attrs`` reliably through graph operations
     if _is_dask_dataframe(ds):
         try:
             return object.__getattribute__(ds, "_geoutils_attrs")
@@ -83,6 +85,7 @@ def _get_dataframe_attrs(ds: Any) -> dict[str, Any]:
 def _set_dataframe_attrs(ds: Any, attrs: dict[str, Any]) -> None:
     """Set GeoUtils metadata on Pandas or Dask dataframes."""
 
+    # Keep a private copy on Dask collections and use the public mapping for Pandas
     if _is_dask_dataframe(ds):
         object.__setattr__(ds, "_geoutils_attrs", attrs.copy())
     elif hasattr(ds, "attrs"):
@@ -127,7 +130,7 @@ def _cast_numeric_array_pointcloud(
     if isinstance(other, (float, int, np.floating, np.integer)):
         return other
 
-    if other.__class__.__module__.startswith(("dask.array", "dask.dataframe")):
+    if is_dask_array(other) or _is_dask_dataframe(other):
         return other
 
     raise NotImplementedError(
@@ -145,6 +148,8 @@ class PointCloudBase(VectorBase):
 
     @property
     def _is_dask(self) -> bool:
+        """Whether the backing point-cloud dataframe is partitioned by Dask."""
+
         return _is_dask_dataframe(self.ds)
 
     @property
@@ -175,11 +180,13 @@ class PointCloudBase(VectorBase):
 
         if self.data_column is not None:
             if self._is_dask:
+                # ``assign`` adds a lazy column operation without mutating partitions
                 self.ds = self.ds.assign(**{self.data_column: new_data})
             else:
                 self.ds[self.data_column] = new_data
         else:
             if self._is_dask:
+                # Dask point geometries are kept two-dimensional for reliable metadata
                 raise ValueError("Dask-backed point clouds require an explicit data column.")
             self.ds.geometry = gpd.points_from_xy(x=self.geometry.x, y=self.geometry.y, z=new_data, crs=self.crs)
 
@@ -201,6 +208,8 @@ class PointCloudBase(VectorBase):
 
     @data_column.setter
     def data_column(self, new_data_column: str | None) -> None:
+        """Select the dataframe column used as point-cloud values."""
+
         self.set_data_column(new_data_column=new_data_column)
 
     def set_data_column(self, new_data_column: str | None) -> None:
@@ -240,6 +249,7 @@ class PointCloudBase(VectorBase):
         """Number of points in the point cloud."""
 
         if self._is_dask:
+            # Use file or construction metadata before falling back to a Dask row count
             count = _get_dataframe_attrs(self.ds).get("point_count")
             if count is not None:
                 return int(count)
@@ -258,6 +268,7 @@ class PointCloudBase(VectorBase):
         attrs["data_column"] = self.data_column
         _set_dataframe_attrs(new_ds, attrs)
 
+        # Accessors expose dataframe-like outputs while PointCloud wraps eager outputs
         if self._is_pd or self._is_dask:
             return new_ds
 
@@ -273,6 +284,7 @@ class PointCloudBase(VectorBase):
         """
 
         if self._is_dask:
+            # Copying a Dask collection duplicates the graph rather than computing data
             new_ds = self.ds.copy()
             if new_array is not None:
                 if self.data_column is None:
@@ -360,6 +372,7 @@ class PointCloudBase(VectorBase):
         """Convert point cloud to three 1D arrays of coordinates for X/Y/Z."""
 
         if self._is_dask:
+            # Extract X and Y independently within each point partition
             x = self.ds["geometry"].map_partitions(lambda s: s.apply(lambda geom: geom.x), meta=("x", "float64"))
             y = self.ds["geometry"].map_partitions(lambda s: s.apply(lambda geom: geom.y), meta=("y", "float64"))
             return x, y, self.data
@@ -370,6 +383,7 @@ class PointCloudBase(VectorBase):
 
         x, y, z = self.to_xyz()
         if self._is_dask:
+            # Stack lazy coordinate Series into a 3 x N Dask array
             import_optional("dask")
             import dask.array as da
 
@@ -380,6 +394,7 @@ class PointCloudBase(VectorBase):
         """Convert point cloud to a list of 3-tuples."""
 
         if self._is_dask:
+            # Tuple output is eager, so compute all three coordinate collections here
             return list(zip(*[v.compute() for v in self.to_xyz()]))
         return list(zip(self.geometry.x.values, self.geometry.y.values, self.data))
 
@@ -430,6 +445,7 @@ class PointCloudBase(VectorBase):
     ) -> np.floating[Any] | dict[str, np.floating[Any]]:
         """Retrieve specified statistics or all available statistics for the point cloud data."""
 
+        # Statistics return small eager values, so reduce the lazy data column here
         data = self.data.compute().values if self._is_dask else np.asarray(self.data)
 
         if isinstance(stats_name, list) or stats_name is None:
@@ -476,6 +492,7 @@ class PointCloudBase(VectorBase):
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """Randomly sample the point cloud. Only valid values are considered."""
 
+        # Subsampling returns a small eager selection, so materialize the data column once
         data = self.data.compute().values if self._is_dask else np.asarray(self.data)
         if return_indices:
             return _subsample_numpy(
@@ -494,38 +511,50 @@ class PointCloudBase(VectorBase):
     @profiler.profile("geoutils.pointcloud.base.grid", memprof=True)
     def grid(
         self,
-        ref: RasterType | None = None,
+        ref: RasterLike | None = None,
         grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
         res: float | tuple[float, float] | None = None,
         shape: tuple[int, int] | None = None,
-        bounds: tuple[int, int, int, int] | None = None,
-        resampling: Literal["nearest", "linear", "cubic"] = "linear",
+        bounds: tuple[float, float, float, float] | None = None,
+        resampling: GriddingMethod = "linear",
         dist_nodata_pixel: float = 1.0,
         nodata: int | float = -9999,
-    ) -> RasterType:
+        *,
+        distance_power: float = 2.0,
+        min_points: int = 1,
+        engine: GriddingEngine = "scipy",
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        n_threads: int = 0,
+        nodata_propagation: NodataPropagation = "gdal",
+    ) -> Any:
         """Grid point cloud into a raster."""
 
-        from geoutils._dispatch import _check_match_grid
-
-        ds = self.ds.compute() if self._is_dask else self.ds
-        out_shape, out_transform, out_crs = _check_match_grid(
-            self, ref=ref, coords=grid_coords, res=res, bounds=bounds, shape=shape, crs=None
+        return self._cast_raster_output(
+            _grid_pointcloud_to_raster(
+                source_pointcloud=self,
+                ref=ref,
+                grid_coords=grid_coords,
+                res=res,
+                shape=shape,
+                bounds=bounds,
+                resampling=resampling,
+                dist_nodata_pixel=dist_nodata_pixel,
+                nodata=nodata,
+                distance_power=distance_power,
+                min_points=min_points,
+                engine=engine,
+                chunksizes=chunksizes,
+                mp_config=mp_config,
+                dask=self._is_dask,
+                n_threads=n_threads,
+                nodata_propagation=nodata_propagation,
+            )
         )
-        grid_coords = _coords(transform=out_transform, shape=out_shape, grid=False, area_or_point=None)
-
-        array, transform = _grid_pointcloud(
-            ds,
-            grid_coords=grid_coords,
-            data_column_name=self.data_column,
-            resampling=resampling,
-            dist_nodata_pixel=dist_nodata_pixel,
-        )
-        from geoutils.raster import Raster
-
-        raster = Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=nodata)
-        return self._cast_raster_output(raster)
 
     def _binary_numeric_operation(self, other: Any, op_name: str) -> Any:
+        """Apply one named numeric operation to point values and retain point geometry."""
+
         other_data = _cast_numeric_array_pointcloud(self, other, operation_name="an arithmetic operation")
         out_data = getattr(self.data, op_name)(other_data)
         return self.copy(new_array=out_data)

@@ -388,7 +388,7 @@ def map_overlap(
     for row in range(tiling_grid.shape[0]):
         for col in range(tiling_grid.shape[1]):
             tile = tiling_grid[row, col]
-            # Submit the block processing task on the cluster.
+            # Submit the block processing task on the cluster
             tasks.append(mp_config.cluster.submit(_apply_func_block, func, raster, tile, depth, *args, **kwargs))
 
     # get first tile to retrieve dtype and nodata
@@ -427,9 +427,9 @@ def _write_multiproc_result(
     # Create a new raster file to save the processed results
     with rio.open(mp_config.outfile, "w", driver=mp_config.driver, **file_metadata, BIGTIFF="IF_NEEDED") as dst:
         try:
-            # Iterate over the tasks and retrieve the processed blocks.
-            for results in tasks:
-                result_tile, dst_tile = mp_config.cluster.compute(results)
+            # Iterate over the tasks and retrieve one processed block at a time
+            for task_index, task in enumerate(tasks):
+                result_tile, dst_tile = mp_config.cluster.compute(task)
                 is_mask = has_geo_attr(result_tile, "is_mask") and get_geo_attr(result_tile, "is_mask")
 
                 # Define the window in the output file where the tile should be written
@@ -447,8 +447,13 @@ def _write_multiproc_result(
                 else:
                     data = result_tile.data if result_tile.count > 1 else result_tile[np.newaxis, :, :]
 
-                # Write the processed block to the appropriate location in the output file.
+                # Write the processed block to the appropriate location in the output file
                 dst.write(data, window=dst_window)
+
+                # Futures retain their result, so release both after the file owns the tile
+                tasks[task_index] = None
+                del data
+                del result_tile
             logging.info(f"Raster saved under {mp_config.outfile}")
         except Exception as e:
             raise RuntimeError(f"Error retrieving raster blocks from multiprocessing tasks: {e}")
@@ -533,7 +538,7 @@ def map_blocks(
     for row in range(tiling_grid.shape[0]):
         for col in range(tiling_grid.shape[1]):
             tile = tiling_grid[row, col]
-            # Submit the block processing task on the cluster.
+            # Submit the block processing task on the cluster
             tasks.append(mp_config.cluster.submit(_apply_func_block, func, raster, tile, depth, *args, **kwargs))
 
     try:

@@ -51,6 +51,35 @@ if TYPE_CHECKING:
     from geoutils.raster.base import RasterBase, RasterLike
     from geoutils.vector.vector import Vector, VectorLike
 
+# Helpers for recognizing optional Dask objects without importing Dask
+################################################
+
+
+def is_dask_dataframe(obj: Any) -> bool:
+    """Return True for Dask DataFrame-like objects without importing optional dependencies."""
+
+    # Dask and Dask-GeoPandas expose stable public module prefixes
+    return obj.__class__.__module__.startswith(("dask.dataframe", "dask_geopandas"))
+
+
+def is_dask_array(obj: Any) -> bool:
+    """Return True for Dask Array-like objects without importing optional dependencies."""
+
+    # Inspecting the module keeps the check usable when Dask is not installed
+    return obj.__class__.__module__.startswith("dask.array")
+
+
+def is_dask_geodataframe(obj: Any) -> bool:
+    """Return True for Dask-GeoPandas GeoDataFrame-like objects without importing Dask-GeoPandas."""
+
+    # Prefer the specific package marker when it is available
+    if obj.__class__.__module__.startswith("dask_geopandas"):
+        return True
+
+    # Retain compatibility with dataframe wrappers exposing geospatial methods
+    return is_dask_dataframe(obj) and hasattr(obj, "geometry") and hasattr(obj, "to_crs")
+
+
 # Helpers for duck typing: Check if object has attribute (or through an accessor)
 #################################################################################
 

@@ -82,6 +82,30 @@ class TestPointCloud:
         assert pc.data_column is None
         assert_geodataframe_equal(pc.ds, self.gdf3)
 
+    def test_init_from_file__lazy(self) -> None:
+        """Check that non-LAS file-backed point clouds load data only when requested."""
+
+        # Write a non-LAS source whose metadata can be inspected independently
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.gdf1.to_file(temp_file)
+
+        # Construction records the source path without retaining the full dataframe
+        pc = PointCloud(temp_file, data_column="b1")
+
+        # CRS, bounds, rows and columns should remain available from file metadata
+        assert not pc.is_loaded
+        assert pc.data_column == "b1"
+        assert pc.crs == self.gdf1.crs
+        assert pc.bounds == gu.Vector(self.gdf1).bounds
+        assert pc.point_count == len(self.gdf1)
+        assert list(pc.columns) == list(self.gdf1.columns)
+        assert not pc.is_loaded
+
+        # Accessing point values triggers the first complete data load
+        assert np.array_equal(pc.data, self.gdf1["b1"].values)
+        assert pc.is_loaded
+
     def test_init_las(self) -> None:
         # Import optional laspy or skip test
         pytest.importorskip("laspy")
@@ -155,7 +179,7 @@ class TestPointCloud:
         assert before_crs == after_crs
         assert before_bounds == after_bounds
         assert before_nb_points == after_nb_points
-        assert before_columns == after_columns
+        assert before_columns.equals(after_columns)
 
         # 2/ Check default column argument
         pc = PointCloud(self.fn_las)

@@ -64,7 +64,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Edit referencing
   - `gdal_edit` / `gdalmove.py`
   - `gdal raster edit`
-  - {meth}`~geoutils.Raster.set_crs`, {meth}`~geoutils.Raster.set_transform`, {meth}`~geoutils.Raster.set_nodata`, {meth}`~geoutils.Raster.translate`
+  - {meth}`~geoutils.Raster.edit` (or individual metadata setters), {meth}`~geoutils.Raster.translate`
 
 * - Convert file format
   - `gdal_translate`
@@ -99,12 +99,12 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Fill nodata gaps
   - `gdal_fillnodata.py`
   - `gdal raster fill-nodata`
-  - Not implemented (planned)
+  - {meth}`~geoutils.Raster.fill_nodata`
 
 * - Remove small raster regions
   - `gdal_sieve.py`
   - `gdal raster sieve`
-  - Not implemented (planned)
+  - {meth}`~geoutils.Raster.sieve`
 
 * - Generate contours
   - `gdal_contour`

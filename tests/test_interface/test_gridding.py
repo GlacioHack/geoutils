@@ -1,5 +1,7 @@
 """Test module for gridding functionalities."""
 
+from importlib.util import find_spec
+
 import geopandas as gpd
 import numpy as np
 import pytest
@@ -7,10 +9,12 @@ import rasterio as rio
 from shapely import geometry
 
 from geoutils import Raster
-from geoutils.interface.gridding import _grid_pointcloud
+from geoutils.interface.gridding import GriddingMethod, _grid_pointcloud
 
 
 class TestPointCloud:
+    """Test interpolation and neighborhood methods used to grid point clouds."""
+
     def test_grid_pc(self) -> None:
         """Test point cloud gridding."""
 
@@ -111,9 +115,305 @@ class TestPointCloud:
 
         assert all(~np.isfinite(gridded_pc[ifarchull, jfarchull]))
 
+        # Infinite support skips distance filtering but must match a sufficiently large finite cutoff
+        finite_support, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="b1",
+            resampling="nearest",
+            dist_nodata_pixel=1e9,
+        )
+        infinite_support, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="b1",
+            resampling="nearest",
+            dist_nodata_pixel=float("inf"),
+        )
+        assert np.array_equal(finite_support, infinite_support, equal_nan=True)
+
         # 3/ Errors
         with pytest.raises(TypeError, match="Input grid coordinates must be 1D arrays.*"):
             Raster.from_pointcloud_regular(pc, grid_coords=(1, "lol"))  # type: ignore
         with pytest.raises(ValueError, match="Grid coordinates must be regular*"):
             grid_coords[0][0] += 1
             Raster.from_pointcloud_regular(pc, grid_coords=grid_coords)  # type: ignore
+
+    @pytest.mark.parametrize("resampling", ["idw", "mean"])
+    def test_grid_pc__circular_neighborhood(self, resampling: GriddingMethod) -> None:
+        """Check IDW and moving means on points with an exact analytical result."""
+
+        # Two constant-valued columns place an equal pair of neighbors around the central column
+        pc = gpd.GeoDataFrame(
+            data={"z": [0.0, 10.0, 0.0, 10.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 2.0, 0.0, 2.0], y=[0.0, 0.0, 1.0, 1.0]),
+        )
+        grid_coords = (np.array([0.0, 1.0, 2.0]), np.array([0.0, 1.0]))
+
+        # A radius just over one pixel reaches both same-row neighbors at the center
+        result, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling=resampling,
+            dist_nodata_pixel=1.1,
+        )
+        expected = np.array([[0.0, 5.0, 10.0], [0.0, 5.0, 10.0]])
+        assert np.allclose(result, expected)
+
+    @pytest.mark.parametrize("resampling", ["nearest", "linear"])
+    def test_grid_pc__nodata_policies(self, resampling: GriddingMethod) -> None:
+        """Apply the same default, ignored and propagated nodata rules as raster interpolation."""
+
+        # A regular point grid has one invalid value that surrounding finite values can replace
+        x, y = np.meshgrid(np.arange(3, dtype=float), np.arange(3, dtype=float))
+        values = np.arange(9, dtype=float)
+        values[4] = np.nan
+        pc = gpd.GeoDataFrame(data={"z": values}, geometry=gpd.points_from_xy(x=x.ravel(), y=y.ravel()))
+        grid_coords = (np.arange(3, dtype=float), np.arange(3, dtype=float))
+
+        # GDAL gridding and the explicit ignore rule both omit invalid point values
+        default, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling=resampling,
+        )
+        ignored, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling=resampling,
+            nodata_propagation="ignore",
+        )
+        propagated, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling=resampling,
+            nodata_propagation="propagate",
+        )
+        assert np.array_equal(default, ignored, equal_nan=True)
+        assert np.isfinite(default[1, 1])
+        assert np.isnan(propagated[1, 1])
+
+    def test_grid_pc__circular_nodata_propagation(self) -> None:
+        """Propagate an invalid point through the complete circular support when requested."""
+
+        # The finite endpoints give every central neighborhood a result when invalid values are ignored
+        pc = gpd.GeoDataFrame(
+            data={"z": [2.0, np.nan, 8.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 1.0, 2.0], y=[0.0, 0.0, 0.0]),
+        )
+        grid_coords = (np.arange(4, dtype=float), np.array([0.0]))
+        default, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            grid_res=(1.0, 1.0),
+            data_column_name="z",
+            resampling="mean",
+            dist_nodata_pixel=1.1,
+        )
+        propagated, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            grid_res=(1.0, 1.0),
+            data_column_name="z",
+            resampling="mean",
+            dist_nodata_pixel=1.1,
+            nodata_propagation="propagate",
+        )
+
+        # The last cell lies outside the invalid point support and therefore remains unchanged
+        assert np.all(np.isfinite(default[0, :3]))
+        assert np.all(np.isnan(propagated[0, :3]))
+        assert propagated[0, 3] == default[0, 3]
+
+    @pytest.mark.parametrize(
+        ("resampling", "expected_center"),
+        [
+            ("mean", 5.0),
+            ("average", 5.0),
+            ("minimum", 2.0),
+            ("min", 2.0),
+            ("maximum", 8.0),
+            ("max", 8.0),
+            ("range", 6.0),
+            ("count", 2.0),
+            ("stdev", 3.0),
+            ("average_distance", 1.0),
+            ("average_distance_pts", 2.0),
+        ],
+    )
+    def test_grid_pc__circular_statistics(self, resampling: GriddingMethod, expected_center: float) -> None:
+        """Check circular statistics, aliases and the shared handling of invalid values."""
+
+        # Two finite points surround the central cell while invalid values cannot contribute
+        pc = gpd.GeoDataFrame(
+            data={"z": [2.0, 8.0, np.nan, 20.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 2.0, 1.0, np.nan], y=[0.0, 0.0, 0.0, 0.0]),
+        )
+        grid_coords = (np.arange(5, dtype=float), np.array([0.0]))
+
+        # Cells with neighbors use only finite values and cells outside support remain NaN
+        result, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            grid_res=(1.0, 1.0),
+            data_column_name="z",
+            resampling=resampling,
+            dist_nodata_pixel=1.1,
+        )
+        assert result[0, 1] == pytest.approx(expected_center)
+        assert np.isnan(result[0, 4])
+
+    def test_grid_pc__minimum_points(self) -> None:
+        """Check that circular outputs need the requested number of finite points."""
+
+        # Only the central cell reaches both points inside its circular support
+        pc = gpd.GeoDataFrame(
+            data={"z": [2.0, 8.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 2.0], y=[0.0, 0.0]),
+        )
+        result, _ = _grid_pointcloud(
+            pc,
+            grid_coords=(np.array([0.0, 1.0, 2.0]), np.array([0.0])),
+            grid_res=(1.0, 1.0),
+            data_column_name="z",
+            resampling="mean",
+            dist_nodata_pixel=1.1,
+            min_points=2,
+        )
+        assert np.array_equal(result, np.array([[np.nan, 5.0, np.nan]]), equal_nan=True)
+
+    def test_grid_pc__idw_distance_power_and_exact_points(self) -> None:
+        """Check that IDW follows its distance exponent and preserves exact source values."""
+
+        # The first output cell coincides with a point while the middle cell has unequal distances
+        pc = gpd.GeoDataFrame(
+            data={"z": [0.0, 10.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 3.0], y=[0.0, 0.0]),
+        )
+        grid_coords = (np.array([0.0, 1.0, 2.0, 3.0]), np.array([0.0, 1.0]))
+
+        # Squared inverse distances give weights of one and one quarter at the inner columns
+        result, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling="idw",
+            dist_nodata_pixel=2.1,
+            distance_power=2,
+        )
+        assert np.allclose(result[1], [0.0, 2.0, 8.0, 10.0])
+
+    @pytest.mark.parametrize(
+        "resampling",
+        ["nearest", "idw", "mean", "minimum", "maximum", "range", "count", "stdev", "average_distance"],
+    )
+    def test_grid_pc__engine(self, resampling: GriddingMethod) -> None:
+        """Check that the SciPy and Numba engines give the same gridded values."""
+
+        pytest.importorskip("numba")
+
+        # Uneven point values and positions exercise distance choices and every accumulation
+        pc = gpd.GeoDataFrame(
+            data={"z": [1.0, 4.0, 8.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 1.2, 3.0], y=[0.0, 1.0, 0.0]),
+        )
+        grid_coords = (np.arange(4, dtype=float), np.arange(2, dtype=float))
+        scipy_result, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling=resampling,
+            dist_nodata_pixel=2,
+            engine="scipy",
+        )
+
+        # The explicit Numba engine follows the same interface as elsewhere in GeoUtils and xDEM
+        numba_result, _ = _grid_pointcloud(
+            pc,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling=resampling,
+            dist_nodata_pixel=2,
+            engine="numba",
+        )
+        assert np.allclose(scipy_result, numba_result, equal_nan=True)
+
+    @pytest.mark.parametrize("resampling", ["linear", "cubic", "average_distance_pts"])
+    def test_grid_pc__numba_unsupported_method(self, resampling: GriddingMethod) -> None:
+        """Raise a clear error for gridding methods without a Numba implementation."""
+
+        pc = gpd.GeoDataFrame(data={"z": [1.0]}, geometry=gpd.points_from_xy(x=[0.0], y=[0.0]))
+        grid_coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
+
+        with pytest.raises(ValueError, match="Numba gridding engine does not support"):
+            _grid_pointcloud(
+                pc,
+                grid_coords=grid_coords,
+                data_column_name="z",
+                resampling=resampling,
+                engine="numba",
+            )
+
+    @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")
+    def test_grid_pc__numba_missing_dependency(self) -> None:
+        """Raise the standard optional-dependency error when Numba is unavailable."""
+
+        pc = gpd.GeoDataFrame(data={"z": [1.0]}, geometry=gpd.points_from_xy(x=[0.0], y=[0.0]))
+        with pytest.raises(ImportError, match="Optional dependency 'numba' required"):
+            _grid_pointcloud(
+                pc,
+                grid_coords=(np.array([0.0, 1.0]), np.array([0.0, 1.0])),
+                data_column_name="z",
+                resampling="nearest",
+                engine="numba",
+            )
+
+    def test_grid_pc__neighborhood_errors(self) -> None:
+        """Check explicit validation for unsupported neighborhood definitions."""
+
+        pc = gpd.GeoDataFrame(data={"z": [1.0]}, geometry=gpd.points_from_xy(x=[0.0], y=[0.0]))
+        grid_coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
+
+        # Local aggregation cannot have infinite support without materializing all point-cell pairs
+        with pytest.raises(ValueError, match="require a finite dist_nodata_pixel"):
+            _grid_pointcloud(
+                pc,
+                grid_coords=grid_coords,
+                data_column_name="z",
+                resampling="mean",
+                dist_nodata_pixel=float("inf"),
+            )
+        with pytest.raises(ValueError, match="distance_power must be finite and strictly positive"):
+            _grid_pointcloud(
+                pc,
+                grid_coords=grid_coords,
+                data_column_name="z",
+                resampling="idw",
+                distance_power=0,
+            )
+        with pytest.raises(ValueError, match="min_points.*non-negative integer"):
+            _grid_pointcloud(
+                pc,
+                grid_coords=grid_coords,
+                data_column_name="z",
+                resampling="count",
+                min_points=-1,
+            )
+        with pytest.raises(ValueError, match="nodata_propagation must be one of"):
+            _grid_pointcloud(
+                pc,
+                grid_coords=grid_coords,
+                data_column_name="z",
+                nodata_propagation="invalid",  # type: ignore[arg-type]
+            )
+        with pytest.raises(ValueError, match="engine.*either 'scipy' or 'numba'"):
+            _grid_pointcloud(
+                pc,
+                grid_coords=grid_coords,
+                data_column_name="z",
+                engine="invalid",  # type: ignore[arg-type]
+            )

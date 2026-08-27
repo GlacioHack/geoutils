@@ -93,14 +93,22 @@ pc3 = geoutils.PointCloud.from_tuples([(1, 2, 3), (4, 5, 6)], crs=4326)
 
 ## Gridding to a raster
 
-Gridding a {class}`~geoutils.PointCloud` into a specific grid can be done through the {func}`~geoutils.PointCloud.grid` function, that applies a
-gridding scheme according to a given methods (inverse-distance weighting, delauney triangle interpolation).
+Gridding a {class}`~geoutils.PointCloud` into a specific grid can be done through the {func}`~geoutils.PointCloud.grid` function, using nearest,
+linear or cubic interpolation, or circular inverse-distance weighting and statistics. Circular statistics include mean,
+minimum, maximum, range, count, population standard deviation, average point-to-cell distance and average spacing
+between points. Invalid point coordinates or values are ignored, and cells without the required number of finite
+neighbors remain nodata.
 
 ```{code-cell} ipython3
 # Grid the point cloud on a 100x100 grid on its extent
 coords = (np.linspace(pc.bounds.left, pc.bounds.right, 100), np.linspace(pc.bounds.bottom, pc.bounds.top, 100))
-rst = pc.grid(grid_coords=coords)
+rst = pc.grid(grid_coords=coords, resampling="idw", dist_nodata_pixel=3)
 ```
+
+Use `min_points` to require several finite neighbors in the circular support, for example
+`pc.grid(..., resampling="mean", min_points=3)`.
+The default `engine="scipy"` supports every method. `engine="numba"` provides an optional compiled implementation for
+nearest and circular methods except `average_distance_pts`, which can be faster depending on the number of points.
 
 ## Arithmetic
 

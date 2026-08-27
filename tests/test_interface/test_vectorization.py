@@ -19,6 +19,7 @@ from shapely.ops import unary_union
 import geoutils as gu
 from geoutils import examples, open_raster
 from geoutils._typing import NDArrayNum
+from geoutils.interface.vectorization import _build_selection_mask, _PolygonizePrepared
 from geoutils.multiproc.mparray import MultiprocConfig
 
 # Helpers for different types of vector equality
@@ -217,7 +218,7 @@ def assert_vectors_equal(
     Setting "setwise = True" leaves more flexibility on the polygon definition (Multipolygon, etc...).
     """
 
-    # Accept either GeoUtils Vector objects or accessor-backed GeoDataFrames.
+    # Accept either GeoUtils Vector objects or accessor-backed GeoDataFrames
     if isinstance(v1, gpd.GeoDataFrame):
         v1 = gu.Vector(v1)
     if isinstance(v2, gpd.GeoDataFrame):
@@ -276,6 +277,7 @@ def _write_tmp_tif(
 
 
 class TestPolygonize:
+    """Test eager and chunked polygonization results across supported inputs."""
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
@@ -286,6 +288,40 @@ class TestPolygonize:
         "label_stitch",
         "geometry_stitch",
     )
+
+    def test_polygonize__dask_selection_mask_stays_lazy(self) -> None:
+        """Building a polygon selection mask must use Dask dtype metadata without reading values."""
+
+        pytest.importorskip("dask")
+        import dask
+        import dask.array as da
+
+        # A source task that raises makes any accidental construction-time evaluation explicit
+        @dask.delayed
+        def unread_source() -> NDArrayNum:
+            raise AssertionError("Dask source was evaluated while building its selection mask")
+
+        # Dask knows the dtype and shape without running the delayed source task
+        values = da.from_delayed(unread_source(), shape=(2, 2), dtype=np.float32)
+        prepared = _PolygonizePrepared(
+            target_values=1,
+            use_boolean_labeling=True,
+            final_dtype="float32",
+            nodata=None,
+            is_mask_raster=False,
+            connectivity=4,
+            strategy="label_stitch",
+            value_column="raster_value",
+            id_column="component_id",
+            data_column_name="id",
+            halo=0,
+            float_tol=0.001,
+        )
+
+        # The returned comparison graph must remain lazy until a caller explicitly computes it
+        mask = _build_selection_mask(values, prepared)
+        assert isinstance(mask, da.Array)
+        assert mask.dtype == np.dtype("uint8")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_polygonize__area_data_column(self, example: str) -> None:

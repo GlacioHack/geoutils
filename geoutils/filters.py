@@ -208,15 +208,22 @@ def _multiproc_filter(
     # Get depth of overlap
     depth = _overlap_depth_for_filter(method, size=size, **kwargs)
 
-    # Block function to pass
-    def filter_block(block: Raster) -> Raster:
-        """Block function for multiprocessing."""
-        nan_block = block.get_nanarray()
-        filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
-        return block.copy(new_array=filtered_block)
-
     # Call Multiprocessing map_overlap
-    return map_overlap(filter_block, rst, mp_config, depth=depth)
+    return map_overlap(_multiproc_filter_block, rst, mp_config, method, size, kwargs, depth=depth)
+
+
+def _multiproc_filter_block(
+    block: Raster,
+    method: str | Callable[..., NDArrayNum],
+    size: int,
+    kwargs: dict[str, Any],
+) -> Raster:
+    """Filter one raster block in a serializable multiprocessing task."""
+
+    # Convert masked values to NaNs before applying the common filter implementation
+    nan_block = block.get_nanarray()
+    filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
+    return block.copy(new_array=filtered_block)
 
 
 def _filter(

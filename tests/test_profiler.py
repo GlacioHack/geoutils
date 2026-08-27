@@ -12,10 +12,11 @@ import pytest
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.profiler import Profiler, profile_call
+from geoutils.profiler import ProfileMetrics, Profiler, profile_call
 
 
 class TestProfiling:
+    """Check lightweight call metrics and the configurable GeoUtils profiling interface."""
 
     def test_profile_call__psutil_only(self) -> None:
         """Profile a small local function without a distributed Dask client."""
@@ -27,9 +28,52 @@ class TestProfiling:
         assert result == 45
         assert metrics.runtime_s >= 0
         assert metrics.peak_client_rss_mb > 0
+        assert metrics.peak_process_tree_rss_mb is None
+        assert metrics.peak_child_process_rss_mb is None
         assert metrics.peak_dask_worker_process_rss_mb is None
         assert metrics.peak_dask_spilled_mb is None
         assert not metrics.dask_client_detected
+
+    def test_profile_metrics__plot(self) -> None:
+        """Turn available process and Dask samples into one elapsed-time figure."""
+
+        pytest.importorskip("plotly")
+
+        # Fixed timestamps verify that independent profiler traces share one time origin
+        metrics = ProfileMetrics(
+            runtime_s=1.5,
+            peak_client_rss_mb=120.0,
+            client_rss_mb=[(10.0, 100.0), (11.0, 120.0)],
+            dask_worker_process_rss_mb=[(10.5, 40.0), (11.0, 60.0)],
+        )
+        figure = metrics.plot()
+
+        assert [trace.name for trace in figure.data] == ["Python process", "Dask worker processes"]
+        assert list(figure.data[0].x) == [0.0, 1.0]
+        assert list(figure.data[1].x) == [0.5, 1.0]
+        assert figure.layout.yaxis.title.text == "Memory (MB)"
+
+    def test_profile_call__process_tree(self) -> None:
+        """Profile a real multiprocessing worker together with the client process."""
+
+        pytest.importorskip("psutil")
+
+        from geoutils.multiproc.cluster import MpCluster
+
+        # Keep one worker alive long enough for the sampler to observe its RSS
+        with MpCluster(conf={"nb_workers": 1, "max_tasks_per_child": None}) as cluster:
+            result, metrics = profile_call(
+                lambda: cluster.compute(cluster.submit(sum, range(10))),
+                interval=0.001,
+                include_children=True,
+            )
+
+        # The tree contains the client and at least one worker process
+        assert result == 45
+        assert metrics.peak_process_tree_rss_mb is not None
+        assert metrics.peak_process_tree_rss_mb >= metrics.peak_client_rss_mb
+        assert metrics.peak_child_process_rss_mb is not None
+        assert metrics.peak_child_process_rss_mb > 0
 
     def test_profile_call__active_dask_client(self, tmp_path: str) -> None:
         """Profile worker memory when a distributed Dask client is active."""

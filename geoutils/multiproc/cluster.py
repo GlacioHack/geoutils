@@ -108,12 +108,22 @@ class MpCluster(AbstractCluster):
         """
         super().__init__()
         nb_workers = 1
+        max_tasks_per_child = 10
         if conf is not None:
             nb_workers = conf.get("nb_workers", 1)
+            max_tasks_per_child = conf.get("max_tasks_per_child", 10)
         # Using the 'forkserver' context for more controlled process handling
         ctx_in_main = multiprocessing.get_context("fork")
-        # Create a pool of workers with max 10 tasks per child process
-        self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=10)
+        # Recycling stays configurable so memory tests can distinguish it from a crash
+        self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=max_tasks_per_child)
+
+    def worker_pids(self) -> tuple[int, ...]:
+        """Return the current multiprocessing worker process identifiers."""
+
+        # Pool workers are created eagerly and retained until recycling or shutdown
+        if self.pool is None:
+            return ()
+        return tuple(worker.pid for worker in self.pool._pool if worker.pid is not None)
 
     def close(self) -> None:
         """Closes the multiprocessing pool by terminating and joining workers."""

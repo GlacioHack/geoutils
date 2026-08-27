@@ -1,8 +1,11 @@
 """Tests on Xarray accessor mirroring Raster API."""
 
+from pathlib import Path
+
 import geopandas as gpd
 import numpy as np
 import pytest
+import rasterio as rio
 from rasterio.transform import from_origin
 from shapely.geometry import box
 
@@ -83,6 +86,22 @@ class TestAccessor:
         ds_comp = ds.compute()
         assert isinstance(ds_comp.data, np.ndarray)
         assert ds_comp._in_memory
+
+    def test_open__dask_nodata_can_be_written(self, tmp_path: Path) -> None:
+        """Write a lazily opened nodata raster without conflicting xarray metadata."""
+
+        pytest.importorskip("dask")
+
+        # Opening a masked file moves its encoded nodata to one unambiguous attribute
+        ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
+        assert ds.rst.nodata is not None
+        assert "_FillValue" not in ds.encoding
+
+        # The final writer must preserve nodata while computing the Dask array
+        output_file = tmp_path / "dask-nodata.tif"
+        ds.rst.to_file(output_file)
+        with rio.open(output_file) as output:
+            assert output.nodata == ds.rst.nodata
 
     def test_cross_type_outputs_are_accessors(self) -> None:
         ds = gu.RasterAccessor.from_array(

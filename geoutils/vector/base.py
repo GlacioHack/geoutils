@@ -33,7 +33,12 @@ from packaging.version import Version
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
+from geoutils._dispatch import (
+    _check_match_bbox,
+    get_geo_attr,
+    has_geo_attr,
+    is_dask_dataframe,
+)
 from geoutils._misc import deprecate, import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -77,6 +82,8 @@ class VectorBase(ABC):
     _ACCESSOR_OUTPUT = False
 
     def __init__(self) -> None:
+        """Initialize shared accessor state without assigning a concrete dataframe."""
+
         self._obj: gpd.GeoDataFrame | None = None
         self._name: str | None = None
 
@@ -109,6 +116,9 @@ class VectorBase(ABC):
 
     def _cast_pointcloud_output(self, pointcloud: Any) -> Any:
         """Return an accessor-backed point cloud when this vector is accessor-backed."""
+
+        if is_dask_dataframe(pointcloud):
+            return pointcloud
 
         if self._is_pd:
             ds = pointcloud.ds
@@ -151,15 +161,27 @@ class VectorBase(ABC):
         return self._name
 
     @property
+    def is_loaded(self) -> bool:
+        """Whether the vector data are loaded in memory."""
+
+        return not is_dask_dataframe(self.ds)
+
+    @property
     def geometry(self) -> gpd.GeoSeries:
+        """Active geometry column of the vector."""
+
         return self.ds.geometry
 
     @property
     def columns(self) -> pd.Index:
+        """Column names available on the vector dataframe."""
+
         return self.ds.columns
 
     @property
     def index(self) -> pd.Index:
+        """Row index of the vector dataframe."""
+
         return self.ds.index
 
     def vector_equal(self, other: Any, **kwargs: Any) -> bool:
@@ -352,6 +374,8 @@ class VectorBase(ABC):
 
     @property
     def active_geometry_name(self) -> str:
+        """Name of the active geometry column."""
+
         return self.ds.active_geometry_name
 
     @overload
@@ -560,6 +584,7 @@ class VectorBase(ABC):
     ) -> RasterType | PointCloudLike | NDArrayBool:
         """Create a raster or point cloud mask from the vector features."""
 
+        # Functional interfaces operate on Vector while outputs follow the caller type
         source_vector = self.to_geoutils() if self._is_pd else self
         output = _create_mask(
             source_vector=source_vector,
@@ -576,6 +601,7 @@ class VectorBase(ABC):
             mp_config=mp_config,
             dask=dask,
         )
+        # Preserve plain arrays and cast geospatial results to their matching accessor
         if as_array:
             return output
         if has_geo_attr(output, "data_column"):
@@ -621,6 +647,7 @@ class VectorBase(ABC):
             warnings.warn(message="Argument 'raster' is deprecrated in favour of 'ref'.", category=DeprecationWarning)
             ref = kwargs.get("raster", None)
 
+        # Run the common implementation and cast its Raster output for accessors
         source_vector = self.to_geoutils() if self._is_pd else self
         raster = _rasterize(
             source_vector=source_vector,

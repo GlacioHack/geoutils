@@ -11,6 +11,7 @@ import warnings
 import geopandas as gpd
 import geopandas.base
 import matplotlib.pyplot as plt
+import numpy as np
 import pyproj
 import pytest
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
@@ -36,15 +37,18 @@ class TestVector:
         # First, with a string filename
         v0 = gu.Vector(self.aster_outlines_path)
         assert isinstance(v0, gu.Vector)
+        assert not v0.is_loaded
 
         # Second, with a pathlib path
         path = pathlib.Path(self.aster_outlines_path)
         v1 = gu.Vector(path)
         assert isinstance(v1, gu.Vector)
+        assert not v1.is_loaded
 
         # Third, with a geopandas dataframe
         v2 = gu.Vector(gpd.read_file(self.aster_outlines_path))
         assert isinstance(v2, gu.Vector)
+        assert v2.is_loaded
 
         # Fourth, passing a Vector itself (points back to Vector passed)
         v3 = gu.Vector(v2)
@@ -53,6 +57,24 @@ class TestVector:
         # Check errors are raised when filename has wrong type
         with pytest.raises(TypeError, match="Filename argument should be a string, path or geodataframe."):
             gu.Vector(1)  # type: ignore
+
+    def test_lazy_load_from_file(self) -> None:
+        """Check that file-backed vectors only load their GeoDataFrame when data are requested."""
+
+        # Read an eager reference separately from the lazy Vector constructor
+        vector = gu.Vector(self.aster_outlines_path)
+        eager = gpd.read_file(self.aster_outlines_path)
+
+        # Public metadata should be available without retaining all features
+        assert not vector.is_loaded
+        assert vector.crs == eager.crs
+        assert np.array_equal(vector.total_bounds, eager.total_bounds)
+        assert list(vector.columns) == list(eager.columns)
+        assert not vector.is_loaded
+
+        # Accessing the full dataframe triggers loading and matches GeoPandas
+        assert_geodataframe_equal(vector.ds, eager)
+        assert vector.is_loaded
 
     def test_copy(self) -> None:
 

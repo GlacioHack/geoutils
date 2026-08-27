@@ -1,6 +1,20 @@
+---
+file_format: mystnb
+jupytext:
+  formats: md:myst
+  text_representation:
+    extension: .md
+    format_name: myst
+kernelspec:
+  display_name: geoutils-env
+  language: python
+  name: geoutils
+---
+(profiling)=
 # Profiling
 
-GeoUtils has a built-in profiling tool, that can be used to provide more insight on the memory and time use of a function if needed.
+GeoUtils has a built-in profiling tool to measure the time and memory used by a function on your own data and hardware.
+The same measurements support the controlled comparisons presented in {ref}`benchmarking-performance`.
 ```{warning}
 The profiling functionalities rely on [psutil](https://psutil.readthedocs.io/en/latest/) and [plotly](https://plotly.com/), which can be installed manually or using Geoutils development dependencies.
 ```
@@ -8,6 +22,33 @@ The profiling functionalities rely on [psutil](https://psutil.readthedocs.io/en/
 With the profiling activated with the graphs output, two kinds of .HTML graphs will be created by default :
 * an icicle graph `time_graph.html`, showing the time spent in each step of the entire process
 * a graph `memory_[function].html` for each decorated functions used, showing the memory consumption of GeoUtils at regular intervals during the execution
+
+## Profiling a single function call
+
+For a one-off measurement, `profile_call()` runs a function and returns both its output and normalized metrics for runtime and memory.
+The current Python process is measured with `psutil`.
+If a distributed Dask client is active, GeoUtils also uses Dask's `MemorySampler` to report worker process memory and spilled memory.
+
+```{code-cell} python
+import geoutils as gu
+from IPython.display import HTML
+from geoutils.profiler import profile_call
+
+# Load the example before starting the measurement
+raster = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
+
+# Measure a real reprojection and display its memory trace
+reprojected, metrics = profile_call(raster.reproject, crs=4326)
+figure = metrics.plot()
+HTML(figure.to_html(full_html=False, include_plotlyjs="cdn"))
+```
+
+The returned {class}`~geoutils.profiler.ProfileMetrics` also gives direct access to the runtime, peak values and raw
+memory samples. The Plotly figure can be displayed directly, as above, or saved with its `write_html()` method.
+
+This Dask behaviour is automatic: no active distributed client means `psutil` only; an active distributed client means `psutil` for the client process and Dask diagnostics for the workers.
+Pass `include_children=True` to also measure aggregate process-tree RSS and the largest child process, for example for
+Multiprocessing or subprocess workflows.
 
 ## Configuration and parameters
 
@@ -20,7 +61,7 @@ GeoUtils's profiling configuration works just like a pipeline step. It is execut
 
 Example of initialization:
 
-```{code-cell} ipython3
+```python
 from geoutils.profiler import Profiler
 
 Profiler.enable(save_graphs=True, save_raw_data=True)
@@ -65,7 +106,7 @@ To profile other functions and add them to the summary graphs and data, simply a
 If you also want to track memory usage over time for a specific function call, set `memprof=True` in the decorator.
 If the function is too fast (or slow) for the default memory sampling interval, you can modify it with *interval* (in seconds).
 
-```{code-cell} ipython3
+```python
 from geoutils.profiler import profile
 
 @profile("my profiled function name", memprof=True, interval=0.5)  # type: ignore

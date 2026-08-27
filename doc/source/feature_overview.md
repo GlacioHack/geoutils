@@ -10,6 +10,7 @@ The **{ref}`summary tables<tables-overview>` directly below** lists the core fea
 ```{seealso}
 If you are interested in porting from GDAL/OGR, see our {ref}`cheatsheet-osgeo` page.
 While tables below provide a scalability summary, the detailed **input/output behaviour of all operations** is available on the {ref}`scalability-support` page.
+For measured backend comparisons and guidance on interpreting performance, see {ref}`benchmarking-performance`.
 ```
 
 ## Summary
@@ -21,7 +22,7 @@ At its core, GeoUtils provides two interchangeable ways to work with geospatial 
 - **Accessors** that extend existing data structures ({class}`rst <geoutils.RasterAccessor>` for **rasters** with **Xarray**, `pc` and `vct` for **point clouds** and **vectors** with **GeoPandas**),
 - **GeoUtils objects** {class}`~geoutils.Raster`, {class}`~geoutils.PointCloud`, {class}`~geoutils.Vector`.
 
-Nearly all **raster operations** support **scalable execution** using [Dask](https://www.dask.org/) or Multiprocessing, allowing large datasets to be processed **chunk-by-chunk without loading the full array into memory**. Support for **point-cloud operations** is partial and ongoing, while **vector operations** may gain scalable support in the future.
+Nearly all **raster operations** support **scalable execution** using [Dask](https://www.dask.org/) or Multiprocessing, allowing large datasets to be processed **chunk-by-chunk without loading the full array into memory**. Some **vector** and **point-cloud** accessor operations are also lazy with [Dask-GeoPandas](https://dask-geopandas.readthedocs.io/en/stable/), with support still partial and ongoing.
 
 Additionally, some numerical routines of GeoUtils provide multiple computational **backends** (e.g., SciPy or Numba implementations).
 

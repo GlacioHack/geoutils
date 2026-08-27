@@ -32,6 +32,10 @@ As a rule of thumb:
 - Use **Multiprocessing** to work with our {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects, and if you are fine with intermediate writing/reading between steps.
 - Use standard **in-memory execution** to work efficiently on small rasters, which is possible even if those were loaded from larger rasters (use {class}`~geoutils.Raster.crop`).
 
+These choices involve both memory and time. Parallel backends have initialization and scheduling costs, so they are often
+slower for small inputs. See {ref}`benchmarking-performance` for controlled comparisons and {ref}`profiling` to measure
+the behavior of your own data and hardware.
+
 ```{note}
 GeoUtils currently targets scalable **CPU** execution. However, as many of our numerical operations rely on **NumPy**, **SciPy** or **Numba**, those are planned to be linked to their **GPU** counterparts (**CuPy** and **Numba CUDA**).
 ```

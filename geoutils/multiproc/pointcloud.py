@@ -54,6 +54,7 @@ def _load_laspy_data_partitions(
     if partition_size <= 0:
         raise ValueError("Argument 'partition_size' must be a strictly positive integer.")
 
+    # Split point indexes into independent ranges that workers can seek to directly
     starts = list(range(0, point_count, partition_size))
     futures = []
     for start in starts:
@@ -68,6 +69,7 @@ def _load_laspy_data_partitions(
             )
         )
 
+    # Gather in submission order so the combined point cloud keeps source row order
     parts = mp_config.cluster.gather(futures)
     crs = parts[0].crs if len(parts) > 0 else None
     return _concat_las_geodataframes(parts=parts, columns=columns, crs=crs)
@@ -110,6 +112,7 @@ def _load_laspy_data_spatial_partitions(
     if partition_size <= 0:
         raise ValueError("Argument 'partition_size' must be a strictly positive integer.")
 
+    # Each worker reads only the points intersecting one requested spatial block
     futures = [
         mp_config.cluster.submit(
             load_laspy_data_bounds,
@@ -121,6 +124,7 @@ def _load_laspy_data_spatial_partitions(
         )
         for bounds in block_bounds
     ]
+    # Preserve block order for callers that place results into a spatial grid
     return mp_config.cluster.gather(futures)
 
 
@@ -151,6 +155,7 @@ def _write_laspy_data_partitions(
 ) -> None:
     """Write a dataframe to LAS/LAZ with multiprocessing partition files."""
 
+    # Reuse the common temporary-file writer with the configuration's scalar chunk size
     write_laspy_multiproc_partitions(
         filename=filename,
         pc=pc,

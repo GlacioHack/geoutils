@@ -42,14 +42,18 @@ from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import _check_match_grid, get_geo_attr, has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
-from geoutils.interface.gridding import _grid_pointcloud
+from geoutils.interface._nodata import NodataPropagation
+from geoutils.interface.gridding import (
+    GriddingEngine,
+    GriddingMethod,
+    _grid_pointcloud_to_raster,
+)
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.las import _load_laspy_data, _load_laspy_metadata, _write_laspy
-from geoutils.raster.referencing import _coords
 from geoutils.stats.sampling import _subsample_numpy
 from geoutils.stats.stats import _statistics
 from geoutils.vector.vector import Vector, VectorLike
@@ -57,7 +61,7 @@ from geoutils.vector.vector import Vector, VectorLike
 if TYPE_CHECKING:
     import matplotlib
 
-    from geoutils.raster.base import RasterLike, RasterType
+    from geoutils.raster.base import RasterBase, RasterLike
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
@@ -227,9 +231,13 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         self._crs: CRS | None = None
         self._data_column: str | None = None
         self._bounds: BoundingBox
+        self._columns: pd.Index | None = None
+        self._feature_count: int | None = None
+        self._geometry_type: str | None = None
         self._data: NDArrayNum
         self._nb_points: int
         self.__nongeo_columns: pd.Index
+        self._is_las = False
 
         # If PointCloud is passed, simply point back to PointCloud
         if isinstance(filename_or_dataset, PointCloud):
@@ -238,11 +246,14 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             return
         # For filename, rely on parent Vector class or LAS file reader
         else:
-            if isinstance(filename_or_dataset, (str, pathlib.Path)) and os.path.splitext(filename_or_dataset)[-1] in [
+            if isinstance(filename_or_dataset, (str, pathlib.Path)) and os.path.splitext(
+                os.fspath(filename_or_dataset)
+            )[-1] in [
                 ".las",
                 ".laz",
             ]:
 
+                self._is_las = True
                 # No need to pass a data column for LAS/LAZ file, as Z is the logical default
                 if data_column is None:
                     data_column = "Z"
@@ -254,12 +265,22 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 self._nb_points = nb_points
                 self.__nongeo_columns = columns
                 self._bounds = bounds
+                self._columns = pd.Index(list(columns) + ["geometry"])
+                self._feature_count = nb_points
+                self._geometry_type = "Point"
                 self._ds = None
             # Check on filename are done with Vector.__init__
             else:
                 super().__init__(filename_or_dataset)
-                # Verify that the vector can be cast as a point cloud
-                if not all(p == "Point" for p in self.ds.geom_type):
+                if not self.is_loaded:
+                    if self._geometry_type is not None and "Point" not in self._geometry_type:
+                        raise ValueError(
+                            "This vector file contains non-point geometries, "
+                            "cannot be instantiated as a point cloud."
+                        )
+                    self.__nongeo_columns = pd.Index([c for c in Vector.columns.fget(self) if c != "geometry"])
+                    self._nb_points = self._feature_count if self._feature_count is not None else -1
+                elif not all(p == "Point" for p in self.ds.geom_type):
                     raise ValueError(
                         "This vector file contains non-point geometries, " "cannot be instantiated as a point cloud."
                     )
@@ -290,6 +311,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             self._ds = gpd.GeoDataFrame(geometry=new_ds)
         else:
             raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
+        self._set_metadata_from_ds(self._ds)
 
     @property
     def crs(self) -> CRS:
@@ -298,26 +320,24 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().crs
-        # Return CRS on disk
-        else:
-            return self._crs
+        return self._crs
 
     @property
     def bounds(self) -> BoundingBox:
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().bounds
-        # Return bounds on disk
-        else:
-            return self._bounds
+        return self._bounds
 
+    @property
     def columns(self) -> pd.Index:
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().columns
-        # Return columns on disk (adding a placeholder geometry to replace X/Y)
-        else:
+        if self._is_las:
+            # Return columns on disk (adding a placeholder geometry to replace X/Y)
             return pd.Index(list(self._nongeo_columns) + ["geometry"])
+        return Vector.columns.fget(self)
 
     #####################################
     # METHODS SPECIFIC TO POINT CLOUD
@@ -359,8 +379,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             nongeo_columns = super().columns
             nongeo_columns = nongeo_columns[nongeo_columns != "geometry"]
             return nongeo_columns
-        else:
-            return self.__nongeo_columns
+        return self.__nongeo_columns
 
     @property
     def data_column(self) -> str | None:
@@ -415,8 +434,10 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         # New method for point cloud
         if self.is_loaded:
             return len(self.ds)
-        else:
+        if self._nb_points >= 0:
             return self._nb_points
+        self.load()
+        return len(self.ds)
 
     @property
     def is_mask(self) -> bool:
@@ -428,12 +449,14 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         self,
         columns: Literal["all", "main"] | list[str] = "main",
         mp_config: MultiprocConfig | None = None,
+        **kwargs: Any,
     ) -> None:
         """
         Load point cloud from disk (only supported for LAS files).
 
         :param columns: Columns to load. Defaults to main data column only.
         :param mp_config: Optional multiprocessing configuration to load LAS/LAZ files by chunks.
+        :param kwargs: Optional keyword arguments passed to :func:`geopandas.read_file` for non-LAS files.
         """
 
         if self.is_loaded:
@@ -443,6 +466,15 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             raise AttributeError(
                 "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
             )
+
+        if not self._is_las:
+            Vector.load(self, **kwargs)
+            if not all(p == "Point" for p in self.ds.geom_type):
+                raise ValueError(
+                    "This vector file contains non-point geometries, cannot be instantiated as a point cloud."
+                )
+            self.set_data_column(new_data_column=self._data_column)
+            return
 
         if columns == "all":
             columns_to_load = self._nongeo_columns
@@ -1495,15 +1527,23 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     @profiler.profile("geoutils.pointcloud.pointcloud.grid", memprof=True)
     def grid(
         self,
-        ref: RasterType | None = None,
+        ref: RasterLike | None = None,
         grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
         res: float | tuple[float, float] | None = None,
         shape: tuple[int, int] | None = None,
         bounds: tuple[float, float, float, float] | BoundingBox | None = None,
-        resampling: Literal["nearest", "linear", "cubic"] = "linear",
+        resampling: GriddingMethod = "linear",
         dist_nodata_pixel: float = 1.0,
         nodata: int | float = -9999,
-    ) -> RasterType:
+        *,
+        distance_power: float = 2.0,
+        min_points: int = 1,
+        engine: GriddingEngine = "scipy",
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        n_threads: int = 0,
+        nodata_propagation: NodataPropagation = "gdal",
+    ) -> RasterBase:
         """
         Grid point cloud into a raster.
 
@@ -1514,32 +1554,40 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         :param ref: Reference raster to match (if output grid coordinates or output resolution undefined).
         :param grid_coords: Output grid coordinates in X and Y (if reference raster or output resolution undefined).
         :param res: Output resolution (if reference raster or output grid coordinates undefined).
-        :param resampling: Resampling method within delauney triangles (defaults to linear).
-        :param dist_nodata_pixel: Distance from the point cloud after which grid cells are filled by nodata values,
-            expressed in number of pixels.
+        :param resampling: Interpolation method or a circular ``idw``, statistic or distance metric (defaults to
+            linear). ``average``, ``min`` and ``max`` are aliases for ``mean``, ``minimum`` and ``maximum``.
+        :param dist_nodata_pixel: Maximum point distance or circular neighborhood radius, expressed in output pixels.
         :param nodata: Nodata value of output raster (defaults to -9999).
+        :param distance_power: Distance exponent used for inverse-distance weighting (defaults to 2).
+        :param min_points: Minimum number of finite points required inside a circular neighborhood (defaults to 1).
+        :param engine: Calculation engine, either ``scipy`` (default) or ``numba``. Numba supports nearest and
+            circular methods except ``average_distance_pts``.
+        :param chunksizes: Chunk size (rows, cols) for Dask/Multiprocessing output chunks.
+        :param mp_config: Multiprocessing configuration. If passed, output chunks are written to disk.
+        :param n_threads: Number of SciPy threads for eager nearest gridding. ``0`` uses all but one available CPU,
+            while Dask and Multiprocessing tasks remain single-threaded by default.
+        :param nodata_propagation: How invalid point values affect the output. ``gdal`` and ``ignore`` omit them,
+            while ``propagate`` returns NaN where an invalid value participates in the selected method.
 
         :return: Raster from gridded point cloud.
         """
 
-        out_shape, out_transform, out_crs = _check_match_grid(
-            self,
+        return _grid_pointcloud_to_raster(
+            source_pointcloud=self,
             ref=ref,
-            coords=grid_coords,
-            res=res,
-            bounds=bounds,
-            shape=shape,
-            crs=None,
-        )
-        grid_coords = _coords(transform=out_transform, shape=out_shape, grid=False, area_or_point=None)
-
-        array, transform = _grid_pointcloud(
-            self.ds,
             grid_coords=grid_coords,
-            data_column_name=self.data_column,
+            res=res,
+            shape=shape,
+            bounds=bounds,
             resampling=resampling,
             dist_nodata_pixel=dist_nodata_pixel,
+            nodata=nodata,
+            distance_power=distance_power,
+            min_points=min_points,
+            engine=engine,
+            chunksizes=chunksizes,
+            mp_config=mp_config,
+            dask=False,
+            n_threads=n_threads,
+            nodata_propagation=nodata_propagation,
         )
-        from geoutils.raster import Raster  # Runtime import to avoid circularity issues
-
-        return Raster.from_array(data=array, transform=transform, crs=self.crs, nodata=nodata)

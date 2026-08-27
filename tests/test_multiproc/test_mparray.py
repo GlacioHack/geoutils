@@ -148,15 +148,22 @@ class TestTiling:
             _generate_tiling_grid(0, 0, 100, 100, 50, 50, 0.5)  # type: ignore
 
     def test_block_bounds_from_chunks(self) -> None:
+        """Expand rectangular chunk bounds by overlap and clip them to the raster."""
+
+        # Two row chunks and three column chunks cover the non-divisible shape
         block_bounds = block_bounds_from_chunks(chunks=(50, 25), shape=(100, 55), overlap=5)
 
+        # Outer blocks stay clipped while their inner edges include support pixels
         assert block_bounds.shape == (2, 3, 4)
         assert np.array_equal(block_bounds[0, 0], np.array([0, 55, 0, 30]))
         assert np.array_equal(block_bounds[-1, -1], np.array([45, 100, 45, 55]))
 
     def test_compute_tiling_rectangular_chunks(self) -> None:
+        """Create the expected row-major tiling for unequal row and column chunks."""
+
         tiling = compute_tiling(tile_size=(40, 25), raster_shape=(100, 55), overlap=5)
 
+        # Spell out all windows to make their order and clipped edges explicit
         expected_tiling = np.array(
             [
                 [[0, 45, 0, 30], [0, 45, 20, 55]],
@@ -168,6 +175,8 @@ class TestTiling:
 
 
 class TestMultiproc:
+    """Check multiprocessing raster helpers, configuration and chunk layouts."""
+
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
@@ -175,11 +184,15 @@ class TestMultiproc:
     cluster = ClusterGenerator("test", nb_workers=num_workers)
 
     def test_multiproc_config_rectangular_chunks(self) -> None:
+        """Accept positive rectangular chunks and reject invalid dimensions."""
+
+        # Copying the configuration should preserve both chunk dimensions
         config = MultiprocConfig(chunks=(40, 25))
 
         assert config.chunks == (40, 25)
         assert config.copy().chunks == (40, 25)
 
+        # Validate values and types early before worker tasks are scheduled
         with pytest.raises(ValueError, match="strictly positive"):
             MultiprocConfig(chunks=(0, 25))
         with pytest.raises(TypeError, match="integer or a tuple of two integers"):
@@ -284,9 +297,13 @@ class TestMultiproc:
             assert np.array_equal(raster.get_mask(), output_mask.data)
 
     def test_map_overlap_rectangular_chunks(self, tmp_path: Any) -> None:
+        """Map an overlapping function over unequal chunk dimensions without loading the source."""
+
+        # Write worker tiles to a dedicated test output
         raster = Raster(self.aster_dem_path)
         config = MultiprocConfig(chunks=(100, 160), outfile=str(tmp_path / "rectangular_overlap.tif"))
 
+        # Compare tiled execution with applying the same function to the full raster
         output_raster = map_overlap(_custom_func, raster, config, addition=5, factor=0.5, depth=10)
 
         assert not raster.is_loaded
@@ -326,16 +343,22 @@ class TestMultiproc:
         assert total_stats["valid_count"] == tiled_count
 
     def test_map_blocks_rectangular_chunks(self) -> None:
+        """Collect block statistics correctly from unequal chunk dimensions."""
+
+        # Use narrow column chunks so the first reported window is unambiguous
         raster = Raster(self.aster_dem_path)
         config = MultiprocConfig(chunks=(10, 20))
 
+        # Retain block locations alongside each worker result
         results = map_blocks(_custom_func_stats, raster, config, return_block_info=True)  # type: ignore
         list_stats = [result[0] for result in results]
         list_tiles = [result[1] for result in results]
 
+        # Scheduling must preserve the requested rectangular shape and source laziness
         assert np.array_equal(list_tiles[0], np.array([0, 10, 0, 20]))
         assert not raster.is_loaded
 
+        # Recombine per-block counts and weighted means into full-raster statistics
         total_stats = _custom_func_stats(raster)
         tiled_count = np.nansum([stats["valid_count"] for stats in list_stats])
         tiled_mean = np.nansum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count

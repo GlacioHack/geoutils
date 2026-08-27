@@ -8,9 +8,9 @@
   "environment_type": "virtualenv",
   "install_command": "python -m pip install {wheel_file}[benchmark]",
   "benchmark_dir": "benchmarks",
-  "env_dir": ".asv/env",
-  "results_dir": ".asv/results",
-  "html_dir": ".asv/html",
+  "env_dir": "benchmarks/results/asv/env",
+  "results_dir": "benchmarks/results/asv/results",
+  "html_dir": "benchmarks/results/asv/html/asv",
   "matrix": {
     "python": ["3.12"]
   },

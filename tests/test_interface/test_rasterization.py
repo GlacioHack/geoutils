@@ -13,10 +13,12 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 import geoutils as gu
 from geoutils import examples
 from geoutils.exceptions import InvalidGridError
+from geoutils.interface import rasterization
 from geoutils.multiproc import MultiprocConfig
 
 
 class TestRasterVectorInterface:
+    """Test raster and point-cloud outputs created from vector geometries."""
 
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
     poly1 = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
@@ -270,3 +272,40 @@ class TestRasterVectorInterface:
 
         # Sanity check that the known "center pixel" is True for this geometry/grid
         assert m_base[10, 10] is np.True_
+
+    def test_rasterize__dask_builds_one_spatial_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Test that Dask builds one spatial index before running its raster blocks.
+
+        Selecting the features once avoids rebuilding the complete index in every worker.
+        """
+
+        pytest.importorskip("dask")
+
+        # Wrap the index builder to count calls without changing its result
+        index_count = 0
+        build_spatial_index = rasterization._build_spatial_index
+
+        def count_spatial_index(geometries: Any) -> Any:
+            """Record each construction of the complete vector spatial index."""
+
+            nonlocal index_count
+            index_count += 1
+            return build_spatial_index(geometries)
+
+        monkeypatch.setattr(rasterization, "_build_spatial_index", count_spatial_index)
+
+        # Building the lazy raster selects features once for all four output blocks
+        rasterized = self.vector.rasterize(
+            res=1,
+            bounds=(0, 0, 21, 21),
+            crs=4326,
+            in_value=1,
+            dask=True,
+            chunksizes=(11, 11),
+        )
+        assert index_count == 1
+
+        # Computing the blocks uses their selected features without rebuilding the index
+        rasterized.data.compute(scheduler="synchronous")
+        assert index_count == 1

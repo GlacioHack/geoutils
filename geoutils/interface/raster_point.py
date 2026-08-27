@@ -53,7 +53,7 @@ def _regular_pointcloud_to_raster(
     """
 
     # Extract geodataframe and data column name depending on input. Plain GeoDataFrames can now expose a ``pc``
-    # accessor, so use accessor-aware retrieval instead of assuming the original object owns ``.ds`` directly.
+    # accessor, so use accessor-aware retrieval instead of assuming the original object owns ``.ds`` directly
     if has_geo_attr(pointcloud, "ds", accessors=("pc",)):
         gdf_pc = get_geo_attr(pointcloud, "ds", accessors=("pc",))
         pc_data_column_name = get_geo_attr(pointcloud, "data_column", accessors=("pc",))

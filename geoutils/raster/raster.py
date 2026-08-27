@@ -568,6 +568,12 @@ class Raster(RasterBase):
         # (we accept setting an array with new dtype to mirror NumPy behaviour)
         self._nodata = _cast_nodata(new_data.dtype, self.nodata)
 
+        # Integer and boolean arrays cannot contain non-finite values
+        # Without nodata, copy them directly instead of scanning the complete array
+        if not np.ma.isMaskedArray(new_data) and self.nodata is None and new_data.dtype.kind in "biu":
+            self._data = np.ma.array(new_data, mask=np.ma.nomask, copy=True, fill_value=None)
+            return
+
         # If the new data is not masked and has non-finite values, we define a default nodata value
         if (not np.ma.is_masked(new_data) and self.nodata is None and np.count_nonzero(~np.isfinite(new_data)) > 0) or (
             np.ma.is_masked(new_data)

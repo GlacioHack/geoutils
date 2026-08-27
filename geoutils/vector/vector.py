@@ -22,6 +22,7 @@ Module for Vector class.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import warnings
 from os import PathLike
@@ -41,6 +42,7 @@ from typing import (
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal
 from packaging.version import Version
@@ -104,6 +106,11 @@ class Vector(VectorBase):
 
         self._name: str | None = None
         self._ds: gpd.GeoDataFrame | None = None
+        self._crs: CRS | None = None
+        self._bounds: rio.coords.BoundingBox | None = None
+        self._columns: pd.Index | None = None
+        self._feature_count: int | None = None
+        self._geometry_type: str | None = None
 
         # If Vector is passed, simply point back to Vector
         if isinstance(filename_or_dataset, Vector):
@@ -112,7 +119,9 @@ class Vector(VectorBase):
             return
         # If filename is passed
         elif isinstance(filename_or_dataset, (str, pathlib.Path)):
-            ds = gpd.read_file(filename_or_dataset)
+            self._name = os.fspath(filename_or_dataset)
+            self._set_metadata_from_file(self._name)
+            return
         # If GeoPandas or Shapely object is passed
         elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
             if isinstance(filename_or_dataset, gpd.GeoDataFrame):
@@ -127,21 +136,20 @@ class Vector(VectorBase):
         # Set geodataframe
         self.ds = ds
 
-        # Write name attribute
-        if isinstance(filename_or_dataset, str):
-            self._name = filename_or_dataset
-        if isinstance(filename_or_dataset, pathlib.Path):
-            self._name = filename_or_dataset.name
-
     @property
     def crs(self) -> CRS:
         """Coordinate reference system of the vector."""
+
+        if not self.is_loaded:
+            return self._crs  # type: ignore[return-value]
         return self.ds.crs
 
     @property
     def ds(self) -> gpd.GeoDataFrame:
         """Geodataframe of the vector."""
-        return self._ds
+        if not self.is_loaded:
+            self.load()
+        return self._ds  # type: ignore[return-value]
 
     @ds.setter
     def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
@@ -153,6 +161,51 @@ class Vector(VectorBase):
             self._ds = gpd.GeoDataFrame(geometry=new_ds)
         else:
             raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
+        self._set_metadata_from_ds(self._ds)
+
+    def _set_metadata_from_file(self, filename: str) -> None:
+        """Read lightweight vector metadata without loading the full GeoDataFrame."""
+
+        info = pyogrio.read_info(filename)
+        crs = info.get("crs")
+        total_bounds = info.get("total_bounds")
+
+        self._crs = CRS.from_user_input(crs) if crs else None
+        if total_bounds is not None:
+            self._bounds = rio.coords.BoundingBox(*total_bounds)
+        self._columns = pd.Index(list(info.get("fields", [])) + ["geometry"])
+        self._feature_count = info.get("features")
+        self._geometry_type = info.get("geometry_type")
+
+    def _set_metadata_from_ds(self, ds: gpd.GeoDataFrame) -> None:
+        """Update cached vector metadata from an in-memory GeoDataFrame."""
+
+        self._crs = ds.crs
+        self._bounds = rio.coords.BoundingBox(*ds.total_bounds)
+        self._columns = ds.columns
+        self._feature_count = len(ds)
+        self._geometry_type = ds.geom_type.iloc[0] if len(ds) > 0 else None
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether the vector data are loaded in memory."""
+
+        return self._ds is not None
+
+    def load(self, **kwargs: Any) -> None:
+        """
+        Load the vector GeoDataFrame from disk.
+
+        :param kwargs: Optional keyword arguments passed to :func:`geopandas.read_file`.
+        """
+
+        if self.is_loaded:
+            raise ValueError("Data are already loaded.")
+
+        if self.name is None:
+            raise AttributeError("Cannot load as name is not set anymore. Did you manually update the name attribute?")
+
+        self.ds = gpd.read_file(self.name, **kwargs)
 
     def vector_equal(self, other: VectorType, **kwargs: Any) -> bool:
         """
@@ -180,6 +233,8 @@ class Vector(VectorBase):
 
     @property
     def columns(self) -> pd.Index:
+        if not self.is_loaded and self._columns is not None:
+            return self._columns
         return self.ds.columns
 
     @property
@@ -556,6 +611,8 @@ class Vector(VectorBase):
     @property
     def total_bounds(self) -> rio.coords.BoundingBox:
         """Total bounds of the vector."""
+        if not self.is_loaded and self._bounds is not None:
+            return np.array(self._bounds)
         return self.ds.total_bounds
 
     # Exception ! Vector.bounds corresponds to the total_bounds
@@ -568,6 +625,8 @@ class Vector(VectorBase):
         but not ``GeoDataFrame.bounds`` (per-feature bounds) which is instead defined as
         ``Vector.geom_bounds``.
         """
+        if not self.is_loaded and self._bounds is not None:
+            return self._bounds
         return rio.coords.BoundingBox(*self.ds.total_bounds)
 
     @property

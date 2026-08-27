@@ -126,7 +126,7 @@ def _statistics_dask(
     valid_count = final_count_nonzero if counts is None else counts[0]
 
     # Dask requires explicit axes for full-array quantiles. This remains lazy, but exact global quantiles can still be
-    # memory-intensive at execution time because Dask has to combine data across chunks.
+    # memory-intensive at execution time because Dask has to combine data across chunks
     axes = tuple(range(data.ndim))
 
     def _quantile(q: float) -> Any:

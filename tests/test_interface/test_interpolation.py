@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+import os.path
 import re
+import tempfile
+from pathlib import Path
 from typing import Literal
 
+import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio as rio
+from affine import Affine
 from scipy.interpolate import interpn
 from scipy.ndimage import binary_dilation
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.interpolation import (
     _get_dist_nodata_spread,
     _interp_points,
     _interpn_interpolator,
+    _interpolate_array,
     method_to_order,
 )
 from geoutils.multiproc import MultiprocConfig
@@ -22,6 +29,7 @@ from geoutils.projtools import reproject_to_latlon
 
 
 class TestInterpolate:
+    """Test raster interpolation values, boundaries and invalid-value propagation."""
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
@@ -46,6 +54,132 @@ class TestInterpolate:
         assert _get_dist_nodata_spread(5, "half_order_up") == 3
         assert _get_dist_nodata_spread(5, "half_order_down") == 2
         assert _get_dist_nodata_spread(5, 5) == 5
+
+    @pytest.mark.parametrize(
+        ("method", "resampling"),
+        [("nearest", rio.enums.Resampling.nearest), ("linear", rio.enums.Resampling.bilinear)],
+    )
+    @pytest.mark.parametrize("shift", [(1.0, 1.0), (0.2, 0.2), (0.5, 0.5), (-0.2, 0.35), (-0.5, -0.5)])
+    def test_interpolate_array__gdal_nodata(
+        self,
+        method: Literal["nearest", "linear"],
+        resampling: rio.enums.Resampling,
+        shift: tuple[float, float],
+    ) -> None:
+        """Match GDAL values and invalid cells for integral and subpixel shifts."""
+
+        # Separate invalid regions exercise isolated cells, edges and neighboring invalid cells
+        source = np.arange(81, dtype=np.float32).reshape(9, 9)
+        source[4, 4] = np.nan
+        source[1:3, 6] = np.nan
+        src_transform = rio.transform.from_origin(0, 9, 1, 1)
+        dst_transform = Affine.translation(*shift) * src_transform
+
+        # Rasterio calls the GDAL resampler with an explicit sentinel for source nodata
+        expected = np.full(source.shape, np.nan, dtype=np.float32)
+        rio.warp.reproject(
+            np.where(np.isfinite(source), source, -9999),
+            expected,
+            src_transform=src_transform,
+            dst_transform=dst_transform,
+            src_crs=4326,
+            dst_crs=4326,
+            src_nodata=-9999,
+            dst_nodata=np.nan,
+            resampling=resampling,
+            XSCALE=1,
+            YSCALE=1,
+        )
+
+        # The default interpolation policy must reproduce both GDAL values and its nodata mask
+        actual = _interpolate_array(
+            source,
+            src_transform=src_transform,
+            dst_transform=dst_transform,
+            method=method,
+        )
+        assert np.array_equal(np.isnan(actual), np.isnan(expected))
+        assert np.allclose(actual, expected, equal_nan=True, atol=2e-5)
+
+    @pytest.mark.parametrize("resolution", [0.5, 1.5, 2.0])
+    def test_interpolate_array__gdal_resolution(self, resolution: float) -> None:
+        """Match GDAL bilinear nodata behavior while changing output resolution."""
+
+        # Use several nodata shapes because their contributions change between resolutions
+        source = np.arange(81, dtype=np.float32).reshape(9, 9)
+        source[4, 4] = np.nan
+        source[1:3, 6] = np.nan
+        src_transform = rio.transform.from_origin(0, 9, 1, 1)
+        dst_shape = (int(np.ceil(source.shape[0] / resolution)), int(np.ceil(source.shape[1] / resolution)))
+        dst_transform = rio.transform.from_origin(0, 9, resolution, resolution)
+
+        # Compare the complete array so both internal nodata and outer footprint behavior are covered
+        expected = np.full(dst_shape, np.nan, dtype=np.float32)
+        rio.warp.reproject(
+            np.where(np.isfinite(source), source, -9999),
+            expected,
+            src_transform=src_transform,
+            dst_transform=dst_transform,
+            src_crs=4326,
+            dst_crs=4326,
+            src_nodata=-9999,
+            dst_nodata=np.nan,
+            resampling=rio.enums.Resampling.bilinear,
+            XSCALE=1,
+            YSCALE=1,
+        )
+        actual = _interpolate_array(
+            source,
+            src_transform=src_transform,
+            dst_transform=dst_transform,
+            dst_shape=dst_shape,
+        )
+        assert np.array_equal(np.isnan(actual), np.isnan(expected))
+        assert np.allclose(actual, expected, equal_nan=True, atol=2e-5)
+
+    def test_interp_points__nodata_policies(self) -> None:
+        """Keep GDAL-compatible, ignored and propagated nodata rules distinct and predictable."""
+
+        # Two fractional samples receive weight from the invalid central cell
+        source = np.arange(25, dtype=np.float32).reshape(5, 5)
+        source[2, 2] = np.nan
+        raster = gu.Raster.from_array(
+            source,
+            transform=rio.transform.from_origin(0, 5, 1, 1),
+            crs=4326,
+            nodata=-9999,
+        )
+        x, y = raster.ij2xy(i=np.array([2.25, 1.4]), j=np.array([2.25, 1.4]))
+
+        # Ignoring nodata retains finite contributions while propagation rejects every affected sample
+        ignored = raster.interp_points((x, y), as_array=True, nodata_propagation="ignore")
+        gdal = raster.interp_points((x, y), as_array=True)
+        propagated = raster.interp_points((x, y), as_array=True, nodata_propagation="propagate")
+        assert np.all(np.isfinite(ignored))
+        assert np.array_equal(np.isnan(gdal), np.array([True, False]))
+        assert np.all(np.isnan(propagated))
+
+        with pytest.raises(ValueError, match="nodata_propagation must be one of"):
+            raster.interp_points((x, y), as_array=True, nodata_propagation="invalid")  # type: ignore[arg-type]
+
+    def test_interpolate_array__band_masks(self) -> None:
+        """Handle masked, NaN and infinite values independently in every raster band."""
+
+        # Each band uses a different invalid representation and position
+        source = np.ma.array(
+            np.stack((np.arange(16, dtype=np.float32).reshape(4, 4), np.arange(16, dtype=np.float32).reshape(4, 4))),
+            mask=False,
+        )
+        source.mask[0, 1, 1] = True
+        source[1, 2, 2] = np.inf
+        transform = rio.transform.from_origin(0, 4, 1, 1)
+
+        # An unchanged grid must retain finite values and each band's own invalid cell
+        actual = _interpolate_array(source, src_transform=transform, dst_transform=transform)
+        assert actual.shape == source.shape
+        assert np.array_equal(np.isnan(actual[0]), source.mask[0])
+        assert np.array_equal(np.isnan(actual[1]), ~np.isfinite(source.data[1]))
+        assert np.array_equal(actual[:, 0, 0], source.data[:, 0, 0])
 
     @pytest.mark.parametrize(
         "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
@@ -690,6 +824,7 @@ class TestInterpolate:
 
 
 class TestInterpPointsChunked:
+    """Compare point interpolation across eager, Dask and Multiprocessing backends."""
 
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("method", ["nearest", "linear"])
@@ -859,3 +994,127 @@ class TestInterpPointsChunked:
         # assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_dask_np[oob]))
 
         assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_mp_np[oob]))
+
+    @pytest.mark.parametrize("nodata_propagation", ["gdal", "ignore", "propagate"])
+    def test_interp_points__nodata_policies_backends(
+        self,
+        nodata_propagation: NodataPropagation,
+        tmp_path: Path,
+    ) -> None:
+        """Keep each nodata policy identical across eager, Dask and Multiprocessing interpolation."""
+
+        pytest.importorskip("dask")
+
+        # Store one invalid central cell so every backend reads the same source metadata
+        source = np.arange(81, dtype=np.float32).reshape(9, 9)
+        source[4, 4] = np.nan
+        raster = gu.Raster.from_array(
+            source,
+            transform=rio.transform.from_origin(0, 9, 1, 1),
+            crs=4326,
+            nodata=-9999,
+        )
+        source_file = tmp_path / "interpolation-nodata.tif"
+        raster.to_file(source_file)
+
+        # Fractional points distinguish the three policies around the invalid cell
+        x, y = raster.ij2xy(i=np.array([4.25, 3.4, 1.2]), j=np.array([4.25, 3.4, 1.2]))
+        expected = raster.interp_points(
+            (x, y),
+            method="linear",
+            as_array=True,
+            nodata_propagation=nodata_propagation,
+        )
+
+        # Dask evaluates only the overlapping source chunks while preserving the selected rule
+        dask_raster = open_raster(str(source_file), chunks={"x": 4, "y": 4})
+        dask_output = dask_raster.rst.interp_points(
+            (x, y),
+            method="linear",
+            as_array=True,
+            nodata_propagation=nodata_propagation,
+        )
+        assert np.array_equal(expected, dask_output.compute(), equal_nan=True)
+
+        # Multiprocessing applies the same rule inside independently loaded source tiles
+        file_raster = gu.Raster(source_file)
+        multiproc_output = file_raster.interp_points(
+            (x, y),
+            method="linear",
+            as_array=True,
+            nodata_propagation=nodata_propagation,
+            mp_config=MultiprocConfig(chunks=(4, 4)),
+        )
+        assert np.array_equal(expected, multiproc_output, equal_nan=True)
+
+    def test_interp_points__dask_pointcloud_input(self, lazy_test_files_tiny: list[str]) -> None:
+        """Test interpolation to Dask-GeoPandas point-cloud inputs."""
+
+        # Load the optional lazy dataframe and array types used in assertions
+        dgpd = pytest.importorskip("dask_geopandas")
+        import dask.array as da
+
+        # Compare a loaded Raster with a chunked accessor over the same source
+        path_raster = lazy_test_files_tiny[0]
+        raster = gu.Raster(path_raster)
+        raster.load()
+        ds_dask = open_raster(path_raster, chunks={"x": 10, "y": 10})
+
+        # Include two raster-edge points and one truly out-of-bounds point
+        left, bottom, right, top = rio.transform.array_bounds(*raster.shape, raster.transform)
+        x = np.array([left, (left + right) / 2, right + raster.res[0]])
+        y = np.array([top, (bottom + top) / 2, bottom - raster.res[1]])
+        points = gpd.GeoDataFrame({"id": [1, 2, 3]}, geometry=gpd.points_from_xy(x, y), crs=raster.crs)
+
+        # Open the points in two lazy partitions through the public helper
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "points.gpkg")
+        points.to_file(temp_file)
+        dask_points = gu.open_pointcloud(temp_file, data_column="id", chunks=2)
+
+        # Compute the eager values once as the expected result
+        expected = raster.interp_points(points=points, method="nearest", as_array=True)
+
+        # Array output should remain lazy and preserve out-of-bounds NaNs
+        out_array = ds_dask.rst.interp_points(points=dask_points, method="nearest", as_array=True)
+        assert isinstance(out_array, da.Array)
+        assert np.array_equal(np.asarray(expected), out_array.compute(), equal_nan=True)
+
+        # Point-cloud output should remain a Dask-GeoPandas collection with ``pc`` metadata
+        out_points = ds_dask.rst.interp_points(points=dask_points, method="nearest")
+        assert isinstance(out_points, dgpd.GeoDataFrame)
+        assert not out_points.pc.is_loaded
+        assert np.array_equal(np.asarray(expected), out_points.compute()["z"].to_numpy(), equal_nan=True)
+
+    def test_interp_points_las__dask_pointcloud_input(self) -> None:
+        """Test interpolation to Dask point-cloud inputs opened from LAS."""
+
+        # This path needs both lazy GeoDataFrames and the LAS reader
+        pytest.importorskip("dask_geopandas")
+        pytest.importorskip("laspy")
+        import dask.array as da
+
+        # Surround the LAS extent with a simple constant raster
+        fn_las = gu.examples.get_path_test("coromandel_lidar")
+        pc = gu.PointCloud(fn_las)
+        bounds = pc.bounds
+        xpad = bounds.right - bounds.left
+        ypad = bounds.top - bounds.bottom
+        transform = rio.transform.from_bounds(
+            bounds.left - xpad,
+            bounds.bottom - ypad,
+            bounds.right + xpad,
+            bounds.top + ypad,
+            width=4,
+            height=4,
+        )
+        raster = gu.Raster.from_array(data=np.full((4, 4), 5, dtype=np.float32), transform=transform, crs=pc.crs)
+
+        # Interpolation should compute LAS partitions without loading the accessor
+        dask_points = gu.open_pointcloud(fn_las, chunks=100)
+        output = raster.interp_points(points=dask_points, method="nearest", as_array=True)
+
+        # Every in-bounds point must receive the constant raster value
+        assert isinstance(output, da.Array)
+        assert np.array_equal(output.compute(), np.full(dask_points.pc.point_count, 5, dtype=np.float32))
+        assert not dask_points.pc.is_loaded

@@ -22,17 +22,20 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, overload
+from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, cast, overload
 
+import geopandas as gpd
 import numpy as np
+import pandas as pd
 import rasterio as rio
 from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 
 from geoutils._config import config
-from geoutils._dispatch import _check_match_points
+from geoutils._dispatch import _check_match_points, is_dask_geodataframe
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.interface._nodata import NodataPropagation, _validate_nodata_propagation
 from geoutils.multiproc import MultiprocConfig, compute_tiling
 from geoutils.multiproc.chunked import cached_cumsum, normalize_chunks
 from geoutils.projtools import reproject_from_latlon
@@ -44,6 +47,162 @@ if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloudLike
     from geoutils.raster.base import RasterBase
     from geoutils.raster.raster import Raster
+
+
+def _interp_output_dtype(dtype: DTypeLike) -> DTypeLike:
+    """Return an interpolation dtype that can represent NaNs."""
+
+    return np.float32 if np.issubdtype(dtype, np.integer) else dtype
+
+
+def _destination_pixel_indices(
+    src_transform: rio.transform.Affine,
+    dst_transform: rio.transform.Affine,
+    dst_shape: tuple[int, int],
+) -> tuple[NDArrayNum, NDArrayNum]:
+    """
+    Return source array indices at the centers of destination pixels.
+
+    :param src_transform: Geotransform of the source array.
+    :param dst_transform: Geotransform of the destination array.
+    :param dst_shape: Height and width of the destination array.
+
+    :return: Source row and column indices for every destination pixel center.
+    """
+
+    # Build destination pixel-center positions without retaining coordinate pairs as Python objects
+    dst_cols, dst_rows = np.meshgrid(np.arange(dst_shape[1]) + 0.5, np.arange(dst_shape[0]) + 0.5)
+    dst_x = dst_transform.a * dst_cols + dst_transform.b * dst_rows + dst_transform.c
+    dst_y = dst_transform.d * dst_cols + dst_transform.e * dst_rows + dst_transform.f
+
+    # Transform coordinates back to source pixels and place array index zero at the first center
+    inverse = ~src_transform
+    src_cols = inverse.a * dst_x + inverse.b * dst_y + inverse.c - 0.5
+    src_rows = inverse.d * dst_x + inverse.e * dst_y + inverse.f - 0.5
+    return src_rows, src_cols
+
+
+def _interpolate_array_band(
+    array: NDArrayNum,
+    src_rows: NDArrayNum,
+    src_cols: NDArrayNum,
+    method: Literal["nearest", "linear"],
+    nodata_propagation: NodataPropagation,
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
+) -> NDArrayNum:
+    """
+    Interpolate one array band using normalized finite-value weights.
+
+    :param array: Two-dimensional source values.
+    :param src_rows: Source row indices of destination pixel centers.
+    :param src_cols: Source column indices of destination pixel centers.
+    :param method: Nearest-neighbor or linear interpolation.
+    :param nodata_propagation: Rule used to handle invalid source values.
+    :param dist_nodata_spread: Optional extra distance for spreading invalid cells.
+
+    :return: Interpolated floating-point array.
+    """
+
+    # Convert masked and integer inputs to floating values where invalid cells are represented by NaN
+    source = np.array(np.ma.getdata(array), dtype=_interp_output_dtype(array.dtype), copy=True)
+    if np.ma.isMaskedArray(array):
+        source[np.ma.getmaskarray(array)] = np.nan
+    valid = np.isfinite(source)
+
+    # Interpolate values and validity separately so invalid neighbors never contribute numerically
+    order = 0 if method == "nearest" else 1
+    filled = np.where(valid, source, 0)
+    numerator = map_coordinates(filled, (src_rows, src_cols), order=order, mode="nearest", prefilter=False)
+    weights = map_coordinates(
+        valid.astype(np.float32), (src_rows, src_cols), order=order, mode="nearest", prefilter=False
+    )
+
+    # Normalize the remaining finite weights as GDAL does for nearest and bilinear resampling
+    output = np.full(numerator.shape, np.nan, dtype=_interp_output_dtype(source.dtype))
+    np.divide(numerator, weights, out=output, where=weights > 0)
+
+    # Pixel areas extend half a cell beyond their centers but do not extend farther
+    inside = (src_rows >= -0.5) & (src_rows < source.shape[0] - 0.5)
+    inside &= (src_cols >= -0.5) & (src_cols < source.shape[1] - 0.5)
+    output[~inside] = np.nan
+
+    if nodata_propagation == "propagate":
+        # A propagated output is invalid when any weighted source value is invalid
+        output[weights < 1 - np.finfo(np.float32).eps] = np.nan
+    elif nodata_propagation == "gdal":
+        # GDAL invalidates an output when its nearest source cell is invalid
+        invalid_center = map_coordinates(
+            (~valid).astype(np.uint8),
+            (src_rows, src_cols),
+            order=0,
+            mode="nearest",
+            prefilter=False,
+        )
+        output[invalid_center.astype(bool)] = np.nan
+
+    if dist_nodata_spread is not None:
+        # An explicit distance adds a predictable mask around invalid cells after interpolation
+        distance = _get_dist_nodata_spread(
+            order=order,
+            dist_nodata_spread=dist_nodata_spread,
+        )
+        invalid = ~valid
+        if distance != 0:
+            invalid = binary_dilation(invalid, iterations=distance)
+        spread_mask = map_coordinates(
+            invalid.astype(np.uint8),
+            (src_rows, src_cols),
+            order=0,
+            mode="nearest",
+            prefilter=False,
+        )
+        output[spread_mask.astype(bool)] = np.nan
+    return output
+
+
+def _interpolate_array(
+    array: NDArrayNum,
+    src_transform: rio.transform.Affine,
+    dst_transform: rio.transform.Affine,
+    dst_shape: tuple[int, int] | None = None,
+    method: Literal["nearest", "linear", "bilinear"] = "linear",
+    nodata_propagation: NodataPropagation = "gdal",
+) -> NDArrayNum:
+    """
+    Interpolate an array onto another grid in the same coordinate reference system.
+
+    This function separates coordinate mapping from value interpolation so it can be reused by same-CRS
+    reprojection. The default reproduces GDAL nearest and bilinear nodata behavior, while ``ignore`` always uses
+    available finite neighbors and ``propagate`` rejects outputs influenced by an invalid neighbor.
+
+    :param array: Two- or three-dimensional source array, with bands on the first axis.
+    :param src_transform: Geotransform of the source array.
+    :param dst_transform: Geotransform of the destination array.
+    :param dst_shape: Height and width of the destination array. Defaults to the source shape.
+    :param method: Nearest-neighbor or linear interpolation. ``bilinear`` is an alias for ``linear``.
+    :param nodata_propagation: Rule used to handle invalid source values.
+
+    :return: Interpolated floating-point array.
+    """
+
+    # Normalize inputs before building the shared destination-to-source coordinate mapping
+    source = np.asanyarray(array)
+    if source.ndim not in (2, 3):
+        raise ValueError("array must have two or three dimensions.")
+    resolved_dst_shape = (source.shape[-2], source.shape[-1]) if dst_shape is None else dst_shape
+    normalized_method = "linear" if method == "bilinear" else method
+    propagation = _validate_nodata_propagation(nodata_propagation)
+    src_rows, src_cols = _destination_pixel_indices(src_transform, dst_transform, resolved_dst_shape)
+
+    # Interpolate each band independently because nodata locations can differ between bands
+    if source.ndim == 2:
+        return _interpolate_array_band(source, src_rows, src_cols, normalized_method, propagation)
+    bands = [
+        _interpolate_array_band(source[band], src_rows, src_cols, normalized_method, propagation)
+        for band in range(source.shape[0])
+    ]
+    return np.stack(bands)
+
 
 # Dask as optional dependency
 try:
@@ -266,6 +425,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+    nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: Literal[False] = False,
     **kwargs: Any,
@@ -282,6 +442,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+    nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: Literal[True],
     **kwargs: Any,
@@ -298,6 +459,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+    nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: bool = False,
     **kwargs: Any,
@@ -313,6 +475,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
+    nodata_propagation: NodataPropagation = "gdal",
     return_interpolator: bool = False,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
@@ -321,16 +484,51 @@ def _interp_points_base(
     if method is None:
         method = config["interpolation_method"]
 
-    # If dist_nodata_spread undefined, default to the global system config
-    if dist_nodata_spread is None:
-        dist_nodata_spread = config["interpolation_dist_nodata_spread"]
-
     # If array is not a floating dtype (to support NaNs), convert dtype
     if not np.issubdtype(array.dtype, np.floating):
         array = array.astype(np.float32)
     # If array is masked, fill with NaN without copy
     if np.ma.isMaskedArray(array):
         array = array.filled(np.nan)
+
+    # Nearest and linear interpolation share the same finite-weight rules as same-grid interpolation
+    propagation = _validate_nodata_propagation(nodata_propagation)
+    if method in ("nearest", "linear"):
+        normalized_method = cast(Literal["nearest", "linear"], method)
+
+        def interpolate_nearest_or_linear(x: NDArrayNum, y: NDArrayNum) -> NDArrayNum:
+            """Interpolate point coordinates with the shared nearest or linear policy."""
+
+            # Convert georeferenced coordinates to array indices before applying the common numeric kernel
+            i, j = _xy2ij(
+                x,
+                y,
+                transform=transform,
+                area_or_point=area_or_point,
+                shift_area_or_point=shift_area_or_point,
+            )
+            return _interpolate_array_band(
+                array=array,
+                src_rows=i,
+                src_cols=j,
+                method=normalized_method,
+                nodata_propagation=propagation,
+                dist_nodata_spread=dist_nodata_spread,
+            )
+
+        if return_interpolator:
+            # Interpolators receive coordinates in array-axis order to match SciPy's existing interface
+            def point_interpolator(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
+                return interpolate_nearest_or_linear(x=np.asarray(xi[1]), y=np.asarray(xi[0]))
+
+            return point_interpolator
+
+        assert points is not None
+        return interpolate_nearest_or_linear(x=np.asarray(points[0]), y=np.asarray(points[1]))
+
+    # Higher-order methods retain their configurable mask spread until a GDAL-equivalent kernel is available
+    if dist_nodata_spread is None:
+        dist_nodata_spread = config["interpolation_dist_nodata_spread"]
 
     # If the raster is on an equal grid, use scipy.ndimage.map_coordinates
     force_map_coords = force_scipy_function is not None and force_scipy_function == "map_coordinates"
@@ -385,7 +583,7 @@ def _interp_points_base(
             kwargs.update({"fill_value": np.nan})
 
         # Using direct coordinates, Y is the first axis, and we need to flip it
-        interpolator = _interpn_interpolator(
+        scipy_interpolator = _interpn_interpolator(
             points=(np.flip(xycoords[1], axis=0), xycoords[0]),
             values=array,
             method=method,
@@ -394,9 +592,9 @@ def _interp_points_base(
             fill_value=kwargs["fill_value"],
         )
         if return_interpolator:
-            return interpolator
+            return scipy_interpolator
         else:
-            rpoints = interpolator((y, x))  # type: ignore
+            rpoints = scipy_interpolator((y, x))  # type: ignore
 
     return rpoints
 
@@ -573,6 +771,147 @@ def _dask_interp_points(
     return interp_points
 
 
+def _empty_pointcloud_meta(data_column: str, crs: Any, dtype: DTypeLike) -> gpd.GeoDataFrame:
+    """Build an empty GeoDataFrame for Dask point-cloud outputs."""
+
+    # Dask uses this empty object to infer columns, geometry and data types
+    return gpd.GeoDataFrame(
+        data={data_column: pd.Series(dtype=dtype)},
+        geometry=gpd.GeoSeries([], crs=crs),
+        crs=crs,
+    )
+
+
+def _set_dask_pointcloud_attrs(ds: Any, crs: Any, data_column: str) -> None:
+    """Set minimal GeoUtils point-cloud metadata on a Dask GeoDataFrame."""
+
+    # Dask dataframes do not provide the Pandas ``attrs`` storage used by the accessor
+    object.__setattr__(
+        ds,
+        "_geoutils_attrs",
+        {
+            "crs": crs,
+            "bounds": None,
+            "point_count": None,
+            "data_column": data_column,
+        },
+    )
+
+
+def _interp_points_partition(
+    part: gpd.GeoDataFrame,
+    source_raster: RasterBase,
+    interp_options: dict[str, Any],
+    extra_kwargs: dict[str, Any],
+    data_column: str,
+    out_crs: Any,
+) -> gpd.GeoDataFrame:
+    """Interpolate one point partition and return a point-cloud partition."""
+
+    # Preserve the planned output structure even when Dask sends an empty partition
+    out_dtype = _interp_output_dtype(source_raster.dtype)
+    if len(part) == 0:
+        return _empty_pointcloud_meta(data_column=data_column, crs=out_crs, dtype=out_dtype)
+
+    # Convert partition geometries to the coordinate arrays used by raster interpolation
+    x = np.atleast_1d(np.asarray(part.geometry.x.values))
+    y = np.atleast_1d(np.asarray(part.geometry.y.values))
+    i, j = _xy2ij(
+        x,
+        y,
+        transform=source_raster.transform,
+        area_or_point=source_raster.area_or_point,
+        shift_area_or_point=interp_options["shift_area_or_point"],
+    )
+    # Detect partitions with no raster overlap before constructing interpolation work
+    ind_outofbounds: NDArrayBool = (i < 0) | (j < 0) | (i >= source_raster.shape[0]) | (j >= source_raster.shape[1])
+
+    if np.count_nonzero(~ind_outofbounds) == 0:
+        z = np.full(len(part), np.nan, dtype=out_dtype)
+    else:
+        # Reuse the regular interpolation path within the current point partition
+        z = _interp_points(
+            source_raster=source_raster,
+            points=(x, y),
+            as_array=True,
+            **interp_options,
+            **extra_kwargs,
+        )
+        # A Dask raster may return a lazy array that must finish inside this task
+        if hasattr(z, "compute"):
+            z = z.compute()
+
+    # Retain the original geometry and index while adding interpolated values
+    return gpd.GeoDataFrame(
+        data={data_column: np.asarray(z)},
+        geometry=part.geometry,
+        crs=out_crs,
+        index=part.index,
+    )
+
+
+def _interp_points_dask_pointcloud(
+    source_raster: RasterBase,
+    points: Any,
+    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"],
+    band: int,
+    input_latlon: bool,
+    as_array: bool,
+    dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None,
+    nodata_propagation: NodataPropagation,
+    shift_area_or_point: bool | None,
+    force_scipy_function: Literal["map_coordinates", "interpn"] | None,
+    return_interpolator: bool,
+    extra_kwargs: dict[str, Any],
+) -> Any:
+    """Interpolate raster values at a Dask-GeoPandas point cloud."""
+
+    # Reject options whose eager return type cannot be represented by partitions
+    if return_interpolator:
+        raise ValueError("Option 'return_interpolator' of interp_points cannot be used with Dask point-cloud inputs.")
+    if input_latlon:
+        raise ValueError("Argument 'input_latlon' is only supported for tuple point inputs.")
+
+    # Import only after identifying a Dask input so the dependency remains optional
+    import_optional("dask_geopandas", package_name="dask-geopandas")
+
+    # Reproject lazily so every partition reaches the raster in the same CRS
+    out_crs = source_raster.crs
+    points_in_crs = points if points.crs == out_crs else points.to_crs(out_crs)
+    data_column = "z"
+    out_dtype = _interp_output_dtype(source_raster.dtype)
+    meta = _empty_pointcloud_meta(data_column=data_column, crs=out_crs, dtype=out_dtype)
+
+    # Package stable interpolation options once for each partition task
+    interp_options = {
+        "method": method,
+        "band": band,
+        "input_latlon": False,
+        "dist_nodata_spread": dist_nodata_spread,
+        "nodata_propagation": nodata_propagation,
+        "shift_area_or_point": shift_area_or_point,
+        "force_scipy_function": force_scipy_function,
+        "return_interpolator": False,
+    }
+    # Map the eager partition helper while keeping the complete point cloud lazy
+    out = points_in_crs.map_partitions(
+        _interp_points_partition,
+        source_raster,
+        interp_options,
+        extra_kwargs,
+        data_column,
+        out_crs,
+        meta=meta,
+    )
+    # Restore the metadata expected by the GeoUtils ``pc`` accessor
+    _set_dask_pointcloud_attrs(out, crs=out_crs, data_column=data_column)
+
+    if as_array:
+        # Expose values as a Dask array without computing point partitions
+        return out[data_column].to_dask_array(lengths=True)
+    return out
+
+
 # SAME WITH MULTIPROCESSING
 
 
@@ -683,7 +1022,6 @@ def _multiproc_interp_points(
     indices = np.concatenate(ind_per_block).astype(int)
     argsort = np.argsort(indices)
     interp_points = np.array(interp_points)[argsort]
-    print(interp_points)
 
     return interp_points
 
@@ -703,6 +1041,7 @@ def _interp_points(
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
     mp_config: MultiprocConfig | None = None,
+    nodata_propagation: NodataPropagation = "gdal",
     **kwargs: Any,
 ) -> Any:
     """See description of Raster.interp_points."""
@@ -711,11 +1050,27 @@ def _interp_points(
     if method is None:
         method = config["interpolation_method"]
 
-    # If dist_nodata_spread undefined, default to the global system config
-    if dist_nodata_spread is None:
-        dist_nodata_spread = config["interpolation_dist_nodata_spread"]
+    propagation = _validate_nodata_propagation(nodata_propagation)
 
     # 1/ Input checks
+
+    if is_dask_geodataframe(points):
+        if mp_config is not None:
+            raise ValueError("Dask point-cloud inputs cannot be combined with Multiprocessing interpolation.")
+        return _interp_points_dask_pointcloud(
+            source_raster=source_raster,
+            points=points,
+            method=method,
+            band=band,
+            input_latlon=input_latlon,
+            as_array=as_array,
+            dist_nodata_spread=dist_nodata_spread,
+            nodata_propagation=propagation,
+            shift_area_or_point=shift_area_or_point,
+            force_scipy_function=force_scipy_function,
+            return_interpolator=return_interpolator,
+            extra_kwargs=kwargs,
+        )
 
     # Check and normalize input points
     pts_xy, input_scalar = _check_match_points(source_raster, points)
@@ -769,7 +1124,8 @@ def _interp_points(
     class _InterpKwargs(TypedDict):
         area_or_point: Literal["Area", "Point"] | None
         method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None
+        nodata_propagation: NodataPropagation
         shift_area_or_point: bool | None
         force_scipy_function: Literal["map_coordinates", "interpn"] | None
         return_interpolator: bool
@@ -778,6 +1134,7 @@ def _interp_points(
         "area_or_point": area_or_point,
         "method": method,
         "dist_nodata_spread": dist_nodata_spread,
+        "nodata_propagation": propagation,
         "shift_area_or_point": shift_area_or_point,
         "force_scipy_function": force_scipy_function,
         "return_interpolator": return_interpolator,
@@ -844,13 +1201,13 @@ def _interp_points(
 
         # Rebuild array (delayed if Dask, normal if NumPy)
         def _rebuild_with_nans(z_inbounds: NDArrayNum, mask_out: NDArrayBool, n: int, dtype: DTypeLike) -> NDArrayNum:
-            out = np.full(n, np.nan, dtype=np.float32 if np.issubdtype(dtype, np.integer) else dtype)
+            out = np.full(n, np.nan, dtype=_interp_output_dtype(dtype))
             out[~mask_out] = z_inbounds
             return out
 
         if dask_backend:
             out_del = dask.delayed(_rebuild_with_nans)(z_inbounds, ind_outofbounds, n, dtype)
-            z = da.from_delayed(out_del, shape=(n,), dtype=np.float32 if np.issubdtype(dtype, np.integer) else dtype)
+            z = da.from_delayed(out_del, shape=(n,), dtype=_interp_output_dtype(dtype))
         else:
             z = _rebuild_with_nans(z_inbounds, ind_outofbounds, n, dtype)
 

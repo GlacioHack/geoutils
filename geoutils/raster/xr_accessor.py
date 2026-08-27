@@ -80,8 +80,13 @@ class RasterAccessor(RasterBase):
         # We are never returning a DataArray that is unmasked, so the nodata plays a different role than in Rioxarray
         # It is only used for file writing = always the encoded value if it exists
         if self._obj.rio.encoded_nodata is not None:
-            # Write encoded nodata as "_FillValue" attribute
-            self._obj.rio.write_nodata(self._obj.rio.encoded_nodata, inplace=True)
+            encoded_nodata = self._obj.rio.encoded_nodata
+
+            # Move encoded nodata to the attributes without retaining a duplicate value
+            encoding = dict(self._obj.encoding)
+            encoding.pop("_FillValue", None)
+            self._obj.rio.set_encoding(encoding, inplace=True)
+            self._obj.rio.write_nodata(encoded_nodata, inplace=True)
 
     @property
     def data(self) -> xr.DataArray:
@@ -259,7 +264,7 @@ class RasterAccessor(RasterBase):
             tags.update({"AREA_OR_POINT": area_or_point})
 
         # Xarray converts NumPy masked arrays to floating arrays with NaN, even when no values are masked. Preserve the
-        # original dtype when possible, and only materialize masked values when they exist.
+        # original dtype when possible, and only materialize masked values when they exist
         if np.ma.isMaskedArray(data):
             masked = np.ma.asarray(data)
             mask = np.ma.getmaskarray(masked)

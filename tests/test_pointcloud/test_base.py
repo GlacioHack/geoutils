@@ -18,6 +18,7 @@ from pyproj import CRS
 
 import geoutils as gu
 from geoutils import PointCloud, Raster
+from geoutils.interface.gridding import GriddingMethod
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.pd_accessor import PointCloudAccessor
@@ -208,6 +209,7 @@ class TestClassVsAccessorConsistency:
 class TestAccessorDask:
     """Test Dask loading and laziness of the "pc" Pandas accessor."""
 
+    # Use the same compact fixture as the eager class-versus-accessor tests
     ds = TestClassVsAccessorConsistency.ds
 
     def test_open__dask(self) -> None:
@@ -215,18 +217,18 @@ class TestAccessorDask:
         Check that a DataFrame opened with chunks using "open_pointcloud" maintains Dask laziness.
         """
 
-        pytest.importorskip("dask")
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
-            import dask.dataframe as dd
+        # Skip cleanly when the optional lazy dataframe backend is unavailable
+        dgpd = pytest.importorskip("dask_geopandas")
 
+        # Write a source that can be reopened into two row partitions
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.ds.to_file(temp_file)
 
+        # Metadata queries should not force the Dask collection into memory
         ds = gu.open_pointcloud(temp_file, data_column="b1", chunks=2)
 
-        assert isinstance(ds, dd.DataFrame)
+        assert isinstance(ds, dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
         assert ds.pc.point_count == len(self.ds)
 
@@ -235,12 +237,13 @@ class TestAccessorDask:
         Test that chunked methods have the exact same output, loading mechanism and laziness.
         """
 
-        pytest.importorskip("dask")
+        # Load both lazy dataframe and lazy array types used by this test
+        dgpd = pytest.importorskip("dask_geopandas")
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
             import dask.array as da
-            import dask.dataframe as dd
 
+        # Prepare matching lazy and eager point-cloud interfaces
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.ds.to_file(temp_file)
@@ -248,53 +251,308 @@ class TestAccessorDask:
         ds = gu.open_pointcloud(temp_file, data_column="b1", chunks=2)
         pc = PointCloud(self.ds, data_column="b1")
 
+        # Arithmetic should remain lazy only for the Dask-backed accessor
         output_ds = ds.pc + 1
         output_pc = pc + 1
 
         assert not ds.pc.is_loaded
-        assert isinstance(output_ds, dd.DataFrame)
+        assert isinstance(output_ds, dgpd.GeoDataFrame)
         assert output_pc.is_loaded
 
+        # Compute the accessor result and compare both coordinates and values
         output_ds_comp = _as_geodataframe(output_ds.compute(), crs=ds.pc.crs)
         output_ds_pc = PointCloud(output_ds_comp, data_column="b1")
         assert output_pc.georeferenced_coords_equal(output_ds_pc)
         assert np.array_equal(output_pc.data, output_ds_pc.data)
 
+        # Array conversion should create a Dask array with the eager values
         array_ds = ds.pc.to_array()
         array_pc = pc.to_array()
 
         assert isinstance(array_ds, da.Array)
         assert np.array_equal(array_ds.compute(), array_pc)
 
+        # Explicit loading is the only operation that replaces the lazy source
         ds.pc.load()
         assert ds.pc.is_loaded
         assert_geodataframe_equal(ds.pc.ds, self.ds)
+
+    def test_chunked_reduction_methods__equality_loading_laziness(self) -> None:
+        """Test Dask point-cloud reductions/subsampling compute small outputs without loading the source."""
+
+        pytest.importorskip("dask_geopandas")
+
+        # Open the same source lazily and eagerly for reduction comparisons
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.ds.to_file(temp_file)
+
+        ds = gu.open_pointcloud(temp_file, data_column="b1", chunks=2)
+        pc = PointCloud(self.ds, data_column="b1")
+
+        # Statistics compute a small dictionary without loading the accessor source
+        assert_output_equal(
+            pc.get_stats(["mean", "max", "valid_count"]),
+            ds.pc.get_stats(["mean", "max", "valid_count"]),
+        )
+        assert not ds.pc.is_loaded
+
+        # Subsampling computes only the requested small point selection
+        assert_output_equal(
+            pc.subsample(subsample=2, random_state=42),
+            ds.pc.subsample(subsample=2, random_state=42),
+        )
+        assert not ds.pc.is_loaded
+
+    @pytest.mark.parametrize(
+        "resampling",
+        [
+            "nearest",
+            "idw",
+            "mean",
+            "minimum",
+            "maximum",
+            "range",
+            "count",
+            "stdev",
+            "average_distance",
+            "average_distance_pts",
+        ],
+    )
+    def test_grid__dask_geopandas(self, resampling: GriddingMethod) -> None:
+        """Test interpolation and neighborhood gridding from a Dask-GeoPandas input."""
+
+        pytest.importorskip("dask_geopandas")
+        import dask.array as da
+
+        # Build an eager reference before opening the partitioned source
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.ds.to_file(temp_file)
+
+        expected = PointCloud(self.ds, data_column="b1").grid(
+            res=1,
+            bounds=(0, 0, 2, 2),
+            resampling=resampling,
+            dist_nodata_pixel=2,
+        )
+        # Request rectangular output chunks to exercise Dask block assembly
+        ds = gu.open_pointcloud(temp_file, data_column="b1", chunks=2)
+        output = ds.pc.grid(
+            res=1,
+            bounds=(0, 0, 2, 2),
+            resampling=resampling,
+            dist_nodata_pixel=2,
+            chunksizes=(2, 1),
+        )
+
+        # Verify lazy output structure before computing numerical equality
+        assert isinstance(output.data, da.Array)
+        assert output.data.chunks == ((2,), (1, 1))
+        assert not ds.pc.is_loaded
+        assert np.array_equal(expected.data, output.compute().values, equal_nan=True)
+        assert not ds.pc.is_loaded
+
+    @pytest.mark.parametrize(
+        "resampling",
+        [
+            "nearest",
+            "idw",
+            "mean",
+            "minimum",
+            "maximum",
+            "range",
+            "count",
+            "stdev",
+            "average_distance",
+            "average_distance_pts",
+        ],
+    )
+    def test_grid__multiprocessing_file_backed(self, resampling: GriddingMethod) -> None:
+        """Test interpolation and neighborhood gridding from an unloaded file with Multiprocessing."""
+
+        # Build the expected grid from the complete in-memory point cloud
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.ds.to_file(temp_file)
+
+        expected = PointCloud(self.ds, data_column="b1").grid(
+            res=1,
+            bounds=(0, 0, 2, 2),
+            resampling=resampling,
+            dist_nodata_pixel=2,
+        )
+        # Keep the source unloaded while worker tasks read only their point bounds
+        pc = PointCloud(temp_file, data_column="b1")
+        output = pc.grid(
+            res=1,
+            bounds=(0, 0, 2, 2),
+            resampling=resampling,
+            dist_nodata_pixel=2,
+            mp_config=MultiprocConfig(chunks=(2, 1)),
+        )
+
+        # The result stays file-backed and matches the eager reference when read
+        assert not pc.is_loaded
+        assert not output.is_loaded
+        assert np.array_equal(expected.data, output.data, equal_nan=True)
+
+    @pytest.mark.parametrize("resampling", ["nearest", "mean"])
+    def test_grid__numba_backends(self, resampling: GriddingMethod) -> None:
+        """Keep the Numba calculation engine identical across eager, Dask and Multiprocessing backends."""
+
+        pytest.importorskip("numba")
+        pytest.importorskip("dask_geopandas")
+
+        # Store one point source so both out-of-core backends can select local points
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.ds.to_file(temp_file)
+        kwargs = {
+            "res": 1,
+            "bounds": (0, 0, 2, 2),
+            "resampling": resampling,
+            "dist_nodata_pixel": 2,
+            "engine": "numba",
+        }
+
+        # The eager result provides the complete reference for both tiled outputs
+        expected = PointCloud(self.ds, data_column="b1").grid(**kwargs)
+        dask_points = gu.open_pointcloud(temp_file, data_column="b1", chunks=2)
+        dask_output = dask_points.pc.grid(**kwargs, chunksizes=(2, 1))
+        assert np.array_equal(expected.data, dask_output.compute().values, equal_nan=True)
+
+        # Multiprocessing forwards the same calculation engine to each worker tile
+        file_points = PointCloud(temp_file, data_column="b1")
+        multiproc_output = file_points.grid(
+            **kwargs,
+            mp_config=MultiprocConfig(chunks=(2, 1)),
+        )
+        assert np.array_equal(expected.data, multiproc_output.data, equal_nan=True)
+
+    def test_grid__nodata_propagation_backends(self) -> None:
+        """Keep propagated invalid points identical across eager, Dask and Multiprocessing gridding."""
+
+        pytest.importorskip("dask_geopandas")
+
+        # A regular grid with one invalid center exercises support across output chunk boundaries
+        x, y = np.meshgrid(np.arange(3, dtype=float), np.arange(3, dtype=float))
+        values = np.arange(9, dtype=float)
+        values[4] = np.nan
+        points = gpd.GeoDataFrame(
+            data={"z": values},
+            geometry=gpd.points_from_xy(x=x.ravel(), y=y.ravel()),
+            crs=32610,
+        )
+        temp_dir = tempfile.TemporaryDirectory()
+        point_file = os.path.join(temp_dir.name, "nodata-points.gpkg")
+        points.to_file(point_file)
+        grid_coords = (np.arange(3, dtype=float), np.arange(3, dtype=float))
+
+        # The eager result establishes the complete support mask before the source is partitioned
+        expected = PointCloud(points, data_column="z").grid(
+            grid_coords=grid_coords,
+            resampling="mean",
+            dist_nodata_pixel=1.1,
+            nodata_propagation="propagate",
+        )
+        dask_points = gu.open_pointcloud(point_file, data_column="z", chunks=2)
+        dask_output = dask_points.pc.grid(
+            grid_coords=grid_coords,
+            resampling="mean",
+            dist_nodata_pixel=1.1,
+            nodata_propagation="propagate",
+            chunksizes=(2, 2),
+        )
+        assert np.array_equal(expected.data, dask_output.compute().values, equal_nan=True)
+
+        # Multiprocessing reads the same support around each output tile from the file-backed source
+        file_points = PointCloud(point_file, data_column="z")
+        multiproc_output = file_points.grid(
+            grid_coords=grid_coords,
+            resampling="mean",
+            dist_nodata_pixel=1.1,
+            nodata_propagation="propagate",
+            mp_config=MultiprocConfig(chunks=(2, 2)),
+        )
+        assert np.array_equal(expected.data, multiproc_output.data, equal_nan=True)
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_open_las__multiprocessing_and_dask(self) -> None:
         """Check LAS chunked loading through Multiprocessing and Dask."""
 
-        pytest.importorskip("dask")
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
-            import dask.dataframe as dd
+        dgpd = pytest.importorskip("dask_geopandas")
 
+        # Establish one eager reference for both chunked backends
         fn_las = gu.examples.get_path_test("coromandel_lidar")
 
         pc = PointCloud(fn_las)
         pc.load()
 
+        # Multiprocessing reads independent LAS row chunks into one PointCloud
         pc_mp = PointCloud(fn_las)
         pc_mp.load(mp_config=MultiprocConfig(chunks=100))
 
         assert pc_mp.pointcloud_equal(pc)
 
+        # Dask represents the same LAS chunks as a lazy GeoDataFrame
         ds = gu.open_pointcloud(fn_las, chunks=100)
-        assert isinstance(ds, dd.DataFrame)
+        assert isinstance(ds, dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
         assert ds.pc.point_count == pc.point_count
 
+        # Compute once for a complete coordinate and value comparison
         ds_comp = _as_geodataframe(ds.compute(), crs=ds.pc.crs)
         ds_pc = PointCloud(ds_comp, data_column="Z")
         assert ds_pc.georeferenced_coords_equal(pc)
         assert np.allclose(ds_pc.data, pc.data)
+
+    @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
+    def test_grid_las__multiprocessing_and_dask(self) -> None:
+        """Test LAS point-cloud gridding with Dask and Multiprocessing."""
+
+        pytest.importorskip("dask_geopandas")
+        import dask.array as da
+
+        # Build a small eager grid that both chunked implementations must match
+        fn_las = gu.examples.get_path_test("coromandel_lidar")
+
+        pc = PointCloud(fn_las)
+        pc.load()
+        expected = pc.grid(
+            shape=(3, 3),
+            bounds=pc.bounds,
+            resampling="nearest",
+            dist_nodata_pixel=100,
+        )
+
+        # Dask selects and grids point partitions separately for every output block
+        ds = gu.open_pointcloud(fn_las, chunks=100)
+        output_dask = ds.pc.grid(
+            shape=(3, 3),
+            bounds=pc.bounds,
+            resampling="nearest",
+            dist_nodata_pixel=100,
+            chunksizes=(2, 1),
+        )
+
+        # Check graph layout and laziness before computing the grid
+        assert isinstance(output_dask.data, da.Array)
+        assert output_dask.data.chunks == ((2, 1), (1, 1, 1))
+        assert not ds.pc.is_loaded
+        assert np.array_equal(expected.data, output_dask.compute().values, equal_nan=True)
+
+        # Multiprocessing keeps the PointCloud unloaded while workers read LAS bounds
+        pc_file = PointCloud(fn_las)
+        output_mp = pc_file.grid(
+            shape=(3, 3),
+            bounds=pc.bounds,
+            resampling="nearest",
+            dist_nodata_pixel=100,
+            mp_config=MultiprocConfig(chunks=(2, 1)),
+        )
+
+        # Its file-backed raster result should equal the eager and Dask results
+        assert not pc_file.is_loaded
+        assert not output_mp.is_loaded
+        assert np.array_equal(expected.data, output_mp.data, equal_nan=True)

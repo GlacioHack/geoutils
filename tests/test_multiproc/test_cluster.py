@@ -23,6 +23,8 @@ def long_running_task(x: float) -> float:
 
 
 class TestClusterGenerator:
+    """Check synchronous and process-based cluster implementations through their shared interface."""
+
     def test_basic_cluster(self) -> None:
         # Test that tasks are run synchronously in BasicCluster
         cluster = ClusterGenerator(name="basic")

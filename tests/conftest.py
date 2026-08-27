@@ -12,29 +12,6 @@ import pytest
 from geoutils import Raster, examples
 
 
-def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register custom GeoUtils test options."""
-
-    parser.addoption(
-        "--run-large-data",
-        action="store_true",
-        default=False,
-        help="Run large-data Dask memory stress tests.",
-    )
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Skip large-data stress tests unless explicitly requested."""
-
-    if config.getoption("--run-large-data"):
-        return
-
-    skip_large_data = pytest.mark.skip(reason="Large-data stress test; use --run-large-data to run.")
-    for item in items:
-        if "large_data" in item.keywords:
-            item.add_marker(skip_large_data)
-
-
 class LoggingWarningCollector(logging.Handler):
     """Helper class to collect logging warnings."""
 

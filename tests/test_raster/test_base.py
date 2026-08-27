@@ -135,6 +135,7 @@ class TestClassVsAccessorConsistency:
         "copy",
         "georeferenced_grid_equal",
         "intersection",
+        "edit",
     ]
     # List of methods that WILL NOT load the input for certain arguments
     methods_input_noload_allowed_args = {"info": {"stats": [False]}}
@@ -150,6 +151,7 @@ class TestClassVsAccessorConsistency:
         "set_transform",
         "set_nodata",
         "set_area_or_point",
+        "edit",
     ]
     # List of methods that WILL NOT LOAD the output for certain arguments
     # copy(new_array=not None) will load
@@ -203,6 +205,7 @@ class TestClassVsAccessorConsistency:
         ),  # "random" will be derived during the test to work on all inputs
         ("icrop", {"bbox": (3, 5, 10, 22)}),
         ("translate", {"xoff": 10.5, "yoff": 5}),
+        ("edit", {"crs": CRS.from_epsg(4326), "tags": {"edited": "true"}}),
         ("xy2ij", {"x": "random", "y": "random"}),  # "random" will be derived during the test to work on all inputs
         ("ij2xy", {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]}),
         ("coords", {"grid": True}),
@@ -233,6 +236,8 @@ class TestClassVsAccessorConsistency:
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
         ("filter", {"method": "median", "size": 7}),
+        ("sieve", {"size": 7}),
+        ("fill_nodata", {"max_search_distance": 3}),
         ("get_stats", {}),
         # 2.2. In-place methods
         ("load", {}),
@@ -257,6 +262,25 @@ class TestClassVsAccessorConsistency:
         # Open both objects
         ds = open_raster(path_raster)
         raster = Raster(path_raster)
+
+        # Sieve follows GDAL and accepts integer categories rather than continuous values
+        if method == "sieve":
+            source_data = raster.data
+            integer_data = np.ma.array(source_data.data.astype(np.int32), mask=np.ma.getmaskarray(source_data))
+            raster = Raster.from_array(
+                integer_data,
+                transform=raster.transform,
+                crs=raster.crs,
+                nodata=-99999,
+                area_or_point=raster.area_or_point,
+            )
+            ds = RasterAccessor.from_array(
+                integer_data.filled(-99999),
+                transform=raster.transform,
+                crs=raster.crs,
+                nodata=-99999,
+                area_or_point=raster.area_or_point,
+            )
 
         # For methods that require knowledge of the data (relative to bounds), create specific inputs
         args = kwargs.copy()

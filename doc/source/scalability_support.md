@@ -1,7 +1,7 @@
 (scalability-support)=
 # Supported operations
 
-GeoUtils supports **scalable execution for most of its raster methods**, including nearly all **raster–point** and **raster–vector** interface operations. Support for **point-cloud methods** is partially supported and under development, while **vector methods** may also gain scalable support in the future (lower priority).
+GeoUtils supports **scalable execution for most of its raster methods**, including nearly all **raster–point** and **raster–vector** interface operations. Support for **vector** and **point-cloud** accessors is partially supported through **Dask-GeoPandas** and under development.
 
 Chunked implementations can run through either **Dask** (via the Xarray and Pandas accessors) or **Multiprocessing** (via GeoUtils objects such as {class}`~geoutils.Raster`).
 
@@ -9,7 +9,8 @@ Both object types (accessors or GeoUtils) expose the **exact same API**, and bot
 
 ## Table summary
 
-The table below summarizes the **scalability support** of GeoUtils operations with respect to their input and output behavior.
+The table below summarizes the **scalability support** of GeoUtils operations with respect to their input and output
+behavior. Operations marked as chunked are also validated with inputs larger than the memory available to one worker.
 
 If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, see the {ref}`scalability-concept` page.
 
@@ -130,9 +131,9 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   -
 
 * - {meth}`~geoutils.PointCloud.grid`
-  - {bdg-secondary}`In-memory`
-  - {bdg-secondary}`In-memory`
-  - —
+  - {bdg-success}`Chunked`
+  - {bdg-success}`Chunked`
+  - ~1 point partition and 1 output chunk
 * - {meth}`~geoutils.Raster.from_pointcloud_regular`
   - {bdg-secondary}`In-memory`
   - {bdg-secondary}`In-memory`
