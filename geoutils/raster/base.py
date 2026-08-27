@@ -902,7 +902,6 @@ class RasterBase(ABC):
 
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
-            print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
             warnings.warn(
                 category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
             )
