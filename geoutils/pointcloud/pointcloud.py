@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import logging
 import os.path
 import pathlib
 import warnings
@@ -1319,6 +1318,43 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         )
 
     @overload
+    def info(self, verbose: Literal[True] = ..., stats: bool = False) -> None: ...
+
+    @overload
+    def info(self, verbose: Literal[False], stats: bool = False) -> str: ...
+
+    def info(self, verbose: bool = True, stats: bool = False) -> None | str:
+        """
+        Print summary information about the point cloud.
+
+        :param stats: Add statistics for each band of the dataset (max, min, median, mean, std. dev.). Default is to
+            not calculate statistics.
+        :param verbose: If set to True (default) will directly print to screen and return None
+
+        :returns: Summary string or None.
+        """
+
+        # Get vector.info()
+        as_str_split = super().info(verbose=False).split("\n")  # type: ignore
+
+        if stats:
+            as_str_split.append("\nStatistics:")
+            statistics = self.get_stats()
+
+            # Determine the maximum length of the stat names for alignment
+            max_len = max(len(name) for name in statistics.keys())
+
+            # Format the stats with aligned names
+            for name, value in statistics.items():
+                as_str_split.append(f"{name.ljust(max_len)}: {value:.2f}")
+
+        if verbose:
+            print("\n".join(as_str_split))
+            return None
+        else:
+            return "\n".join(as_str_split)
+
+    @overload
     def get_stats(
         self,
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
@@ -1383,12 +1419,17 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
         Callable functions are supported as well.
 
-        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+        By default and without any specification, this function computes the following main statistics: minimum,
+        maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
+        To compute all available statistics, set `stats_name` to `all`.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, main statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
+            To compute all available statistics, set `stats_name` to `all`.
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
 
@@ -1399,7 +1440,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         data = self.data
 
         # Given list or all attributes to compute if None
-        if isinstance(stats_name, list) or stats_name is None:
+        if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
             return _statistics(data, stats_name)  # type: ignore
         else:
             # Single attribute to compute
@@ -1408,7 +1449,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             elif callable(stats_name):
                 return stats_name(data)  # type: ignore
             else:
-                logging.warning("Statistic name '%s' is a not recognized string", stats_name)
+                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
 
     @overload
     def subsample(

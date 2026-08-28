@@ -550,6 +550,32 @@ class TestArithmetic:
 
     pc1_wrong_coords = gu.PointCloud.from_array(arr_wrong_coord, crs=crs)
 
+    def test_info(self) -> None:
+        """Test that the information summary is consistent"""
+        path = gu.examples.get_path_test("everest_landsat_b4")
+        raster = gu.Raster(path)
+        pc = raster.to_pointcloud()
+
+        # Check default runs without error (prints to screen)
+        output = pc.info()
+        assert output is None
+
+        # Otherwise returns info
+        output2 = pc.info(verbose=False)
+        assert isinstance(output2, str)
+        list_prints = ["Filename", "Coordinate system", "Extent", "Number of features", "Attributes"]
+        assert all(p in output2 for p in list_prints)
+
+        # Test stats param (raster vs pc)
+        pc_with_stats_split = pc.info(stats=True, verbose=False).split("\n")
+        start_stats_pc = pc_with_stats_split.index("Statistics:")
+        raster_with_stats_split = raster.info(stats=True, verbose=False).split("\n")
+        start_stats_raster = raster_with_stats_split.index("Statistics:")
+
+        pc_stats_split = pc_with_stats_split[start_stats_pc:]
+        raster_stats_split = raster_with_stats_split[start_stats_raster:]
+        assert pc_stats_split == raster_stats_split
+
     def test_pointcloud_equal(self) -> None:
         """
         Test that pointcloud_equal() works as expected.

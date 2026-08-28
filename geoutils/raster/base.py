@@ -48,7 +48,7 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
-from geoutils._dispatch import is_dask_dataframe
+from geoutils._dispatch import _check_match_grid, is_dask_dataframe
 from geoutils._misc import deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -719,22 +719,22 @@ class RasterBase(ABC):
         :returns: Summary string or None.
         """
         as_str = [
-            f"Driver:               {self.driver} \n",
-            f"Filename:             {self.name} \n",
-            f"Loaded?               {self.is_loaded} \n",
-            f"Grid size:            {self.width}, {self.height}\n",
-            f"Number of bands:      {self.count:d}\n",
-            f"Data types:           {self.dtype}\n",
-            f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}\n",
-            f"Nodata value:         {self.nodata}\n",
-            f"Pixel interpretation: {self.area_or_point}\n",
-            "Pixel size:           {}, {}\n".format(*self.res),
-            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}\n",
-            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}\n",
+            f"Driver:               {self.driver}",
+            f"Filename:             {self.name}",
+            f"Loaded?               {self.is_loaded}",
+            f"Grid size:            {self.width}, {self.height}",
+            f"Number of bands:      {self.count}",
+            f"Data types:           {self.dtype}",
+            f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}",
+            f"Nodata value:         {self.nodata}",
+            f"Pixel interpretation: {self.area_or_point}",
+            "Pixel size:           {}, {}".format(*self.res),
+            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}",
+            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}",
         ]
 
         if stats:
-            as_str.append("\nStatistics:\n")
+            as_str.append("\nStatistics:")
             if not self.is_loaded:
                 self.load()
 
@@ -746,40 +746,40 @@ class RasterBase(ABC):
 
                 # Format the stats with aligned names
                 for name, value in statistics.items():
-                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
+                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}")
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
-                    as_str.append(f"Band {b + 1}:\n")
+                    as_str.append(f"Band {b + 1}:")
                     statistics = self.get_stats(band=b)
                     if isinstance(statistics, dict):
                         max_len = max(len(name) for name in statistics.keys())
                         for name, value in statistics.items():
-                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
+                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}")
 
         if verbose:
-            print("".join(as_str))
+            print("\n".join(as_str))
             return None
         else:
-            return "".join(as_str)
+            return "\n".join(as_str)
 
     @overload
     def get_stats(
         self,
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any]: ...
+    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
 
     @overload
     def get_stats(
         self,
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> dict[str, np.floating[Any]]: ...
+    ) -> dict[str, np.floating[Any]] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
 
     @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)
     def get_stats(
@@ -788,9 +788,9 @@ class RasterBase(ABC):
             str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
+    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
@@ -816,7 +816,7 @@ class RasterBase(ABC):
         - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
         ignoring masked values.
         - Valid count: number of finite data points in the array. It counts the non-masked elements.
-        - Total count: total size of the raster.
+        - Total count: total size (width x height) of the raster.
         - Percentage valid points: ratio between Valid count and Total count.
 
         For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
@@ -838,12 +838,17 @@ class RasterBase(ABC):
 
         Callable functions are supported as well.
 
-        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+        By default and without any specification, this function computes the following main statistics: minimum,
+        maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
+        To compute all available statistics, set `stats_name` to `all`.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, main statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
+            To compute all available statistics, set `stats_name` to `all`.
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
@@ -851,38 +856,54 @@ class RasterBase(ABC):
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
 
-        # Get data band
-        data = self.data[band - 1, :, :] if self.count > 1 else self.data
+        # Case mono-band
+        if self.count == 1 and band is None:
+            band = 1
 
-        # Derive inlier mask
-        if inlier_mask is not None:
-            valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
-            if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
-                mask = inlier_mask.data
+        if band is not None:
+            # Get data band
+            data = self.data[band - 1, :, :] if self.count > 1 else self.data
+
+            # Derive inlier mask
+            if inlier_mask is not None:
+                valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
+                if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
+                    mask = inlier_mask.data
+                else:
+                    mask = inlier_mask
+                inlier_points = np.count_nonzero(mask)
+
+                rast = self.copy()
+
+                # Mask pixels from the inlier_mask
+                if not np.ma.isMaskedArray(rast.data):
+                    rast[~mask] = np.nan  # type: ignore
+                else:
+                    rast.set_mask(~mask)  # type: ignore
+                return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+
+            # Given list or all attributes to compute if None
+            if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
+                return _statistics(data, stats_name, counts)  # type: ignore
             else:
-                mask = inlier_mask
-            inlier_points = np.count_nonzero(mask)
-
-            rast = self.copy()
-
-            # Mask pixels from the inlier_mask
-            if not np.ma.isMaskedArray(rast.data):
-                rast[~mask] = np.nan  # type: ignore
-            else:
-                rast.set_mask(~mask)  # type: ignore
-            return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
-
-        # Given list or all attributes to compute if None
-        if isinstance(stats_name, list) or stats_name is None:
-            return _statistics(data, stats_name, counts)  # type: ignore
+                # Single attribute to compute
+                if isinstance(stats_name, str):
+                    return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
+                elif callable(stats_name):
+                    return stats_name(data)  # type: ignore
+                else:
+                    warnings.warn(
+                        "Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning
+                    )
         else:
-            # Single attribute to compute
-            if isinstance(stats_name, str):
-                return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
-            elif callable(stats_name):
-                return stats_name(data)  # type: ignore
-            else:
-                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
+            # Case multi-band
+            stats = {}
+            for band in range(self.count):
+                stats["band " + str(band)] = self.get_stats(
+                    stats_name=stats_name, inlier_mask=inlier_mask, band=band, counts=counts
+                )
+
+            return stats  # type: ignore
 
     def _raster_equal_allclose(
         self,
@@ -969,7 +990,6 @@ class RasterBase(ABC):
 
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
-            print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
             warnings.warn(
                 category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
             )
@@ -1548,7 +1568,11 @@ class RasterBase(ABC):
         )
 
     def coords(
-        self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None
+        self,
+        grid: bool = True,
+        shift_area_or_point: bool | None = None,
+        force_offset: str | None = None,
+        crs: CRS | int | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of all pixels in the raster.
@@ -1559,12 +1583,19 @@ class RasterBase(ABC):
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
             any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
+        :param crs: Coordinate reference system in which the coordinates are provided. Defaults to CRS of
+            the input raster.
 
         :returns x,y: Arrays of the (x,y) coordinates.
         """
+        dst_transform = self.transform
+        if crs:
+            _, dst_transform, _ = _check_match_grid(
+                src=self, crs=crs, ref=None, res=None, shape=None, bounds=None, coords=None
+            )
 
         return _coords(
-            transform=self.transform,
+            transform=dst_transform,
             shape=self.shape,
             area_or_point=self.area_or_point,
             grid=grid,
