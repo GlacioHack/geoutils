@@ -52,8 +52,14 @@ from geoutils.interface.gridding import (
     _grid_pointcloud_to_raster,
 )
 from geoutils.multiproc import MultiprocConfig
-from geoutils.pointcloud.base import PointCloudBase
-from geoutils.pointcloud.las import _load_laspy_data, _load_laspy_metadata, _write_laspy
+from geoutils.pointcloud.base import PointCloudBase, _cast_numeric_array_pointcloud
+from geoutils.pointcloud.las import (
+    _load_laspy_data_partitions,
+    _point_partition_size,
+    _write_laspy,
+    load_laspy_data,
+    load_laspy_metadata,
+)
 from geoutils.stats.sampling import _subsample_numpy
 from geoutils.stats.stats import _statistics
 from geoutils.vector.vector import Vector, VectorLike
@@ -134,62 +140,6 @@ _HANDLED_FUNCTIONS_2NIN = [
 handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
 
 
-def _cast_numeric_array_pointcloud(
-    pc: PointCloudType, other: PointCloudType | NDArrayNum | Number, operation_name: str
-) -> NDArrayNum | Number:
-    """
-    Cast a point cloud and another point cloud or array or number to arrays with proper metadata, or raise an error
-    message.
-
-    :param pc: Pointcloud.
-    :param other: Point cloud or array or number.
-    :param operation_name: Name of operation to raise in the error message.
-    """
-
-    # Check first input is a point cloud
-    if not isinstance(pc, PointCloud):
-        raise ValueError("Developer error: Only a point cloud should be passed as first argument to this function.")
-
-    # Check that other is of correct type
-    # If not, a NotImplementedError should be raised, in case other's class has a method implemented.
-    # See https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
-    if not isinstance(other, (PointCloud, np.ndarray, float, int, np.floating, np.integer)):
-        raise NotImplementedError(
-            f"Operation between an object of type {type(other)} and a point cloud impossible. Must be a point cloud, "
-            f"np.ndarray or single number."
-        )
-
-    # If other is a point cloud
-    if isinstance(other, PointCloud):
-
-        other_data = other.data
-        # Check that both point clouds have the same shape and georeferences
-        if pc.georeferenced_coords_equal(other):  # type: ignore
-            pass
-        else:
-            raise ValueError(
-                "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + "."
-            )
-
-    # If other is an array
-    elif isinstance(other, np.ndarray):
-
-        other_data = other.squeeze()
-        if other.squeeze().ndim == 1 and other.squeeze().shape[0] == pc.point_count:
-            pass
-        else:
-            raise ValueError(
-                "The array must be 1-dimensional with the same number of points as the point cloud for "
-                + operation_name
-                + "."
-            )
-
-    else:
-        other_data = other  # type: ignore
-
-    return other_data
-
-
 class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     """
     The georeferenced point cloud.
@@ -259,14 +209,14 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                     data_column = "Z"
                 # Load only metadata, and not the data
                 fn = os.fspath(filename_or_dataset)
-                crs, nb_points, bounds, columns = _load_laspy_metadata(fn)
+                metadata = load_laspy_metadata(fn)
                 self._name = fn
-                self._crs = crs
-                self._nb_points = nb_points
-                self.__nongeo_columns = columns
-                self._bounds = bounds
-                self._columns = pd.Index(list(columns) + ["geometry"])
-                self._feature_count = nb_points
+                self._crs = metadata.crs
+                self._nb_points = metadata.point_count
+                self.__nongeo_columns = metadata.columns
+                self._bounds = metadata.bounds
+                self._columns = pd.Index(list(metadata.columns) + ["geometry"])
+                self._feature_count = metadata.point_count
                 self._geometry_type = "Point"
                 self._ds = None
             # Check on filename are done with Vector.__init__
@@ -484,13 +434,8 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             columns_to_load = columns
 
         if mp_config is None:
-            ds = _load_laspy_data(filename=self.name, columns=columns_to_load)
+            ds = load_laspy_data(filename=self.name, columns=columns_to_load, data_column=self.data_column)
         else:
-            from geoutils.multiproc.pointcloud import (
-                _load_laspy_data_partitions,
-                _point_partition_size,
-            )
-
             ds = _load_laspy_data_partitions(
                 filename=self.name,
                 columns=columns_to_load,

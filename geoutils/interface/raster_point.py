@@ -52,8 +52,7 @@ def _regular_pointcloud_to_raster(
     Convert a regular point cloud to a raster. See Raster.from_pointcloud_regular() for details.
     """
 
-    # Extract geodataframe and data column name depending on input. Plain GeoDataFrames can now expose a ``pc``
-    # accessor, so use accessor-aware retrieval instead of assuming the original object owns ``.ds`` directly
+    # Extract geodataframe and data column name depending on input
     if has_geo_attr(pointcloud, "ds", accessors=("pc",)):
         gdf_pc = get_geo_attr(pointcloud, "ds", accessors=("pc",))
         pc_data_column_name = get_geo_attr(pointcloud, "data_column", accessors=("pc",))

@@ -76,7 +76,7 @@ class TestLasPyIO:
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
 
-            # Metadata reads the header without materializing point records
+            # Metadata reads the header without loading point records
             metadata = load_laspy_metadata(source)
             assert metadata.point_count == len(self.gdf)
             assert "Z" in metadata.columns
@@ -207,3 +207,4 @@ class TestLasPyIO:
             )
             # Validate the resulting file through an independent eager reader
             self._assert_roundtrip(pc, output)
+            assert not ds.pc.is_loaded

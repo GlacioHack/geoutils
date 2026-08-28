@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Grid point clouds eagerly or in bounded Dask and multiprocessing raster tiles."""
+"""Grid point clouds into rasters."""
 
 from __future__ import annotations
 
@@ -49,7 +49,6 @@ from geoutils.multiproc.mparray import (
     _split_chunk_size,
     _write_multiproc_result,
 )
-from geoutils.pointcloud.las import is_laspy_supported, load_laspy_data_bounds
 from geoutils.raster.referencing import _coords
 
 if TYPE_CHECKING:
@@ -815,46 +814,30 @@ def _grid_pointcloud(
     return aligned_dem, transform_from_coords
 
 
-def _as_bounding_box(bounds: BoundingBox | tuple[float, float, float, float]) -> BoundingBox:
-    """Convert a bounds tuple to a Rasterio bounding box."""
-
-    if isinstance(bounds, BoundingBox):
-        return bounds
-    return BoundingBox(left=bounds[0], bottom=bounds[1], right=bounds[2], top=bounds[3])
-
-
-def _buffer_bounds(bounds: BoundingBox, x_buffer: float, y_buffer: float) -> BoundingBox:
-    """Expand bounds by X/Y buffers."""
-
-    return BoundingBox(
-        left=bounds.left - x_buffer,
-        bottom=bounds.bottom - y_buffer,
-        right=bounds.right + x_buffer,
-        top=bounds.top + y_buffer,
-    )
-
-
 def _support_bounds(geogrid: GeoGrid, dist_nodata_pixel: float) -> BoundingBox:
     """Return block bounds expanded by the gridding local support radius."""
 
     if dist_nodata_pixel < 0:
         raise ValueError("Argument 'dist_nodata_pixel' must be non-negative.")
-    return _buffer_bounds(
-        bounds=geogrid.bounds,
-        x_buffer=abs(geogrid.res[0]) * dist_nodata_pixel,
-        y_buffer=abs(geogrid.res[1]) * dist_nodata_pixel,
+    x_buffer = abs(geogrid.res[0]) * dist_nodata_pixel
+    y_buffer = abs(geogrid.res[1]) * dist_nodata_pixel
+    return BoundingBox(
+        left=geogrid.bounds.left - x_buffer,
+        bottom=geogrid.bounds.bottom - y_buffer,
+        right=geogrid.bounds.right + x_buffer,
+        top=geogrid.bounds.top + y_buffer,
     )
 
 
 def _filter_points_by_bounds(pc: gpd.GeoDataFrame, bounds: BoundingBox) -> gpd.GeoDataFrame:
     """Filter point geometries by X/Y bounds."""
 
-    bbox = _as_bounding_box(bounds)
     if len(pc) == 0:
         return pc
 
-    mask = (pc.geometry.x >= bbox.left) & (pc.geometry.x <= bbox.right)
-    mask &= (pc.geometry.y >= bbox.bottom) & (pc.geometry.y <= bbox.top)
+    # Apply the same inclusive bounds to eager and distributed point partitions
+    mask = (pc.geometry.x >= bounds.left) & (pc.geometry.x <= bounds.right)
+    mask &= (pc.geometry.y >= bounds.bottom) & (pc.geometry.y <= bounds.top)
     return pc.loc[mask]
 
 
@@ -862,48 +845,28 @@ def _filter_dask_points_by_bounds(ds: Any, bounds: BoundingBox) -> Any:
     """Filter a Dask-GeoPandas dataframe by bounds, using spatial partitions when available."""
 
     # Spatial partitions can discard unrelated partitions before any data is read
-    bbox = _as_bounding_box(bounds)
     try:
         if getattr(ds, "spatial_partitions", None) is not None:
-            return ds.cx[bbox.left : bbox.right, bbox.bottom : bbox.top]
+            return ds.cx[bounds.left : bounds.right, bounds.bottom : bounds.top]
     except NotImplementedError:
         pass
 
     # Fall back to applying the same coordinate filter inside every partition
     meta = getattr(ds, "_meta", None)
-    return ds.map_partitions(_filter_points_by_bounds, bbox, meta=meta)
-
-
-def _empty_points_like(pc: gpd.GeoDataFrame | None, crs: Any = None) -> gpd.GeoDataFrame:
-    """Return an empty GeoDataFrame matching a point-cloud dataframe."""
-
-    if pc is not None:
-        return pc.iloc[0:0]
-    return gpd.GeoDataFrame(geometry=gpd.GeoSeries([], crs=crs), crs=crs)
+    return ds.map_partitions(_filter_points_by_bounds, bounds, meta=meta)
 
 
 def _concat_point_parts(parts: list[gpd.GeoDataFrame], crs: Any = None) -> gpd.GeoDataFrame:
     """Concatenate per-partition point-cloud subsets."""
 
     if len(parts) == 0:
-        return _empty_points_like(None, crs=crs)
+        return gpd.GeoDataFrame(geometry=gpd.GeoSeries([], crs=crs), crs=crs)
 
     non_empty = [part for part in parts if len(part) > 0]
     if len(non_empty) == 0:
-        return _empty_points_like(parts[0], crs=crs)
+        return parts[0].iloc[0:0]
 
     return gpd.GeoDataFrame(pd.concat(non_empty, ignore_index=True), geometry="geometry", crs=crs)
-
-
-def _source_is_dask(source_pointcloud: Any) -> bool:
-    """Return whether a point-cloud source is backed by a Dask dataframe without loading it."""
-
-    obj = getattr(source_pointcloud, "_obj", None)
-    if obj is not None:
-        return is_dask_dataframe(obj)
-
-    ds = getattr(source_pointcloud, "_ds", None)
-    return is_dask_dataframe(ds)
 
 
 def _source_dataframe(source_pointcloud: Any) -> gpd.GeoDataFrame | Any | None:
@@ -932,6 +895,9 @@ def _load_pointcloud_bounds(
     filename = getattr(source_pointcloud, "name", None)
     if filename is None:
         return _filter_points_by_bounds(source_pointcloud.ds, bounds)
+
+    # Import point-cloud readers only after this general gridding module is initialized
+    from geoutils.pointcloud.las import is_laspy_supported, load_laspy_data_bounds
 
     if is_laspy_supported(filename):
         return load_laspy_data_bounds(
@@ -1054,15 +1020,15 @@ def _dask_grid_pointcloud(
 
     # Build the nested block layout expected by ``dask.array.block``
     block_arrays = []
-    for iy in range(dst_geotiling.numblocks[0]):
+    for iy in range(dst_geotiling.num_chunks[0]):
         row_arrays = []
-        for ix in range(dst_geotiling.numblocks[1]):
+        for ix in range(dst_geotiling.num_chunks[1]):
             # Match this Dask block to its georeferenced output area
-            block_index = dst_geotiling.ravel_block_index((iy, ix))
+            block_index = dst_geotiling.flat_block_index((iy, ix))
             geogrid = dst_block_geogrids[block_index]
 
             if is_dask_dataframe(source_ds):
-                # Cull points outside the interpolation support before computing partitions
+                # Select only points inside the interpolation support before computing partitions
                 source_ds_dask = cast(Any, source_ds)
                 bounds = _support_bounds(geogrid=geogrid, dist_nodata_pixel=kwargs["dist_nodata_pixel"])
                 filtered = _filter_dask_points_by_bounds(source_ds_dask, bounds)
@@ -1156,7 +1122,7 @@ def _grid_pointcloud_to_raster(
             "To use Multiprocessing, use an eager PointCloud object."
         )
 
-    if _source_is_dask(source_pointcloud) and mp_config is not None:
+    if is_dask_dataframe(_source_dataframe(source_pointcloud)) and mp_config is not None:
         raise ValueError("Multiprocessing gridding is only supported for eager or file-backed PointCloud objects.")
 
     # Resolve all supported grid definitions to one output shape and transform

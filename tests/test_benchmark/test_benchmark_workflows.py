@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 
-from benchmarks.asv_suite.implementation_comparisons import IMPLEMENTATION_COMPARISONS
+from benchmarks.asv_suite.comparisons import COMPARISONS
 from benchmarks.asv_suite.render_results import (
     COMPARISON_REPORT_DIRECTORY,
     DOCUMENTATION_DATA,
@@ -19,8 +19,8 @@ from benchmarks.asv_suite.render_results import (
     DOCUMENTATION_SUMMARY,
     DOCUMENTATION_TIME_PLOT,
     collect_implementation_measurements,
+    render_comparisons,
     render_documentation_snapshot,
-    render_implementation_comparisons,
     select_asv_result,
 )
 from benchmarks.gdal_comparison.commands import (
@@ -53,7 +53,7 @@ class TestOperationRegistry:
         assert parsed == expected
 
 
-class TestImplementationComparisonReport:
+class TestComparisonReport:
     """Check that saved ASV comparisons become reusable numeric reports and plots."""
 
     class FakeResult:
@@ -70,11 +70,11 @@ class TestImplementationComparisonReport:
 
             self.values = {}
             self.parameters = {}
-            for comparison in IMPLEMENTATION_COMPARISONS:
+            for comparison in COMPARISONS:
                 for implementation_index, (_, class_name) in enumerate(comparison.series, start=1):
                     # Test parameters are stored as repr strings like real ASV results
                     parameters = [["256", "512", "1024"]]
-                    prefix = f"asv_suite.implementation_comparisons.{class_name}"
+                    prefix = f"asv_suite.comparisons.{class_name}"
                     self.parameters[f"{prefix}.time_operation"] = parameters
                     self.parameters[f"{prefix}.track_end_to_end_time_s"] = parameters
                     self.parameters[f"{prefix}.track_peak_process_tree_rss_mb"] = parameters
@@ -109,11 +109,9 @@ class TestImplementationComparisonReport:
 
         # Every declared line and parameter must remain an independent numeric record
         records = collect_implementation_measurements(self.FakeResult())
-        expected_records = sum(len(comparison.series) * 3 for comparison in IMPLEMENTATION_COMPARISONS)
+        expected_records = sum(len(comparison.series) * 3 for comparison in COMPARISONS)
         assert len(records) == expected_records
-        assert {record.comparison for record in records} == {
-            comparison.slug for comparison in IMPLEMENTATION_COMPARISONS
-        }
+        assert {record.comparison for record in records} == {comparison.slug for comparison in COMPARISONS}
         assert {record.implementation for record in records} == {
             "Eager",
             "Dask",
@@ -139,21 +137,21 @@ class TestImplementationComparisonReport:
 
         assert select_asv_result(tmp_path) is complete
 
-    def test_render_implementation_comparisons(self, tmp_path: Path) -> None:
+    def test_render_comparisons(self, tmp_path: Path) -> None:
         """Write one site index, numeric files and one SVG per comparison."""
 
         pytest.importorskip("matplotlib")
 
         # The root remains the single entry point for local artifacts and GitHub Pages
-        render_implementation_comparisons(self.FakeResult(), tmp_path)
+        render_comparisons(self.FakeResult(), tmp_path)
         assert (tmp_path / "index.html").is_file()
-        assert "implementation-comparisons/index.html" in (tmp_path / "index.html").read_text(encoding="utf-8")
+        assert "comparisons/index.html" in (tmp_path / "index.html").read_text(encoding="utf-8")
         report_directory = tmp_path / COMPARISON_REPORT_DIRECTORY
         assert (report_directory / "index.html").is_file()
-        assert (report_directory / "implementation-comparisons.json").is_file()
-        assert (report_directory / "implementation-comparisons.csv").is_file()
+        assert (report_directory / "comparisons.json").is_file()
+        assert (report_directory / "comparisons.csv").is_file()
         assert {path.name for path in report_directory.glob("*.svg")} == {
-            f"{comparison.slug}.svg" for comparison in IMPLEMENTATION_COMPARISONS
+            f"{comparison.slug}.svg" for comparison in COMPARISONS
         }
 
     def test_render_documentation_snapshot(self, tmp_path: Path) -> None:
@@ -406,7 +404,7 @@ class TestBenchmarkRunner:
                 assert np.isclose(value, OPERATION_BY_NAME[operation].expected_value), operation
 
     def test_eager_comparison_operations(self) -> None:
-        """Run every eager implementation comparison on compact in-memory data."""
+        """Run every eager comparison on compact in-memory data."""
 
         # Eager coverage checks the common file-to-file computation paths without workers
         config = BenchmarkConfig(

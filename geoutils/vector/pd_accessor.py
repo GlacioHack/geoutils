@@ -153,6 +153,9 @@ class VectorAccessor(VectorBase):
     def copy(self, deep: bool = True) -> gpd.GeoDataFrame:
         """Return a copy of the vector GeoDataFrame."""
 
+        # Dask copies its task graph and does not expose Pandas' deep-copy option
+        if is_dask_dataframe(self._obj):
+            return self._obj.copy()
         return self._obj.copy(deep=deep)
 
     def _override_gdf_output(self, other: gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | pd.Series | Any) -> Any:

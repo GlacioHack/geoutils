@@ -17,7 +17,7 @@ Implementation = Literal["eager", "dask", "multiprocessing", "gdal"]
 
 
 @dataclass(frozen=True)
-class ImplementationComparison:
+class Comparison:
     """Describe one parameter plot and the ASV classes that supply its lines."""
 
     slug: str
@@ -29,8 +29,8 @@ class ImplementationComparison:
 
 
 # The renderer uses these exact public class names to find each series in saved ASV results
-IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
-    ImplementationComparison(
+COMPARISONS: tuple[Comparison, ...] = (
+    Comparison(
         slug="interpolation-point-count",
         title="Interpolation point count",
         parameter_label="Interpolated points",
@@ -41,7 +41,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
         ),
         logarithmic_x=True,
     ),
-    ImplementationComparison(
+    Comparison(
         slug="reprojection-raster-size",
         title="Reprojection raster size",
         parameter_label="Square raster width and height (pixels)",
@@ -52,7 +52,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
             ("GDAL", "GdalReprojectionRasterSize"),
         ),
     ),
-    ImplementationComparison(
+    Comparison(
         slug="filter-chunk-size",
         title="Filter chunk size",
         parameter_label="Square chunk width and height (pixels)",
@@ -61,7 +61,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
             ("Multiprocessing", "MultiprocessingFilterChunkSize"),
         ),
     ),
-    ImplementationComparison(
+    Comparison(
         slug="polygonization-raster-size",
         title="Polygonization raster size",
         parameter_label="Square raster width and height (pixels)",
@@ -72,7 +72,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
             ("GDAL", "GdalPolygonizationRasterSize"),
         ),
     ),
-    ImplementationComparison(
+    Comparison(
         slug="rasterization-raster-size",
         title="Rasterization raster size",
         parameter_label="Square raster width and height (pixels)",
@@ -83,7 +83,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
             ("GDAL", "GdalRasterizationRasterSize"),
         ),
     ),
-    ImplementationComparison(
+    Comparison(
         slug="gridding-raster-size",
         title="Nearest gridding raster size",
         parameter_label="Square raster width and height (pixels)",
@@ -94,7 +94,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
             ("GDAL", "GdalGriddingRasterSize"),
         ),
     ),
-    ImplementationComparison(
+    Comparison(
         slug="linear-gridding-raster-size",
         title="Linear gridding raster size",
         parameter_label="Square raster width and height (pixels)",
@@ -106,7 +106,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
         ),
         documentation=False,
     ),
-    ImplementationComparison(
+    Comparison(
         slug="idw-gridding-raster-size",
         title="Inverse-distance gridding raster size",
         parameter_label="Square raster width and height (pixels)",
@@ -119,7 +119,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
         ),
         documentation=False,
     ),
-    ImplementationComparison(
+    Comparison(
         slug="mean-gridding-raster-size",
         title="Circular-mean gridding raster size",
         parameter_label="Square raster width and height (pixels)",
@@ -132,7 +132,7 @@ IMPLEMENTATION_COMPARISONS: tuple[ImplementationComparison, ...] = (
         ),
         documentation=False,
     ),
-    ImplementationComparison(
+    Comparison(
         slug="nearest-gridding-engine-point-count",
         title="Nearest gridding calculation engine",
         parameter_label="Source points per axis",

@@ -1,4 +1,4 @@
-"""Tests on Pandas accessor mirroring PointCloud API."""
+"""Tests on the Pandas accessor mirroring the PointCloud API."""
 
 from __future__ import annotations
 
@@ -128,7 +128,10 @@ class TestPointCloudAccessor:
         # Arithmetic should add tasks to the graph and preserve lazy output type
         summed = ds.pc + 1
         assert isinstance(summed, dgpd.GeoDataFrame)
+        assert not summed.pc.is_loaded
         assert np.array_equal(summed.compute()["z"].values, self.gdf["z"].values + 1)
+        assert not ds.pc.is_loaded
+        assert not summed.pc.is_loaded
 
     def test_reproject_pointcloud__dask_geopandas(self) -> None:
         """Reproject point partitions lazily and match eager GeoPandas output."""
@@ -147,6 +150,37 @@ class TestPointCloudAccessor:
         assert isinstance(reprojected, dgpd.GeoDataFrame)
         assert not reprojected.pc.is_loaded
         assert_geodataframe_equal(reprojected.compute(), self.gdf.to_crs(3857))
+        assert not ds.pc.is_loaded
+        assert not reprojected.pc.is_loaded
+
+    @pytest.mark.parametrize(
+        ("method", "kwargs"),
+        [
+            ("copy", {}),
+            ("crop", {"bbox": (0, 0, 500, 500)}),
+            ("translate", {"xoff": 1, "yoff": 2}),
+        ],
+    )
+    def test_geometric_methods__dask_geopandas(self, method: str, kwargs: dict[str, object]) -> None:
+        """Keep copied, cropped and translated point partitions lazy and equal to eager GeoPandas."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+
+        # Open one on-disk source lazily and build the expected result through the eager accessor
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.gdf.to_file(temp_file)
+        ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5)
+        expected = getattr(self.gdf.pc, method)(**kwargs)
+
+        # Each dataframe operation should add work without evaluating any point partition
+        output = getattr(ds.pc, method)(**kwargs)
+        assert isinstance(output, dgpd.GeoDataFrame)
+        assert not ds.pc.is_loaded
+        assert not output.pc.is_loaded
+        assert_geodataframe_equal(output.compute(), expected)
+        assert not ds.pc.is_loaded
+        assert not output.pc.is_loaded
 
     def test_to_file__dask_geopandas(self) -> None:
         """Write a lazy point cloud to a regular GeoPandas-supported vector file."""
@@ -159,12 +193,14 @@ class TestPointCloudAccessor:
         self.gdf.to_file(temp_file)
 
         ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5).pc.reproject(crs=3857)
+        assert not ds.pc.is_loaded
         output_file = os.path.join(temp_dir.name, "output.gpkg")
         ds.pc.to_file(output_file)
 
         # Reopen through PointCloud to validate geometry, CRS and data values
         assert os.path.exists(output_file)
         assert gu.PointCloud(output_file, data_column="z").pointcloud_equal(gu.PointCloud(self.gdf.to_crs(3857), "z"))
+        assert not ds.pc.is_loaded
 
     def test_to_file__dask_geopandas_parquet(self) -> None:
         """Write Dask point partitions to one GeoParquet dataset without changing rows."""
@@ -178,6 +214,7 @@ class TestPointCloudAccessor:
         self.gdf.to_file(temp_file)
 
         ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5)
+        assert not ds.pc.is_loaded
         output_file = os.path.join(temp_dir.name, "output.parquet")
         ds.pc.to_file(output_file)
 
@@ -186,6 +223,7 @@ class TestPointCloudAccessor:
         expected = self.gdf.reset_index(drop=True)
         assert os.path.exists(output_file)
         assert_geodataframe_equal(output, expected)
+        assert not ds.pc.is_loaded
 
     def test_open_pointcloud__dask_missing_dep(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explain the missing optional dependency when chunked opening requests Dask."""
@@ -225,6 +263,7 @@ class TestPointCloudAccessor:
         assert ds.pc.point_count == pc.point_count
         # Computing all partitions should recover every source point
         assert len(ds.compute()) == pc.point_count
+        assert not ds.pc.is_loaded
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_reproject_pointcloud_las__dask_geopandas(self) -> None:
@@ -243,6 +282,8 @@ class TestPointCloudAccessor:
         assert isinstance(reprojected, dgpd.GeoDataFrame)
         assert not reprojected.pc.is_loaded
         assert_geodataframe_equal(reprojected.compute(), pc.ds.to_crs(3857))
+        assert not ds.pc.is_loaded
+        assert not reprojected.pc.is_loaded
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_load_las__multiprocessing(self) -> None:
@@ -250,7 +291,9 @@ class TestPointCloudAccessor:
 
         # Load the source once by worker chunks and once through the regular path
         pc_chunked = gu.PointCloud(self.fn_las)
+        assert not pc_chunked.is_loaded
         pc_chunked.load(mp_config=MultiprocConfig(chunks=100))
+        assert pc_chunked.is_loaded
 
         pc = gu.PointCloud(self.fn_las)
         pc.load()

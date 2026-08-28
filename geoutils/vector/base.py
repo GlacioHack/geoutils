@@ -71,6 +71,23 @@ def _as_geodataframe(obj: Any) -> gpd.GeoDataFrame:
     return obj.ds
 
 
+def _crop_geodataframe(
+    ds: gpd.GeoDataFrame,
+    bounds: tuple[float, float, float, float],
+    clip: bool,
+) -> gpd.GeoDataFrame:
+    """Crop one GeoDataFrame or Dask partition to bounding coordinates."""
+
+    # Select every geometry intersecting the requested extent
+    xmin, ymin, xmax, ymax = bounds
+    cropped = ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
+
+    # Optionally trim selected geometries at the exact bounds
+    if clip:
+        cropped = cropped.clip(mask=bounds)
+    return cropped
+
+
 class VectorBase(ABC):
     """
     Shared implementation for :class:`~geoutils.Vector` and the ``vct`` Pandas accessor.
@@ -431,9 +448,18 @@ class VectorBase(ABC):
 
         xmin, ymin, xmax, ymax = (float(value) for value in _check_match_bbox(self, bbox))
 
-        new_ds = self.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
-        if clip:
-            new_ds = new_ds.clip(mask=(xmin, ymin, xmax, ymax))
+        bounds = (xmin, ymin, xmax, ymax)
+        if is_dask_dataframe(self.ds):
+            # Spatial partitions can discard unrelated partitions before reading their rows
+            if getattr(self.ds, "spatial_partitions", None) is not None:
+                new_ds = self.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
+                if clip:
+                    new_ds = new_ds.clip(mask=bounds)
+            else:
+                # Otherwise apply the same eager selection independently inside each partition
+                new_ds = self.ds.map_partitions(_crop_geodataframe, bounds, clip, meta=self.ds._meta)
+        else:
+            new_ds = _crop_geodataframe(self.ds, bounds=bounds, clip=clip)
 
         if inplace:
             self.ds = new_ds

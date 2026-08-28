@@ -30,6 +30,7 @@ from scipy.stats import iqr
 from scipy.stats.mstats import mquantiles
 
 from geoutils import profiler
+from geoutils._dispatch import is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
@@ -91,12 +92,6 @@ _ALIAS_STATS_LIST_MASK = {
 }
 
 _ALIAS_STATS = _STATS_ALIASES | _ALIAS_STATS_LIST_MASK
-
-
-def _is_dask_array(data: Any) -> bool:
-    """Whether data is a Dask array, without importing Dask at module import time."""
-
-    return data.__class__.__module__.startswith("dask.array")
 
 
 def _get_stat_common_name(stat_name: str, stats_dict: dict[str, Any]) -> str | None:
@@ -247,7 +242,7 @@ def _statistics(
     :returns: A dictionary containing the calculated statistics for the selected band.
     """
 
-    if _is_dask_array(data):
+    if is_dask_array(data):
         return _statistics_dask(data=data, stats_name=stats_name, counts=counts)
 
     if np.ma.isMaskedArray(data):

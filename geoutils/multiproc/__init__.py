@@ -19,4 +19,3 @@
 from geoutils.multiproc.chunked import *  # noqa
 from geoutils.multiproc.cluster import *  # noqa
 from geoutils.multiproc.mparray import *  # noqa
-from geoutils.multiproc.pointcloud import *  # noqa

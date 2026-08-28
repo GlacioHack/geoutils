@@ -58,7 +58,8 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-from geoutils.filters import _filter
+from geoutils.filters import _filter, _sieve
+from geoutils.gapfill import _fill_nodata
 from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.interpolation import _interp_points, _reduce_points
@@ -75,7 +76,6 @@ from geoutils.projtools import (
     align_bounds,
     merge_bounds,
 )
-from geoutils.raster.processing import _fill_nodata, _sieve
 from geoutils.raster.referencing import (
     _bounds,
     _coords,

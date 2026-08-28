@@ -68,8 +68,32 @@ class BenchmarkConfig:
     directory: str | None = None
 
 
+class ProfiledResult:
+    """Expose complete-process memory measurements shared by all benchmark implementations."""
+
+    metrics: ProfileMetrics
+
+    @property
+    def peak_process_tree_rss_mb(self) -> float:
+        """Return peak aggregate RSS for the measured process and its children."""
+
+        peak = self.metrics.peak_process_tree_rss_mb
+        if peak is None:
+            raise RuntimeError("Process-tree memory was not collected for this benchmark result")
+        return peak
+
+    @property
+    def process_tree_rss_increase_mb(self) -> float:
+        """Return peak RSS above the initialized process-tree baseline."""
+
+        if not self.metrics.process_tree_rss_mb:
+            raise RuntimeError("Process-tree memory was not collected for this benchmark result")
+        baseline = self.metrics.process_tree_rss_mb[0][1]
+        return max(0.0, self.peak_process_tree_rss_mb - baseline)
+
+
 @dataclass
-class BenchmarkResult:
+class BenchmarkResult(ProfiledResult):
     """Store one computed result together with memory and worker-health measurements."""
 
     value: float
@@ -84,26 +108,6 @@ class BenchmarkResult:
         """Whether the backend replaced a worker during the operation."""
 
         return self.worker_pids_before != self.worker_pids_after
-
-    @property
-    def peak_process_tree_rss_mb(self) -> float:
-        """Return peak aggregate RSS for the client and all backend processes."""
-
-        # A profiled benchmark always samples the complete process tree
-        peak = self.metrics.peak_process_tree_rss_mb
-        if peak is None:
-            raise RuntimeError("Process-tree memory was not collected for this benchmark result")
-        return peak
-
-    @property
-    def process_tree_rss_increase_mb(self) -> float:
-        """Return peak RSS above the initialized process-tree baseline."""
-
-        # The sampler records one value before work begins and one after it completes
-        if not self.metrics.process_tree_rss_mb:
-            raise RuntimeError("Process-tree memory was not collected for this benchmark result")
-        baseline = self.metrics.process_tree_rss_mb[0][1]
-        return max(0.0, self.peak_process_tree_rss_mb - baseline)
 
 
 def logical_raster_size_mb(config: BenchmarkConfig) -> float:
@@ -134,6 +138,15 @@ def _tiff_block_size(size: int, requested: int) -> int:
     # GeoTIFF tile dimensions must be divisible by sixteen
     block_size = min(size, requested, 512)
     return max(16, block_size // 16 * 16)
+
+
+def read_raster_center(filename: str) -> float:
+    """Read one central output pixel without loading the complete raster."""
+
+    with rio.open(filename) as dataset:
+        row = dataset.height // 2
+        col = dataset.width // 2
+        return float(dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0])
 
 
 def _write_constant_raster(filename: str, config: BenchmarkConfig) -> None:
@@ -604,16 +617,6 @@ class BenchmarkRunner:
             write_pending_blocks(destination)
         return filename
 
-    @staticmethod
-    def _read_center(filename: str) -> float:
-        """Read one central output pixel without loading the complete raster."""
-
-        with rio.open(filename) as dataset:
-            row = dataset.height // 2
-            col = dataset.width // 2
-            value = dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0]
-        return float(value)
-
     def _compute_raster(self, raster: Any, operation: OperationName) -> float:
         """Write or inspect the complete raster produced by one implementation."""
 
@@ -636,7 +639,7 @@ class BenchmarkRunner:
                     "COMPRESS": "NONE",
                 },
             )
-        return self._read_center(self._last_output_file)
+        return read_raster_center(self._last_output_file)
 
     def _interpolation_points(self) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
         """Create deterministic point coordinates spread across the source raster."""
@@ -775,7 +778,7 @@ class BenchmarkRunner:
 
             # Write the unchanged lazy source to isolate the storage path
             self._last_output_file = self._write_dask_raster(raster, operation)
-            return self._read_center(self._last_output_file)
+            return read_raster_center(self._last_output_file)
 
         if operation in ("rasterize", "create_mask"):
             from geoutils import Vector

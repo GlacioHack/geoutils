@@ -1,0 +1,209 @@
+name: benchmark-asv
+
+# ASV command reference: https://asv.readthedocs.io/en/stable/commands.html
+# ASV example project: https://github.com/airspeed-velocity/asv_samples
+# GitHub Pages custom workflow: https://docs.github.com/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+#
+# Pull requests only verify benchmark definitions. Scheduled and manual runs record repeatable measurements, rebuild
+# the complete history and optionally deploy it. Package source files are deliberately omitted from the path list:
+# regular tests check those pull requests, while the next scheduled ASV run measures the latest main commit
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "benchmarks/asv_suite/**"
+      - "benchmarks/gdal_comparison/**"
+      - "benchmarks/workflows/**"
+      - "asv.conf.json"
+      - "environment.yml"
+      - "setup.cfg"
+      - ".github/scripts/generate_yml_env_fixed_py.py"
+      - ".github/workflows/benchmark-asv.yml"
+  workflow_dispatch:
+    inputs:
+      publish_pages:
+        description: "Deploy the generated ASV site to GitHub Pages"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "0 3 * * 0"
+
+# Only the small result-saving and Pages jobs below receive broader permissions
+permissions:
+  contents: read
+
+concurrency:
+  # Complete measurements must finish before their raw results can be added to the saved history
+  group: benchmark-asv-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    # Pull requests run a quick check pass; scheduled and manual events save complete measurements
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # ASV reads Git history to associate measurements with commits
+          fetch-depth: 0
+
+      - name: Initiate empty environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          use-mamba: true
+          channel-priority: strict
+          activate-environment: geoutils-dev
+
+      - name: Install benchmark environment
+        run: |
+          mamba install pyyaml python=3.12
+          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3" environment.yml
+          mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
+          pip install -e .[benchmark]
+
+      # `asv check` imports every benchmark and reports invalid definitions without recording measurements
+      # https://asv.readthedocs.io/en/stable/commands.html#asv-check
+      - name: Check ASV benchmarks
+        run: asv check -E existing
+
+      # ASV keeps histories from different machines separate. The CPU suffix avoids comparing unlike hosted runners
+      # https://asv.readthedocs.io/en/stable/commands.html#asv-machine
+      - name: Configure comparable CI machine metadata
+        run: |
+          cpu_model="$(awk -F ': ' '/model name/{print $2; exit}' /proc/cpuinfo)"
+          cpu_key="$(printf '%s' "$cpu_model" | sha256sum | cut -c1-8)"
+          echo "ASV_MACHINE_NAME=github-actions-${RUNNER_ARCH,,}-$cpu_key" >> "$GITHUB_ENV"
+          asv machine --yes --machine "github-actions-${RUNNER_ARCH,,}-$cpu_key"
+
+      # Quick mode executes every case once and intentionally does not add data to the benchmark history
+      # https://asv.readthedocs.io/en/stable/commands.html#asv-run
+      - name: Run ASV smoke benchmark pass
+        if: github.event_name == 'pull_request'
+        run: asv run --quick --show-stderr -E existing --machine "$ASV_MACHINE_NAME"
+
+      - name: Restore saved ASV history
+        if: github.event_name != 'pull_request'
+        run: |
+          # Raw results live on a data-only branch so generated measurements do not clutter the main branch
+          mkdir -p benchmarks/results/asv/results
+          if git fetch origin refs/heads/asv-results:refs/remotes/origin/asv-results; then
+            git archive refs/remotes/origin/asv-results | tar -x -C benchmarks/results/asv/results
+          fi
+
+      # Existing mode measures the checked-out code in the environment prepared above
+      - name: Run repeatable ASV benchmarks
+        if: github.event_name != 'pull_request'
+        run: |
+          asv run --show-stderr --record-samples -E existing \
+            --machine "$ASV_MACHINE_NAME" --set-commit-hash "${{ github.sha }}"
+
+      # `asv publish` rebuilds the native static history; the GeoUtils renderer adds the comparison landing page
+      # https://asv.readthedocs.io/en/stable/commands.html#asv-publish
+      - name: Publish ASV website and comparisons
+        if: github.event_name != 'pull_request'
+        run: |
+          asv publish
+          python -m benchmarks.asv_suite.render_results \
+            --machine "$ASV_MACHINE_NAME" \
+            --commit "${{ github.sha }}"
+
+      # This artifact passes raw results to a separate job with repository write permission
+      - name: Upload ASV measurements
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asv-results
+          path: benchmarks/results/asv/results
+          retention-days: 90
+
+      # Keep a short-lived downloadable preview even when the public Pages site is not updated
+      - name: Upload ASV website preview
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asv-site-preview
+          path: benchmarks/results/asv/html
+          retention-days: 14
+
+      # GitHub Pages expects one dedicated artifact that the deployment job below can publish
+      - name: Configure GitHub Pages
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: benchmarks/results/asv/html
+
+  save-results:
+    # Keep write permission away from the job that installs and executes pull-request benchmark code
+    needs: benchmark
+    if: needs.benchmark.result == 'success' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: asv-results
+          path: ${{ runner.temp }}/asv-results
+
+      - name: Store ASV history on its data branch
+        env:
+          HISTORY_DIRECTORY: ${{ runner.temp }}/asv-history
+          RESULTS_DIRECTORY: ${{ runner.temp }}/asv-results
+        run: |
+          # Reuse the data branch when it exists, or initialize it without files from the main branch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin refs/heads/asv-results:refs/remotes/origin/asv-results; then
+            git worktree add --detach "$HISTORY_DIRECTORY" refs/remotes/origin/asv-results
+          else
+            git worktree add --detach "$HISTORY_DIRECTORY"
+            git -C "$HISTORY_DIRECTORY" switch --orphan asv-results
+            git -C "$HISTORY_DIRECTORY" rm -r --ignore-unmatch .
+          fi
+
+          # Replace the saved history with the restored history plus measurements from this run
+          git -C "$HISTORY_DIRECTORY" rm -r --ignore-unmatch .
+          cp -a "$RESULTS_DIRECTORY"/. "$HISTORY_DIRECTORY"/
+          git -C "$HISTORY_DIRECTORY" add -A
+          if git -C "$HISTORY_DIRECTORY" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "$HISTORY_DIRECTORY" commit -m "BENCH: Store ASV results for ${{ github.sha }}"
+          git -C "$HISTORY_DIRECTORY" push origin HEAD:asv-results
+
+  deploy:
+    # Deployment stays manual so scheduled measurements cannot change the public site without a maintainer request
+    needs: [benchmark, save-results]
+    if: >-
+      ${{
+        needs.benchmark.result == 'success' && needs.save-results.result == 'success' &&
+        github.event_name == 'workflow_dispatch' && inputs.publish_pages
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # https://docs.github.com/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+      - name: Deploy ASV website to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

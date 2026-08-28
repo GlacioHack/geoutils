@@ -7,9 +7,13 @@
 # codex
 .codex
 AGENTS.md
+.agents
 
-# asv
+# Legacy local ASV outputs from the previous layout
 .asv/
+
+# Local benchmark environments, measurements and reports
+benchmarks/results/
 
 # sphinx documentation
 doc/_build/

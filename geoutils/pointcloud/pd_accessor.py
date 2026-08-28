@@ -32,18 +32,20 @@ import rasterio as rio
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
+from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils.pointcloud.base import (
     PointCloudBase,
     _get_dataframe_attrs,
-    _is_dask_dataframe,
     _set_dataframe_attrs,
 )
 from geoutils.pointcloud.las import (
-    _load_laspy_data_slice,
-    _load_laspy_metadata,
+    _empty_las_geodataframe,
     _write_laspy,
     is_laspy_supported,
+    load_laspy_data_slice,
+    load_laspy_metadata,
+    resolve_las_columns,
 )
 from geoutils.vector.pd_accessor import (
     VectorAccessor,
@@ -88,25 +90,6 @@ def _register_dask_pointcloud_accessor() -> None:
     _DASK_ACCESSOR_REGISTERED = True
 
 
-def _columns_to_load(
-    columns: Literal["all", "main"] | list[str],
-    data_column: str | None,
-    available_columns: pd.Index,
-) -> list[str]:
-    """Resolve LAS columns to load from user input."""
-
-    if columns == "all":
-        columns_to_load = list(available_columns)
-    elif columns == "main":
-        columns_to_load = [data_column] if data_column is not None else []
-    else:
-        columns_to_load = columns
-
-    if "Z" not in columns_to_load:
-        columns_to_load = ["Z"] + columns_to_load
-    return columns_to_load
-
-
 def _infer_data_column(ds: Any) -> str | None:
     """Infer a point cloud data column from dataframe metadata and columns."""
 
@@ -122,21 +105,11 @@ def _infer_data_column(ds: Any) -> str | None:
     return None
 
 
-def _empty_las_meta(columns: list[str], crs: CRS | None) -> gpd.GeoDataFrame:
-    """Build an empty GeoDataFrame used as Dask metadata for LAS chunks."""
-
-    # Dask needs column dtypes and geometry information before partitions are read
-    data = {column: pd.Series(dtype="float64") for column in columns}
-    meta = gpd.GeoDataFrame(data=data, geometry=gpd.GeoSeries([], crs=crs), crs=crs)
-    meta.attrs["crs"] = crs
-    return meta
-
-
 def _load_laspy_data_slice_dataframe(filename: str, columns: list[str], start: int, count: int) -> gpd.GeoDataFrame:
     """Load a LAS slice as a GeoDataFrame suitable for Dask-GeoPandas."""
 
     # Give every partition its source row range so indexes stay unique after assembly
-    ds = _load_laspy_data_slice(filename, columns, start, count)
+    ds = load_laspy_data_slice(filename, columns, start, count)
     ds.index = pd.RangeIndex(start, start + count)
     return ds
 
@@ -210,13 +183,17 @@ def open_pointcloud(
         data_column = "Z"
 
     # Resolve requested dimensions entirely from the LAS header
-    crs, point_count, bounds, available_columns = _load_laspy_metadata(filename)
-    if data_column not in available_columns:
+    metadata = load_laspy_metadata(filename)
+    if data_column not in metadata.columns:
         raise ValueError(
             f"Data column {data_column} not found among columns. Available columns are: "
-            f"{', '.join(available_columns)}."
+            f"{', '.join(metadata.columns)}."
         )
-    columns_to_load = _columns_to_load(columns=columns, data_column=data_column, available_columns=available_columns)
+    columns_to_load = resolve_las_columns(
+        columns=columns,
+        data_column=data_column,
+        available_columns=metadata.columns,
+    )
 
     if chunks is None:
         # The eager path loads all requested LAS dimensions into one GeoDataFrame
@@ -234,23 +211,28 @@ def open_pointcloud(
     delayed = dask.delayed
 
     # Represent every contiguous LAS row slice as one delayed partition
-    starts = list(range(0, point_count, chunks))
+    starts = list(range(0, metadata.point_count, chunks))
     parts = [
-        delayed(_load_laspy_data_slice_dataframe)(filename, columns_to_load, start, min(chunks, point_count - start))
+        delayed(_load_laspy_data_slice_dataframe)(
+            filename,
+            columns_to_load,
+            start,
+            min(chunks, metadata.point_count - start),
+        )
         for start in starts
     ]
     # Keep LAS numeric dimensions unchanged while assembling the lazy dataframe
     with dask.config.set({"dataframe.convert-string": False}):
-        ddf = dd.from_delayed(parts, meta=_empty_las_meta(columns_to_load, crs=crs))
+        ddf = dd.from_delayed(parts, meta=_empty_las_geodataframe(columns_to_load, crs=metadata.crs))
 
     # Add geospatial behavior and cache header metadata for accessor properties
     ddf = dgpd.from_dask_dataframe(ddf, geometry="geometry")
     _set_dataframe_attrs(
         ddf,
         {
-            "crs": crs,
-            "bounds": bounds,
-            "point_count": point_count,
+            "crs": metadata.crs,
+            "bounds": metadata.bounds,
+            "point_count": metadata.point_count,
             "data_column": data_column,
         },
     )
@@ -271,7 +253,7 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         self._name = None
 
         # Dask validation relies on planned columns because partitions are still lazy
-        if _is_dask_dataframe(pandas_obj):
+        if is_dask_dataframe(pandas_obj):
             self._obj = pandas_obj
             self._data_column = _infer_data_column(pandas_obj)
             return
@@ -306,7 +288,7 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
     def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries | Any) -> None:
         """Set a new GeoDataFrame or lazy Dask DataFrame."""
 
-        if _is_dask_dataframe(new_ds):
+        if is_dask_dataframe(new_ds):
             # Replacing a lazy collection is safe because it does not mutate partitions
             self._obj = new_ds
             return
@@ -352,7 +334,7 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         """Parse outputs of GeoPandas functions to facilitate object manipulation."""
 
         # Propagate cached metadata through lazy dataframe operations
-        if _is_dask_dataframe(other):
+        if is_dask_dataframe(other):
             attrs = _get_dataframe_attrs(self.ds)
             old_crs = attrs.get("crs")
             new_crs = getattr(other, "crs", None)

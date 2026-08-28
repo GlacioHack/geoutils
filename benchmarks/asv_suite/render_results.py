@@ -13,13 +13,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from benchmarks.asv_suite.implementation_comparisons import (
-    IMPLEMENTATION_COMPARISONS,
-    ImplementationComparison,
+from benchmarks.asv_suite.comparisons import (
+    COMPARISONS,
+    Comparison,
 )
 
-COMPARISON_BENCHMARK_MODULE = "asv_suite.implementation_comparisons"
-COMPARISON_REPORT_DIRECTORY = "implementation-comparisons"
+COMPARISON_BENCHMARK_MODULE = "asv_suite.comparisons"
+COMPARISON_REPORT_DIRECTORY = "comparisons"
 DOCUMENTATION_TIME_PLOT = "time_relative_to_gdal.svg"
 DOCUMENTATION_MEMORY_PLOT = "peak_ram_by_raster_size.svg"
 DOCUMENTATION_DATA = "benchmark_snapshot.json"
@@ -64,13 +64,13 @@ def _latest_timestamp(result: Any) -> int:
 
 
 def _required_benchmark_keys() -> set[str]:
-    """Return every saved result needed to render complete implementation comparisons."""
+    """Return every saved result needed to render all comparisons."""
 
     # A partially interrupted ASV run must not replace the latest complete documentation result
     methods = ("time_operation", "track_end_to_end_time_s", "track_peak_process_tree_rss_mb")
     return {
         _benchmark_key(class_name, method)
-        for comparison in IMPLEMENTATION_COMPARISONS
+        for comparison in COMPARISONS
         for _, class_name in comparison.series
         for method in methods
     }
@@ -106,7 +106,7 @@ def select_asv_result(
         candidates.append(result)
 
     if not candidates:
-        raise RuntimeError("No saved ASV result contains the complete implementation comparisons")
+        raise RuntimeError("No saved ASV result contains all comparisons")
     return max(candidates, key=_latest_timestamp)
 
 
@@ -123,10 +123,10 @@ def _decode_parameter(value: Any) -> int:
 def _result_series(result: Any, key: str) -> tuple[list[int], list[float]]:
     """Return aligned numeric parameters and measurements for one ASV result key."""
 
-    # Implementation comparisons deliberately define exactly one parameter dimension
+    # Comparisons deliberately define exactly one parameter dimension
     params = result.get_result_params(key)
     if len(params) != 1:
-        raise ValueError(f"Implementation comparison must contain one parameter: {key}")
+        raise ValueError(f"Comparison must contain one parameter: {key}")
     parameters = [_decode_parameter(value) for value in params[0]]
 
     # Ask ASV to align values against the parameter order stored with this result
@@ -134,7 +134,7 @@ def _result_series(result: Any, key: str) -> tuple[list[int], list[float]]:
     if not isinstance(values, list):
         values = [values]
     if len(parameters) != len(values) or any(value is None for value in values):
-        raise ValueError(f"Incomplete implementation comparison result: {key}")
+        raise ValueError(f"Incomplete comparison result: {key}")
     return parameters, [float(value) for value in values]
 
 
@@ -143,7 +143,7 @@ def collect_implementation_measurements(result: Any) -> list[ImplementationMeasu
 
     records = []
     available = set(result.get_all_result_keys())
-    for comparison in IMPLEMENTATION_COMPARISONS:
+    for comparison in COMPARISONS:
         for implementation, class_name in comparison.series:
             # The three ASV methods share the same numeric parameter values
             keys = {
@@ -153,7 +153,7 @@ def collect_implementation_measurements(result: Any) -> list[ImplementationMeasu
             }
             missing = set(keys.values()) - available
             if missing:
-                raise ValueError(f"Missing implementation comparison results: {', '.join(sorted(missing))}")
+                raise ValueError(f"Missing comparison results: {', '.join(sorted(missing))}")
 
             operation_params, operation_times = _result_series(result, keys["operation"])
             end_to_end_params, end_to_end_times = _result_series(result, keys["end_to_end"])
@@ -182,7 +182,7 @@ def collect_implementation_measurements(result: Any) -> list[ImplementationMeasu
 
 
 def _plot_comparison(
-    comparison: ImplementationComparison,
+    comparison: Comparison,
     records: list[ImplementationMeasurement],
     output: Path,
 ) -> None:
@@ -232,18 +232,18 @@ def _plot_comparison(
     plt.close(figure)
 
 
-def _gdal_comparisons() -> tuple[ImplementationComparison, ...]:
+def _gdal_comparisons() -> tuple[Comparison, ...]:
     """Return raster-size comparisons that provide a GDAL reference line."""
 
     return tuple(
         comparison
-        for comparison in IMPLEMENTATION_COMPARISONS
+        for comparison in COMPARISONS
         if comparison.documentation and any(implementation == "GDAL" for implementation, _ in comparison.series)
     )
 
 
 def _largest_shared_parameter(
-    comparison: ImplementationComparison,
+    comparison: Comparison,
     records: list[ImplementationMeasurement],
 ) -> int:
     """Return the largest parameter measured by every implementation in one comparison."""
@@ -284,7 +284,7 @@ def _measurement_at(
     return selected[0]
 
 
-def _documentation_operation_name(comparison: ImplementationComparison) -> str:
+def _documentation_operation_name(comparison: Comparison) -> str:
     """Return the concise operation name used on documentation graphics."""
 
     return comparison.title.removesuffix(" raster size")
@@ -452,27 +452,27 @@ def _markdown_report(result: Any) -> str:
 
     machine = result.params.get("machine", "unknown")
     lines = [
-        "# GeoUtils implementation comparisons",
+        "# GeoUtils comparisons",
         "",
         f"Commit `{result.commit_hash}` on machine `{machine}`",
         "",
         "Operation time excludes implementation initialization. End-to-end time includes it but excludes input "
         "generation. Peak RAM is aggregate RSS for the benchmark process and all implementation children.",
         "",
-        "Raw values: [CSV](implementation-comparisons.csv) · [JSON](implementation-comparisons.json)",
+        "Raw values: [CSV](comparisons.csv) · [JSON](comparisons.json)",
     ]
-    for comparison in IMPLEMENTATION_COMPARISONS:
+    for comparison in COMPARISONS:
         lines.extend(["", f"## {comparison.title}", "", f"![{comparison.title}]({comparison.slug}.svg)"])
     return "\n".join(lines) + "\n"
 
 
 def _comparison_html(result: Any) -> str:
-    """Return the standalone implementation-comparison browser page."""
+    """Return the standalone comparison browser page."""
 
     machine = html.escape(str(result.params.get("machine", "unknown")))
     commit = html.escape(str(result.commit_hash))
     sections = []
-    for comparison in IMPLEMENTATION_COMPARISONS:
+    for comparison in COMPARISONS:
         title = html.escape(comparison.title)
         sections.append(f'<section><h2>{title}</h2><img src="{comparison.slug}.svg" alt="{title}"></section>')
     return "\n".join(
@@ -480,16 +480,15 @@ def _comparison_html(result: Any) -> str:
             "<!doctype html>",
             '<html lang="en"><head><meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
-            "<title>GeoUtils implementation comparisons</title>",
+            "<title>GeoUtils comparisons</title>",
             "<style>body{font-family:sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem}",
             "img{width:100%;height:auto}code{overflow-wrap:anywhere}</style></head><body>",
             '<p><a href="../index.html">GeoUtils benchmark results</a></p>',
-            "<h1>Implementation comparisons</h1>",
+            "<h1>Comparisons</h1>",
             f"<p>Commit <code>{commit}</code> on machine <code>{machine}</code></p>",
             "<p>Operation time excludes implementation initialization. End-to-end time includes it but excludes "
             "input generation. Peak RAM is aggregate RSS for the benchmark process and all implementation children.</p>",
-            '<p>Raw values: <a href="implementation-comparisons.csv">CSV</a> · '
-            '<a href="implementation-comparisons.json">JSON</a></p>',
+            '<p>Raw values: <a href="comparisons.csv">CSV</a> · ' '<a href="comparisons.json">JSON</a></p>',
             *sections,
             "</body></html>",
         ]
@@ -511,7 +510,7 @@ def _site_index() -> str:
             "<p>Choose the view that matches the question being investigated.</p>",
             "<ul>",
             '<li><a href="asv/index.html">Performance across commits</a> — native ASV history</li>',
-            '<li><a href="implementation-comparisons/index.html">Implementation and parameter comparisons</a> — '
+            '<li><a href="comparisons/index.html">Comparisons</a> — '
             "operation time, end-to-end time and peak RAM</li>",
             "</ul>",
             "</body></html>",
@@ -519,7 +518,7 @@ def _site_index() -> str:
     )
 
 
-def render_implementation_comparisons(
+def render_comparisons(
     result: Any,
     website_directory: Path,
 ) -> list[ImplementationMeasurement]:
@@ -529,18 +528,18 @@ def render_implementation_comparisons(
     report_directory = website_directory / COMPARISON_REPORT_DIRECTORY
     report_directory.mkdir(parents=True, exist_ok=True)
     records = collect_implementation_measurements(result)
-    for comparison in IMPLEMENTATION_COMPARISONS:
+    for comparison in COMPARISONS:
         _plot_comparison(comparison, records, report_directory / f"{comparison.slug}.svg")
 
     # JSON retains run metadata while CSV remains convenient for independent analysis
     payload = _result_payload(result, records)
-    (report_directory / "implementation-comparisons.json").write_text(
+    (report_directory / "comparisons.json").write_text(
         json.dumps(payload, indent=2) + "\n",
         encoding="utf-8",
     )
 
     # Write explicit columns so the stable schema does not depend on plotting code
-    with open(report_directory / "implementation-comparisons.csv", "w", newline="", encoding="utf-8") as csv_file:
+    with open(report_directory / "comparisons.csv", "w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=list(asdict(records[0])))
         writer.writeheader()
         writer.writerows(asdict(record) for record in records)
@@ -560,8 +559,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-directory", type=Path, default=Path("benchmarks/results/asv/results"))
     parser.add_argument("--website-directory", type=Path, default=Path("benchmarks/results/asv/html"))
-    parser.add_argument("--documentation-directory", type=Path)
-    parser.add_argument("--documentation-only", action="store_true")
+    parser.add_argument("--doc-dir", type=Path)
+    parser.add_argument("--doc-only", action="store_true")
     parser.add_argument("--machine")
     parser.add_argument("--commit")
     parser.add_argument("--environment")
@@ -574,12 +573,12 @@ def main() -> None:
         commit=args.commit,
         environment=args.environment,
     )
-    if not args.documentation_only:
-        render_implementation_comparisons(result, args.website_directory)
-    if args.documentation_directory is not None:
-        render_documentation_snapshot(result, args.documentation_directory)
-    elif args.documentation_only:
-        parser.error("--documentation-only requires --documentation-directory")
+    if not args.doc_only:
+        render_comparisons(result, args.website_directory)
+    if args.doc_dir is not None:
+        render_documentation_snapshot(result, args.doc_dir)
+    elif args.doc_only:
+        parser.error("--doc-only requires --doc-dir")
 
 
 if __name__ == "__main__":

@@ -543,3 +543,59 @@ class TestClassVsAccessorConsistency:
 
         # TODO: Finalize after consistent input check function #850
         assert True
+
+
+class TestRasterEdit:
+    """Check grouped metadata changes without modifying source raster data or metadata."""
+
+    def test_edit(self) -> None:
+        """Apply core GDAL-style metadata edits to a shallow raster copy."""
+
+        transform = rio.transform.from_origin(0, 2, 1, 1)
+        raster = Raster.from_array(
+            np.ones((2, 2), dtype=np.int16),
+            transform=transform,
+            crs=4326,
+            nodata=-9999,
+            tags={"source": "test"},
+            area_or_point="Area",
+        )
+        new_transform = rio.transform.from_origin(10, 20, 2, 2)
+
+        # Omitted metadata is retained while tags are merged with the existing values
+        edited = raster.edit(
+            crs=32631,
+            transform=new_transform,
+            nodata=-32768,
+            tags={"edited": "true"},
+            area_or_point="Point",
+        )
+        assert edited.crs == rio.crs.CRS.from_epsg(32631)
+        assert edited.transform == new_transform
+        assert edited.nodata == -32768
+        assert edited.tags["source"] == "test"
+        assert edited.tags["edited"] == "true"
+        assert edited.area_or_point == "Point"
+
+        # Editing metadata does not alter the source raster
+        assert raster.crs == rio.crs.CRS.from_epsg(4326)
+        assert raster.transform == transform
+        assert raster.nodata == -9999
+        assert raster.tags == {"source": "test", "AREA_OR_POINT": "Area"}
+        assert np.array_equal(edited.data, raster.data)
+
+    def test_edit_clear_metadata(self) -> None:
+        """Distinguish omitted arguments from metadata explicitly cleared with None."""
+
+        raster = Raster.from_array(
+            np.ones((2, 2), dtype=np.float32),
+            transform=rio.transform.from_origin(0, 2, 1, 1),
+            crs=4326,
+            nodata=-9999,
+            tags={"source": "test"},
+        )
+        edited = raster.edit(crs=None, nodata=None, tags=None, area_or_point=None)
+        assert edited.crs is None
+        assert edited.nodata is None
+        assert edited.tags == {}
+        assert edited.area_or_point is None

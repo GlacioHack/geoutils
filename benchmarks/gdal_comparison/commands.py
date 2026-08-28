@@ -85,7 +85,7 @@ def build_gdal_grid_command(
     height, width = shape
     command = [
         _require_command("gdal_grid"),
-        # Fix internal parallelism so every implementation comparison uses one calculation thread
+        # Fix internal parallelism so every comparison uses one calculation thread
         "--config",
         "GDAL_NUM_THREADS",
         "1",
@@ -94,21 +94,21 @@ def build_gdal_grid_command(
         command.extend(("--config", "GDAL_CACHEMAX", str(gdal_cachemax_mb)))
     command.extend(
         [
-        "-zfield",
-        zfield,
-        "-a",
-        algorithm_definition,
-        "-txe",
-        str(left),
-        str(right),
-        "-tye",
-        str(bottom),
-        str(top),
-        "-outsize",
-        str(width),
-        str(height),
-        "-ot",
-        "Float64",
+            "-zfield",
+            zfield,
+            "-a",
+            algorithm_definition,
+            "-txe",
+            str(left),
+            str(right),
+            "-tye",
+            str(bottom),
+            str(top),
+            "-outsize",
+            str(width),
+            str(height),
+            "-ot",
+            "Float64",
         ]
     )
     if output_crs is not None:
@@ -117,10 +117,10 @@ def build_gdal_grid_command(
         command.extend(creation_options)
     command.extend(
         [
-        "-l",
-        layer,
-        point_file,
-        output_file,
+            "-l",
+            layer,
+            point_file,
+            output_file,
         ]
     )
     return GdalCommand(command=command, output_file=output_file)

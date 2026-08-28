@@ -1,1 +1,1 @@
-"""Provide equivalent GDAL commands and measurements to the ASV implementation comparisons."""
+"""Provide equivalent GDAL commands and measurements to the ASV comparisons."""

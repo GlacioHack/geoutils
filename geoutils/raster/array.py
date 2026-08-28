@@ -21,15 +21,59 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import xarray as xr
 
 from geoutils._dispatch import has_geo_attr
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 
 if TYPE_CHECKING:
-    from geoutils.raster.base import RasterType
+    from geoutils.raster.base import RasterLike, RasterType
+
+
+def _masked_raster_data(source_raster: RasterLike) -> MArrayNum:
+    """Return raster values and their mask as an in-memory masked array."""
+
+    data = source_raster.data
+    if isinstance(data, xr.DataArray):
+        array = data.to_masked_array(copy=True)
+    else:
+        array = np.ma.array(data, copy=True)
+
+    # Combine masked, non-finite and explicit nodata representations across both raster classes
+    invalid = np.ma.getmaskarray(array) | ~np.isfinite(array.data)
+    nodata = getattr(source_raster, "nodata", None)
+    if nodata is not None:
+        invalid |= array.data == nodata
+    return np.ma.array(array.data, mask=invalid, copy=False)
+
+
+def _processing_mask(mask: RasterLike | NDArrayBool | None, shape: tuple[int, ...]) -> NDArrayBool:
+    """Return a Boolean processing mask matching one raster band."""
+
+    if mask is None:
+        return np.ones(shape[-2:], dtype=bool)
+
+    # Raster masks may have a singleton band dimension that has no spatial meaning
+    mask_data: Any = mask.data if hasattr(mask, "data") and not isinstance(mask, np.ndarray) else mask
+    if isinstance(mask_data, xr.DataArray):
+        mask_data = mask_data.to_numpy()
+    mask_array = np.asarray(mask_data).squeeze()
+    if mask_array.shape != shape[-2:]:
+        raise ValueError(f"Mask shape {mask_array.shape} does not match raster shape {shape[-2:]}.")
+    return mask_array.astype(bool)
+
+
+def _as_bands(array: MArrayNum) -> tuple[MArrayNum, bool]:
+    """Expose two-dimensional and multiband arrays through one band dimension."""
+
+    if array.ndim == 2:
+        return array[np.newaxis, ...], True
+    if array.ndim == 3:
+        return array, False
+    raise ValueError("Raster processing expects a two-dimensional or multiband array.")
 
 
 def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:

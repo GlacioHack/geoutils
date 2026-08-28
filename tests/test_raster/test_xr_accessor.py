@@ -104,6 +104,9 @@ class TestAccessor:
             assert output.nodata == ds.rst.nodata
 
     def test_cross_type_outputs_are_accessors(self) -> None:
+        """Return accessor-backed vectors and point clouds when a raster operation changes type."""
+
+        # Create one compact raster shared by every cross-type operation
         ds = gu.RasterAccessor.from_array(
             data=np.array([[1, 1], [0, 0]], dtype=np.uint8),
             transform=from_origin(0, 2, 1, 1),
@@ -111,10 +114,12 @@ class TestAccessor:
             nodata=None,
         )
 
+        # Polygonization returns a GeoDataFrame with the vector accessor
         vector = ds.rst.polygonize(target_values=1)
         assert isinstance(vector, gpd.GeoDataFrame)
         assert vector.vct.to_geoutils().vector_equal(gu.Vector(vector))
 
+        # Raster-to-point operations return GeoDataFrames with point-cloud metadata
         pointcloud = ds.rst.to_pointcloud(skip_nodata=False)
         assert isinstance(pointcloud, gpd.GeoDataFrame)
         assert pointcloud.pc.data_column == "b1"
@@ -123,6 +128,7 @@ class TestAccessor:
         assert isinstance(interpolated, gpd.GeoDataFrame)
         assert interpolated.pc.data_column == "z"
 
+        # Geometric footprint helpers also retain the vector accessor
         footprint = ds.rst.get_footprint_projected(ds.rst.crs)
         assert isinstance(footprint, gpd.GeoDataFrame)
 

@@ -765,8 +765,21 @@ def _dask_interp_points(
     list_inds_used = [ind_per_block[i] for i in used]
     joined = dask.delayed(_concat_reorder)(list_interp, list_inds_used)
 
-    # Join into full length array of input dtype
-    interp_points = da.from_delayed(joined, shape=(len(points[0]),), dtype=darr.dtype)
+    # Join into one array using a floating type whenever source values cannot represent NaN
+    output_dtype = _interp_output_dtype(darr.dtype)
+    interp_points = da.from_delayed(joined, shape=(len(points[0]),), dtype=output_dtype)
+
+    # Padded edge chunks repeat their outer cells, so restore the bounds of the complete source raster
+    src_rows, src_cols = _xy2ij(
+        points[0],
+        points[1],
+        transform=transform,
+        area_or_point=kwargs["area_or_point"],
+        shift_area_or_point=kwargs["shift_area_or_point"],
+    )
+    inside = (src_rows >= -0.5) & (src_rows < darr.shape[0] - 0.5)
+    inside &= (src_cols >= -0.5) & (src_cols < darr.shape[1] - 0.5)
+    interp_points = da.where(inside, interp_points, np.nan)
 
     return interp_points
 
@@ -779,22 +792,6 @@ def _empty_pointcloud_meta(data_column: str, crs: Any, dtype: DTypeLike) -> gpd.
         data={data_column: pd.Series(dtype=dtype)},
         geometry=gpd.GeoSeries([], crs=crs),
         crs=crs,
-    )
-
-
-def _set_dask_pointcloud_attrs(ds: Any, crs: Any, data_column: str) -> None:
-    """Set minimal GeoUtils point-cloud metadata on a Dask GeoDataFrame."""
-
-    # Dask dataframes do not provide the Pandas ``attrs`` storage used by the accessor
-    object.__setattr__(
-        ds,
-        "_geoutils_attrs",
-        {
-            "crs": crs,
-            "bounds": None,
-            "point_count": None,
-            "data_column": data_column,
-        },
     )
 
 
@@ -903,8 +900,19 @@ def _interp_points_dask_pointcloud(
         out_crs,
         meta=meta,
     )
+    # Import at runtime to avoid the point-cloud base importing this interpolation module in return
+    from geoutils.pointcloud.base import _set_dataframe_attrs
+
     # Restore the metadata expected by the GeoUtils ``pc`` accessor
-    _set_dask_pointcloud_attrs(out, crs=out_crs, data_column=data_column)
+    _set_dataframe_attrs(
+        out,
+        {
+            "crs": out_crs,
+            "bounds": None,
+            "point_count": None,
+            "data_column": data_column,
+        },
+    )
 
     if as_array:
         # Expose values as a Dask array without computing point partitions
@@ -1148,7 +1156,7 @@ def _interp_points(
     if mp_backend and dask_backend:
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
-            "from reproject(). To use Multiprocessing, open the file without chunks."
+            "from interp_points(). To use Multiprocessing, open the file without chunks."
         )
 
     if (dask_backend or mp_backend) and (return_interpolator or pts_inbounds is None):
@@ -1175,7 +1183,7 @@ def _interp_points(
             arr = source_raster.data[band - 1, :, :]
         else:
             arr = source_raster.data
-        # If using Dask backend, process and return NumPy array (ragged output)
+        # If using Dask backend, process and return a lazy array with one value per point
         if dask_backend:
             assert pts_inbounds is not None
             z_inbounds = _dask_interp_points(

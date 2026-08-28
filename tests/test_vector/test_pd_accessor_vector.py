@@ -1,4 +1,4 @@
-"""Tests on Pandas accessor mirroring Vector API."""
+"""Tests on the Pandas accessor mirroring the Vector API."""
 
 from __future__ import annotations
 
@@ -50,6 +50,8 @@ class TestVectorAccessor:
         assert isinstance(reprojected, dgpd.GeoDataFrame)
         assert not reprojected.vct.is_loaded
         assert_geodataframe_equal(reprojected.compute(), expected)
+        assert not ds.vct.is_loaded
+        assert not reprojected.vct.is_loaded
 
     def test_translate_vector__dask_geopandas(self) -> None:
         """Translate vector partitions lazily and match the eager accessor result."""
@@ -66,6 +68,44 @@ class TestVectorAccessor:
         assert not ds.vct.is_loaded
         assert not translated.vct.is_loaded
         assert_geodataframe_equal(translated.compute(), expected)
+        assert not ds.vct.is_loaded
+        assert not translated.vct.is_loaded
+
+    @pytest.mark.parametrize(
+        ("method", "clip"),
+        [("copy", False), ("crop", False), ("crop", True)],
+        ids=["copy", "crop", "crop-and-clip"],
+    )
+    def test_copy_crop_vector__dask_geopandas(self, method: str, clip: bool) -> None:
+        """Keep copied and cropped vector partitions lazy and equal to eager GeoPandas."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+
+        # Use the middle half of the source extent so cropping has visible work to perform
+        expected_source = gu.open_vector(self.aster_outlines_path)
+        left, bottom, right, top = expected_source.total_bounds
+        bbox = (
+            left + (right - left) / 4,
+            bottom + (top - bottom) / 4,
+            right - (right - left) / 4,
+            top - (top - bottom) / 4,
+        )
+        kwargs = {"bbox": bbox, "clip": clip} if method == "crop" else {}
+
+        # Apply the same operation to eager and lazy accessors
+        ds = gu.open_vector(self.aster_outlines_path, chunks=1)
+        expected = getattr(expected_source.vct, method)(**kwargs)
+        output = getattr(ds.vct, method)(**kwargs)
+
+        assert isinstance(output, dgpd.GeoDataFrame)
+        assert not ds.vct.is_loaded
+        assert not output.vct.is_loaded
+        computed_output = output.compute()
+
+        # Partition order is not meaningful, but every feature and its original index must remain exact
+        assert_geodataframe_equal(computed_output.sort_index(), expected.sort_index())
+        assert not ds.vct.is_loaded
+        assert not output.vct.is_loaded
 
     def test_open_vector__dask_geopandas_missing_dep(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explain the missing optional dependency when chunked vector opening requests Dask."""
@@ -144,6 +184,7 @@ class TestVectorAccessor:
 
         # Include a lazy reprojection so writing evaluates the complete task graph
         ds = gu.open_vector(self.aster_outlines_path, chunks=1).vct.reproject(crs=CRS.from_epsg(3857))
+        assert not ds.vct.is_loaded
 
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
@@ -152,6 +193,7 @@ class TestVectorAccessor:
         # Reopen the file eagerly and compare it with the projected source
         assert os.path.exists(temp_file)
         assert gu.Vector(temp_file).vector_equal(gu.Vector(gu.open_vector(self.aster_outlines_path).to_crs(3857)))
+        assert not ds.vct.is_loaded
 
     @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
     def test_to_file__dask_geopandas_parquet(self) -> None:
@@ -161,6 +203,7 @@ class TestVectorAccessor:
 
         # GeoParquet supports a partitioned Dask write directly
         ds = gu.open_vector(self.aster_outlines_path, chunks=1)
+        assert not ds.vct.is_loaded
 
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.parquet")
@@ -169,6 +212,7 @@ class TestVectorAccessor:
         # Read through GeoPandas to validate the complete written dataset
         assert os.path.exists(temp_file)
         assert_geodataframe_equal(gpd.read_parquet(temp_file), gu.open_vector(self.aster_outlines_path))
+        assert not ds.vct.is_loaded
 
     def test_cross_type_outputs_are_accessors(self) -> None:
         """Return accessor-native objects when vector operations change geospatial type."""
@@ -218,13 +262,17 @@ class TestVectorAccessor:
         assert isinstance(output, dgpd.GeoDataFrame)
         assert not output.pc.is_loaded
         assert_geodataframe_equal(output.compute(), expected)
+        assert not dask_points.pc.is_loaded
+        assert not output.pc.is_loaded
 
         # Requesting an array should preserve the same partitioned values
         output_array = vector.vct.create_mask(points=dask_points, as_array=True)
         assert isinstance(output_array, da.Array)
         assert np.array_equal(output_array.compute(), expected["z"].to_numpy())
+        assert not dask_points.pc.is_loaded
 
         # The generic ``ref`` argument must dispatch to the same point-cloud path
         output_ref = vector.vct.create_mask(ref=dask_points, as_array=True)
         assert isinstance(output_ref, da.Array)
         assert np.array_equal(output_ref.compute(), expected["z"].to_numpy())
+        assert not dask_points.pc.is_loaded

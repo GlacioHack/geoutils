@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import rasterio as rio
 import scipy
 import xarray as xr
 
@@ -256,6 +257,47 @@ class TestRasterFilters:  # type: ignore
             raster.filter("unknown_filter")
         with pytest.raises(TypeError, match="`method` must be a string or a callable"):
             raster.filter(12345)
+
+
+class TestSieveFilter:
+    """Test filtering of small connected regions in categorical rasters."""
+
+    def test_sieve(self) -> None:
+        """Remove an isolated category while retaining a larger connected region."""
+
+        # One category has a single cell while the other has two connected cells
+        array = np.ones((5, 5), dtype=np.uint8)
+        array[1, 1] = 2
+        array[3, 3:5] = 3
+        raster = Raster.from_array(array, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
+
+        # GDAL replaces only the region below the two-pixel threshold
+        result = raster.sieve(size=2)
+        expected = array.copy()
+        expected[1, 1] = 1
+        assert np.array_equal(result.data, expected)
+        assert np.array_equal(raster.data, array)
+
+        # Cells excluded by a processing mask keep their original values
+        excluded = np.ones(array.shape, dtype=bool)
+        excluded[1, 1] = False
+        masked_result = raster.sieve(size=2, mask=excluded)
+        assert np.array_equal(masked_result.data, array)
+
+    def test_sieve_errors(self) -> None:
+        """Reject unsupported continuous values and invalid region definitions."""
+
+        raster = Raster.from_array(
+            np.ones((3, 3), dtype=np.float32),
+            transform=rio.transform.from_origin(0, 3, 1, 1),
+            crs=4326,
+        )
+        with pytest.raises(ValueError, match="integer or Boolean"):
+            raster.sieve(size=2)
+        with pytest.raises(ValueError, match="strictly positive integer"):
+            raster.astype(np.uint8).sieve(size=0)
+        with pytest.raises(ValueError, match="connectivity.*4 or 8"):
+            raster.astype(np.uint8).sieve(size=2, connectivity=6)  # type: ignore[arg-type]
 
 
 class TestSyntheticsNansFilters:  # type: ignore

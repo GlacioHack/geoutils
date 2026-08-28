@@ -39,8 +39,7 @@ import pandas as pd
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, is_dask_array
-from geoutils._dispatch import is_dask_dataframe as _is_dask_dataframe
+from geoutils._dispatch import get_geo_attr, is_dask_array, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation
@@ -61,20 +60,11 @@ if TYPE_CHECKING:
 PointCloudBaseType = TypeVar("PointCloudBaseType", bound="PointCloudBase")
 
 
-def _as_dask_array(values: Any) -> Any:
-    """Convert a Dask Series to a Dask Array when possible, otherwise return the input unchanged."""
-
-    # Dask Series exposes this conversion without computing its partitions
-    if hasattr(values, "to_dask_array"):
-        return values.to_dask_array(lengths=True)
-    return values
-
-
 def _get_dataframe_attrs(ds: Any) -> dict[str, Any]:
     """Get GeoUtils metadata from Pandas or Dask dataframes."""
 
     # Dask does not carry Pandas ``attrs`` reliably through graph operations
-    if _is_dask_dataframe(ds):
+    if is_dask_dataframe(ds):
         try:
             return object.__getattribute__(ds, "_geoutils_attrs")
         except AttributeError:
@@ -86,7 +76,7 @@ def _set_dataframe_attrs(ds: Any, attrs: dict[str, Any]) -> None:
     """Set GeoUtils metadata on Pandas or Dask dataframes."""
 
     # Keep a private copy on Dask collections and use the public mapping for Pandas
-    if _is_dask_dataframe(ds):
+    if is_dask_dataframe(ds):
         object.__setattr__(ds, "_geoutils_attrs", attrs.copy())
     elif hasattr(ds, "attrs"):
         ds.attrs.update(attrs)
@@ -130,7 +120,7 @@ def _cast_numeric_array_pointcloud(
     if isinstance(other, (float, int, np.floating, np.integer)):
         return other
 
-    if is_dask_array(other) or _is_dask_dataframe(other):
+    if is_dask_array(other) or is_dask_dataframe(other):
         return other
 
     raise NotImplementedError(
@@ -150,7 +140,7 @@ class PointCloudBase(VectorBase):
     def _is_dask(self) -> bool:
         """Whether the backing point-cloud dataframe is partitioned by Dask."""
 
-        return _is_dask_dataframe(self.ds)
+        return is_dask_dataframe(self.ds)
 
     @property
     def _has_z(self) -> bool:
@@ -387,7 +377,11 @@ class PointCloudBase(VectorBase):
             import_optional("dask")
             import dask.array as da
 
-            return da.stack([_as_dask_array(x), _as_dask_array(y), _as_dask_array(z)], axis=0)
+            # Dask Series expose lazy array conversion while coordinate arrays can pass through unchanged
+            arrays = [
+                value.to_dask_array(lengths=True) if hasattr(value, "to_dask_array") else value for value in (x, y, z)
+            ]
+            return da.stack(arrays, axis=0)
         return np.stack((x, y, z), axis=0)
 
     def to_tuples(self) -> Iterable[tuple[Number, Number, Number]]:
@@ -414,7 +408,7 @@ class PointCloudBase(VectorBase):
         if self.crs != get_geo_attr(pc, "crs"):
             return False
 
-        if self._is_dask or _is_dask_dataframe(get_geo_attr(pc, "ds")):
+        if self._is_dask or is_dask_dataframe(get_geo_attr(pc, "ds")):
             return self.point_count == get_geo_attr(pc, "point_count")
 
         return all(

@@ -28,7 +28,7 @@ dependencies:
   - lazrs-python # For LAZ file support
   - psutil # For profiler
   - plotly # For profiler
-  - numba # For filters and point-cloud gridding
+  - numba # For filters and point cloud gridding
   - dask # For out-of-memory operations
   - dask-geopandas # For out-of-memory vector/point operations
 

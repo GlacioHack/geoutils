@@ -1,4 +1,4 @@
-"""Repository-wide pytest configuration, to reach benchmarks/ as well as tests/."""
+"""Repository-wide pytest config, to reach benchmarks/ as well as tests/, and skip large data tests by default."""
 
 from __future__ import annotations
 

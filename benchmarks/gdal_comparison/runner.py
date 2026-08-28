@@ -7,43 +7,28 @@ import subprocess
 from dataclasses import dataclass
 
 import geopandas as gpd
-import rasterio as rio
 
 from benchmarks.gdal_comparison.commands import (
     ComparisonOperation,
     GdalCommand,
     build_gdal_command,
 )
-from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
+from benchmarks.workflows.runner import (
+    BenchmarkConfig,
+    BenchmarkRunner,
+    ProfiledResult,
+    read_raster_center,
+)
 from geoutils.profiler import ProfileMetrics, profile_call
 
 
 @dataclass(frozen=True)
-class GdalResult:
+class GdalResult(ProfiledResult):
     """Store one completed GDAL result together with its process memory."""
 
     value: float
     metrics: ProfileMetrics
     output_file: str
-
-    @property
-    def peak_process_tree_rss_mb(self) -> float:
-        """Return peak aggregate RSS for the benchmark process and GDAL child."""
-
-        peak = self.metrics.peak_process_tree_rss_mb
-        if peak is None:
-            raise RuntimeError("Process-tree memory was not collected for this GDAL result")
-        return peak
-
-    @property
-    def process_tree_rss_increase_mb(self) -> float:
-        """Return peak RSS above the initialized benchmark-process baseline."""
-
-        # Subtracting the first sample isolates memory added while GDAL is running
-        if not self.metrics.process_tree_rss_mb:
-            raise RuntimeError("Process-tree memory was not collected for this GDAL result")
-        baseline = self.metrics.process_tree_rss_mb[0][1]
-        return max(0.0, self.peak_process_tree_rss_mb - baseline)
 
 
 def read_comparison_value(operation: ComparisonOperation, output_file: str) -> float:
@@ -54,10 +39,7 @@ def read_comparison_value(operation: ComparisonOperation, output_file: str) -> f
         return float(len(gpd.read_file(output_file)))
 
     # Raster workflows use a central pixel that is one for every deterministic fixture
-    with rio.open(output_file) as dataset:
-        row = dataset.height // 2
-        col = dataset.width // 2
-        return float(dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0])
+    return read_raster_center(output_file)
 
 
 class GdalRunner:

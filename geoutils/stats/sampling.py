@@ -963,7 +963,7 @@ def _subsample(
     if mp_backend and dask_backend:
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
-            "from reproject(). To use Multiprocessing, open the file without chunks."
+            "from subsample(). To use Multiprocessing, open the file without chunks."
         )
 
     class _SubsampleKwargs(TypedDict):

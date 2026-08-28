@@ -842,12 +842,11 @@ class TestInterpPointsChunked:
         Test that interp_points yields consistent output for:
          - In-memory base function through Raster (NumPy backend),
          - In-memory base function through Xarray DataArray (NumPy backend),
-         - Dask backend through Xarray accessor (lazy input; ragged/eager compute by design),
-         - Multiprocessing backend through Raster class (lazy input; ragged/eager compute by design).
+         - Dask backend through Xarray accessor (lazy input and output),
+         - Multiprocessing backend through Raster class (lazy input and eager output).
 
         Notes:
-         - Dask and Multiprocessing implementations must return a NumPy array (ragged output),
-           while the in-memory backends may return NumPy array directly.
+         - Dask returns one delayed array while the other backends return NumPy arrays directly,
          - Points outside of bounds are handled in the wrapper (_interp_points) by returning NaNs.
         """
 
@@ -914,8 +913,8 @@ class TestInterpPointsChunked:
 
         # 3/ Run interp_points across backends
 
-        # For the wrapper, out-of-bounds points are removed for chunked work, then NaNs are rebuilt in output.
-        # Dask/MP return arrays (ragged output), so we request as_array=True for all.
+        # The wrapper removes out-of-bounds points from chunked work and restores NaNs afterwards
+        # Request arrays from every backend so output values can be compared directly
         mp_config = MultiprocConfig(chunks=(10, 7))
 
         # Base raster output (NumPy backend)
@@ -924,7 +923,7 @@ class TestInterpPointsChunked:
         # Base xarray output (NumPy backend)
         out_xr = ds_base.rst.interp_points(points=(x, y), method=method, as_array=as_array)
 
-        # Dask output (output is eager)
+        # Dask output remains lazy until the comparison below
         out_dask = ds_dask.rst.interp_points(points=(x, y), method=method, as_array=as_array)
 
         # Multiprocessing output (output is eager)
@@ -933,6 +932,7 @@ class TestInterpPointsChunked:
         # 4/ Laziness checks (inputs remain lazy)
         assert not ds_dask._in_memory
         assert isinstance(ds_dask.data, da.Array)
+        assert isinstance(out_dask, da.Array)
         assert not raster_mp.is_loaded
 
         # 5/ Normalize to NumPy arrays
@@ -947,53 +947,15 @@ class TestInterpPointsChunked:
         assert out_dask_np.shape == (ninterp,)
         assert out_mp_np.shape == (ninterp,)
 
-        # 6/ Consistency checks
-        #
-        # Edge handling can differ slightly across implementations (halo/overlap, nodata spreading, boundary fill),
-        # especially for linear interpolation close to raster bounds
-        # We therefore:
-        #  - Require full equality for "nearest" (stable),
-        #  - For "linear", compare only points that are inside bounds, and not within a small pixel margin of the
-        #   raster edges.
-        #
-        # Out-of-bounds points must still return NaNs across all backends (wrapper contract)
-
-        # Identify which points are inside the raster bounds (in world coordinates)
-        in_bounds = (x >= left) & (x <= right) & (y >= bottom) & (y <= top)
-
-        # Define an edge margin in "pixels" expressed in world units.
-        margin_px = 3
-        xres, yres = raster_base.res
-
-        # Points within 3 pixels of any edge are considered "at boundary"
-        at_boundary = (
-            (x <= left + margin_px * xres)
-            | (x >= right - margin_px * xres)
-            | (y <= bottom + margin_px * yres)
-            | (y >= top - margin_px * yres)
-        )
-
-        core = in_bounds & ~at_boundary
-
+        # 6/ Compare complete outputs, including raster boundaries and out-of-bounds NaNs
         if method == "nearest":
-            # Nearest should be identical everywhere (including near boundaries) given identical bounds filtering
-            assert np.array_equal(out_raster_np[core], out_xr_np[core], equal_nan=True)
-            assert np.array_equal(out_raster_np[core], out_dask_np[core], equal_nan=True)
-            assert np.array_equal(out_raster_np[core], out_mp_np[core], equal_nan=True)
+            assert np.array_equal(out_raster_np, out_xr_np, equal_nan=True)
+            assert np.array_equal(out_raster_np, out_dask_np, equal_nan=True)
+            assert np.array_equal(out_raster_np, out_mp_np, equal_nan=True)
         else:
-            # Linear: compare only away from the raster boundary
-            assert np.allclose(out_raster_np[core], out_xr_np[core], equal_nan=True, rtol=1e-6, atol=0.0)
-            assert np.allclose(out_raster_np[core], out_dask_np[core], equal_nan=True, rtol=1e-6, atol=0.0)
-            assert np.allclose(out_raster_np[core], out_mp_np[core], equal_nan=True, rtol=1e-6, atol=0.0)
-
-        # Still require that truly out-of-bounds points map to NaNs consistently
-        oob = ~in_bounds
-        assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_xr_np[oob]))
-
-        # Need to fix Dask behaviour near edges, see issue #876...
-        # assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_dask_np[oob]))
-
-        assert np.array_equal(np.isnan(out_raster_np[oob]), np.isnan(out_mp_np[oob]))
+            assert np.allclose(out_raster_np, out_xr_np, equal_nan=True, rtol=1e-6, atol=0.0)
+            assert np.allclose(out_raster_np, out_dask_np, equal_nan=True, rtol=1e-6, atol=0.0)
+            assert np.allclose(out_raster_np, out_mp_np, equal_nan=True, rtol=1e-6, atol=0.0)
 
     @pytest.mark.parametrize("nodata_propagation", ["gdal", "ignore", "propagate"])
     def test_interp_points__nodata_policies_backends(
@@ -1047,6 +1009,103 @@ class TestInterpPointsChunked:
         )
         assert np.array_equal(expected, multiproc_output, equal_nan=True)
 
+    @pytest.mark.parametrize("raster_dask", [False, True], ids=["raster-eager", "raster-dask"])
+    @pytest.mark.parametrize("point_dask", [False, True], ids=["point-eager", "point-dask"])
+    @pytest.mark.parametrize("method", ["nearest", "linear"])
+    def test_interp_points__raster_point_input_combinations(
+        self,
+        raster_dask: bool,
+        point_dask: bool,
+        method: Literal["nearest", "linear"],
+        tmp_path: Path,
+    ) -> None:
+        """Interpolate every combination of eager and Dask raster and point-cloud inputs."""
+
+        pytest.importorskip("dask_geopandas")
+        import dask.array as da
+
+        # Create exact cell-center queries so both interpolation methods have one unambiguous result
+        source = np.arange(36, dtype=np.int16).reshape(6, 6)
+        raster = gu.Raster.from_array(
+            source,
+            transform=rio.transform.from_origin(0, 6, 1, 1),
+            crs=32610,
+            nodata=-9999,
+        )
+        i = np.array([1, 2, 4])
+        j = np.array([1, 3, 4])
+        x, y = raster.ij2xy(i=i, j=j)
+        x = np.append(x, raster.bounds.right + raster.res[0])
+        y = np.append(y, (raster.bounds.bottom + raster.bounds.top) / 2)
+        points = gpd.GeoDataFrame(
+            data={"id": np.arange(len(x))},
+            geometry=gpd.points_from_xy(x=x, y=y),
+            crs=raster.crs,
+        )
+
+        # Write both inputs so their Dask variants read the same values and metadata
+        raster_file = tmp_path / "raster.tif"
+        point_file = tmp_path / "points.gpkg"
+        raster.to_file(raster_file)
+        points.to_file(point_file)
+        raster_input = open_raster(str(raster_file), chunks={"x": 3, "y": 3}) if raster_dask else raster
+        point_input = gu.open_pointcloud(str(point_file), data_column="id", chunks=2) if point_dask else points
+
+        # The complete in-memory calculation defines the exact expected values
+        expected = raster.interp_points(points=points, method=method, as_array=True)
+        output = (
+            raster_input.rst.interp_points(points=point_input, method=method, as_array=True)
+            if raster_dask
+            else raster_input.interp_points(points=point_input, method=method, as_array=True)
+        )
+
+        # Either Dask input must produce a lazy array while two eager inputs return NumPy directly
+        if raster_dask or point_dask:
+            assert isinstance(output, da.Array)
+            computed_output = output.compute()
+        else:
+            assert isinstance(output, np.ndarray)
+            computed_output = output
+        assert np.array_equal(expected, computed_output, equal_nan=True)
+
+        # Evaluating the result must leave each Dask input unchanged and lazy
+        if raster_dask:
+            assert not raster_input._in_memory
+            assert isinstance(raster_input.data, da.Array)
+        if point_dask:
+            assert not point_input.pc.is_loaded
+
+    def test_interp_points__dask_pointcloud_multiprocessing_error(self, tmp_path: Path) -> None:
+        """Reject Multiprocessing when Dask already partitions the point-cloud input."""
+
+        pytest.importorskip("dask_geopandas")
+
+        # Store one point source and reopen it lazily through the public helper
+        raster = gu.Raster.from_array(
+            np.arange(9, dtype=np.float32).reshape(3, 3),
+            transform=rio.transform.from_origin(0, 3, 1, 1),
+            crs=32610,
+        )
+        x, y = raster.ij2xy(i=np.array([1]), j=np.array([1]))
+        points = gpd.GeoDataFrame(
+            data={"id": [1]},
+            geometry=gpd.points_from_xy(x=x, y=y),
+            crs=raster.crs,
+        )
+        point_file = tmp_path / "points.gpkg"
+        points.to_file(point_file)
+        dask_points = gu.open_pointcloud(str(point_file), data_column="id", chunks=1)
+
+        # One operation cannot be scheduled by both Dask and Multiprocessing
+        with pytest.raises(ValueError, match="Dask point-cloud inputs cannot be combined with Multiprocessing"):
+            raster.interp_points(
+                points=dask_points,
+                method="nearest",
+                as_array=True,
+                mp_config=MultiprocConfig(chunks=(2, 2)),
+            )
+        assert not dask_points.pc.is_loaded
+
     def test_interp_points__dask_pointcloud_input(self, lazy_test_files_tiny: list[str]) -> None:
         """Test interpolation to Dask-GeoPandas point-cloud inputs."""
 
@@ -1079,12 +1138,17 @@ class TestInterpPointsChunked:
         out_array = ds_dask.rst.interp_points(points=dask_points, method="nearest", as_array=True)
         assert isinstance(out_array, da.Array)
         assert np.array_equal(np.asarray(expected), out_array.compute(), equal_nan=True)
+        assert not ds_dask._in_memory
+        assert not dask_points.pc.is_loaded
 
         # Point-cloud output should remain a Dask-GeoPandas collection with ``pc`` metadata
         out_points = ds_dask.rst.interp_points(points=dask_points, method="nearest")
         assert isinstance(out_points, dgpd.GeoDataFrame)
         assert not out_points.pc.is_loaded
         assert np.array_equal(np.asarray(expected), out_points.compute()["z"].to_numpy(), equal_nan=True)
+        assert not ds_dask._in_memory
+        assert not dask_points.pc.is_loaded
+        assert not out_points.pc.is_loaded
 
     def test_interp_points_las__dask_pointcloud_input(self) -> None:
         """Test interpolation to Dask point-cloud inputs opened from LAS."""

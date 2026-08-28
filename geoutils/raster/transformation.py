@@ -441,7 +441,7 @@ def _build_geotiling_and_meta(
     # transform of each tuples of source blocks
     src_block_ids = src_geotiling.get_block_locations()
     dest2source = [
-        _expand_source_block_indices(sbid, src_block_ids=src_block_ids, src_numblocks=src_geotiling.numblocks)
+        _expand_source_block_indices(sbid, src_block_ids=src_block_ids, src_numblocks=src_geotiling.num_chunks)
         for sbid in dest2source
     ]
     meta_params = [

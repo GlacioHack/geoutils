@@ -24,7 +24,7 @@ import pathlib
 import tempfile
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -32,8 +32,11 @@ import pandas as pd
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 
-from geoutils._dispatch import is_dask_dataframe as _is_dask_dataframe
+from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import import_optional
+
+if TYPE_CHECKING:
+    from geoutils.multiproc.mparray import MultiprocConfig
 
 
 @dataclass(frozen=True)
@@ -109,34 +112,23 @@ def spatial_bounds_grid(
     return blocks
 
 
-def _normalize_las_columns(columns: Literal["all", "main"] | Iterable[str], data_column: str | None) -> list[str]:
-    """Resolve user-facing column choices to LAS dimensions to load."""
-
-    if columns == "all":
-        raise ValueError("Column value 'all' can only be resolved with file metadata.")
-    if columns == "main":
-        columns_to_load = [data_column] if data_column is not None else []
-    else:
-        columns_to_load = list(columns)
-
-    if "Z" not in columns_to_load:
-        columns_to_load = ["Z"] + columns_to_load
-
-    return columns_to_load
-
-
 def resolve_las_columns(
-    columns: Literal["all", "main"] | list[str],
+    columns: Literal["all", "main"] | Iterable[str],
     data_column: str | None,
     available_columns: pd.Index,
 ) -> list[str]:
     """Resolve LAS columns to load from user input and file metadata."""
 
     # Expand public column shorthands before validating against the header
-    if columns == "all":
+    if isinstance(columns, str) and columns == "all":
         columns_to_load = list(available_columns)
+    elif isinstance(columns, str) and columns == "main":
+        columns_to_load = [data_column] if data_column is not None else []
     else:
-        columns_to_load = _normalize_las_columns(columns=columns, data_column=data_column)
+        columns_to_load = list(columns)
+
+    if "Z" not in columns_to_load:
+        columns_to_load = ["Z"] + columns_to_load
 
     # Report all unknown dimensions together for a useful user-facing error
     missing = [column for column in columns_to_load if column not in available_columns]
@@ -154,7 +146,9 @@ def _empty_las_geodataframe(columns: list[str], crs: CRS | None) -> gpd.GeoDataF
     """Build an empty GeoDataFrame with the LAS chunk column order."""
 
     data = {column: pd.Series(dtype="float64") for column in columns}
-    return gpd.GeoDataFrame(data=data, geometry=gpd.GeoSeries([], crs=crs), crs=crs)
+    empty = gpd.GeoDataFrame(data=data, geometry=gpd.GeoSeries([], crs=crs), crs=crs)
+    empty.attrs["crs"] = crs
+    return empty
 
 
 def _concat_las_geodataframes(parts: list[gpd.GeoDataFrame], columns: list[str], crs: CRS | None) -> gpd.GeoDataFrame:
@@ -226,23 +220,9 @@ def load_laspy_metadata(filename: str | pathlib.Path) -> LasMetadata:
     return LasMetadata(crs=crs, point_count=point_count, bounds=bounds, columns=columns)
 
 
-def _load_laspy_metadata(
-    filename: str | pathlib.Path,
-) -> tuple[CRS | None, int, BoundingBox, pd.Index]:
-    """Backward-compatible tuple form of :func:`load_laspy_metadata`."""
-
-    metadata = load_laspy_metadata(filename)
-    return (
-        metadata.crs,
-        metadata.point_count,
-        metadata.bounds,
-        metadata.columns,
-    )
-
-
 def load_laspy_data(
     filename: str | pathlib.Path,
-    columns: Literal["all", "main"] | list[str],
+    columns: Literal["all", "main"] | Iterable[str],
     data_column: str | None = "Z",
 ) -> gpd.GeoDataFrame:
     """Load point-cloud data from a LAS/LAZ/COPC file as a GeoDataFrame."""
@@ -259,17 +239,6 @@ def load_laspy_data(
     # Convert all records only after column and metadata checks have passed
     las = laspy.read(filename)
     return _laspy_points_to_geodataframe(points=las, crs=metadata.crs, columns=columns_to_load)
-
-
-def _load_laspy_data(filename: str | pathlib.Path, columns: list[str]) -> gpd.GeoDataFrame:
-    """Backward-compatible loader for callers that already resolved columns."""
-
-    laspy = import_optional("laspy")
-
-    with laspy.open(filename) as reader:
-        crs = reader.header.parse_crs(prefer_wkt=False)
-    las = laspy.read(filename)
-    return _laspy_points_to_geodataframe(points=las, crs=crs, columns=columns)
 
 
 def load_laspy_data_slice(filename: str | pathlib.Path, columns: list[str], start: int, count: int) -> gpd.GeoDataFrame:
@@ -291,12 +260,45 @@ def load_laspy_data_slice(filename: str | pathlib.Path, columns: list[str], star
     return _laspy_points_to_geodataframe(points=points, crs=crs, columns=columns)
 
 
-def _load_laspy_data_slice(
-    filename: str | pathlib.Path, columns: list[str], start: int, count: int
-) -> gpd.GeoDataFrame:
-    """Backward-compatible alias for :func:`load_laspy_data_slice`."""
+def _point_partition_size(mp_config: MultiprocConfig) -> int:
+    """Return a scalar point partition size from a multiprocessing configuration."""
 
-    return load_laspy_data_slice(filename=filename, columns=columns, start=start, count=count)
+    if not isinstance(mp_config.chunks, int):
+        raise ValueError("Point-cloud multiprocessing requires an integer chunk size.")
+    return mp_config.chunks
+
+
+def _load_laspy_data_partitions(
+    filename: str | pathlib.Path,
+    columns: list[str],
+    point_count: int,
+    partition_size: int,
+    mp_config: MultiprocConfig,
+) -> gpd.GeoDataFrame:
+    """Load LAS/LAZ data by point partitions with multiprocessing."""
+
+    if partition_size <= 0:
+        raise ValueError("Argument 'partition_size' must be a strictly positive integer.")
+
+    # Split point indexes into independent ranges that workers can seek to directly
+    starts = list(range(0, point_count, partition_size))
+    futures = []
+    for start in starts:
+        count = min(partition_size, point_count - start)
+        futures.append(
+            mp_config.cluster.submit(
+                load_laspy_data_slice,
+                filename,
+                columns,
+                start,
+                count,
+            )
+        )
+
+    # Gather in submission order so the combined point cloud keeps source row order
+    parts = mp_config.cluster.gather(futures)
+    crs = parts[0].crs if len(parts) > 0 else None
+    return _concat_las_geodataframes(parts=parts, columns=columns, crs=crs)
 
 
 def iter_laspy_data_chunks(
@@ -508,12 +510,6 @@ def _iter_dataframe_chunks(pc: gpd.GeoDataFrame | pd.DataFrame, chunk_size: int 
         yield _as_geodataframe(pc.iloc[start : start + chunk_size])
 
 
-def _header_native_dimensions(header: Any) -> set[str]:
-    """Return dimensions already present in a LasPy point format."""
-
-    return set(header.point_format.dimension_names)
-
-
 def _non_geometry_columns(pc: gpd.GeoDataFrame | pd.DataFrame) -> list[str]:
     """Return dataframe columns except the geometry column."""
 
@@ -523,7 +519,7 @@ def _non_geometry_columns(pc: gpd.GeoDataFrame | pd.DataFrame) -> list[str]:
 def _extra_las_columns(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str | None, header: Any) -> list[str]:
     """Return dataframe columns that need LAS extra dimensions."""
 
-    native_dimensions = _header_native_dimensions(header)
+    native_dimensions = set(header.point_format.dimension_names)
     extra_columns = []
     for column in _non_geometry_columns(pc):
         if column == data_column:
@@ -594,16 +590,12 @@ def dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str |
         las.z = pc.geometry.z.values
 
     # Copy all remaining attributes to their native or extra dimensions
-    native_dimensions = _header_native_dimensions(chunk_header)
     for column in _non_geometry_columns(pc):
         if column == data_column:
             continue
         if column == "Z":
             continue
-        if column in native_dimensions:
-            setattr(las, column, pc[column].values)
-        else:
-            setattr(las, column, pc[column].values)
+        setattr(las, column, pc[column].values)
 
     return las
 
@@ -720,7 +712,7 @@ def _write_laspy(
     offsets: tuple[float, float, float] | None = None,
     scales: tuple[float, float, float] | None = None,
     chunks: int | None = None,
-    mp_config: Any = None,
+    mp_config: MultiprocConfig | None = None,
     **kwargs: Any,
 ) -> None:
     """Write a point-cloud dataframe to a LAS/LAZ/COPC file."""
@@ -728,12 +720,12 @@ def _write_laspy(
     if chunks is not None and chunks <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
-    if mp_config is not None and _is_dask_dataframe(pc):
-        raise ValueError("Multiprocessing LAS writing is not supported for Dask-backed " "point clouds.")
+    if mp_config is not None and is_dask_dataframe(pc):
+        raise ValueError("Multiprocessing LAS writing is not supported for Dask-backed point clouds.")
 
     # Dask metadata describes columns and dtypes without computing a partition
-    header_pc = pc._meta if _is_dask_dataframe(pc) else pc
-    crs = getattr(pc, "_geoutils_attrs", {}).get("crs") if _is_dask_dataframe(pc) else None
+    header_pc = pc._meta if is_dask_dataframe(pc) else pc
+    crs = getattr(pc, "_geoutils_attrs", {}).get("crs") if is_dask_dataframe(pc) else None
     header = build_laspy_header(
         pc=header_pc,
         data_column=data_column,
@@ -746,19 +738,18 @@ def _write_laspy(
     )
 
     # Choose one scheduler while sharing header construction and point conversion
-    if _is_dask_dataframe(pc):
+    if is_dask_dataframe(pc):
         _write_laspy_dask_dataframe(filename=filename, pc=pc, data_column=data_column, header=header)
         return
 
     if mp_config is not None:
-        from geoutils.multiproc.pointcloud import _write_laspy_data_partitions
-
-        _write_laspy_data_partitions(
+        write_laspy_multiproc_partitions(
             filename=filename,
             pc=pc,
             data_column=data_column,
             header=header,
-            mp_config=mp_config,
+            chunks=_point_partition_size(mp_config),
+            cluster=mp_config.cluster,
         )
         return
 
@@ -879,23 +870,3 @@ def write_laspy_multiproc_partitions(
             header=header,
             chunk_size=chunks,
         )
-
-
-def write_laspy_multiproc_temp_chunks(
-    filename: str | pathlib.Path,
-    pc: gpd.GeoDataFrame | pd.DataFrame,
-    data_column: str | None,
-    header: Any,
-    chunks: int,
-    cluster: Any,
-) -> None:
-    """Write dataframe chunks to temporary LAS files in workers."""
-
-    write_laspy_multiproc_partitions(
-        filename=filename,
-        pc=pc,
-        data_column=data_column,
-        header=header,
-        chunks=chunks,
-        cluster=cluster,
-    )

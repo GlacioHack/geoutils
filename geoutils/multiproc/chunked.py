@@ -178,54 +178,30 @@ class ChunkedGeoGrid:
         return self._chunks
 
     @property
-    def numblocks(self) -> tuple[int, int]:
-        """Number of blocks along each array axis, matching Dask array's ``numblocks``."""
+    def num_chunks(self) -> tuple[int, int]:
+        """Number of chunks along each array axis."""
         return len(self.chunks[0]), len(self.chunks[1])
 
-    @property
-    def num_chunks(self) -> tuple[int, int]:
-        """Number of chunks along each array axis. Alias for :attr:`numblocks`."""
-        return self.numblocks
-
-    @property
-    def npartitions(self) -> int:
-        """Total number of blocks, matching Dask dataframe's ``npartitions`` concept."""
-        return self.numblocks[0] * self.numblocks[1]
-
-    def ravel_block_index(self, chunk_location: tuple[int, int]) -> int:
+    def flat_block_index(self, chunk_location: tuple[int, int]) -> int:
         """"""
         iy, ix = chunk_location
-        ny, nx = self.numblocks
+        ny, nx = self.num_chunks
         if not (0 <= iy < ny and 0 <= ix < nx):
             raise IndexError(chunk_location)
         return iy * nx + ix
 
-    def flat_block_index(self, chunk_location: tuple[int, int]) -> int:
-        """Return the flat block index. Alias for :meth:`ravel_block_index`."""
-        return self.ravel_block_index(chunk_location=chunk_location)
-
-    def iter_blocks(self) -> Any:
-        """Yield ``(flat_index, GeoGrid)`` pairs in block order."""
-        yield from enumerate(self.blocks)
-
     def iter_block_geogrids(self) -> Any:
-        """Yield ``(flat_index, GeoGrid)`` pairs. Alias for :meth:`iter_blocks`."""
-        yield from self.iter_blocks()
-
-    @property
-    def block_info(self) -> list[dict[str, Any]]:
-        """Per-block location metadata, following Dask's ``block_info`` naming."""
-        return _get_block_ids_per_chunk(self._chunks)
+        """Yield ``(flat_index, GeoGrid)`` pairs in block order."""
+        yield from enumerate(self.get_blocks_as_geogrids())
 
     def get_block_locations(self) -> list[dict[str, Any]]:
         """Get block locations in 2D: xstart, xend, ystart, yend."""
-        return self.block_info
+        return _get_block_ids_per_chunk(self._chunks)
 
-    @property
-    def blocks(self) -> list[GeoGrid]:
+    def get_blocks_as_geogrids(self) -> list[GeoGrid]:
         """Blocks as geogrids with updated transform/shape."""
 
-        block_ids = self.block_info
+        block_ids = self.get_block_locations()
 
         list_geogrids = []
         for bid in block_ids:
@@ -238,15 +214,6 @@ class ChunkedGeoGrid:
             list_geogrids.append(geogrid_block)
 
         return list_geogrids
-
-    def get_blocks_as_geogrids(self) -> list[GeoGrid]:
-        """Get blocks as geogrids with updated transform/shape."""
-        return self.blocks
-
-    @property
-    def partitions(self) -> list[GeoGrid]:
-        """Alias for :attr:`blocks` using Dask dataframe partition terminology."""
-        return self.blocks
 
     def get_block_footprints(self, crs: rio.crs.CRS = None) -> gpd.GeoDataFrame:
         """Get block projected footprints as a single geodataframe."""

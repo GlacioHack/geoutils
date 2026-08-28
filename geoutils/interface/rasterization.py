@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Rasterize vector geometries and create raster or point-cloud masks with all supported backends."""
+"""Rasterize vector geometries and create raster or point cloud masks."""
 
 from __future__ import annotations
 
@@ -373,10 +373,10 @@ def _dask_rasterize(
 
     # Build a two-dimensional layout of independently computed blocks
     block_arrays = []
-    for iy in range(dst_geotiling.numblocks[0]):
+    for iy in range(dst_geotiling.num_chunks[0]):
         row_arrays = []
-        for ix in range(dst_geotiling.numblocks[1]):
-            block_index = dst_geotiling.ravel_block_index((iy, ix))
+        for ix in range(dst_geotiling.num_chunks[1]):
+            block_index = dst_geotiling.flat_block_index((iy, ix))
             geogrid = dst_block_geogrids[block_index]
 
             # Give each block computation only the geometries it needs
@@ -695,10 +695,12 @@ def _create_mask_pointcloud_dask(source_vector: Vector, points: Any, as_array: b
     # Each point partition becomes an equally partitioned boolean point cloud
     out = points_in_crs.map_partitions(_mask_pointcloud_partition, source_geom, source_vector.crs, meta=meta)
 
+    # Import at runtime because the point-cloud base also uses rasterization through its vector parent
+    from geoutils.pointcloud.base import _set_dataframe_attrs
+
     # Restore the metadata expected by the GeoUtils ``pc`` accessor
-    object.__setattr__(
+    _set_dataframe_attrs(
         out,
-        "_geoutils_attrs",
         {
             "crs": source_vector.crs,
             "bounds": None,
