@@ -1,5 +1,6 @@
 """Test point-cloud gridding values and consistency across calculation backends."""
 
+import subprocess
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import xarray as xr
 from shapely import geometry
 
 import geoutils as gu
+from benchmarks.gdal_comparison.commands import build_gdal_grid_command
 from geoutils import PointCloud, Raster
 from geoutils.interface.gridding import GriddingMethod, _grid_pointcloud
 from geoutils.multiproc import MultiprocConfig
@@ -422,6 +424,179 @@ class TestPointCloud:
                 engine="invalid",  # type: ignore[arg-type]
             )
 
+    @pytest.mark.parametrize(("geoutils_method", "gdal_algorithm"), [("nearest", "nearest"), ("linear", "linear")])
+    def test_grid_pc__gdal_interpolation(
+        self, geoutils_method: GriddingMethod, gdal_algorithm: str, tmp_path: Path
+    ) -> None:
+        """Match complete GDAL nearest and linear outputs for an irregular point cloud."""
+
+        # Unequal positions and values expose axis rescaling and nearest-neighbor differences
+        points = gpd.GeoDataFrame(
+            {"z": [2.0, 8.0, 4.0, 10.0, 6.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 37.0, 4.0, 40.0, 17.0], y=[0.0, 0.2, 3.6, 4.0, 2.3]),
+            crs=32631,
+        )
+        point_file = tmp_path / "interpolation-points.gpkg"
+        points.to_file(point_file, layer="source-points", driver="GPKG")
+        grid_coords = (np.arange(0, 50, 10, dtype=float), np.arange(5, dtype=float))
+
+        # Infinite nearest support and linear interpolation without extrapolation match GDAL radius zero
+        expected, _ = _grid_pointcloud(
+            points,
+            grid_coords=grid_coords,
+            data_column_name="z",
+            resampling=geoutils_method,
+            dist_nodata_pixel=float("inf"),
+            engine="scipy",
+        )
+        output_file = tmp_path / f"gdal-{gdal_algorithm}.tif"
+        command = build_gdal_grid_command(
+            str(point_file),
+            str(output_file),
+            algorithm=gdal_algorithm,  # type: ignore[arg-type]
+            bounds=(-5.0, -0.5, 45.0, 4.5),
+            shape=(5, 5),
+            radius=(0.0, 0.0),
+        )
+        subprocess.run(command.command, check=True, capture_output=True, text=True)
+        with rio.open(output_file) as dataset:
+            actual = dataset.read(1, masked=True).filled(np.nan)
+
+        assert np.allclose(actual, expected, equal_nan=True)
+
+    @pytest.mark.parametrize(
+        ("geoutils_method", "gdal_algorithm"),
+        [
+            ("idw", "invdist"),
+            ("mean", "average"),
+            ("minimum", "minimum"),
+            ("maximum", "maximum"),
+            ("range", "range"),
+            ("count", "count"),
+            ("average_distance", "average_distance"),
+            ("average_distance_pts", "average_distance_pts"),
+        ],
+    )
+    def test_grid_pc__gdal_circular_methods(
+        self, geoutils_method: GriddingMethod, gdal_algorithm: str, tmp_path: Path
+    ) -> None:
+        """Match GDAL values and nodata cells for every shared circular method."""
+
+        # Two unequal values exercise all statistics while an invalid value checks GDAL's omission rule
+        points = gpd.GeoDataFrame(
+            {"z": [2.0, np.nan, 8.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 1.0, 2.0], y=[0.0, 0.0, 0.0]),
+            crs=32631,
+        )
+        point_file = tmp_path / "circular-points.gpkg"
+        points.to_file(point_file, layer="source-points", driver="GPKG")
+        x_coords = np.arange(5, dtype=float)
+        y_coords = np.array([0.0])
+
+        # GeoUtils expresses the support ellipse in output pixels
+        expected, _ = _grid_pointcloud(
+            points,
+            grid_coords=(x_coords, y_coords),
+            grid_res=(1.0, 1.0),
+            data_column_name="z",
+            resampling=geoutils_method,
+            dist_nodata_pixel=1.1,
+        )
+
+        # GDAL receives the equivalent support in coordinate units and the same cell centers
+        output_file = tmp_path / f"gdal-{gdal_algorithm}.tif"
+        command = build_gdal_grid_command(
+            str(point_file),
+            str(output_file),
+            algorithm=gdal_algorithm,  # type: ignore[arg-type]
+            bounds=(-0.5, -0.5, 4.5, 0.5),
+            shape=(1, 5),
+            radius=(1.1, 1.1),
+        )
+        subprocess.run(command.command, check=True, capture_output=True, text=True)
+        with rio.open(output_file) as dataset:
+            actual = dataset.read(1, masked=True).filled(np.nan)
+
+        assert np.allclose(actual, expected, equal_nan=True)
+
+    def test_grid_pc__gdal_idw_minimum_points(self, tmp_path: Path) -> None:
+        """Give exact IDW points precedence over minimum neighbor counts like GDAL."""
+
+        # Exact edge cells have one neighbor while the central cell has two
+        points = gpd.GeoDataFrame(
+            {"z": [2.0, 8.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 2.0], y=[0.0, 0.0]),
+            crs=32631,
+        )
+        point_file = tmp_path / "idw-points.gpkg"
+        points.to_file(point_file, layer="source-points", driver="GPKG")
+        expected, _ = _grid_pointcloud(
+            points,
+            grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
+            grid_res=(1.0, 1.0),
+            data_column_name="z",
+            resampling="idw",
+            dist_nodata_pixel=1.1,
+            min_points=2,
+        )
+
+        # Use the same local support and minimum count in the GDAL reference
+        output_file = tmp_path / "gdal-idw-min-points.tif"
+        command = build_gdal_grid_command(
+            str(point_file),
+            str(output_file),
+            algorithm="invdist",
+            bounds=(-0.5, -0.5, 2.5, 0.5),
+            shape=(1, 3),
+            radius=(1.1, 1.1),
+            min_points=2,
+        )
+        subprocess.run(command.command, check=True, capture_output=True, text=True)
+        with rio.open(output_file) as dataset:
+            actual = dataset.read(1, masked=True).filled(np.nan)
+
+        assert np.allclose(actual, expected, equal_nan=True)
+
+    @pytest.mark.parametrize("engine", ["scipy", "numba"])
+    def test_grid_pc__gdal_idw_anisotropic_grid(self, engine: str, tmp_path: Path) -> None:
+        """Weight IDW values by coordinate distance on an anisotropic output grid like GDAL."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # One X pixel is ten times larger than one Y pixel so scaled and coordinate distances differ
+        points = gpd.GeoDataFrame(
+            {"z": [0.0, 10.0]},
+            geometry=gpd.points_from_xy(x=[0.0, 10.0], y=[1.0, 0.0]),
+            crs=32631,
+        )
+        point_file = tmp_path / f"anisotropic-idw-{engine}.gpkg"
+        points.to_file(point_file, layer="source-points", driver="GPKG")
+        expected, _ = _grid_pointcloud(
+            points,
+            grid_coords=(np.arange(0, 30, 10, dtype=float), np.arange(3, dtype=float)),
+            data_column_name="z",
+            resampling="idw",
+            dist_nodata_pixel=1.1,
+            engine=engine,  # type: ignore[arg-type]
+        )
+
+        # GDAL receives the same support radius converted from pixels to coordinate units
+        output_file = tmp_path / f"gdal-anisotropic-idw-{engine}.tif"
+        command = build_gdal_grid_command(
+            str(point_file),
+            str(output_file),
+            algorithm="invdist",
+            bounds=(-5.0, -0.5, 25.0, 2.5),
+            shape=(3, 3),
+            radius=(11.0, 1.1),
+        )
+        subprocess.run(command.command, check=True, capture_output=True, text=True)
+        with rio.open(output_file) as dataset:
+            actual = dataset.read(1, masked=True).filled(np.nan)
+
+        assert np.allclose(actual, expected, equal_nan=True)
+
 
 class TestGridChunked:
     """Compare gridding outputs and loading across eager, Dask and Multiprocessing backends."""
@@ -619,7 +794,7 @@ class TestGridChunked:
         assert not multiproc_points.is_loaded
 
     def test_grid__nodata_propagation_chunked_backends(self, tmp_path: Path) -> None:
-        """Ensure propagated invalid points are identical across eager, Dask and Multiprocessing gridding."""
+        """Ensure nodata propagation is identical across eager, Dask and Multiprocessing gridding."""
 
         pytest.importorskip("dask_geopandas")
 

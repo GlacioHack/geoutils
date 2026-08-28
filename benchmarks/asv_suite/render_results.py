@@ -9,6 +9,7 @@ import html
 import json
 import os
 import tempfile
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -75,21 +76,18 @@ def _required_benchmark_keys() -> set[str]:
     }
 
 
-def select_asv_result(
-    results_directory: Path,
+def _select_complete_result(
+    results: Iterable[Any],
     *,
     machine: str | None = None,
     commit: str | None = None,
     environment: str | None = None,
 ) -> Any:
-    """Select the newest complete comparison result matching optional filters."""
-
-    # Import ASV only when rendering so benchmark discovery remains lightweight
-    from asv.results import iter_results
+    """Select the newest complete comparison result from an ASV result sequence."""
 
     required_keys = _required_benchmark_keys()
     candidates = []
-    for result in iter_results(str(results_directory)):
+    for result in results:
         # Machine and commit filters make local multi-machine histories predictable
         if machine is not None and result.params.get("machine") != machine:
             continue
@@ -107,6 +105,26 @@ def select_asv_result(
     if not candidates:
         raise RuntimeError("No saved ASV result contains all comparisons")
     return max(candidates, key=_latest_timestamp)
+
+
+def select_asv_result(
+    results_directory: Path,
+    *,
+    machine: str | None = None,
+    commit: str | None = None,
+    environment: str | None = None,
+) -> Any:
+    """Read ASV results and select the newest complete comparison."""
+
+    # Import ASV only when rendering so benchmark discovery remains lightweight
+    from asv.results import iter_results
+
+    return _select_complete_result(
+        iter_results(str(results_directory)),
+        machine=machine,
+        commit=commit,
+        environment=environment,
+    )
 
 
 def _decode_parameter(value: Any) -> int:
