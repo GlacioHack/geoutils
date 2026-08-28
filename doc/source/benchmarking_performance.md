@@ -7,12 +7,11 @@ backends and against the [**GDAL CLI**](https://gdal.org/en/stable/programs/inde
 
 The benchmarks use GeoUtils' profiling tool described in {ref}`profiling`, which relies on [**psutil**](https://psutil.readthedocs.io/) and [**Dask's worker memory diagnostics**](https://distributed.dask.org/en/stable/worker-memory.html).
 
-## Performance and its improvements or regressions over time
+## Improvements or regressions over time
 
-The [**GeoUtils benchmark webpage**](https://glaciohack.github.io/geoutils/) provides performance of various functionalities and their changes with commit history.
+The [**GeoUtils benchmark webpage**](https://glaciohack.github.io/geoutils/) provides performance of core functionalities and their changes with commit history.
 
-For this, GeoUtils relies on [**Airspeed Velocity (ASV)**](https://asv.readthedocs.io/) to record fixed performance measurements for each commit. This
-makes changes in time or memory visible while keeping comparisons on the same machine and software environment.
+It relies on [**Airspeed Velocity (ASV)**](https://asv.readthedocs.io/) to record fixed performance measurements for each commit and publish them. 
 
 ## Comparison across backends and against GDAL CLI
 
@@ -43,8 +42,8 @@ These graphics show the latest complete CI benchmark and may be newer than this 
 ## Test suite for scalable execution and large datasets
 
 Every GeoUtils operation advertised as {ref}`chunked or lazy <scalability-support>` is tested
-on all supported Python versions and operating systems for its respect of Dask laziness, deferred I/O, and loading behaviour;
-which can all be verified on small test data.
+on all supported Python versions and operating systems for its respect of Dask laziness, deferred I/O, and loading behaviour, 
+while yielding **exactly** the same output as in-memory operations.
 
 In addition, GeoUtils also includes large data tests running on the latest Python and Ubuntu,
-verifying that these operations yield a correct result using less memory than loading the full raster would require.
+verifying that these operations use less memory than loading the full raster would require, while yielding a correct result.

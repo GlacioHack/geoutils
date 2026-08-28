@@ -1,3 +1,5 @@
+# This workflow checks linting and formatting
+
 name: Linting and formatting (pre-commit)
 
 on:

@@ -9,10 +9,10 @@ A test fails if the input opens eagerly, the operation raises an error or times 
 output file is incorrect, a Dask worker is replaced, multiprocessing workers disappear, or additional worker memory
 reaches the size of the full raster.
 
-This is a pass/fail computation and memory test, not a benchmark like the ASV suite.
+This is a pass/fail computation and memory test (not a benchmark like the ASV suite).
 
-Normal Pytest skips this module. Run it with ``pytest --large-data -m large_data -ra``.
-The parameters can be changed by defining environment variables before the above call (default in parenthesis):
+Default Pytest run skips this module. Run it with ``pytest --large-data -m large_data -ra``.
+The parameters can be changed by defining environment variables before the above call (defaults shown below):
 ``GEOUTILS_LARGE_DATA_SHAPE`` (12288), ``GEOUTILS_LARGE_DATA_CHUNKS`` (1024),
 ``GEOUTILS_LARGE_DATA_MEMORY_LIMIT`` (512MB), ``GEOUTILS_LARGE_DATA_PROFILE_INTERVAL`` (0.1 seconds) and
 ``GEOUTILS_LARGE_DATA_TIMEOUT`` (1800 seconds).

@@ -1,10 +1,11 @@
-name: benchmark-asv
-
-# Runs the benchmark on the latest main branch commit, and pushes the raw ASV history on the "asv-results" branch
-#
-# This follows the result-branch pattern used by pandas:
+# This workflow runs the full benchmark on the latest main branch commit, then pushes the raw ASV results
+# on an "asv-results" branch
+# This roughly follows the workflow used by pandas:
 # https://github.com/pandas-dev/asv-runner/blob/main/.github/workflows/run_asvs_2026_01_04.yaml
 # ASV command reference: https://asv.readthedocs.io/en/stable/commands.html
+
+name: benchmark-asv
+
 on:
   workflow_dispatch:
   schedule:
@@ -73,7 +74,7 @@ jobs:
           asv run --show-stderr --record-samples -E existing \
             --machine "$ASV_MACHINE_NAME" --set-commit-hash "$ASV_COMMIT_SHA"
 
-      - name: Store ASV history on its data branch
+      - name: Store ASV history on its own data branch
         env:
           HISTORY_DIRECTORY: ${{ runner.temp }}/asv-history
           RESULTS_DIRECTORY: benchmarks/results/asv/results

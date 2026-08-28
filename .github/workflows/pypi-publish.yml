@@ -1,4 +1,4 @@
-# This workflow will upload a Python Package when a release is created
+# This workflow will upload a Python Package when a new GitHub release is created
 # See reference: https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
 
 name: Publish to PyPI

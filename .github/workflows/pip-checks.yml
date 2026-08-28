@@ -1,4 +1,4 @@
-# This workflow checks that pip installation works to import the package (tests are in python-tests.yml)
+# This workflow checks that pip installation works to import the package (while tests are in python-tests.yml)
 
 name: pip-install
 

@@ -1,6 +1,7 @@
+# This workflow runs large data tests checking out-of-core Dask/MP behaviour on a single OS/python version to limit computing cost
+
 name: large-data-pytest
 
-# Run benchmarks/test_large_data to test out-of-core Dask/MP, but on a single OS/python to limit computing cost
 on:
   push:
     branches: [main]

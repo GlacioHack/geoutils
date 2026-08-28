@@ -1,10 +1,10 @@
-name: benchmark-asv-check
-
-# Check benchmark definitions on pull requests without saving performance measurements
-#
+# This workflow checks ASV benchmark definitions on every PR without running full performance measurements (using asv -quick)
 # References:
 # https://github.com/airspeed-velocity/asv_samples/blob/main/.github/workflows/build_test.yml
 # https://github.com/pydata/xarray/blob/main/.github/workflows/benchmarks.yml
+
+name: benchmark-asv-check
+
 on:
   pull_request:
     branches: [main]
@@ -57,7 +57,7 @@ jobs:
         run: asv check -E existing
 
       # Quick mode executes each case once and does not add measurements to ASV history
-      - name: Run ASV smoke benchmark pass
+      - name: Run ASV quick benchmark pass
         run: |
           asv machine --yes --machine github-actions-check
           asv run --quick --show-stderr -E existing --machine github-actions-check

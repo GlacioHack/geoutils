@@ -1,12 +1,13 @@
-name: benchmark-publish
-
-# Build the website from the saved ASV history after measurements or on request
-#
-# This separates result processing from measurement, following pandas and Newton:
+# This workflow builds the benchmark webpage from the saved ASV results, triggers when a new commit
+# is merged on the "asv-results" branch or triggers on request
+# It roughly follows pandas and Newton:
 # https://github.com/pandas-dev/asv-runner/blob/main/.github/workflows/process_results.yaml
 # https://github.com/newton-physics/newton-asv
 # GitHub Pages reference:
 # https://docs.github.com/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+
+name: benchmark-publish
+
 on:
   workflow_run:
     workflows: [benchmark-asv]
