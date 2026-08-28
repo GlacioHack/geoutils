@@ -166,7 +166,12 @@ def _run_isolated(case_name: str, config: BenchmarkConfig) -> BenchmarkResult:
 class TestLargeData:
     """Check every registered out-of-core operation against one explicit memory contract."""
 
-    def _check_case(self, case_name: str, large_data_config: BenchmarkConfig) -> None:
+    def _check_case(
+        self,
+        case_name: str,
+        large_data_config: BenchmarkConfig,
+        expected_value: float | None = None,
+    ) -> None:
         """Run one operation and check its result, worker health and bounded memory."""
 
         # Every backend needs psutil and Dask additionally needs distributed workers
@@ -187,8 +192,9 @@ class TestLargeData:
         result = _run_isolated(case_name, large_data_config)
 
         # Validate the small fingerprint and any large file produced by the operation
-        expected = OPERATION_BY_NAME[operation].expected_value
-        assert np.isclose(result.value, expected)
+        if expected_value is None:
+            expected_value = OPERATION_BY_NAME[operation].expected_value
+        assert np.isclose(result.value, expected_value, equal_nan=True)
         if result.output_file is not None:
             assert os.path.exists(result.output_file)
             # Remove each checked output before the next large operation starts
@@ -232,23 +238,24 @@ class TestLargeData:
 
     @pytest.mark.parametrize("case_name", ["dask-grid", "multiprocessing-grid"])
     @pytest.mark.parametrize(
-        "resampling",
+        ("resampling", "expected_value"),
         [
-            "idw",
-            "mean",
-            "minimum",
-            "maximum",
-            "range",
-            "count",
-            "stdev",
-            "average_distance",
-            "average_distance_pts",
+            pytest.param("idw", 1.0, id="idw"),
+            pytest.param("mean", 1.0, id="mean"),
+            pytest.param("minimum", 1.0, id="minimum"),
+            pytest.param("maximum", 1.0, id="maximum"),
+            pytest.param("range", 0.0, id="range"),
+            pytest.param("count", 1.0, id="count"),
+            pytest.param("stdev", 0.0, id="stdev"),
+            pytest.param("average_distance", 0.0, id="average_distance"),
+            pytest.param("average_distance_pts", np.nan, id="average_distance_pts"),
         ],
     )
     def test_neighborhood_gridding_stays_out_of_core(
         self,
         case_name: str,
         resampling: GriddingMethod,
+        expected_value: float,
         large_data_config: BenchmarkConfig,
     ) -> None:
         """Complete each circular gridding method through every out-of-core backend."""
@@ -259,4 +266,6 @@ class TestLargeData:
             grid_resampling=resampling,
             grid_dist_nodata_pixel=2,
         )
-        self._check_case(case_name=case_name, large_data_config=config)
+
+        # The central support contains one value-one point, so every method has its own simple fingerprint
+        self._check_case(case_name=case_name, large_data_config=config, expected_value=expected_value)

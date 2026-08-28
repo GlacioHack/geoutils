@@ -273,6 +273,32 @@ class TestPointCloud:
         assert result[0, 1] == pytest.approx(expected_center)
         assert np.isnan(result[0, 4])
 
+    @pytest.mark.parametrize(
+        ("resampling", "expected"),
+        [
+            ("range", 0.0),
+            ("count", 1.0),
+            ("stdev", 0.0),
+            ("average_distance", 0.0),
+            ("average_distance_pts", np.nan),
+        ],
+    )
+    def test_grid_pc__circular_single_point(self, resampling: GriddingMethod, expected: float) -> None:
+        """Check circular spread and distance metrics when only one point is supported."""
+
+        # Match the central neighborhood used as the large data correctness fingerprint
+        pc = gpd.GeoDataFrame(data={"z": [1.0]}, geometry=gpd.points_from_xy(x=[1.0], y=[1.0]))
+        result, _ = _grid_pointcloud(
+            pc,
+            grid_coords=(np.arange(3, dtype=float), np.arange(3, dtype=float)),
+            grid_res=(1.0, 1.0),
+            data_column_name="z",
+            resampling=resampling,
+            dist_nodata_pixel=0.1,
+        )
+
+        assert np.isclose(result[1, 1], expected, equal_nan=True)
+
     def test_grid_pc__minimum_points(self) -> None:
         """Check that circular outputs need the requested number of finite points."""
 

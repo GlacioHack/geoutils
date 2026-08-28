@@ -24,7 +24,7 @@ env:
 
 jobs:
   test:
-    name: Ubuntu, Python 3.12
+    name: ubuntu, python 3.12
     runs-on: ubuntu-latest
     timeout-minutes: 180
     defaults:
