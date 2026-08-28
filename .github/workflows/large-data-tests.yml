@@ -1,6 +1,6 @@
-name: large-data-tests
+name: large-data-pytest
 
-# Run the out-of-core pass/fail contract like the regular Pytest workflow, but in one fixed environment to limit cost
+# Run benchmarks/test_large_data to test out-of-core Dask/MP, but on a single OS/python to limit computing cost
 on:
   push:
     branches: [main]
@@ -63,7 +63,6 @@ jobs:
             --pyv ${{ env.PYTHON_VERSION }} --add "gdal<3.13.3" environment.yml
           mamba env update -n geoutils-dev -f environment-ci-py${{ env.PYTHON_VERSION }}.yml
 
-      # The benchmark extra provides Dask and Distributed without making them required package dependencies
       - name: Install GeoUtils and test dependencies
         run: pip install -e .[test,benchmark]
 

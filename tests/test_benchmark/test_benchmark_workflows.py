@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,6 @@ from benchmarks.asv_suite.render_results import (
     COMPARISON_REPORT_DIRECTORY,
     DOCUMENTATION_DATA,
     DOCUMENTATION_MEMORY_PLOT,
-    DOCUMENTATION_SUMMARY,
     DOCUMENTATION_TIME_PLOT,
     collect_implementation_measurements,
     render_comparisons,
@@ -164,11 +164,10 @@ class TestComparisonReport:
         assert (tmp_path / DOCUMENTATION_TIME_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_MEMORY_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_DATA).is_file()
-        assert (tmp_path / DOCUMENTATION_SUMMARY).is_file()
 
-        summary = (tmp_path / DOCUMENTATION_SUMMARY).read_text(encoding="utf-8")
-        assert "01234567" in summary
-        assert "test-machine" in summary
+        snapshot = json.loads((tmp_path / DOCUMENTATION_DATA).read_text(encoding="utf-8"))
+        assert snapshot["metadata"]["commit"] == "0123456789abcdef"
+        assert snapshot["metadata"]["machine"]["machine"] == "test-machine"
 
 
 class TestGdalComparison:

@@ -23,7 +23,6 @@ COMPARISON_REPORT_DIRECTORY = "comparisons"
 DOCUMENTATION_TIME_PLOT = "time_relative_to_gdal.svg"
 DOCUMENTATION_MEMORY_PLOT = "peak_ram_by_raster_size.svg"
 DOCUMENTATION_DATA = "benchmark_snapshot.json"
-DOCUMENTATION_SUMMARY = "summary.md.inc"
 
 # Colors stay consistent between the detailed ASV plots and the concise documentation snapshot
 IMPLEMENTATION_COLORS = {
@@ -398,38 +397,11 @@ def _result_payload(result: Any, records: list[ImplementationMeasurement]) -> di
     }
 
 
-def _documentation_summary(result: Any) -> str:
-    """Return the short MyST fragment embedded in the performance page."""
-
-    commit = str(result.commit_hash)
-    machine = str(result.params.get("machine", "unknown"))
-    return "\n".join(
-        [
-            ":::{figure} /imgs/benchmarking/time_relative_to_gdal.svg",
-            ":alt: End-to-end GeoUtils backend time relative to GDAL for four raster operations",
-            "",
-            "End-to-end time on the largest raster size shared by every implementation. GDAL is the reference at one.",
-            ":::",
-            "",
-            ":::{figure} /imgs/benchmarking/peak_ram_by_raster_size.svg",
-            ":alt: Peak process-tree RAM by raster size for GeoUtils backends and GDAL",
-            "",
-            "Peak RAM for the benchmark process and all implementation workers as raster dimensions increase.",
-            ":::",
-            "",
-            f"Measured at GeoUtils commit [`{commit[:8]}`]"
-            f"(https://github.com/GlacioHack/geoutils/commit/{commit}) on `{machine}`. "
-            "{download}`Download the exact values and run metadata </imgs/benchmarking/benchmark_snapshot.json>`.",
-            "",
-        ]
-    )
-
-
 def render_documentation_snapshot(
     result: Any,
     output_directory: Path,
 ) -> list[ImplementationMeasurement]:
-    """Write the two reviewed reference graphics and their complete numeric source."""
+    """Write the two documentation graphics and their complete numeric source."""
 
     # Keep Matplotlib caches in a writable disposable location under sandboxed runs
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "geoutils-matplotlib-cache"))
@@ -443,7 +415,6 @@ def render_documentation_snapshot(
         json.dumps(_result_payload(result, records), indent=2) + "\n",
         encoding="utf-8",
     )
-    (output_directory / DOCUMENTATION_SUMMARY).write_text(_documentation_summary(result), encoding="utf-8")
     return records
 
 

@@ -25,8 +25,20 @@ Two reference graphics summarize the core results:
 - **End-to-end time relative to GDAL** for each comparable operation
 - **Peak RAM as raster size increases**, including the full process and its workers
 
-```{include} imgs/benchmarking/summary.md.inc
-```
+:::{figure} https://glaciohack.github.io/geoutils/documentation/time_relative_to_gdal.svg
+:alt: End-to-end GeoUtils backend time relative to GDAL for four raster operations
+
+End-to-end time on the largest raster size shared by every implementation. GDAL is the reference at one.
+:::
+
+:::{figure} https://glaciohack.github.io/geoutils/documentation/peak_ram_by_raster_size.svg
+:alt: Peak process-tree RAM by raster size for GeoUtils backends and GDAL
+
+Peak RAM for the benchmark process and all implementation workers as raster dimensions increase.
+:::
+
+These graphics show the latest complete CI benchmark and may be newer than this documentation version.
+[Download the exact values and run metadata](https://glaciohack.github.io/geoutils/documentation/benchmark_snapshot.json).
 
 ## Test suite for scalable execution and large datasets
 

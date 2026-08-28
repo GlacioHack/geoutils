@@ -17,7 +17,7 @@
 # limitations under the License.
 
 """
-Module for the Pandas accessor ``pc`` mirroring the GeoUtils-specific PointCloud API.
+Module for the Pandas accessor ``pc`` mirroring the PointCloud API.
 """
 
 from __future__ import annotations

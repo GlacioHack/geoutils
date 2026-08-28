@@ -17,7 +17,7 @@
 # limitations under the License.
 
 """
-Module for the Pandas accessor ``vct`` mirroring the GeoUtils-specific Vector API.
+Module for the Pandas accessor ``vct`` mirroring the Vector API.
 """
 
 from __future__ import annotations

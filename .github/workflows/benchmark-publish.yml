@@ -1,0 +1,90 @@
+name: benchmark-publish
+
+# Build the website from the saved ASV history after measurements or on request
+#
+# This separates result processing from measurement, following pandas and Newton:
+# https://github.com/pandas-dev/asv-runner/blob/main/.github/workflows/process_results.yaml
+# https://github.com/newton-physics/newton-asv
+# GitHub Pages reference:
+# https://docs.github.com/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
+on:
+  workflow_run:
+    workflows: [benchmark-asv]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Let an active Pages deployment finish before another publication starts
+  group: benchmark-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Failed benchmark runs must not replace the last valid website
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      # GitHub's Pages setup action reads and prepares the repository Pages configuration
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install ASV and the comparison renderer
+        run: python -m pip install -e .[benchmark]
+
+      - name: Restore the saved ASV measurements
+        run: |
+          # The measurement workflow keeps raw history on this data-only branch
+          mkdir -p benchmarks/results/asv/results
+          git fetch origin refs/heads/asv-results:refs/remotes/origin/asv-results
+          git archive refs/remotes/origin/asv-results | tar -x -C benchmarks/results/asv/results
+
+      - name: Build the benchmark website
+        run: |
+          # ASV renders commit history and GeoUtils adds the implementation and documentation comparisons
+          asv publish --no-pull
+          python -m benchmarks.asv_suite.render_results \
+              --doc-dir benchmarks/results/asv/html/documentation
+
+      # Keep a downloadable copy for reviewing the site without deploying it elsewhere
+      - name: Upload ASV website preview
+        uses: actions/upload-artifact@v7
+        with:
+          name: asv-site-preview-${{ github.run_id }}
+          path: benchmarks/results/asv/html
+          retention-days: 14
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: benchmarks/results/asv/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy ASV website to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
