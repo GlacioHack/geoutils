@@ -68,4 +68,5 @@ jobs:
         run: pip install -e .[test,benchmark]
 
       - name: Run large data tests
-        run: pytest --large-data -m large_data -ra
+        # Module execution keeps the repository-only benchmarks package importable
+        run: python -m pytest --large-data -m large_data -ra

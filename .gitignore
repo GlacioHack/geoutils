@@ -9,7 +9,7 @@
 AGENTS.md
 .agents
 
-# Legacy local ASV outputs from the previous layout
+# Default local ASV outputs
 .asv/
 
 # Local benchmark environments, measurements and reports

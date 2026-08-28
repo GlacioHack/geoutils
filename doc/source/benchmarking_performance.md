@@ -11,7 +11,7 @@ The benchmarks use GeoUtils' profiling tool described in {ref}`profiling`, which
 
 The [**GeoUtils benchmark webpage**](https://glaciohack.github.io/geoutils/) provides performance of core functionalities and their changes with commit history.
 
-It relies on [**Airspeed Velocity (ASV)**](https://asv.readthedocs.io/) to record fixed performance measurements for each commit and publish them. 
+It relies on [**Airspeed Velocity (ASV)**](https://asv.readthedocs.io/) to record fixed performance measurements for each commit and publish them.
 
 ## Comparison across backends and against GDAL CLI
 
@@ -42,7 +42,7 @@ These graphics show the latest complete CI benchmark and may be newer than this 
 ## Test suite for scalable execution and large datasets
 
 Every GeoUtils operation advertised as {ref}`chunked or lazy <scalability-support>` is tested
-on all supported Python versions and operating systems for its respect of Dask laziness, deferred I/O, and loading behaviour, 
+on all supported Python versions and operating systems for its respect of Dask laziness, deferred I/O, and loading behaviour,
 while yielding **exactly** the same output as in-memory operations.
 
 In addition, GeoUtils also includes large data tests running on the latest Python and Ubuntu,

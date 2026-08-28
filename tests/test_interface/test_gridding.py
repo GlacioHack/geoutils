@@ -589,7 +589,7 @@ class TestGridChunked:
 
     @pytest.mark.parametrize("resampling", ["nearest", "mean"])
     def test_grid__numba_chunked_backends(self, resampling: GriddingMethod, tmp_path: Path) -> None:
-        """Keep the Numba calculation engine identical across eager, Dask and Multiprocessing backends."""
+        """Ensure the Numba calculation engine is identical across eager, Dask and Multiprocessing backends."""
 
         pytest.importorskip("numba")
         pytest.importorskip("dask_geopandas")
@@ -619,7 +619,7 @@ class TestGridChunked:
         assert not multiproc_points.is_loaded
 
     def test_grid__nodata_propagation_chunked_backends(self, tmp_path: Path) -> None:
-        """Keep propagated invalid points identical across eager, Dask and Multiprocessing gridding."""
+        """Ensure propagated invalid points are identical across eager, Dask and Multiprocessing gridding."""
 
         pytest.importorskip("dask_geopandas")
 

@@ -11,7 +11,7 @@ reaches the size of the full raster.
 
 This is a pass/fail computation and memory test (not a benchmark like the ASV suite).
 
-Default Pytest run skips this module. Run it with ``pytest --large-data -m large_data -ra``.
+Default Pytest run skips this module. Run it with ``python -m pytest --large-data -m large_data -ra``.
 The parameters can be changed by defining environment variables before the above call (defaults shown below):
 ``GEOUTILS_LARGE_DATA_SHAPE`` (12288), ``GEOUTILS_LARGE_DATA_CHUNKS`` (1024),
 ``GEOUTILS_LARGE_DATA_MEMORY_LIMIT`` (512MB), ``GEOUTILS_LARGE_DATA_PROFILE_INTERVAL`` (0.1 seconds) and

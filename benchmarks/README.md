@@ -39,11 +39,14 @@ To save the results and generate the HTML report locally, omit `--quick`, then r
 history and the comparison plots.
 
 In CI, `benchmark-asv-check` verifies changed benchmarks on every pull request. The weekly or manually triggered
-`benchmark-asv` workflow records measurements on new `main` commits, and stores their raw history on 
-the `asv-results` branch of this repository. After a successful run, `benchmark-publish` automatically 
-rebuilds the latest saved history and deploys the website and documentation graphics to GitHub Pages. 
-Trigger it manually only to rebuild these outputs without new measurements. 
+`benchmark-asv` workflow records measurements on new `main` commits, and stores their raw history on
+the `asv-results` branch of this repository. After a successful run, `benchmark-publish` automatically
+rebuilds the latest saved history and deploys the website and documentation graphics to GitHub Pages.
+Trigger it manually only to rebuild these outputs without new measurements.
 The user documentation links to the latest complete graphics published there.
+
+The benchmark dependencies include Pytest because ASV imports every Python module under `benchmarks/` during
+discovery, including the large data test, without executing its tests.
 
 For a local preview of the documentation graphics, run:
 
@@ -57,7 +60,7 @@ Normal Pytest skips these intentionally expensive checks, while pull-request CI 
 Python 3.12. Run the complete suite locally with:
 
 ```bash
-pytest --large-data -m large_data -ra
+python -m pytest --large-data -m large_data -ra
 ```
 
 Select one parameter with `-k` while developing and add `--lf` to repeat only failed cases. The practical instructions

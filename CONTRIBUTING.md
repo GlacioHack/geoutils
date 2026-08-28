@@ -31,10 +31,10 @@ mamba activate geoutils-dev  # Or any other name specified above
 
 At least one test per feature (in the associated `tests/test_*.py` file) should be included in the PR, using `pytest` (see existing tests for examples).
 
-To run the entire test suite, run `pytest` in the current directory:
+To run the entire test suite from the repository root:
 
 ```bash
-pytest
+python -m pytest
 ```
 
 ### Formatting and linting
@@ -71,7 +71,7 @@ Open `benchmarks/results/asv/html/index.html` to view local results or the
 Run the large data tests with:
 
 ```bash
-pytest --large-data -m large_data -ra
+python -m pytest --large-data -m large_data -ra
 ```
 
 Large data results are pass/fail, and run separately in the CI.

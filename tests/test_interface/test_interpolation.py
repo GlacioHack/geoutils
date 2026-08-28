@@ -16,6 +16,7 @@ from scipy.ndimage import binary_dilation
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils._misc import silence_rasterio_message
 from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.interpolation import (
     _get_dist_nodata_spread,
@@ -77,19 +78,20 @@ class TestInterpolate:
 
         # Rasterio calls the GDAL resampler with an explicit sentinel for source nodata
         expected = np.full(source.shape, np.nan, dtype=np.float32)
-        rio.warp.reproject(
-            np.where(np.isfinite(source), source, -9999),
-            expected,
-            src_transform=src_transform,
-            dst_transform=dst_transform,
-            src_crs=4326,
-            dst_crs=4326,
-            src_nodata=-9999,
-            dst_nodata=np.nan,
-            resampling=resampling,
-            XSCALE=1,
-            YSCALE=1,
-        )
+        with silence_rasterio_message(param_name="SCALE"):
+            rio.warp.reproject(
+                np.where(np.isfinite(source), source, -9999),
+                expected,
+                src_transform=src_transform,
+                dst_transform=dst_transform,
+                src_crs=4326,
+                dst_crs=4326,
+                src_nodata=-9999,
+                dst_nodata=np.nan,
+                resampling=resampling,
+                XSCALE=1,
+                YSCALE=1,
+            )
 
         # The default interpolation policy must reproduce both GDAL values and its nodata mask
         actual = _interpolate_array(
@@ -115,19 +117,20 @@ class TestInterpolate:
 
         # Compare the complete array so both internal nodata and outer footprint behavior are covered
         expected = np.full(dst_shape, np.nan, dtype=np.float32)
-        rio.warp.reproject(
-            np.where(np.isfinite(source), source, -9999),
-            expected,
-            src_transform=src_transform,
-            dst_transform=dst_transform,
-            src_crs=4326,
-            dst_crs=4326,
-            src_nodata=-9999,
-            dst_nodata=np.nan,
-            resampling=rio.enums.Resampling.bilinear,
-            XSCALE=1,
-            YSCALE=1,
-        )
+        with silence_rasterio_message(param_name="SCALE"):
+            rio.warp.reproject(
+                np.where(np.isfinite(source), source, -9999),
+                expected,
+                src_transform=src_transform,
+                dst_transform=dst_transform,
+                src_crs=4326,
+                dst_crs=4326,
+                src_nodata=-9999,
+                dst_nodata=np.nan,
+                resampling=rio.enums.Resampling.bilinear,
+                XSCALE=1,
+                YSCALE=1,
+            )
         actual = _interpolate_array(
             source,
             src_transform=src_transform,
