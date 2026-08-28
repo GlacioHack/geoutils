@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from benchmarks.asv_suite import asv_pr_check_enabled
 from benchmarks.workflows.registry import (
     OPERATION_BENCHMARK_CASES,
     split_operation_case,
@@ -23,17 +24,20 @@ class OperationBenchmarks:
 
     # ASV passes every registry identifier to setup and both measurement methods
     param_names = ["case"]
-    params = [OPERATION_BENCHMARK_CASES]
+    # Large-data CI covers the full registry, so the ASV pull-request check samples both worker backends
+    pr_check_cases = ("dask-reproject", "multiprocessing-filter")
+    params = [pr_check_cases if asv_pr_check_enabled() else OPERATION_BENCHMARK_CASES]
 
     def setup(self, case: str) -> None:
         """Prepare deterministic files and one backend outside the measured region."""
 
         # One case identifier avoids the invalid product of all backends and operations
         backend, self.operation = split_operation_case(case)
+        raster_size = 512 if asv_pr_check_enabled() else 2048
         self.runner = BenchmarkRunner(
             backend,
             BenchmarkConfig(
-                shape=(2048, 2048),
+                shape=(raster_size, raster_size),
                 chunks=(512, 512),
                 memory_limit="1GB",
                 subsample_size=2048,

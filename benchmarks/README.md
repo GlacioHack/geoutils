@@ -45,6 +45,10 @@ rebuilds the latest saved history and deploys the website and documentation grap
 Trigger it manually only to rebuild these outputs without new measurements.
 The user documentation links to the latest complete graphics published there.
 
+The pull-request quick pass sets `GEOUTILS_ASV_PR_CHECK=1` to execute every benchmark with reduced checked-in
+parameters and smaller operation fixtures. ASV definition checks and recorded benchmark runs retain the complete
+inputs.
+
 The benchmark dependencies include Pytest because ASV imports every Python module under `benchmarks/` during
 discovery, including the large data test, without executing its tests.
 

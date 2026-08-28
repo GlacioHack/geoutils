@@ -69,4 +69,10 @@ jobs:
 
       - name: Run large data tests
         # Module execution keeps the repository-only benchmarks package importable
-        run: python -m pytest --large-data -m large_data -ra
+        env:
+          # Each Pytest worker owns one single-threaded backend case
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: python -m pytest --large-data -m large_data -n 4 --dist load --durations=20 -ra

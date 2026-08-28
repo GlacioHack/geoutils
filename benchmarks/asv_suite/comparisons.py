@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Literal, cast
 
+from benchmarks.asv_suite import asv_parameter_values
 from benchmarks.gdal_comparison.commands import ComparisonOperation
 from benchmarks.gdal_comparison.runner import GdalRunner
 from benchmarks.workflows.registry import OperationName
@@ -250,7 +251,7 @@ class _InterpolationPointCount(_ImplementationBenchmark):
 
     # ASV uses this label in results and passes each listed value as parameter
     param_names = ["interpolated_points"]
-    params = [[256, 2048, 16384]]
+    params = [asv_parameter_values([256, 2048, 16384], pr_check_value=256)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected point count in an otherwise fixed configuration."""
@@ -284,7 +285,7 @@ class _ReprojectionRasterSize(_ImplementationBenchmark):
 
     # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
-    params = [[1024, 2048, 4096]]
+    params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size in an otherwise fixed configuration."""
@@ -324,7 +325,7 @@ class _FilterChunkSize(_ImplementationBenchmark):
 
     # ASV uses this label in results and passes each listed value as parameter
     param_names = ["chunk_size"]
-    params = [[256, 512, 1024]]
+    params = [asv_parameter_values([256, 512, 1024], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected chunk size in an otherwise fixed configuration."""
@@ -352,7 +353,7 @@ class _PolygonizationRasterSize(_ImplementationBenchmark):
 
     # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
-    params = [[1024, 2048, 4096]]
+    params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size around a fixed set of regions."""
@@ -396,7 +397,7 @@ class _RasterizationRasterSize(_ImplementationBenchmark):
 
     # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
-    params = [[1024, 2048, 4096]]
+    params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size around a fixed vector input."""
@@ -444,7 +445,7 @@ class _GriddingRasterSize(_ImplementationBenchmark):
 
     # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
-    params = [[512, 1024, 2048]]
+    params = [asv_parameter_values([512, 1024, 2048], pr_check_value=512)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size around a fixed point-cloud input."""
@@ -601,7 +602,7 @@ class _NearestGriddingPointCount(_ImplementationBenchmark):
 
     # Points per axis gives nine, eighty-one and one thousand eighty-nine source points
     param_names = ["points_per_axis"]
-    params = [[3, 9, 33]]
+    params = [asv_parameter_values([3, 9, 33], pr_check_value=3)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected point count in an otherwise fixed configuration."""
