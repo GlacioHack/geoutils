@@ -34,9 +34,23 @@ To run a benchmark while developing:
 asv run --quick --show-stderr -E existing --bench <benchmark-regex>
 ```
 
-To save the results and generate the HTML report locally, omit `--quick`, then run `asv publish` followed by
-`python -m benchmarks.asv_suite.render_results`. Then open `results/asv/html/index.html` for the native ASV
-history and the comparison plots.
+For example, `<benchmark-regex>` can be `EagerIdwNumbaGriddingRasterSize.time_operation`.
+
+To compare a new implementation with the `main` branch: commit current changes, then use:
+
+```bash
+asv continuous main HEAD -b 'EagerIdwNumbaGriddingRasterSize.time_operation'
+```
+
+To save the results and generate the HTML report locally:
+
+```bash
+asv run --show-stderr -E existing --bench 'EagerIdwNumbaGriddingRasterSize.time_operation'
+asv publish
+python -m benchmarks.asv_suite.render_results
+```
+
+Then open `results/asv/html/index.html` for the native ASV history and comparison plots.
 
 Pass `--baseline-commit <commit>` to the renderer to add `comparisons/performance-change.md`, a compact before/after
 table for eager, Dask and Multiprocessing end-to-end time normalized to the GDAL CLI on the same revision.
