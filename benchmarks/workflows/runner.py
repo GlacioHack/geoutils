@@ -22,24 +22,28 @@ from __future__ import annotations
 import os
 import tempfile
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import geopandas as gpd
 import numpy as np
 import rasterio as rio
 from shapely.geometry import box
 
-from benchmarks.workflows.registry import OperationName
+from benchmarks.workflows.registry import (
+    CalculationEngine,
+    ExecutionMode,
+    OperationName,
+    OperationStrategyName,
+    resolve_operation_parameters,
+)
 from geoutils._misc import (
-    _get_process_rss_mb,
+    _get_process_mem_mb,
     _prepare_benchmark_process,
     _trim_process_memory,
     import_optional,
 )
 from geoutils.interface.gridding import GriddingEngine, GriddingMethod
 from geoutils.profiler import ProfileMetrics, profile_call
-
-GeoUtilsImplementation = Literal["eager", "dask", "multiprocessing"]
 
 
 @dataclass
@@ -60,9 +64,10 @@ class BenchmarkConfig:
     polygon_regions_per_axis: int = 1
     vector_features_per_axis: int = 1
     point_features_per_axis: int = 5
-    grid_resampling: GriddingMethod = "nearest"
+    operation_method: str | None = None
+    calculation_engine: CalculationEngine | None = None
+    operation_strategy: OperationStrategyName | None = None
     grid_dist_nodata_pixel: float = float("inf")
-    grid_engine: GriddingEngine = "scipy"
     dask_write_batch_size: int = 4
     trim_dask_memory: bool = False
     directory: str | None = None
@@ -74,22 +79,22 @@ class ProfiledResult:
     metrics: ProfileMetrics
 
     @property
-    def peak_process_tree_rss_mb(self) -> float:
-        """Return peak aggregate RSS for the measured process and its children."""
+    def peak_process_tree_mem_mb(self) -> float:
+        """Return peak aggregate memory for the measured process and its children."""
 
-        peak = self.metrics.peak_process_tree_rss_mb
+        peak = self.metrics.peak_process_tree_mem_mb
         if peak is None:
             raise RuntimeError("Process-tree memory was not collected for this benchmark result")
         return peak
 
     @property
-    def process_tree_rss_increase_mb(self) -> float:
-        """Return peak RSS above the initialized process-tree baseline."""
+    def process_tree_mem_increase_mb(self) -> float:
+        """Return peak memory above the initialized process-tree baseline."""
 
-        if not self.metrics.process_tree_rss_mb:
+        if not self.metrics.process_tree_mem_mb:
             raise RuntimeError("Process-tree memory was not collected for this benchmark result")
-        baseline = self.metrics.process_tree_rss_mb[0][1]
-        return max(0.0, self.peak_process_tree_rss_mb - baseline)
+        baseline = self.metrics.process_tree_mem_mb[0][1]
+        return max(0.0, self.peak_process_tree_mem_mb - baseline)
 
 
 @dataclass
@@ -100,7 +105,7 @@ class BenchmarkResult(ProfiledResult):
     metrics: ProfileMetrics
     worker_pids_before: tuple[int, ...] | dict[str, int] = field(default_factory=tuple)
     worker_pids_after: tuple[int, ...] | dict[str, int] = field(default_factory=tuple)
-    dask_worker_baseline_rss_mb: float | None = None
+    dask_worker_baseline_mem_mb: float | None = None
     output_file: str | None = None
 
     @property
@@ -282,7 +287,7 @@ def _write_point_source(filename: str, points_per_axis: int = 5) -> None:
 class BenchmarkRunner:
     """Prepare deterministic files and execute one GeoUtils implementation."""
 
-    def __init__(self, backend: GeoUtilsImplementation, config: BenchmarkConfig | None = None) -> None:
+    def __init__(self, backend: ExecutionMode, config: BenchmarkConfig | None = None) -> None:
         """Prepare runner state without starting worker processes."""
 
         self.backend = backend
@@ -381,7 +386,7 @@ class BenchmarkRunner:
                 "distributed.worker.memory.spill": 0.60,
                 # Leave room for native task workspaces before Dask pauses the worker
                 "distributed.worker.memory.pause": 1.20,
-                # Peak RSS and stable PIDs are asserted directly by the large data test
+                # Peak memory and stable PIDs are asserted directly by the large data test
                 "distributed.worker.memory.terminate": False,
             }
         )
@@ -488,7 +493,7 @@ class BenchmarkRunner:
         worker_pids_before = self.worker_pids()
         if self.client is not None:
             # Query workers directly because Dask's first monitor sample can predate warm-up
-            worker_baseline = sum(float(value) for value in self.client.run(_get_process_rss_mb).values())
+            worker_baseline = sum(float(value) for value in self.client.run(_get_process_mem_mb).values())
         else:
             worker_baseline = None
         if profile:
@@ -517,7 +522,7 @@ class BenchmarkRunner:
             metrics=metrics,
             worker_pids_before=worker_pids_before,
             worker_pids_after=worker_pids_after,
-            dask_worker_baseline_rss_mb=worker_baseline,
+            dask_worker_baseline_mem_mb=worker_baseline,
             output_file=self._last_output_file,
         )
 
@@ -654,6 +659,13 @@ class BenchmarkRunner:
         """Build and fully compute one named benchmark operation."""
 
         self._last_output_file = None
+        operation_method, calculation_engine, operation_strategy = resolve_operation_parameters(
+            operation,
+            self.config.operation_method,
+            self.config.calculation_engine,
+            self.config.operation_strategy,
+            self.backend,
+        )
 
         # Open a raster only for operations that use one as their source
         raster: Any = None
@@ -688,10 +700,15 @@ class BenchmarkRunner:
         if operation == "filter":
             # Apply a local operation before writing its complete large output
             mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
+            filter_kwargs: dict[str, Any] = {
+                "method": operation_method,
+                "engine": calculation_engine,
+                "size": 5,
+            }
             output = (
-                raster.rst.filter(method="mean", size=5)
+                raster.rst.filter(**filter_kwargs)
                 if self.backend == "dask"
-                else raster.filter(method="mean", size=5, mp_config=mp_config)
+                else raster.filter(**filter_kwargs, mp_config=mp_config)
             )
             return self._compute_raster(output, operation)
 
@@ -701,7 +718,7 @@ class BenchmarkRunner:
             kwargs = {
                 "crs": 32632,
                 "grid_size": self.config.shape[::-1],
-                "resampling": "nearest",
+                "resampling": operation_method,
                 "nodata": -99999,
                 "n_threads": 1,
                 "memory_limit": 64,
@@ -728,17 +745,18 @@ class BenchmarkRunner:
         if operation == "subsample":
             # Return only a fixed-size selection from the much larger raster
             mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
+            subsample_kwargs: dict[str, Any] = {"random_state": 42}
+            if operation_strategy is not None:
+                subsample_kwargs["strategy"] = operation_strategy
             sample = (
                 raster.rst.subsample(
                     self.config.subsample_size,
-                    random_state=42,
-                    strategy="topk",
+                    **subsample_kwargs,
                 )
                 if self.backend == "dask"
                 else raster.subsample(
                     self.config.subsample_size,
-                    random_state=42,
-                    strategy="topk",
+                    **subsample_kwargs,
                     mp_config=mp_config,
                 )
             )
@@ -751,21 +769,24 @@ class BenchmarkRunner:
             points = self._interpolation_points()
             mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
             values = (
-                raster.rst.interp_points(points, method="linear", as_array=True)
+                raster.rst.interp_points(points, method=operation_method, as_array=True)
                 if self.backend == "dask"
-                else (raster.interp_points(points, method="linear", as_array=True, mp_config=mp_config))
+                else raster.interp_points(points, method=operation_method, as_array=True, mp_config=mp_config)
             )
             if hasattr(values, "compute"):
                 values = values.compute()
             return float(np.nanmean(values))
 
         if operation == "polygonize":
-            # Label stitching keeps each Dask task local while joining chunk boundaries
+            # The selected chunk strategy reconciles polygons that cross output tiles
             mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
+            polygonize_kwargs: dict[str, Any] = {"target_values": 1}
+            if operation_strategy is not None:
+                polygonize_kwargs["strategy"] = operation_strategy
             polygons = (
-                raster.rst.polygonize(target_values=1, strategy="label_stitch")
+                raster.rst.polygonize(**polygonize_kwargs)
                 if self.backend == "dask"
-                else raster.polygonize(target_values=1, strategy="label_stitch", mp_config=mp_config)
+                else raster.polygonize(**polygonize_kwargs, mp_config=mp_config)
             )
             self._last_output_file = self._output_path(operation, suffix=".gpkg")
             polygon_data = polygons if isinstance(polygons, gpd.GeoDataFrame) else polygons.ds
@@ -827,9 +848,9 @@ class BenchmarkRunner:
             grid_kwargs = {
                 "shape": self.config.shape,
                 "bounds": (7.0, 45.0, 8.0, 46.0),
-                "resampling": self.config.grid_resampling,
+                "resampling": cast(GriddingMethod, operation_method),
                 "dist_nodata_pixel": self.config.grid_dist_nodata_pixel,
-                "engine": self.config.grid_engine,
+                "engine": cast(GriddingEngine, calculation_engine),
                 "chunksizes": self.config.chunks,
                 # One SciPy thread keeps backend and GDAL comparisons repeatable
                 "n_threads": 1,

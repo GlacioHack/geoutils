@@ -781,7 +781,7 @@ class RasterBase(ABC):
         counts: tuple[int, int] | None = None,
     ) -> dict[str, np.floating[Any]] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
 
-    @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)
+    @profiler.profile("geoutils.raster.base.get_stats", memprof=True)
     def get_stats(
         self,
         stats_name: (
@@ -1214,7 +1214,7 @@ class RasterBase(ABC):
         else:
             return nanarray
 
-    @profiler.profile("geoutils.raster.raster.crop", memprof=True)
+    @profiler.profile("geoutils.raster.base.crop", memprof=True)
     def crop(
         self: RasterType,
         bbox: RasterType | VectorType | list[float] | tuple[float, ...],
@@ -1256,12 +1256,10 @@ class RasterBase(ABC):
 
         # Not in-place
         if self._is_xr:
-            newraster = cropped_arr
-        else:
-            newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
-        return newraster
+            return cast(RasterType, cropped_arr)
+        return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
 
-    @profiler.profile("geoutils.raster.raster.icrop", memprof=True)
+    @profiler.profile("geoutils.raster.base.icrop", memprof=True)
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -1296,13 +1294,10 @@ class RasterBase(ABC):
 
         # Not in-place
         if self._is_xr:
-            newraster = cropped_arr
-        else:
-            newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
+            return cast(RasterType, cropped_arr)
+        return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
 
-        return newraster
-
-    @profiler.profile("geoutils.raster.raster.reproject", memprof=True)
+    @profiler.profile("geoutils.raster.base.reproject", memprof=True)
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -1367,7 +1362,7 @@ class RasterBase(ABC):
             source_raster=self,
             ref=ref,
             crs=crs,
-            res=res,
+            res=cast(float | tuple[float, float] | None, res),
             grid_size=grid_size,
             bounds=bounds,
             nodata=nodata,
@@ -1387,11 +1382,6 @@ class RasterBase(ABC):
             else:
                 return self
 
-        # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
-        # assert data is not None
-        # assert transformed is not None
-        # assert crs is not None
-
         # Keep in-place for a bit with deprecation warning
         if inplace:
             warnings.warn(
@@ -1406,6 +1396,8 @@ class RasterBase(ABC):
                     "accessor or Multiproc config."
                 )
             else:
+                if data is None or transformed is None or crs is None:
+                    raise RuntimeError("Reprojection did not return the expected in-memory output.")
                 # Order is important here, because calling self.data will use nodata to mask the array properly
                 self._crs = crs
                 self._nodata = nodata
@@ -1427,6 +1419,8 @@ class RasterBase(ABC):
             return self._cast_raster_output(result_raster)  # type: ignore
 
         # Not in-place
+        if data is None or transformed is None or crs is None:
+            raise RuntimeError("Reprojection did not return the expected in-memory output.")
         return self.from_array(
             data=data, transform=transformed, crs=crs, nodata=nodata, area_or_point=self.area_or_point, tags=self.tags
         )
@@ -1666,7 +1660,7 @@ class RasterBase(ABC):
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
-    @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)
+    @profiler.profile("geoutils.raster.base.interp_points", memprof=True)
     def interp_points(
         self,
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
@@ -1794,6 +1788,7 @@ class RasterBase(ABC):
             return self._cast_pointcloud_output(pointcloud), output_window
         return self._cast_pointcloud_output(output)
 
+    @profiler.profile("geoutils.raster.base.filter", memprof=True)
     def filter(
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
@@ -1840,7 +1835,7 @@ class RasterBase(ABC):
         )
         return self._cast_raster_output(output)
 
-    @profiler.profile("geoutils.raster.raster.sieve", memprof=True)
+    @profiler.profile("geoutils.raster.base.sieve", memprof=True)
     def sieve(
         self: RasterType,
         size: int,
@@ -1863,7 +1858,7 @@ class RasterBase(ABC):
         output = _sieve(source_raster=self, size=size, connectivity=connectivity, mask=mask)
         return self.copy(new_array=output)
 
-    @profiler.profile("geoutils.raster.raster.fill_nodata", memprof=True)
+    @profiler.profile("geoutils.raster.base.fill_nodata", memprof=True)
     def fill_nodata(
         self: RasterType,
         max_search_distance: float = 100.0,
@@ -2061,6 +2056,7 @@ class RasterBase(ABC):
 
         return cls.from_array(data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point)
 
+    @profiler.profile("geoutils.raster.base.polygonize", memprof=True)
     def polygonize(
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
@@ -2175,7 +2171,7 @@ class RasterBase(ABC):
         mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
-    @profiler.profile("geoutils.raster.raster.subsample", memprof=True)
+    @profiler.profile("geoutils.raster.base.subsample", memprof=True)
     def subsample(
         self,
         subsample: float | int,

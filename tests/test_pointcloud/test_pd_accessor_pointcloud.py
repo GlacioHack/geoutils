@@ -42,19 +42,14 @@ class TestPointCloudAccessor:
         assert np.array_equal(ds.pc.data.values, ds["z"].values)
         assert isinstance(ds.pc.to_geoutils(), gu.PointCloud)
 
-    def test_copy_and_arithmetic(self) -> None:
-        """Return independent GeoDataFrames from copy and point-value arithmetic."""
+    def test_copy(self) -> None:
+        """Return an independent GeoDataFrame from the accessor copy method."""
 
         ds = self.gdf.copy()
 
         # Copying must retain the complete geospatial dataframe
         copied = ds.pc.copy()
         assert_geodataframe_equal(copied, ds)
-
-        # Arithmetic changes only the selected point-cloud data column
-        summed = ds.pc + 1
-        assert isinstance(summed, gpd.GeoDataFrame)
-        assert np.array_equal(summed["z"].values, ds["z"].values + 1)
 
     def test_from_xyz(self) -> None:
         """Construct an accessor-backed GeoDataFrame directly from X/Y/Z arrays."""
@@ -108,7 +103,7 @@ class TestPointCloudAccessor:
         assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_column="z"))
 
     def test_open_pointcloud__dask(self) -> None:
-        """Keep opening and arithmetic lazy when chunks request Dask-GeoPandas."""
+        """Keep point-cloud opening lazy when chunks request Dask-GeoPandas."""
 
         # Skip cleanly when the optional lazy dataframe backend is unavailable
         dgpd = pytest.importorskip("dask_geopandas")
@@ -124,14 +119,6 @@ class TestPointCloudAccessor:
         assert isinstance(ds, dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
         assert ds.pc.point_count == len(self.gdf)
-
-        # Arithmetic should add tasks to the graph and preserve lazy output type
-        summed = ds.pc + 1
-        assert isinstance(summed, dgpd.GeoDataFrame)
-        assert not summed.pc.is_loaded
-        assert np.array_equal(summed.compute()["z"].values, self.gdf["z"].values + 1)
-        assert not ds.pc.is_loaded
-        assert not summed.pc.is_loaded
 
     def test_reproject_pointcloud__dask_geopandas(self) -> None:
         """Reproject point partitions lazily and match eager GeoPandas output."""

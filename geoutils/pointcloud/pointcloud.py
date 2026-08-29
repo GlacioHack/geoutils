@@ -21,15 +21,14 @@ from __future__ import annotations
 
 import os.path
 import pathlib
-import warnings
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Iterable,
     Literal,
     TypeVar,
     Union,
+    cast,
     overload,
 )
 
@@ -41,17 +40,16 @@ from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, has_geo_attr
-from geoutils._misc import import_optional
-from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
-from geoutils.interface._nodata import NodataPropagation
-from geoutils.interface.gridding import (
-    GriddingEngine,
-    GriddingMethod,
-    _grid_pointcloud_to_raster,
+from geoutils._dispatch import (
+    get_geo_attr,
+    has_geo_attr,
+    is_dask_array,
+    is_dask_dataframe,
 )
+from geoutils._misc import import_optional
+from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig
-from geoutils.pointcloud.base import PointCloudBase, _cast_numeric_array_pointcloud
+from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.las import (
     _load_laspy_data_partitions,
     _point_partition_size,
@@ -59,14 +57,12 @@ from geoutils.pointcloud.las import (
     load_laspy_data,
     load_laspy_metadata,
 )
-from geoutils.stats.sampling import _subsample_numpy
-from geoutils.stats.stats import _statistics
 from geoutils.vector.vector import Vector, VectorLike
 
 if TYPE_CHECKING:
     import matplotlib
 
-    from geoutils.raster.base import RasterBase, RasterLike
+    from geoutils.raster.base import RasterLike
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
@@ -139,6 +135,49 @@ _HANDLED_FUNCTIONS_2NIN = [
 handled_array_funcs = _HANDLED_FUNCTIONS_1NIN + _HANDLED_FUNCTIONS_2NIN
 
 
+def _cast_numeric_array_pointcloud(
+    pc: PointCloudType, other: PointCloudType | NDArrayNum | Number | Any, operation_name: str
+) -> Any:
+    """Cast point-cloud arithmetic inputs to compatible arrays or scalar values."""
+
+    if isinstance(other, PointCloud):
+        if not pc.georeferenced_coords_equal(other):
+            raise ValueError(
+                "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + "."
+            )
+        return other.data
+
+    try:
+        other_pc = cast(Any, other).pc
+    except AttributeError:
+        other_pc = None
+    if isinstance(other_pc, PointCloudBase):
+        if not pc.georeferenced_coords_equal(other_pc):
+            raise ValueError(
+                "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + "."
+            )
+        return other_pc.data
+
+    if isinstance(other, (np.ndarray, pd.Series)):
+        other_data = np.asarray(other).squeeze()
+        if other_data.ndim == 1 and other_data.shape[0] == pc.point_count:
+            return other_data
+        raise ValueError(
+            "The array must be 1-dimensional with the same number of points as the point cloud for "
+            + operation_name
+            + "."
+        )
+
+    if isinstance(other, (float, int, np.floating, np.integer)):
+        return other
+    if is_dask_array(other) or is_dask_dataframe(other):
+        return other
+    raise NotImplementedError(
+        f"Operation between an object of type {type(other)} and a point cloud impossible. Must be a point cloud, "
+        f"np.ndarray or single number."
+    )
+
+
 class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     """
     The georeferenced point cloud.
@@ -161,7 +200,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     See the API for more details.
     """
 
-    @profiler.profile("geoutils.pointcloud.pointcloud.__init__", memprof=True)
+    @profiler.profile("geoutils.pointcloud.pointcloud.__init__", collect=False)
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
@@ -293,34 +332,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     #####################################
 
     @property
-    def _has_z(self) -> bool:
-        """Whether the point geometries all have a Z coordinate or not."""
-
-        return all(p.has_z for p in self.ds.geometry) if len(self.ds.geometry) > 0 else False
-
-    @property
-    def data(self) -> NDArrayNum:
-        """
-        Data of the point cloud.
-
-        Points to either the Z axis of the point geometries, or the associated data column of the geodataframe.
-        """
-        # Triggers the loading mechanism through self.ds
-        if self.data_column is not None:
-            return self.ds[self.data_column].values
-        else:
-            return self.geometry.z.values
-
-    @data.setter
-    def data(self, new_data: NDArrayNum) -> None:
-        """Set new data for the point cloud."""
-
-        if self.data_column is not None:
-            self.ds[self.data_column] = new_data
-        else:
-            self.ds.geometry = gpd.points_from_xy(x=self.geometry.x, y=self.geometry.y, z=new_data, crs=self.crs)
-
-    @property
     def _nongeo_columns(self) -> pd.Index:
         """Columns of the point cloud excluding the column of 2D point geometries."""
         # Overriding method in Vector
@@ -329,70 +340,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             nongeo_columns = nongeo_columns[nongeo_columns != "geometry"]
             return nongeo_columns
         return self.__nongeo_columns
-
-    @property
-    def data_column(self) -> str | None:
-        """
-        Name of data column of the point cloud.
-
-        Can be None if point geometries are 3D.
-        """
-        return self._data_column
-
-    @data_column.setter
-    def data_column(self, new_data_column: str | None) -> None:
-        self.set_data_column(new_data_column=new_data_column)
-
-    def set_data_column(self, new_data_column: str | None) -> None:
-        """Set new column as point cloud data column."""
-
-        # If point geometries are 3D, only for loaded data (otherwise _has_z would load data)
-        if self.is_loaded:
-            if self._has_z:
-                if new_data_column is None:
-                    self._data_column = None
-                    return
-                else:
-                    warnings.warn(
-                        f"Overriding 3D points with with data column '{new_data_column}'. Set data_column "
-                        f"to None to use the 3D point geometries instead."
-                    )
-
-        # If point geometries are 2D and the data column is undefined
-        if new_data_column is None:
-            raise ValueError("A data column name must be passed for a point cloud with 2D point geometries.")
-
-        # If 2D and data column is defined, check that it exists
-        if new_data_column not in self._nongeo_columns:
-            raise ValueError(
-                f"Data column {new_data_column} not found among columns. Available columns "
-                f"are: {', '.join(self._nongeo_columns)}."
-            )
-
-        # Set data column name
-        self._data_column = new_data_column
-
-    @property
-    def is_loaded(self) -> bool:
-        """Whether the point cloud data is loaded."""
-        return self._ds is not None
-
-    @property
-    def point_count(self) -> int:
-        """Number of points in the point cloud."""
-        # New method for point cloud
-        if self.is_loaded:
-            return len(self.ds)
-        if self._nb_points >= 0:
-            return self._nb_points
-        self.load()
-        return len(self.ds)
-
-    @property
-    def is_mask(self) -> bool:
-        """Whether the point cloud mask is a mask (boolean type)."""
-
-        return np.dtype(self.data.dtype) == np.bool_
 
     def load(
         self,
@@ -503,41 +450,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             else:
                 return self.copy(new_array=out_data)
 
-    def copy(self: PointCloud, new_array: NDArrayNum | NDArrayBool | None = None) -> PointCloud:
-        """
-        Copy the point cloud in-memory.
-
-        :param new_array: New data array to use in the copied point cloud's data column.
-
-        :return: Copy of the point cloud.
-        """
-
-        # Define new array
-        if new_array is not None:
-            if not isinstance(new_array, np.ndarray):
-                raise ValueError("New data must be an array.")
-            new_array = new_array.squeeze()
-            if not (new_array.ndim == 1 and new_array.shape[0] == self.point_count):
-                raise ValueError(
-                    "New data array must be 1-dimensional with the same number of points as the point "
-                    "cloud being copied."
-                )
-            data = new_array
-        else:
-            data = self.data.copy()
-
-        # Send to from_xyz
-        cp = self.from_xyz(
-            x=self.geometry.x.values,
-            y=self.geometry.y.values,
-            z=data,
-            crs=self.crs,
-            data_column=self.data_column,
-            use_z=self._has_z and self.data_column is None,
-        )
-
-        return cp
-
     def to_las(
         self,
         filename: str | pathlib.Path,
@@ -574,123 +486,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             mp_config=mp_config,
             **kwargs,
         )
-
-    @classmethod
-    def from_xyz(
-        cls,
-        x: ArrayLike,
-        y: ArrayLike,
-        z: ArrayLike,
-        crs: CRS,
-        data_column: str | None = None,
-        use_z: bool = False,
-    ) -> PointCloud:
-        """
-        Create point cloud from three 1D array-like coordinates for X/Y/Z.
-
-        Note that this is the most modular method to create a point cloud, as it allows to specify different data
-        types for the different coordinates or columns.
-
-        :param x: X coordinates of point cloud.
-        :param y: Y coordinates of point cloud.
-        :param z: Z values of point cloud.
-        :param crs: Coordinate reference system.
-        :param data_column: Data column name to associate to 2D point geometries (defaults to "z" if none is passed).
-        :param use_z: Use 3D point geometries with Z coordinates instead of a data column.
-
-        :return Point cloud.
-        """
-
-        # Build geodataframe
-        if not use_z:
-            data_column = data_column if data_column is not None else "z"
-            gdf = gpd.GeoDataFrame(
-                geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), crs=crs),
-                data={data_column: np.atleast_1d(z)},
-            )
-        else:
-            data_column = None
-            gdf = gpd.GeoDataFrame(
-                geometry=gpd.points_from_xy(x=np.atleast_1d(x), y=np.atleast_1d(y), z=np.atleast_1d(z), crs=crs),
-            )
-
-        # If the data was transformed into boolean, re-initialize as a Mask subclass
-        # Typing: we can specify this behaviour in @overload once we add the NumPy plugin of MyPy
-        if np.atleast_1d(z)[0].dtype == bool:
-            return PointCloud(filename_or_dataset=gdf, data_column=data_column)  # type: ignore
-        # Otherwise, keep as a given PointCloudType subclass
-        else:
-            return cls(filename_or_dataset=gdf, data_column=data_column)
-
-    @classmethod
-    def from_array(
-        cls,
-        data: NDArrayNum,
-        crs: CRS,
-        data_column: str | None = None,
-        use_z: bool = False,
-    ) -> PointCloud:
-        """
-        Create point cloud from a 3 x N or N x 3 array of X coordinates, Y coordinates and Z values.
-
-        :param data: Point cloud coordinates and data values as 3 x N or N x 3 array.
-        :param crs: Coordinate reference system of point cloud.
-        :param data_column: Data column of point cloud.
-
-        :return Point cloud.
-        """
-
-        # Check shape
-        if data.ndim != 2 or (data.shape[0] != 3 and data.shape[1] != 3):
-            raise ValueError("Array must be of shape 3xN or Nx3.")
-
-        # Make the first axis the one with size 3
-        if data.shape[0] != 3:
-            data = data.T
-
-        return cls.from_xyz(
-            x=data[0, :],
-            y=data[1, :],
-            z=data[2, :],
-            crs=crs,
-            data_column=data_column,
-            use_z=use_z,
-        )
-
-    @classmethod
-    def from_tuples(
-        cls,
-        tuples_xyz: Iterable[tuple[Number, Number, Number]],
-        crs: CRS,
-        data_column: str | None = None,
-        use_z: bool = False,
-    ) -> PointCloud:
-        """
-        Create point cloud from an iterable of 3-tuples (X coordinate, Y coordinate, Z value).
-
-        :param tuples_xyz: Point cloud coordinates and data as an iterable of 3-tuples.
-        :param crs: Coordinate reference system of point cloud.
-        :param data_column: Data column of point cloud.
-
-        :return Point cloud.
-        """
-
-        return cls.from_array(np.array(tuples_xyz), crs=crs, data_column=data_column, use_z=use_z)
-
-    def to_xyz(self) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
-        """Convert point cloud to three 1D arrays of coordinates for X/Y/Z."""
-
-        return self.geometry.x.values, self.geometry.y.values, self.data
-
-    def to_array(self) -> NDArrayNum:
-        """Convert point cloud to a 3 x N array of X coordinates, Y coordinates and Z values."""
-
-        return np.stack((self.geometry.x.values, self.geometry.y.values, self.data), axis=0)
-
-    def to_tuples(self) -> Iterable[tuple[Number, Number, Number]]:
-        """Convert point cloud to a list of 3-tuples (X coordinate, Y coordinate, Z value)."""
-
-        return list(zip(self.geometry.x.values, self.geometry.y.values, self.data))
 
     def __getitem__(self, index: PointCloud | NDArrayBool | Any) -> PointCloud | Any:
         """
@@ -1282,41 +1077,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
         return self.copy(~self.data)
 
-    def pointcloud_equal(self, other: PointCloud, **kwargs: Any) -> bool:
-        """
-        Check if two point clouds are equal.
-
-        This means that:
-        - The two vectors (geodataframes) are equal.
-        - The data column is the same for both point clouds.
-
-        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
-        """
-
-        # Vector equality
-        vector_eq = super().vector_equal(other, **kwargs)
-        # Data column equality
-        data_column_eq = self.data_column == other.data_column
-
-        return all([vector_eq, data_column_eq])
-
-    def georeferenced_coords_equal(self: PointCloud, pc: PointCloud) -> bool:
-        """
-        Check that point cloud X/Y coordinates and CRS are equal.
-
-        :param pc: Another pointcloud.
-
-        :return: Whether the two objects have the same georeferenced points.
-        """
-
-        return all(
-            [
-                self.crs == pc.crs,
-                np.array_equal(self.geometry.x.values, pc.geometry.x.values),
-                np.array_equal(self.geometry.y.values, pc.geometry.y.values),
-            ]
-        )
-
     @overload
     def info(self, verbose: Literal[True] = ..., stats: bool = False) -> None: ...
 
@@ -1353,227 +1113,3 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             return None
         else:
             return "\n".join(as_str_split)
-
-    @overload
-    def get_stats(
-        self,
-        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
-    ) -> np.floating[Any]: ...
-
-    @overload
-    def get_stats(
-        self,
-        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
-    ) -> dict[str, np.floating[Any]]: ...
-
-    @profiler.profile("geoutils.pointcloud.pointcloud.get_stats", memprof=True)
-    def get_stats(
-        self,
-        stats_name: (
-            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
-        ) = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
-        """
-        Retrieve specified statistics or all available statistics for the point cloud data. Allows passing custom
-        callables to calculate custom stats.
-
-        Common statistics for an N-D array :
-
-        - Mean: arithmetic mean of the data, ignoring masked values.
-        - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
-        - Max: maximum value among the data, ignoring masked values.
-        - Min: minimum value among the data, ignoring masked values.
-        - Sum: sum of all data, ignoring masked values.
-        - Sum of squares: sum of the squares of all data, ignoring masked values.
-        - 90th percentile: point below which 90% of the data falls, ignoring masked values.
-        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset,
-        ignoring masked values.
-        - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset,
-        representing the range within which 90% of the data points lie. Ignore masked values.
-        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to
-        outliers compared to standard deviation. Ignore masked values.
-        - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give
-        insight into the spread of the data. Only relevant when the raster represents a difference of two objects.
-        Ignore masked values.
-        - Std (Standard deviation): measures the spread or dispersion of the data around the mean,
-        ignoring masked values.
-        - Valid count: number of finite data points in the array. It counts the non-masked elements.
-        - Total count: total size of the raster.
-        - Percentage valid points: ratio between Valid count and Total count.
-
-        For all statistics up to "Std", functions from numpy.ma module are used (directly or in the calculation) in case
-        of a masked array, numpy module otherwise.
-
-        "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero).
-        Numpy Masked functions is used is this case or if the Point Cloud was already a masked array.
-        Percentage valid points is calculated accordingly.
-
-        If an inlier mask is passed:
-        - Total inlier count: number of data points in the inlier mask.
-        - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
-        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification
-        statistics.
-        - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
-
-        They are all computed based on the previously stated final_count_nonzero.
-
-        Callable functions are supported as well.
-
-        By default and without any specification, this function computes the following main statistics: minimum,
-        maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
-        To compute all available statistics, set `stats_name` to `all`.
-
-        :param stats_name: Name or list of names of the statistics to retrieve. If None, main statistics are returned.
-            Accepted names include:
-            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `LE90`, `nmad`, `rmse`,
-            `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
-            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
-            Custom callables can also be provided.
-            To compute all available statistics, set `stats_name` to `all`.
-        :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
-        """
-
-        # Force load if not loaded
-        if not self.is_loaded:
-            self.load()
-
-        data = self.data
-
-        # Given list or all attributes to compute if None
-        if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
-            return _statistics(data, stats_name)  # type: ignore
-        else:
-            # Single attribute to compute
-            if isinstance(stats_name, str):
-                return _statistics(data, [stats_name])[stats_name]  # type: ignore
-            elif callable(stats_name):
-                return stats_name(data)  # type: ignore
-            else:
-                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
-
-    @overload
-    def subsample(
-        self,
-        subsample: int | float,
-        return_indices: Literal[False] = False,
-        *,
-        random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum: ...
-
-    @overload
-    def subsample(
-        self,
-        subsample: int | float,
-        return_indices: Literal[True],
-        *,
-        random_state: int | np.random.Generator | None = None,
-    ) -> tuple[NDArrayNum, ...]: ...
-
-    @overload
-    def subsample(
-        self,
-        subsample: float | int,
-        return_indices: bool = False,
-        random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
-
-    @profiler.profile("geoutils.pointcloud.pointcloud.subsample", memprof=True)
-    def subsample(
-        self,
-        subsample: float | int,
-        return_indices: bool = False,
-        random_state: int | np.random.Generator | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
-        """
-        Randomly sample the point cloud. Only valid values are considered.
-
-        :param subsample: Subsample size. If <= 1, a fraction of the total pixels to extract.
-            If > 1, the number of pixels.
-        :param return_indices: Whether to return the extracted indices only.
-        :param random_state: Random state or seed number.
-
-        :return: Array of sampled valid values, or array of sampled indices.
-        """
-
-        if return_indices:
-            return _subsample_numpy(
-                array=self.data,
-                subsample=subsample,
-                return_indices=True,
-                random_state=random_state,
-            )
-        else:
-            return _subsample_numpy(
-                array=self.data,
-                subsample=subsample,
-                return_indices=False,
-                random_state=random_state,
-            )
-
-    @profiler.profile("geoutils.pointcloud.pointcloud.grid", memprof=True)
-    def grid(
-        self,
-        ref: RasterLike | None = None,
-        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
-        res: float | tuple[float, float] | None = None,
-        shape: tuple[int, int] | None = None,
-        bounds: tuple[float, float, float, float] | BoundingBox | None = None,
-        resampling: GriddingMethod = "linear",
-        dist_nodata_pixel: float = 1.0,
-        nodata: int | float = -9999,
-        *,
-        distance_power: float = 2.0,
-        min_points: int = 1,
-        engine: GriddingEngine = "scipy",
-        chunksizes: tuple[int, int] | None = None,
-        mp_config: MultiprocConfig | None = None,
-        n_threads: int = 0,
-        nodata_propagation: NodataPropagation = "gdal",
-    ) -> RasterBase:
-        """
-        Grid point cloud into a raster.
-
-        Output grid can be defined either by passing a reference raster to match, or by passing output grid coordinates
-        for X/Y (must be regular in each dimension), or by specifying an output grid resolution (which uses the
-        upper-left bounds of point cloud to define the start of the grid).
-
-        :param ref: Reference raster to match (if output grid coordinates or output resolution undefined).
-        :param grid_coords: Output grid coordinates in X and Y (if reference raster or output resolution undefined).
-        :param res: Output resolution (if reference raster or output grid coordinates undefined).
-        :param resampling: Interpolation method or a circular ``idw``, statistic or distance metric (defaults to
-            linear). ``average``, ``min`` and ``max`` are aliases for ``mean``, ``minimum`` and ``maximum``.
-        :param dist_nodata_pixel: Maximum point distance or circular neighborhood radius, expressed in output pixels.
-        :param nodata: Nodata value of output raster (defaults to -9999).
-        :param distance_power: Distance exponent used for inverse-distance weighting (defaults to 2).
-        :param min_points: Minimum number of finite points required inside a circular neighborhood (defaults to 1).
-        :param engine: Calculation engine, either ``scipy`` (default) or ``numba``. Numba supports nearest and
-            circular methods except ``average_distance_pts``.
-        :param chunksizes: Chunk size (rows, cols) for Dask/Multiprocessing output chunks.
-        :param mp_config: Multiprocessing configuration. If passed, output chunks are written to disk.
-        :param n_threads: Number of SciPy threads for eager nearest gridding. ``0`` uses all but one available CPU,
-            while Dask and Multiprocessing tasks remain single-threaded by default.
-        :param nodata_propagation: How invalid point values affect the output. ``gdal`` and ``ignore`` omit them,
-            while ``propagate`` returns NaN where an invalid value participates in the selected method.
-
-        :return: Raster from gridded point cloud.
-        """
-
-        return _grid_pointcloud_to_raster(
-            source_pointcloud=self,
-            ref=ref,
-            grid_coords=grid_coords,
-            res=res,
-            shape=shape,
-            bounds=bounds,
-            resampling=resampling,
-            dist_nodata_pixel=dist_nodata_pixel,
-            nodata=nodata,
-            distance_power=distance_power,
-            min_points=min_points,
-            engine=engine,
-            chunksizes=chunksizes,
-            mp_config=mp_config,
-            dask=False,
-            n_threads=n_threads,
-            nodata_propagation=nodata_propagation,
-        )

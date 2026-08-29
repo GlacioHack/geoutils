@@ -339,7 +339,7 @@ class Raster(RasterBase):
     See the API for more details.
     """
 
-    @profiler.profile("geoutils.raster.raster.__init__", memprof=True)
+    @profiler.profile("geoutils.raster.raster.__init__", collect=False)
     def __init__(
         self,
         filename_or_dataset: (

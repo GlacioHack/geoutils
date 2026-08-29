@@ -90,6 +90,7 @@ def open_vector(filename: str, chunks: int | None = None, **kwargs: Any) -> gpd.
     :param filename: Path to the vector file to open.
     :param chunks: Number of features per Dask partition. If None, load eagerly with GeoPandas.
     :param kwargs: Keyword arguments passed to :func:`geopandas.read_file`.
+    :returns: An eager GeoDataFrame, or a lazy Dask-GeoPandas GeoDataFrame when ``chunks`` is passed.
     """
 
     if chunks is not None:
@@ -151,7 +152,12 @@ class VectorAccessor(VectorBase):
         _replace_geodataframe(self._obj, new_ds)
 
     def copy(self, deep: bool = True) -> gpd.GeoDataFrame:
-        """Return a copy of the vector GeoDataFrame."""
+        """
+        Return a copy of the vector GeoDataFrame.
+
+        :param deep: Whether to copy eager data deeply. Dask-backed dataframes always copy their task graph.
+        :returns: A copy with the same eager or lazy dataframe type.
+        """
 
         # Dask copies its task graph and does not expose Pandas' deep-copy option
         if is_dask_dataframe(self._obj):
@@ -185,7 +191,15 @@ class VectorAccessor(VectorBase):
         return Vector(ds)
 
     def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
-        """Write the vector to file."""
+        """
+        Write the vector to a vector file or GeoParquet dataset.
+
+        :param filename: Path to the output file or dataset.
+        :param driver: Output format driver. By default, infer it from ``filename``.
+        :param schema: Schema passed to GeoPandas for eager vector formats. Not supported for Dask GeoParquet.
+        :param index: Whether to write the dataframe index.
+        :param kwargs: Additional keyword arguments passed to GeoPandas or Dask-GeoPandas.
+        """
 
         if is_dask_dataframe(self._obj):
             # GeoParquet supports direct partitioned output from Dask-GeoPandas

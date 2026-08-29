@@ -7,6 +7,7 @@ import ast
 import csv
 import html
 import json
+import math
 import os
 import tempfile
 from collections.abc import Iterable
@@ -15,8 +16,19 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.asv_suite.comparisons import (
+    BENCHMARK_CASE_BY_CLASS,
     COMPARISONS,
+    EXTERNAL_REFERENCE_CASE_BY_CLASS,
+    GDAL_CLI_LABEL,
     Comparison,
+    ComparisonDimension,
+    ExternalReference,
+)
+from benchmarks.workflows.registry import (
+    CalculationEngine,
+    ExecutionMode,
+    OperationName,
+    OperationStrategyName,
 )
 
 COMPARISON_BENCHMARK_MODULE = "asv_suite.comparisons"
@@ -24,26 +36,34 @@ COMPARISON_REPORT_DIRECTORY = "comparisons"
 DOCUMENTATION_TIME_PLOT = "time_relative_to_gdal.svg"
 DOCUMENTATION_MEMORY_PLOT = "peak_ram_by_raster_size.svg"
 DOCUMENTATION_DATA = "benchmark_snapshot.json"
+PERFORMANCE_CHANGE_REPORT = "performance-change.md"
 
 # Colors stay consistent between the detailed ASV plots and the concise documentation snapshot
-IMPLEMENTATION_COLORS = {
+SERIES_COLORS = {
     "Eager": "#0072B2",
     "Dask": "#E69F00",
     "Multiprocessing": "#009E73",
-    "GDAL": "#6C6C6C",
+    GDAL_CLI_LABEL: "#6C6C6C",
 }
 
 
 @dataclass(frozen=True)
-class ImplementationMeasurement:
-    """Store one implementation result at one numeric parameter value."""
+class ComparisonMeasurement:
+    """Store one fully identified benchmark result at one numeric parameter value."""
 
     comparison: str
-    implementation: str
+    series_label: str
+    operation: OperationName
+    method: str | None
+    calculation_engine: CalculationEngine | None
+    strategy: OperationStrategyName | None
+    execution_mode: ExecutionMode | None
+    external_reference: ExternalReference | None
+    series_dimension: ComparisonDimension
     parameter: int
     operation_time_s: float
     end_to_end_time_s: float
-    peak_process_tree_rss_mb: float
+    peak_process_tree_mem_mb: float
 
 
 def _benchmark_key(class_name: str, method_name: str) -> str:
@@ -63,14 +83,14 @@ def _latest_timestamp(result: Any) -> int:
     return int(result.date or 0)
 
 
-def _required_benchmark_keys() -> set[str]:
-    """Return every saved result needed to render all comparisons."""
+def _required_benchmark_keys(comparisons: Iterable[Comparison] = COMPARISONS) -> set[str]:
+    """Return every saved result needed to render the selected comparisons."""
 
     # A partially interrupted ASV run must not replace the latest complete documentation result
-    methods = ("time_operation", "track_end_to_end_time_s", "track_peak_process_tree_rss_mb")
+    methods = ("time_operation", "track_end_to_end_time_s", "track_peak_process_tree_mem_mb")
     return {
         _benchmark_key(class_name, method)
-        for comparison in COMPARISONS
+        for comparison in comparisons
         for _, class_name in comparison.series
         for method in methods
     }
@@ -82,8 +102,9 @@ def _select_complete_result(
     machine: str | None = None,
     commit: str | None = None,
     environment: str | None = None,
+    require_complete: bool = True,
 ) -> Any:
-    """Select the newest complete comparison result from an ASV result sequence."""
+    """Select the newest matching result from an ASV result sequence."""
 
     required_keys = _required_benchmark_keys()
     candidates = []
@@ -98,12 +119,12 @@ def _select_complete_result(
         result_environment = str(getattr(result, "_env_name", ""))
         if environment is not None and result_environment != environment:
             continue
-        if not required_keys.issubset(result.get_all_result_keys()):
+        if require_complete and not required_keys.issubset(result.get_all_result_keys()):
             continue
         candidates.append(result)
 
     if not candidates:
-        raise RuntimeError("No saved ASV result contains all comparisons")
+        raise RuntimeError("No matching saved ASV result contains the requested comparisons")
     return max(candidates, key=_latest_timestamp)
 
 
@@ -113,8 +134,9 @@ def select_asv_result(
     machine: str | None = None,
     commit: str | None = None,
     environment: str | None = None,
+    require_complete: bool = True,
 ) -> Any:
-    """Read ASV results and select the newest complete comparison."""
+    """Read ASV results and select the newest matching comparison result."""
 
     # Import ASV only when rendering so benchmark discovery remains lightweight
     from asv.results import iter_results
@@ -124,6 +146,7 @@ def select_asv_result(
         machine=machine,
         commit=commit,
         environment=environment,
+        require_complete=require_complete,
     )
 
 
@@ -155,18 +178,46 @@ def _result_series(result: Any, key: str) -> tuple[list[int], list[float]]:
     return parameters, [float(value) for value in values]
 
 
-def collect_implementation_measurements(result: Any) -> list[ImplementationMeasurement]:
+def collect_comparison_measurements(
+    result: Any,
+    comparisons: Iterable[Comparison] = COMPARISONS,
+) -> list[ComparisonMeasurement]:
     """Combine matching operation-time, end-to-end-time and peak-RAM results."""
 
     records = []
     available = set(result.get_all_result_keys())
-    for comparison in COMPARISONS:
-        for implementation, class_name in comparison.series:
+    for comparison in comparisons:
+        for series_label, class_name in comparison.series:
+            benchmark_case = BENCHMARK_CASE_BY_CLASS.get(class_name)
+            reference_case = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(class_name)
+            if (benchmark_case is None) == (reference_case is None):
+                raise ValueError(f"Expected exactly one registered benchmark case for {class_name}")
+            selected_case = benchmark_case or reference_case
+            assert selected_case is not None
+            if selected_case.operation != comparison.operation:
+                raise ValueError(f"Comparison dimensions do not match registered case {class_name}")
+            if comparison.series_dimension != "method" and selected_case.method != comparison.method:
+                raise ValueError(f"Comparison method does not match registered case {class_name}")
+            if benchmark_case is not None:
+                if (
+                    comparison.series_dimension != "calculation_engine"
+                    and benchmark_case.calculation_engine != comparison.calculation_engine
+                ):
+                    raise ValueError(f"Comparison engine does not match registered case {class_name}")
+                if (
+                    comparison.series_dimension != "execution_mode"
+                    and benchmark_case.execution_mode != comparison.execution_mode
+                ):
+                    raise ValueError(f"Comparison execution mode does not match registered case {class_name}")
+                expected_strategy = comparison.strategy if benchmark_case.execution_mode != "eager" else None
+                if comparison.series_dimension != "strategy" and benchmark_case.strategy != expected_strategy:
+                    raise ValueError(f"Comparison strategy does not match registered case {class_name}")
+
             # The three ASV methods share the same numeric parameter values
             keys = {
                 "operation": _benchmark_key(class_name, "time_operation"),
                 "end_to_end": _benchmark_key(class_name, "track_end_to_end_time_s"),
-                "memory": _benchmark_key(class_name, "track_peak_process_tree_rss_mb"),
+                "memory": _benchmark_key(class_name, "track_peak_process_tree_mem_mb"),
             }
             missing = set(keys.values()) - available
             if missing:
@@ -178,15 +229,22 @@ def collect_implementation_measurements(result: Any) -> list[ImplementationMeasu
             if operation_params != end_to_end_params or operation_params != memory_params:
                 raise ValueError(f"Time and RAM parameters differ for {class_name}")
 
-            # One record per point keeps JSON and CSV useful without plotting software
+            # ASV stores skipped parameter combinations as NaN, which should leave no plotted metric
             records.extend(
-                ImplementationMeasurement(
-                    comparison.slug,
-                    implementation,
-                    parameter,
-                    operation_time,
-                    end_to_end_time,
-                    memory,
+                ComparisonMeasurement(
+                    comparison=comparison.slug,
+                    series_label=series_label,
+                    operation=selected_case.operation,
+                    method=selected_case.method,
+                    calculation_engine=(benchmark_case.calculation_engine if benchmark_case is not None else None),
+                    strategy=benchmark_case.strategy if benchmark_case is not None else None,
+                    execution_mode=benchmark_case.execution_mode if benchmark_case is not None else None,
+                    external_reference=(reference_case.external_reference if reference_case is not None else None),
+                    series_dimension=comparison.series_dimension,
+                    parameter=parameter,
+                    operation_time_s=operation_time,
+                    end_to_end_time_s=end_to_end_time,
+                    peak_process_tree_mem_mb=memory,
                 )
                 for parameter, operation_time, end_to_end_time, memory in zip(
                     operation_params,
@@ -194,13 +252,14 @@ def collect_implementation_measurements(result: Any) -> list[ImplementationMeasu
                     end_to_end_times,
                     peak_memory,
                 )
+                if all(math.isfinite(value) for value in (operation_time, end_to_end_time, memory))
             )
     return records
 
 
 def _plot_comparison(
     comparison: Comparison,
-    records: list[ImplementationMeasurement],
+    records: list[ComparisonMeasurement],
     output: Path,
 ) -> None:
     """Write aligned operation-time, end-to-end-time and peak-RAM plots."""
@@ -212,31 +271,31 @@ def _plot_comparison(
     import matplotlib.pyplot as plt
 
     figure, axes = plt.subplots(3, 1, figsize=(9, 10), sharex=True, layout="constrained")
-    for implementation, _ in comparison.series:
+    for series_label, _ in comparison.series:
         # Stable parameter sorting keeps lines readable if ASV changes storage order
         selected = sorted(
             (
                 record
                 for record in records
-                if record.comparison == comparison.slug and record.implementation == implementation
+                if record.comparison == comparison.slug and record.series_label == series_label
             ),
             key=lambda record: record.parameter,
         )
         parameters = [record.parameter for record in selected]
-        axes[0].plot(parameters, [record.operation_time_s for record in selected], marker="o", label=implementation)
-        axes[1].plot(parameters, [record.end_to_end_time_s for record in selected], marker="o", label=implementation)
+        axes[0].plot(parameters, [record.operation_time_s for record in selected], marker="o", label=series_label)
+        axes[1].plot(parameters, [record.end_to_end_time_s for record in selected], marker="o", label=series_label)
         axes[2].plot(
             parameters,
-            [record.peak_process_tree_rss_mb for record in selected],
+            [record.peak_process_tree_mem_mb for record in selected],
             marker="o",
-            label=implementation,
+            label=series_label,
         )
 
     # Separate panels keep initialized work, complete execution and memory unambiguous
     axes[0].set_title(comparison.title)
     axes[0].set_ylabel("Operation time (s)")
     axes[1].set_ylabel("End-to-end time (s)")
-    axes[2].set_ylabel("Peak process-tree RSS (MB)")
+    axes[2].set_ylabel("Peak process-tree memory (MB)")
     axes[2].set_xlabel(comparison.parameter_label)
     for axis in axes:
         axis.grid(True, alpha=0.3)
@@ -250,53 +309,53 @@ def _plot_comparison(
 
 
 def _gdal_comparisons() -> tuple[Comparison, ...]:
-    """Return raster-size comparisons that provide a GDAL reference line."""
+    """Return raster-size comparisons that provide a GDAL CLI reference line."""
 
     return tuple(
         comparison
         for comparison in COMPARISONS
-        if comparison.documentation and any(implementation == "GDAL" for implementation, _ in comparison.series)
+        if comparison.documentation and any(label == GDAL_CLI_LABEL for label, _ in comparison.series)
     )
 
 
 def _largest_shared_parameter(
     comparison: Comparison,
-    records: list[ImplementationMeasurement],
+    records: list[ComparisonMeasurement],
 ) -> int:
-    """Return the largest parameter measured by every implementation in one comparison."""
+    """Return the largest parameter measured by every series in one comparison."""
 
     # Shared parameters keep the normalized time bars based on exactly the same input size
-    parameters_by_implementation = []
-    for implementation, _ in comparison.series:
-        parameters_by_implementation.append(
+    parameters_by_series = []
+    for series_label, _ in comparison.series:
+        parameters_by_series.append(
             {
                 record.parameter
                 for record in records
-                if record.comparison == comparison.slug and record.implementation == implementation
+                if record.comparison == comparison.slug and record.series_label == series_label
             }
         )
-    shared_parameters = set.intersection(*parameters_by_implementation)
+    shared_parameters = set.intersection(*parameters_by_series)
     if not shared_parameters:
         raise ValueError(f"No shared parameter found for {comparison.slug}")
     return max(shared_parameters)
 
 
 def _measurement_at(
-    records: list[ImplementationMeasurement],
+    records: list[ComparisonMeasurement],
     comparison: str,
-    implementation: str,
+    series_label: str,
     parameter: int,
-) -> ImplementationMeasurement:
-    """Return one uniquely identified implementation measurement."""
+) -> ComparisonMeasurement:
+    """Return one uniquely identified plot-series measurement."""
 
     selected = [
         record
         for record in records
-        if record.comparison == comparison and record.implementation == implementation and record.parameter == parameter
+        if record.comparison == comparison and record.series_label == series_label and record.parameter == parameter
     ]
     if len(selected) != 1:
         raise ValueError(
-            f"Expected one {implementation} result for {comparison} at parameter {parameter}, found {len(selected)}"
+            f"Expected one {series_label} result for {comparison} at parameter {parameter}, found {len(selected)}"
         )
     return selected[0]
 
@@ -304,52 +363,190 @@ def _measurement_at(
 def _documentation_operation_name(comparison: Comparison) -> str:
     """Return the concise operation name used on documentation graphics."""
 
-    return comparison.title.removesuffix(" raster size")
+    operation_labels = {
+        "reproject": "Reprojection",
+        "polygonize": "Polygonization",
+        "rasterize": "Rasterization",
+        "grid": "Nearest gridding",
+    }
+    return operation_labels[comparison.operation]
+
+
+def _shared_change_parameter(
+    comparison: Comparison,
+    baseline_records: list[ComparisonMeasurement],
+    current_records: list[ComparisonMeasurement],
+) -> int | None:
+    """Return the largest parameter shared by every requested series in both results."""
+
+    series_labels = ("Eager", "Dask", "Multiprocessing", GDAL_CLI_LABEL)
+    parameters = []
+    for records in (baseline_records, current_records):
+        for series_label in series_labels:
+            parameters.append(
+                {
+                    record.parameter
+                    for record in records
+                    if record.comparison == comparison.slug and record.series_label == series_label
+                }
+            )
+    if any(not values for values in parameters):
+        return None
+    shared = set.intersection(*parameters)
+    return max(shared) if shared else None
+
+
+def _format_change(value: float) -> str:
+    """Describe one normalized performance change with an explicit direction."""
+
+    if value >= 1:
+        return f"{value:.2f}× faster"
+    return f"{1 / value:.2f}× slower"
+
+
+def performance_change_markdown(baseline_result: Any, current_result: Any) -> str:
+    """Compare execution-mode time before and after a change, normalized to the GDAL CLI."""
+
+    baseline_machine = str(baseline_result.params.get("machine", "unknown"))
+    current_machine = str(current_result.params.get("machine", "unknown"))
+    if baseline_machine != current_machine:
+        raise ValueError(f"Performance results use different machines: {baseline_machine} and {current_machine}")
+
+    # Normalizing each revision to its own GDAL CLI result limits machine-wide timing drift
+    baseline_available = set(baseline_result.get_all_result_keys())
+    current_available = set(current_result.get_all_result_keys())
+    shared_comparisons = []
+    baseline_records = []
+    current_records = []
+    for comparison in _gdal_comparisons():
+        if not _required_benchmark_keys((comparison,)).issubset(baseline_available & current_available):
+            continue
+        try:
+            baseline_comparison = collect_comparison_measurements(baseline_result, (comparison,))
+            current_comparison = collect_comparison_measurements(current_result, (comparison,))
+        except ValueError:
+            # Interrupted runs may contain keys whose parameter series still has missing values
+            continue
+        shared_comparisons.append(comparison)
+        baseline_records.extend(baseline_comparison)
+        current_records.extend(current_comparison)
+    execution_modes = ("Eager", "Dask", "Multiprocessing")
+    ratios: dict[str, list[tuple[Comparison, int, float, float]]] = {name: [] for name in execution_modes}
+    for comparison in shared_comparisons:
+        parameter = _shared_change_parameter(comparison, baseline_records, current_records)
+        if parameter is None:
+            continue
+
+        baseline_gdal = _measurement_at(baseline_records, comparison.slug, GDAL_CLI_LABEL, parameter).end_to_end_time_s
+        current_gdal = _measurement_at(current_records, comparison.slug, GDAL_CLI_LABEL, parameter).end_to_end_time_s
+        for execution_mode in execution_modes:
+            baseline_ratio = (
+                _measurement_at(baseline_records, comparison.slug, execution_mode, parameter).end_to_end_time_s
+                / baseline_gdal
+            )
+            current_ratio = (
+                _measurement_at(current_records, comparison.slug, execution_mode, parameter).end_to_end_time_s
+                / current_gdal
+            )
+            ratios[execution_mode].append((comparison, parameter, baseline_ratio, current_ratio))
+
+    if not all(ratios.values()):
+        raise ValueError("No GDAL CLI comparison is complete in both performance results")
+
+    # Geometric means combine multiplicative time ratios without favoring slower operations
+    summary_rows = []
+    for execution_mode in execution_modes:
+        execution_mode_ratios = ratios[execution_mode]
+        count = len(execution_mode_ratios)
+        baseline_mean = math.prod(row[2] for row in execution_mode_ratios) ** (1 / count)
+        current_mean = math.prod(row[3] for row in execution_mode_ratios) ** (1 / count)
+        summary_rows.append((execution_mode, baseline_mean, current_mean, baseline_mean / current_mean))
+
+    shared_rows = ratios[execution_modes[0]]
+    operation_names = ", ".join(_documentation_operation_name(row[0]) for row in shared_rows)
+    lines = [
+        "# Performance change relative to the GDAL CLI",
+        "",
+        f"Baseline `{baseline_result.commit_hash}` → current `{current_result.commit_hash}` on `{current_machine}`.",
+        "",
+        "End-to-end time is normalized to the GDAL CLI for the same revision and input. Lower ratios are better. "
+        "The summary "
+        f"is the geometric mean across {operation_names}, using the largest parameter shared by every execution mode.",
+        "",
+        "| GeoUtils execution mode | Before / GDAL CLI | After / GDAL CLI | Change |",
+        "|---|---:|---:|---:|",
+    ]
+    lines.extend(
+        f"| {execution_mode} | {baseline:.2f}× | {current:.2f}× | {_format_change(change)} |"
+        for execution_mode, baseline, current, change in summary_rows
+    )
+    lines.extend(
+        [
+            "",
+            "## Per-operation values",
+            "",
+            "| Operation | Input | Execution mode | Before / GDAL CLI | After / GDAL CLI | Change |",
+            "|---|---:|---|---:|---:|---:|",
+        ]
+    )
+    for execution_mode in execution_modes:
+        for comparison, parameter, baseline, current in ratios[execution_mode]:
+            lines.append(
+                f"| {_documentation_operation_name(comparison)} | {parameter} | {execution_mode} | "
+                f"{baseline:.2f}× | {current:.2f}× | {_format_change(baseline / current)} |"
+            )
+    return "\n".join(lines) + "\n"
 
 
 def _plot_time_relative_to_gdal(
-    records: list[ImplementationMeasurement],
+    records: list[ComparisonMeasurement],
     output: Path,
 ) -> None:
-    """Compare end-to-end backend time with GDAL on the largest shared raster."""
+    """Compare end-to-end execution-mode time with the GDAL CLI on the largest shared raster."""
 
     # Import plotting only for an explicit rendering command
     import matplotlib.pyplot as plt
 
     comparisons = _gdal_comparisons()
-    implementations = ("Eager", "Dask", "Multiprocessing")
+    execution_modes = ("Eager", "Dask", "Multiprocessing")
     bar_width = 0.24
     positions = list(range(len(comparisons)))
     figure, axis = plt.subplots(figsize=(9, 4.8), layout="constrained")
 
-    for implementation_index, implementation in enumerate(implementations):
+    for execution_mode_index, execution_mode in enumerate(execution_modes):
         ratios = []
         for comparison in comparisons:
             parameter = _largest_shared_parameter(comparison, records)
-            gdal_time = _measurement_at(records, comparison.slug, "GDAL", parameter).end_to_end_time_s
-            backend_time = _measurement_at(
+            gdal_time = _measurement_at(records, comparison.slug, GDAL_CLI_LABEL, parameter).end_to_end_time_s
+            execution_mode_time = _measurement_at(
                 records,
                 comparison.slug,
-                implementation,
+                execution_mode,
                 parameter,
             ).end_to_end_time_s
-            ratios.append(backend_time / gdal_time)
+            ratios.append(execution_mode_time / gdal_time)
 
-        # Group implementations around each operation so their GDAL ratio is easy to compare
-        offset = (implementation_index - 1) * bar_width
+        # Group execution modes around each operation so their GDAL CLI ratio is easy to compare
+        offset = (execution_mode_index - 1) * bar_width
         bars = axis.bar(
             [position + offset for position in positions],
             ratios,
             width=bar_width,
-            label=implementation,
-            color=IMPLEMENTATION_COLORS[implementation],
+            label=execution_mode,
+            color=SERIES_COLORS[execution_mode],
         )
         axis.bar_label(bars, fmt="%.1f×", padding=3, fontsize=8)
 
-    # GDAL equals one by definition and remains visible when every backend is slower
-    axis.axhline(1.0, color=IMPLEMENTATION_COLORS["GDAL"], linestyle="--", linewidth=1.2, label="GDAL")
+    # The GDAL CLI equals one by definition and remains visible when every execution mode is slower
+    axis.axhline(
+        1.0,
+        color=SERIES_COLORS[GDAL_CLI_LABEL],
+        linestyle="--",
+        linewidth=1.2,
+        label=GDAL_CLI_LABEL,
+    )
     axis.set_xticks(positions, [_documentation_operation_name(comparison) for comparison in comparisons])
-    axis.set_ylabel("End-to-end time relative to GDAL")
+    axis.set_ylabel("End-to-end time relative to GDAL CLI")
     axis.grid(axis="y", alpha=0.3)
     axis.legend(ncol=4)
     figure.savefig(output, format="svg")
@@ -357,7 +554,7 @@ def _plot_time_relative_to_gdal(
 
 
 def _plot_peak_ram_by_raster_size(
-    records: list[ImplementationMeasurement],
+    records: list[ComparisonMeasurement],
     output: Path,
 ) -> None:
     """Compare total process-tree RAM as the raster size increases."""
@@ -368,27 +565,27 @@ def _plot_peak_ram_by_raster_size(
     comparisons = _gdal_comparisons()
     figure, axes = plt.subplots(2, 2, figsize=(9, 7), layout="constrained")
     for axis, comparison in zip(axes.flat, comparisons):
-        for implementation, _ in comparison.series:
+        for series_label, _ in comparison.series:
             # Sorting protects the displayed dependency from ASV storage order
             selected = sorted(
                 (
                     record
                     for record in records
-                    if record.comparison == comparison.slug and record.implementation == implementation
+                    if record.comparison == comparison.slug and record.series_label == series_label
                 ),
                 key=lambda record: record.parameter,
             )
             axis.plot(
                 [record.parameter for record in selected],
-                [record.peak_process_tree_rss_mb for record in selected],
+                [record.peak_process_tree_mem_mb for record in selected],
                 marker="o",
-                label=implementation,
-                color=IMPLEMENTATION_COLORS[implementation],
+                label=series_label,
+                color=SERIES_COLORS[series_label],
             )
 
         axis.set_title(_documentation_operation_name(comparison))
         axis.set_xlabel("Raster width and height (pixels)")
-        axis.set_ylabel("Peak process-tree RSS (MB)")
+        axis.set_ylabel("Peak process-tree memory (MB)")
         axis.grid(alpha=0.3)
 
     # One legend applies to every panel and leaves the operation curves uncluttered
@@ -398,7 +595,7 @@ def _plot_peak_ram_by_raster_size(
     plt.close(figure)
 
 
-def _result_payload(result: Any, records: list[ImplementationMeasurement]) -> dict[str, Any]:
+def _result_payload(result: Any, records: list[ComparisonMeasurement]) -> dict[str, Any]:
     """Return measurements and enough run metadata to interpret them later."""
 
     return {
@@ -407,9 +604,9 @@ def _result_payload(result: Any, records: list[ImplementationMeasurement]) -> di
             "date": result.date,
             "environment": str(getattr(result, "_env_name", "")),
             "machine": result.params,
-            "operation_time": "wall-clock time after implementation initialization",
-            "end_to_end_time": "wall-clock time including implementation initialization but excluding input generation",
-            "memory": "peak aggregate process-tree RSS",
+            "operation_time": "wall-clock time after runner initialization",
+            "end_to_end_time": "wall-clock time including runner initialization but excluding input generation",
+            "memory": "peak aggregate process-tree memory",
         },
         "measurements": [asdict(record) for record in records],
     }
@@ -418,13 +615,13 @@ def _result_payload(result: Any, records: list[ImplementationMeasurement]) -> di
 def render_documentation_snapshot(
     result: Any,
     output_directory: Path,
-) -> list[ImplementationMeasurement]:
+) -> list[ComparisonMeasurement]:
     """Write the two documentation graphics and their complete numeric source."""
 
     # Keep Matplotlib caches in a writable disposable location under sandboxed runs
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "geoutils-matplotlib-cache"))
     output_directory.mkdir(parents=True, exist_ok=True)
-    records = collect_implementation_measurements(result)
+    records = collect_comparison_measurements(result)
 
     # Documentation uses two broad summaries while the ASV site retains every detailed panel
     _plot_time_relative_to_gdal(records, output_directory / DOCUMENTATION_TIME_PLOT)
@@ -436,7 +633,7 @@ def render_documentation_snapshot(
     return records
 
 
-def _markdown_report(result: Any) -> str:
+def _markdown_report(result: Any, *, includes_performance_change: bool = False) -> str:
     """Return a compact Markdown index linking plots and numeric results."""
 
     machine = result.params.get("machine", "unknown")
@@ -445,17 +642,19 @@ def _markdown_report(result: Any) -> str:
         "",
         f"Commit `{result.commit_hash}` on machine `{machine}`",
         "",
-        "Operation time excludes implementation initialization. End-to-end time includes it but excludes input "
-        "generation. Peak RAM is aggregate RSS for the benchmark process and all implementation children.",
+        "Operation time excludes runner initialization. End-to-end time includes it but excludes input generation. "
+        "Peak memory is aggregated over the benchmark process and all runner children.",
         "",
         "Raw values: [CSV](comparisons.csv) · [JSON](comparisons.json)",
     ]
+    if includes_performance_change:
+        lines.extend(["", f"Before/after summary: [{PERFORMANCE_CHANGE_REPORT}]({PERFORMANCE_CHANGE_REPORT})"])
     for comparison in COMPARISONS:
         lines.extend(["", f"## {comparison.title}", "", f"![{comparison.title}]({comparison.slug}.svg)"])
     return "\n".join(lines) + "\n"
 
 
-def _comparison_html(result: Any) -> str:
+def _comparison_html(result: Any, *, includes_performance_change: bool = False) -> str:
     """Return the standalone comparison browser page."""
 
     machine = html.escape(str(result.params.get("machine", "unknown")))
@@ -464,6 +663,11 @@ def _comparison_html(result: Any) -> str:
     for comparison in COMPARISONS:
         title = html.escape(comparison.title)
         sections.append(f'<section><h2>{title}</h2><img src="{comparison.slug}.svg" alt="{title}"></section>')
+    change_link = (
+        f'<p>Before/after summary: <a href="{PERFORMANCE_CHANGE_REPORT}">{PERFORMANCE_CHANGE_REPORT}</a></p>'
+        if includes_performance_change
+        else ""
+    )
     return "\n".join(
         [
             "<!doctype html>",
@@ -475,9 +679,10 @@ def _comparison_html(result: Any) -> str:
             '<p><a href="../index.html">GeoUtils benchmark results</a></p>',
             "<h1>Comparisons</h1>",
             f"<p>Commit <code>{commit}</code> on machine <code>{machine}</code></p>",
-            "<p>Operation time excludes implementation initialization. End-to-end time includes it but excludes "
-            "input generation. Peak RAM is aggregate RSS for the benchmark process and all implementation children.</p>",
+            "<p>Operation time excludes runner initialization. End-to-end time includes it but excludes input "
+            "generation. Peak memory is aggregated over the benchmark process and all runner children.</p>",
             '<p>Raw values: <a href="comparisons.csv">CSV</a> · ' '<a href="comparisons.json">JSON</a></p>',
+            change_link,
             *sections,
             "</body></html>",
         ]
@@ -510,13 +715,15 @@ def _site_index() -> str:
 def render_comparisons(
     result: Any,
     website_directory: Path,
-) -> list[ImplementationMeasurement]:
+    *,
+    baseline_result: Any | None = None,
+) -> list[ComparisonMeasurement]:
     """Write comparison plots and one landing page beside the native ASV site."""
 
     # All generated material stays under the gitignored ASV website directory
     report_directory = website_directory / COMPARISON_REPORT_DIRECTORY
     report_directory.mkdir(parents=True, exist_ok=True)
-    records = collect_implementation_measurements(result)
+    records = collect_comparison_measurements(result)
     for comparison in COMPARISONS:
         _plot_comparison(comparison, records, report_directory / f"{comparison.slug}.svg")
 
@@ -532,8 +739,17 @@ def render_comparisons(
         writer = csv.DictWriter(csv_file, fieldnames=list(asdict(records[0])))
         writer.writeheader()
         writer.writerows(asdict(record) for record in records)
-    (report_directory / "README.md").write_text(_markdown_report(result), encoding="utf-8")
-    (report_directory / "index.html").write_text(_comparison_html(result), encoding="utf-8")
+    includes_performance_change = baseline_result is not None
+    if baseline_result is not None:
+        (report_directory / PERFORMANCE_CHANGE_REPORT).write_text(
+            performance_change_markdown(baseline_result, result), encoding="utf-8"
+        )
+    (report_directory / "README.md").write_text(
+        _markdown_report(result, includes_performance_change=includes_performance_change), encoding="utf-8"
+    )
+    (report_directory / "index.html").write_text(
+        _comparison_html(result, includes_performance_change=includes_performance_change), encoding="utf-8"
+    )
 
     # A small stable root avoids modifying files generated internally by ASV
     website_directory.mkdir(parents=True, exist_ok=True)
@@ -552,6 +768,7 @@ def main() -> None:
     parser.add_argument("--doc-only", action="store_true")
     parser.add_argument("--machine")
     parser.add_argument("--commit")
+    parser.add_argument("--baseline-commit")
     parser.add_argument("--environment")
     args = parser.parse_args()
 
@@ -562,8 +779,17 @@ def main() -> None:
         commit=args.commit,
         environment=args.environment,
     )
+    baseline_result = None
+    if args.baseline_commit is not None:
+        baseline_result = select_asv_result(
+            args.results_directory,
+            machine=str(result.params.get("machine", "")),
+            commit=args.baseline_commit,
+            environment=str(getattr(result, "_env_name", "")),
+            require_complete=False,
+        )
     if not args.doc_only:
-        render_comparisons(result, args.website_directory)
+        render_comparisons(result, args.website_directory, baseline_result=baseline_result)
     if args.doc_dir is not None:
         render_documentation_snapshot(result, args.doc_dir)
     elif args.doc_only:

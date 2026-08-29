@@ -25,11 +25,48 @@ from typing import TYPE_CHECKING, Any
 import geopandas as gpd
 from rasterio.crs import CRS
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import (
+    _check_match_bbox,
+    get_geo_attr,
+    has_geo_attr,
+    is_dask_dataframe,
+)
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike
     from geoutils.vector.vector import VectorLike
+
+
+def _crop_geodataframe(
+    ds: gpd.GeoDataFrame,
+    bounds: tuple[float, float, float, float],
+    clip: bool,
+) -> gpd.GeoDataFrame:
+    """Crop one GeoDataFrame or Dask partition to bounding coordinates."""
+
+    xmin, ymin, xmax, ymax = bounds
+    cropped = ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
+    if clip:
+        cropped = cropped.clip(mask=bounds)
+    return cropped
+
+
+def _crop(source_vector: Any, bbox: Any, clip: bool) -> Any:
+    """Crop vector data, dispatching to eager or partitioned execution."""
+
+    xmin, ymin, xmax, ymax = (float(value) for value in _check_match_bbox(source_vector, bbox))
+    bounds = (xmin, ymin, xmax, ymax)
+    if is_dask_dataframe(source_vector.ds):
+        # Spatial partitions can discard unrelated partitions before reading their rows
+        if getattr(source_vector.ds, "spatial_partitions", None) is not None:
+            cropped = source_vector.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
+            if clip:
+                cropped = cropped.clip(mask=bounds)
+            return cropped
+
+        # Otherwise apply the same eager selection independently inside each partition
+        return source_vector.ds.map_partitions(_crop_geodataframe, bounds, clip, meta=source_vector.ds._meta)
+    return _crop_geodataframe(source_vector.ds, bounds=bounds, clip=clip)
 
 
 def _reproject(

@@ -205,9 +205,9 @@ class TestLargeData:
             assert not result.worker_restarted
 
             # Native imports form a directly measured baseline before the operation starts
-            baseline_worker_mb = result.dask_worker_baseline_rss_mb
+            baseline_worker_mb = result.dask_worker_baseline_mem_mb
             assert baseline_worker_mb is not None
-            peak_worker_mb = result.metrics.peak_dask_worker_process_rss_mb
+            peak_worker_mb = result.metrics.peak_dask_worker_process_mem_mb
             assert peak_worker_mb is not None
 
             # Additional worker memory must remain below the complete logical raster
@@ -218,17 +218,17 @@ class TestLargeData:
             assert result.worker_pids_after
 
             # Native imports form a fixed baseline that is unrelated to raster loading
-            child_trace = result.metrics.child_process_rss_mb
+            child_trace = result.metrics.child_process_mem_mb
             assert child_trace
             baseline_child_mb = child_trace[0][1]
-            peak_child_mb = result.metrics.peak_child_process_rss_mb
+            peak_child_mb = result.metrics.peak_child_process_mem_mb
             assert peak_child_mb is not None
 
             # Additional worker memory must remain below the complete logical raster
             assert peak_child_mb - baseline_child_mb < logical_mb
 
             # Aggregate process-tree memory is retained for reports and diagnostics
-            assert result.metrics.peak_process_tree_rss_mb is not None
+            assert result.metrics.peak_process_tree_mem_mb is not None
 
     @pytest.mark.parametrize("case_name", OPERATION_BENCHMARK_CASES)
     def test_operation_stays_out_of_core(self, case_name: str, large_data_config: BenchmarkConfig) -> None:
@@ -263,7 +263,7 @@ class TestLargeData:
         # A two-pixel support crosses chunk edges without creating unbounded point-cell pairs
         config = replace(
             large_data_config,
-            grid_resampling=resampling,
+            operation_method=resampling,
             grid_dist_nodata_pixel=2,
         )
 

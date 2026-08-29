@@ -29,7 +29,6 @@ import numpy as np
 from scipy.stats import iqr
 from scipy.stats.mstats import mquantiles
 
-from geoutils import profiler
 from geoutils._dispatch import is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
@@ -203,7 +202,6 @@ def _statistics_dask(
     return res_dict
 
 
-@profiler.profile("geoutils.stats.stats._statistics", memprof=True)
 def _statistics(
     data: NDArrayNum,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | Literal["all"] | None = None,

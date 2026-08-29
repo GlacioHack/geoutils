@@ -359,10 +359,8 @@ class TestGeoPandasMethods:
     def test_overridden_funcs_exist(self) -> None:
         """Check that all methods listed above exist in Vector."""
 
-        # Check that all methods declared in the class above exist in Vector
-        vector_methods = gu.Vector.__dict__
-
-        list_missing = [method for method in self.all_declared if method not in vector_methods.keys()]
+        # Shared GeoUtils methods may be inherited from VectorBase
+        list_missing = [method for method in self.all_declared if not hasattr(gu.Vector, method)]
 
         assert len(list_missing) == 0, print(f"Test method listed that is not in GeoUtils: {list_missing}")
 

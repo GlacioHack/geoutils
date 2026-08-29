@@ -7,6 +7,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Literal
 
+from benchmarks.workflows.registry import resolve_operation_parameters
 from benchmarks.workflows.runner import BenchmarkConfig
 
 ComparisonOperation = Literal["reproject", "polygonize", "rasterize", "grid"]
@@ -137,6 +138,12 @@ def build_gdal_command(
 
     if config.directory is None:
         raise ValueError("GDAL comparison commands require an explicit output directory")
+    operation_method, _, _ = resolve_operation_parameters(
+        operation,
+        config.operation_method,
+        config.calculation_engine,
+        config.operation_strategy,
+    )
 
     # Every raster command writes the same tiled dimensions and bounded GDAL cache
     height, width = config.shape
@@ -242,11 +249,11 @@ def build_gdal_command(
             "average_distance": "average_distance",
             "average_distance_pts": "average_distance_pts",
         }
-        if config.grid_resampling not in algorithms:
-            raise ValueError(f"GDAL has no matching gridding method for {config.grid_resampling!r}")
+        if operation_method not in algorithms:
+            raise ValueError(f"GDAL has no matching gridding method for {operation_method!r}")
 
         # A zero radius means unlimited nearest support and disables linear fallback outside the triangulation
-        if config.grid_resampling in ("nearest", "linear"):
+        if operation_method in ("nearest", "linear"):
             radius = (0.0, 0.0)
         else:
             pixel_width = 1 / width
@@ -258,7 +265,7 @@ def build_gdal_command(
         return build_gdal_grid_command(
             point_file,
             output_file,
-            algorithm=algorithms[config.grid_resampling],
+            algorithm=algorithms[operation_method],
             bounds=(7.0, 45.0, 8.0, 46.0),
             shape=config.shape,
             radius=radius,

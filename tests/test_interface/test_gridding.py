@@ -788,7 +788,7 @@ class TestGridChunked:
 
         assert expected.raster_equal(computed_output, warn_failure_reason=True, strict_masked=False)
 
-    @pytest.mark.parametrize("resampling", ["nearest", "mean"])
+    @pytest.mark.parametrize("resampling", ["nearest", "idw", "mean"])
     def test_grid__numba_chunked_backends(self, resampling: GriddingMethod, tmp_path: Path) -> None:
         """Ensure the Numba calculation engine is identical across eager, Dask and Multiprocessing backends."""
 

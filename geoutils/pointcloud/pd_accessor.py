@@ -106,7 +106,7 @@ def _infer_data_column(ds: Any) -> str | None:
 
 
 def _load_laspy_data_slice_dataframe(filename: str, columns: list[str], start: int, count: int) -> gpd.GeoDataFrame:
-    """Load a LAS slice as a GeoDataFrame suitable for Dask-GeoPandas."""
+    """Adapt the common LAS point-slice reader into one indexed Dask partition."""
 
     # Give every partition its source row range so indexes stay unique after assembly
     ds = load_laspy_data_slice(filename, columns, start, count)
@@ -150,9 +150,18 @@ def open_pointcloud(
     chunks: int | None = None,
 ) -> gpd.GeoDataFrame | Any:
     """
-    Open a point cloud as a GeoDataFrame or a lazy Dask-GeoPandas GeoDataFrame.
+    Open a point cloud as a GeoDataFrame or a lazy Dask-GeoPandas GeoDataFrame if ``chunks`` is passed.
 
-    LAS/LAZ files are opened through LasPy. Passing ``chunks`` returns lazy partitions of LAS point slices.
+    LAS, LAZ and COPC files are read through LasPy.
+    Other supported vector formats are read through PyOGRIO and GeoPandas.
+
+    :param filename: Path to the point-cloud file to open.
+    :param data_column: Column containing point values. For LAS, LAZ and COPC files, defaults to the native ``Z``
+        dimension.
+    :param columns: LAS dimensions to read. ``main`` reads the data column, ``all`` reads every dimension, and a list
+        selects specific dimensions. Ignored for other vector formats.
+    :param chunks: Number of points or features per Dask partition. If None, load eagerly into one GeoDataFrame.
+    :returns: An eager GeoDataFrame, or a lazy Dask-GeoPandas GeoDataFrame when ``chunks`` is passed.
     """
 
     from geoutils.pointcloud.pointcloud import PointCloud
@@ -397,7 +406,19 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         mp_config: Any = None,
         **kwargs: Any,
     ) -> None:
-        """Write the point cloud to LAS/LAZ/COPC file."""
+        """
+        Write the point cloud to a LAS, LAZ or COPC file.
+
+        :param filename: Path to the output file.
+        :param version: LAS file version.
+        :param point_format: LAS point format identifier.
+        :param offsets: Coordinate offsets for X, Y and Z.
+        :param scales: Coordinate scales for X, Y and Z.
+        :param chunks: Number of points per sequential write chunk. Dask inputs use their existing partitions.
+        :param mp_config: Multiprocessing configuration for writing eager point-cloud chunks in workers. Not supported
+            for Dask-backed point clouds.
+        :param kwargs: Additional attributes to set on the LasPy header.
+        """
 
         # The common writer streams Dask partitions or eager chunks as appropriate
         _write_laspy(

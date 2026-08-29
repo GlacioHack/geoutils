@@ -41,7 +41,9 @@ def open_raster(filename: str, is_mask: bool = False, **kwargs: Any) -> xr.DataA
     Open a raster using Rioxarray, always masked and squeezed.
 
     :param filename: Path to the raster file to open.
-    :param kwargs: Keyword to pass to rioxarray.open().
+    :param is_mask: Whether to return the raster values as booleans.
+    :param kwargs: Keyword arguments passed to :func:`rioxarray.open_rasterio`.
+    :returns: The opened raster as a Rioxarray DataArray.
     """
 
     # Open with Rioxarray, cast to float32 if integer type

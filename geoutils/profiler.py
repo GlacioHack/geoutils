@@ -18,19 +18,17 @@
 
 """Measure function runtime and memory for local inspection and controlled benchmarks.
 
-``profile_call`` returns normalized measurements used by the benchmark workflows and can plot them interactively,
-while ``Profiler`` collects decorated calls into a larger execution summary.
+``profile_call`` is the common measurement engine, while ``Profiler`` organizes decorated calls into a larger
+execution summary.
 """
 
 from __future__ import annotations
 
-import logging
 import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from functools import wraps
-from multiprocessing import Pipe, connection
 from threading import Event, Thread
 from typing import Any, Callable
 
@@ -51,17 +49,28 @@ class ProfileMetrics:
     """
 
     runtime_s: float
-    peak_client_rss_mb: float
-    peak_process_tree_rss_mb: float | None = None
-    peak_child_process_rss_mb: float | None = None
-    peak_dask_worker_process_rss_mb: float | None = None
+    peak_client_mem_mb: float
+    peak_process_tree_mem_mb: float | None = None
+    peak_child_process_mem_mb: float | None = None
+    peak_dask_worker_process_mem_mb: float | None = None
     peak_dask_spilled_mb: float | None = None
-    client_rss_mb: list[tuple[float, float]] = field(default_factory=list)
-    process_tree_rss_mb: list[tuple[float, float]] = field(default_factory=list)
-    child_process_rss_mb: list[tuple[float, float]] = field(default_factory=list)
-    dask_worker_process_rss_mb: list[tuple[float, float]] = field(default_factory=list)
+    client_mem_mb: list[tuple[float, float]] = field(default_factory=list)
+    process_tree_mem_mb: list[tuple[float, float]] = field(default_factory=list)
+    child_process_mem_mb: list[tuple[float, float]] = field(default_factory=list)
+    dask_worker_process_mem_mb: list[tuple[float, float]] = field(default_factory=list)
     dask_spilled_mb: list[tuple[float, float]] = field(default_factory=list)
     dask_client_detected: bool = False
+
+    def _memory_traces(self) -> tuple[tuple[str, list[tuple[float, float]]], ...]:
+        """Return every supported memory trace with its display name."""
+
+        return (
+            ("Python process", self.client_mem_mb),
+            ("Complete process tree", self.process_tree_mem_mb),
+            ("Largest child process", self.child_process_mem_mb),
+            ("Dask worker processes", self.dask_worker_process_mem_mb),
+            ("Dask spilled memory", self.dask_spilled_mb),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Return metrics as a plain dictionary."""
@@ -75,13 +84,7 @@ class ProfileMetrics:
         import_optional("plotly")
         import plotly.graph_objects as go
 
-        traces = (
-            ("Python process", self.client_rss_mb),
-            ("Complete process tree", self.process_tree_rss_mb),
-            ("Largest child process", self.child_process_rss_mb),
-            ("Dask worker processes", self.dask_worker_process_rss_mb),
-            ("Dask spilled memory", self.dask_spilled_mb),
-        )
+        traces = self._memory_traces()
 
         # Align psutil and Dask timestamps on one elapsed-time axis
         timestamps = [timestamp for _, trace in traces for timestamp, _ in trace]
@@ -110,8 +113,8 @@ class ProfileMetrics:
         return figure
 
 
-class _ProcessRSSSampler(Thread):
-    """Sample RSS memory for one process and, optionally, all its children."""
+class _ProcessMemorySampler(Thread):
+    """Sample memory for one process and, optionally, all its children."""
 
     def __init__(self, pid: int, interval: float, include_children: bool = False) -> None:
         """Prepare background sampling for one process ID and interval."""
@@ -136,7 +139,7 @@ class _ProcessRSSSampler(Thread):
     def run(self) -> None:
         """Run the sampler."""
 
-        # Record timestamped RSS until the profiled function signals completion
+        # Record timestamped memory until the profiled function signals completion
         while not self._stop_event.is_set():
             self._sample()
             self._stop_event.wait(self.interval)
@@ -144,29 +147,29 @@ class _ProcessRSSSampler(Thread):
         self._sample()
 
     def _sample(self) -> None:
-        """Record the parent, complete process tree and largest child RSS."""
+        """Record memory for the parent, complete process tree and largest child."""
 
         # A worker can finish between discovery and memory inspection
         psutil = import_optional("psutil")
         timestamp = time.time()
         try:
-            parent_rss_mb = self.process.memory_info().rss / MB
+            parent_mem_mb = self.process.memory_info().rss / MB
         except psutil.Error:
             return
-        self.samples_mb.append((timestamp, parent_rss_mb))
+        self.samples_mb.append((timestamp, parent_mem_mb))
 
         if not self.include_children:
             return
 
-        # Sum concurrent RSS so multiprocessing and subprocess runs use one boundary
-        child_rss_mb = []
+        # Sum concurrent memory so multiprocessing and subprocess runs use one boundary
+        child_mem_mb = []
         for child in self.process.children(recursive=True):
             try:
-                child_rss_mb.append(child.memory_info().rss / MB)
+                child_mem_mb.append(child.memory_info().rss / MB)
             except psutil.Error:
                 continue
-        self.process_tree_samples_mb.append((timestamp, parent_rss_mb + sum(child_rss_mb)))
-        self.child_process_samples_mb.append((timestamp, max(child_rss_mb, default=0.0)))
+        self.process_tree_samples_mb.append((timestamp, parent_mem_mb + sum(child_mem_mb)))
+        self.child_process_samples_mb.append((timestamp, max(child_mem_mb, default=0.0)))
 
 
 def _get_active_dask_client() -> Any | None:
@@ -217,15 +220,16 @@ def profile_call(
     dask: bool | None = None,
     client: Any | None = None,
     include_children: bool = False,
+    profile_memory: bool = True,
     **kwargs: Any,
 ) -> tuple[Any, ProfileMetrics]:
     """
     Profile one function call with the appropriate GeoUtils profiling backends.
 
-    The current/client Python process RSS is always sampled with psutil. If a distributed Dask client is active, or if
-    ``client`` is passed explicitly, Dask's :class:`distributed.diagnostics.MemorySampler` is also used to measure
-    aggregate worker process RSS and spilled memory. Child-process sampling can also be enabled for multiprocessing
-    and subprocess workflows.
+    When memory profiling is enabled, the current/client Python process memory is sampled with psutil. If a distributed
+    Dask client is active, or if ``client`` is passed explicitly, Dask's
+    :class:`distributed.diagnostics.MemorySampler` also measures aggregate worker process memory and spilled memory.
+    Child-process sampling can be enabled for multiprocessing and subprocess workflows.
 
     :param func: Callable to execute.
     :param args: Positional arguments passed to ``func``.
@@ -233,12 +237,19 @@ def profile_call(
     :param dask: Whether to force Dask worker-memory sampling. By default, an active distributed client is detected.
     :param client: Explicit distributed client to sample. If omitted, the active client is used when present.
     :param include_children: Whether to sample the complete process tree and the largest child process.
+    :param profile_memory: Whether to collect memory samples in addition to the runtime.
     :param kwargs: Keyword arguments passed to ``func``.
     :returns: Tuple of ``(result, metrics)``.
     """
 
     if interval <= 0:
         raise ValueError("Argument 'interval' must be strictly positive.")
+
+    # Timing-only calls use the same execution boundary without importing optional memory profilers
+    if not profile_memory:
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        return result, ProfileMetrics(runtime_s=time.time() - start_time, peak_client_mem_mb=0.0)
 
     # Prefer an explicit client, otherwise discover the active distributed context
     if client is None:
@@ -253,8 +264,8 @@ def profile_call(
         except ValueError as exc:
             raise ValueError("Dask profiling was requested, but no active distributed client was found.") from exc
 
-    # Client RSS is sampled in a background thread around the complete call
-    process_sampler = _ProcessRSSSampler(os.getpid(), interval=interval, include_children=include_children)
+    # Client memory is sampled in a background thread around the complete call
+    process_sampler = _ProcessMemorySampler(os.getpid(), interval=interval, include_children=include_children)
     process_sampler.start()
     start_time = time.time()
 
@@ -286,15 +297,15 @@ def profile_call(
     spilled_trace = _memory_sampler_trace_mb(spilled, "spilled") if spilled else []
     metrics = ProfileMetrics(
         runtime_s=runtime_s,
-        peak_client_rss_mb=max((value for _, value in client_trace), default=0.0),
-        peak_process_tree_rss_mb=max((value for _, value in process_tree_trace), default=None),
-        peak_child_process_rss_mb=max((value for _, value in child_process_trace), default=None),
-        peak_dask_worker_process_rss_mb=max((value for _, value in worker_process_trace), default=None),
+        peak_client_mem_mb=max((value for _, value in client_trace), default=0.0),
+        peak_process_tree_mem_mb=max((value for _, value in process_tree_trace), default=None),
+        peak_child_process_mem_mb=max((value for _, value in child_process_trace), default=None),
+        peak_dask_worker_process_mem_mb=max((value for _, value in worker_process_trace), default=None),
         peak_dask_spilled_mb=max((value for _, value in spilled_trace), default=None),
-        client_rss_mb=client_trace,
-        process_tree_rss_mb=process_tree_trace,
-        child_process_rss_mb=child_process_trace,
-        dask_worker_process_rss_mb=worker_process_trace,
+        client_mem_mb=client_trace,
+        process_tree_mem_mb=process_tree_trace,
+        child_process_mem_mb=child_process_trace,
+        dask_worker_process_mem_mb=worker_process_trace,
         dask_spilled_mb=spilled_trace,
         dask_client_detected=bool(use_dask),
     )
@@ -309,7 +320,7 @@ class Profiler:
     enabled = False
     save_graphs = False
     save_raw_data = False
-    columns = ["level", "uuid_function", "name", "uuid_parent", "time", "call_time", "memory"]
+    columns = ["level", "uuid_function", "name", "uuid_parent", "time", "call_time", "memory", "metrics"]
     _profiling_info = pd.DataFrame(columns=columns)
     selection_activated = False
     functions_selected = []
@@ -354,12 +365,22 @@ class Profiler:
         Profiler.functions_selected = []
 
     @staticmethod
-    def add_profiling_info(info: dict[str, float | int | Any | str | list[Any] | None]) -> None:
+    def add_profiling_info(info: dict[str, Any]) -> None:
         """
         Add profiling info to the profiling DataFrame.
 
         :param info: dictionary with profiling data keys
         """
+        memory = info["memory"]
+        metrics = info.get("metrics")
+        if metrics is None:
+            memory_trace = memory if isinstance(memory, list) else []
+            metrics = ProfileMetrics(
+                runtime_s=float(info["time"]),
+                peak_client_mem_mb=max((value for _, value in memory_trace), default=0.0),
+                client_mem_mb=memory_trace,
+            )
+
         Profiler._profiling_info.loc[len(Profiler._profiling_info)] = {
             "level": info["level"],
             "uuid_function": info["uuid_function"],
@@ -367,7 +388,8 @@ class Profiler:
             "uuid_parent": info["uuid_parent"],
             "time": info["time"],
             "call_time": info["call_time"],
-            "memory": info["memory"],
+            "memory": memory,
+            "metrics": metrics,
         }
 
     @staticmethod
@@ -377,9 +399,6 @@ class Profiler:
 
         :param output: Output directory path, if None output is "output_profiling" in the current directory
         """
-
-        import_optional("plotly")
-        import plotly.express as px
 
         if output is None:
             output = "output_profiling"
@@ -392,32 +411,50 @@ class Profiler:
 
         if Profiler.save_raw_data:
             Profiler._profiling_info.to_pickle(os.path.join(output, "raw_data.pickle"))
-        Profiler._profiling_info["text_display"] = (
-            Profiler._profiling_info["name"] + " (" + Profiler._profiling_info["time"].round(2).astype(str) + " s)"
-        )
 
         if Profiler.save_graphs:
-            # time profiling flame graph
-            fig = px.icicle(
-                Profiler._profiling_info,
-                names="text_display",
-                ids="uuid_function",
-                parents="uuid_parent",
-                values="time",
-                title="Time profiling icicle graph (functions tagged only)",
-                color="time",
-                color_continuous_scale="thermal",
-                branchvalues="total",
-            )
-
-            fig.update_traces(tiling_orientation="v")
-
-            fig.write_html(os.path.join(output, "time_graph.html"))
+            Profiler.plot_time_summary(os.path.join(output, "time_graph.html"))
 
             # memory profiling graph
             for _, call_row in Profiler._profiling_info[Profiler._profiling_info["memory"].notnull()].iterrows():
                 path_fig = os.path.join(output, "memory_{}.html".format(call_row["name"]))
                 Profiler.plot_trace_for_call(call_row["uuid_function"], "memory", path_fig)
+
+    @staticmethod
+    def plot_time_summary(path_fig: str | None = None) -> Any | None:
+        """
+        Plot the runtime hierarchy for all collected calls.
+
+        :param path_fig: Optional path where the Plotly figure is saved as HTML.
+        :returns: Plotly figure, or None when no calls have been collected.
+        """
+
+        if Profiler._profiling_info.empty:
+            return None
+
+        import_optional("plotly")
+        import plotly.express as px
+
+        profiling_info = Profiler._profiling_info.copy()
+        profiling_info["text_display"] = (
+            profiling_info["name"] + " (" + profiling_info["time"].round(2).astype(str) + " s)"
+        )
+        fig = px.icicle(
+            profiling_info,
+            names="text_display",
+            ids="uuid_function",
+            parents="uuid_parent",
+            values="time",
+            title="Time profiling icicle graph (functions tagged only)",
+            color="time",
+            color_continuous_scale="thermal",
+            branchvalues="total",
+        )
+        fig.update_traces(tiling_orientation="v")
+
+        if path_fig is not None:
+            fig.write_html(path_fig)
+        return fig
 
     @staticmethod
     def get_profiling_info(function_name: str = None) -> pd.DataFrame:
@@ -463,15 +500,30 @@ class Profiler:
         parent_row = parent_row.iloc[0]
 
         call_start_time = parent_row["call_time"]
-        times = [data[0] - call_start_time for data in parent_row[data_name]]
-        values = [data[1] for data in parent_row[data_name]]
+        metrics = parent_row.get("metrics")
+        if data_name == "memory" and isinstance(metrics, ProfileMetrics):
+            traces = tuple((name, trace) for name, trace in metrics._memory_traces() if trace)
+        else:
+            traces = ((f"{data_name} usage", parent_row[data_name]),)
+
+        values = [value for _, trace in traces for _, value in trace]
+        if not values:
+            return None
 
         # Collect subcalls (direct children)
         subcalls = Profiler._profiling_info[Profiler._profiling_info["uuid_parent"] == uuid_function]
 
-        # Plot memory usage line
+        # Plot all measurements collected for this resource
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=times, y=values, mode="lines+markers", name=f"{data_name} usage"))
+        for trace_name, trace in traces:
+            fig.add_trace(
+                go.Scatter(
+                    x=[timestamp - call_start_time for timestamp, _ in trace],
+                    y=[value for _, value in trace],
+                    mode="lines+markers",
+                    name=trace_name,
+                )
+            )
 
         # Base Y position for markers
         base_y = max(values)
@@ -548,7 +600,7 @@ class Profiler:
             current_offset += offset_step
 
         fig.update_layout(
-            title="{} usage during {} call".format(data_name, parent_row["name"]),
+            title="{} usage during {}".format(data_name.capitalize(), parent_row["name"]),
             xaxis_title="Time (s)",
             yaxis_title="Memory (MB)",
             showlegend=True,
@@ -560,7 +612,13 @@ class Profiler:
         return fig
 
 
-def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  # type: ignore
+def profile(
+    name: str,
+    interval: int | float = 0.005,
+    memprof: bool = False,
+    *,
+    collect: bool = True,
+) -> Any:
     """
     Geoutils profiling decorator
 
@@ -572,6 +630,7 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
     :param name: name of the function in the report
     :param interval: memory sampling interval (seconds)
     :param memprof: whether to profile the memory consumption
+    :param collect: whether calls to the decorated function are collected
 
     :example:
         from geoutils import profiler
@@ -597,7 +656,7 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
             """
             # if profiling is disabled, remove overhead
 
-            if not Profiler.enabled:
+            if not collect or not Profiler.enabled:
                 return func(*args, **kwargs)
 
             func_name = name
@@ -612,33 +671,25 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
                 func_name = func.__name__.capitalize()
 
             Profiler.running_processes.append(uuid_function)
-
-            if memprof:
-                # Launch memory profiling thread
-                child_pipe, parent_pipe = Pipe()
-                thread_monitoring = MemProf(os.getpid(), child_pipe, interval=interval)
-                thread_monitoring.start()
-                if parent_pipe.poll(1):  # wait for thread to start
-                    parent_pipe.recv()
-
-            start_time = time.time()
-            res = func(*args, **kwargs)
-            total_time = time.time() - start_time
-
-            if memprof:
-                # end memprofiling monitoring
-                parent_pipe.send(0)
-
-            Profiler.running_processes.pop(-1)  # remove function from call list
+            call_time = time.time()
+            try:
+                res, metrics = profile_call(
+                    lambda: func(*args, **kwargs),
+                    interval=float(interval),
+                    profile_memory=memprof,
+                )
+            finally:
+                Profiler.running_processes.pop(-1)  # remove function from call list
 
             func_data = {
                 "level": level,
                 "uuid_function": uuid_function,
                 "name": func_name,
                 "uuid_parent": uuid_parent,
-                "time": total_time,
-                "call_time": start_time,
-                "memory": thread_monitoring.mem_data if memprof else None,
+                "time": metrics.runtime_s,
+                "call_time": call_time,
+                "memory": metrics.client_mem_mb if memprof else None,
+                "metrics": metrics,
             }
             Profiler.add_profiling_info(func_data)
             return res
@@ -646,50 +697,3 @@ def profile(name: str, interval: int | float = 0.005, memprof: bool = False):  #
         return wrapper_profile
 
     return decorator_generator
-
-
-class MemProf(Thread):
-    """
-    MemProf
-
-    Profiling thread
-    """
-
-    def __init__(self, pid: int, pipe: connection.Connection, interval: float) -> None:
-        """
-        Init function of MemProf
-
-        :param pid: The process ID of the monitored process
-        :param pipe: The pipe used to send the end monitoring signal
-        :param interval: Time interval (seconds) between memory measurements
-        """
-        psutil = import_optional("psutil")
-
-        super().__init__()
-        self.pipe = pipe
-        self.interval = interval
-        self.process = psutil.Process(pid)
-        self.mem_data = []
-
-    def run(self) -> None:
-        """
-        Run the memory profiling thread
-        """
-
-        try:
-            # tell parent profiling is ready
-            self.pipe.send(0)
-
-            while True:
-
-                timestamp = time.time()
-
-                # Get memory in megabytes
-                current_mem = self.process.memory_info().rss / 1000000
-                self.mem_data.append((timestamp, current_mem))
-
-                if self.pipe.poll(self.interval):
-                    break
-
-        except BrokenPipeError:
-            logging.debug("Broken pipe error in log wrapper.")

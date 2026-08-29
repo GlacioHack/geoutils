@@ -115,6 +115,7 @@ class TestClassVsAccessorConsistency:
         ("to_array", {}),
         ("to_tuples", {}),
         ("pointcloud_equal", {"other": "self"}),
+        ("pointcloud_allclose", {"other": "self"}),
         ("georeferenced_coords_equal", {"pc": "self"}),
         ("get_stats", {}),
         ("subsample", {"subsample": 2, "random_state": 42}),
@@ -204,6 +205,36 @@ class TestClassVsAccessorConsistency:
         if len(list_missing) != 0:
             raise NeedsTestError(f"PointCloudBase methods not covered by tests: {list_missing}")
 
+    def test_equality__cross_type_and_tolerance(self) -> None:
+        """Check that equality accepts both APIs while allclose tolerates small numeric differences."""
+
+        pointcloud = PointCloud(self.ds, data_column="b1")
+        exact_ds = self.ds.copy()
+        exact_ds.pc.set_data_column("b1")
+        close_ds = self.ds.copy()
+        close_ds.geometry = close_ds.geometry.translate(xoff=1e-9)
+        close_ds["b1"] += 1e-9
+        close_ds.pc.set_data_column("b1")
+
+        assert pointcloud.pointcloud_equal(exact_ds.pc)
+        assert exact_ds.pc.pointcloud_equal(pointcloud)
+        assert not pointcloud.pointcloud_equal(close_ds)
+        assert pointcloud.pointcloud_allclose(close_ds, atol=1e-8)
+        assert close_ds.pc.pointcloud_allclose(pointcloud, atol=1e-8)
+        assert not pointcloud.pointcloud_allclose(close_ds, rtol=0, atol=1e-10)
+
+    def test_shared_methods_and_arithmetic_ownership(self) -> None:
+        """Check that shared operations live in the base while arithmetic remains exclusive to PointCloud."""
+
+        shared_methods = {"from_xyz", "pointcloud_equal", "pointcloud_allclose", "get_stats", "grid"}
+        assert shared_methods <= set(PointCloudBase.__dict__)
+        assert shared_methods.isdisjoint(PointCloud.__dict__)
+        assert "__add__" not in PointCloudBase.__dict__
+        assert "__add__" in PointCloud.__dict__
+
+        with pytest.raises(TypeError):
+            self.ds.pc + 1
+
 
 class TestAccessorDask:
     """Test Dask loading and laziness of the "pc" Pandas accessor."""
@@ -237,7 +268,7 @@ class TestAccessorDask:
         """
 
         # Load both lazy dataframe and lazy array types used by this test
-        dgpd = pytest.importorskip("dask_geopandas")
+        pytest.importorskip("dask_geopandas")
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
             import dask.array as da
@@ -249,23 +280,6 @@ class TestAccessorDask:
 
         ds = gu.open_pointcloud(temp_file, data_column="b1", chunks=2)
         pc = PointCloud(self.ds, data_column="b1")
-
-        # Arithmetic should remain lazy only for the Dask-backed accessor
-        output_ds = ds.pc + 1
-        output_pc = pc + 1
-
-        assert not ds.pc.is_loaded
-        assert isinstance(output_ds, dgpd.GeoDataFrame)
-        assert not output_ds.pc.is_loaded
-        assert output_pc.is_loaded
-
-        # Compute the accessor result and compare both coordinates and values
-        output_ds_comp = _as_geodataframe(output_ds.compute(), crs=ds.pc.crs)
-        output_ds_pc = PointCloud(output_ds_comp, data_column="b1")
-        assert output_pc.georeferenced_coords_equal(output_ds_pc)
-        assert np.array_equal(output_pc.data, output_ds_pc.data)
-        assert not ds.pc.is_loaded
-        assert not output_ds.pc.is_loaded
 
         # Array conversion should create a Dask array with the eager values
         array_ds = ds.pc.to_array()

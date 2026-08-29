@@ -35,7 +35,6 @@ from rasterio.enums import Resampling
 from shapely.geometry import box
 from shapely.strtree import STRtree
 
-from geoutils import profiler
 from geoutils._config import config
 from geoutils._dispatch import _check_match_bbox, _check_match_grid
 from geoutils._misc import import_optional, silence_rasterio_message
@@ -768,7 +767,6 @@ def _multiproc_reproject(
     _write_multiproc_result(tasks, mp_config, file_metadata)
 
 
-@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)
 def _reproject(
     source_raster: RasterType,
     ref: RasterLike,
@@ -868,7 +866,6 @@ def _reproject(
 #########
 
 
-@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)
 def _crop(
     source_raster: RasterType,
     bbox: RasterLike | VectorLike | tuple[float, float, float, float],
@@ -955,7 +952,6 @@ def _crop(
 ##############
 
 
-@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)
 def _translate(
     transform: affine.Affine,
     xoff: float,

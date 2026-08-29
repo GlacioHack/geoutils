@@ -100,6 +100,7 @@ class TestClassVsAccessorConsistency:
     methods_and_kwargs = [
         ("copy", {}),
         ("vector_equal", {"other": "self"}),
+        ("vector_allclose", {"other": "self"}),
         ("crop", {"bbox": (-1, -1, 3, 3)}),
         ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("translate", {"xoff": 1, "yoff": 2}),
@@ -182,6 +183,27 @@ class TestClassVsAccessorConsistency:
         for text in ["Coordinate system", "Extent", "Number of features", "Attributes"]:
             assert text in output_vector
             assert text in output_ds
+
+    def test_equality__cross_type_and_tolerance(self) -> None:
+        """Check that equality accepts both APIs while allclose tolerates small coordinate differences."""
+
+        vector = Vector(self.ds)
+        close_ds = self.ds.copy()
+        close_ds.geometry = close_ds.geometry.translate(xoff=1e-9)
+
+        assert vector.vector_equal(self.ds.vct)
+        assert self.ds.vct.vector_equal(vector)
+        assert not vector.vector_equal(close_ds)
+        assert vector.vector_allclose(close_ds, atol=1e-8)
+        assert close_ds.vct.vector_allclose(vector, atol=1e-8)
+        assert not vector.vector_allclose(close_ds, rtol=0, atol=1e-10)
+
+    def test_shared_methods_are_owned_by_base(self) -> None:
+        """Check that GeoUtils operations shared with the accessor are not redefined on Vector."""
+
+        shared_methods = {"vector_equal", "vector_allclose", "crop", "reproject", "rasterize", "proximity"}
+        assert shared_methods <= set(VectorBase.__dict__)
+        assert shared_methods.isdisjoint(Vector.__dict__)
 
     def test_methods__test_coverage(self) -> None:
         """Test that checks that all existing VectorBase methods are tested above."""

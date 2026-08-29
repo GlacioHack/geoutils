@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Base classes for vector objects and the ``vct`` Pandas accessor."""
+"""Base class for vector object and the ``vct`` Pandas accessor."""
 
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ from pyproj import CRS
 
 from geoutils import profiler
 from geoutils._dispatch import (
-    _check_match_bbox,
     get_geo_attr,
     has_geo_attr,
     is_dask_dataframe,
@@ -50,7 +49,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
-from geoutils.vector.transformation import _reproject
+from geoutils.vector.transformation import _crop, _reproject
 
 if TYPE_CHECKING:
     import matplotlib
@@ -66,26 +65,37 @@ VectorBaseLike = Union["VectorBase", gpd.GeoDataFrame]
 def _as_geodataframe(obj: Any) -> gpd.GeoDataFrame:
     """Return a GeoDataFrame from a Vector-like object."""
 
-    if isinstance(obj, gpd.GeoDataFrame):
-        return obj
-    return obj.ds
+    ds = obj if isinstance(obj, gpd.GeoDataFrame) else get_geo_attr(obj, "ds")
+    if is_dask_dataframe(ds):
+        ds = ds.compute()
+    if not isinstance(ds, gpd.GeoDataFrame):
+        raise TypeError(f"Expected a Vector or GeoDataFrame, received {type(obj).__name__}.")
+    return ds
 
 
-def _crop_geodataframe(
-    ds: gpd.GeoDataFrame,
-    bounds: tuple[float, float, float, float],
-    clip: bool,
-) -> gpd.GeoDataFrame:
-    """Crop one GeoDataFrame or Dask partition to bounding coordinates."""
+def _geometry_allclose(left: Any, right: Any, rtol: float, atol: float) -> bool:
+    """Return whether two geometries have the same structure and numerically close coordinates."""
 
-    # Select every geometry intersecting the requested extent
-    xmin, ymin, xmax, ymax = bounds
-    cropped = ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
+    from shapely import get_coordinates
 
-    # Optionally trim selected geometries at the exact bounds
-    if clip:
-        cropped = cropped.clip(mask=bounds)
-    return cropped
+    if left is None or right is None:
+        return left is right
+    if left.geom_type != right.geom_type:
+        return False
+
+    left_coordinates = get_coordinates(left, include_z=True)
+    right_coordinates = get_coordinates(right, include_z=True)
+    if left_coordinates.shape != right_coordinates.shape or not np.allclose(
+        left_coordinates, right_coordinates, rtol=rtol, atol=atol, equal_nan=True
+    ):
+        return False
+
+    # ``equals_exact`` additionally checks the geometry and ring/component structure
+    coordinate_scale = max(
+        float(np.nanmax(np.abs(left_coordinates), initial=0)),
+        float(np.nanmax(np.abs(right_coordinates), initial=0)),
+    )
+    return bool(left.equals_exact(right, tolerance=atol + rtol * coordinate_scale))
 
 
 class VectorBase(ABC):
@@ -108,7 +118,7 @@ class VectorBase(ABC):
     def _is_pd(self) -> bool:
         """Whether the object is backed by a Pandas/GeoPandas accessor."""
 
-        return self._obj is not None
+        return getattr(self, "_obj", None) is not None
 
     def _cast_raster_output(self, raster: Any) -> Any:
         """Return an accessor-backed raster when this vector is accessor-backed."""
@@ -205,16 +215,64 @@ class VectorBase(ABC):
         """
         Check if two vectors are equal.
 
-        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
+        :param other: Vector, vector accessor or GeoDataFrame to compare.
+        :param kwargs: Keyword arguments passed to :func:`geopandas.testing.assert_geodataframe_equal`.
+        :returns: True if geometry, data and metadata are equal.
         """
 
         try:
-            assert_geodataframe_equal(self.ds, _as_geodataframe(other), **kwargs)
-            vector_eq = True
-        except AssertionError:
-            vector_eq = False
+            assert_geodataframe_equal(_as_geodataframe(self), _as_geodataframe(other), **kwargs)
+        except (AssertionError, AttributeError, TypeError):
+            return False
+        return True
 
-        return vector_eq
+    def vector_allclose(self, other: Any, rtol: float = 1e-5, atol: float = 1e-8, **kwargs: Any) -> bool:
+        """
+        Check that two vectors have equal metadata and numerically close coordinates and columns.
+
+        :param other: Vector, vector accessor or GeoDataFrame to compare.
+        :param rtol: Relative tolerance for geometry coordinates and numeric columns.
+        :param atol: Absolute tolerance for geometry coordinates and numeric columns.
+        :param kwargs: Additional comparison options. ``check_dtype=False`` allows numeric dtypes to differ.
+        :returns: True if metadata are equal and numeric values are within tolerance.
+        """
+
+        try:
+            left = _as_geodataframe(self)
+            right = _as_geodataframe(other)
+        except (AttributeError, TypeError):
+            return False
+
+        # Shape, schema, index and CRS must still match exactly
+        if (
+            left.shape != right.shape
+            or not left.columns.equals(right.columns)
+            or not left.index.equals(right.index)
+            or left.crs != right.crs
+            or left.active_geometry_name != right.active_geometry_name
+        ):
+            return False
+
+        geometry_name = left.active_geometry_name
+        check_dtype = kwargs.get("check_dtype", True)
+        for column in left.columns:
+            if check_dtype and left[column].dtype != right[column].dtype:
+                return False
+            if column == geometry_name:
+                if not all(
+                    _geometry_allclose(left_geometry, right_geometry, rtol=rtol, atol=atol)
+                    for left_geometry, right_geometry in zip(left.geometry, right.geometry)
+                ):
+                    return False
+            elif pd.api.types.is_numeric_dtype(left[column].dtype) and pd.api.types.is_numeric_dtype(
+                right[column].dtype
+            ):
+                if not np.allclose(left[column], right[column], rtol=rtol, atol=atol, equal_nan=True):
+                    return False
+            elif not left[column].equals(right[column]):
+                return False
+
+        return True
 
     def __repr__(self) -> str:
         """Convert vector to string representation."""
@@ -446,20 +504,7 @@ class VectorBase(ABC):
         if bbox is None:
             raise ValueError("Argument 'bbox' must be passed.")
 
-        xmin, ymin, xmax, ymax = (float(value) for value in _check_match_bbox(self, bbox))
-
-        bounds = (xmin, ymin, xmax, ymax)
-        if is_dask_dataframe(self.ds):
-            # Spatial partitions can discard unrelated partitions before reading their rows
-            if getattr(self.ds, "spatial_partitions", None) is not None:
-                new_ds = self.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
-                if clip:
-                    new_ds = new_ds.clip(mask=bounds)
-            else:
-                # Otherwise apply the same eager selection independently inside each partition
-                new_ds = self.ds.map_partitions(_crop_geodataframe, bounds, clip, meta=self.ds._meta)
-        else:
-            new_ds = _crop_geodataframe(self.ds, bounds=bounds, clip=clip)
+        new_ds = _crop(self, bbox=bbox, clip=clip)
 
         if inplace:
             self.ds = new_ds

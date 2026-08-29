@@ -1000,3 +1000,27 @@ def _subsample(
         # NumPy
         else:
             return _subsample_numpy(arr, **subsample_kwargs)  # type: ignore
+
+
+def _subsample_pointcloud(
+    source_pointcloud: Any,
+    subsample: float | int,
+    return_indices: bool = False,
+    random_state: int | np.random.Generator | None = None,
+) -> NDArrayNum | tuple[NDArrayNum, ...]:
+    """Subsample point-cloud values after materializing any lazy data column."""
+
+    data = source_pointcloud.data.compute().values if source_pointcloud._is_dask else np.asarray(source_pointcloud.data)
+    if return_indices:
+        return _subsample_numpy(
+            array=data,
+            subsample=subsample,
+            return_indices=True,
+            random_state=random_state,
+        )
+    return _subsample_numpy(
+        array=data,
+        subsample=subsample,
+        return_indices=False,
+        random_state=random_state,
+    )

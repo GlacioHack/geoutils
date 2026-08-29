@@ -4,13 +4,13 @@ This directory contains repeatable performance measurements and pass/fail large 
 
 ## Organization
 
-- `workflows/` defines deterministic inputs, combinations of operation/backends and result computation shared by
-  every suite (ASV benchmark + large data tests),
-- `asv_suite/operations.py` measures each operation with one fixed configuration of input parameters,
-- `asv_suite/comparisons.py` measures certain operations across specific input parameters (e.g. raster size) for eager,
-  Dask, Multiprocessing and, when available, GDAL.
-- `asv_suite/render_results.py` renders the ASV raw measurements into implementation comparisons and the two concise
-  graphics used by the documentation,
+- `workflows/` defines deterministic inputs, operation methods, calculation engines, chunk strategies, execution modes
+  and result computation shared by every suite (ASV benchmark + large data tests),
+- `asv_suite/operations.py` measures operations without a dedicated scaling comparison at one fixed configuration,
+- `asv_suite/comparisons.py` defines one-axis comparisons and generates their valid ASV cases and classes, with fixed
+  Numba worker checks and the GDAL CLI kept as a separate external reference,
+- `asv_suite/render_results.py` renders the raw measurements into method, engine, strategy and execution-mode
+  comparisons and the two concise graphics used by the documentation,
 - `gdal_comparison/` contains the GDAL CLI equivalent operations for performance comparison,
 - `test_large_data.py` verifies that every supported Dask and Multiprocessing operation computes correctly without
   loading the complete raster into memory.
@@ -38,16 +38,16 @@ To save the results and generate the HTML report locally, omit `--quick`, then r
 `python -m benchmarks.asv_suite.render_results`. Then open `results/asv/html/index.html` for the native ASV
 history and the comparison plots.
 
-In CI, `benchmark-asv-check` verifies changed benchmarks on every pull request. The weekly or manually triggered
-`benchmark-asv` workflow records measurements on new `main` commits, and stores their raw history on
+Pass `--baseline-commit <commit>` to the renderer to add `comparisons/performance-change.md`, a compact before/after
+table for eager, Dask and Multiprocessing end-to-end time normalized to the GDAL CLI on the same revision.
+
+In CI, `benchmark-asv-check` verifies changed benchmarks on every pull request (using `GEOUTILS_ASV_PR_CHECK=1` to use
+reduced parameters). The weekly or manually triggered `benchmark-asv` workflow records measurements on new `main`
+commits and stores their raw history on
 the `asv-results` branch of this repository. After a successful run, `benchmark-publish` automatically
 rebuilds the latest saved history and deploys the website and documentation graphics to GitHub Pages.
 Trigger it manually only to rebuild these outputs without new measurements.
 The user documentation links to the latest complete graphics published there.
-
-The pull-request quick pass sets `GEOUTILS_ASV_PR_CHECK=1` to execute every benchmark with reduced checked-in
-parameters and smaller operation fixtures. ASV definition checks and recorded benchmark runs retain the complete
-inputs.
 
 The benchmark dependencies include Pytest because ASV imports every Python module under `benchmarks/` during
 discovery, including the large data test, without executing its tests.

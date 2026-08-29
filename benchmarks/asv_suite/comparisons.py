@@ -1,166 +1,512 @@
-"""Measure parameter-dependent time and RAM across GeoUtils backends and GDAL."""
+"""Measure time and RAM while varying one benchmark dimension at a time."""
 
 from __future__ import annotations
 
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, cast
 
-from benchmarks.asv_suite import asv_parameter_values
+from benchmarks.asv_suite import asv_parameter_values, asv_pr_check_enabled
 from benchmarks.gdal_comparison.commands import ComparisonOperation
 from benchmarks.gdal_comparison.runner import GdalRunner
-from benchmarks.workflows.registry import OperationName
+from benchmarks.workflows.registry import (
+    OPERATION_METHODS,
+    OPERATION_STRATEGIES,
+    CalculationEngine,
+    ExecutionMode,
+    OperationName,
+    OperationStrategyName,
+)
 from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
-from geoutils.interface.gridding import GriddingEngine, GriddingMethod
 
-Implementation = Literal["eager", "dask", "multiprocessing", "gdal"]
+ComparisonDimension = Literal["method", "calculation_engine", "strategy", "execution_mode"]
+ExternalReference = Literal["gdal_cli"]
+GDAL_CLI_LABEL = "GDAL CLI"
+
+EXECUTION_MODE_LABELS: dict[ExecutionMode, str] = {
+    "eager": "Eager",
+    "dask": "Dask",
+    "multiprocessing": "Multiprocessing",
+}
+CALCULATION_ENGINE_LABELS: dict[CalculationEngine, str] = {
+    "scipy": "SciPy",
+    "numba": "Numba",
+    "rasterio": "Rasterio/GDAL",
+}
+METHOD_LABELS = {
+    "nearest": "Nearest",
+    "linear": "Linear (Delaunay)",
+    "idw": "Inverse-distance",
+    "mean": "Circular mean",
+}
+STRATEGY_LABELS: dict[OperationStrategyName, str] = {
+    "sequential": "Sequential",
+    "topk": "Top-k",
+    "label_union": "Label union",
+    "label_stitch": "Label stitch",
+    "geometry_stitch": "Geometry stitch",
+}
+
+
+def _class_token(value: str) -> str:
+    """Convert one stable dimension value to part of an ASV class name."""
+
+    return "".join(token.capitalize() for token in value.replace("_", "-").split("-"))
+
+
+@dataclass(frozen=True)
+class BenchmarkCase:
+    """Identify one valid GeoUtils method, engine, strategy and execution-mode case."""
+
+    comparison_group: str
+    operation: OperationName
+    method: str | None
+    calculation_engine: CalculationEngine | None
+    strategy: OperationStrategyName | None
+    execution_mode: ExecutionMode
+    pr_check: bool = False
+
+    @property
+    def benchmark_class(self) -> str:
+        """Return the generated public ASV class name for this case."""
+
+        values = (
+            self.execution_mode,
+            self.method,
+            self.calculation_engine,
+            self.strategy,
+            self.comparison_group,
+        )
+        return "".join(_class_token(value) for value in values if value is not None)
+
+
+@dataclass(frozen=True)
+class ExternalReferenceCase:
+    """Identify one external reference without treating it as an engine or execution mode."""
+
+    comparison_group: str
+    operation: OperationName
+    method: str | None
+    external_reference: ExternalReference
+    pr_check: bool = False
+    strategy: None = None
+
+    @property
+    def benchmark_class(self) -> str:
+        """Return the generated public ASV class name for this reference."""
+
+        values = (self.external_reference, self.method, self.comparison_group)
+        return "".join(_class_token(value) for value in values if value is not None)
+
+
+def _execution_cases(
+    comparison_group: str,
+    operation: OperationName,
+    method: str | None,
+    calculation_engine: CalculationEngine | None,
+    *,
+    strategy: OperationStrategyName | None = None,
+    execution_modes: tuple[ExecutionMode, ...] = ("eager", "dask", "multiprocessing"),
+    pr_modes: tuple[ExecutionMode, ...] = (),
+) -> tuple[BenchmarkCase, ...]:
+    """Generate an execution-mode comparison around fixed numerical dimensions."""
+
+    return tuple(
+        BenchmarkCase(
+            comparison_group,
+            operation,
+            method,
+            calculation_engine,
+            strategy if execution_mode != "eager" else None,
+            execution_mode,
+            pr_check=execution_mode in pr_modes,
+        )
+        for execution_mode in execution_modes
+    )
+
+
+def _engine_cases(
+    comparison_group: str,
+    operation: OperationName,
+    method: str | None,
+    *,
+    execution_mode: ExecutionMode = "eager",
+    strategy: OperationStrategyName | None = None,
+    pr_engines: tuple[CalculationEngine, ...] = (),
+) -> tuple[BenchmarkCase, ...]:
+    """Generate an engine comparison for one method and execution mode."""
+
+    if execution_mode == "eager" and strategy is not None:
+        raise ValueError("Chunk strategies cannot be fixed for an eager engine comparison")
+    specification = next(item for item in OPERATION_METHODS if item.operation == operation and item.method == method)
+    return tuple(
+        BenchmarkCase(
+            comparison_group,
+            operation,
+            method,
+            calculation_engine,
+            strategy,
+            execution_mode,
+            pr_check=calculation_engine in pr_engines,
+        )
+        for calculation_engine in specification.calculation_engines
+    )
+
+
+def _method_cases(
+    comparison_group: str,
+    operation: OperationName,
+    methods: tuple[str, ...],
+    calculation_engine: CalculationEngine,
+    *,
+    execution_mode: ExecutionMode = "eager",
+    strategy: OperationStrategyName | None = None,
+) -> tuple[BenchmarkCase, ...]:
+    """Generate a method comparison for one engine, strategy and execution mode."""
+
+    if execution_mode == "eager" and strategy is not None:
+        raise ValueError("Chunk strategies cannot be fixed for an eager method comparison")
+    supported = {item.method: item.calculation_engines for item in OPERATION_METHODS if item.operation == operation}
+    if any(calculation_engine not in supported.get(method, ()) for method in methods):
+        raise ValueError(f"Engine {calculation_engine!r} does not support every requested {operation!r} method")
+    return tuple(
+        BenchmarkCase(
+            comparison_group,
+            operation,
+            method,
+            calculation_engine,
+            strategy,
+            execution_mode,
+        )
+        for method in methods
+    )
+
+
+def _strategy_cases(
+    comparison_group: str,
+    operation: OperationName,
+    method: str | None,
+    calculation_engine: CalculationEngine | None,
+    *,
+    execution_mode: Literal["dask", "multiprocessing"],
+) -> tuple[BenchmarkCase, ...]:
+    """Generate a comparison of approaches for coordinating one chunked operation."""
+
+    strategies = tuple(item.strategy for item in OPERATION_STRATEGIES if item.operation == operation)
+    return tuple(
+        BenchmarkCase(
+            comparison_group,
+            operation,
+            method,
+            calculation_engine,
+            strategy,
+            execution_mode,
+        )
+        for strategy in strategies
+    )
+
+
+def _merge_cases(*groups: tuple[BenchmarkCase, ...]) -> tuple[BenchmarkCase, ...]:
+    """Deduplicate cases reused by several plots while retaining pull-request selection."""
+
+    cases: dict[tuple[object, ...], BenchmarkCase] = {}
+    for group in groups:
+        for case in group:
+            key = (
+                case.comparison_group,
+                case.operation,
+                case.method,
+                case.calculation_engine,
+                case.strategy,
+                case.execution_mode,
+            )
+            existing = cases.get(key)
+            cases[key] = replace(case, pr_check=True) if existing is not None and case.pr_check else existing or case
+    return tuple(cases.values())
+
+
+def _external_case(
+    comparison_group: str,
+    operation: OperationName,
+    method: str | None,
+    *,
+    pr_check: bool = False,
+) -> ExternalReferenceCase:
+    """Define one GDAL CLI reference equivalent to a GeoUtils operation."""
+
+    return ExternalReferenceCase(comparison_group, operation, method, "gdal_cli", pr_check=pr_check)
+
+
+# Each tuple states one performance question; individual cases and classes are generated from it
+_INTERPOLATION_MODES = _execution_cases("interpolation-point-count", "interp_points", "linear", "scipy")
+_REPROJECTION_MODES = _execution_cases("reprojection-raster-size", "reproject", "nearest", "rasterio")
+_FILTER_MODES = _execution_cases(
+    "filter-chunk-size",
+    "filter",
+    "mean",
+    "scipy",
+    execution_modes=("dask", "multiprocessing"),
+)
+_POLYGONIZATION_MODES = _execution_cases(
+    "polygonization-raster-size", "polygonize", None, "rasterio", strategy="label_stitch"
+)
+_POLYGONIZATION_STRATEGIES = _strategy_cases(
+    "polygonization-raster-size", "polygonize", None, "rasterio", execution_mode="dask"
+)
+_RASTERIZATION_MODES = _execution_cases("rasterization-raster-size", "rasterize", None, "rasterio")
+_SUBSAMPLE_STRATEGIES = _strategy_cases("subsample-size", "subsample", None, None, execution_mode="dask")
+
+_GRID_METHODS = ("nearest", "linear", "idw", "mean")
+_GRID_MODE_CASES = {
+    method: _execution_cases(
+        "gridding-raster-size",
+        "grid",
+        method,
+        "scipy",
+        pr_modes=("eager", "dask", "multiprocessing") if method == "nearest" else (),
+    )
+    for method in _GRID_METHODS
+}
+_GRID_ENGINE_CASES = {
+    method: _engine_cases(
+        "gridding-raster-size",
+        "grid",
+        method,
+        pr_engines=("numba",) if method == "nearest" else (),
+    )
+    for method in ("nearest", "idw", "mean")
+}
+_GRID_POINT_ENGINE_CASES = _engine_cases("gridding-point-count", "grid", "nearest")
+
+# Fixed-size checks retain worker/JIT coverage without adding redundant Numba scaling curves
+_WORKER_EXECUTION_MODES: tuple[ExecutionMode, ...] = ("dask", "multiprocessing")
+_NUMBA_WORKER_CASES = tuple(
+    BenchmarkCase(
+        "worker-integration",
+        "grid",
+        method,
+        "numba",
+        None,
+        execution_mode,
+        pr_check=(method, execution_mode) in (("idw", "dask"), ("mean", "multiprocessing")),
+    )
+    for method in ("nearest", "idw", "mean")
+    for execution_mode in _WORKER_EXECUTION_MODES
+)
+
+BENCHMARK_CASES = _merge_cases(
+    _INTERPOLATION_MODES,
+    _REPROJECTION_MODES,
+    _FILTER_MODES,
+    _POLYGONIZATION_MODES,
+    _POLYGONIZATION_STRATEGIES,
+    _RASTERIZATION_MODES,
+    _SUBSAMPLE_STRATEGIES,
+    *tuple(_GRID_MODE_CASES.values()),
+    *tuple(_GRID_ENGINE_CASES.values()),
+    _GRID_POINT_ENGINE_CASES,
+    _NUMBA_WORKER_CASES,
+)
+
+_REPROJECTION_REFERENCE = _external_case("reprojection-raster-size", "reproject", "nearest")
+_POLYGONIZATION_REFERENCE = _external_case("polygonization-raster-size", "polygonize", None)
+_RASTERIZATION_REFERENCE = _external_case("rasterization-raster-size", "rasterize", None)
+_GRID_REFERENCES = {
+    method: _external_case(
+        "gridding-raster-size",
+        "grid",
+        method,
+        pr_check=method == "nearest",
+    )
+    for method in _GRID_METHODS
+}
+_GRID_POINT_REFERENCE = _external_case("gridding-point-count", "grid", "nearest")
+EXTERNAL_REFERENCE_CASES = (
+    _REPROJECTION_REFERENCE,
+    _POLYGONIZATION_REFERENCE,
+    _RASTERIZATION_REFERENCE,
+    *_GRID_REFERENCES.values(),
+    _GRID_POINT_REFERENCE,
+)
+
+BENCHMARK_CASE_BY_CLASS = {case.benchmark_class: case for case in BENCHMARK_CASES}
+EXTERNAL_REFERENCE_CASE_BY_CLASS = {case.benchmark_class: case for case in EXTERNAL_REFERENCE_CASES}
+
+
+def _series_label(case: BenchmarkCase, dimension: ComparisonDimension) -> str:
+    """Return the plot label for the dimension varied by one GeoUtils case."""
+
+    if dimension == "execution_mode":
+        return EXECUTION_MODE_LABELS[case.execution_mode]
+    if dimension == "calculation_engine":
+        assert case.calculation_engine is not None
+        return CALCULATION_ENGINE_LABELS[case.calculation_engine]
+    if dimension == "strategy":
+        assert case.strategy is not None
+        return STRATEGY_LABELS[case.strategy]
+    assert case.method is not None
+    return METHOD_LABELS.get(case.method, case.method.replace("_", " ").title())
+
+
+def _comparison_series(
+    cases: tuple[BenchmarkCase, ...],
+    dimension: ComparisonDimension,
+    external_reference: ExternalReferenceCase | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """Return labelled ASV classes for one plot, optionally followed by the GDAL CLI."""
+
+    series = tuple((_series_label(case, dimension), case.benchmark_class) for case in cases)
+    if external_reference is not None:
+        return (*series, (GDAL_CLI_LABEL, external_reference.benchmark_class))
+    return series
 
 
 @dataclass(frozen=True)
 class Comparison:
-    """Describe one parameter plot and the ASV classes that supply its lines."""
+    """Describe one parameter plot while varying exactly one categorical dimension."""
 
     slug: str
     title: str
     parameter_label: str
     series: tuple[tuple[str, str], ...]
+    operation: OperationName
+    method: str | None
     logarithmic_x: bool = False
     documentation: bool = True
+    series_dimension: ComparisonDimension = "execution_mode"
+    calculation_engine: CalculationEngine | None = None
+    strategy: OperationStrategyName | None = None
+    execution_mode: ExecutionMode | None = None
 
 
-# The renderer uses these exact public class names to find each series in saved ASV results
 COMPARISONS: tuple[Comparison, ...] = (
     Comparison(
         slug="interpolation-point-count",
-        title="Interpolation point count",
+        title="Linear interpolation point count (SciPy engine)",
         parameter_label="Interpolated points",
-        series=(
-            ("Eager", "EagerInterpolationPointCount"),
-            ("Dask", "DaskInterpolationPointCount"),
-            ("Multiprocessing", "MultiprocessingInterpolationPointCount"),
-        ),
+        series=_comparison_series(_INTERPOLATION_MODES, "execution_mode"),
+        operation="interp_points",
+        method="linear",
+        calculation_engine="scipy",
         logarithmic_x=True,
     ),
     Comparison(
         slug="reprojection-raster-size",
-        title="Reprojection raster size",
+        title="Nearest reprojection raster size (Rasterio/GDAL engine)",
         parameter_label="Square raster width and height (pixels)",
-        series=(
-            ("Eager", "EagerReprojectionRasterSize"),
-            ("Dask", "DaskReprojectionRasterSize"),
-            ("Multiprocessing", "MultiprocessingReprojectionRasterSize"),
-            ("GDAL", "GdalReprojectionRasterSize"),
-        ),
+        series=_comparison_series(_REPROJECTION_MODES, "execution_mode", _REPROJECTION_REFERENCE),
+        operation="reproject",
+        method="nearest",
+        calculation_engine="rasterio",
     ),
     Comparison(
         slug="filter-chunk-size",
-        title="Filter chunk size",
+        title="Mean filter chunk size (SciPy engine)",
         parameter_label="Square chunk width and height (pixels)",
-        series=(
-            ("Dask", "DaskFilterChunkSize"),
-            ("Multiprocessing", "MultiprocessingFilterChunkSize"),
-        ),
+        series=_comparison_series(_FILTER_MODES, "execution_mode"),
+        operation="filter",
+        method="mean",
+        calculation_engine="scipy",
     ),
     Comparison(
         slug="polygonization-raster-size",
-        title="Polygonization raster size",
+        title="Label-stitch polygonization raster size (Rasterio/GDAL engine)",
         parameter_label="Square raster width and height (pixels)",
-        series=(
-            ("Eager", "EagerPolygonizationRasterSize"),
-            ("Dask", "DaskPolygonizationRasterSize"),
-            ("Multiprocessing", "MultiprocessingPolygonizationRasterSize"),
-            ("GDAL", "GdalPolygonizationRasterSize"),
-        ),
+        series=_comparison_series(_POLYGONIZATION_MODES, "execution_mode", _POLYGONIZATION_REFERENCE),
+        operation="polygonize",
+        method=None,
+        calculation_engine="rasterio",
+        strategy="label_stitch",
+    ),
+    Comparison(
+        slug="polygonization-strategy-raster-size",
+        title="Polygonization chunk strategy (Dask execution)",
+        parameter_label="Square raster width and height (pixels)",
+        series=_comparison_series(_POLYGONIZATION_STRATEGIES, "strategy"),
+        operation="polygonize",
+        method=None,
+        calculation_engine="rasterio",
+        execution_mode="dask",
+        series_dimension="strategy",
+        documentation=False,
     ),
     Comparison(
         slug="rasterization-raster-size",
-        title="Rasterization raster size",
+        title="Rasterization raster size (Rasterio/GDAL engine)",
         parameter_label="Square raster width and height (pixels)",
-        series=(
-            ("Eager", "EagerRasterizationRasterSize"),
-            ("Dask", "DaskRasterizationRasterSize"),
-            ("Multiprocessing", "MultiprocessingRasterizationRasterSize"),
-            ("GDAL", "GdalRasterizationRasterSize"),
-        ),
+        series=_comparison_series(_RASTERIZATION_MODES, "execution_mode", _RASTERIZATION_REFERENCE),
+        operation="rasterize",
+        method=None,
+        calculation_engine="rasterio",
     ),
     Comparison(
-        slug="gridding-raster-size",
-        title="Nearest gridding raster size",
-        parameter_label="Square raster width and height (pixels)",
-        series=(
-            ("Eager", "EagerGriddingRasterSize"),
-            ("Dask", "DaskGriddingRasterSize"),
-            ("Multiprocessing", "MultiprocessingGriddingRasterSize"),
-            ("GDAL", "GdalGriddingRasterSize"),
-        ),
-    ),
-    Comparison(
-        slug="linear-gridding-raster-size",
-        title="Linear gridding raster size",
-        parameter_label="Square raster width and height (pixels)",
-        series=(
-            ("Eager", "EagerLinearGriddingRasterSize"),
-            ("Dask", "DaskLinearGriddingRasterSize"),
-            ("Multiprocessing", "MultiprocessingLinearGriddingRasterSize"),
-            ("GDAL", "GdalLinearGriddingRasterSize"),
-        ),
+        slug="subsampling-strategy-size",
+        title="Subsampling chunk strategy (Dask execution)",
+        parameter_label="Selected values",
+        series=_comparison_series(_SUBSAMPLE_STRATEGIES, "strategy"),
+        operation="subsample",
+        method=None,
+        execution_mode="dask",
+        series_dimension="strategy",
+        logarithmic_x=True,
         documentation=False,
     ),
-    Comparison(
-        slug="idw-gridding-raster-size",
-        title="Inverse-distance gridding raster size",
-        parameter_label="Square raster width and height (pixels)",
-        series=(
-            ("Eager", "EagerIdwGriddingRasterSize"),
-            ("Eager (Numba)", "EagerNumbaIdwGriddingRasterSize"),
-            ("Dask", "DaskIdwGriddingRasterSize"),
-            ("Multiprocessing", "MultiprocessingIdwGriddingRasterSize"),
-            ("GDAL", "GdalIdwGriddingRasterSize"),
-        ),
-        documentation=False,
+    *tuple(
+        Comparison(
+            slug="gridding-raster-size" if method == "nearest" else f"{method}-gridding-raster-size",
+            title=f"{METHOD_LABELS[method]} gridding execution mode (SciPy engine)",
+            parameter_label="Square raster width and height (pixels)",
+            series=_comparison_series(_GRID_MODE_CASES[method], "execution_mode", _GRID_REFERENCES[method]),
+            operation="grid",
+            method=method,
+            calculation_engine="scipy",
+            documentation=method == "nearest",
+        )
+        for method in _GRID_METHODS
     ),
-    Comparison(
-        slug="mean-gridding-raster-size",
-        title="Circular-mean gridding raster size",
-        parameter_label="Square raster width and height (pixels)",
-        series=(
-            ("Eager", "EagerMeanGriddingRasterSize"),
-            ("Eager (Numba)", "EagerNumbaMeanGriddingRasterSize"),
-            ("Dask", "DaskMeanGriddingRasterSize"),
-            ("Multiprocessing", "MultiprocessingMeanGriddingRasterSize"),
-            ("GDAL", "GdalMeanGriddingRasterSize"),
-        ),
-        documentation=False,
+    *tuple(
+        Comparison(
+            slug=f"{method}-gridding-engine-raster-size",
+            title=f"{METHOD_LABELS[method]} gridding calculation engine (eager execution)",
+            parameter_label="Square raster width and height (pixels)",
+            series=_comparison_series(_GRID_ENGINE_CASES[method], "calculation_engine", _GRID_REFERENCES[method]),
+            operation="grid",
+            method=method,
+            execution_mode="eager",
+            series_dimension="calculation_engine",
+            documentation=False,
+        )
+        for method in ("nearest", "idw", "mean")
     ),
     Comparison(
         slug="nearest-gridding-engine-point-count",
-        title="Nearest gridding calculation engine",
+        title="Nearest gridding calculation engine by source size (eager execution)",
         parameter_label="Source points per axis",
-        series=(
-            ("SciPy", "ScipyNearestGriddingPointCount"),
-            ("Numba", "NumbaNearestGriddingPointCount"),
-            ("GDAL", "GdalNearestGriddingPointCount"),
-        ),
+        series=_comparison_series(_GRID_POINT_ENGINE_CASES, "calculation_engine", _GRID_POINT_REFERENCE),
+        operation="grid",
+        method="nearest",
+        execution_mode="eager",
+        series_dimension="calculation_engine",
         documentation=False,
     ),
 )
 
 
-class _ImplementationBenchmark:
-    """Share ASV settings, deterministic sources and complete result computation."""
+class _ComparisonBenchmark:
+    """Share ASV settings, dimensional metadata and complete result computation."""
 
-    # A leading underscore keeps this shared class out of ASV's displayed benchmark list
-    # Allow one complete operation to run for up to 15 minutes
     timeout = 900
-
-    # Run once per timing sample, collect two samples and avoid an extra warm-up pass
     number = 1
     repeat = 2
     rounds = 1
     warmup_time = 0
-    implementation: Implementation
     operation: OperationName
+    operation_method: str | None
+    calculation_engine: CalculationEngine | None
+    operation_strategy: OperationStrategyName | None
+    execution_mode: ExecutionMode | None
+    external_reference: ExternalReference | None
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Build the fixed configuration around one selected numeric parameter."""
@@ -168,56 +514,73 @@ class _ImplementationBenchmark:
         raise NotImplementedError
 
     def setup(self, parameter: int) -> None:
-        """Prepare deterministic files and initialize one implementation."""
+        """Prepare deterministic files and initialize one execution case."""
 
-        # ASV calls setup before measuring, so input creation is excluded from every result
-        # An explicit directory lets a fresh backend reuse sources for end-to-end timing
+        benchmark_class = type(self).__name__
+        case = BENCHMARK_CASE_BY_CLASS.get(benchmark_class)
+        reference_case = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(benchmark_class)
+        if (case is None) == (reference_case is None):
+            raise ValueError(f"Expected exactly one registered benchmark case for {benchmark_class}")
+
+        selected_case = case or reference_case
+        assert selected_case is not None
+        if asv_pr_check_enabled() and not selected_case.pr_check:
+            raise NotImplementedError("Benchmark case omitted from the pull-request sample")
+
+        # Strategies only identify how Dask or multiprocessing coordinates chunks
+        self.operation = selected_case.operation
+        self.operation_method = selected_case.method
+        self.operation_strategy = selected_case.strategy
+        self.calculation_engine = case.calculation_engine if case is not None else None
+        self.execution_mode = case.execution_mode if case is not None else None
+        self.external_reference = reference_case.external_reference if reference_case is not None else None
+
+        # Input generation remains outside all three measured boundaries
         self._tmpdir = tempfile.TemporaryDirectory(prefix="geoutils-asv-comparison-")
         self.config = self.make_config(parameter)
+        self.config.operation_method = self.operation_method
+        self.config.calculation_engine = self.calculation_engine
+        self.config.operation_strategy = self.operation_strategy
         self.config.directory = self._tmpdir.name
         self.sources = BenchmarkRunner("eager", self.config).prepare_sources()
 
-        # GDAL needs only its prepared command while GeoUtils may need worker processes
-        if self.implementation == "gdal":
+        if self.external_reference is not None:
             operation = cast(ComparisonOperation, self.operation)
             self.runner: BenchmarkRunner | GdalRunner = GdalRunner(operation, self.config, self.sources)
         else:
-            self.runner = BenchmarkRunner(self.implementation, self.config).start()
+            assert self.execution_mode is not None
+            self.runner = BenchmarkRunner(self.execution_mode, self.config).start()
 
     def teardown(self, parameter: int) -> None:
         """Stop workers and remove generated source, output and spill files."""
 
-        # ASV calls teardown after each measurement to isolate parameters and implementations
-        # Both runners leave the explicitly owned directory for this class to remove
+        if not hasattr(self, "runner"):
+            return
         self.runner.close()
         if self.sources is not self.runner:
             self.sources.close()
         self._tmpdir.cleanup()
 
     def time_operation(self, parameter: int) -> None:
-        """Measure a complete operation after implementation initialization."""
+        """Measure a complete operation after execution-mode initialization."""
 
-        # The time_ prefix tells ASV to time this method automatically
-        # Every lazy result reaches a small value or a complete file before returning
         if isinstance(self.runner, GdalRunner):
             self.runner._execute()
         else:
             self.runner._execute(self.operation)
 
     def track_end_to_end_time_s(self, parameter: int) -> float:
-        """Measure implementation initialization followed by one complete operation."""
+        """Measure execution-mode initialization followed by one complete operation."""
 
-        # The track_ prefix tells ASV to store the returned numeric measurement
-        # GDAL has no persistent backend, so its command time is also its end-to-end time
-        if self.implementation == "gdal":
+        if self.external_reference is not None:
             start_time = time.perf_counter()
             assert isinstance(self.runner, GdalRunner)
             self.runner._execute()
             return time.perf_counter() - start_time
 
-        # Close the initialized backend while retaining the source files prepared by setup
         self.runner.close()
-        fresh_runner = BenchmarkRunner(self.implementation, self.config)
+        assert self.execution_mode is not None
+        fresh_runner = BenchmarkRunner(self.execution_mode, self.config)
         start_time = time.perf_counter()
         try:
             fresh_runner.start()
@@ -228,137 +591,63 @@ class _ImplementationBenchmark:
         self.runner = fresh_runner
         return elapsed_time_s
 
-    def track_peak_process_tree_rss_mb(self, parameter: int) -> float:
-        """Measure peak RAM for the benchmark process and implementation children."""
+    def track_peak_process_tree_mem_mb(self, parameter: int) -> float:
+        """Measure peak memory for the benchmark process and execution-mode children."""
 
-        # ASV stores this returned value separately from the two time measurements
-        # A separate pass keeps memory sampling overhead out of elapsed-time measurements
         if isinstance(self.runner, GdalRunner):
-            return self.runner.run().peak_process_tree_rss_mb
-        return self.runner.run(self.operation).peak_process_tree_rss_mb
+            return self.runner.run().peak_process_tree_mem_mb
+        return self.runner.run(self.operation).peak_process_tree_mem_mb
 
 
-# ASV reads unit attributes from tracker functions when labelling stored results
-setattr(_ImplementationBenchmark.track_end_to_end_time_s, "unit", "seconds")
-setattr(_ImplementationBenchmark.track_peak_process_tree_rss_mb, "unit", "MB")
+setattr(_ComparisonBenchmark.track_end_to_end_time_s, "unit", "seconds")
+setattr(_ComparisonBenchmark.track_peak_process_tree_mem_mb, "unit", "MB")
 
 
-# Each private class defines one parameter axis while public subclasses select the implementation
-class _InterpolationPointCount(_ImplementationBenchmark):
+class _InterpolationPointCount(_ComparisonBenchmark):
     """Keep raster and chunk sizes fixed while varying interpolated points."""
 
-    operation: OperationName = "interp_points"
-
-    # ASV uses this label in results and passes each listed value as parameter
     param_names = ["interpolated_points"]
     params = [asv_parameter_values([256, 2048, 16384], pr_check_value=256)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected point count in an otherwise fixed configuration."""
 
-        # The same raster and chunks isolate point-selection and interpolation work
         return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), ninterp=parameter)
 
 
-class EagerInterpolationPointCount(_InterpolationPointCount):
-    """Measure eager interpolation as the requested point count grows."""
-
-    implementation: Implementation = "eager"
-
-
-class DaskInterpolationPointCount(_InterpolationPointCount):
-    """Measure Dask interpolation as the requested point count grows."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingInterpolationPointCount(_InterpolationPointCount):
-    """Measure multiprocessing interpolation as the requested point count grows."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class _ReprojectionRasterSize(_ImplementationBenchmark):
+class _ReprojectionRasterSize(_ComparisonBenchmark):
     """Keep chunk size fixed while varying input and output raster size."""
 
-    operation: OperationName = "reproject"
-
-    # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
     params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size in an otherwise fixed configuration."""
 
-        # Fixed chunks expose the scaling cost of processing more raster pixels
         return BenchmarkConfig(shape=(parameter, parameter), chunks=(512, 512))
 
 
-class EagerReprojectionRasterSize(_ReprojectionRasterSize):
-    """Measure eager reprojection as input and output rasters grow."""
-
-    implementation: Implementation = "eager"
-
-
-class DaskReprojectionRasterSize(_ReprojectionRasterSize):
-    """Measure Dask reprojection as input and output rasters grow."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingReprojectionRasterSize(_ReprojectionRasterSize):
-    """Measure multiprocessing reprojection as input and output rasters grow."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class GdalReprojectionRasterSize(_ReprojectionRasterSize):
-    """Measure GDAL reprojection as input and output rasters grow."""
-
-    implementation: Implementation = "gdal"
-
-
-class _FilterChunkSize(_ImplementationBenchmark):
+class _FilterChunkSize(_ComparisonBenchmark):
     """Keep raster size and filter window fixed while varying square chunks."""
 
-    operation: OperationName = "filter"
-
-    # ASV uses this label in results and passes each listed value as parameter
     param_names = ["chunk_size"]
     params = [asv_parameter_values([256, 512, 1024], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected chunk size in an otherwise fixed configuration."""
 
-        # Fixed raster pixels isolate task scheduling and overlap granularity
         return BenchmarkConfig(shape=(2048, 2048), chunks=(parameter, parameter))
 
 
-class DaskFilterChunkSize(_FilterChunkSize):
-    """Measure Dask filtering as scheduler and overlap granularity change."""
+class _PolygonizationRasterSize(_ComparisonBenchmark):
+    """Keep connected-region count fixed while varying raster size."""
 
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingFilterChunkSize(_FilterChunkSize):
-    """Measure multiprocessing filtering as task and overlap granularity change."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class _PolygonizationRasterSize(_ImplementationBenchmark):
-    """Keep connected-region count fixed while varying the raster size."""
-
-    operation: OperationName = "polygonize"
-
-    # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
     params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size around a fixed set of regions."""
 
-        # A constant 441 regions isolates the cost of visiting more raster pixels
         return BenchmarkConfig(
             shape=(parameter, parameter),
             chunks=(512, 512),
@@ -366,43 +655,15 @@ class _PolygonizationRasterSize(_ImplementationBenchmark):
         )
 
 
-class EagerPolygonizationRasterSize(_PolygonizationRasterSize):
-    """Measure eager polygonization as the source raster grows."""
+class _RasterizationRasterSize(_ComparisonBenchmark):
+    """Keep vector complexity fixed while varying output raster size."""
 
-    implementation: Implementation = "eager"
-
-
-class DaskPolygonizationRasterSize(_PolygonizationRasterSize):
-    """Measure Dask polygonization as the source raster grows."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingPolygonizationRasterSize(_PolygonizationRasterSize):
-    """Measure multiprocessing polygonization as the source raster grows."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class GdalPolygonizationRasterSize(_PolygonizationRasterSize):
-    """Measure GDAL polygonization as the source raster grows."""
-
-    implementation: Implementation = "gdal"
-
-
-class _RasterizationRasterSize(_ImplementationBenchmark):
-    """Keep vector complexity fixed while varying the output raster size."""
-
-    operation: OperationName = "rasterize"
-
-    # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
     params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size around a fixed vector input."""
 
-        # A constant 2,601 polygons isolates the cost of producing more output pixels
         return BenchmarkConfig(
             shape=(parameter, parameter),
             chunks=(512, 512),
@@ -410,197 +671,47 @@ class _RasterizationRasterSize(_ImplementationBenchmark):
         )
 
 
-class EagerRasterizationRasterSize(_RasterizationRasterSize):
-    """Measure eager rasterization as the output raster grows."""
+class _SubsampleSize(_ComparisonBenchmark):
+    """Keep raster and chunks fixed while varying the selected value count."""
 
-    implementation: Implementation = "eager"
+    param_names = ["subsample_size"]
+    params = [asv_parameter_values([256, 2048, 16384], pr_check_value=256)]
 
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Place the selected value count in an otherwise fixed configuration."""
 
-class DaskRasterizationRasterSize(_RasterizationRasterSize):
-    """Measure Dask rasterization as the output raster grows."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingRasterizationRasterSize(_RasterizationRasterSize):
-    """Measure multiprocessing rasterization as the output raster grows."""
-
-    implementation: Implementation = "multiprocessing"
+        return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), subsample_size=parameter)
 
 
-class GdalRasterizationRasterSize(_RasterizationRasterSize):
-    """Measure GDAL rasterization as the output raster grows."""
-
-    implementation: Implementation = "gdal"
-
-
-class _GriddingRasterSize(_ImplementationBenchmark):
+class _GriddingRasterSize(_ComparisonBenchmark):
     """Keep one gridding method and point count fixed while varying raster size."""
 
-    operation: OperationName = "grid"
-    grid_resampling: GriddingMethod = "nearest"
-    grid_engine: GriddingEngine = "scipy"
-    grid_dist_nodata_pixel = float("inf")
-    point_features_per_axis = 3
-
-    # ASV uses this label in results and passes each listed value as parameter
     param_names = ["raster_size"]
     params = [asv_parameter_values([512, 1024, 2048], pr_check_value=512)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected raster size around a fixed point-cloud input."""
+        """Place the selected raster size around a method-appropriate point input."""
 
-        # Method-specific inputs remain fixed while only the number of output cells changes
+        method_settings = {
+            "nearest": (float("inf"), 3),
+            "linear": (float("inf"), 9),
+            "idw": (16.0, 17),
+            "mean": (16.0, 17),
+        }
+        if self.operation_method not in method_settings:
+            raise ValueError(f"No gridding fixture is defined for method {self.operation_method!r}")
+        distance, points_per_axis = method_settings[self.operation_method]
         return BenchmarkConfig(
             shape=(parameter, parameter),
             chunks=(512, 512),
-            point_features_per_axis=self.point_features_per_axis,
-            grid_resampling=self.grid_resampling,
-            grid_dist_nodata_pixel=self.grid_dist_nodata_pixel,
-            grid_engine=self.grid_engine,
+            point_features_per_axis=points_per_axis,
+            grid_dist_nodata_pixel=distance,
         )
 
 
-class EagerGriddingRasterSize(_GriddingRasterSize):
-    """Measure eager gridding as the output raster grows."""
-
-    implementation: Implementation = "eager"
-
-
-class DaskGriddingRasterSize(_GriddingRasterSize):
-    """Measure Dask gridding as the output raster grows."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingGriddingRasterSize(_GriddingRasterSize):
-    """Measure multiprocessing gridding as the output raster grows."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class GdalGriddingRasterSize(_GriddingRasterSize):
-    """Measure GDAL nearest gridding as the output raster grows."""
-
-    implementation: Implementation = "gdal"
-
-
-class _LinearGriddingRasterSize(_GriddingRasterSize):
-    """Keep linear interpolation and source points fixed while varying raster size."""
-
-    grid_resampling: GriddingMethod = "linear"
-    point_features_per_axis = 9
-
-
-class EagerLinearGriddingRasterSize(_LinearGriddingRasterSize):
-    """Measure eager linear gridding as the output raster grows."""
-
-    implementation: Implementation = "eager"
-
-
-class DaskLinearGriddingRasterSize(_LinearGriddingRasterSize):
-    """Measure Dask linear gridding as the output raster grows."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingLinearGriddingRasterSize(_LinearGriddingRasterSize):
-    """Measure multiprocessing linear gridding as the output raster grows."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class GdalLinearGriddingRasterSize(_LinearGriddingRasterSize):
-    """Measure GDAL linear gridding as the output raster grows."""
-
-    implementation: Implementation = "gdal"
-
-
-class _IdwGriddingRasterSize(_GriddingRasterSize):
-    """Keep inverse-distance support and source points fixed while varying raster size."""
-
-    grid_resampling: GriddingMethod = "idw"
-    grid_dist_nodata_pixel = 16.0
-    point_features_per_axis = 17
-
-
-class EagerIdwGriddingRasterSize(_IdwGriddingRasterSize):
-    """Measure eager inverse-distance gridding as the output raster grows."""
-
-    implementation: Implementation = "eager"
-
-
-class EagerNumbaIdwGriddingRasterSize(_IdwGriddingRasterSize):
-    """Measure eager Numba inverse-distance gridding as the output raster grows."""
-
-    implementation: Implementation = "eager"
-    grid_engine: GriddingEngine = "numba"
-
-
-class DaskIdwGriddingRasterSize(_IdwGriddingRasterSize):
-    """Measure Dask inverse-distance gridding as the output raster grows."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingIdwGriddingRasterSize(_IdwGriddingRasterSize):
-    """Measure multiprocessing inverse-distance gridding as the output raster grows."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class GdalIdwGriddingRasterSize(_IdwGriddingRasterSize):
-    """Measure GDAL inverse-distance gridding as the output raster grows."""
-
-    implementation: Implementation = "gdal"
-
-
-class _MeanGriddingRasterSize(_GriddingRasterSize):
-    """Keep circular-mean support and source points fixed while varying raster size."""
-
-    grid_resampling: GriddingMethod = "mean"
-    grid_dist_nodata_pixel = 16.0
-    point_features_per_axis = 17
-
-
-class EagerMeanGriddingRasterSize(_MeanGriddingRasterSize):
-    """Measure eager circular-mean gridding as the output raster grows."""
-
-    implementation: Implementation = "eager"
-
-
-class EagerNumbaMeanGriddingRasterSize(_MeanGriddingRasterSize):
-    """Measure eager Numba circular-mean gridding as the output raster grows."""
-
-    implementation: Implementation = "eager"
-    grid_engine: GriddingEngine = "numba"
-
-
-class DaskMeanGriddingRasterSize(_MeanGriddingRasterSize):
-    """Measure Dask circular-mean gridding as the output raster grows."""
-
-    implementation: Implementation = "dask"
-
-
-class MultiprocessingMeanGriddingRasterSize(_MeanGriddingRasterSize):
-    """Measure multiprocessing circular-mean gridding as the output raster grows."""
-
-    implementation: Implementation = "multiprocessing"
-
-
-class GdalMeanGriddingRasterSize(_MeanGriddingRasterSize):
-    """Measure GDAL circular-mean gridding as the output raster grows."""
-
-    implementation: Implementation = "gdal"
-
-
-class _NearestGriddingPointCount(_ImplementationBenchmark):
+class _NearestGriddingPointCount(_ComparisonBenchmark):
     """Keep raster size fixed while varying source points for nearest gridding."""
 
-    operation: OperationName = "grid"
-    grid_engine: GriddingEngine = "scipy"
-
-    # Points per axis gives nine, eighty-one and one thousand eighty-nine source points
     param_names = ["points_per_axis"]
     params = [asv_parameter_values([3, 9, 33], pr_check_value=3)]
 
@@ -611,26 +722,45 @@ class _NearestGriddingPointCount(_ImplementationBenchmark):
             shape=(1024, 1024),
             chunks=(512, 512),
             point_features_per_axis=parameter,
-            grid_resampling="nearest",
             grid_dist_nodata_pixel=float("inf"),
-            grid_engine=self.grid_engine,
         )
 
 
-class ScipyNearestGriddingPointCount(_NearestGriddingPointCount):
-    """Measure the SciPy nearest engine as source point count grows."""
+class _NumbaWorkerIntegration(_GriddingRasterSize):
+    """Exercise each Numba kernel once in Dask and multiprocessing workers."""
 
-    implementation: Implementation = "eager"
-
-
-class NumbaNearestGriddingPointCount(_NearestGriddingPointCount):
-    """Measure the Numba nearest engine as source point count grows."""
-
-    implementation: Implementation = "eager"
-    grid_engine: GriddingEngine = "numba"
+    params = [asv_parameter_values([1024], pr_check_value=512)]
 
 
-class GdalNearestGriddingPointCount(_NearestGriddingPointCount):
-    """Measure GDAL nearest gridding as source point count grows."""
+_SCENARIO_BASES: dict[str, type[_ComparisonBenchmark]] = {
+    "interpolation-point-count": _InterpolationPointCount,
+    "reprojection-raster-size": _ReprojectionRasterSize,
+    "filter-chunk-size": _FilterChunkSize,
+    "polygonization-raster-size": _PolygonizationRasterSize,
+    "rasterization-raster-size": _RasterizationRasterSize,
+    "subsample-size": _SubsampleSize,
+    "gridding-raster-size": _GriddingRasterSize,
+    "gridding-point-count": _NearestGriddingPointCount,
+    "worker-integration": _NumbaWorkerIntegration,
+}
 
-    implementation: Implementation = "gdal"
+
+def _register_asv_classes() -> None:
+    """Create stable public ASV classes from the deduplicated case registry."""
+
+    for case in (*BENCHMARK_CASES, *EXTERNAL_REFERENCE_CASES):
+        class_name = case.benchmark_class
+        if class_name in globals():
+            raise ValueError(f"Duplicate generated ASV benchmark class: {class_name}")
+        base = _SCENARIO_BASES[case.comparison_group]
+        globals()[class_name] = type(
+            class_name,
+            (base,),
+            {
+                "__module__": __name__,
+                "__doc__": f"Measure the registered {case.operation} benchmark case.",
+            },
+        )
+
+
+_register_asv_classes()

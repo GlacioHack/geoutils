@@ -97,7 +97,7 @@ def _prepare_benchmark_process(cachemax_mb: int) -> None:
     _trim_process_memory()
 
 
-def _get_process_rss_mb() -> float:
+def _get_process_mem_mb() -> float:
     """Return resident memory for the process executing this worker callback."""
 
     # Import psutil only for profiling and benchmark environments that request it
