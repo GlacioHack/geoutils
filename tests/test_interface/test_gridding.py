@@ -14,6 +14,7 @@ from shapely import geometry
 import geoutils as gu
 from benchmarks.gdal_comparison.commands import build_gdal_grid_command
 from geoutils import PointCloud, Raster
+from geoutils._typing import NDArrayNum
 from geoutils.interface.gridding import GriddingMethod, _grid_pointcloud
 from geoutils.multiproc import MultiprocConfig
 
@@ -149,7 +150,7 @@ class TestPointCloud:
     def test_grid_pc__circular_neighborhood(self, resampling: GriddingMethod) -> None:
         """Check IDW and moving means on points with an exact analytical result."""
 
-        # Two constant-valued columns place an equal pair of neighbors around the central column
+        # Two constant value columns place an equal pair of neighbors around the central column
         pc = gpd.GeoDataFrame(
             data={"z": [0.0, 10.0, 0.0, 10.0]},
             geometry=gpd.points_from_xy(x=[0.0, 2.0, 0.0, 2.0], y=[0.0, 0.0, 1.0, 1.0]),
@@ -373,6 +374,53 @@ class TestPointCloud:
             engine="numba",
         )
         assert np.allclose(scipy_result, numba_result, equal_nan=True)
+
+    @pytest.mark.parametrize(
+        ("resampling", "expected"),
+        [
+            ("nearest", np.array([[4.0, 4.0, np.nan]])),
+            ("idw", np.array([[4.0, 4.0, np.nan]])),
+            ("average_distance", np.array([[0.0, 1.0, np.nan]])),
+        ],
+    )
+    def test_grid_pc__engines_include_support_boundary(self, resampling: GriddingMethod, expected: NDArrayNum) -> None:
+        """Check that both Numba/SciPy engines include cells on the support radius and exclude cells beyond it."""
+
+        pytest.importorskip("numba")
+        pc = gpd.GeoDataFrame(data={"z": [4.0]}, geometry=gpd.points_from_xy(x=[0.0], y=[0.0]))
+        for engine in ("scipy", "numba"):
+            result, _ = _grid_pointcloud(
+                pc,
+                grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
+                grid_res=(1.0, 1.0),
+                data_column_name="z",
+                resampling=resampling,
+                dist_nodata_pixel=1,
+                engine=engine,
+            )
+            assert np.allclose(result, expected, equal_nan=True)
+
+    def test_grid_pc__engines_average_duplicate_exact_idw_points(self) -> None:
+        """Check that both Numba/SciPy engines average duplicate exact IDW points even when min_points is unmet."""
+
+        pytest.importorskip("numba")
+        # Process a weighted neighbor before two exact points to ensure exact values replace it
+        pc = gpd.GeoDataFrame(
+            data={"z": [100.0, 2.0, 8.0]},
+            geometry=gpd.points_from_xy(x=[1.0, 0.0, 0.0], y=[0.0, 0.0, 0.0]),
+        )
+        for engine in ("scipy", "numba"):
+            result, _ = _grid_pointcloud(
+                pc,
+                grid_coords=(np.array([0.0]), np.array([0.0])),
+                grid_res=(1.0, 1.0),
+                data_column_name="z",
+                resampling="idw",
+                dist_nodata_pixel=1.1,
+                min_points=4,
+                engine=engine,
+            )
+            assert result[0, 0] == pytest.approx(5.0)
 
     @pytest.mark.parametrize("resampling", ["linear", "cubic", "average_distance_pts"])
     def test_grid_pc__numba_unsupported_method(self, resampling: GriddingMethod) -> None:

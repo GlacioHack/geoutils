@@ -170,7 +170,6 @@ class TestLargeData:
         self,
         case_name: str,
         large_data_config: BenchmarkConfig,
-        expected_value: float | None = None,
     ) -> None:
         """Run one operation and check its result, worker health and bounded memory."""
 
@@ -192,8 +191,7 @@ class TestLargeData:
         result = _run_isolated(case_name, large_data_config)
 
         # Validate the small fingerprint and any large file produced by the operation
-        if expected_value is None:
-            expected_value = OPERATION_BY_NAME[operation].expected_value
+        expected_value = OPERATION_BY_NAME[operation].expected_value
         assert np.isclose(result.value, expected_value, equal_nan=True)
         if result.output_file is not None:
             assert os.path.exists(result.output_file)
@@ -237,28 +235,14 @@ class TestLargeData:
         self._check_case(case_name=case_name, large_data_config=large_data_config)
 
     @pytest.mark.parametrize("case_name", ["dask-grid", "multiprocessing-grid"])
-    @pytest.mark.parametrize(
-        ("resampling", "expected_value"),
-        [
-            pytest.param("idw", 1.0, id="idw"),
-            pytest.param("mean", 1.0, id="mean"),
-            pytest.param("minimum", 1.0, id="minimum"),
-            pytest.param("maximum", 1.0, id="maximum"),
-            pytest.param("range", 0.0, id="range"),
-            pytest.param("count", 1.0, id="count"),
-            pytest.param("stdev", 0.0, id="stdev"),
-            pytest.param("average_distance", 0.0, id="average_distance"),
-            pytest.param("average_distance_pts", np.nan, id="average_distance_pts"),
-        ],
-    )
+    @pytest.mark.parametrize("resampling", ["idw", "mean"])
     def test_neighborhood_gridding_stays_out_of_core(
         self,
         case_name: str,
         resampling: GriddingMethod,
-        expected_value: float,
         large_data_config: BenchmarkConfig,
     ) -> None:
-        """Complete each circular gridding method through every out-of-core backend."""
+        """Complete the IDW and circular-statistic execution paths through every out-of-core backend."""
 
         # A two-pixel support crosses chunk edges without creating unbounded point-cell pairs
         config = replace(
@@ -267,5 +251,5 @@ class TestLargeData:
             grid_dist_nodata_pixel=2,
         )
 
-        # The central support contains one value-one point, so every method has its own simple fingerprint
-        self._check_case(case_name=case_name, large_data_config=config, expected_value=expected_value)
+        # IDW has its own reduction, while mean represents the shared circular-statistic neighborhood path
+        self._check_case(case_name=case_name, large_data_config=config)

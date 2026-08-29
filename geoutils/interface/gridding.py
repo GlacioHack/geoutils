@@ -1,4 +1,4 @@
-# Copyright (c) 2025 GeoUtils developers
+# Copyright (c) 2026 GeoUtils developers
 #
 # This file is part of the GeoUtils project:
 # https://github.com/glaciohack/geoutils
@@ -16,7 +16,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Grid point clouds into rasters."""
+"""Grid point clouds with SciPy or Numba through eager, Dask or multiprocessing execution."""
+
+# The gridding methods and parameters try to follow the GDAL gdal_grid descriptions:
+# https://gdal.org/en/stable/programs/gdal_grid.html
+#
+# SciPy backend relies on existing griddata and spatial-tree implementations.
+# Numba backend relies on simple accumulation kernels for nearest-neighbor, IDW and circular-neighborhood statistics.
 
 from __future__ import annotations
 
@@ -54,6 +60,26 @@ from geoutils.raster.referencing import _coords
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike
 
+try:
+    from numba import jit
+except ImportError:
+
+    def jit(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Return a no-op decorator when Numba is not installed."""
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
+
+
+################################
+# 1/ SHARED GRIDDING DEFINITIONS
+################################
+
+# Methods, coordinate preparation and support/nodata handling shared by all calculation engines
+##############################################################################################
+
 
 GridPointCloudCallable = Callable[..., tuple[NDArrayNum, affine.Affine]]
 GriddingEngine = Literal["scipy", "numba"]
@@ -86,7 +112,6 @@ GriddingMethod = Literal[
     "average_distance_pts",
 ]
 _GRID_QUERY_ROWS = 128
-_NUMBA_GRID_FUNCTIONS: dict[str, Callable[..., NDArrayNum]] = {}
 _CIRCULAR_METHOD_ALIASES: dict[str, CircularGriddingMethod] = {
     "idw": "idw",
     "mean": "mean",
@@ -225,6 +250,7 @@ def _mask_grid_from_invalid_points(
     # Circular methods propagate every invalid point inside their requested neighborhood
     x_start = float(np.min(x_coords))
     y_start = float(np.min(y_coords))
+    # Query the nearest invalid point in output-pixel coordinates for every grid cell
     invalid_tree = _scaled_point_tree(invalid_points, x_start=x_start, y_start=y_start, res_x=res_x, res_y=res_y)
     scaled_queries = _grid_queries((x_coords - x_start) / res_x, (y_coords - y_start) / res_y)
     distances, _ = invalid_tree.query(scaled_queries, k=1)
@@ -254,6 +280,7 @@ def _mask_grid_beyond_support(
     x_coords, y_coords = grid_coords
     x_start = float(np.min(x_coords))
     y_start = float(np.min(y_coords))
+    # Index source points once in the output-pixel coordinate system
     point_tree = _scaled_point_tree(points, x_start=x_start, y_start=y_start, res_x=res_x, res_y=res_y)
     scaled_x = (x_coords - x_start) / res_x
     scaled_y = (y_coords - y_start) / res_y
@@ -262,9 +289,18 @@ def _mask_grid_beyond_support(
     for row_start in range(0, len(y_coords), _GRID_QUERY_ROWS):
         row_stop = min(row_start + _GRID_QUERY_ROWS, len(y_coords))
         queries = _grid_queries(scaled_x, scaled_y[row_start:row_stop])
+        # The nearest distance is sufficient to decide whether any point supports each cell
         distances, _ = point_tree.query(queries, k=1, workers=n_threads)
         block = array[row_start:row_stop]
         block[distances.reshape(block.shape) > radius] = np.nan
+
+
+################################
+# 2/ EAGER CALCULATION ENGINES
+################################
+
+# Nearest-neighbour using either SciPy spatial tree or a compiled Numba loop
+############################################################################
 
 
 def _grid_nearest_scipy(
@@ -279,6 +315,7 @@ def _grid_nearest_scipy(
     """Interpolate nearest values in bounded row groups using a SciPy spatial tree."""
 
     x_coords, y_coords = grid_coords
+    # Build one reusable index of source coordinates
     point_tree = cKDTree(points)
     output = np.empty((len(y_coords), len(x_coords)), dtype=np.float64)
 
@@ -286,6 +323,7 @@ def _grid_nearest_scipy(
     for row_start in range(0, len(y_coords), _GRID_QUERY_ROWS):
         row_stop = min(row_start + _GRID_QUERY_ROWS, len(y_coords))
         queries = _grid_queries(x_coords, y_coords[row_start:row_stop])
+        # Query the closest source index for each cell and copy its value into the block
         _, point_indexes = point_tree.query(queries, k=1, workers=n_threads)
         output[row_start:row_stop] = values[point_indexes].reshape(row_stop - row_start, len(x_coords))
 
@@ -302,6 +340,7 @@ def _grid_nearest_scipy(
     return output
 
 
+@jit(nopython=True, cache=True)
 def _grid_nearest_numba(
     points: NDArrayNum,
     values: NDArrayNum,
@@ -311,13 +350,13 @@ def _grid_nearest_numba(
     res_y: float,
     radius: float,
 ) -> NDArrayNum:
-    """Interpolate nearest values by comparing source distances in a compiled loop."""
+    """Interpolate nearest values by comparing source distances in a loop."""
 
     output = np.full((len(y_coords), len(x_coords)), np.nan, dtype=np.float64)
     radius_squared = radius * radius
     finite_radius = np.isfinite(radius)
 
-    # A cell keeps the value of its closest point in unscaled source coordinates
+    # A cell keeps the value of its closest point in source coordinates
     for row in range(len(y_coords)):
         for col in range(len(x_coords)):
             nearest_index = 0
@@ -341,16 +380,6 @@ def _grid_nearest_numba(
     return output
 
 
-def _numba_grid_function(name: str, function: Callable[..., NDArrayNum]) -> Callable[..., NDArrayNum]:
-    """Return one lazily compiled Numba gridding function."""
-
-    # Numba is imported only for an explicit Numba calculation engine
-    if name not in _NUMBA_GRID_FUNCTIONS:
-        numba = import_optional("numba")
-        _NUMBA_GRID_FUNCTIONS[name] = numba.jit(nopython=True, cache=True)(function)
-    return _NUMBA_GRID_FUNCTIONS[name]
-
-
 def _grid_nearest(
     points: NDArrayNum,
     values: NDArrayNum,
@@ -364,8 +393,7 @@ def _grid_nearest(
     """Dispatch nearest gridding to the selected SciPy or Numba engine."""
 
     if engine == "numba":
-        function = _numba_grid_function("nearest", _grid_nearest_numba)
-        return function(points, values, grid_coords[0], grid_coords[1], res_x, res_y, radius)
+        return _grid_nearest_numba(points, values, grid_coords[0], grid_coords[1], res_x, res_y, radius)
     return _grid_nearest_scipy(
         points,
         values,
@@ -377,6 +405,11 @@ def _grid_nearest(
     )
 
 
+# Circular-neighborhood engines using compiled accumulation or SciPy sparse neighborhoods
+########################################################################################
+
+
+@jit(nopython=True, cache=True)
 def _grid_radius_statistic_numba(
     points: NDArrayNum,
     values: NDArrayNum,
@@ -390,7 +423,7 @@ def _grid_radius_statistic_numba(
     statistic_code: int,
     min_points: int,
 ) -> NDArrayNum:
-    """Compute one circular statistic by visiting nearby cells from every source point."""
+    """Compute one circular statistic in nearby cells from every source point."""
 
     output = np.zeros((height, width), dtype=np.float64)
     secondary = np.zeros((height, width), dtype=np.float64)
@@ -405,7 +438,7 @@ def _grid_radius_statistic_numba(
     if statistic_code == 3:
         secondary[:, :] = -np.inf
 
-    # Point-driven updates avoid searching empty cells in sparse point clouds
+    # Visit only the grid cells that can fall inside each point's support radius
     for point_index in range(len(points)):
         point_x = (points[point_index, 0] - x_start) / res_x
         point_y = (points[point_index, 1] - y_start) / res_y
@@ -419,22 +452,28 @@ def _grid_radius_statistic_numba(
                 if distance_squared <= radius_squared:
                     value = values[point_index]
                     if statistic_code == 0:
+                        # Mean: accumulate values, then divide by the point count further below
                         output[row, col] += value
                     elif statistic_code == 1:
+                        # Minimum: retain the smallest value found for this cell
                         output[row, col] = min(output[row, col], value)
                     elif statistic_code == 2:
+                        # Maximum: retain the largest value found for this cell
                         output[row, col] = max(output[row, col], value)
                     elif statistic_code == 3:
+                        # Range: retain the minimum and maximum in separate arrays
                         output[row, col] = min(output[row, col], value)
                         secondary[row, col] = max(secondary[row, col], value)
                     elif statistic_code == 5:
+                        # Standard deviation: accumulate values and squared values
                         output[row, col] += value
                         secondary[row, col] += value * value
                     elif statistic_code == 6:
+                        # Average distance: accumulate point-to-cell distances
                         output[row, col] += np.sqrt(((col - point_x) * res_x) ** 2 + ((row - point_y) * res_y) ** 2)
                     counts[row, col] += 1
 
-    # Reuse the accumulation arrays for the final statistic
+    # Reject cells with too few points, then convert accumulated values into final results
     required_points = max(1, min_points)
     for row in range(height):
         for col in range(width):
@@ -442,17 +481,22 @@ def _grid_radius_statistic_numba(
             if count < required_points:
                 output[row, col] = np.nan
             elif statistic_code == 0 or statistic_code == 6:
+                # Mean and average distance are their accumulated sums divided by count
                 output[row, col] /= count
             elif statistic_code == 3:
+                # Range is the accumulated maximum minus minimum
                 output[row, col] = secondary[row, col] - output[row, col]
             elif statistic_code == 4:
+                # Count can be directly reuse
                 output[row, col] = count
             elif statistic_code == 5:
+                # Derive the population standard deviation from the two accumulated sums
                 mean = output[row, col] / count
                 output[row, col] = np.sqrt(max(0.0, secondary[row, col] / count - mean * mean))
     return output
 
 
+@jit(nopython=True, cache=True)
 def _grid_radius_idw_numba(
     points: NDArrayNum,
     values: NDArrayNum,
@@ -466,7 +510,7 @@ def _grid_radius_idw_numba(
     power: float,
     min_points: int,
 ) -> NDArrayNum:
-    """Compute IDW by visiting every output cell inside each point's support radius."""
+    """Compute inverse-distance weighting (IDW) in nearby cells inside each point's support radius."""
 
     output = np.zeros((height, width), dtype=np.float64)
     weights = np.zeros((height, width), dtype=np.float64)
@@ -474,7 +518,7 @@ def _grid_radius_idw_numba(
     counts = np.zeros((height, width), dtype=np.int32)
     radius_squared = radius * radius
 
-    # Negative weights mark cells containing exact source coordinates
+    # Accumulate exact values or weighted values in cells inside each point's support
     for point_index in range(len(points)):
         point_x = (points[point_index, 0] - x_start) / res_x
         point_y = (points[point_index, 1] - y_start) / res_y
@@ -489,29 +533,35 @@ def _grid_radius_idw_numba(
                     continue
                 counts[row, col] += 1
                 if distance_squared == 0:
+                    # Points at exact location discard earlier weighted contributions and are averaged together
                     if weights[row, col] >= 0:
                         output[row, col] = 0
                         weights[row, col] = -1
                     output[row, col] += values[point_index]
                     exact_counts[row, col] += 1
                 elif weights[row, col] >= 0:
-                    # GDAL selects an elliptical support but weights real coordinate distances
+                    # Select neighbors by output-pixel radius, but calculate weights in source coordinate units
                     coordinate_distance_squared = ((col - point_x) * res_x) ** 2 + ((row - point_y) * res_y) ** 2
                     weight = coordinate_distance_squared ** (-power / 2)
+                    # Accumulate the weighted value and weight for the final weighted mean
                     output[row, col] += weight * values[point_index]
                     weights[row, col] += weight
 
-    # Exact source values take precedence over surrounding weighted values
+    # Finalize each cell, giving exact samples precedence over min_points and IDW
     required_points = max(1, min_points)
     for row in range(height):
         for col in range(width):
             if exact_counts[row, col] > 0:
+                # Average source values located exactly at the cell center
                 output[row, col] /= exact_counts[row, col]
             elif counts[row, col] < required_points:
+                # Reject cells whose support contains too few source points
                 output[row, col] = np.nan
             elif weights[row, col] > 0:
+                # Normalize the accumulated weighted values by their total weight
                 output[row, col] /= weights[row, col]
             else:
+                # Leave cells without an exact or weighted source value empty
                 output[row, col] = np.nan
     return output
 
@@ -532,26 +582,31 @@ def _grid_radius_scipy(
     x_coords, y_coords = grid_coords
     x_start = float(np.min(x_coords))
     y_start = float(np.min(y_coords))
+    # Index source points in output-pixel coordinates so radius has the same scale on both axes
     point_tree = _scaled_point_tree(points, x_start=x_start, y_start=y_start, res_x=res_x, res_y=res_y)
     scaled_x = (x_coords - x_start) / res_x
     scaled_y = (y_coords - y_start) / res_y
     output = np.full((len(y_coords), len(x_coords)), np.nan, dtype=np.float64)
 
-    # Sparse pairs retain only point-cell distances inside the requested circular support
+    # Process bounded row blocks instead of constructing all possible point-cell pairs at once
     for row_start in range(0, len(y_coords), _GRID_QUERY_ROWS):
         row_stop = min(row_start + _GRID_QUERY_ROWS, len(y_coords))
         queries = _grid_queries(scaled_x, scaled_y[row_start:row_stop])
+        # Build a tree for this block of grid cells and retain only neighbors within radius
         query_tree = cKDTree(queries)
         pairs = query_tree.sparse_distance_matrix(point_tree, radius, output_type="coo_matrix")
+        # Sparse-matrix rows identify grid cells, columns identify source points and data stores distances
         block = np.full(len(queries), np.nan, dtype=np.float64)
         counts = np.bincount(pairs.row, minlength=len(queries))
         required_points = max(2 if method == "average_distance_pts" else 1, min_points)
         valid = counts >= required_points
 
         if method == "mean":
+            # Sum neighborhood values per cell and divide by the point count
             sums = np.bincount(pairs.row, weights=values[pairs.col], minlength=len(queries))
             block[valid] = sums[valid] / counts[valid]
         elif method == "idw":
+            # Separate exact points from nonzero-distance points before weighting
             exact = pairs.data == 0
             exact_counts = np.bincount(pairs.row[exact], minlength=len(queries))
             exact_sums = np.bincount(
@@ -560,7 +615,7 @@ def _grid_radius_scipy(
                 minlength=len(queries),
             )
             nonzero = ~exact
-            # Sparse-tree distances select an output-pixel circle while weights use source coordinates
+            # The support radius uses output pixels, while IDW weights use source-coordinate distances
             delta_x = queries[pairs.row[nonzero], 0] - point_tree.data[pairs.col[nonzero], 0]
             delta_y = queries[pairs.row[nonzero], 1] - point_tree.data[pairs.col[nonzero], 1]
             coordinate_distances = np.sqrt((delta_x * res_x) ** 2 + (delta_y * res_y) ** 2)
@@ -577,6 +632,7 @@ def _grid_radius_scipy(
             block[exact_rows] = exact_sums[exact_rows] / exact_counts[exact_rows]
             block[weighted_rows] = weighted_sums[weighted_rows] / weight_sums[weighted_rows]
         elif method in ("minimum", "maximum", "range"):
+            # Accumulate both extrema once, then select one or subtract them for the range
             minima = np.full(len(queries), np.inf)
             maxima = np.full(len(queries), -np.inf)
             np.minimum.at(minima, pairs.row, values[pairs.col])
@@ -588,22 +644,24 @@ def _grid_radius_scipy(
             else:
                 block[valid] = maxima[valid] - minima[valid]
         elif method == "count":
+            # Return the neighborhood size already computed for validity
             block[valid] = counts[valid]
         elif method == "stdev":
+            # Derive the population variance from sums and squared sums per cell
             sums = np.bincount(pairs.row, weights=values[pairs.col], minlength=len(queries))
             squared_sums = np.bincount(pairs.row, weights=values[pairs.col] ** 2, minlength=len(queries))
             variance = np.zeros(len(queries), dtype=np.float64)
             variance[valid] = squared_sums[valid] / counts[valid] - (sums[valid] / counts[valid]) ** 2
             block[valid] = np.sqrt(np.maximum(variance[valid], 0))
         elif method == "average_distance":
-            # Tree distances use output pixels, while GDAL reports distances in coordinate units
+            # Convert tree distances back to coordinate units, then average them per cell
             dx = queries[pairs.row, 0] - point_tree.data[pairs.col, 0]
             dy = queries[pairs.row, 1] - point_tree.data[pairs.col, 1]
             distances = np.sqrt((dx * res_x) ** 2 + (dy * res_y) ** 2)
             sums = np.bincount(pairs.row, weights=distances, minlength=len(queries))
             block[valid] = sums[valid] / counts[valid]
         else:
-            # Pairwise point distances depend on each complete local neighborhood
+            # Compute all point-to-point distances in each complete neighborhood, then average them
             for query_index in np.flatnonzero(valid):
                 point_indexes = pairs.col[pairs.row == query_index]
                 block[query_index] = float(np.mean(pdist(points[point_indexes])))
@@ -638,11 +696,8 @@ def _grid_radius(
         x_coords, y_coords = grid_coords
         x_start = float(np.min(x_coords))
         y_start = float(np.min(y_coords))
-        function_name = "idw" if method == "idw" else "statistic"
-        function = _grid_radius_idw_numba if method == "idw" else _grid_radius_statistic_numba
-        numba_function = _numba_grid_function(function_name, function)
         if method != "idw":
-            return numba_function(
+            return _grid_radius_statistic_numba(
                 points,
                 values,
                 x_start,
@@ -655,7 +710,7 @@ def _grid_radius(
                 _NUMBA_STATISTIC_CODES[method],
                 min_points,
             )
-        return numba_function(
+        return _grid_radius_idw_numba(
             points,
             values,
             x_start,
@@ -680,6 +735,10 @@ def _grid_radius(
         distance_power=distance_power,
         min_points=min_points,
     )
+
+
+# Common eager dispatcher for interpolation and circular-neighborhood methods
+############################################################################
 
 
 def _grid_pointcloud(
@@ -812,6 +871,14 @@ def _grid_pointcloud(
     transform_from_coords = rio.transform.from_origin(min(grid_coords[0]), max(grid_coords[1]), res_x, res_y)
 
     return aligned_dem, transform_from_coords
+
+
+################################
+# 3/ CHUNKED POINT SELECTION
+################################
+
+# Bounds filtering and per-block calculation shared by Dask and multiprocessing
+###############################################################################
 
 
 def _support_bounds(geogrid: GeoGrid, dist_nodata_pixel: float) -> BoundingBox:
@@ -1000,6 +1067,14 @@ def _grid_pointcloud_multiproc_block(
     return array, dst_tile
 
 
+############################################
+# 4/ DASK AND MULTIPROCESSING EXECUTION
+############################################
+
+# Assemble lazy Dask tiles or submit file-backed multiprocessing tiles
+#######################################################################
+
+
 def _dask_grid_pointcloud(
     source_pointcloud: Any,
     dst_geotiling: ChunkedGeoGrid,
@@ -1090,6 +1165,14 @@ def _multiproc_grid_pointcloud(
 
     # Write tiles as workers finish instead of holding the full raster in memory
     return _write_multiproc_result(tasks=tasks, mp_config=mp_config, file_metadata=file_metadata)
+
+
+######################
+# 5/ BACKEND DISPATCH
+######################
+
+# Resolve the output grid once, then select eager, Dask or multiprocessing execution
+####################################################################################
 
 
 def _grid_pointcloud_to_raster(

@@ -68,11 +68,11 @@ jobs:
         run: pip install -e .[test,benchmark]
 
       - name: Run large data tests
-        # Module execution keeps the repository-only benchmarks package importable
+        # Keep benchmarks importable without collecting unrelated test modules in this memory-intensive job
         env:
           # Each Pytest worker owns one single-threaded backend case
           OMP_NUM_THREADS: "1"
           OPENBLAS_NUM_THREADS: "1"
           MKL_NUM_THREADS: "1"
           NUMEXPR_NUM_THREADS: "1"
-        run: python -m pytest --large-data -m large_data -n 4 --dist load --durations=20 -ra
+        run: python -m pytest benchmarks/test_large_data.py --large-data -m large_data -n 4 --dist load --durations=20 -ra
