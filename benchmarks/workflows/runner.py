@@ -46,6 +46,7 @@ from geoutils.interface.gridding import GriddingEngine, GriddingMethod
 from geoutils.profiler import ProfileMetrics, profile_call
 
 
+# Keep input sizes, worker settings and measured results consistent across ASV, GDAL and large-data tests
 @dataclass
 class BenchmarkConfig:
     """Collect deterministic data, chunk, worker and profiling settings."""
@@ -115,6 +116,7 @@ class BenchmarkResult(ProfiledResult):
         return self.worker_pids_before != self.worker_pids_after
 
 
+# Calculate memory limits and read one output pixel without loading a complete raster
 def logical_raster_size_mb(config: BenchmarkConfig) -> float:
     """Return the uncompressed float32 raster size in decimal megabytes."""
 
@@ -154,6 +156,7 @@ def read_raster_center(filename: str) -> float:
         return float(dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0])
 
 
+# Write deterministic test rasters, polygons and points without allocating the complete raster in memory
 def _write_constant_raster(filename: str, config: BenchmarkConfig) -> None:
     """Write a deterministic constant raster one storage block at a time."""
 
@@ -284,6 +287,7 @@ def _write_point_source(filename: str, points_per_axis: int = 5) -> None:
     points.to_file(filename, driver="GPKG")
 
 
+# Prepare the shared inputs, start the selected execution mode and force each operation to produce a complete output
 class BenchmarkRunner:
     """Prepare deterministic files and execute one GeoUtils implementation."""
 

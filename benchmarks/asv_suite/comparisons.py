@@ -1,4 +1,4 @@
-"""Measure time and RAM while varying one benchmark dimension at a time."""
+"""Generate ASV cases that measure time and RAM while varying one benchmark dimension at a time."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ from benchmarks.workflows.registry import (
 )
 from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
 
+# Comparisons vary one GeoUtils choice at a time: method, calculation engine, chunk strategy or execution mode
+# The label dictionaries give the stored values readable names in plots
 ComparisonDimension = Literal["method", "calculation_engine", "strategy", "execution_mode"]
 ExternalReference = Literal["gdal_cli"]
 GDAL_CLI_LABEL = "GDAL CLI"
@@ -55,6 +57,7 @@ def _class_token(value: str) -> str:
     return "".join(token.capitalize() for token in value.replace("_", "-").split("-"))
 
 
+# Store one concrete combination, such as eager IDW gridding with Numba, before creating its ASV class
 @dataclass(frozen=True)
 class BenchmarkCase:
     """Identify one valid GeoUtils method, engine, strategy and execution-mode case."""
@@ -238,7 +241,8 @@ def _external_case(
     return ExternalReferenceCase(comparison_group, operation, method, "gdal_cli", pr_check=pr_check)
 
 
-# Each tuple states one performance question; individual cases and classes are generated from it
+# Define the cases needed to compare each operation across execution modes, calculation engines, methods or strategies
+# Each helper changes only that choice and keeps the other operation settings fixed
 _INTERPOLATION_MODES = _execution_cases("interpolation-point-count", "interp_points", "linear", "scipy")
 _REPROJECTION_MODES = _execution_cases("reprojection-raster-size", "reproject", "nearest", "rasterio")
 _FILTER_MODES = _execution_cases(
@@ -257,6 +261,7 @@ _POLYGONIZATION_STRATEGIES = _strategy_cases(
 _RASTERIZATION_MODES = _execution_cases("rasterization-raster-size", "rasterize", None, "rasterio")
 _SUBSAMPLE_STRATEGIES = _strategy_cases("subsample-size", "subsample", None, None, execution_mode="dask")
 
+# Compare all four gridding methods across execution modes while keeping SciPy as the calculation engine
 _GRID_METHODS = ("nearest", "linear", "idw", "mean")
 _GRID_MODE_CASES = {
     method: _execution_cases(
@@ -268,6 +273,8 @@ _GRID_MODE_CASES = {
     )
     for method in _GRID_METHODS
 }
+
+# Compare SciPy and Numba in eager mode for the methods supported by both calculation engines
 _GRID_ENGINE_CASES = {
     method: _engine_cases(
         "gridding-raster-size",
@@ -277,9 +284,12 @@ _GRID_ENGINE_CASES = {
     )
     for method in ("nearest", "idw", "mean")
 }
+
+# Repeat the nearest engine comparison while varying source point count instead of raster size
 _GRID_POINT_ENGINE_CASES = _engine_cases("gridding-point-count", "grid", "nearest")
 
-# Fixed-size checks retain worker/JIT coverage without adding redundant Numba scaling curves
+# Add one fixed-size run per Numba method and worker execution mode to check that compiled kernels work there
+# The eager engine comparisons already measure how these methods scale with raster size
 _WORKER_EXECUTION_MODES: tuple[ExecutionMode, ...] = ("dask", "multiprocessing")
 _NUMBA_WORKER_CASES = tuple(
     BenchmarkCase(
@@ -295,6 +305,7 @@ _NUMBA_WORKER_CASES = tuple(
     for execution_mode in _WORKER_EXECUTION_MODES
 )
 
+# Combine every GeoUtils case and remove duplicates when the same combination appears in several comparisons
 BENCHMARK_CASES = _merge_cases(
     _INTERPOLATION_MODES,
     _REPROJECTION_MODES,
@@ -309,6 +320,7 @@ BENCHMARK_CASES = _merge_cases(
     _NUMBA_WORKER_CASES,
 )
 
+# Define matching GDAL CLI runs for operations that have a direct external reference
 _REPROJECTION_REFERENCE = _external_case("reprojection-raster-size", "reproject", "nearest")
 _POLYGONIZATION_REFERENCE = _external_case("polygonization-raster-size", "polygonize", None)
 _RASTERIZATION_REFERENCE = _external_case("rasterization-raster-size", "rasterize", None)
@@ -322,6 +334,8 @@ _GRID_REFERENCES = {
     for method in _GRID_METHODS
 }
 _GRID_POINT_REFERENCE = _external_case("gridding-point-count", "grid", "nearest")
+
+# Collect GDAL runs separately because the CLI is neither a GeoUtils engine nor an execution mode
 EXTERNAL_REFERENCE_CASES = (
     _REPROJECTION_REFERENCE,
     _POLYGONIZATION_REFERENCE,
@@ -330,6 +344,7 @@ EXTERNAL_REFERENCE_CASES = (
     _GRID_POINT_REFERENCE,
 )
 
+# Map each generated ASV class name back to the operation settings needed during setup
 BENCHMARK_CASE_BY_CLASS = {case.benchmark_class: case for case in BENCHMARK_CASES}
 EXTERNAL_REFERENCE_CASE_BY_CLASS = {case.benchmark_class: case for case in EXTERNAL_REFERENCE_CASES}
 
@@ -380,6 +395,7 @@ class Comparison:
     execution_mode: ExecutionMode | None = None
 
 
+# Define the report plots, including their displayed series and the operation settings held fixed
 COMPARISONS: tuple[Comparison, ...] = (
     Comparison(
         slug="interpolation-point-count",
@@ -493,6 +509,8 @@ COMPARISONS: tuple[Comparison, ...] = (
 )
 
 
+# The classes below define which numeric input changes, such as raster size, chunk size or point count
+# Generated subclasses later combine that input axis with one concrete operation configuration
 class _ComparisonBenchmark:
     """Share ASV settings, dimensional metadata and complete result computation."""
 
@@ -599,6 +617,7 @@ class _ComparisonBenchmark:
         return self.runner.run(self.operation).peak_process_tree_mem_mb
 
 
+# ASV reads tracker units from method attributes when labelling stored values
 setattr(_ComparisonBenchmark.track_end_to_end_time_s, "unit", "seconds")
 setattr(_ComparisonBenchmark.track_peak_process_tree_mem_mb, "unit", "MB")
 
@@ -692,6 +711,7 @@ class _GriddingRasterSize(_ComparisonBenchmark):
     def make_config(self, parameter: int) -> BenchmarkConfig:
         """Place the selected raster size around a method-appropriate point input."""
 
+        # Set the support distance in pixels and input points per axis used to exercise each method
         method_settings = {
             "nearest": (float("inf"), 3),
             "linear": (float("inf"), 9),
@@ -732,6 +752,7 @@ class _NumbaWorkerIntegration(_GriddingRasterSize):
     params = [asv_parameter_values([1024], pr_check_value=512)]
 
 
+# Select the input axis and fixture configuration used by each named comparison group
 _SCENARIO_BASES: dict[str, type[_ComparisonBenchmark]] = {
     "interpolation-point-count": _InterpolationPointCount,
     "reprojection-raster-size": _ReprojectionRasterSize,
@@ -763,4 +784,5 @@ def _register_asv_classes() -> None:
         )
 
 
+# ASV discovers public module classes, so create one class for every registered case after defining the bases
 _register_asv_classes()

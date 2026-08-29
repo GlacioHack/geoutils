@@ -22,6 +22,7 @@ from benchmarks.workflows.runner import (
 from geoutils.profiler import ProfileMetrics, profile_call
 
 
+# Return GDAL measurements through the same result interface used by GeoUtils benchmark runs
 @dataclass(frozen=True)
 class GdalResult(ProfiledResult):
     """Store one completed GDAL result together with its process memory."""
@@ -42,6 +43,7 @@ def read_comparison_value(operation: ComparisonOperation, output_file: str) -> f
     return read_raster_center(output_file)
 
 
+# Adapt one GDAL command to the setup, execution, validation and cleanup steps expected by ASV
 class GdalRunner:
     """Run one GDAL operation against sources prepared by the shared workflow."""
 

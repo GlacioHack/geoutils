@@ -10,8 +10,11 @@ from typing import Literal
 from benchmarks.workflows.registry import resolve_operation_parameters
 from benchmarks.workflows.runner import BenchmarkConfig
 
+# Only these GeoUtils operations have an equivalent GDAL CLI command for the external comparison
 ComparisonOperation = Literal["reproject", "polygonize", "rasterize", "grid"]
 COMPARISON_OPERATIONS: tuple[ComparisonOperation, ...] = ("reproject", "polygonize", "rasterize", "grid")
+
+# List the GDAL gridding algorithms that the command builder can use for matching GeoUtils methods
 GdalGridAlgorithm = Literal[
     "nearest",
     "linear",

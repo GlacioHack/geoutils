@@ -15,13 +15,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Describe benchmark operations, methods, engines, strategies and execution modes."""
+"""List supported benchmark dimensions and resolve one valid operation configuration."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
 
+# Define the dimensions supported by GeoUtils and tested in benchmarks: execution modes,
+# calculation engines, operation names, operation methods and chunk strategies
 ExecutionMode = Literal["eager", "dask", "multiprocessing"]
 CalculationEngine = Literal["scipy", "numba", "rasterio"]
 OperationStrategyName = Literal["sequential", "topk", "label_union", "label_stitch", "geometry_stitch"]
@@ -42,6 +44,8 @@ OperationName = Literal[
 ]
 
 
+# Store which methods and engines each operation supports, which chunk strategies it offers,
+# and which execution modes are tested
 @dataclass(frozen=True)
 class OperationMethod:
     """Describe one benchmarked method and its supported calculation engines."""
@@ -70,8 +74,8 @@ class OperationCase:
     expected_value: float
 
 
-# Methods and engines are independent of execution mode. A single-method operation is still
-# explicit here so reports never have to infer its numerical implementation from a class name.
+# List the supported method and calculation-engine combinations for each numerical operation
+# Single-method operations stay explicit so the engine is always recorded in benchmark results
 OPERATION_METHODS: tuple[OperationMethod, ...] = (
     OperationMethod("interp_points", "linear", ("scipy",), default=True),
     OperationMethod("reproject", "nearest", ("rasterio",), default=True),
@@ -84,7 +88,7 @@ OPERATION_METHODS: tuple[OperationMethod, ...] = (
     OperationMethod("grid", "mean", ("scipy", "numba")),
 )
 
-# Strategies coordinate selections or reconcile results across chunks; eager execution has no strategy
+# List the alternative ways chunked operations select or reconcile results; eager execution has no strategy
 OPERATION_STRATEGIES: tuple[OperationStrategy, ...] = (
     OperationStrategy("subsample", "sequential"),
     OperationStrategy("subsample", "topk", default=True),
@@ -94,7 +98,8 @@ OPERATION_STRATEGIES: tuple[OperationStrategy, ...] = (
 )
 
 
-# Keep public out-of-core claims in one executable list
+# List each operation tested out of core, its supported execution modes and its expected result value
+# Both the fixed ASV benchmarks and large-data tests use this coverage list
 OPERATION_CASES: tuple[OperationCase, ...] = (
     OperationCase("crop", ("dask",), 1),
     OperationCase("translate", ("dask",), 1),
@@ -111,8 +116,10 @@ OPERATION_CASES: tuple[OperationCase, ...] = (
     OperationCase("grid", ("dask", "multiprocessing"), 1),
 )
 
-# Flatten supported pairs for ASV and pytest without creating invalid combinations
+# Map an operation name to its expected result and supported execution modes
 OPERATION_BY_NAME = {case.operation: case for case in OPERATION_CASES}
+
+# Build identifiers such as "dask-grid" only for execution mode and operation pairs that are supported
 OPERATION_BENCHMARK_CASES = tuple(
     f"{execution_mode}-{case.operation}" for case in OPERATION_CASES for execution_mode in case.execution_modes
 )
@@ -127,6 +134,7 @@ def resolve_operation_parameters(
 ) -> tuple[str | None, CalculationEngine | None, OperationStrategyName | None]:
     """Resolve and validate the method, engine and strategy for one operation."""
 
+    # Find the requested method, or the registered default, before checking that its engine is supported
     operation_methods = tuple(
         specification for specification in OPERATION_METHODS if specification.operation == operation
     )
@@ -149,6 +157,7 @@ def resolve_operation_parameters(
                 f"Engine {calculation_engine!r} does not support benchmark method {operation!r}/{method!r}"
             )
 
+    # Chunk strategies are selected independently and rejected for eager execution
     operation_strategies = tuple(
         specification for specification in OPERATION_STRATEGIES if specification.operation == operation
     )

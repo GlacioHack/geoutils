@@ -31,6 +31,7 @@ from benchmarks.workflows.registry import (
     OperationStrategyName,
 )
 
+# Name the files written by this renderer and linked from the benchmark website and documentation
 COMPARISON_BENCHMARK_MODULE = "asv_suite.comparisons"
 COMPARISON_REPORT_DIRECTORY = "comparisons"
 DOCUMENTATION_TIME_PLOT = "time_relative_to_gdal.svg"
@@ -47,6 +48,7 @@ SERIES_COLORS = {
 }
 
 
+# Store one row per plot point, with operation, method, engine, strategy and execution mode in separate fields
 @dataclass(frozen=True)
 class ComparisonMeasurement:
     """Store one fully identified benchmark result at one numeric parameter value."""
@@ -184,6 +186,7 @@ def collect_comparison_measurements(
 ) -> list[ComparisonMeasurement]:
     """Combine matching operation-time, end-to-end-time and peak-RAM results."""
 
+    # Convert each saved ASV series into one record per numeric input value
     records = []
     available = set(result.get_all_result_keys())
     for comparison in comparisons:
@@ -363,6 +366,7 @@ def _measurement_at(
 def _documentation_operation_name(comparison: Comparison) -> str:
     """Return the concise operation name used on documentation graphics."""
 
+    # Convert registry names such as "reproject" to the titles shown in public plots and tables
     operation_labels = {
         "reproject": "Reprojection",
         "polygonize": "Polygonization",
@@ -379,6 +383,7 @@ def _shared_change_parameter(
 ) -> int | None:
     """Return the largest parameter shared by every requested series in both results."""
 
+    # Compare only input sizes measured for all three GeoUtils execution modes and the GDAL CLI on both revisions
     series_labels = ("Eager", "Dask", "Multiprocessing", GDAL_CLI_LABEL)
     parameters = []
     for records in (baseline_records, current_records):
@@ -415,6 +420,8 @@ def performance_change_markdown(baseline_result: Any, current_result: Any) -> st
     # Normalizing each revision to its own GDAL CLI result limits machine-wide timing drift
     baseline_available = set(baseline_result.get_all_result_keys())
     current_available = set(current_result.get_all_result_keys())
+
+    # Build the report only from operations with all three measurements on both revisions
     shared_comparisons = []
     baseline_records = []
     current_records = []
@@ -430,6 +437,8 @@ def performance_change_markdown(baseline_result: Any, current_result: Any) -> st
         shared_comparisons.append(comparison)
         baseline_records.extend(baseline_comparison)
         current_records.extend(current_comparison)
+
+    # Group GDAL-normalized timings by execution mode before summarizing across operations
     execution_modes = ("Eager", "Dask", "Multiprocessing")
     ratios: dict[str, list[tuple[Comparison, int, float, float]]] = {name: [] for name in execution_modes}
     for comparison in shared_comparisons:

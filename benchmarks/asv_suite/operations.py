@@ -11,11 +11,15 @@ from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
 
 # Scaling comparisons already cover these operations at three input values
 _SCALING_OPERATIONS = {"filter", "reproject", "interp_points", "polygonize", "rasterize", "grid"}
+
+# Remove operations already measured while varying raster, chunk or point count
+# The remaining operation/execution-mode pairs are measured once with a fixed input configuration
 FIXED_OPERATION_BENCHMARK_CASES = tuple(
     case for case in OPERATION_BENCHMARK_CASES if split_operation_case(case)[1] not in _SCALING_OPERATIONS
 )
 
 
+# Use one parameterized ASV class so every remaining operation/execution-mode pair uses the same measurements
 class OperationBenchmarks:
     """Measure operations without a dedicated scaling comparison at one fixed configuration."""
 

@@ -47,6 +47,7 @@ from benchmarks.workflows.runner import (
 )
 from geoutils.interface.gridding import GriddingMethod
 
+# Mark every test in this module as opt-in, memory-sensitive and allowed to emit expected worker warnings
 pytestmark = [pytest.mark.large_data, pytest.mark.memory, pytest.mark.allow_logging_warnings]
 
 

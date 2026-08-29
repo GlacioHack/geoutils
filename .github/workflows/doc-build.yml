@@ -1,4 +1,4 @@
-# This workflow test the documentation build on every PR commit
+# This workflow tests the documentation build on every PR commit
 
 name: documentation
 
