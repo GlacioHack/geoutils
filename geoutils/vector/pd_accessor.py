@@ -28,7 +28,6 @@ from typing import Any
 
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry.base import BaseGeometry
 
 from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
@@ -163,23 +162,6 @@ class VectorAccessor(VectorBase):
         if is_dask_dataframe(self._obj):
             return self._obj.copy()
         return self._obj.copy(deep=deep)
-
-    def _override_gdf_output(self, other: gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | pd.Series | Any) -> Any:
-        """Parse outputs of GeoPandas functions to facilitate object manipulation."""
-
-        if is_dask_dataframe(other):
-            return other
-
-        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoSeries, pd.Series, BaseGeometry)):
-            raise ValueError("Not implemented. This error should only be raised in tests.")
-
-        if isinstance(other, gpd.GeoDataFrame):
-            return other
-        if isinstance(other, gpd.GeoSeries):
-            return gpd.GeoDataFrame(geometry=other)
-        if isinstance(other, BaseGeometry):
-            return gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs)
-        return other
 
     def to_geoutils(self) -> Any:
         """Convert to a GeoUtils Vector object."""

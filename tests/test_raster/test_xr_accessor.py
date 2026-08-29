@@ -87,6 +87,27 @@ class TestAccessor:
         assert isinstance(ds_comp.data, np.ndarray)
         assert ds_comp._in_memory
 
+    def test_equality__dask_reduces_lazily(self) -> None:
+        """Compare Dask raster data through scalar reductions without loading the DataArray."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        array = np.arange(20, dtype=np.float32).reshape(4, 5)
+        raster = gu.Raster.from_array(array, transform=from_origin(0, 4, 1, 1), crs=4326, nodata=None)
+        lazy = gu.RasterAccessor.from_array(
+            da.from_array(array, chunks=(2, 3)), transform=raster.transform, crs=raster.crs, nodata=None
+        )
+        close = lazy.copy(data=lazy.data + 1e-7)
+        changed = lazy.copy(data=lazy.data + 1)
+
+        assert raster.raster_equal(lazy)
+        assert lazy.rst.raster_equal(raster)
+        assert raster.raster_allclose(close, atol=1e-6)
+        assert not raster.raster_equal(close)
+        assert not raster.raster_allclose(changed)
+        assert not lazy._in_memory
+
     def test_open__dask_nodata_can_be_written(self, tmp_path: Path) -> None:
         """Write a lazily opened nodata raster without conflicting xarray metadata."""
 
@@ -190,7 +211,11 @@ class TestAccessor:
         assert bool(mask.compute().data[3, 3])
 
         polygons = ds.rst.polygonize(target_values=1)
-        rasterized = polygons.vct.rasterize(ds.rst, in_value=1, out_value=0, out_dtype=np.uint8, dask=True)
+        rasterized = polygons.vct.rasterize(ds.rst, in_value=1, out_value=0, out_dtype=np.uint8)
         assert isinstance(rasterized.data, da.Array)
         assert rasterized.data.chunks == dask_arr.chunks
         assert np.array_equal(rasterized.compute().data, arr)
+
+        rasterized_from_dataarray = polygons.vct.rasterize(ds, in_value=1, out_value=0, out_dtype=np.uint8)
+        assert isinstance(rasterized_from_dataarray.data, da.Array)
+        assert rasterized_from_dataarray.data.chunks == dask_arr.chunks

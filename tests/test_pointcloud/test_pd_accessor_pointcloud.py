@@ -120,6 +120,25 @@ class TestPointCloudAccessor:
         assert not ds.pc.is_loaded
         assert ds.pc.point_count == len(self.gdf)
 
+    def test_accessor__rejects_invalid_dask_dataframes(self) -> None:
+        """Reject plain Dask DataFrames and validate lazy geometry partitions as points."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+        import dask.dataframe as dd
+
+        vector_pd_accessor._register_dask_vector_accessor()
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+
+        _register_dask_pointcloud_accessor()
+        plain = dd.from_pandas(self.gdf.drop(columns="geometry"), npartitions=2)
+        with pytest.raises(AttributeError, match="Dask-GeoPandas"):
+            _ = plain.pc
+
+        polygons = gpd.GeoDataFrame({"z": [1]}, geometry=[self.gdf.geometry.iloc[0].buffer(1)], crs=4326)
+        lazy_polygons = dgpd.from_geopandas(polygons, npartitions=1)
+        with pytest.raises(ValueError, match="point geometries"):
+            lazy_polygons.pc.load()
+
     def test_reproject_pointcloud__dask_geopandas(self) -> None:
         """Reproject point partitions lazily and match eager GeoPandas output."""
 

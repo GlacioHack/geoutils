@@ -36,8 +36,11 @@ def assert_output_equal(output_pc: Any, output_ds: Any, use_allclose: bool = Fal
 
     # For point clouds: the class returns a PointCloud, while the accessor returns a GeoDataFrame
     if isinstance(output_pc, PointCloud):
-        assert isinstance(output_ds, gpd.GeoDataFrame)
-        assert output_pc.pointcloud_equal(PointCloud(output_ds, data_column=output_ds.pc.data_column))
+        if isinstance(output_ds, PointCloud):
+            assert output_pc.pointcloud_equal(output_ds)
+        else:
+            assert isinstance(output_ds, gpd.GeoDataFrame)
+            assert output_pc.pointcloud_equal(PointCloud(output_ds, data_column=output_ds.pc.data_column))
 
     # For rasters
     elif isinstance(output_pc, Raster):
@@ -119,6 +122,7 @@ class TestClassVsAccessorConsistency:
         ("georeferenced_coords_equal", {"pc": "self"}),
         ("get_stats", {}),
         ("subsample", {"subsample": 2, "random_state": 42}),
+        ("to_geoutils", {}),
         (
             "grid",
             {"grid_coords": (np.array([0.0, 1.0]), np.array([0.0, 1.0])), "resampling": "nearest"},
@@ -223,6 +227,44 @@ class TestClassVsAccessorConsistency:
         assert close_ds.pc.pointcloud_allclose(pointcloud, atol=1e-8)
         assert not pointcloud.pointcloud_allclose(close_ds, rtol=0, atol=1e-10)
 
+    def test_copy__preserves_dataframe_and_pointcloud_type(self) -> None:
+        """Check that copying retains auxiliary columns, indexes and PointCloud outputs."""
+
+        ds = self.ds.copy()
+        ds.index = pd.Index([10, 20, 30, 40], name="point_id")
+        pointcloud = PointCloud(ds, data_column="b1")
+        replacement = np.array([11.0, 12.0, 13.0, 14.0])
+
+        copied = pointcloud.copy(new_array=replacement)
+        copied_ds = ds.pc.copy(new_array=replacement)
+
+        assert isinstance(copied, PointCloud)
+        assert copied.columns.equals(ds.columns)
+        assert copied.index.equals(ds.index)
+        assert np.array_equal(copied["b1"], replacement)
+        assert np.array_equal(copied["b2"], ds["b2"])
+        assert_geodataframe_equal(copied.ds, copied_ds)
+        assert np.array_equal(pointcloud["b1"], ds["b1"])
+
+    @pytest.mark.parametrize(
+        ("method", "kwargs"),
+        [
+            ("crop", {"bbox": (-1, -1, 0.5, 2)}),
+            ("reproject", {"crs": 4326}),
+            ("translate", {"xoff": 1, "yoff": 2}),
+        ],
+    )
+    def test_point_preserving_vector_methods__return_pointcloud(self, method: str, kwargs: dict[str, Any]) -> None:
+        """Check that inherited point-preserving vector methods retain PointCloud semantics."""
+
+        pointcloud = PointCloud(self.ds, data_column="b1")
+        result = getattr(pointcloud, method)(**kwargs)
+
+        assert isinstance(result, PointCloud)
+        assert result.data_column == "b1"
+        assert "b2" in result.columns
+        assert isinstance(pointcloud.to_geoutils(), PointCloud)
+
     def test_shared_methods_and_arithmetic_ownership(self) -> None:
         """Check that shared operations live in the base while arithmetic remains exclusive to PointCloud."""
 
@@ -289,10 +331,34 @@ class TestAccessorDask:
         assert np.array_equal(array_ds.compute(), array_pc)
         assert not ds.pc.is_loaded
 
-        # Explicit loading is the only operation that replaces the lazy source
-        ds.pc.load()
-        assert ds.pc.is_loaded
-        assert_geodataframe_equal(ds.pc.ds, self.ds)
+        # Loading returns an eager replacement because a Dask collection cannot be mutated in place
+        loaded = ds.pc.load()
+        assert_geodataframe_equal(loaded, self.ds)
+        assert not ds.pc.is_loaded
+
+    def test_chunked_equality__compares_values_without_loading(self) -> None:
+        """Check that lazy equality detects changed coordinates and values without replacing either input."""
+
+        pytest.importorskip("dask_geopandas")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = os.path.join(temp_dir, "source.gpkg")
+            changed = os.path.join(temp_dir, "changed.gpkg")
+            self.ds.to_file(source)
+            changed_ds = self.ds.copy()
+            changed_ds.geometry = changed_ds.geometry.translate(xoff=10)
+            changed_ds.to_file(changed)
+
+            lazy = gu.open_pointcloud(source, data_column="b1", chunks=3)
+            lazy_changed = gu.open_pointcloud(changed, data_column="b1", chunks=2)
+            eager = PointCloud(self.ds, data_column="b1")
+
+            assert lazy.pc.pointcloud_equal(eager)
+            assert lazy.pc.georeferenced_coords_equal(eager)
+            assert not lazy_changed.pc.georeferenced_coords_equal(eager)
+            assert not lazy_changed.pc.pointcloud_equal(eager)
+            assert not lazy.pc.is_loaded
+            assert not lazy_changed.pc.is_loaded
 
     def test_chunked_reduction_methods__equality_loading_laziness(self) -> None:
         """Test Dask point-cloud reductions/subsampling compute small outputs without loading the source."""

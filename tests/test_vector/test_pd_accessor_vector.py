@@ -71,6 +71,47 @@ class TestVectorAccessor:
         assert not ds.vct.is_loaded
         assert not translated.vct.is_loaded
 
+    def test_equality__dask_partitions(self) -> None:
+        """Compare lazy vectors exactly and approximately without changing their collections."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+        import dask
+
+        eager = gu.open_vector(self.aster_outlines_path)
+        lazy = gu.open_vector(self.aster_outlines_path, chunks=1)
+        with dask.config.set({"dataframe.convert-string": False}):
+            differently_chunked = dgpd.from_geopandas(eager, npartitions=2)
+        close = eager.copy()
+        close.geometry = close.geometry.translate(xoff=1e-9)
+        changed = eager.copy()
+        changed.geometry = changed.geometry.translate(xoff=1)
+
+        assert lazy.vct.vector_equal(eager)
+        assert lazy.vct.vector_equal(differently_chunked)
+        assert lazy.vct.vector_allclose(close, atol=1e-8)
+        assert not lazy.vct.vector_equal(close)
+        assert not lazy.vct.vector_equal(changed)
+        assert not lazy.vct.is_loaded
+
+    @pytest.mark.parametrize(
+        ("method", "kwargs"),
+        [
+            ("crop", {"bbox": (-180, -90, 180, 90)}),
+            ("reproject", {"crs": 4326}),
+            ("translate", {"xoff": 1, "yoff": 2}),
+            ("query", {"expression": "index == index"}),
+        ],
+    )
+    def test_inplace__dask_rejected(self, method: str, kwargs: dict[str, object]) -> None:
+        """Explain that immutable Dask vectors must use the returned collection."""
+
+        pytest.importorskip("dask_geopandas")
+        ds = gu.open_vector(self.aster_outlines_path, chunks=1)
+
+        with pytest.raises(ValueError, match="cannot be modified in place"):
+            getattr(ds.vct, method)(**kwargs, inplace=True)
+        assert not ds.vct.is_loaded
+
     @pytest.mark.parametrize(
         ("method", "clip"),
         [("copy", False), ("crop", False), ("crop", True)],

@@ -911,6 +911,7 @@ def _interp_points_dask_pointcloud(
             "bounds": None,
             "point_count": None,
             "data_column": data_column,
+            "geometry_type": "Point",
         },
     )
 

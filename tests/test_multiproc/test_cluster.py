@@ -22,6 +22,13 @@ def long_running_task(x: float) -> float:
     return x * 2
 
 
+def delayed_value(delay: float, value: int) -> int:
+    """Return a value after a controlled worker delay."""
+
+    time.sleep(delay)
+    return value
+
+
 class TestClusterGenerator:
     """Check synchronous and process-based cluster implementations through their shared interface."""
 
@@ -50,6 +57,18 @@ class TestClusterGenerator:
         futures = [cluster.submit(long_running_task, i) for i in range(4)]
         results = cluster.gather(futures)
         assert results == [0, 2, 4, 6]
+
+    def test_mp_cluster_completion_order(self) -> None:
+        """Yield a later submitted task first when it completes first."""
+
+        cluster = ClusterGenerator("multiprocessing", nb_workers=2)
+        assert isinstance(cluster, MpCluster)
+
+        futures = [cluster.submit(delayed_value, 0.2, 0), cluster.submit(delayed_value, 0.01, 1)]
+        completed = list(cluster.iter_completed(futures))
+        cluster.close()
+
+        assert completed == [(1, 1), (0, 0)]
 
     def test_mp_cluster_termination(self) -> None:
         # Test that the pool terminates correctly after closing

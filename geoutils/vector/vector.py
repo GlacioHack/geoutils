@@ -204,28 +204,6 @@ class Vector(VectorBase):
     # Overridden and wrapped methods from GeoPandas API to logically cast outputs
     ############################################################################
 
-    def _override_gdf_output(
-        self, other: gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | pd.Series | Any
-    ) -> VectorType | pd.Series:
-        """Parse outputs of GeoPandas functions to facilitate object manipulation."""
-
-        # Raise error if output is not treated separately, should appear in tests
-        if not isinstance(other, (gpd.GeoDataFrame, pd.Series, BaseGeometry)):
-            raise ValueError("Not implemented. This error should only be raised in tests.")
-
-        # If a GeoDataFrame is the output, return it
-        if isinstance(other, gpd.GeoDataFrame):
-            return Vector(other)
-        # If a GeoSeries is the output, re-encapsulate in a GeoDataFrame and return it
-        elif isinstance(other, gpd.GeoSeries):
-            return Vector(gpd.GeoDataFrame(geometry=other))
-        # If a Shapely Geometry is the output, re-encapsulate in a GeoDataFrame and return it
-        elif isinstance(other, BaseGeometry):
-            return Vector(gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs))
-        # If a Pandas Series is the output, append it to that of the GeoDataFrame
-        else:
-            return other
-
     # -----------------------------------------------
     # GeoPandasBase - Attributes that return a Series
     # -----------------------------------------------

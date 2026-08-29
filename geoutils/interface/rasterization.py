@@ -510,7 +510,7 @@ def _rasterize(
     :param crs: Output CRS.
     :param chunksizes: Chunk size (rows, cols) for Dask/Multiproc (if no reference raster is passed, or not chunked).
     :param mp_config: Multiprocessing config.
-    :param dask: If True, return a Dask-backed Raster.
+    :param dask: If True, return a Dask-backed Raster. A Dask-backed reference raster also selects this backend.
     :param mask_output: Return boolean values for an in-memory or Dask mask.
     """
     # Compute output grid
@@ -525,8 +525,9 @@ def _rasterize(
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
-    # Output type follows the caller; Dask output is opt-in
-    dask_backend = bool(dask)
+    # A Dask reference keeps its chunked representation unless Multiprocessing is requested
+    ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
+    dask_backend = bool(dask) or (da is not None and ref_chunks is not None)
 
     if mp_backend and dask_backend:
         raise ValueError(
@@ -563,7 +564,6 @@ def _rasterize(
             assert mp_config is not None
             chunksizes = _split_chunk_size(mp_config.chunks)
         else:
-            ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
             if ref_chunks is not None:
                 chunksizes = ref_chunks
             else:
@@ -624,7 +624,7 @@ def _rasterize(
 
 def _create_mask_pointcloud(
     source_vector: Vector, points: tuple[NDArrayNum, NDArrayNum] | PointCloudLike, as_array: bool = False
-) -> NDArrayBool:
+) -> NDArrayBool | PointCloud:
     """Subfunction to create a point cloud mask using geopandas."""
 
     # Normalize input
@@ -706,6 +706,7 @@ def _create_mask_pointcloud_dask(source_vector: Vector, points: Any, as_array: b
             "bounds": None,
             "point_count": None,
             "data_column": "z",
+            "geometry_type": "Point",
         },
     )
 

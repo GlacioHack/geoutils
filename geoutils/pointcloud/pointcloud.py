@@ -51,11 +51,12 @@ from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.las import (
+    _is_laspy_supported,
+    _load_laspy_data,
     _load_laspy_data_partitions,
+    _load_laspy_metadata,
     _point_partition_size,
     _write_laspy,
-    load_laspy_data,
-    load_laspy_metadata,
 )
 from geoutils.vector.vector import Vector, VectorLike
 
@@ -234,12 +235,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             return
         # For filename, rely on parent Vector class or LAS file reader
         else:
-            if isinstance(filename_or_dataset, (str, pathlib.Path)) and os.path.splitext(
-                os.fspath(filename_or_dataset)
-            )[-1] in [
-                ".las",
-                ".laz",
-            ]:
+            if isinstance(filename_or_dataset, (str, pathlib.Path)) and _is_laspy_supported(filename_or_dataset):
 
                 self._is_las = True
                 # No need to pass a data column for LAS/LAZ file, as Z is the logical default
@@ -247,7 +243,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                     data_column = "Z"
                 # Load only metadata, and not the data
                 fn = os.fspath(filename_or_dataset)
-                metadata = load_laspy_metadata(fn)
+                metadata = _load_laspy_metadata(fn)
                 self._name = fn
                 self._crs = metadata.crs
                 self._nb_points = metadata.point_count
@@ -380,7 +376,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             columns_to_load = columns
 
         if mp_config is None:
-            ds = load_laspy_data(filename=self.name, columns=columns_to_load, data_column=self.data_column)
+            ds = _load_laspy_data(filename=self.name, columns=columns_to_load, data_column=self.data_column)
         else:
             ds = _load_laspy_data_partitions(
                 filename=self.name,

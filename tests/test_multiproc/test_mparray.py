@@ -27,7 +27,9 @@ from geoutils.multiproc.mparray import (
     block_bounds_from_chunks,
     compute_tiling,
     map_blocks,
+    map_multiproc_collect,
     map_overlap,
+    map_overlap_multiproc_save,
 )
 from geoutils.raster import RasterType
 
@@ -197,6 +199,25 @@ class TestMultiproc:
             MultiprocConfig(chunks=(0, 25))
         with pytest.raises(TypeError, match="integer or a tuple of two integers"):
             MultiprocConfig(chunks=(40, 25.0))  # type: ignore
+
+    def test_deprecated_map_names_preserve_signatures(self, tmp_path: Any) -> None:
+        """Forward the former top-level map functions with explicit deprecation warnings."""
+
+        raster = Raster.from_array(
+            np.arange(16, dtype=np.float32).reshape(4, 4),
+            transform=gu.Raster(self.aster_dem_path).transform,
+            crs=4326,
+        )
+        config = MultiprocConfig(chunks=2, outfile=str(tmp_path / "deprecated-map.tif"))
+
+        with pytest.warns(DeprecationWarning, match=r"Use map_overlap\(\) instead"):
+            mapped = map_overlap_multiproc_save(_custom_func, raster, config, 1, 2)
+        assert mapped.raster_equal(_custom_func(raster, 1, 2))
+
+        with pytest.warns(DeprecationWarning, match=r"Use map_blocks\(\)"):
+            collected = map_multiproc_collect(_custom_func_stats, raster, config, return_tile=True)
+        assert len(collected) == 4
+        assert all(len(item) == 2 for item in collected)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     def test_load_raster_tile(self, example: str) -> None:

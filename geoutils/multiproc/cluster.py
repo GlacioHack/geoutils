@@ -80,6 +80,12 @@ class AbstractCluster:
         """Collect several task results, mirroring Dask Distributed's ``Client.gather``."""
         return [self.compute(future) for future in futures]
 
+    def iter_completed(self, futures: list[Any]) -> Any:
+        """Yield task indexes and results as supported by the cluster backend."""
+
+        for index, future in enumerate(futures):
+            yield index, self.compute(future)
+
     def return_wrapper(self) -> None:
         """Wrapper for returned values, should be customized in subclasses if needed."""
         raise NotImplementedError("This method should be implemented by subclasses.")
@@ -149,3 +155,17 @@ class MpCluster(AbstractCluster):
         Retrieves the result of a completed asynchronous task.
         """
         return future.get(timeout=5000)
+
+    def iter_completed(self, futures: list[Any]) -> Any:
+        """Yield multiprocessing results as soon as their tasks finish."""
+
+        pending = dict(enumerate(futures))
+        while pending:
+            ready = [index for index, future in pending.items() if future.ready()]
+            if not ready:
+                # Wait briefly on one task before checking every future again
+                next(iter(pending.values())).wait(timeout=0.05)
+                continue
+            for index in ready:
+                future = pending.pop(index)
+                yield index, self.compute(future)

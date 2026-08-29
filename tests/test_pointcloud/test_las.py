@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from dataclasses import replace
 from importlib.util import find_spec
 
 import geopandas as gpd
@@ -11,14 +12,15 @@ import numpy as np
 import pytest
 
 import geoutils as gu
+import geoutils.pointcloud.las as las_module
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.las import (
-    iter_laspy_spatial_chunks,
-    load_laspy_data_bounds,
-    load_laspy_data_slice,
-    load_laspy_metadata,
-    spatial_bounds_grid,
-    write_laspy_spatial_chunks,
+    _iter_laspy_spatial_chunks,
+    _load_laspy_data_bounds,
+    _load_laspy_data_slice,
+    _load_laspy_metadata,
+    _spatial_bounds_grid,
+    _write_laspy_spatial_chunks,
 )
 
 pytestmark = pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
@@ -77,19 +79,20 @@ class TestLasPyIO:
             source = self._write_source(pc, temp_dir)
 
             # Metadata reads the header without loading point records
-            metadata = load_laspy_metadata(source)
+            metadata = _load_laspy_metadata(source)
             assert metadata.point_count == len(self.gdf)
             assert "Z" in metadata.columns
             assert "intensity" in metadata.columns
+            assert not metadata.is_copc
 
             # Index slicing should return one contiguous range of records
-            sliced = load_laspy_data_slice(source, columns=["Z", "intensity"], start=1, count=3)
+            sliced = _load_laspy_data_slice(source, columns=["Z", "intensity"], start=1, count=3)
             assert len(sliced) == 3
             assert np.allclose(sliced["Z"].values, self.z[1:4])
             assert np.array_equal(sliced["intensity"].values, self.intensity[1:4])
 
             # Coordinate filtering streams small chunks for a regular non-COPC file
-            bounded = load_laspy_data_bounds(
+            bounded = _load_laspy_data_bounds(
                 source,
                 columns=["Z", "intensity"],
                 bounds=(0.0, 0.0, 1.0, 1.0),
@@ -101,6 +104,22 @@ class TestLasPyIO:
             assert set(np.round(bounded.geometry.x.values, 6)) == {0.0, 1.0}
             assert set(np.round(bounded.geometry.y.values, 6)) == {0.0, 1.0}
 
+    def test_load_laspy_bounds__copc_errors_are_not_hidden(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Propagate indexed-reader failures when the LAS header identifies a COPC file."""
+
+        pc = gu.PointCloud(self.gdf, data_column="z")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = self._write_source(pc, temp_dir)
+            metadata = replace(_load_laspy_metadata(source), is_copc=True)
+            monkeypatch.setattr(las_module, "_load_laspy_metadata", lambda filename: metadata)
+
+            def _raise_copc_error(**kwargs: object) -> gpd.GeoDataFrame:
+                raise RuntimeError("invalid COPC index")
+
+            monkeypatch.setattr(las_module, "_load_laspy_data_bounds_copc", _raise_copc_error)
+            with pytest.raises(RuntimeError, match="invalid COPC index"):
+                _load_laspy_data_bounds(source, columns=["Z"], bounds=(0, 0, 1, 1))
+
     def test_spatial_chunks_select_points_by_xy_blocks(self) -> None:
         """Split LAS points into X/Y blocks without edge duplicates."""
 
@@ -109,10 +128,10 @@ class TestLasPyIO:
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
 
-            blocks = spatial_bounds_grid(bounds=(0.0, 0.0, 2.0, 1.0), block_size=(1.0, 1.0))
+            blocks = _spatial_bounds_grid(bounds=(0.0, 0.0, 2.0, 1.0), block_size=(1.0, 1.0))
             # Route one streamed source pass into each spatial selection
             chunks = list(
-                iter_laspy_spatial_chunks(
+                _iter_laspy_spatial_chunks(
                     source,
                     block_bounds=blocks,
                     columns=["Z", "intensity"],
@@ -133,15 +152,14 @@ class TestLasPyIO:
         pc = gu.PointCloud(self.gdf, data_column="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
-            blocks = spatial_bounds_grid(bounds=(0.0, 0.0, 2.0, 1.0), block_size=(1.0, 1.0))
+            blocks = _spatial_bounds_grid(bounds=(0.0, 0.0, 2.0, 1.0), block_size=(1.0, 1.0))
             output_dir = os.path.join(temp_dir, "blocks")
 
             # Write both outputs during one sequential read of the source LAS file
-            output_files = write_laspy_spatial_chunks(
+            output_files = _write_laspy_spatial_chunks(
                 source,
                 output_dir=output_dir,
                 block_bounds=blocks,
-                columns=["Z", "intensity"],
                 chunk_size=2,
             )
 

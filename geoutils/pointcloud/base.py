@@ -46,6 +46,7 @@ from geoutils.interface.gridding import (
     GriddingMethod,
     _grid_pointcloud_to_raster,
 )
+from geoutils.pointcloud.testing import _georeferenced_coords_equal
 from geoutils.stats.sampling import _subsample_pointcloud
 from geoutils.stats.stats import _statistics
 from geoutils.vector.base import VectorBase
@@ -221,7 +222,12 @@ class PointCloudBase(VectorBase):
         """Cast a GeoDataFrame-like point cloud output to the proper public type."""
 
         attrs = _get_dataframe_attrs(self.ds)
+        new_crs = getattr(new_ds, "crs", None)
+        if new_crs is not None and new_crs != attrs.get("crs"):
+            attrs["crs"] = new_crs
+            attrs["bounds"] = None
         attrs["data_column"] = self.data_column
+        attrs["geometry_type"] = "Point"
         _set_dataframe_attrs(new_ds, attrs)
 
         # Accessors expose dataframe-like outputs while PointCloud wraps eager outputs
@@ -231,6 +237,17 @@ class PointCloudBase(VectorBase):
         from geoutils.pointcloud.pointcloud import PointCloud
 
         return PointCloud(new_ds, data_column=self.data_column)
+
+    def _override_gdf_output(self, other: Any) -> Any:
+        """Keep point-preserving GeoDataFrame outputs as point clouds."""
+
+        if is_dask_dataframe(other):
+            return self._cast_pointcloud_output(other)
+        if isinstance(other, gpd.GeoDataFrame):
+            geometry_types = set(other.geom_type)
+            if len(geometry_types) == 0 or geometry_types == {"Point"}:
+                return self._cast_pointcloud_output(other)
+        return super()._override_gdf_output(other)
 
     def copy(self, new_array: NDArrayNum | NDArrayBool | Any | None = None) -> Any:
         """
@@ -249,6 +266,7 @@ class PointCloudBase(VectorBase):
                 new_ds = new_ds.assign(**{self.data_column: new_array})
             return self._cast_pointcloud_output(new_ds)
 
+        new_ds = self.ds.copy()
         if new_array is not None:
             if not isinstance(new_array, np.ndarray):
                 new_array = np.asarray(new_array)
@@ -258,18 +276,17 @@ class PointCloudBase(VectorBase):
                     "New data array must be 1-dimensional with the same number of points as the point "
                     "cloud being copied."
                 )
-            data = new_array
-        else:
-            data = np.asarray(self.data).copy()
+            if self.data_column is not None:
+                new_ds[self.data_column] = new_array
+            else:
+                new_ds.geometry = gpd.points_from_xy(
+                    x=self.geometry.x.to_numpy(),
+                    y=self.geometry.y.to_numpy(),
+                    z=new_array,
+                    crs=self.crs,
+                )
 
-        return self.from_xyz(
-            x=self.geometry.x.values,
-            y=self.geometry.y.values,
-            z=data,
-            crs=self.crs,
-            data_column=self.data_column,
-            use_z=self._has_z and self.data_column is None,
-        )
+        return self._cast_pointcloud_output(new_ds)
 
     @classmethod
     def from_xyz(
@@ -427,18 +444,15 @@ class PointCloudBase(VectorBase):
         :returns: True if the point coordinates and CRS are equal.
         """
 
-        if self.crs != get_geo_attr(pc, "crs"):
-            return False
+        return _georeferenced_coords_equal(self, pc)
 
-        if self._is_dask or is_dask_dataframe(get_geo_attr(pc, "ds")):
-            return self.point_count == get_geo_attr(pc, "point_count")
+    def to_geoutils(self) -> Any:
+        """Convert to an eager GeoUtils PointCloud object."""
 
-        return all(
-            [
-                np.array_equal(self.geometry.x.values, get_geo_attr(pc, "geometry").x.values),
-                np.array_equal(self.geometry.y.values, get_geo_attr(pc, "geometry").y.values),
-            ]
-        )
+        from geoutils.pointcloud.pointcloud import PointCloud
+
+        ds = self.ds.compute() if self._is_dask else self.ds
+        return PointCloud(ds, data_column=self.data_column)
 
     @overload
     def get_stats(

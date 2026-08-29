@@ -28,9 +28,9 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio as rio
-from geopandas.testing import assert_geodataframe_equal
 from packaging.version import Version
 from pyproj import CRS
+from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
 from geoutils._dispatch import (
@@ -49,6 +49,7 @@ from geoutils.projtools import (
     _get_utm_ups_crs,
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
+from geoutils.vector.testing import _vector_allclose, _vector_equal
 from geoutils.vector.transformation import _crop, _reproject
 
 if TYPE_CHECKING:
@@ -71,31 +72,6 @@ def _as_geodataframe(obj: Any) -> gpd.GeoDataFrame:
     if not isinstance(ds, gpd.GeoDataFrame):
         raise TypeError(f"Expected a Vector or GeoDataFrame, received {type(obj).__name__}.")
     return ds
-
-
-def _geometry_allclose(left: Any, right: Any, rtol: float, atol: float) -> bool:
-    """Return whether two geometries have the same structure and numerically close coordinates."""
-
-    from shapely import get_coordinates
-
-    if left is None or right is None:
-        return left is right
-    if left.geom_type != right.geom_type:
-        return False
-
-    left_coordinates = get_coordinates(left, include_z=True)
-    right_coordinates = get_coordinates(right, include_z=True)
-    if left_coordinates.shape != right_coordinates.shape or not np.allclose(
-        left_coordinates, right_coordinates, rtol=rtol, atol=atol, equal_nan=True
-    ):
-        return False
-
-    # ``equals_exact`` additionally checks the geometry and ring/component structure
-    coordinate_scale = max(
-        float(np.nanmax(np.abs(left_coordinates), initial=0)),
-        float(np.nanmax(np.abs(right_coordinates), initial=0)),
-    )
-    return bool(left.equals_exact(right, tolerance=atol + rtol * coordinate_scale))
 
 
 class VectorBase(ABC):
@@ -170,10 +146,24 @@ class VectorBase(ABC):
         """Return a copy of the vector-like object."""
         ...
 
-    @abstractmethod
     def _override_gdf_output(self, other: gpd.GeoDataFrame | gpd.GeoSeries | pd.Series | Any) -> Any:
         """Cast a GeoPandas output to the correct public type."""
-        ...
+
+        if is_dask_dataframe(other):
+            return other
+        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoSeries, pd.Series, BaseGeometry)):
+            raise ValueError("Not implemented. This error should only be raised in tests.")
+
+        if isinstance(other, gpd.GeoSeries):
+            other = gpd.GeoDataFrame(geometry=other)
+        elif isinstance(other, BaseGeometry):
+            other = gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs)
+
+        if isinstance(other, gpd.GeoDataFrame) and not self._ACCESSOR_OUTPUT:
+            from geoutils.vector.vector import Vector
+
+            return Vector(other)
+        return other
 
     @property
     def crs(self) -> CRS:
@@ -220,11 +210,7 @@ class VectorBase(ABC):
         :returns: True if geometry, data and metadata are equal.
         """
 
-        try:
-            assert_geodataframe_equal(_as_geodataframe(self), _as_geodataframe(other), **kwargs)
-        except (AssertionError, AttributeError, TypeError):
-            return False
-        return True
+        return _vector_equal(self, other, **kwargs)
 
     def vector_allclose(self, other: Any, rtol: float = 1e-5, atol: float = 1e-8, **kwargs: Any) -> bool:
         """
@@ -237,42 +223,7 @@ class VectorBase(ABC):
         :returns: True if metadata are equal and numeric values are within tolerance.
         """
 
-        try:
-            left = _as_geodataframe(self)
-            right = _as_geodataframe(other)
-        except (AttributeError, TypeError):
-            return False
-
-        # Shape, schema, index and CRS must still match exactly
-        if (
-            left.shape != right.shape
-            or not left.columns.equals(right.columns)
-            or not left.index.equals(right.index)
-            or left.crs != right.crs
-            or left.active_geometry_name != right.active_geometry_name
-        ):
-            return False
-
-        geometry_name = left.active_geometry_name
-        check_dtype = kwargs.get("check_dtype", True)
-        for column in left.columns:
-            if check_dtype and left[column].dtype != right[column].dtype:
-                return False
-            if column == geometry_name:
-                if not all(
-                    _geometry_allclose(left_geometry, right_geometry, rtol=rtol, atol=atol)
-                    for left_geometry, right_geometry in zip(left.geometry, right.geometry)
-                ):
-                    return False
-            elif pd.api.types.is_numeric_dtype(left[column].dtype) and pd.api.types.is_numeric_dtype(
-                right[column].dtype
-            ):
-                if not np.allclose(left[column], right[column], rtol=rtol, atol=atol, equal_nan=True):
-                    return False
-            elif not left[column].equals(right[column]):
-                return False
-
-        return True
+        return _vector_allclose(self, other, rtol=rtol, atol=atol, **kwargs)
 
     def __repr__(self) -> str:
         """Convert vector to string representation."""
@@ -503,6 +454,8 @@ class VectorBase(ABC):
             bbox = crop_geom
         if bbox is None:
             raise ValueError("Argument 'bbox' must be passed.")
+        if inplace and is_dask_dataframe(self.ds):
+            raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
         new_ds = _crop(self, bbox=bbox, clip=clip)
 
@@ -546,6 +499,9 @@ class VectorBase(ABC):
         inplace: bool = False,
     ) -> VectorBaseType | gpd.GeoDataFrame | None:
         """Reproject vector to a specified coordinate reference system."""
+
+        if inplace and is_dask_dataframe(self.ds):
+            raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
         new_ds = _reproject(self, ref=ref, crs=crs)
 
@@ -592,6 +548,9 @@ class VectorBase(ABC):
         inplace: bool = False,
     ) -> VectorBaseType | gpd.GeoDataFrame | None:
         """Shift a vector by a coordinate offset."""
+
+        if inplace and is_dask_dataframe(self.ds):
+            raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
         new_ds = self.ds.copy()
         new_ds.geometry = self.geometry.translate(xoff=xoff, yoff=yoff, zoff=zoff)
@@ -767,6 +726,8 @@ class VectorBase(ABC):
     def query(self: VectorBaseType, expression: str, inplace: bool = False) -> VectorBaseType | gpd.GeoDataFrame | None:
         """Query the vector with a valid Pandas expression."""
 
+        if inplace and is_dask_dataframe(self.ds):
+            raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
         new_ds = self.ds.query(expression)
         if inplace:
             self.ds = new_ds

@@ -30,9 +30,8 @@ import pandas as pd
 import pyogrio
 import rasterio as rio
 from pyproj import CRS
-from shapely.geometry.base import BaseGeometry
 
-from geoutils._dispatch import is_dask_dataframe
+from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
 from geoutils.pointcloud.base import (
     PointCloudBase,
@@ -41,11 +40,11 @@ from geoutils.pointcloud.base import (
 )
 from geoutils.pointcloud.las import (
     _empty_las_geodataframe,
+    _is_laspy_supported,
+    _load_laspy_data_slice,
+    _load_laspy_metadata,
+    _resolve_las_columns,
     _write_laspy,
-    is_laspy_supported,
-    load_laspy_data_slice,
-    load_laspy_metadata,
-    resolve_las_columns,
 )
 from geoutils.vector.pd_accessor import (
     VectorAccessor,
@@ -105,11 +104,19 @@ def _infer_data_column(ds: Any) -> str | None:
     return None
 
 
+def _validate_point_partition(ds: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Reject non-point geometries when a lazy point-cloud partition is computed."""
+
+    if not isinstance(ds, gpd.GeoDataFrame) or not all(geometry_type == "Point" for geometry_type in ds.geom_type):
+        raise ValueError("The 'pc' accessor is only available for GeoDataFrames with point geometries.")
+    return ds
+
+
 def _load_laspy_data_slice_dataframe(filename: str, columns: list[str], start: int, count: int) -> gpd.GeoDataFrame:
     """Adapt the common LAS point-slice reader into one indexed Dask partition."""
 
     # Give every partition its source row range so indexes stay unique after assembly
-    ds = load_laspy_data_slice(filename, columns, start, count)
+    ds = _load_laspy_data_slice(filename, columns, start, count)
     ds.index = pd.RangeIndex(start, start + count)
     return ds
 
@@ -139,6 +146,7 @@ def _set_pointcloud_attrs_from_file(ds: Any, filename: str, data_column: str | N
             "bounds": bounds,
             "point_count": info.get("features"),
             "data_column": data_column,
+            "geometry_type": geom_type,
         },
     )
 
@@ -170,7 +178,7 @@ def open_pointcloud(
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
     # LAS needs its own slice reader while regular vector formats use GeoPandas
-    is_las = is_laspy_supported(filename)
+    is_las = _is_laspy_supported(filename)
 
     if not is_las:
         if chunks is None:
@@ -192,13 +200,13 @@ def open_pointcloud(
         data_column = "Z"
 
     # Resolve requested dimensions entirely from the LAS header
-    metadata = load_laspy_metadata(filename)
+    metadata = _load_laspy_metadata(filename)
     if data_column not in metadata.columns:
         raise ValueError(
             f"Data column {data_column} not found among columns. Available columns are: "
             f"{', '.join(metadata.columns)}."
         )
-    columns_to_load = resolve_las_columns(
+    columns_to_load = _resolve_las_columns(
         columns=columns,
         data_column=data_column,
         available_columns=metadata.columns,
@@ -243,6 +251,7 @@ def open_pointcloud(
             "bounds": metadata.bounds,
             "point_count": metadata.point_count,
             "data_column": data_column,
+            "geometry_type": "Point",
         },
     )
     return ddf
@@ -261,8 +270,17 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
 
         self._name = None
 
-        # Dask validation relies on planned columns because partitions are still lazy
+        # Validate the collection now and individual geometries only when unknown partitions are computed
         if is_dask_dataframe(pandas_obj):
+            if not is_dask_geodataframe(pandas_obj):
+                raise AttributeError("The 'pc' accessor is only available for Dask-GeoPandas GeoDataFrame objects.")
+            attrs = _get_dataframe_attrs(pandas_obj)
+            geometry_type = attrs.get("geometry_type")
+            if geometry_type is not None and "Point" not in geometry_type:
+                raise AttributeError("The 'pc' accessor is only available for GeoDataFrames with point geometries.")
+            if geometry_type is None:
+                pandas_obj = pandas_obj.map_partitions(_validate_point_partition, meta=pandas_obj._meta)
+                _set_dataframe_attrs(pandas_obj, attrs)
             self._obj = pandas_obj
             self._data_column = _infer_data_column(pandas_obj)
             return
@@ -339,61 +357,18 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
             return self.ds["geometry"]
         return self.ds.geometry
 
-    def _override_gdf_output(self, other: gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | pd.Series | Any) -> Any:
-        """Parse outputs of GeoPandas functions to facilitate object manipulation."""
-
-        # Propagate cached metadata through lazy dataframe operations
-        if is_dask_dataframe(other):
-            attrs = _get_dataframe_attrs(self.ds)
-            old_crs = attrs.get("crs")
-            new_crs = getattr(other, "crs", None)
-            if new_crs is not None:
-                attrs["crs"] = new_crs
-                if old_crs != new_crs:
-                    attrs["bounds"] = None
-            attrs["data_column"] = self.data_column
-            _set_dataframe_attrs(other, attrs)
-            return other
-        # Normalize eager GeoPandas outputs to the public accessor representation
-        if not isinstance(other, (gpd.GeoDataFrame, gpd.GeoSeries, pd.Series, BaseGeometry)):
-            raise ValueError("Not implemented. This error should only be raised in tests.")
-
-        if isinstance(other, gpd.GeoDataFrame):
-            attrs = _get_dataframe_attrs(other)
-            attrs["data_column"] = self.data_column
-            _set_dataframe_attrs(other, attrs)
-            return other
-        if isinstance(other, gpd.GeoSeries):
-            return gpd.GeoDataFrame(geometry=other)
-        if isinstance(other, BaseGeometry):
-            return gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs)
-        return other
-
-    def load(self) -> None:
-        """Compute a Dask-backed point cloud in-place."""
+    def load(self) -> gpd.GeoDataFrame:
+        """Compute and return a Dask-backed point cloud as an eager GeoDataFrame."""
 
         if not self._is_dask:
             raise ValueError("Data are already loaded.")
 
-        # Materialize all partitions once, then replace the accessor source in place
+        # Dask collections are immutable, so return a replacement without changing the caller
         ds = self.ds.compute()
         attrs = _get_dataframe_attrs(self.ds)
-        self._obj = gpd.GeoDataFrame(ds, geometry="geometry", crs=attrs.get("crs"))
-        _set_dataframe_attrs(self._obj, attrs)
-
-    def to_geoutils(self) -> Any:
-        """Convert to a GeoUtils PointCloud object."""
-
-        from geoutils.pointcloud.pointcloud import PointCloud
-
-        # A PointCloud is eager by design, so lazy partitions must be computed here
-        if self._is_dask:
-            ds = self.ds.compute()
-            if not isinstance(ds, gpd.GeoDataFrame):
-                ds = gpd.GeoDataFrame(ds, geometry="geometry", crs=self.crs)
-        else:
-            ds = self.ds
-        return PointCloud(ds, data_column=self.data_column)
+        eager = gpd.GeoDataFrame(ds, geometry="geometry", crs=attrs.get("crs"))
+        _set_dataframe_attrs(eager, attrs)
+        return eager
 
     def to_las(
         self,

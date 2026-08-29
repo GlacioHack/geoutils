@@ -29,7 +29,7 @@ import numpy as np
 import rasterio as rio
 
 from geoutils._dispatch import get_geo_attr, has_geo_attr
-from geoutils._misc import import_optional
+from geoutils._misc import deprecate, import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc.chunked import ChunkSpec, normalize_chunks
 from geoutils.multiproc.cluster import AbstractCluster, ClusterGenerator
@@ -427,9 +427,9 @@ def _write_multiproc_result(
     # Create a new raster file to save the processed results
     with rio.open(mp_config.outfile, "w", driver=mp_config.driver, **file_metadata, BIGTIFF="IF_NEEDED") as dst:
         try:
-            # Iterate over the tasks and retrieve one processed block at a time
-            for task_index, task in enumerate(tasks):
-                result_tile, dst_tile = mp_config.cluster.compute(task)
+            # Retrieve completed blocks promptly so worker results can be released after writing
+            for task_index, completed in mp_config.cluster.iter_completed(tasks):
+                result_tile, dst_tile = completed
                 is_mask = has_geo_attr(result_tile, "is_mask") and get_geo_attr(result_tile, "is_mask")
 
                 # Define the window in the output file where the tile should be written
@@ -485,6 +485,18 @@ def map_blocks(
     return_block_info: Literal[False] = False,
     **kwargs: Any,
 ) -> list[Any]: ...
+
+
+@overload
+def map_blocks(
+    func: Callable[..., Any],
+    raster_path: str | Any,
+    mp_config: MultiprocConfig,
+    *args: Any,
+    depth: int = 0,
+    return_block_info: bool,
+    **kwargs: Any,
+) -> list[Any] | list[tuple[Any, NDArrayNum]]: ...
 
 
 def map_blocks(
@@ -554,3 +566,40 @@ def map_blocks(
 
     except Exception as e:
         raise RuntimeError(f"Error retrieving raster from multiprocessing tasks: {e}")
+
+
+@deprecate(details="Use map_overlap() instead.")
+def map_overlap_multiproc_save(
+    func: Callable[..., Raster],
+    raster_path: str | Raster,
+    mp_config: MultiprocConfig,
+    *args: Any,
+    depth: int = 0,
+    **kwargs: Any,
+) -> Raster:
+    """Compatibility wrapper for the former multiprocessing map name."""
+
+    return map_overlap(func, raster_path, mp_config, *args, depth=depth, **kwargs)
+
+
+@deprecate(details="Use map_blocks() with return_block_info instead.")
+def map_multiproc_collect(
+    func: Callable[..., Any],
+    raster_path: str | Raster,
+    mp_config: MultiprocConfig,
+    *args: Any,
+    depth: int = 0,
+    return_tile: bool = False,
+    **kwargs: Any,
+) -> list[Any] | list[tuple[Any, NDArrayNum]]:
+    """Compatibility wrapper for the former multiprocessing collection name."""
+
+    return map_blocks(
+        func,
+        raster_path,
+        mp_config,
+        *args,
+        depth=depth,
+        return_block_info=return_tile,
+        **kwargs,
+    )

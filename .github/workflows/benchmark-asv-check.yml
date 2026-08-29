@@ -9,6 +9,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "geoutils/**"
       - "benchmarks/asv_suite/**"
       - "benchmarks/gdal_comparison/**"
       - "benchmarks/workflows/**"

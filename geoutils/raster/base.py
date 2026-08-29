@@ -25,7 +25,6 @@ import pathlib
 import struct
 import warnings
 from abc import ABC, abstractmethod
-from functools import partial
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -85,6 +84,7 @@ from geoutils.raster.referencing import (
     _res,
     _xy2ij,
 )
+from geoutils.raster.testing import _array_equal_or_close
 from geoutils.raster.transformation import _crop, _reproject, _translate
 from geoutils.stats.sampling import _subsample
 from geoutils.stats.stats import _statistics
@@ -751,7 +751,7 @@ class RasterBase(ABC):
                 for b in range(self.count):
                     # try to keep with rasterio convention.
                     as_str.append(f"Band {b + 1}:")
-                    statistics = self.get_stats(band=b)
+                    statistics = self.get_stats(band=b + 1)
                     if isinstance(statistics, dict):
                         max_len = max(len(name) for name in statistics.keys())
                         for name, value in statistics.items():
@@ -898,7 +898,7 @@ class RasterBase(ABC):
         else:
             # Case multi-band
             stats = {}
-            for band in range(self.count):
+            for band in range(1, self.count + 1):
                 stats["band " + str(band)] = self.get_stats(
                     stats_name=stats_name, inlier_mask=inlier_mask, band=band, counts=counts
                 )
@@ -962,19 +962,23 @@ class RasterBase(ABC):
             crs = other.rst.crs if isinstance(other, xr.DataArray) else other.crs
             nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
 
-            # Select function
-            if use_allclose:
-                func = partial(np.allclose, atol=atol, rtol=rtol)
-            else:
-                func = np.array_equal  # type: ignore
-
             # Three cases: masked/NaN, NaN/masked or NaN/NaN
             if np.ma.isMaskedArray(self.data):
-                array_eq = func(self.get_nanarray(), other.data, equal_nan=True)
+                left_data = self.get_nanarray()
+                right_data = other.data
             elif np.ma.isMaskedArray(other.data):
-                array_eq = func(self.data, other.get_nanarray(), equal_nan=True)
+                left_data = self.data
+                right_data = other.get_nanarray()
             else:
-                array_eq = func(self.data, other.data, equal_nan=True)
+                left_data = self.data
+                right_data = other.data
+            array_eq = _array_equal_or_close(
+                left_data,
+                right_data,
+                use_allclose=use_allclose,
+                rtol=rtol,
+                atol=atol,
+            )
 
             # Equalities
             names = ["data", "dtype", "transform", "crs", "nodata"]

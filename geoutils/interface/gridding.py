@@ -897,10 +897,10 @@ def _load_pointcloud_bounds(
         return _filter_points_by_bounds(source_pointcloud.ds, bounds)
 
     # Import point-cloud readers only after this general gridding module is initialized
-    from geoutils.pointcloud.las import is_laspy_supported, load_laspy_data_bounds
+    from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_data_bounds
 
-    if is_laspy_supported(filename):
-        return load_laspy_data_bounds(
+    if _is_laspy_supported(filename):
+        return _load_laspy_data_bounds(
             filename=filename,
             columns="main",
             bounds=bounds,
