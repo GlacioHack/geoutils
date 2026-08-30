@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 from dataclasses import dataclass
@@ -35,6 +36,16 @@ class GdalCommand:
 
     command: list[str]
     output_file: str
+
+
+def _warp_memory_limit_mb(config: BenchmarkConfig) -> int:
+    """Return the GDAL warp memory closest to one GeoUtils execution chunk."""
+
+    # GDAL holds one Float32 source and destination buffer plus their one-bit nodata masks
+    chunk_height = min(config.shape[0], config.chunks[0])
+    chunk_width = min(config.shape[1], config.chunks[1])
+    working_bits = chunk_height * chunk_width * 2 * (32 + 1)
+    return max(1, math.ceil(working_bits / 8 / 1024**2))
 
 
 def _require_command(name: str) -> str:
@@ -148,7 +159,8 @@ def build_gdal_command(
         config.operation_strategy,
     )
 
-    # Every raster command writes the same tiled dimensions and bounded GDAL cache
+    # Match output storage tiles and the GDAL block cache used by GeoUtils
+    # These settings control file access, not GDAL's internal processing chunks
     height, width = config.shape
     common_config = ["--config", "GDAL_CACHEMAX", str(config.gdal_cachemax_mb)]
     common_creation = ["-co", "TILED=YES", "-co", "BLOCKXSIZE=512", "-co", "BLOCKYSIZE=512"]
@@ -174,7 +186,7 @@ def build_gdal_command(
             "-et",
             "0",
             "-wm",
-            "64",
+            str(_warp_memory_limit_mb(config)),
             "-wo",
             "NUM_THREADS=1",
             "-wo",

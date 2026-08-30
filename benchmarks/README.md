@@ -50,7 +50,14 @@ asv publish
 python -m benchmarks.asv_suite.render_results
 ```
 
-Then open `results/asv/html/index.html` for the native ASV history and comparison plots.
+Then open `results/asv/html/index.html`.
+
+To modify the rendering of the custom webpages without running benchmarks, generate fake results and render them locally with:
+
+```bash
+python -m benchmarks.asv_suite.render_results --preview
+asv preview --browser --html-dir benchmarks/results/asv/preview
+```
 
 Pass `--baseline-commit <commit>` to the renderer to add `comparisons/performance-change.md`, a compact before/after
 table for eager, Dask and Multiprocessing end-to-end time normalized to the GDAL CLI on the same revision.

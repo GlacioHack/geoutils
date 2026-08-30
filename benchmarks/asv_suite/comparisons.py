@@ -274,6 +274,9 @@ _GRID_MODE_CASES = {
     for method in _GRID_METHODS
 }
 
+# Reuse the eager SciPy cases in one plot that isolates the choice of gridding method
+_GRID_METHOD_CASES = _method_cases("gridding-raster-size", "grid", _GRID_METHODS, "scipy")
+
 # Compare SciPy and Numba in eager mode for the methods supported by both calculation engines
 _GRID_ENGINE_CASES = {
     method: _engine_cases(
@@ -315,6 +318,7 @@ BENCHMARK_CASES = _merge_cases(
     _RASTERIZATION_MODES,
     _SUBSAMPLE_STRATEGIES,
     *tuple(_GRID_MODE_CASES.values()),
+    _GRID_METHOD_CASES,
     *tuple(_GRID_ENGINE_CASES.values()),
     _GRID_POINT_ENGINE_CASES,
     _NUMBA_WORKER_CASES,
@@ -383,10 +387,12 @@ class Comparison:
 
     slug: str
     title: str
+    description: str
     parameter_label: str
     series: tuple[tuple[str, str], ...]
     operation: OperationName
     method: str | None
+    workload_template: str
     logarithmic_x: bool = False
     documentation: bool = True
     series_dimension: ComparisonDimension = "execution_mode"
@@ -395,53 +401,82 @@ class Comparison:
     execution_mode: ExecutionMode | None = None
 
 
+# Concisely identify the shared input and support chosen for each gridding method
+_GRID_FIXTURE_DESCRIPTIONS = {
+    "nearest": "Grids a 17 × 17 regular WGS84 point set with unlimited nearest-neighbor support onto a square WGS84 raster.",
+    "linear": "Grids a 17 × 17 regular WGS84 point set with Delaunay linear interpolation onto a square WGS84 raster.",
+    "idw": "Grids a 17 × 17 regular WGS84 point set with inverse-distance weighting and 16-pixel support onto a square WGS84 raster.",
+    "mean": "Grids a 17 × 17 regular WGS84 point set with a circular mean and 16-pixel support onto a square WGS84 raster.",
+}
+_GRID_POINTS_PER_AXIS = {"nearest": 17, "linear": 17, "idw": 17, "mean": 17}
+
+
 # Define the report plots, including their displayed series and the operation settings held fixed
 COMPARISONS: tuple[Comparison, ...] = (
     Comparison(
         slug="interpolation-point-count",
-        title="Linear interpolation point count (SciPy engine)",
-        parameter_label="Interpolated points",
+        title="Linear interpolation by number of points (SciPy engine)",
+        description=("Interpolates deterministic WGS84 points from a 2048 × 2048 WGS84 raster with 512 × 512 chunks."),
+        parameter_label="Number of interpolated points",
         series=_comparison_series(_INTERPOLATION_MODES, "execution_mode"),
         operation="interp_points",
         method="linear",
+        workload_template=("2,048 × 2,048 source raster; {parameter} interpolated points; 512 × 512 chunks"),
         calculation_engine="scipy",
         logarithmic_x=True,
     ),
     Comparison(
         slug="reprojection-raster-size",
-        title="Nearest reprojection raster size (Rasterio/GDAL engine)",
-        parameter_label="Square raster width and height (pixels)",
+        title="Nearest reprojection by raster size (Rasterio/GDAL engine)",
+        description=(
+            "Reprojects a WGS84 (EPSG:4326) raster to UTM zone 32N (EPSG:32632) with nearest-neighbor "
+            "resampling while preserving the selected output dimensions."
+        ),
+        parameter_label="Size of raster (pixels per side)",
         series=_comparison_series(_REPROJECTION_MODES, "execution_mode", _REPROJECTION_REFERENCE),
         operation="reproject",
         method="nearest",
+        workload_template="{parameter} × {parameter} input/output raster; 512 × 512 chunks",
         calculation_engine="rasterio",
     ),
     Comparison(
         slug="filter-chunk-size",
-        title="Mean filter chunk size (SciPy engine)",
-        parameter_label="Square chunk width and height (pixels)",
+        title="Mean filter by chunk size (SciPy engine)",
+        description="Applies a 5 × 5 mean filter to a 2048 × 2048 WGS84 raster while varying square chunk size.",
+        parameter_label="Size of chunks (pixels per side)",
         series=_comparison_series(_FILTER_MODES, "execution_mode"),
         operation="filter",
         method="mean",
+        workload_template="2,048 × 2,048 raster; {parameter} × {parameter} chunks; 5 × 5 filter",
         calculation_engine="scipy",
     ),
     Comparison(
         slug="polygonization-raster-size",
-        title="Label-stitch polygonization raster size (Rasterio/GDAL engine)",
-        parameter_label="Square raster width and height (pixels)",
+        title="Label-stitch polygonization by raster size (Rasterio/GDAL engine)",
+        description=(
+            "Polygonizes value-1 pixels in a WGS84 raster containing 21 × 21 disconnected rectangles while "
+            "varying raster size."
+        ),
+        parameter_label="Size of raster (pixels per side)",
         series=_comparison_series(_POLYGONIZATION_MODES, "execution_mode", _POLYGONIZATION_REFERENCE),
         operation="polygonize",
         method=None,
+        workload_template=("{parameter} × {parameter} raster; 441 disconnected raster regions; 512 × 512 chunks"),
         calculation_engine="rasterio",
         strategy="label_stitch",
     ),
     Comparison(
         slug="polygonization-strategy-raster-size",
         title="Polygonization chunk strategy (Dask execution)",
-        parameter_label="Square raster width and height (pixels)",
+        description=(
+            "Polygonizes the same 21 × 21 disconnected rectangles with Dask while comparing how polygons "
+            "crossing chunk boundaries are reconciled."
+        ),
+        parameter_label="Size of raster (pixels per side)",
         series=_comparison_series(_POLYGONIZATION_STRATEGIES, "strategy"),
         operation="polygonize",
         method=None,
+        workload_template=("{parameter} × {parameter} raster; 441 disconnected raster regions; 512 × 512 chunks"),
         calculation_engine="rasterio",
         execution_mode="dask",
         series_dimension="strategy",
@@ -449,20 +484,26 @@ COMPARISONS: tuple[Comparison, ...] = (
     ),
     Comparison(
         slug="rasterization-raster-size",
-        title="Rasterization raster size (Rasterio/GDAL engine)",
-        parameter_label="Square raster width and height (pixels)",
+        title="Rasterization by raster size (Rasterio/GDAL engine)",
+        description=("Burns 51 × 51 regularly spaced WGS84 polygons as value 1 into a byte raster with background 0."),
+        parameter_label="Size of raster (pixels per side)",
         series=_comparison_series(_RASTERIZATION_MODES, "execution_mode", _RASTERIZATION_REFERENCE),
         operation="rasterize",
         method=None,
+        workload_template=("2,601 source polygon features; {parameter} × {parameter} output raster; 512 × 512 chunks"),
         calculation_engine="rasterio",
     ),
     Comparison(
         slug="subsampling-strategy-size",
         title="Subsampling chunk strategy (Dask execution)",
-        parameter_label="Selected values",
+        description=(
+            "Selects values with random seed 42 from a 2048 × 2048 WGS84 raster while comparing chunk strategies."
+        ),
+        parameter_label="Number of sampled values",
         series=_comparison_series(_SUBSAMPLE_STRATEGIES, "strategy"),
         operation="subsample",
         method=None,
+        workload_template=("2,048 × 2,048 source raster; {parameter} sampled values; 512 × 512 chunks"),
         execution_mode="dask",
         series_dimension="strategy",
         logarithmic_x=True,
@@ -472,23 +513,54 @@ COMPARISONS: tuple[Comparison, ...] = (
         Comparison(
             slug="gridding-raster-size" if method == "nearest" else f"{method}-gridding-raster-size",
             title=f"{METHOD_LABELS[method]} gridding execution mode (SciPy engine)",
-            parameter_label="Square raster width and height (pixels)",
+            description=_GRID_FIXTURE_DESCRIPTIONS[method],
+            parameter_label="Size of raster (pixels per side)",
             series=_comparison_series(_GRID_MODE_CASES[method], "execution_mode", _GRID_REFERENCES[method]),
             operation="grid",
             method=method,
+            workload_template=(
+                f"{{parameter}} × {{parameter}} output raster; "
+                f"{_GRID_POINTS_PER_AXIS[method]} × {_GRID_POINTS_PER_AXIS[method]} source points; "
+                "512 × 512 chunks"
+            ),
             calculation_engine="scipy",
             documentation=method == "nearest",
         )
         for method in _GRID_METHODS
     ),
+    Comparison(
+        slug="gridding-method-raster-size",
+        title="Gridding method (SciPy engine, eager execution)",
+        description=(
+            "Grids regular WGS84 point sets onto square WGS84 rasters using the fixture and support selected for "
+            "each numerical method."
+        ),
+        parameter_label="Size of raster (pixels per side)",
+        series=_comparison_series(_GRID_METHOD_CASES, "method"),
+        operation="grid",
+        method=None,
+        workload_template=(
+            "{parameter} × {parameter} output raster; method-specific source point set; 512 × 512 chunks"
+        ),
+        calculation_engine="scipy",
+        execution_mode="eager",
+        series_dimension="method",
+        documentation=False,
+    ),
     *tuple(
         Comparison(
             slug=f"{method}-gridding-engine-raster-size",
             title=f"{METHOD_LABELS[method]} gridding calculation engine (eager execution)",
-            parameter_label="Square raster width and height (pixels)",
+            description=_GRID_FIXTURE_DESCRIPTIONS[method],
+            parameter_label="Size of raster (pixels per side)",
             series=_comparison_series(_GRID_ENGINE_CASES[method], "calculation_engine", _GRID_REFERENCES[method]),
             operation="grid",
             method=method,
+            workload_template=(
+                f"{{parameter}} × {{parameter}} output raster; "
+                f"{_GRID_POINTS_PER_AXIS[method]} × {_GRID_POINTS_PER_AXIS[method]} source points; "
+                "512 × 512 chunks"
+            ),
             execution_mode="eager",
             series_dimension="calculation_engine",
             documentation=False,
@@ -497,11 +569,16 @@ COMPARISONS: tuple[Comparison, ...] = (
     ),
     Comparison(
         slug="nearest-gridding-engine-point-count",
-        title="Nearest gridding calculation engine by source size (eager execution)",
-        parameter_label="Source points per axis",
+        title="Nearest gridding by number of source points (eager execution)",
+        description=(
+            "Grids a regular WGS84 point set with unlimited nearest-neighbor support onto a fixed 1024 × 1024 "
+            "WGS84 raster."
+        ),
+        parameter_label="Number of source points per axis",
         series=_comparison_series(_GRID_POINT_ENGINE_CASES, "calculation_engine", _GRID_POINT_REFERENCE),
         operation="grid",
         method="nearest",
+        workload_template=("1,024 × 1,024 output raster; {parameter} × {parameter} source points; 512 × 512 chunks"),
         execution_mode="eager",
         series_dimension="calculation_engine",
         documentation=False,
@@ -709,23 +786,22 @@ class _GriddingRasterSize(_ComparisonBenchmark):
     params = [asv_parameter_values([512, 1024, 2048], pr_check_value=512)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected raster size around a method-appropriate point input."""
+        """Place the selected raster size around the common source point input."""
 
-        # Set the support distance in pixels and input points per axis used to exercise each method
-        method_settings = {
-            "nearest": (float("inf"), 3),
-            "linear": (float("inf"), 9),
-            "idw": (16.0, 17),
-            "mean": (16.0, 17),
+        # Keep the point count fixed so only the method and its required support distance differ
+        method_distances = {
+            "nearest": float("inf"),
+            "linear": float("inf"),
+            "idw": 16.0,
+            "mean": 16.0,
         }
-        if self.operation_method not in method_settings:
+        if self.operation_method not in method_distances:
             raise ValueError(f"No gridding fixture is defined for method {self.operation_method!r}")
-        distance, points_per_axis = method_settings[self.operation_method]
         return BenchmarkConfig(
             shape=(parameter, parameter),
             chunks=(512, 512),
-            point_features_per_axis=points_per_axis,
-            grid_dist_nodata_pixel=distance,
+            point_features_per_axis=_GRID_POINTS_PER_AXIS[self.operation_method],
+            grid_dist_nodata_pixel=method_distances[self.operation_method],
         )
 
 
