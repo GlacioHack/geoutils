@@ -183,8 +183,8 @@ class TestRaster:
             start = nb_lines + 2
             for band in range(r.count):
                 assert output_with_stats_split[start + band * len(r.get_stats(band=1)) + band] == f"Band {band + 1}:"
-                stats_band = r.get_stats(band=band)
-                for s, stat in enumerate(r.get_stats(band=band).keys()):
+                stats_band = r.get_stats(band=band + 1)
+                for s, stat in enumerate(stats_band.keys()):
                     assert output_with_stats_split[start + band * len(r.get_stats(band=1)) + band + 1 + s].startswith(
                         stat
                     )

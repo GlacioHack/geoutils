@@ -31,9 +31,10 @@ mamba activate geoutils-dev  # Or any other name specified above
 
 At least one test per feature (in the associated `tests/test_*.py` file) should be included in the PR, using `pytest` (see existing tests for examples).
 
-To run the entire test suite, run `pytest` in the current directory:
+To run the entire test suite from the repository root:
+
 ```bash
-pytest
+python -m pytest
 ```
 
 ### Formatting and linting
@@ -42,11 +43,39 @@ Install and run `pre-commit` (see [pre-commit documentation](https://pre-commit.
 import sorting, type checking, formatting and linting.
 
 You can then run pre-commit manually:
+
 ```bash
 pre-commit run --all-files
 ```
 
 Optionally, `pre-commit` can be installed as a git hook to ensure checks have to pass before committing.
+
+### Performance benchmark
+
+Run an affected ASV benchmark in `benchmarks/` with:
+
+```bash
+asv run --quick --show-stderr -E existing --bench <benchmark-regex>
+```
+
+Generate the local HTML report with:
+
+```bash
+asv publish
+python -m benchmarks.asv_suite.render_results
+```
+
+Open `benchmarks/results/asv/html/index.html` to view local results or the
+[GeoUtils benchmark webpage](https://glaciohack.github.io/geoutils/) for CI results.
+
+Run the large data tests with:
+
+```bash
+python -m pytest --large-data -m large_data -ra
+```
+
+Large data results are pass/fail, and run separately in the CI.
+See the [benchmark directory guide](benchmarks/README.md) for more commands and configuration.
 
 ## Rights
 

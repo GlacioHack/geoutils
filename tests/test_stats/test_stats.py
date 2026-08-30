@@ -23,7 +23,7 @@ stat_types = (int, float, np.integer, np.floating)
 
 
 def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
-    assert len(dict1.keys()) == len(dict1.keys())
+    assert dict1.keys() == dict2.keys()
     for key in dict1.keys():
         assert key in dict2
         if dict1[key] is not np.nan:
@@ -204,13 +204,14 @@ class TestStats:
     def test_get_stats_multi_bands(self, example: str) -> None:
         raster = gu.Raster(example)
         stats = raster.get_stats()
-        assert list(stats.keys()) == ["band 0", "band 1", "band 2"]
-        for band in range(raster.count):
-            assert stats["band " + str(band)] == raster.get_stats(band=band)
+        assert list(stats.keys()) == ["band 1", "band 2", "band 3"]
+        data = raster.get_nanarray()
+        for band in range(1, raster.count + 1):
+            assert stats["band " + str(band)]["Mean"] == pytest.approx(np.nanmean(data[band - 1]))
 
         stats = raster.get_stats("mean")
-        for band in range(raster.count):
-            assert stats["band " + str(band)] == raster.get_stats("mean", band=band)
+        for band in range(1, raster.count + 1):
+            assert stats["band " + str(band)] == pytest.approx(np.nanmean(data[band - 1]))
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_get_stats_raster_pointcloud(self, example: str) -> None:

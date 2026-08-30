@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functionalities at the interface of rasters and vectors."""
+"""Vectorize rasters into geometries."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
-    _chunks2d_from_chunksizes_shape,
+    normalize_chunks,
 )
 from geoutils.multiproc.mparray import MultiprocConfig
 from geoutils.raster.referencing import _cast_nodata
@@ -338,7 +338,11 @@ def _build_selection_mask(
 
     xp = _xp(values)
 
-    v_dtype = np.dtype(getattr(values, "dtype", np.asarray(values).dtype))
+    # Read array metadata directly so a Dask fallback is never evaluated eagerly
+    values_dtype = getattr(values, "dtype", None)
+    if values_dtype is None:
+        values_dtype = np.asarray(values).dtype
+    v_dtype = np.dtype(values_dtype)
 
     if eff == "all":
         nodata = prepared.nodata
@@ -399,6 +403,9 @@ class _ChunkedRunner(Generic[T]):
 class _DaskRunner(_ChunkedRunner[T]):
     """Runner implementation using dask.delayed + dask.compute. See _ChunkedRunner for details."""
 
+    # Limit ready block results so label arrays cannot accumulate to the raster size
+    _gather_batch_size = 16
+
     def __init__(self) -> None:
         import_optional("dask")
         self._dask = __import__("dask")
@@ -410,7 +417,13 @@ class _DaskRunner(_ChunkedRunner[T]):
     def gather(self, handles: list[Any]) -> list[T]:
         if len(handles) == 0:
             return []
-        return list(self._dask.compute(*handles))
+
+        # Compute a bounded group at a time and release its intermediate arrays
+        results: list[T] = []
+        for start in range(0, len(handles), self._gather_batch_size):
+            batch = handles[start : start + self._gather_batch_size]
+            results.extend(self._dask.compute(*batch))
+        return results
 
 
 class _MultiprocRunner(_ChunkedRunner[T]):
@@ -420,12 +433,12 @@ class _MultiprocRunner(_ChunkedRunner[T]):
         self._cluster = mp_config.cluster
 
     def submit(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> Any:
-        return self._cluster.launch_task(func, [*args], **kwargs)
+        return self._cluster.submit(func, *args, **kwargs)
 
     def gather(self, handles: list[Any]) -> list[T]:
         out: list[T] = []
         for h in handles:
-            res = self._cluster.get_res(h)
+            res = self._cluster.compute(h)
             out.append(res)
         return out
 
@@ -446,6 +459,17 @@ class _ChunkedDaskReader:
     mask: Any  # Dask array (uint8-ish)
     labels: Any  # Dask array (int32)
     prepared: _PolygonizePrepared
+
+    def delayed_blocks(self) -> list[tuple[Any, Any, Any]]:
+        """Return matching delayed value, mask and label blocks."""
+
+        # Converting each array to delayed objects exposes one dependency per chunk
+        value_blocks = self.values.to_delayed().ravel()
+        mask_blocks = self.mask.to_delayed().ravel()
+        label_blocks = self.labels.to_delayed().ravel()
+
+        # Block ordering follows the row-major order used by the tiling metadata
+        return list(zip(value_blocks, mask_blocks, label_blocks))
 
     def read_block(
         self,
@@ -965,6 +989,37 @@ def _chunked_union_mapping_from_pairs(pair_lists: list[list[tuple[int, int]]]) -
     return mapping
 
 
+def _chunked_seam_task(
+    labels_a: NDArrayNum,
+    labels_b: NDArrayNum,
+    values_a: NDArrayNum,
+    values_b: NDArrayNum,
+    mask_a: NDArrayBool,
+    mask_b: NDArrayBool,
+    block_id_a: int,
+    block_id_b: int,
+    axis: Literal["h", "v"],
+    connectivity: Literal[4, 8],
+    float_tol: float,
+) -> list[tuple[int, int]]:
+    """Compare one pair of block seams in a serializable worker task."""
+
+    # Normalize delayed and multiprocessing inputs before the common seam logic
+    return _chunked_seam_pairs_from_strips(
+        np.asarray(labels_a),
+        np.asarray(labels_b),
+        np.asarray(values_a),
+        np.asarray(values_b),
+        np.asarray(mask_a, dtype=bool),
+        np.asarray(mask_b, dtype=bool),
+        left_block_id=int(block_id_a),
+        right_block_id=int(block_id_b),
+        connectivity=connectivity,
+        axis=axis,
+        float_tol=float_tol,
+    )
+
+
 def _build_seam_mapping(
     runner: _ChunkedRunner[Any],
     reader: Any,
@@ -1006,21 +1061,6 @@ def _build_seam_mapping(
 
     seam_tasks: list[Any] = []
 
-    def _seam_task(labA, labB, valA, valB, mA, mB, bidA, bidB, axis):  # type: ignore
-        return _chunked_seam_pairs_from_strips(
-            np.asarray(labA),
-            np.asarray(labB),
-            np.asarray(valA),
-            np.asarray(valB),
-            np.asarray(mA, dtype=bool),
-            np.asarray(mB, dtype=bool),
-            left_block_id=int(bidA),
-            right_block_id=int(bidB),
-            connectivity=connectivity,
-            axis=axis,
-            float_tol=float_tol,
-        )
-
     # Vertical seams (ix -> ix+1)
     for iy in range(ny):
         for ix in range(nx - 1):
@@ -1043,7 +1083,22 @@ def _build_seam_mapping(
                 {**bR, "ys": ys, "ye": ye},
                 tiling_transform=t,
             )
-            seam_tasks.append(runner.submit(_seam_task, labL, labR, valL, valR, mL, mR, bidL, bidR, "v"))
+            seam_tasks.append(
+                runner.submit(
+                    _chunked_seam_task,
+                    labL,
+                    labR,
+                    valL,
+                    valR,
+                    mL,
+                    mR,
+                    bidL,
+                    bidR,
+                    "v",
+                    connectivity,
+                    float_tol,
+                )
+            )
 
     # Horizontal seams (iy -> iy+1)
     for iy in range(ny - 1):
@@ -1067,7 +1122,22 @@ def _build_seam_mapping(
                 {**bB, "xs": xs, "xe": xe},
                 tiling_transform=t,
             )
-            seam_tasks.append(runner.submit(_seam_task, labT, labB_, valT, valB, mT, mB, bidT, bidB, "h"))
+            seam_tasks.append(
+                runner.submit(
+                    _chunked_seam_task,
+                    labT,
+                    labB_,
+                    valT,
+                    valB,
+                    mT,
+                    mB,
+                    bidT,
+                    bidB,
+                    "h",
+                    connectivity,
+                    float_tol,
+                )
+            )
 
     # Diagonal corners for 8-connectivity
     if connectivity == 8:
@@ -1083,7 +1153,22 @@ def _build_seam_mapping(
                         labA, labB, valA, valB, mA, mB = reader.read_diag_corners(bTL, bBR, tiling_transform=t)
                     except TypeError:
                         labA, labB, valA, valB, mA, mB = reader.read_diag_corners(bTL, bBR)
-                    seam_tasks.append(runner.submit(_seam_task, labA, labB, valA, valB, mA, mB, bidTL, bidBR, "v"))
+                    seam_tasks.append(
+                        runner.submit(
+                            _chunked_seam_task,
+                            labA,
+                            labB,
+                            valA,
+                            valB,
+                            mA,
+                            mB,
+                            bidTL,
+                            bidBR,
+                            "v",
+                            connectivity,
+                            float_tol,
+                        )
+                    )
 
                 # TR -> BL
                 bidTR = pos2bid.get((iy, ix + 1))
@@ -1095,7 +1180,22 @@ def _build_seam_mapping(
                         labA, labB, valA, valB, mA, mB = reader.read_antidiag_corners(bTR, bBL, tiling_transform=t)
                     except TypeError:
                         labA, labB, valA, valB, mA, mB = reader.read_antidiag_corners(bTR, bBL)
-                    seam_tasks.append(runner.submit(_seam_task, labA, labB, valA, valB, mA, mB, bidTR, bidBL, "v"))
+                    seam_tasks.append(
+                        runner.submit(
+                            _chunked_seam_task,
+                            labA,
+                            labB,
+                            valA,
+                            valB,
+                            mA,
+                            mB,
+                            bidTR,
+                            bidBL,
+                            "v",
+                            connectivity,
+                            float_tol,
+                        )
+                    )
 
     seam_pairs_lists = runner.gather(seam_tasks)
     return _chunked_union_mapping_from_pairs(seam_pairs_lists)
@@ -1202,10 +1302,39 @@ def _polygonize_block_from_labels(
     values, mask, labels = reader.read_block(b, tiling_transform=tiling_transform)
     assert labels is not None  # label strategies only
 
+    return _polygonize_arrays_from_labels(
+        values,
+        mask,
+        labels,
+        block_id=block_id,
+        block_transform=block_transform,
+        block_bounds=block_bounds,
+        connectivity=connectivity,
+        float_tol=float_tol,
+        value_column=value_column,
+    )
+
+
+def _polygonize_arrays_from_labels(
+    values: NDArrayNum,
+    mask: NDArrayBool,
+    labels: NDArrayNum,
+    *,
+    block_id: int,
+    block_transform: rio.Affine,
+    block_bounds: rio.coords.BoundingBox,
+    connectivity: Literal[4, 8],
+    float_tol: float,
+    value_column: str,
+) -> gpd.GeoDataFrame:
+    """Polygonize already selected arrays from one labeled block."""
+
+    # Materialize only the arrays belonging to this worker task
     v_np = np.asarray(values)
     m_np = np.asarray(mask)
     l_np = np.asarray(labels)
 
+    # Convert connected labels to geometries in the block coordinate system
     g = _chunked_polygonize_block_labels(
         labels=l_np,
         values=v_np,
@@ -1219,6 +1348,7 @@ def _polygonize_block_from_labels(
     if len(g) == 0:
         return g
 
+    # Keep block metadata until neighboring geometries have been joined
     g["_block_id"] = block_id
     g["_touches_block"] = _touches_block_fast(g, block_bounds=block_bounds)
     return g
@@ -1657,6 +1787,113 @@ def _chunked_stitch_by_value_neighbor_blocks(
     return out.reset_index(drop=True)
 
 
+# Serializable per-block tasks
+##############################
+
+
+def _chunked_polygonize_labels_task(
+    reader: Any,
+    block_index: int,
+    block_id: dict[str, int],
+    tiling_transform: rio.Affine,
+    block_transform: rio.Affine,
+    block_bounds: rio.coords.BoundingBox,
+    prepared: _PolygonizePrepared,
+    seam_mapping: dict[int, int] | None,
+) -> gpd.GeoDataFrame:
+    """Polygonize one labeled block in a serializable worker task."""
+
+    # Read labels and values only for the block assigned to this task
+    polygons = _polygonize_block_from_labels(
+        reader,
+        block_id=block_index,
+        b=block_id,
+        tiling_transform=tiling_transform,
+        block_transform=block_transform,
+        block_bounds=block_bounds,
+        connectivity=prepared.connectivity,
+        value_column=prepared.value_column,
+        float_tol=prepared.float_tol,
+    )
+    if len(polygons) == 0:
+        return polygons
+
+    # Label-union assigns the cross-block component before local ids are removed
+    if prepared.strategy == "label_union":
+        assert seam_mapping is not None
+        polygons = _attach_label_union_ids(
+            polygons,
+            block_id=block_index,
+            id_column=prepared.id_column,
+            seam_mapping=seam_mapping,
+        )
+    return polygons.drop(columns=["local_id"], errors="ignore")
+
+
+def _chunked_polygonize_dask_labels_task(
+    values: NDArrayNum,
+    mask: NDArrayBool,
+    labels: NDArrayNum,
+    block_index: int,
+    block_transform: rio.Affine,
+    block_bounds: rio.coords.BoundingBox,
+    prepared: _PolygonizePrepared,
+    seam_mapping: dict[int, int] | None,
+) -> gpd.GeoDataFrame:
+    """Polygonize one explicit Dask block without embedding the complete array graph."""
+
+    # Each delayed argument depends only on the matching source chunk
+    polygons = _polygonize_arrays_from_labels(
+        values,
+        mask,
+        labels,
+        block_id=block_index,
+        block_transform=block_transform,
+        block_bounds=block_bounds,
+        connectivity=prepared.connectivity,
+        float_tol=prepared.float_tol,
+        value_column=prepared.value_column,
+    )
+    if len(polygons) == 0:
+        return polygons
+
+    # Label union applies the cross-block component mapping before removing local ids
+    if prepared.strategy == "label_union":
+        assert seam_mapping is not None
+        polygons = _attach_label_union_ids(
+            polygons,
+            block_id=block_index,
+            id_column=prepared.id_column,
+            seam_mapping=seam_mapping,
+        )
+    return polygons.drop(columns=["local_id"], errors="ignore")
+
+
+def _chunked_polygonize_geometry_task(
+    reader: Any,
+    block_id: dict[str, int],
+    tiling_transform: rio.Affine,
+    crs: Any,
+    prepared: _PolygonizePrepared,
+    shape: tuple[int, int],
+) -> gpd.GeoDataFrame:
+    """Polygonize one haloed value block in a serializable worker task."""
+
+    # The common helper clips halo polygons back to this block interior
+    return _polygonize_block_geometry_halo(
+        reader,
+        b=block_id,
+        tiling_transform=tiling_transform,
+        crs=crs,
+        data_column_name=prepared.data_column_name,
+        value_column=prepared.value_column,
+        halo=prepared.halo,
+        connectivity=prepared.connectivity,
+        float_tol=prepared.float_tol,
+        shape=shape,
+    )
+
+
 # Common chunked strategy wrapper
 ##################################
 
@@ -1725,62 +1962,45 @@ def _chunked_polygonize_core(
 
     # 2) Per-block polygonization (shared dispatch)
     if prepared.strategy in ("label_union", "label_stitch"):
-
-        def _block_task_lab(
-            i: int,
-            b: dict[str, int],
-            block_transform: rio.Affine,
-            block_bounds: rio.coords.BoundingBox,
-        ) -> gpd.GeoDataFrame:
-            g = _polygonize_block_from_labels(
-                reader,
-                block_id=i,
-                b=b,
-                tiling_transform=t,
-                block_transform=block_transform,
-                block_bounds=block_bounds,
-                connectivity=prepared.connectivity,
-                value_column=prepared.value_column,
-                float_tol=prepared.float_tol,
-            )
-            if len(g) == 0:
-                return g
-
-            # Attach global ids only for label_union
-            if prepared.strategy == "label_union":
-                assert seam_mapping is not None
-                g = _attach_label_union_ids(
-                    g,
-                    block_id=i,
-                    id_column=prepared.id_column,
-                    seam_mapping=seam_mapping,
+        if isinstance(reader, _ChunkedDaskReader):
+            # Pass individual delayed blocks so no task serializes the full Dask collection
+            delayed_blocks = reader.delayed_blocks()
+            handles = [
+                runner.submit(
+                    _chunked_polygonize_dask_labels_task,
+                    delayed_blocks[i][0],
+                    delayed_blocks[i][1],
+                    delayed_blocks[i][2],
+                    i,
+                    block_geogrids[i].transform,
+                    block_geogrids[i].bounds,
+                    prepared,
+                    seam_mapping,
                 )
-
-            # The local ids are internal to labeling only
-            return g.drop(columns=["local_id"], errors="ignore")
-
-        handles = [
-            runner.submit(_block_task_lab, i, block_ids[i], block_geogrids[i].transform, block_geogrids[i].bounds)
-            for i in range(len(block_ids))
-        ]
+                for i in range(len(block_ids))
+            ]
+        else:
+            # File-backed workers receive a lightweight reader and load their own window
+            handles = [
+                runner.submit(
+                    _chunked_polygonize_labels_task,
+                    reader,
+                    i,
+                    block_ids[i],
+                    t,
+                    block_geogrids[i].transform,
+                    block_geogrids[i].bounds,
+                    prepared,
+                    seam_mapping,
+                )
+                for i in range(len(block_ids))
+            ]
 
     elif prepared.strategy == "geometry_stitch":
-
-        def _block_task_geom(b: dict[str, int]) -> gpd.GeoDataFrame:
-            return _polygonize_block_geometry_halo(
-                reader,
-                b=b,
-                tiling_transform=t,
-                crs=crs,
-                data_column_name=prepared.data_column_name,
-                value_column=prepared.value_column,
-                halo=prepared.halo,
-                connectivity=prepared.connectivity,
-                float_tol=prepared.float_tol,
-                shape=shape,
-            )
-
-        handles = [runner.submit(_block_task_geom, block_ids[i]) for i in range(len(block_ids))]
+        handles = [
+            runner.submit(_chunked_polygonize_geometry_task, reader, block_ids[i], t, crs, prepared, shape)
+            for i in range(len(block_ids))
+        ]
 
     else:
         raise ValueError(
@@ -1902,8 +2122,7 @@ def _multiproc_polygonize(
     shape = (int(source_raster.shape[0]), int(source_raster.shape[1]))
 
     # Determine chunks from mp_config
-    chunksizes = (mp_config.chunk_size, mp_config.chunk_size)
-    chunks = _chunks2d_from_chunksizes_shape(chunksizes=chunksizes, shape=shape)
+    chunks = normalize_chunks(chunks=mp_config.chunks, shape=shape)
 
     # Build tiling from the chosen chunking scheme
     tiling, block_geogrids, block_ids = _chunked_build_dst_geotiling(

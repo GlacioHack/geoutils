@@ -4,6 +4,17 @@
 # pycharm
 .idea/
 
+# codex
+.codex
+AGENTS.md
+.agents
+
+# Default local ASV outputs
+.asv/
+
+# Local benchmark environments, measurements and reports
+benchmarks/results/
+
 # sphinx documentation
 doc/_build/
 

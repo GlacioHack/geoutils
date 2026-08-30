@@ -25,8 +25,8 @@ from geoutils._config import config  # noqa
 
 from geoutils.raster import Raster, xr_accessor  # noqa isort:skip
 from geoutils.raster.xr_accessor import open_raster, RasterAccessor  # noqa isort:skip
-from geoutils.vector import Vector  # noqa isort:skip
-from geoutils.pointcloud import PointCloud  # noqa isort:skip
+from geoutils.vector import Vector, open_vector, VectorAccessor  # noqa isort:skip
+from geoutils.pointcloud import PointCloud, open_pointcloud, PointCloudAccessor  # noqa isort:skip
 
 # To-be-deprecated
 from geoutils.raster import Mask  # noqa isort:skip

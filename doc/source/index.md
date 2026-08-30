@@ -142,6 +142,7 @@ analysis_examples/index
 api
 cli
 config
+benchmarking_index
 data
 release_notes
 ```

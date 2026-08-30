@@ -50,6 +50,7 @@ which themselves depend notably on [NumPy](https://numpy.org/), [pandas](https:/
 Optional dependencies are:
 - [Matplotlib](https://matplotlib.org/) for plotting,
 - [LasPy](https://laspy.readthedocs.io/en/latest/) for reading and writing LAS/LAZ/COPC point cloud files,
-- [Numba](https://numba.pydata.org/) for faster filters,
+- [Numba](https://numba.pydata.org/) for faster filters and point-cloud gridding,
 - [Dask](https://www.dask.org/) for out-of-memory operations,
+- [Dask-GeoPandas](https://dask-geopandas.readthedocs.io/en/stable/) for out-of-memory vector and point-cloud accessor operations,
 - [Psutil](https://psutil.readthedocs.io/en/latest/) and [Plotly](https://plotly.com/) for profiling computing speed and memory.

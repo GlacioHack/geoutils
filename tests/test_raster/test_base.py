@@ -14,7 +14,7 @@ from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
-from geoutils import Raster, Vector, examples, open_raster
+from geoutils import PointCloud, Raster, Vector, examples, open_raster
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
@@ -23,9 +23,24 @@ from geoutils.raster.xr_accessor import RasterAccessor
 def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, strict_masked: bool = True) -> None:
     """Return equality of different output types."""
 
-    # For two vectors
-    if isinstance(output1, Vector) and isinstance(output2, Vector):
-        assert output1.vector_equal(output2)
+    # For point clouds, accepting accessor-backed GeoDataFrames
+    if isinstance(output1, PointCloud) or isinstance(output2, PointCloud):
+        gdf1 = output1.ds if isinstance(output1, PointCloud) else output1
+        gdf2 = output2.ds if isinstance(output2, PointCloud) else output2
+        assert isinstance(gdf1, gpd.GeoDataFrame)
+        assert isinstance(gdf2, gpd.GeoDataFrame)
+        gpd.testing.assert_geodataframe_equal(
+            gdf1.reset_index(drop=True), gdf2.reset_index(drop=True), check_dtype=False
+        )
+        data_column1 = output1.data_column if isinstance(output1, PointCloud) else output1.pc.data_column
+        data_column2 = output2.data_column if isinstance(output2, PointCloud) else output2.pc.data_column
+        assert data_column1 == data_column2
+
+    # For vectors, accepting accessor-backed GeoDataFrames
+    elif isinstance(output1, (Vector, gpd.GeoDataFrame)) and isinstance(output2, (Vector, gpd.GeoDataFrame)):
+        vector1 = output1 if isinstance(output1, Vector) else Vector(output1)
+        vector2 = output2 if isinstance(output2, Vector) else Vector(output2)
+        assert vector1.vector_equal(vector2)
 
     # For two raster: Xarray or Raster objects
     elif isinstance(output1, (Raster, xr.DataArray)):
@@ -130,6 +145,7 @@ class TestClassVsAccessorConsistency:
         "copy",
         "georeferenced_grid_equal",
         "intersection",
+        "edit",
     ]
     # List of methods that WILL NOT load the input for certain arguments
     methods_input_noload_allowed_args = {"info": {"stats": [False]}}
@@ -145,6 +161,7 @@ class TestClassVsAccessorConsistency:
         "set_transform",
         "set_nodata",
         "set_area_or_point",
+        "edit",
     ]
     # List of methods that WILL NOT LOAD the output for certain arguments
     # copy(new_array=not None) will load
@@ -198,6 +215,7 @@ class TestClassVsAccessorConsistency:
         ),  # "random" will be derived during the test to work on all inputs
         ("icrop", {"bbox": (3, 5, 10, 22)}),
         ("translate", {"xoff": 10.5, "yoff": 5}),
+        ("edit", {"crs": CRS.from_epsg(4326), "tags": {"edited": "true"}}),
         ("xy2ij", {"x": "random", "y": "random"}),  # "random" will be derived during the test to work on all inputs
         ("ij2xy", {"i": [0, 1, 2, 3], "j": [4, 5, 6, 7]}),
         ("coords", {"grid": True}),
@@ -228,6 +246,8 @@ class TestClassVsAccessorConsistency:
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
         ("filter", {"method": "median", "size": 7}),
+        ("sieve", {"size": 7}),
+        ("fill_nodata", {"max_search_distance": 3}),
         ("get_stats", {}),
         # 2.2. In-place methods
         ("load", {}),
@@ -252,6 +272,25 @@ class TestClassVsAccessorConsistency:
         # Open both objects
         ds = open_raster(path_raster)
         raster = Raster(path_raster)
+
+        # Sieve follows GDAL and accepts integer categories rather than continuous values
+        if method == "sieve":
+            source_data = raster.data
+            integer_data = np.ma.array(source_data.data.astype(np.int32), mask=np.ma.getmaskarray(source_data))
+            raster = Raster.from_array(
+                integer_data,
+                transform=raster.transform,
+                crs=raster.crs,
+                nodata=-99999,
+                area_or_point=raster.area_or_point,
+            )
+            ds = RasterAccessor.from_array(
+                integer_data.filled(-99999),
+                transform=raster.transform,
+                crs=raster.crs,
+                nodata=-99999,
+                area_or_point=raster.area_or_point,
+            )
 
         # For methods that require knowledge of the data (relative to bounds), create specific inputs
         args = kwargs.copy()
@@ -413,7 +452,7 @@ class TestClassVsAccessorConsistency:
         # Open lazily with Dask
         ds = open_raster(path_raster, chunks={"band": 1, "x": 25, "y": 25})
         # Open raster that will be processed using Multiprocessing
-        mp_config = MultiprocConfig(chunk_size=25)  # To pass to the function
+        mp_config = MultiprocConfig(chunks=25)  # To pass to the function
         raster = Raster(path_raster)
         # Open and load both DataArray/Raster with NumPy
         ds2 = open_raster(path_raster)
@@ -514,3 +553,59 @@ class TestClassVsAccessorConsistency:
 
         # TODO: Finalize after consistent input check function #850
         assert True
+
+
+class TestRasterEdit:
+    """Check grouped metadata changes without modifying source raster data or metadata."""
+
+    def test_edit(self) -> None:
+        """Apply core GDAL-style metadata edits to a shallow raster copy."""
+
+        transform = rio.transform.from_origin(0, 2, 1, 1)
+        raster = Raster.from_array(
+            np.ones((2, 2), dtype=np.int16),
+            transform=transform,
+            crs=4326,
+            nodata=-9999,
+            tags={"source": "test"},
+            area_or_point="Area",
+        )
+        new_transform = rio.transform.from_origin(10, 20, 2, 2)
+
+        # Omitted metadata is retained while tags are merged with the existing values
+        edited = raster.edit(
+            crs=32631,
+            transform=new_transform,
+            nodata=-32768,
+            tags={"edited": "true"},
+            area_or_point="Point",
+        )
+        assert edited.crs == rio.crs.CRS.from_epsg(32631)
+        assert edited.transform == new_transform
+        assert edited.nodata == -32768
+        assert edited.tags["source"] == "test"
+        assert edited.tags["edited"] == "true"
+        assert edited.area_or_point == "Point"
+
+        # Editing metadata does not alter the source raster
+        assert raster.crs == rio.crs.CRS.from_epsg(4326)
+        assert raster.transform == transform
+        assert raster.nodata == -9999
+        assert raster.tags == {"source": "test", "AREA_OR_POINT": "Area"}
+        assert np.array_equal(edited.data, raster.data)
+
+    def test_edit_clear_metadata(self) -> None:
+        """Distinguish omitted arguments from metadata explicitly cleared with None."""
+
+        raster = Raster.from_array(
+            np.ones((2, 2), dtype=np.float32),
+            transform=rio.transform.from_origin(0, 2, 1, 1),
+            crs=4326,
+            nodata=-9999,
+            tags={"source": "test"},
+        )
+        edited = raster.edit(crs=None, nodata=None, tags=None, area_or_point=None)
+        assert edited.crs is None
+        assert edited.nodata is None
+        assert edited.tags == {}
+        assert edited.area_or_point is None

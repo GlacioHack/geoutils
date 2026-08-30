@@ -777,7 +777,7 @@ def _multiproc_subsample(
     """
 
     # Get tiling
-    tiling = compute_tiling(tile_size=config.chunk_size, raster_shape=rst.shape, overlap=0)
+    tiling = compute_tiling(tile_size=config.chunks, raster_shape=rst.shape, overlap=0)
 
     # Get number of chunks and blocks
     num_chunks = (tiling.shape[0], tiling.shape[1])
@@ -788,12 +788,9 @@ def _multiproc_subsample(
     tile_ids = [tiling[indexes_row[i], indexes_col[i], :] for i in range(num_blocks)]
 
     # Count valid values per tile in parallel
-    tasks = [
-        config.cluster.launch_task(fun=_wrapper_multiproc_nb_valids_per_block, args=[rst, tile_ids[i]], kwargs={})
-        for i in range(num_blocks)
-    ]
+    tasks = [config.cluster.submit(_wrapper_multiproc_nb_valids_per_block, rst, tile_ids[i]) for i in range(num_blocks)]
     try:
-        nb_valids_per_block = np.array([config.cluster.get_res(t) for t in tasks], dtype=np.int64)
+        nb_valids_per_block = np.array(config.cluster.gather(tasks), dtype=np.int64)
     except Exception as e:
         raise RuntimeError(f"Error retrieving valid-count results from multiprocessing tasks: {e}")
 
@@ -827,16 +824,17 @@ def _multiproc_subsample(
         # Sample them through multiprocessing, either for indices or values
         if not return_indices:
             tasks = [
-                config.cluster.launch_task(
-                    fun=_wrapper_multiproc_subsample_values_block,
-                    args=[rst, tile_ids[i], np.asarray(ind_per_block[i], dtype=np.int64)],
-                    kwargs={},
+                config.cluster.submit(
+                    _wrapper_multiproc_subsample_values_block,
+                    rst,
+                    tile_ids[i],
+                    np.asarray(ind_per_block[i], dtype=np.int64),
                 )
                 for i in used
             ]
 
             try:
-                list_vals = [config.cluster.get_res(t) for t in tasks]
+                list_vals = config.cluster.gather(tasks)
             except Exception as e:
                 raise RuntimeError(f"Error retrieving subsampled values from multiprocessing tasks: {e}")
 
@@ -845,16 +843,17 @@ def _multiproc_subsample(
 
         else:
             tasks = [
-                config.cluster.launch_task(
-                    fun=_wrapper_multiproc_subsample_indices_block,
-                    args=[rst, tile_ids[i], np.asarray(ind_per_block[i], dtype=np.int64)],
-                    kwargs={},
+                config.cluster.submit(
+                    _wrapper_multiproc_subsample_indices_block,
+                    rst,
+                    tile_ids[i],
+                    np.asarray(ind_per_block[i], dtype=np.int64),
                 )
                 for i in used
             ]
 
             try:
-                list_rc = [config.cluster.get_res(t) for t in tasks]  # each (n_i, 2)
+                list_rc = config.cluster.gather(tasks)  # each (n_i, 2)
             except Exception as e:
                 raise RuntimeError(f"Error retrieving subsampled indices from multiprocessing tasks: {e}")
 
@@ -878,16 +877,20 @@ def _multiproc_subsample(
         nx_full = int(rst.shape[1])
 
         tasks = [
-            config.cluster.launch_task(
-                fun=_wrapper_multiproc_topk_candidates_block,
-                args=[rst, tile_ids[i]],
-                kwargs={"seed": seed, "k": subsample_size, "nx_full": nx_full, "return_indices": return_indices},
+            config.cluster.submit(
+                _wrapper_multiproc_topk_candidates_block,
+                rst,
+                tile_ids[i],
+                seed=seed,
+                k=subsample_size,
+                nx_full=nx_full,
+                return_indices=return_indices,
             )
             for i in range(num_blocks)
         ]
 
         try:
-            cand = [config.cluster.get_res(t) for t in tasks]  # list of (keys, payload)
+            cand = config.cluster.gather(tasks)  # list of (keys, payload)
         except Exception as e:
             raise RuntimeError(f"Error retrieving topk candidates from multiprocessing tasks: {e}")
 
@@ -960,7 +963,7 @@ def _subsample(
     if mp_backend and dask_backend:
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config parameter "
-            "from reproject(). To use Multiprocessing, open the file without chunks."
+            "from subsample(). To use Multiprocessing, open the file without chunks."
         )
 
     class _SubsampleKwargs(TypedDict):
@@ -997,3 +1000,27 @@ def _subsample(
         # NumPy
         else:
             return _subsample_numpy(arr, **subsample_kwargs)  # type: ignore
+
+
+def _subsample_pointcloud(
+    source_pointcloud: Any,
+    subsample: float | int,
+    return_indices: bool = False,
+    random_state: int | np.random.Generator | None = None,
+) -> NDArrayNum | tuple[NDArrayNum, ...]:
+    """Subsample point-cloud values after materializing any lazy data column."""
+
+    data = source_pointcloud.data.compute().values if source_pointcloud._is_dask else np.asarray(source_pointcloud.data)
+    if return_indices:
+        return _subsample_numpy(
+            array=data,
+            subsample=subsample,
+            return_indices=True,
+            random_state=random_state,
+        )
+    return _subsample_numpy(
+        array=data,
+        subsample=subsample,
+        return_indices=False,
+        random_state=random_state,
+    )

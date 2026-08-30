@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functionalities at the interface of rasters and vectors."""
+"""Rasterize vector geometries and create raster or point cloud masks."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Sequence
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import rasterio as rio
 import xarray as xr
 from rasterio import features
@@ -33,15 +34,25 @@ from rasterio.crs import CRS
 from shapely.geometry import box as shapely_box
 from shapely.strtree import STRtree
 
-from geoutils._dispatch import _check_match_grid, _check_match_points
+from geoutils._dispatch import (
+    _check_match_grid,
+    _check_match_points,
+    get_geo_attr,
+    has_geo_attr,
+    is_dask_geodataframe,
+)
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
-    _chunks2d_from_chunksizes_shape,
+    normalize_chunks,
 )
-from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
+from geoutils.multiproc.mparray import (
+    MultiprocConfig,
+    _split_chunk_size,
+    _write_multiproc_result,
+)
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -112,6 +123,9 @@ def _make_dtype(out_value: int | float, burn: _VectorBurnSpec, out_dtype: DTypeL
 
     :param out_value: Fill value for background.
     :param burn: Normalized burn values.
+    :param out_dtype: User-defined output data type, if provided.
+
+    :return: Data type used for the rasterized output.
     """
     if out_dtype is not None:
         return np.dtype(out_dtype)
@@ -123,41 +137,90 @@ def _make_dtype(out_value: int | float, burn: _VectorBurnSpec, out_dtype: DTypeL
     return np.result_type(*dts)
 
 
-def _get_strtree_and_lut(geoms: NDArrayNum, cache: dict[str, Any]) -> tuple[Any, dict[int, int]]:
+def _build_spatial_index(geoms: NDArrayNum) -> tuple[Any, dict[int, int]]:
     """
-    Build and cache STRtree + id to idx LUT for Shapely 1.8 compatibility.
+    Build the spatial index used to find features in each raster block.
 
     :param geoms: Geometry array.
-    :param cache: Mutable dict used as per-worker cache.
+
+    :return: Spatial index and mapping from geometry identities to their original positions.
+    """
+    # Build the index once from all input geometries
+    tree = STRtree(list(geoms))
+
+    # Older Shapely versions return geometries instead of their original positions
+    geometry_positions = {id(geometry): index for index, geometry in enumerate(geoms)}
+    return tree, geometry_positions
+
+
+def _query_indices(tree: Any, geometry_positions: dict[int, int], query_geom: Any) -> NDArrayNum:
+    """
+    Return the positions of geometries intersecting a geographic area.
+
+    :param tree: Spatial index containing all input geometries.
+    :param geometry_positions: Mapping from geometry identities to their original positions.
+    :param query_geom: Geographic area to query.
+
+    :return: Positions of intersecting geometries in the original geometry array.
     """
 
-    tree = cache.get("tree", None)
-    if tree is None:
-        tree = STRtree(list(geoms))
-        cache["tree"] = tree
-        cache["id_to_idx"] = {id(g): i for i, g in enumerate(geoms)}
-    return tree, cache["id_to_idx"]
-
-
-def _query_indices(tree: Any, id_to_idx: dict[int, int], query_geom: Any) -> NDArrayNum:
-    """
-    Query indices of geometries intersecting query geometry.
-
-    :param tree: STRtree instance.
-    :param id_to_idx: id(geom)->index LUT (Shapely 1.8 fallback).
-    :param query_geom: Shapely geometry.
-    """
-
-    # Shapely 2: query(..., predicate="intersects") returns indices
+    # Current Shapely versions return the original array positions directly
     try:
-        idx = tree.query(query_geom, predicate="intersects")
-        return np.asarray(idx, dtype=np.int64)
-    # Shapely 1.8: query returns geometries
+        indices = tree.query(query_geom, predicate="intersects")
+        return np.asarray(indices, dtype=np.int64)
+
+    # Older Shapely versions return geometry objects that need mapping back to positions
     except TypeError:
-        hits = tree.query(query_geom)
-        if not hits:
+        intersecting_geometries = tree.query(query_geom)
+        if not intersecting_geometries:
             return np.empty((0,), dtype=np.int64)
-        return np.asarray([id_to_idx[id(g)] for g in hits if query_geom.intersects(g)], dtype=np.int64)
+        return np.asarray(
+            [
+                geometry_positions[id(geometry)]
+                for geometry in intersecting_geometries
+                if query_geom.intersects(geometry)
+            ],
+            dtype=np.int64,
+        )
+
+
+def _subset_burn(burn: _VectorBurnSpec, indices: NDArrayNum) -> _VectorBurnSpec:
+    """
+    Select the geometries and optional values needed by one output block.
+
+    :param burn: Complete vector rasterization inputs.
+    :param indices: Positions of features intersecting the output block.
+
+    :return: Rasterization inputs limited to the selected features.
+    """
+
+    # Keep geometry values aligned when an individual value is used for each feature
+    values = None if burn.values is None else burn.values[indices]
+    return _VectorBurnSpec(geoms=burn.geoms[indices], values=values, default_value=burn.default_value)
+
+
+def _partition_burn_by_geogrids(burn: _VectorBurnSpec, geogrids: list[GeoGrid]) -> list[_VectorBurnSpec]:
+    """
+    Select the relevant vector features once for every output block.
+
+    :param burn: Complete vector rasterization inputs.
+    :param geogrids: Georeferenced output blocks.
+
+    :return: Rasterization inputs limited to each output block.
+    """
+
+    # Build one spatial index for the complete vector input
+    tree, geometry_positions = _build_spatial_index(burn.geoms)
+
+    # Query every block while the complete index remains available in this process
+    block_burns = []
+    for geogrid in geogrids:
+        # Query the geographic area covered by this output block
+        bounds = geogrid.bounds
+        query_box = shapely_box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+        indices = _query_indices(tree, geometry_positions=geometry_positions, query_geom=query_box)
+        block_burns.append(_subset_burn(burn, indices))
+    return block_burns
 
 
 def _rasterio_rasterize_burn(
@@ -205,52 +268,40 @@ def _rasterio_rasterize_burn(
     )
 
 
-def _rasterize_on_geogrid(
-    gg: GeoGrid,
+def _rasterize_selected_on_geogrid(
+    geogrid: GeoGrid,
     burn: _VectorBurnSpec,
     out_value: int | float,
     out_dtype: DTypeLike | None = None,
     *,
     all_touched: bool = False,
-    cache: dict[str, Any] | None = None,
 ) -> NDArrayNum:
     """
-    Rasterize vector features onto a single block GeoGrid.
+    Rasterize features already selected for one output block.
 
-    :param gg: Output block geogrid (shape/transform/bounds in output CRS).
-    :param burn: Normalized burn values and geometries.
+    :param geogrid: Georeferencing and shape of the output block.
+    :param burn: Rasterization inputs limited to features intersecting the block.
     :param out_value: Background fill value.
-    :param all_touched: Rasterio rasterize option.
-    :param cache: Optional per-worker cache for spatial index.
+    :param out_dtype: Output array data type.
+    :param all_touched: Whether to include every pixel touched by a geometry.
+
+    :return: Rasterized output block.
     """
 
+    # Use one consistent data type for empty and rasterized blocks
     dtype = _make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype)
 
-    # Build spatial index (cached per worker if provided)
-    if cache is None:
-        cache = {}
-    tree, id_to_idx = _get_strtree_and_lut(burn.geoms, cache=cache)
+    # Empty blocks can be filled without calling Rasterio
+    if len(burn.geoms) == 0:
+        return np.full(geogrid.shape, out_value, dtype=dtype)
 
-    # Conservative bbox selection for candidate features
-    bb = gg.bounds
-    qbox = shapely_box(bb.left, bb.bottom, bb.right, bb.top)
-    idx = _query_indices(tree, id_to_idx=id_to_idx, query_geom=qbox)
-
-    # Early exit if no candidates
-    if idx.size == 0:
-        return np.full(gg.shape, out_value, dtype=dtype)
-
-    # Subset geometries/values for this tile
-    geoms = burn.geoms[idx]
-    vals = None if burn.values is None else burn.values[idx]
-
-    # Rasterize only candidates into the tile
+    # Burn only the features intersecting this block
     return _rasterio_rasterize_burn(
-        geoms=geoms,
-        values=vals,
+        geoms=burn.geoms,
+        values=burn.values,
         default_value=burn.default_value,
-        out_shape=gg.shape,
-        transform=gg.transform,
+        out_shape=geogrid.shape,
+        transform=geogrid.transform,
         fill=out_value,
         dtype=dtype,
         all_touched=all_touched,
@@ -258,10 +309,9 @@ def _rasterize_on_geogrid(
 
 
 def _rasterize_base(
-    vect_geoms: Sequence[Any],
+    burn: _VectorBurnSpec,
     out_shape: tuple[int, int],
     out_transform: Any,
-    in_value: int | float | Iterable[int | float] | None,
     out_value: int | float = 0,
     out_dtype: DTypeLike | None = None,
     all_touched: bool = False,
@@ -269,15 +319,15 @@ def _rasterize_base(
     """
     Rasterize geometry into a NumPy array.
 
-    :param vect_geoms: Geometry sequence (already in output CRS).
+    :param burn: Normalized geometries and burn values in the output CRS.
     :param out_shape: Output array shape (rows, cols).
     :param out_transform: Output affine transform.
-    :param in_value: Burn value(s) (scalar, iterable, or None for 1..N).
     :param out_value: Background fill value.
-    :param all_touched: Rasterio rasterize option.
+    :param out_dtype: Output array data type.
+    :param all_touched: Whether to include every pixel touched by a geometry.
+
+    :return: Rasterized NumPy array.
     """
-    # Process inputs
-    burn = _normalize_burn_values(vect_geoms=vect_geoms, in_value=in_value)
     dtype = _make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype)
 
     # Rasterize
@@ -308,31 +358,40 @@ def _dask_rasterize(
     :param dst_geotiling: Chunked geogrid for the output.
     :param dst_block_geogrids: List of per-chunk GeoGrids.
     :param out_value: Background fill value.
-    :param all_touched: Rasterio rasterize option.
+    :param out_dtype: Output array data type.
+    :param all_touched: Whether to include every pixel touched by a geometry.
+
+    :return: Lazy rasterized Dask array.
     """
-    import_optional("dask")
+    dask = import_optional("dask")
     import dask.array as da
 
     dtype = _make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype)
-    template = da.empty(dst_geotiling.grid.shape, chunks=dst_geotiling.chunks, dtype=dtype)
 
-    # Per-worker cache (tree + LUT)
-    _CACHE: dict[str, Any] = {}
+    # Select each block's geometries before building the lazy computation
+    block_burns = _partition_burn_by_geogrids(burn, dst_block_geogrids)
 
-    def _flat_block_index(chunk_location: tuple[int, int]) -> int:
-        """Convert Dask chunk location (iy, ix) into flat index matching get_blocks_as_geogrids()."""
-        iy, ix = chunk_location
-        nx = len(dst_geotiling.chunks[1])
-        return iy * nx + ix
+    # Build a two-dimensional layout of independently computed blocks
+    block_arrays = []
+    for iy in range(dst_geotiling.num_chunks[0]):
+        row_arrays = []
+        for ix in range(dst_geotiling.num_chunks[1]):
+            block_index = dst_geotiling.flat_block_index((iy, ix))
+            geogrid = dst_block_geogrids[block_index]
 
-    def _block_func(block: NDArrayNum, block_info: Any = None) -> NDArrayNum:
-        """Block function for Dask."""
-        info = block_info[None]  # type: ignore
-        bidx = _flat_block_index(info["chunk-location"])
-        gg = dst_block_geogrids[bidx]
-        return _rasterize_on_geogrid(gg, burn, out_value, dtype, all_touched=all_touched, cache=_CACHE)
+            # Give each block computation only the geometries it needs
+            tile = dask.delayed(_rasterize_selected_on_geogrid)(
+                geogrid,
+                block_burns[block_index],
+                out_value,
+                dtype,
+                all_touched=all_touched,
+            )
+            row_arrays.append(da.from_delayed(tile, shape=geogrid.shape, dtype=dtype))
+        block_arrays.append(row_arrays)
 
-    return template.map_blocks(_block_func, dtype=dtype)
+    # Join the blocks lazily while preserving their requested chunk sizes
+    return da.block(block_arrays)
 
 
 def _multiproc_rasterize(
@@ -354,33 +413,71 @@ def _multiproc_rasterize(
     :param mp_config: Multiprocessing configuration (includes cluster/outfile/driver).
     :param file_metadata: Rasterio metadata for output file.
     :param out_value: Background fill value.
-    :param all_touched: Rasterio rasterize option.
+    :param out_dtype: Output array data type.
+    :param all_touched: Whether to include every pixel touched by a geometry.
+
+    :return: File-backed raster containing the completed blocks.
     """
     block_ids = dst_geotiling.get_block_locations()
 
-    def rasterize_block(task: tuple[int, dict[str, int]]) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
-        """
-        Block function for multiprocessing.
+    # Build the spatial index once and send each task only its relevant features
+    block_burns = _partition_burn_by_geogrids(burn, dst_block_geogrids)
 
-        Returns result_tile (2D array for the tile) and dst_tile (ys, ye, xs, xe) destination indexes.
-        """
-        bidx, bid = task
-
-        gg = dst_block_geogrids[bidx]
-        tile = _rasterize_on_geogrid(gg, burn, out_value, out_dtype, all_touched=all_touched, cache={})
-
-        dst_tile = (bid["ys"], bid["ye"], bid["xs"], bid["xe"])
-        return tile, dst_tile
-
-    # Submit tasks to cluster interface
-    tasks = [mp_config.cluster.launch_task(rasterize_block, [(i, block_ids[i])]) for i in range(len(block_ids))]
+    # Send one independent output block to the available worker pool
+    tasks = [
+        mp_config.cluster.submit(
+            _multiproc_rasterize_block,
+            block_ids[i],
+            dst_block_geogrids[i],
+            block_burns[i],
+            out_value,
+            out_dtype,
+            all_touched,
+        )
+        for i in range(len(block_ids))
+    ]
 
     # Write tiles as they complete
     return _write_multiproc_result(tasks=tasks, mp_config=mp_config, file_metadata=file_metadata)
 
 
+def _multiproc_rasterize_block(
+    block_id: dict[str, Any],
+    block_geogrid: GeoGrid,
+    burn: _VectorBurnSpec,
+    out_value: int | float,
+    out_dtype: DTypeLike | None,
+    all_touched: bool,
+) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
+    """
+    Rasterize one output block in a multiprocessing worker.
+
+    :param block_id: Pixel positions of the output block in the complete raster.
+    :param block_geogrid: Georeferencing and shape of the output block.
+    :param burn: Rasterization inputs limited to features intersecting the block.
+    :param out_value: Background fill value.
+    :param out_dtype: Output array data type.
+    :param all_touched: Whether to include every pixel touched by a geometry.
+
+    :return: Rasterized block and its pixel positions in the complete raster.
+    """
+
+    # The parent process already selected this block's vector inputs
+    tile = _rasterize_selected_on_geogrid(
+        block_geogrid,
+        burn,
+        out_value,
+        out_dtype,
+        all_touched=all_touched,
+    )
+
+    # Return destination indexes together with the array for the shared writer
+    dst_tile = (block_id["ys"], block_id["ye"], block_id["xs"], block_id["xe"])
+    return tile, dst_tile
+
+
 def _rasterize(
-    source_vector: Vector,
+    source_vector: Any,
     ref: RasterType | None = None,
     in_value: int | float | Iterable[int | float] | None = None,
     out_value: int | float = 0,
@@ -395,6 +492,7 @@ def _rasterize(
     chunksizes: tuple[int, int] | None = None,
     mp_config: MultiprocConfig | None = None,
     dask: bool = False,
+    mask_output: bool = False,
 ) -> Raster:
     """
     Rasterize vector to raster, with optional Dask or Multiprocessing backends.
@@ -412,22 +510,24 @@ def _rasterize(
     :param crs: Output CRS.
     :param chunksizes: Chunk size (rows, cols) for Dask/Multiproc (if no reference raster is passed, or not chunked).
     :param mp_config: Multiprocessing config.
-    :param dask: If True, return a Dask-backed Raster.
+    :param dask: If True, return a Dask-backed Raster. A Dask-backed reference raster also selects this backend.
+    :param mask_output: Return boolean values for an in-memory or Dask mask.
     """
     # Compute output grid
     out_shape, out_transform, out_crs = _check_match_grid(
         src=source_vector, ref=ref, res=res, shape=shape, bounds=bounds, crs=crs, coords=grid_coords
     )
 
-    # Reproject vector into output CRS if needed
-    if out_crs is not None:
+    # Reproject only when the source and destination reference systems differ
+    if out_crs is not None and source_vector.crs != out_crs:
         source_vector = source_vector.to_crs(out_crs)
     vect = source_vector.ds
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
-    # If input reference raster is Dask-based, create Dask output by default
-    dask_backend = (da is not None and ref is not None and ref._chunks is not None) or bool(dask)
+    # A Dask reference keeps its chunked representation unless Multiprocessing is requested
+    ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
+    dask_backend = bool(dask) or (da is not None and ref_chunks is not None)
 
     if mp_backend and dask_backend:
         raise ValueError(
@@ -444,27 +544,34 @@ def _rasterize(
 
     # Base backend (eager)
     if not mp_backend and not dask_backend:
-        mask = _rasterize_base(
-            vect_geoms=burn.geoms,  # type: ignore
+        data = _rasterize_base(
+            burn=burn,
             out_shape=out_shape,
             out_transform=out_transform,
-            in_value=in_value,
             out_value=out_value,
             out_dtype=out_dtype,
             all_touched=all_touched,
         )
-        return Raster.from_array(data=mask, transform=out_transform, crs=out_crs, nodata=None)
+
+        # Byte rasterization is supported by Rasterio and has a zero-copy boolean view
+        if mask_output:
+            data = data.view(np.bool_)
+        return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
 
     # Build chunked geogrid (shared for Dask and multiproc)
     if chunksizes is None:
-        if ref is not None and ref._chunks is not None:
-            chunksizes = ref._chunks  # type: ignore
+        if mp_backend:
+            assert mp_config is not None
+            chunksizes = _split_chunk_size(mp_config.chunks)
         else:
-            chunksizes = (1024, 1024)
+            if ref_chunks is not None:
+                chunksizes = ref_chunks
+            else:
+                chunksizes = (1024, 1024)
     assert chunksizes is not None
 
     dst_geogrid = GeoGrid(transform=out_transform, shape=out_shape, crs=out_crs)
-    dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=chunksizes, shape=out_shape)
+    dst_chunks = normalize_chunks(chunks=chunksizes, shape=out_shape)
     dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
     dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
 
@@ -478,6 +585,10 @@ def _rasterize(
             out_dtype=out_dtype,
             all_touched=all_touched,
         )
+
+        # Convert each completed byte block to a boolean view without another array allocation
+        if mask_output:
+            data = data.view(np.bool_)
         return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
 
     # Multiprocessing backend (lazy and writes to file)
@@ -513,18 +624,18 @@ def _rasterize(
 
 def _create_mask_pointcloud(
     source_vector: Vector, points: tuple[NDArrayNum, NDArrayNum] | PointCloudLike, as_array: bool = False
-) -> NDArrayBool:
+) -> NDArrayBool | PointCloud:
     """Subfunction to create a point cloud mask using geopandas."""
 
     # Normalize input
-    points = _check_match_points(src=source_vector, points=points)
-    points_gs = gpd.points_from_xy(x=points[0], y=points[1])
+    points, _ = _check_match_points(src=source_vector, points=points)
+    points_gs = gpd.GeoSeries(gpd.points_from_xy(x=points[0], y=points[1]), crs=source_vector.crs)
 
     # Project to same CRS if required
     points_gs = points_gs.to_crs(crs=source_vector.crs)
 
-    # Check that points are contained no matter alignment
-    contained = points_gs.within(source_vector.ds, align=False)
+    # Check whether points are contained in any source geometry
+    contained = points_gs.within(source_vector.ds.geometry.union_all())
 
     if as_array:
         # Extract resulting boolean array
@@ -541,6 +652,68 @@ def _create_mask_pointcloud(
             z=contained,
             crs=source_vector.crs,
         )
+
+
+def _empty_point_mask_meta(crs: CRS | None) -> gpd.GeoDataFrame:
+    """Build an empty point-cloud mask GeoDataFrame for Dask outputs."""
+
+    # Dask uses this empty object to plan partition output without reading points
+    return gpd.GeoDataFrame(
+        data={"z": pd.Series(dtype="bool")},
+        geometry=gpd.GeoSeries([], crs=crs),
+        crs=crs,
+    )
+
+
+def _mask_pointcloud_partition(part: gpd.GeoDataFrame, source_geom: Any, crs: CRS | None) -> gpd.GeoDataFrame:
+    """Create a point-cloud mask for one GeoDataFrame partition."""
+
+    # Preserve the declared Dask metadata when a partition contains no points
+    if len(part) == 0:
+        return _empty_point_mask_meta(crs)
+
+    # Test all points in this partition against the combined source geometry
+    contained = part.geometry.within(source_geom)
+    return gpd.GeoDataFrame(
+        data={"z": contained.to_numpy(dtype=bool)},
+        geometry=part.geometry,
+        crs=crs,
+        index=part.index,
+    )
+
+
+def _create_mask_pointcloud_dask(source_vector: Vector, points: Any, as_array: bool = False) -> Any:
+    """Create a point-cloud mask lazily from a Dask-GeoPandas point cloud."""
+
+    # Keep Dask-GeoPandas optional until a lazy point cloud reaches this path
+    import_optional("dask_geopandas", package_name="dask-geopandas")
+
+    # Reproject lazily and prepare one geometry shared by all partition tasks
+    points_in_crs = points if points.crs == source_vector.crs else points.to_crs(source_vector.crs)
+    source_geom = source_vector.ds.geometry.union_all()
+    meta = _empty_point_mask_meta(source_vector.crs)
+    # Each point partition becomes an equally partitioned boolean point cloud
+    out = points_in_crs.map_partitions(_mask_pointcloud_partition, source_geom, source_vector.crs, meta=meta)
+
+    # Import at runtime because the point-cloud base also uses rasterization through its vector parent
+    from geoutils.pointcloud.base import _set_dataframe_attrs
+
+    # Restore the metadata expected by the GeoUtils ``pc`` accessor
+    _set_dataframe_attrs(
+        out,
+        {
+            "crs": source_vector.crs,
+            "bounds": None,
+            "point_count": None,
+            "data_column": "z",
+            "geometry_type": "Point",
+        },
+    )
+
+    if as_array:
+        # Return a lazy value array while keeping point partitions uncomputed
+        return out["z"].to_dask_array(lengths=True)
+    return out
 
 
 def _create_mask_raster(
@@ -578,28 +751,20 @@ def _create_mask_raster(
         mp_config=mp_config,
         dask=dask,
         out_dtype=np.uint8,  # avoid large dtype + keep rasterize fast/safe
+        mask_output=True,
     )
 
-    # Convert to boolean
-    # If DataArray, convert with astype (lazy if Dask array)
-    if isinstance(rst01, xr.DataArray):
-        rst_bool = rst01.astype(np.bool_, copy=False)
-    else:
-        # If raster, convert with astype if loaded
-        if rst01.is_loaded:
-            rst_bool = rst01.astype(np.bool_)
-        # If unloaded, set the is_mask attribute for later loading as boolean
-        else:
-            rst01._is_mask = True
-            rst_bool = rst01
+    # File-backed masks remain bytes on disk and are converted when loaded
+    if not isinstance(rst01, xr.DataArray):
+        rst01._is_mask = True
 
     if as_array:
-        return rst_bool.data
-    return rst_bool
+        return rst01.data
+    return rst01
 
 
 def _create_mask(
-    source_vector: Vector,
+    source_vector: Any,
     ref: RasterLike | PointCloudLike | None = None,
     all_touched: bool = False,
     crs: CRS | None = None,
@@ -640,12 +805,16 @@ def _create_mask(
 
     # Check point definition
     err_points = None
+    point_ref = ref if ref is not None else points
     try:
-        _check_match_points(
-            src=source_vector,
-            points=ref if ref is not None else points,
-        )
-        is_ref_points = True
+        if is_dask_geodataframe(point_ref):
+            is_ref_points = True
+        else:
+            _check_match_points(
+                src=source_vector,
+                points=point_ref,
+            )
+            is_ref_points = True
     except ValueError as e:
         is_ref_points = False
         err_points = e
@@ -678,6 +847,9 @@ def _create_mask(
         )
     # Point cloud mask path: point cloud ref OR points provided
     else:
+        if is_dask_geodataframe(point_ref):
+            return _create_mask_pointcloud_dask(source_vector=source_vector, points=point_ref, as_array=as_array)
+
         # Create boolean mask for points
         return _create_mask_pointcloud(
             source_vector=source_vector, points=points if points is not None else ref, as_array=as_array

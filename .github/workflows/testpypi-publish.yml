@@ -1,4 +1,4 @@
-# This workflow will upload a Python Package on TestPypi
+# This workflow will upload a Python Package on TestPypi when triggered manually
 
 name: Publish to TestPyPI
 

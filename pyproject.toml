@@ -24,4 +24,9 @@ disable_error_code = ["untyped-decorator"]
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --doctest-ignore-import-errors -W error::UserWarning --import-mode=importlib"
 log_level = "WARNING"
-testpaths = ["tests", "geoutils"]
+testpaths = ["tests", "geoutils", "benchmarks/test_large_data.py"]
+markers = [
+    "allow_logging_warnings: allow a test to emit logging warnings/errors collected by the autouse fixture",
+    "large_data: large data tests that are skipped unless --large-data is passed",
+    "memory: memory-pressure or out-of-core memory tests",
+]

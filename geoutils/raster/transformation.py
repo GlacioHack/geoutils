@@ -35,7 +35,6 @@ from rasterio.enums import Resampling
 from shapely.geometry import box
 from shapely.strtree import STRtree
 
-from geoutils import profiler
 from geoutils._config import config
 from geoutils._dispatch import _check_match_bbox, _check_match_grid
 from geoutils._misc import import_optional, silence_rasterio_message
@@ -43,9 +42,13 @@ from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
-    _chunks2d_from_chunksizes_shape,
+    normalize_chunks,
 )
-from geoutils.multiproc.mparray import MultiprocConfig, _write_multiproc_result
+from geoutils.multiproc.mparray import (
+    MultiprocConfig,
+    _split_chunk_size,
+    _write_multiproc_result,
+)
 from geoutils.raster.referencing import (
     _default_nodata,
     _res,
@@ -317,6 +320,35 @@ def _combined_blocks_shape_transform(
     return combined_meta, relative_block_indexes
 
 
+def _expand_source_block_indices(
+    block_indices: list[int],
+    src_block_ids: list[dict[str, Any]],
+    src_numblocks: tuple[int, int],
+) -> list[int]:
+    """
+    Expand source blocks by one neighboring chunk in every direction.
+
+    Rasterio's reprojection can depend on pixels just outside the destination/source overlap, especially at chunk
+    boundaries and with non-nearest kernels. Passing a one-chunk source neighborhood keeps chunked reprojection aligned
+    with the full-array result without materializing the entire source raster.
+    """
+
+    ny, nx = src_numblocks
+    by_location = {tuple(block_id["chunk-location"]): i for i, block_id in enumerate(src_block_ids)}
+    expanded = set(block_indices)
+
+    for index in block_indices:
+        iy, ix = src_block_ids[index]["chunk-location"]
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                jy = int(iy) + dy
+                jx = int(ix) + dx
+                if 0 <= jy < ny and 0 <= jx < nx:
+                    expanded.add(by_location[(jy, jx)])
+
+    return sorted(expanded)
+
+
 def _build_geotiling_and_meta(
     src_count: int,
     src_shape: tuple[int, int],
@@ -368,7 +400,7 @@ def _build_geotiling_and_meta(
 
     # Create tilings
     src_geotiling = ChunkedGeoGrid(grid=src_geogrid, chunks=src_chunks)
-    dst_chunks = _chunks2d_from_chunksizes_shape(chunksizes=dst_chunksizes, shape=dst_shape)
+    dst_chunks = normalize_chunks(chunks=dst_chunksizes, shape=dst_shape)
     dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
 
     # 2/ Get bounds of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
@@ -407,6 +439,10 @@ def _build_geotiling_and_meta(
     # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
     # transform of each tuples of source blocks
     src_block_ids = src_geotiling.get_block_locations()
+    dest2source = [
+        _expand_source_block_indices(sbid, src_block_ids=src_block_ids, src_numblocks=src_geotiling.num_chunks)
+        for sbid in dest2source
+    ]
     meta_params = [
         (
             _combined_blocks_shape_transform(sub_block_ids=[src_block_ids[i] for i in sbid], src_geogrid=src_geogrid)
@@ -672,9 +708,7 @@ def _multiproc_reproject(
     """
 
     # Prepare geotiling and reprojection metadata for source and destination grids
-    src_chunks = _chunks2d_from_chunksizes_shape(
-        chunksizes=(mp_config.chunk_size, mp_config.chunk_size), shape=rst.shape
-    )
+    src_chunks = normalize_chunks(chunks=mp_config.chunks, shape=rst.shape)
     src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids = (
         _build_geotiling_and_meta(
             src_count=rst.count,
@@ -685,7 +719,7 @@ def _multiproc_reproject(
             dst_transform=dst_transform,
             dst_crs=dst_crs,
             src_chunks=src_chunks,
-            dst_chunksizes=(mp_config.chunk_size, mp_config.chunk_size),
+            dst_chunksizes=_split_chunk_size(mp_config.chunks),
         )
     )
 
@@ -706,17 +740,15 @@ def _multiproc_reproject(
     tasks = []
     for i in range(len(dest2source)):
         tasks.append(
-            mp_config.cluster.launch_task(
-                fun=_wrapper_multiproc_reproject_per_block,
-                args=[
-                    rst,
-                    src_block_ids,
-                    dst_block_ids[i],
-                    dest2source[i],
-                    meta_params[i][1],
-                    meta_params[i][0],
-                ],
-                kwargs=kwargs,
+            mp_config.cluster.submit(
+                _wrapper_multiproc_reproject_per_block,
+                rst,
+                src_block_ids,
+                dst_block_ids[i],
+                dest2source[i],
+                meta_params[i][1],
+                meta_params[i][0],
+                **kwargs,
             )
         )
 
@@ -735,7 +767,6 @@ def _multiproc_reproject(
     _write_multiproc_result(tasks, mp_config, file_metadata)
 
 
-@profiler.profile("geoutils.raster.geotransformations._reproject", memprof=True)
 def _reproject(
     source_raster: RasterType,
     ref: RasterLike,
@@ -835,7 +866,6 @@ def _reproject(
 #########
 
 
-@profiler.profile("geoutils.raster.geotransformations._crop", memprof=True)
 def _crop(
     source_raster: RasterType,
     bbox: RasterLike | VectorLike | tuple[float, float, float, float],
@@ -922,7 +952,6 @@ def _crop(
 ##############
 
 
-@profiler.profile("geoutils.raster.geotransformations._translate", memprof=True)
 def _translate(
     transform: affine.Affine,
     xoff: float,

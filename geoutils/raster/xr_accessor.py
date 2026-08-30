@@ -41,7 +41,9 @@ def open_raster(filename: str, is_mask: bool = False, **kwargs: Any) -> xr.DataA
     Open a raster using Rioxarray, always masked and squeezed.
 
     :param filename: Path to the raster file to open.
-    :param kwargs: Keyword to pass to rioxarray.open().
+    :param is_mask: Whether to return the raster values as booleans.
+    :param kwargs: Keyword arguments passed to :func:`rioxarray.open_rasterio`.
+    :returns: The opened raster as a Rioxarray DataArray.
     """
 
     # Open with Rioxarray, cast to float32 if integer type
@@ -80,8 +82,13 @@ class RasterAccessor(RasterBase):
         # We are never returning a DataArray that is unmasked, so the nodata plays a different role than in Rioxarray
         # It is only used for file writing = always the encoded value if it exists
         if self._obj.rio.encoded_nodata is not None:
-            # Write encoded nodata as "_FillValue" attribute
-            self._obj.rio.write_nodata(self._obj.rio.encoded_nodata, inplace=True)
+            encoded_nodata = self._obj.rio.encoded_nodata
+
+            # Move encoded nodata to the attributes without retaining a duplicate value
+            encoding = dict(self._obj.encoding)
+            encoding.pop("_FillValue", None)
+            self._obj.rio.set_encoding(encoding, inplace=True)
+            self._obj.rio.write_nodata(encoded_nodata, inplace=True)
 
     @property
     def data(self) -> xr.DataArray:
@@ -258,26 +265,39 @@ class RasterAccessor(RasterBase):
         if area_or_point is not None:
             tags.update({"AREA_OR_POINT": area_or_point})
 
+        # Xarray converts NumPy masked arrays to floating arrays with NaN, even when no values are masked. Preserve the
+        # original dtype when possible, and only materialize masked values when they exist
+        if np.ma.isMaskedArray(data):
+            masked = np.ma.asarray(data)
+            mask = np.ma.getmaskarray(masked)
+            if mask.any():
+                if np.issubdtype(masked.dtype, np.floating):
+                    data = masked.filled(np.nan)
+                else:
+                    data = masked.astype(np.float32).filled(np.nan)
+            else:
+                data = np.ma.getdata(masked)
+
         # Squeeze data
         data = data.squeeze()
 
         # For a 2-d array
         if data.ndim == 2:
             # Get netCDF coordinates from transform and shape
-            coords = affine_to_coords(affine=transform, width=data.shape[0], height=data.shape[1])
-            # Need to order the coords as X then Y in dict, or it fails...
+            coords = affine_to_coords(affine=transform, width=data.shape[1], height=data.shape[0])
             out_ds = xr.DataArray(
                 data=data,
-                coords={"x": coords["x"], "y": coords["y"]},
+                dims=("y", "x"),
+                coords={"y": coords["y"], "x": coords["x"]},
                 attrs=tags,
             )
         elif data.ndim == 3:
             # Get netCDF coordinates from transform and shape
-            coords = affine_to_coords(affine=transform, width=data.shape[1], height=data.shape[2])
-            # Need to order the coords as band, then X, then Y in dict, or it fails...
+            coords = affine_to_coords(affine=transform, width=data.shape[2], height=data.shape[1])
             out_ds = xr.DataArray(
                 data=data,
-                coords={"band": np.arange(1, data.shape[0] + 1), "x": coords["x"], "y": coords["y"]},
+                dims=("band", "y", "x"),
+                coords={"band": np.arange(1, data.shape[0] + 1), "y": coords["y"], "x": coords["x"]},
                 attrs=tags,
             )
 

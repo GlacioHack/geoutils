@@ -13,10 +13,12 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 import geoutils as gu
 from geoutils import examples
 from geoutils.exceptions import InvalidGridError
+from geoutils.interface import rasterization
 from geoutils.multiproc import MultiprocConfig
 
 
 class TestRasterVectorInterface:
+    """Test raster and point-cloud outputs created from vector geometries."""
 
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
     poly1 = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
@@ -138,47 +140,39 @@ class TestRasterVectorInterface:
         in_value_mode: str,
     ) -> None:
         """
-        Test rasterize and create_mask for base versus chunked (Dask, Multiprocessing).
+        Test that rasterize and create_mask return exactly the same eager, Dask and Multiprocessing outputs.
 
-        Uses an output-only grid definition (no input raster dependence) so that
-        all three backends are forced to target the exact same grid.
+        Dask outputs must remain lazy until computed and Multiprocessing outputs must initially remain file-backed.
         """
 
         pytest.importorskip("dask")
         import dask.array as da
 
-        # Output grid spec
+        # Use one output grid without an input raster so every backend targets the same cells
         vect = self.vector.copy()
         bounds = (0.0, 0.0, 21.0, 21.0)
         res = 1.0
         crs = "EPSG:4326"
+        chunksizes = (10, 7)
 
-        # Chunking
-        chunksizes = (10, 10)
-
-        # Burn value modes for rasterize
+        # Define scalar, iterable and automatic burn values through the public interface
         if in_value_mode == "scalar":
             in_value = 7
             out_value = 0
         elif in_value_mode == "iterable":
-            # single-geom iterable (length must match geom count)
             in_value = [7]  # type: ignore
             out_value = 0
         elif in_value_mode == "none":
-            # None -> burn values become [1 .. N] internally; here N=1 so burn=1
             in_value = None
             out_value = 0
         else:
             raise ValueError("Unexpected in_value_mode")
 
-        # Multiprocessing config (writes tiles to file)
+        # Multiprocessing writes each output tile directly to one temporary raster
         mp_outfile = tmp_path / f"mp_rasterize_{all_touched}_{in_value_mode}.tif"
-        mp_config = MultiprocConfig(chunk_size=chunksizes[0], outfile=str(mp_outfile), driver="GTiff")
+        mp_config = MultiprocConfig(chunks=chunksizes, outfile=str(mp_outfile), driver="GTiff")
 
-        # 1) RASTERIZE
-        ##############
-
-        # Base (eager)
+        # 1/ Rasterize through each backend
         rst_base = vect.rasterize(
             res=res,
             bounds=bounds,
@@ -190,7 +184,8 @@ class TestRasterVectorInterface:
         )
         assert isinstance(rst_base, gu.Raster)
         base_arr = np.asarray(rst_base.data)
-        # Dask (lazy output)
+
+        # Dask builds the same raster as a lazy array
         rst_dask = vect.rasterize(
             res=res,
             bounds=bounds,
@@ -204,9 +199,10 @@ class TestRasterVectorInterface:
         )
         assert isinstance(rst_dask, xr.DataArray)
         assert isinstance(rst_dask.data, da.Array)
+        assert not rst_dask._in_memory
         dask_arr = np.asarray(rst_dask.data.compute())
 
-        # Multiprocessing (writes to disk then opens, output Raster is unloaded)
+        # Multiprocessing returns the written raster without loading its values
         rst_mp = vect.rasterize(
             res=res,
             bounds=bounds,
@@ -216,21 +212,19 @@ class TestRasterVectorInterface:
             all_touched=all_touched,
             out_dtype=np.uint8,
             mp_config=mp_config,
-            chunksizes=chunksizes,
         )
         assert isinstance(rst_mp, gu.Raster)
         assert not rst_mp.is_loaded
         mp_arr = np.asarray(rst_mp.data)
 
-        # Exact equality
+        # All raster values must be exactly equal and computing Dask must not alter its lazy object
         assert base_arr.shape == dask_arr.shape == mp_arr.shape == (21, 21)
         assert np.array_equal(base_arr, dask_arr)
         assert np.array_equal(base_arr, mp_arr)
+        assert not rst_dask._in_memory
+        assert rst_mp.is_loaded
 
-        # 2) CREATE_MASK
-        ################
-
-        # Base (eager)
+        # 2/ Create the corresponding mask through each backend
         m_base = vect.create_mask(
             res=res,
             bounds=bounds,
@@ -240,7 +234,7 @@ class TestRasterVectorInterface:
         assert isinstance(m_base, gu.Raster)
         mask_base = np.asarray(m_base.data, dtype=bool)
 
-        # Dask (lazy)
+        # Dask again keeps the output delayed until the explicit calculation
         m_dask = vect.create_mask(
             res=res,
             bounds=bounds,
@@ -251,16 +245,16 @@ class TestRasterVectorInterface:
         )
         assert isinstance(m_dask, xr.DataArray)
         assert isinstance(m_dask.data, da.Array)
+        assert not m_dask._in_memory
         mask_dask = np.asarray(m_dask.data.compute(), dtype=bool)
 
-        # MP (writes to disk then opens, output is unloaded)
+        # Multiprocessing returns another initially unloaded file-backed raster
         m_mp = vect.create_mask(
             res=res,
             bounds=bounds,
             crs=crs,
             all_touched=all_touched,
             mp_config=mp_config,
-            chunksizes=chunksizes,
         )
         assert isinstance(m_mp, gu.Raster)
         assert not m_mp.is_loaded
@@ -269,6 +263,45 @@ class TestRasterVectorInterface:
         assert m_base.shape == m_dask.shape == m_mp.shape == (21, 21)
         assert np.array_equal(mask_base, mask_dask)
         assert np.array_equal(mask_base, mask_mp)
+        assert not m_dask._in_memory
+        assert m_mp.is_loaded
 
-        # Sanity check that the known "center pixel" is True for this geometry/grid
+        # The known center cell also checks that each result contains the expected geometry
         assert m_base[10, 10] is np.True_
+
+    def test_rasterize__dask_builds_one_spatial_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Test that Dask builds one spatial index before running its raster blocks.
+
+        Selecting the features once avoids rebuilding the complete index in every worker.
+        """
+
+        pytest.importorskip("dask")
+
+        # Wrap the index builder to count calls without changing its result
+        index_count = 0
+        build_spatial_index = rasterization._build_spatial_index
+
+        def count_spatial_index(geometries: Any) -> Any:
+            """Record each construction of the complete vector spatial index."""
+
+            nonlocal index_count
+            index_count += 1
+            return build_spatial_index(geometries)
+
+        monkeypatch.setattr(rasterization, "_build_spatial_index", count_spatial_index)
+
+        # Building the lazy raster selects features once for all four output blocks
+        rasterized = self.vector.rasterize(
+            res=1,
+            bounds=(0, 0, 21, 21),
+            crs=4326,
+            in_value=1,
+            dask=True,
+            chunksizes=(11, 11),
+        )
+        assert index_count == 1
+
+        # Computing the blocks uses their selected features without rebuilding the index
+        rasterized.data.compute(scheduler="synchronous")
+        assert index_count == 1

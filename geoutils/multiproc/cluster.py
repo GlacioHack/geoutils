@@ -21,7 +21,7 @@
 
 import multiprocessing
 from multiprocessing.pool import Pool
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 
 class ClusterGenerator:
@@ -58,23 +58,33 @@ class AbstractCluster:
         """Method to clean up resources. To be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def launch_task(
-        self, fun: Callable[..., Any], args: Optional[List[Any]] = None, kwargs: Optional[Dict[str, Any]] = None
-    ) -> Any:
+    def submit(self, fun: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """
-        Method to launch a task. This should be implemented by subclasses.
+        Submit a task to the cluster, mirroring Dask's ``Client.submit``.
+
         :param fun: The function to run.
         :param args: Positional arguments for the function.
         :param kwargs: Keyword arguments for the function.
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def get_res(self, future: Any) -> Any:
+    def compute(self, future: Any) -> Any:
         """
-        Retrieve the result from a launched task. Meant to be subclassed.
+        Compute a submitted task result, mirroring Dask collection ``compute`` methods.
+
         :param future: The future object representing the result of an asynchronous task.
         """
         return future
+
+    def gather(self, futures: list[Any]) -> list[Any]:
+        """Collect several task results, mirroring Dask Distributed's ``Client.gather``."""
+        return [self.compute(future) for future in futures]
+
+    def iter_completed(self, futures: list[Any]) -> Any:
+        """Yield task indexes and results as supported by the cluster backend."""
+
+        for index, future in enumerate(futures):
+            yield index, self.compute(future)
 
     def return_wrapper(self) -> None:
         """Wrapper for returned values, should be customized in subclasses if needed."""
@@ -86,16 +96,13 @@ class AbstractCluster:
 
 
 class BasicCluster(AbstractCluster):
-    def launch_task(
-        self, fun: Callable[..., Any], args: Optional[List[Any]] = None, kwargs: Optional[Dict[str, Any]] = None
-    ) -> Any:
+    def close(self) -> None:
+        """No resources need closing for the synchronous cluster."""
+
+    def submit(self, fun: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """
-        Launches a task synchronously in a basic cluster (no multiprocessing).
+        Submit a task synchronously in a basic cluster (no multiprocessing).
         """
-        if args is None:
-            args = []
-        if kwargs is None:
-            kwargs = {}
         return fun(*args, **kwargs)
 
 
@@ -107,12 +114,22 @@ class MpCluster(AbstractCluster):
         """
         super().__init__()
         nb_workers = 1
+        max_tasks_per_child = 10
         if conf is not None:
             nb_workers = conf.get("nb_workers", 1)
+            max_tasks_per_child = conf.get("max_tasks_per_child", 10)
         # Using the 'forkserver' context for more controlled process handling
         ctx_in_main = multiprocessing.get_context("fork")
-        # Create a pool of workers with max 10 tasks per child process
-        self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=10)
+        # Recycling stays configurable so memory tests can distinguish it from a crash
+        self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=max_tasks_per_child)
+
+    def worker_pids(self) -> tuple[int, ...]:
+        """Return the current multiprocessing worker process identifiers."""
+
+        # Pool workers are created eagerly and retained until recycling or shutdown
+        if self.pool is None:
+            return ()
+        return tuple(worker.pid for worker in self.pool._pool if worker.pid is not None)
 
     def close(self) -> None:
         """Closes the multiprocessing pool by terminating and joining workers."""
@@ -120,26 +137,35 @@ class MpCluster(AbstractCluster):
             self.pool.terminate()
             self.pool.join()
 
-    def launch_task(
-        self, fun: Callable[..., Any], args: Optional[List[Any]] = None, kwargs: Optional[Dict[str, Any]] = None
-    ) -> Any:
+    def submit(self, fun: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """
-        Launches a task asynchronously in the multiprocessing pool.
+        Submit a task asynchronously in the multiprocessing pool.
+
         :param fun: The function to execute in parallel.
         :param args: The positional arguments for the function.
         :param kwargs: The keyword arguments for the function.
 
         :return: an asynchronous result (future object).
         """
-        if args is None:
-            args = []
-        if kwargs is None:
-            kwargs = {}
         if self.pool is not None:
             return self.pool.apply_async(fun, args=args, kwds=kwargs)
 
-    def get_res(self, future: Any) -> Any:
+    def compute(self, future: Any) -> Any:
         """
         Retrieves the result of a completed asynchronous task.
         """
         return future.get(timeout=5000)
+
+    def iter_completed(self, futures: list[Any]) -> Any:
+        """Yield multiprocessing results as soon as their tasks finish."""
+
+        pending = dict(enumerate(futures))
+        while pending:
+            ready = [index for index, future in pending.items() if future.ready()]
+            if not ready:
+                # Wait briefly on one task before checking every future again
+                next(iter(pending.values())).wait(timeout=0.05)
+                continue
+            for index in ready:
+                future = pending.pop(index)
+                yield index, self.compute(future)

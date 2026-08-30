@@ -22,8 +22,8 @@ Module for Vector class.
 
 from __future__ import annotations
 
+import os
 import pathlib
-import warnings
 from os import PathLike
 from typing import (
     TYPE_CHECKING,
@@ -35,47 +35,30 @@ from typing import (
     Sequence,
     TypeVar,
     Union,
-    overload,
 )
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 import rasterio as rio
-from geopandas.testing import assert_geodataframe_equal
-from packaging.version import Version
 from pandas._typing import WriteBuffer
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import _check_match_bbox, get_geo_attr, has_geo_attr
-from geoutils._misc import copy_doc, deprecate, import_optional
-from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
-from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.rasterization import _create_mask, _rasterize
-from geoutils.multiproc import MultiprocConfig
-from geoutils.projtools import (
-    _get_bounds_projected,
-    _get_footprint_projected,
-    _get_utm_ups_crs,
-)
-from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
-from geoutils.vector.transformation import _reproject
+from geoutils._misc import copy_doc
+from geoutils.vector.base import VectorBase
 
 if TYPE_CHECKING:
-    import matplotlib
-
-    from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
-    from geoutils.raster import Raster
-    from geoutils.raster.base import RasterLike, RasterType
+    from geoutils.raster.base import RasterType
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
 VectorLike = Union["Vector", gpd.GeoDataFrame]
 
 
-class Vector:
+class Vector(VectorBase):
     """
     The georeferenced vector.
 
@@ -91,7 +74,7 @@ class Vector:
     See the API for more details.
     """
 
-    @profiler.profile("geoutils.vector.vector.__init__", memprof=True)
+    @profiler.profile("geoutils.vector.vector.__init__", collect=False)
     def __init__(
         self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
     ):
@@ -103,6 +86,11 @@ class Vector:
 
         self._name: str | None = None
         self._ds: gpd.GeoDataFrame | None = None
+        self._crs: CRS | None = None
+        self._bounds: rio.coords.BoundingBox | None = None
+        self._columns: pd.Index | None = None
+        self._feature_count: int | None = None
+        self._geometry_type: str | None = None
 
         # If Vector is passed, simply point back to Vector
         if isinstance(filename_or_dataset, Vector):
@@ -111,7 +99,9 @@ class Vector:
             return
         # If filename is passed
         elif isinstance(filename_or_dataset, (str, pathlib.Path)):
-            ds = gpd.read_file(filename_or_dataset)
+            self._name = os.fspath(filename_or_dataset)
+            self._set_metadata_from_file(self._name)
+            return
         # If GeoPandas or Shapely object is passed
         elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
             if isinstance(filename_or_dataset, gpd.GeoDataFrame):
@@ -126,21 +116,20 @@ class Vector:
         # Set geodataframe
         self.ds = ds
 
-        # Write name attribute
-        if isinstance(filename_or_dataset, str):
-            self._name = filename_or_dataset
-        if isinstance(filename_or_dataset, pathlib.Path):
-            self._name = filename_or_dataset.name
-
     @property
     def crs(self) -> CRS:
         """Coordinate reference system of the vector."""
+
+        if not self.is_loaded:
+            return self._crs  # type: ignore[return-value]
         return self.ds.crs
 
     @property
     def ds(self) -> gpd.GeoDataFrame:
         """Geodataframe of the vector."""
-        return self._ds
+        if not self.is_loaded:
+            self.load()
+        return self._ds  # type: ignore[return-value]
 
     @ds.setter
     def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
@@ -152,38 +141,57 @@ class Vector:
             self._ds = gpd.GeoDataFrame(geometry=new_ds)
         else:
             raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
+        self._set_metadata_from_ds(self._ds)
 
-    def vector_equal(self, other: VectorType, **kwargs: Any) -> bool:
-        """
-        Check if two vectors are equal.
+    def _set_metadata_from_file(self, filename: str) -> None:
+        """Read lightweight vector metadata without loading the full GeoDataFrame."""
 
-        Keyword arguments are passed to geopandas.assert_geodataframe_equal.
-        """
+        info = pyogrio.read_info(filename)
+        crs = info.get("crs")
+        total_bounds = info.get("total_bounds")
 
-        try:
-            assert_geodataframe_equal(self.ds, other.ds, **kwargs)
-            vector_eq = True
-        except AssertionError:
-            vector_eq = False
+        self._crs = CRS.from_user_input(crs) if crs else None
+        if total_bounds is not None:
+            self._bounds = rio.coords.BoundingBox(*total_bounds)
+        self._columns = pd.Index(list(info.get("fields", [])) + ["geometry"])
+        self._feature_count = info.get("features")
+        self._geometry_type = info.get("geometry_type")
 
-        return vector_eq
+    def _set_metadata_from_ds(self, ds: gpd.GeoDataFrame) -> None:
+        """Update cached vector metadata from an in-memory GeoDataFrame."""
+
+        self._crs = ds.crs
+        self._bounds = rio.coords.BoundingBox(*ds.total_bounds)
+        self._columns = ds.columns
+        self._feature_count = len(ds)
+        self._geometry_type = ds.geom_type.iloc[0] if len(ds) > 0 else None
 
     @property
-    def name(self) -> str | None:
-        """Name on disk, if it exists."""
-        return self._name
+    def is_loaded(self) -> bool:
+        """Whether the vector data are loaded in memory."""
 
-    @property
-    def geometry(self) -> gpd.GeoSeries:
-        return self.ds.geometry
+        return self._ds is not None
+
+    def load(self, **kwargs: Any) -> None:
+        """
+        Load the vector GeoDataFrame from disk.
+
+        :param kwargs: Optional keyword arguments passed to :func:`geopandas.read_file`.
+        """
+
+        if self.is_loaded:
+            raise ValueError("Data are already loaded.")
+
+        if self.name is None:
+            raise AttributeError("Cannot load as name is not set anymore. Did you manually update the name attribute?")
+
+        self.ds = gpd.read_file(self.name, **kwargs)
 
     @property
     def columns(self) -> pd.Index:
+        if not self.is_loaded and self._columns is not None:
+            return self._columns
         return self.ds.columns
-
-    @property
-    def index(self) -> pd.Index:
-        return self.ds.index
 
     def copy(self: VectorType) -> VectorType:
         """Return a copy of the vector."""
@@ -192,257 +200,9 @@ class Vector:
         new_vector.__init__(self.ds.copy())  # type: ignore
         return new_vector  # type: ignore
 
-    def __repr__(self) -> str:
-        """Convert vector to string representation."""
-
-        # Get the representation of ds
-        str_ds = "\n       ".join(self.__str__().split("\n"))
-
-        s = str(
-            self.__class__.__name__
-            + "(\n"
-            + "  ds="
-            + str_ds
-            + "\n  crs="
-            + self.crs.__str__()
-            + "\n  bounds="
-            + self.bounds.__str__()
-            + ")"
-        )
-
-        return s
-
-    def _repr_html_(self) -> str:
-        """Convert vector to HTML string representation for documentation."""
-
-        str_ds = "\n       ".join(self.ds.__str__().split("\n"))
-
-        # Over-ride Raster's method to remove nodata value (always None)
-        # Use <pre> to keep white spaces, <span> to keep line breaks
-        s = str(
-            '<pre><span style="white-space: pre-wrap"><b><em>'
-            + self.__class__.__name__
-            + "</em></b>(\n"
-            + "  <b>ds=</b>"
-            + str_ds
-            + "\n  <b>crs=</b>"
-            + self.crs.__str__()
-            + "\n  <b>bounds=</b>"
-            + self.bounds.__repr__()
-            + ")</span></pre>"
-        )
-
-        return s
-
-    def __str__(self) -> str:
-        """Provide simplified vector string representation for print()."""
-
-        return str(self.ds.__str__())
-
-    @overload
-    def info(self, verbose: Literal[True] = ...) -> None: ...
-
-    @overload
-    def info(self, verbose: Literal[False]) -> str: ...
-
-    def info(self, verbose: bool = True) -> str | None:
-        """
-        Summarize information about the vector.
-
-        :param verbose: If set to True (default) will directly print to screen and return None
-
-        :returns: Information about vector attributes.
-        """
-        as_str = [  # 'Driver:             {} \n'.format(self.driver),
-            f"Filename:           {self.name} \n",
-            f"Coordinate system:  EPSG:{self.ds.crs.to_epsg()}\n",
-            f"Extent:             {self.ds.total_bounds.tolist()} \n",
-            f"Number of features: {len(self.ds)} \n",
-            f"Attributes:         {self.ds.columns.tolist()}",
-        ]
-
-        if verbose:
-            print("".join(as_str))
-            return None
-        else:
-            return "".join(as_str)
-
-    def plot(
-        self,
-        ref_crs: RasterLike | VectorLike | CRS | int | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        return_axes: bool = False,
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        r"""
-        Plot the vector.
-
-        This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs which
-        you give this method will be passed to it.
-
-        :param ref_crs: Coordinate reference system to match when plotting.
-        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
-        :param vmin: Colorbar minimum value. Default is data min.
-        :param vmax: Colorbar maximum value. Default is data max.
-        :param alpha: Transparency of raster and colorbar.
-        :param cbar_title: Colorbar label. Default is None.
-        :param add_cbar: Set to True to display a colorbar. Default is True if a "column" argument is passed.
-        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
-            will create a new axis.
-        :param return_axes: Whether to return axes.
-        :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
-            with a default DPI, no transparency and no metadata. Use `plt.savefig()` to specify other save
-            parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
-            to close the figure.
-
-        :returns: None, or (ax, caxes) if return_axes is True
-        """
-
-        matplotlib = import_optional("matplotlib")
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-        # Ensure that the vector is in the same crs as a reference
-        if has_geo_attr(ref_crs, "crs"):
-            crs = get_geo_attr(ref_crs, "crs")
-            vect_reproj = self.reproject(crs=crs)
-        elif isinstance(ref_crs, (CRS, int)):
-            vect_reproj = self.reproject(crs=ref_crs)
-        else:
-            vect_reproj = self
-
-        # Create axes, or get current ones by default (like in matplotlib)
-        if ax is None:
-            ax0 = plt.gca()
-        elif isinstance(ax, str) and ax.lower() == "new":
-            _, ax0 = plt.subplots()
-        elif isinstance(ax, matplotlib.axes.Axes):
-            ax0 = ax
-        else:
-            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
-
-        # Set add_cbar depending on column argument
-        if "column" in kwargs.keys() and add_cbar:
-            add_cbar = True
-        else:
-            add_cbar = False
-
-        # Update with this function's arguments
-        if add_cbar:
-            legend = True
-        else:
-            legend = False
-
-        if "legend" in list(kwargs.keys()):
-            legend = kwargs.pop("legend")
-
-        # Get colormap arguments that might have been passed in the keyword args
-        if "legend_kwds" in list(kwargs.keys()) and legend:
-            legend_kwds = kwargs.pop("legend_kwds")
-            if cbar_title is not None:
-                legend_kwds.update({"label": cbar_title})  # Pad updates depending on figsize during plot,
-        else:
-            if cbar_title is not None:
-                legend_kwds = {"label": cbar_title}
-            else:
-                legend_kwds = None
-
-        # Add colorbar
-        if add_cbar or cbar_title:
-            divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad="2%")
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = matplotlib.colorbar.ColorbarBase(
-                cax, cmap=cmap, norm=norm
-            )  # , orientation="horizontal", ticklocation="top")
-            cbar.solids.set_alpha(alpha)
-        else:
-            cax = None
-            cbar = None
-
-        # Plot
-        vect_reproj.ds.plot(
-            ax=ax0,
-            cax=cax,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            alpha=alpha,
-            legend=legend,
-            legend_kwds=legend_kwds,
-            **kwargs,
-        )
-        plt.sca(ax0)
-
-        # if savefig_fname filled, save the plot
-        if savefig_fname:
-            plt.savefig(savefig_fname)
-
-        # If returning axes
-        if return_axes:
-            return ax0, cax
-        else:
-            return None
-
-    @deprecate(
-        removal_version=Version("0.3.0"),
-        details="The function .save() will be soon deprecated, use .to_file() instead.",
-    )  # type: ignore
-    def save(
-        self,
-        filename: str | pathlib.Path,
-        driver: str | None = None,
-        schema: dict[str, Any] | None = None,
-        index: bool | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Write the vector to file.
-
-        This function is a simple wrapper of :func:`geopandas.GeoDataFrame.to_file`. See there for details.
-
-        :param filename: Filename to write the file to.
-        :param driver: Driver to write file with.
-        :param schema: Dictionary passed to Fiona to better control how the file is written.
-        :param index: Whether to write the index or not.
-
-        :returns: None.
-        """
-
-        self.ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
-
     ############################################################################
     # Overridden and wrapped methods from GeoPandas API to logically cast outputs
     ############################################################################
-
-    def _override_gdf_output(
-        self, other: gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | pd.Series | Any
-    ) -> VectorType | pd.Series:
-        """Parse outputs of GeoPandas functions to facilitate object manipulation."""
-
-        # Raise error if output is not treated separately, should appear in tests
-        if not isinstance(other, (gpd.GeoDataFrame, pd.Series, BaseGeometry)):
-            raise ValueError("Not implemented. This error should only be raised in tests.")
-
-        # If a GeoDataFrame is the output, return it
-        if isinstance(other, gpd.GeoDataFrame):
-            return Vector(other)
-        # If a GeoSeries is the output, re-encapsulate in a GeoDataFrame and return it
-        elif isinstance(other, gpd.GeoSeries):
-            return Vector(gpd.GeoDataFrame(geometry=other))
-        # If a Shapely Geometry is the output, re-encapsulate in a GeoDataFrame and return it
-        elif isinstance(other, BaseGeometry):
-            return Vector(gpd.GeoDataFrame({"geometry": [other]}, crs=self.crs))
-        # If a Pandas Series is the output, append it to that of the GeoDataFrame
-        else:
-            return other
 
     # -----------------------------------------------
     # GeoPandasBase - Attributes that return a Series
@@ -555,6 +315,8 @@ class Vector:
     @property
     def total_bounds(self) -> rio.coords.BoundingBox:
         """Total bounds of the vector."""
+        if not self.is_loaded and self._bounds is not None:
+            return np.array(self._bounds)
         return self.ds.total_bounds
 
     # Exception ! Vector.bounds corresponds to the total_bounds
@@ -567,12 +329,9 @@ class Vector:
         but not ``GeoDataFrame.bounds`` (per-feature bounds) which is instead defined as
         ``Vector.geom_bounds``.
         """
+        if not self.is_loaded and self._bounds is not None:
+            return self._bounds
         return rio.coords.BoundingBox(*self.ds.total_bounds)
-
-    @property
-    def footprint(self) -> Vector:
-        """Footprint of the raster."""
-        return self.get_footprint_projected(self.crs)
 
     # --------------------------------------------
     # GeoPandasBase - Methods that return a Series
@@ -1271,578 +1030,3 @@ class Vector:
     # --------------------------------
     # End of GeoPandas functionalities
     # --------------------------------
-
-    @property
-    def active_geometry_name(self) -> str:
-        return self.ds.active_geometry_name
-
-    @overload
-    def crop(
-        self: VectorType,
-        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
-        *,
-        inplace: Literal[False] = False,
-        crop_geom: Any = None,
-    ) -> VectorType: ...
-
-    @overload
-    def crop(
-        self: VectorType,
-        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
-        *,
-        inplace: Literal[True],
-        crop_geom: Any = None,
-    ) -> None: ...
-
-    @overload
-    def crop(
-        self: VectorType,
-        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
-        *,
-        inplace: bool = False,
-        crop_geom: Any = None,
-    ) -> VectorType | None: ...
-
-    @profiler.profile("geoutils.vector.vector.crop", memprof=True)
-    def crop(
-        self: VectorType,
-        bbox: RasterLike | VectorLike | tuple[float, float, float, float] = None,
-        clip: bool = False,
-        *,
-        inplace: bool = False,
-        crop_geom: Any = None,
-    ) -> VectorType | None:
-        """
-        Crop the vector to given extent.
-
-        **Match-reference:** a reference raster or vector can be passed to match bounds during cropping.
-
-        Optionally, clip geometries to that extent (by default keeps all intersecting).
-
-        Reprojection is done on the fly if georeferenced objects have different projections.
-
-        :param bbox: Bounding box to crop vector to, as either a Raster object, a Vector object, or a list of
-            coordinates. If ``crop_geom`` is a raster or a vector, will crop to the bounds. If ``crop_geom`` is a
-            list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
-        :param clip: Whether to clip the geometry to the given extent (by default keeps all intersecting).
-        :param inplace: Whether to update the vector in-place.
-        :param crop_geom: (DEPRECATED) Old argument for bounding box, use 'bbox'.
-
-        :returns: Cropped vector (or None if inplace).
-        """
-
-        # Deprecate crop_geom
-        if crop_geom is not None:
-            warnings.warn(DeprecationWarning("Argument 'crop_geom' is deprecated, use 'bbox' instead."))
-            bbox = crop_geom
-        if bbox is None:
-            raise ValueError("Argument 'bbox' must be passed.")
-
-        xmin, ymin, xmax, ymax = _check_match_bbox(self, bbox)
-
-        # Need to separate the two options, inplace update
-        if inplace:
-            self._ds = self.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore
-            if clip:
-                self._ds = self.ds.clip(mask=(xmin, ymin, xmax, ymax))
-            return None
-        # Or create a copy otherwise
-        else:
-            new_vector = self.copy()
-            new_vector._ds = new_vector.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore
-            if clip:
-                new_vector._ds = new_vector.ds.clip(mask=(xmin, ymin, xmax, ymax))
-            return new_vector
-
-    @overload
-    def reproject(
-        self: VectorType,
-        ref: RasterType | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
-        crs: CRS | str | int | None = None,
-        *,
-        inplace: Literal[False] = False,
-    ) -> VectorType: ...
-
-    @overload
-    def reproject(
-        self: VectorType,
-        ref: RasterType | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
-        crs: CRS | str | int | None = None,
-        *,
-        inplace: Literal[True],
-    ) -> None: ...
-
-    @overload
-    def reproject(
-        self: VectorType,
-        ref: RasterType | rio.io.DatasetReader | VectorType | gpd.GeoDataFrame | None = None,
-        crs: CRS | str | int | None = None,
-        *,
-        inplace: bool = False,
-    ) -> VectorType | None: ...
-
-    @profiler.profile("geoutils.vector.vector.reproject", memprof=True)
-    def reproject(
-        self: VectorType,
-        ref: RasterLike | VectorLike | None = None,
-        crs: CRS | str | int | None = None,
-        inplace: bool = False,
-    ) -> VectorType | None:
-        """
-        Reproject vector to a specified coordinate reference system.
-
-        **Match-reference:** a reference raster or vector can be passed to match CRS during reprojection.
-
-        Alternatively, a CRS can be passed in many formats (string, EPSG integer, or CRS).
-
-        To reproject a Vector with different source bounds, first run Vector.crop().
-
-        :param ref: Reference raster or vector whose CRS to use as a reference for reprojection.
-            Can be provided as a raster, vector, Rasterio dataset, or GeoPandas dataframe.
-        :param crs: Specify the coordinate reference system or EPSG to reproject to. If dst_ref not set,
-            defaults to self.crs.
-        :param inplace: Whether to update the vector in-place.
-
-        :returns: Reprojected vector (or None if inplace).
-        """
-
-        new_ds = _reproject(self, ref=ref, crs=crs)
-
-        if inplace:
-            self.ds = new_ds
-            return None
-        else:
-            copy = self.copy()
-            copy.ds = new_ds
-            return copy
-
-    @overload
-    def translate(
-        self: VectorType,
-        xoff: float = 0.0,
-        yoff: float = 0.0,
-        zoff: float = 0.0,
-        *,
-        inplace: Literal[False] = False,
-    ) -> VectorType: ...
-
-    @overload
-    def translate(
-        self: VectorType,
-        xoff: float = 0.0,
-        yoff: float = 0.0,
-        zoff: float = 0.0,
-        *,
-        inplace: Literal[True],
-    ) -> None: ...
-
-    @overload
-    def translate(
-        self: VectorType,
-        xoff: float = 0.0,
-        yoff: float = 0.0,
-        zoff: float = 0.0,
-        *,
-        inplace: bool = False,
-    ) -> VectorType | None: ...
-
-    def translate(
-        self: VectorType,
-        xoff: float = 0.0,
-        yoff: float = 0.0,
-        zoff: float = 0.0,
-        inplace: bool = False,
-    ) -> VectorType | None:
-        """
-        Shift a vector by a (x,y) offset, and optionally a z offset.
-
-        The shifting only updates the coordinates (data is untouched).
-
-        :param xoff: Translation x offset.
-        :param yoff: Translation y offset.
-        :param zoff: Translation z offset.
-        :param inplace: Whether to modify the raster in-place.
-
-        :returns: Shifted vector (or None if inplace).
-        """
-
-        translated_geoseries = self.geometry.translate(xoff=xoff, yoff=yoff, zoff=zoff)
-
-        if inplace:
-            # Overwrite transform by shifted transform
-            self.ds.geometry = translated_geoseries
-            return None
-        else:
-            vector_copy = self.copy()
-            vector_copy.ds.geometry = translated_geoseries
-            return vector_copy
-
-    @overload
-    def create_mask(
-        self,
-        ref: RasterLike | PointCloudLike | None = None,
-        all_touched: bool = False,
-        crs: CRS | None = None,
-        res: float | tuple[float, float] | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
-        shape: tuple[int, int] | None = None,
-        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
-        points: tuple[NDArrayNum, NDArrayNum] | None = None,
-        *,
-        as_array: Literal[False] = False,
-        chunksizes: tuple[int, int] | None = None,
-        mp_config: MultiprocConfig | None = None,
-        dask: bool = False,
-    ) -> Raster | PointCloud: ...
-
-    @overload
-    def create_mask(
-        self,
-        ref: RasterLike | PointCloudLike | None = None,
-        all_touched: bool = False,
-        crs: CRS | None = None,
-        res: float | tuple[float, float] | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
-        shape: tuple[int, int] | None = None,
-        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
-        points: tuple[NDArrayNum, NDArrayNum] | None = None,
-        *,
-        as_array: Literal[True],
-        chunksizes: tuple[int, int] | None = None,
-        mp_config: MultiprocConfig | None = None,
-        dask: bool = False,
-    ) -> NDArrayBool: ...
-
-    def create_mask(
-        self,
-        ref: RasterLike | PointCloudLike | None = None,
-        all_touched: bool = False,
-        crs: CRS | None = None,
-        res: float | tuple[float, float] | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
-        shape: tuple[int, int] | None = None,
-        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
-        points: tuple[NDArrayNum, NDArrayNum] | None = None,
-        *,
-        as_array: bool = False,
-        chunksizes: tuple[int, int] | None = None,
-        mp_config: MultiprocConfig | None = None,
-        dask: bool = False,
-    ) -> Raster | PointCloud | NDArrayBool:
-        """
-        Create a raster or point cloud mask from the vector features (True if pixel/point contained by any vector
-        feature, False if not).
-
-        For a raster reference, creates a raster mask with the resolution, bounds and CRS of the reference raster.
-        For a point cloud reference, creates a point mask with the coordinates and CRS of the reference point cloud.
-
-        Alternatively, for a raster mask, one can specify a grid to rasterize on based on bounds, resolution and CRS.
-        For a point mask, one can specify the points coordinates and CRS.
-
-        :param ref: Reference raster or pointcloud to use during masking.
-        :param res: (Only for raster masking) Spatial resolution of mask. Required if no reference is passed.
-        :param points: (Only for point cloud masking) Point X/Y coordinates of mask. Required if no reference is passed.
-        :param bounds: (Only for raster masking) Bounds of mask (left, bottom, right, top). Optional, defaults to this
-            vector's bounds. Only used if no reference is passed.
-        :param crs: Coordinate reference system for output mask. Optional, defaults to this vector's crs. Only used if
-            no reference is passed.
-        :param as_array: Whether to return mask as a boolean array.
-
-        :returns: A raster or point cloud mask.
-        """
-
-        return _create_mask(
-            source_vector=self,
-            ref=ref,
-            all_touched=all_touched,
-            crs=crs,
-            res=res,
-            shape=shape,
-            grid_coords=grid_coords,
-            points=points,
-            bounds=bounds,
-            as_array=as_array,
-            chunksizes=chunksizes,
-            mp_config=mp_config,
-            dask=dask,
-        )
-
-    @profiler.profile("geoutils.vector.vector.rasterize", memprof=True)
-    def rasterize(
-        self,
-        ref: RasterType | None = None,
-        in_value: int | float | Iterable[int | float] | None = None,
-        out_value: int | float = 0,
-        all_touched: bool = False,
-        out_dtype: DTypeLike | None = None,
-        res: tuple[Number, Number] | Number | None = None,
-        shape: tuple[int, int] | None = None,
-        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
-        bounds: tuple[float, float, float, float] | None = None,
-        crs: CRS | int | None = None,
-        *,
-        chunksizes: tuple[int, int] | None = None,
-        mp_config: MultiprocConfig | None = None,
-        dask: bool = False,
-        **kwargs: Any,
-    ) -> RasterType:
-        """
-        Rasterize vector to a raster or mask, with input geometries burned in.
-
-        **Match-reference:** a raster can be passed to match its resolution, bounds and CRS when rasterizing the vector.
-
-        Alternatively, user can specify a grid to rasterize on using xres, yres, bounds and crs.
-        Only xres is mandatory, by default yres=xres and bounds/crs are set to self's.
-
-        Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
-        Default is an index from 1 to len(self.ds).
-
-        :param ref: Reference raster to match during rasterization.
-        :param crs: Coordinate reference system as string or EPSG code
-            (Default to raster.crs if not None then self.crs).
-        :param res: Output raster spatial resolution.
-        :param bounds: Output raster bounds (left, bottom, right, top). Only if raster is None.
-            Must be in same system as crs, if set. (Default to self bounds).
-        :param in_value: Value(s) to be burned inside the polygons (Default is self.ds.index + 1).
-        :param out_value: Value to be burned outside the polygons (Default is 0).
-
-        :returns: Raster or mask containing the burned geometries.
-        """
-
-        # Deprecate old xres and yres
-        if "xres" in kwargs.keys() or "yres" in kwargs.keys():
-            warnings.warn(
-                message="Argument 'xres' and 'yres' are deprecrated in favour of 'res'.", category=DeprecationWarning
-            )
-        xres = kwargs.get("xres", None)
-        yres = kwargs.get("yres", None)
-        if xres is not None:
-            if yres is not None:
-                res = (xres, yres)
-            else:
-                res = xres
-        if "raster" in kwargs.keys():
-            warnings.warn(message="Argument 'raster' is deprecrated in favour of 'ref'.", category=DeprecationWarning)
-            ref = kwargs.get("raster", None)
-
-        return _rasterize(
-            source_vector=self,
-            ref=ref,
-            in_value=in_value,
-            out_value=out_value,
-            all_touched=all_touched,
-            out_dtype=out_dtype,
-            res=res,
-            shape=shape,
-            grid_coords=grid_coords,
-            bounds=bounds,
-            crs=crs,
-            chunksizes=chunksizes,
-            mp_config=mp_config,
-            dask=dask,
-        )
-
-    @classmethod
-    def from_bounds_projected(
-        cls, raster_or_vector: RasterType | VectorType, out_crs: CRS | None = None, densify_points: int = 5000
-    ) -> VectorType:
-        """Create a vector polygon from projected bounds of a raster or vector.
-
-        :param raster_or_vector: A raster or vector
-        :param out_crs: In which CRS to compute the bounds
-        :param densify_points: Maximum points to be added between image corners to account for nonlinear edges.
-            Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
-        """
-
-        if out_crs is None:
-            out_crs = raster_or_vector.crs
-
-        df = _get_footprint_projected(
-            raster_or_vector.bounds, in_crs=raster_or_vector.crs, out_crs=out_crs, densify_points=densify_points
-        )
-
-        return cls(df)  # type: ignore
-
-    def query(self: VectorType, expression: str, inplace: bool = False) -> VectorType | None:
-        """
-        Query the vector with a valid Pandas expression.
-
-        :param expression: A python-like expression to evaluate. Example: "col1 > col2".
-        :param inplace: Whether the query should modify the data in place or return a modified copy.
-
-        :returns: Vector resulting from the provided query expression or itself if inplace=True.
-        """
-        # Modify inplace if wanted and return the self instance.
-        if inplace:
-            self._ds = self.ds.query(expression, inplace=True)
-            return None
-
-        # Otherwise, create a new Vector from the queried dataset.
-        new_vector = Vector(self.ds.query(expression))
-        return new_vector
-
-    def proximity(
-        self,
-        raster: RasterType | None = None,
-        size: tuple[int, int] = (1000, 1000),
-        geometry_type: str = "boundary",
-        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
-        distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
-    ) -> RasterType:
-        """
-        Compute proximity distances to this vector's geometry.
-
-        **Match-reference**: a raster can be passed to match its resolution, bounds and CRS for computing
-        proximity distances.
-
-        Alternatively, a grid size can be passed to create a georeferenced grid with the bounds and CRS of this vector.
-
-        By default, the boundary of the Vector's geometry will be used. The full geometry can be used by
-        passing "geometry",
-        or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
-        See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
-
-        :param raster: Raster to burn the proximity grid on.
-        :param size: If no Raster is provided, grid size to use with this Vector's extent and CRS
-            (defaults to 1000 x 1000).
-        :param geometry_type: Type of geometry to use for the proximity, defaults to 'boundary'.
-        :param in_or_out: Compute proximity only 'in' or 'out'-side the polygon, or 'both'.
-        :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
-
-        :return: Proximity raster.
-        """
-
-        from geoutils.raster.raster import (  # Runtime import to avoid circularity issues
-            Raster,
-            _default_nodata,
-        )
-
-        # 0/ If no Raster is passed, create one on the Vector bounds of size 1000 x 1000
-        if raster is None:
-            # By default, use self's bounds
-            if self.bounds is None:
-                raise ValueError("To automatically rasterize on the vector, bounds need to be defined.")
-
-            # Calculate raster shape
-            left, bottom, right, top = self.bounds
-
-            # Calculate raster transform
-            transform = rio.transform.from_bounds(left, bottom, right, top, size[0], size[1])
-
-            raster = Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
-
-        proximity = _proximity_from_vector_or_raster(
-            raster=raster, vector=self, geometry_type=geometry_type, in_or_out=in_or_out, distance_unit=distance_unit
-        )
-
-        out_nodata = _default_nodata(proximity.dtype)
-        return Raster.from_array(
-            data=proximity,
-            transform=raster.transform,
-            crs=raster.crs,
-            nodata=out_nodata,
-            area_or_point=raster.area_or_point,
-            tags=raster.tags,
-        )
-
-    def buffer_metric(self: VectorType, buffer_size: float) -> VectorType:
-        """
-        Buffer the vector features in a local metric system (UTM or UPS).
-
-        The outlines are projected to the local UTM or UPS, then reverted to the original projection after buffering.
-
-        :param buffer_size: Buffering distance in meters.
-
-        :return: Buffered shapefile.
-        """
-
-        new_ds = _buffer_metric(gdf=self.ds, buffer_size=buffer_size)
-
-        copy = self.copy()
-        copy.ds = new_ds
-        return copy
-
-    def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
-        """
-        Get vector bounds projected in a specified CRS.
-
-        :param out_crs: Output CRS.
-        :param densify_points: Maximum points to be added between image corners to account for nonlinear edges.
-            Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
-        """
-
-        # Calculate new bounds
-        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
-
-        return new_bounds
-
-    def get_footprint_projected(self: VectorType, out_crs: CRS, densify_points: int = 5000) -> VectorType:
-        """
-        Get vector footprint projected in a specified CRS.
-
-        The polygon points of the vector are densified during reprojection to warp
-        the rectangular square footprint of the original projection into the new one.
-
-        :param out_crs: Output CRS.
-        :param densify_points: Maximum points to be added between image corners to account for non linear edges.
-         Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
-        """
-
-        return Vector(
-            _get_footprint_projected(
-                bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
-            )
-        )
-
-    def get_metric_crs(
-        self,
-        local_crs_type: Literal["universal"] | Literal["custom"] = "universal",
-        method: Literal["centroid"] | Literal["geopandas"] = "centroid",
-    ) -> CRS:
-        """
-        Get local metric coordinate reference system for the vector (UTM, UPS, or custom Mercator or Polar).
-
-        :param local_crs_type: Whether to get a "universal" local CRS (UTM or UPS) or a "custom" local CRS
-            (Mercator or Polar centered on centroid).
-        :param method: Method to choose the zone of the CRS, either based on the centroid of the footprint
-            or the extent as implemented in :func:`geopandas.GeoDataFrame.estimate_utm_crs`.
-            Forced to centroid if `local_crs="custom"`.
-        """
-
-        # For universal CRS (UTM or UPS)
-        if local_crs_type == "universal":
-            return _get_utm_ups_crs(self.ds, method=method)
-        # For a custom CRS
-        else:
-            raise NotImplementedError("This is not implemented yet.")
-
-    def buffer_without_overlap(
-        self: VectorType, buffer_size: int | float, metric: bool = True, plot: bool = False
-    ) -> VectorType:
-        """
-        Buffer the vector geometries without overlapping each other.
-
-        The algorithm is based upon this tutorial: https://statnmap.com/2020-07-31-buffer-area-for-nearest-neighbour/.
-        The buffered polygons are created using Voronoi polygons in order to delineate the "area of influence"
-        of each geometry.
-        The buffer is slightly inaccurate where two geometries touch, due to the nature of the Voronoi polygons,
-        hence one geometry "steps" slightly on the neighbor buffer in some cases.
-        The algorithm may also yield unexpected results on very simple geometries.
-
-        Note: A similar functionality is provided by momepy (http://docs.momepy.org) and is probably more robust.
-        It could be implemented in GeoPandas in the future: https://github.com/geopandas/geopandas/issues/2015.
-
-        :param buffer_size: Buffer size in self's coordinate system units.
-        :param metric: Whether to perform the buffering in a local metric system (defaults to ``True``).
-        :param plot: Whether to show intermediate plots.
-
-        :returns: A Vector containing the buffered geometries.
-        """
-
-        new_ds = _buffer_without_overlap(self.ds, buffer_size=buffer_size, metric=metric, plot=plot)
-        copy = self.copy()
-        copy.ds = new_ds
-        return copy

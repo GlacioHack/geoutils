@@ -29,7 +29,8 @@ import numpy as np
 from scipy.stats import iqr
 from scipy.stats.mstats import mquantiles
 
-from geoutils import profiler
+from geoutils._dispatch import is_dask_array
+from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
 
@@ -93,7 +94,114 @@ _STATS_LIST_MIN = [
 ]
 
 
-@profiler.profile("geoutils.stats.stats._statistics", memprof=True)
+def _get_stat_common_alias(stat_name: str, stats_dict: dict[str, Any]) -> str | None:
+    """Return the internal statistic name for a user-facing alias."""
+
+    if stat_name in stats_dict:
+        return stat_name
+
+    # Spaces and underscores are optional in names such as "standard deviation"
+    for separator in (None, "_"):
+        normalized_name = "".join(stat_name.lower().split(separator))
+        if normalized_name in _STATS_ALIAS_ALL:
+            return normalized_name
+        if normalized_name in _SYNONYMES:
+            return _SYNONYMES[normalized_name]
+    return None
+
+
+def _get_default_stat_names(stats_name: Literal["all"] | None, counts: tuple[int, int] | None) -> list[str]:
+    """Return internal statistic names for the default or complete selection."""
+
+    if stats_name is None:
+        return _STATS_LIST_MIN
+
+    stat_names = list(_STATS_ALIAS_GEN)
+    if counts is not None:
+        stat_names += list(_STATS_ALIAS_MASK)
+    return stat_names
+
+
+def _statistics_dask(
+    data: Any,
+    stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | Literal["all"] | None = None,
+    counts: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    """Calculate common statistics on a Dask array while returning lazy scalar results."""
+
+    import_optional("dask")
+    import dask.array as da
+
+    finite = da.isfinite(data)
+    final_count_nonzero = finite.sum()
+    valid_count = final_count_nonzero if counts is None else counts[0]
+
+    # Dask requires explicit axes for full-array quantiles. This remains lazy, but exact global quantiles can still be
+    # memory-intensive at execution time because Dask has to combine data across chunks
+    axes = tuple(range(data.ndim))
+
+    def _quantile(q: float) -> Any:
+        return da.nanquantile(data, q, axis=axes)
+
+    median = _quantile(0.50)
+    q05 = _quantile(0.05)
+    q25 = _quantile(0.25)
+    q75 = _quantile(0.75)
+    q90 = _quantile(0.90)
+    q95 = _quantile(0.95)
+
+    stats_dict: dict[str, Any] = {
+        "mean": da.nanmean(data),
+        "median": median,
+        "max": da.nanmax(data),
+        "min": da.nanmin(data),
+        "sum": da.nansum(data),
+        "sumofsquares": da.nansum(da.square(data)),
+        "90thpercentile": q90,
+        "le90": q95 - q05,
+        "iqr": q75 - q25,
+        "nmad": 1.4826 * da.nanquantile(da.fabs(data - median), 0.50, axis=axes),
+        "rmse": da.sqrt(da.nanmean(da.square(data))),
+        "std": da.nanstd(data),
+        "validcount": valid_count,
+        "totalcount": data.size,
+        "percentagevalidpoints": (valid_count / data.size) * 100 if data.size else np.nan,
+    }
+
+    if counts is not None:
+        stats_dict.update(
+            {
+                "validinliercount": final_count_nonzero,
+                "totalinliercount": counts[1],
+                "percentageinlierpoints": (final_count_nonzero / counts[0]) * 100,
+                "percentagevalidinlierpoints": (final_count_nonzero / counts[1]) * 100 if counts[1] != 0 else 0,
+            }
+        )
+
+    if stats_name is None or stats_name == "all":
+        stat_names = _get_default_stat_names(stats_name, counts)
+        return {_STATS_ALIAS_ALL[stat_name]: stats_dict[stat_name] for stat_name in stat_names}
+
+    res_dict: dict[str, Any] = {}
+    for stat_name in stats_name:
+        if isinstance(stat_name, str):
+            stat_common_alias = _get_stat_common_alias(stat_name, stats_dict)
+            if stat_common_alias in stats_dict:
+                res_dict[stat_name] = stats_dict[stat_common_alias]
+            elif stat_common_alias is not None:
+                res_dict[stat_name] = np.nan
+            else:
+                warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+                res_dict[stat_name] = np.float32(np.nan)
+        elif callable(stat_name):
+            res_dict[stat_name.__name__] = stat_name(data)
+        else:
+            warnings.warn("Statistic name " + stat_name + " is not recognized", category=UserWarning)
+            res_dict[stat_name] = np.float32(np.nan)
+
+    return res_dict
+
+
 def _statistics(
     data: NDArrayNum,
     stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | Literal["all"] | None = None,
@@ -151,6 +259,9 @@ def _statistics(
 
     :returns: A dictionary containing the calculated statistics for the selected band.
     """
+
+    if is_dask_array(data):
+        return _statistics_dask(data=data, stats_name=stats_name, counts=counts)
 
     if np.ma.isMaskedArray(data):
 
@@ -218,38 +329,12 @@ def _statistics(
             }
         )
 
-    def get_stat_common_alias(stat_name: str) -> str | None:
-        if stat_name in stats_dict.keys():
-            return stat_name
-        else:
-            for split_v in [None, "_"]:
-                if "".join(stat_name.lower().split(split_v)) in _STATS_ALIAS_ALL.keys():
-                    return "".join(stat_name.lower().split(split_v))
-                if "".join(stat_name.lower().split(split_v)) in _ALIAS_STATS_ALL.keys():
-                    return _ALIAS_STATS_GEN["".join(stat_name.lower().split(split_v))]
-                elif "".join(stat_name.lower().split(split_v)) in _SYNONYMES:
-                    return _SYNONYMES["".join(stat_name.lower().split(split_v))]
-
-            return None
-
-    def create_list(counts_is_none: bool, stats_name: str | None) -> list[str]:
-        if isinstance(stats_name, list):
-            return stats_name
-        else:
-            if stats_name is None:
-                stat_names_res = _STATS_LIST_MIN
-            else:
-                stat_names_res = list(_STATS_ALIAS_GEN)
-                if counts_is_none:
-                    stat_names_res = stat_names_res + list(_STATS_ALIAS_MASK.keys())
-            return stat_names_res
-
     # If there are no valid data points, raise a warning
     if final_count_nonzero == 0:
         warnings.warn("Empty raster, returns Nan for all stats", category=UserWarning)
 
     if stats_name is None or stats_name == "all":
-        stat_names_res = create_list(counts is not None, stats_name)  # type: ignore
+        stat_names_res = _get_default_stat_names(stats_name, counts)
 
         res_dict = {
             _STATS_ALIAS_ALL[stat_name]: (
@@ -273,8 +358,8 @@ def _statistics(
             if isinstance(stat_name, str):
 
                 # Get common alias
-                stat_common_alias = get_stat_common_alias(stat_name)
-                if stat_common_alias:
+                stat_common_alias = _get_stat_common_alias(stat_name, stats_dict)
+                if stat_common_alias is not None:
                     if stat_common_alias in stats_dict:
                         res_dict[stat_name] = stats_dict[stat_common_alias]
                         if callable(res_dict[stat_name]):

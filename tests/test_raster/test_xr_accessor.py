@@ -1,8 +1,15 @@
 """Tests on Xarray accessor mirroring Raster API."""
 
+from pathlib import Path
+
+import geopandas as gpd
 import numpy as np
 import pytest
+import rasterio as rio
+from rasterio.transform import from_origin
+from shapely.geometry import box
 
+import geoutils as gu
 from geoutils import examples, open_raster
 
 
@@ -79,3 +86,136 @@ class TestAccessor:
         ds_comp = ds.compute()
         assert isinstance(ds_comp.data, np.ndarray)
         assert ds_comp._in_memory
+
+    def test_equality__dask_reduces_lazily(self) -> None:
+        """Compare Dask raster data through scalar reductions without loading the DataArray."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        array = np.arange(20, dtype=np.float32).reshape(4, 5)
+        raster = gu.Raster.from_array(array, transform=from_origin(0, 4, 1, 1), crs=4326, nodata=None)
+        lazy = gu.RasterAccessor.from_array(
+            da.from_array(array, chunks=(2, 3)), transform=raster.transform, crs=raster.crs, nodata=None
+        )
+        close = lazy.copy(data=lazy.data + 1e-7)
+        changed = lazy.copy(data=lazy.data + 1)
+
+        assert raster.raster_equal(lazy)
+        assert lazy.rst.raster_equal(raster)
+        assert raster.raster_allclose(close, atol=1e-6)
+        assert not raster.raster_equal(close)
+        assert not raster.raster_allclose(changed)
+        assert not lazy._in_memory
+
+    def test_open__dask_nodata_can_be_written(self, tmp_path: Path) -> None:
+        """Write a lazily opened nodata raster without conflicting xarray metadata."""
+
+        pytest.importorskip("dask")
+
+        # Opening a masked file moves its encoded nodata to one unambiguous attribute
+        ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
+        assert ds.rst.nodata is not None
+        assert "_FillValue" not in ds.encoding
+
+        # The final writer must preserve nodata while computing the Dask array
+        output_file = tmp_path / "dask-nodata.tif"
+        ds.rst.to_file(output_file)
+        with rio.open(output_file) as output:
+            assert output.nodata == ds.rst.nodata
+
+    def test_cross_type_outputs_are_accessors(self) -> None:
+        """Return accessor-backed vectors and point clouds when a raster operation changes type."""
+
+        # Create one compact raster shared by every cross-type operation
+        ds = gu.RasterAccessor.from_array(
+            data=np.array([[1, 1], [0, 0]], dtype=np.uint8),
+            transform=from_origin(0, 2, 1, 1),
+            crs=4326,
+            nodata=None,
+        )
+
+        # Polygonization returns a GeoDataFrame with the vector accessor
+        vector = ds.rst.polygonize(target_values=1)
+        assert isinstance(vector, gpd.GeoDataFrame)
+        assert vector.vct.to_geoutils().vector_equal(gu.Vector(vector))
+
+        # Raster-to-point operations return GeoDataFrames with point-cloud metadata
+        pointcloud = ds.rst.to_pointcloud(skip_nodata=False)
+        assert isinstance(pointcloud, gpd.GeoDataFrame)
+        assert pointcloud.pc.data_column == "b1"
+
+        interpolated = ds.rst.interp_points((np.array([0.5]), np.array([1.5])), method="nearest")
+        assert isinstance(interpolated, gpd.GeoDataFrame)
+        assert interpolated.pc.data_column == "z"
+
+        # Geometric footprint helpers also retain the vector accessor
+        footprint = ds.rst.get_footprint_projected(ds.rst.crs)
+        assert isinstance(footprint, gpd.GeoDataFrame)
+
+    def test_get_stats__dask_global_quantile_stats(self) -> None:
+        """Regression test for Dask-backed xarray stats that require global quantiles."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        base = open_raster(self.aster_dem_path)
+        ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
+
+        assert isinstance(ds.data, da.Array)
+        assert not ds._in_memory
+
+        for stat in ["median", "90th percentile", "le90", "nmad", "iqr"]:
+            expected = float(base.rst.get_stats(stat))
+            actual = ds.rst.get_stats(stat)
+
+            assert isinstance(actual, da.Array)
+            assert float(actual.compute()) == pytest.approx(expected, rel=1e-5)
+            assert not ds._in_memory
+
+    def test_reproject__dask_keeps_dimension_order_for_stats(self) -> None:
+        """Regression test for Dask xarray reprojection outputs with valid rioxarray dimension order."""
+
+        pytest.importorskip("dask")
+
+        ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
+
+        reprojected_crs = ds.rst.reproject(crs=4326)
+        reprojected_res = ds.rst.reproject(res=(ds.rst.res[0] * 2, ds.rst.res[1] / 2), resampling="bilinear")
+
+        for reprojected in [reprojected_crs, reprojected_res]:
+            assert reprojected.dims == ("y", "x")
+            assert hasattr(reprojected.rst.get_stats("mean"), "compute")
+            assert np.isfinite(float(reprojected.rst.get_stats("mean").compute()))
+
+    def test_chunked_rasterize_paths_accept_dask_chunk_tuples(self) -> None:
+        """Regression test for xarray/Dask rasterization paths receiving normalized chunk tuples."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        arr = np.zeros((12, 10), dtype=np.uint8)
+        arr[2:9, 3:8] = 1
+        dask_arr = da.from_array(arr, chunks=(5, 4))
+        ds = gu.RasterAccessor.from_array(
+            data=dask_arr,
+            transform=from_origin(0, 12, 1, 1),
+            crs=4326,
+            nodata=0,
+        )
+        vector = gu.Vector(gpd.GeoDataFrame({"geometry": [box(2, 4, 9, 11)]}, crs=4326))
+
+        mask = vector.create_mask(ds.rst, dask=True)
+        assert isinstance(mask.data, da.Array)
+        assert mask.data.chunks == dask_arr.chunks
+        assert bool(mask.compute().data[3, 3])
+
+        polygons = ds.rst.polygonize(target_values=1)
+        rasterized = polygons.vct.rasterize(ds.rst, in_value=1, out_value=0, out_dtype=np.uint8)
+        assert isinstance(rasterized.data, da.Array)
+        assert rasterized.data.chunks == dask_arr.chunks
+        assert np.array_equal(rasterized.compute().data, arr)
+
+        rasterized_from_dataarray = polygons.vct.rasterize(ds, in_value=1, out_value=0, out_dtype=np.uint8)
+        assert isinstance(rasterized_from_dataarray.data, da.Array)
+        assert rasterized_from_dataarray.data.chunks == dask_arr.chunks
