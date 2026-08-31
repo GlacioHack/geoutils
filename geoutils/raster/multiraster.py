@@ -126,7 +126,7 @@ def load_multiple_rasters(
 
 def stack_rasters(
     rasters: list[Raster],
-    reference: int | Raster | None = None,
+    reference: int | Raster = 0,
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
     diff: bool = False,
@@ -155,9 +155,7 @@ def stack_rasters(
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
     # Select reference raster
-    if reference is None:
-        reference_raster = rasters[0]
-    elif isinstance(reference, int):
+    if isinstance(reference, int):
         reference_raster = rasters[reference]
     elif isinstance(reference, Raster):
         reference_raster = reference
