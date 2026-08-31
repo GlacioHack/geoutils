@@ -154,6 +154,7 @@ def stack_rasters(
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
+    
     # Select reference raster
     if isinstance(reference, int):
         reference_raster = rasters[reference]
@@ -195,7 +196,7 @@ def stack_rasters(
             resampling=resampling_method,
             silent=True,
         )
-
+        
         # If the georeferenced grid was the same, reproject() will have returned self with a warning (silenced here),
         # and we want to copy the raster and just modify its nodata (or would modify raster inputs of this function)
         if reprojected_raster.georeferenced_grid_equal(raster):
@@ -212,7 +213,6 @@ def stack_rasters(
             # Use only first band
             if reprojected_raster.count == 1:
                 data.append(reprojected_raster.data[:])
-
             else:
                 for b in range(reprojected_raster.count):
                     data.append(reprojected_raster.data[b, :])
