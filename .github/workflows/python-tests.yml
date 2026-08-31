@@ -59,6 +59,15 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
+
+    - name: Test yaml import
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        python -c "import yaml; print(yaml.__version__)"
+
+    - name: Generate env file
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
         python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "gdal<3.13.3" "environment.yml"
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
