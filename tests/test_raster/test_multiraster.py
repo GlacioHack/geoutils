@@ -343,12 +343,12 @@ class TestMultiRaster:
         if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
             assert merged_img2 == merged_img
 
-        """# For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
+        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
         def custom_func(x: NDArrayNum) -> NDArrayNum:
             print (len(x))
-            return np.logical_and(*x)
+            return np.logical_and.reduce(x)
 
-        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)"""
+        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
 
     @pytest.mark.parametrize(
         "rasters",
