@@ -126,7 +126,7 @@ def load_multiple_rasters(
 
 def stack_rasters(
     rasters: list[Raster],
-    reference: int | Raster = 0,
+    reference: int | Raster | None = None,
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
     diff: bool = False,
@@ -156,13 +156,10 @@ def stack_rasters(
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
-
-    # Check raster has a single band
-    if any(r.count > 1 for r in rasters):
-        warnings.warn("Some input Rasters have multiple bands, only their first band will be used.")
-
     # Select reference raster
-    if isinstance(reference, int):
+    if reference is None:
+        reference_raster = rasters[0]
+    elif isinstance(reference, int):
         reference_raster = rasters[reference]
     elif isinstance(reference, Raster):
         reference_raster = reference
@@ -202,6 +199,7 @@ def stack_rasters(
             resampling=resampling_method,
             silent=True,
         )
+
         # If the georeferenced grid was the same, reproject() will have returned self with a warning (silenced here),
         # and we want to copy the raster and just modify its nodata (or would modify raster inputs of this function)
         if reprojected_raster.georeferenced_grid_equal(raster):
@@ -218,8 +216,10 @@ def stack_rasters(
             # Use only first band
             if reprojected_raster.count == 1:
                 data.append(reprojected_raster.data[:])
+
             else:
-                data.append(reprojected_raster.data[0, :])
+                for b in range(reprojected_raster.count):
+                    data.append(reprojected_raster.data[b, :])
 
         # Remove unloaded rasters
         if not raster.is_loaded:
