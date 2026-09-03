@@ -130,7 +130,6 @@ def stack_rasters(
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
     diff: bool = False,
-    progress: bool = True,
 ) -> Raster:
     """
     Stack a list of rasters on their maximum extent into a multi-band raster.
@@ -152,15 +151,9 @@ def stack_rasters(
     :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
     :param diff: If True, will return the difference to the reference raster.
-    :param progress: If True, will display a progress bar. Default is True.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
-
-    # Check raster has a single band
-    if any(r.count > 1 for r in rasters):
-        warnings.warn("Some input Rasters have multiple bands, only their first band will be used.")
-
     # Select reference raster
     if isinstance(reference, int):
         reference_raster = rasters[reference]
@@ -219,7 +212,8 @@ def stack_rasters(
             if reprojected_raster.count == 1:
                 data.append(reprojected_raster.data[:])
             else:
-                data.append(reprojected_raster.data[0, :])
+                for b in range(reprojected_raster.count):
+                    data.append(reprojected_raster.data[b, :])
 
         # Remove unloaded rasters
         if not raster.is_loaded:
@@ -250,7 +244,6 @@ def merge_rasters(
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
-    progress: bool = True,
 ) -> Raster:
     """
     Spatially merge a list of rasters into one larger raster of their maximum extent.
@@ -270,7 +263,6 @@ def merge_rasters(
         If several algorithms are provided, each result is returned as a separate band.
     :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
-    :param progress: If True, will display a progress bar. Default is True.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
@@ -301,7 +293,6 @@ def merge_rasters(
         reference=reference,
         resampling_method=resampling_method,
         use_ref_bounds=use_ref_bounds,
-        progress=progress,
     )
 
     # Try to use the keyword axis=0 for the merging algorithm (if it's a numpy ufunc).
