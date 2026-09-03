@@ -482,6 +482,7 @@ class TestMultiRaster:
         # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
         def custom_func(x: NDArrayNum) -> NDArrayNum:
             return np.logical_and(*x)
+
         gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
 
     @pytest.mark.parametrize(
