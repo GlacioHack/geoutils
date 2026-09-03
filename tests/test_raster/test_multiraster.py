@@ -343,12 +343,6 @@ class TestMultiRaster:
         if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
             assert merged_img2 == merged_img
 
-        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
-        def custom_func(x: NDArrayNum) -> NDArrayNum:
-            return np.logical_and.reduce(x)
-
-        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
-
     @pytest.mark.parametrize(
         "rasters",
         [
@@ -474,3 +468,33 @@ class TestMultiRaster:
             # Logically, the non overlapping raster should have only masked values
             if k != 0:
                 assert np.count_nonzero(~rst.data.mask) == 0
+
+    @pytest.mark.skip(reason="to check when merge will be change")
+    @pytest.mark.parametrize(
+        "rasters",
+        [
+            lazy_fixtures("images_1d"),
+            lazy_fixtures("images_3d"),
+            lazy_fixtures("images_different_crs"),
+        ],
+    )  # type: ignore
+    def test_merge_rasters_with_function_not_working(self, rasters: Any) -> None:  # type: ignore
+        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and(*x)
+        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
+
+    @pytest.mark.parametrize(
+        "rasters",
+        [
+            lazy_fixtures("images_1d"),
+            lazy_fixtures("images_3d"),
+            lazy_fixtures("images_different_crs"),
+        ],
+    )  # type: ignore
+    def test_merge_rasters_with_function(self, rasters: Any) -> None:  # type: ignore
+        # Test with a simple custom_func
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and.reduce(x)
+
+        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
