@@ -18,7 +18,10 @@
 # limitations under the License.
 
 """
-Filters class to remove outliers and reduce noise in rasters.
+Filters to remove outliers and reduce noise in rasters.
+
+Raster backend dispatch precedes the individual filters. Stacked convolution and NaN-aware patch filtering
+provide shared kernels and valid counts for terrain and uncertainty calculations in xDEM.
 """
 
 from __future__ import annotations
@@ -242,7 +245,6 @@ def _multiproc_filter(
     size: int = 3,
     **kwargs: Any,
 ) -> Raster:
-
     # Get depth of overlap
     depth = _overlap_depth_for_filter(method, size=size, **kwargs)
 
@@ -552,3 +554,166 @@ def generic_filter(
     if array.ndim not in [2, 3]:
         raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
     return filter_function(array, **kwargs)
+
+
+#########################################
+# STACKED CONVOLUTION AND PATCH FILTERS
+#########################################
+
+
+def _create_circular_mask(
+    shape: tuple[int, int], center: tuple[int, int] | None = None, radius: float | None = None
+) -> NDArrayBool:
+    """Create a circular kernel, using the array centre and half width by default."""
+
+    # Use the array center and its nearest edge to choose a fully contained default circle
+    w, h = shape
+
+    if center is None:
+        center = (int(w / 2), int(h / 2))
+    if radius is None:
+        radius = min(center[0], center[1], w - center[0], h - center[1])
+
+    # Select cells strictly inside the radius to preserve the patch kernel boundary convention
+    Y, X = np.ogrid[:w, :h]
+    dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2)
+    mask = dist_from_center < radius
+
+    return mask
+
+
+def convolution(imgs: NDArrayNum, filters: NDArrayNum, method: str = "scipy") -> NDArrayNum:
+    """
+    Convolution on a number n_N of 2D images of size N1 x N2 using a number of kernels n_M of sizes M1 x M2, using
+    either scipy.ndimage.convolve or accelerated numba loops.
+    Note that the indexes on n_M and n_N correspond to first axes on the array to speed up computations (prefetching).
+    Inspired by: https://laurentperrinet.github.io/sciblog/posts/2017-09-20-the-fastest-2d-convolution-in-the-world.html
+
+    :param imgs: Input array of size (n_N, N1, N2) with n_N images of size N1 x N2
+    :param filters: Input array of filters of size (n_M, M1, M2) with n_M filters of size M1 x M2
+    :param method: Method to perform the convolution: "scipy" or "numba"
+
+    :return: Filled array of outputs of size (n_N, n_M, N1, N2)
+    """
+
+    # Validate image and kernel stacks before allocating the output
+    imgs = np.asarray(imgs, dtype=float)
+    filters = np.asarray(filters, dtype=float)
+    if imgs.ndim != 3 or filters.ndim != 3 or any(size < 1 for size in filters.shape):
+        raise ValueError("Images and filters must be 3D stacks with non-empty kernels.")
+
+    # Initialize output array according to input shapes
+    n_N, N1, N2 = imgs.shape
+    n_M, M1, M2 = filters.shape
+    output = np.zeros((n_N, n_M, N1, N2))
+
+    # Apply each kernel to each image, preserving the existing NaN padding outside the image
+    if method.lower() == "scipy":
+        for image_index in range(n_N):
+            for filter_index in range(n_M):
+                output[image_index, filter_index] = scipy.ndimage.convolve(
+                    imgs[image_index], filters[filter_index], mode="constant", cval=np.nan
+                )
+    elif "numba" in method.lower():
+        # Load compilation support only when the caller selects the optional Numba implementation
+        numba = import_optional("numba")
+
+        @numba.njit(parallel=True)
+        def _numba_convolution(imgs: NDArrayNum, filters: NDArrayNum, output: NDArrayNum) -> NDArrayNum:
+            """Accumulate convolution over image and kernel stacks using compiled loops."""
+            # Read image and kernel dimensions for the output loops
+            n_N, N1, N2 = imgs.shape
+            n_M, M1, M2 = filters.shape
+
+            # Restrict windows to complete footprints within the padded input
+            row_range = N1 - M1 + 1
+            col_range = N2 - M2 + 1
+
+            # Accumulate each output pixel from its complete input window
+            for ii in range(n_N):
+                for rr in numba.prange(row_range):
+                    for cc in numba.prange(col_range):
+                        for m1 in range(M1):
+                            for m2 in range(M2):
+                                for ff in range(n_M):
+                                    imgval = imgs[ii, rr + m1, cc + m2]
+
+                                    # Reverse both kernel axes to compute convolution rather than correlation
+                                    filterval = filters[ff, M1 - 1 - m1, M2 - 1 - m2]
+                                    output[ii, ff, rr, cc] += imgval * filterval
+
+            return output
+
+        # Pad asymmetrically for even kernel widths so compiled loops match SciPy's kernel origin
+        half_M1 = int((M1 - 1) / 2)
+        half_M2 = int((M2 - 1) / 2)
+        imgs_pad = np.pad(imgs, pad_width=((0, 0), (half_M1, M1 // 2), (half_M2, M2 // 2)), constant_values=np.nan)
+        output = _numba_convolution(
+            imgs=imgs_pad,
+            filters=filters,
+            output=output,
+        )
+    else:
+        raise ValueError('Method must be "scipy" or "numba".')
+
+    return output
+
+
+def mean_filter_nan(
+    img: NDArrayNum, kernel_size: int, kernel_shape: str = "circular", method: str = "scipy"
+) -> tuple[NDArrayNum, NDArrayNum, int]:
+    """
+    Apply a mean filter to an image with a square or circular kernel of size p and with NaN values ignored.
+
+    :param img: Input array of size (N1, N2)
+    :param kernel_size: Size M of kernel, which will be a symmetrical (M, M) kernel
+    :param kernel_shape: Shape of kernel, either "square" or "circular"
+    :param method: Method to perform the convolution: "scipy" or "numba"
+
+    :return: Array of size (N1, N2) with mean values, Array of size (N1, N2) with number of valid pixels, Number of
+        pixels in the kernel
+    """
+
+    # Use one width for both axes of the square or circular kernel
+    p = kernel_size
+
+    # Copy the array and replace NaNs by zeros before summing them in the convolution
+    img_zeroed = img.copy()
+    img_zeroed[~np.isfinite(img_zeroed)] = 0
+
+    # Define the cells belonging to the requested kernel shape
+    if kernel_shape.lower() == "square":
+        kernel = np.ones((p, p), dtype="uint8")
+
+    # Use the same circle boundary convention as the empirical patch method
+    elif kernel_shape.lower() == "circular":
+        kernel = _create_circular_mask((p, p)).astype("uint8")
+    else:
+        raise ValueError('Kernel shape should be "square" or "circular".')
+
+    # Run convolution to compute the sum of img values
+    summed_img = convolution(
+        imgs=img_zeroed.reshape((1, img_zeroed.shape[0], img_zeroed.shape[1])),
+        filters=kernel.reshape((1, kernel.shape[0], kernel.shape[1])),
+        method=method,
+    ).squeeze()
+
+    # Count only finite observations when normalizing each window sum
+    nodata_img = np.ones(np.shape(img), dtype=np.int8)
+    nodata_img[~np.isfinite(img)] = 0
+
+    # Count the number of valid pixels in the kernel with a convolution
+    nb_valid_img = convolution(
+        imgs=nodata_img.reshape((1, nodata_img.shape[0], nodata_img.shape[1])),  # type: ignore
+        filters=kernel.reshape((1, kernel.shape[0], kernel.shape[1])),
+        method=method,
+    ).squeeze()
+
+    # Divide by finite counts and leave windows without valid data undefined
+    with np.errstate(divide="ignore", invalid="ignore"):
+        mean_img = summed_img / nb_valid_img
+
+    # Retain the full kernel count so callers can reject incompletely observed windows
+    nb_pixel_per_kernel = np.count_nonzero(kernel)
+
+    return mean_img, nb_valid_img, nb_pixel_per_kernel

@@ -16,7 +16,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Array tools related to rasters."""
+"""Array normalization and coordinate tools used by raster operations.
+
+Private normalization utilities prepare raster data, masks and band dimensions without changing spatial metadata.
+Public mask and extent helpers follow, with coordinate rotation kept in the final section.
+"""
 
 from __future__ import annotations
 
@@ -26,11 +30,48 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import xarray as xr
 
-from geoutils._dispatch import has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
+
+
+#################################
+# 1/ INTERNAL ARRAY NORMALIZATION
+#################################
+
+
+def _selected_raster_data(raster: Any, band: int = 1, *, fill_value: float | bool = np.nan) -> Any:
+    """Select one raster band without loading lazy data."""
+
+    # Unwrap Xarray while preserving the laziness of its underlying array
+    data = get_geo_attr(raster, "data")
+    if isinstance(data, xr.DataArray):
+        data = data.data
+
+    # Validate the public one based index before selecting one data plane
+    if band < 1:
+        raise ValueError("band numbers start at 1.")
+    if data.ndim == 2:
+        if band != 1:
+            raise ValueError("A single band raster only accepts band=1.")
+        selected = data
+    elif data.ndim == 3:
+        if band > data.shape[0]:
+            raise ValueError("band exceeds the number of raster bands.")
+        selected = data[band - 1]
+    else:
+        raise ValueError("Raster values must have two spatial dimensions and an optional band dimension.")
+
+    # Preserve unmasked integer data and promote only when missing values require NaN
+    if np.ma.isMaskedArray(selected):
+        if not np.ma.is_masked(selected):
+            return np.ma.getdata(selected)
+        if np.isnan(fill_value):
+            selected = selected.astype(np.result_type(selected.dtype, np.float32))
+        selected = selected.filled(fill_value)
+    return selected
 
 
 def _masked_raster_data(source_raster: RasterLike) -> MArrayNum:
@@ -76,6 +117,11 @@ def _as_bands(array: MArrayNum) -> tuple[MArrayNum, bool]:
     raise ValueError("Raster processing expects a two-dimensional or multiband array.")
 
 
+###################################
+# 2/ PUBLIC MASK AND EXTENT HELPERS
+###################################
+
+
 def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
     """
     Return the mask of invalid values, whether array is a ndarray with NaNs or a np.ma.masked_array.
@@ -112,7 +158,7 @@ def get_array_and_mask(
                 f"Invalid array shape given: {array.shape}." "Expected 2D array or 3D array where arr.shape[0] == 1"
             )
 
-    # If an occupied mask exists and a view was requested, trigger a warning.
+    # Warn when an occupied mask prevents the requested view
     if not copy and np.any(getattr(array, "mask", False)):
         warnings.warn("Copying is required to respect the mask. Returning copy. Set 'copy=True' to hide this message.")
         copy = True
@@ -124,7 +170,7 @@ def get_array_and_mask(
     # Convert into a regular ndarray (a view or copy depending on the 'copy' argument)
     array_data = np.array(array).squeeze() if copy else np.asarray(array).squeeze()
 
-    # Get the mask of invalid pixels and set nans if it is occupied.
+    # Set invalid pixels to NaN while retaining the separate mask
     invalid_mask = get_mask_from_array(array)
     if np.any(invalid_mask):
         array_data[invalid_mask] = np.nan
@@ -144,6 +190,11 @@ def get_valid_extent(array: NDArrayNum | NDArrayBool | MArrayNum) -> tuple[int, 
     cols_nonzero = np.where(np.count_nonzero(valid_mask, axis=0) > 0)[0]
     rows_nonzero = np.where(np.count_nonzero(valid_mask, axis=1) > 0)[0]
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
+
+
+###########################
+# 3/ COORDINATE TRANSFORMS
+###########################
 
 
 def get_xy_rotated(raster: RasterType, along_track_angle: float) -> tuple[NDArrayNum, NDArrayNum]:

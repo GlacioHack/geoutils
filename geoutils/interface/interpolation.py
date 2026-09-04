@@ -36,8 +36,9 @@ from geoutils._dispatch import _check_match_points, is_dask_geodataframe
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation, _validate_nodata_propagation
-from geoutils.multiproc import MultiprocConfig, compute_tiling
+from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.chunked import cached_cumsum, normalize_chunks
+from geoutils.multiproc.mparray import block_bounds_from_chunks
 from geoutils.projtools import reproject_from_latlon
 from geoutils.raster.referencing import _bounds, _coords, _outside_bounds, _res, _xy2ij
 
@@ -305,7 +306,6 @@ def _interpn_interpolator(
 
     # For the RegularGridInterpolator
     if method in RegularGridInterpolator._ALL_METHODS:
-
         # We create the classic interpolator
         interp = RegularGridInterpolator(
             points, values, method=method, bounds_error=bounds_error, fill_value=fill_value
@@ -313,7 +313,6 @@ def _interpn_interpolator(
 
         # We create a new interpolator callable that propagates nodata as defined above
         def regulargrid_interpolator_with_nan(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
-
             # Get results
             results = interp(xi)
             # Get invalids
@@ -326,13 +325,11 @@ def _interpn_interpolator(
 
     # For the RectBivariateSpline
     else:
-
         # The coordinates must be in ascending order, which requires flipping the array too (more costly)
         interp = RectBivariateSpline(np.flip(points[0]), points[1], np.flip(values[:], axis=0))
 
         # We create a new interpolator callable that propagates nodata as defined above, and supports fill_value
         def rectbivariate_interpolator_with_fillvalue(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
-
             # Get invalids
             invalids = interp_mask(xi)
 
@@ -479,7 +476,6 @@ def _interp_points_base(
     return_interpolator: bool = False,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
-
     # If interpolation method undefined, default to the global system config
     if method is None:
         method = config["interpolation_method"]
@@ -595,7 +591,6 @@ def _interp_points_base(
             return scipy_interpolator
         else:
             rpoints = scipy_interpolator((y, x))  # type: ignore
-
     return rpoints
 
 
@@ -615,7 +610,6 @@ def _get_interp_indices_per_block(
     interp_y: NDArrayNum,
     starts: list[tuple[int, ...]],
     num_chunks: tuple[int, int],
-    chunksize: tuple[int, int],
     xres: float,
     yres: float,
     left: float,
@@ -625,15 +619,20 @@ def _get_interp_indices_per_block(
 
     # The argument "starts" contains the list of chunk first X/Y index for the full array, plus the last index
     ny, nx = num_chunks
-    y_chunksize, x_chunksize = chunksize
     y_starts, x_starts = starts
 
     # We use one bucket per block, assuming a flattened blocks shape
     ind_per_block = [[] for _ in range(ny * nx)]
     for i, (x, y) in enumerate(zip(interp_x, interp_y)):
-        # Because it is a regular grid, we know exactly in which block ID the coordinate will fall
-        xb = int(np.floor((x - left) / (xres * x_chunksize)))
-        yb = int(np.floor((top - y) / (yres * y_chunksize)))
+        # Use actual chunk boundaries because overlap can merge small edge chunks
+        xb = int(np.searchsorted(x_starts, (x - left) / xres, side="right") - 1)
+        yb = int(np.searchsorted(y_starts, (top - y) / yres, side="right") - 1)
+
+        # Assign outer half pixels to the first block, matching the interpolation kernel's finite support
+        if left - xres / 2 <= x < left:
+            xb = 0
+        if top < y <= top + yres / 2:
+            yb = 0
 
         if 0 <= xb < nx and 0 <= yb < ny:
             ind_per_block[yb * nx + xb].append(i)
@@ -704,12 +703,11 @@ def _dask_interp_points(
     left, top = bounds.left, bounds.top
 
     # Expand dask array for overlapping computations
-    chunksize = darr.chunksize
     expanded = da.overlap.overlap(darr, depth=depth, boundary="nearest")
 
-    # Get starting 2D index for each chunk of the full array
-    # (mirroring what is done in block_id of dask.array.map_blocks)
-    starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
+    # Recover core chunk boundaries after any automatic merging required for overlap
+    core_chunks = [tuple(size - 2 * depth for size in axis) for axis in expanded.chunks]
+    starts = [cached_cumsum(axis, initial_zero=True) for axis in core_chunks]
     num_chunks = expanded.numblocks
 
     # Get samples indices per blocks
@@ -718,7 +716,6 @@ def _dask_interp_points(
         points_arr[1, :],
         starts,
         num_chunks,
-        chunksize,
         res[0],
         res[1],
         left,
@@ -821,7 +818,10 @@ def _interp_points_partition(
         shift_area_or_point=interp_options["shift_area_or_point"],
     )
     # Detect partitions with no raster overlap before constructing interpolation work
-    ind_outofbounds: NDArrayBool = (i < 0) | (j < 0) | (i >= source_raster.shape[0]) | (j >= source_raster.shape[1])
+    # Include outer half pixels accepted by nearest and linear interpolation when selecting partitions
+    margin = 0.5 if interp_options["method"] in {"nearest", "linear"} else 0
+    ind_outofbounds: NDArrayBool = (i < -margin) | (j < -margin)
+    ind_outofbounds |= (i >= source_raster.shape[0] - margin) | (j >= source_raster.shape[1] - margin)
 
     if np.count_nonzero(~ind_outofbounds) == 0:
         z = np.full(len(part), np.nan, dtype=out_dtype)
@@ -971,11 +971,10 @@ def _multiproc_interp_points(
 
     # Get multiprocessing chunk sizes
     chunks = normalize_chunks(chunks=config.chunks, shape=rst.shape)
-    chunksize = (chunks[0][0], chunks[1][0])
 
     # Get starting 2D index for each chunk of the full array
     # (mirroring what is done in block_id of dask.array.map_blocks)
-    tiling = compute_tiling(tile_size=config.chunks, raster_shape=rst.shape, overlap=depth)
+    tiling = block_bounds_from_chunks(chunks=chunks, shape=rst.shape, overlap=depth)
     starts = [
         cached_cumsum(chunks[0], initial_zero=True),
         cached_cumsum(chunks[1], initial_zero=True),
@@ -989,7 +988,6 @@ def _multiproc_interp_points(
         points_arr[1, :],
         starts,  # type: ignore
         num_chunks,
-        chunksize,
         res[0],
         res[1],
         left,
@@ -1062,7 +1060,6 @@ def _interp_points(
     propagation = _validate_nodata_propagation(nodata_propagation)
 
     # 1/ Input checks
-
     if is_dask_geodataframe(points):
         if mp_config is not None:
             raise ValueError("Dask point-cloud inputs cannot be combined with Multiprocessing interpolation.")
@@ -1107,8 +1104,10 @@ def _interp_points(
 
         i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
 
-        # Get index of points outside of bounds (i = row index vs shape[0], j = column index vs shape[1])
-        ind_outofbounds: NDArrayBool = (i < 0) | (j < 0) | (i >= shape[0]) | (j >= shape[1])
+        # Retain the outer half pixels accepted by nearest and linear array interpolation
+        margin = 0.5 if method in {"nearest", "linear"} else 0
+        ind_outofbounds: NDArrayBool = (i < -margin) | (j < -margin)
+        ind_outofbounds |= (i >= shape[0] - margin) | (j >= shape[1] - margin)
 
         # If all points fell outside of bounds
         if np.count_nonzero(~ind_outofbounds) == 0:
@@ -1203,7 +1202,6 @@ def _interp_points(
         return z_inbounds
     # Otherwise, return array of input length with NaNs for outside-bound points
     else:
-
         # Get output length and dtype
         n = len(x)
         dtype = source_raster.dtype
@@ -1249,7 +1247,6 @@ def _reduce_points(
     as_array: bool = False,
     boundless: bool = True,
 ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
-
     # Check and normalize input points
     pts, input_scalar = _check_match_points(source_raster, points)
 
@@ -1338,7 +1335,6 @@ def _reduce_points(
             win: NDArrayNum | dict[int, NDArrayNum] = data
 
         else:
-
             # Create rasterio's window for reading
             rio_window = rio.windows.Window(col, row, width, height)
 

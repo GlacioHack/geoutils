@@ -89,6 +89,11 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - ❌
   - NumPy / SciPy
 
+* - {meth}`~geoutils.Raster.grouped_stats()`
+  - Compute statistics grouped by continuous bins or discrete categories.
+  - ✅
+  - Pandas / NumPy / Dask
+
 * - {meth}`~geoutils.Raster.subsample()`
   - Randomly sample valid values. Chunk-invariant seed ensures reproducibility.
   - ✅

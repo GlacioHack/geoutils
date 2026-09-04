@@ -27,6 +27,13 @@ from geoutils.raster import Raster, xr_accessor  # noqa isort:skip
 from geoutils.raster.xr_accessor import open_raster, RasterAccessor  # noqa isort:skip
 from geoutils.vector import Vector, open_vector, VectorAccessor  # noqa isort:skip
 from geoutils.pointcloud import PointCloud, open_pointcloud, PointCloudAccessor  # noqa isort:skip
+from geoutils.sampling import CoSampleResult  # noqa isort:skip
+from geoutils.stats.variography import (  # noqa isort:skip
+    GPyTorchVariogram,
+    GSToolsVariogram,
+    Variogram,
+    VariogramModel,
+)
 
 # To-be-deprecated
 from geoutils.raster import Mask  # noqa isort:skip

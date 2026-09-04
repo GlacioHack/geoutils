@@ -17,5 +17,6 @@
 # limitations under the License.
 
 from geoutils.stats.estimators import *  # noqa
-from geoutils.stats.sampling import *  # noqa
+from geoutils.stats.grouped import *  # noqa
 from geoutils.stats.stats import *  # noqa
+from geoutils.stats.variography import *  # noqa

@@ -16,7 +16,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module for array sampling statistics."""
+"""Subsampling tools shared by raster and point cloud data.
+
+The module defines finite NumPy sampling first, followed by Dask and multiprocessing implementations that preserve
+bounded memory. The final dispatchers connect those backends to raster and point cloud methods.
+"""
 
 from __future__ import annotations
 
@@ -1008,7 +1012,7 @@ def _subsample_pointcloud(
     return_indices: bool = False,
     random_state: int | np.random.Generator | None = None,
 ) -> NDArrayNum | tuple[NDArrayNum, ...]:
-    """Subsample point-cloud values after materializing any lazy data column."""
+    """Subsample point cloud values after materializing any lazy data column."""
 
     data = source_pointcloud.data.compute().values if source_pointcloud._is_dask else np.asarray(source_pointcloud.data)
     if return_indices:

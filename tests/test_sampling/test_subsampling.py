@@ -1,4 +1,4 @@
-"""Test sampling statistical tools."""
+"""Test internal raster and point cloud subsampling tools."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from geoutils import open_raster
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.raster.array import get_mask_from_array
-from geoutils.stats.sampling import _subsample_numpy
+from geoutils.sampling.subsampling import _subsample_numpy
 
 
 class TestSampling:

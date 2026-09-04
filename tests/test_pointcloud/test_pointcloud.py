@@ -82,6 +82,19 @@ class TestPointCloud:
         assert pc.data_column is None
         assert_geodataframe_equal(pc.ds, self.gdf3)
 
+    def test_copy_preserves_subclass(self) -> None:
+        """Copying should retain specialized point cloud classes."""
+
+        class SpecializedPointCloud(PointCloud):
+            pass
+
+        # Reconstruct through the runtime class so downstream methods remain available
+        point_cloud = SpecializedPointCloud(self.gdf1, data_column="b1")
+        copied = point_cloud.copy()
+
+        assert isinstance(copied, SpecializedPointCloud)
+        assert copied.pointcloud_equal(point_cloud)
+
     def test_init_from_file__lazy(self) -> None:
         """Check that non-LAS file-backed point clouds load data only when requested."""
 

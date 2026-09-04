@@ -16,27 +16,134 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functionalities at the interface of rasters and point clouds."""
+"""Shared support handling and conversions between rasters and point clouds.
+
+Spatial input normalization and raster support masking come first. Regular point to raster conversion follows, then
+raster to point conversion completes the module.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, Literal
+from typing import TYPE_CHECKING, Any, Iterable, Literal
 
 import affine
 import geopandas as gpd
 import numpy as np
 import rasterio as rio
+import xarray as xr
 from rasterio.crs import CRS
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array
 from geoutils._typing import NDArrayNum
-from geoutils.raster.array import get_mask_from_array
+from geoutils.raster.array import _selected_raster_data, get_mask_from_array
 from geoutils.raster.referencing import _default_nodata, _xy2ij
-from geoutils.stats.sampling import _subsample_numpy
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
     from geoutils.raster.base import RasterType
+
+
+###########################
+# 1/ SHARED SPATIAL SUPPORT
+###########################
+
+
+def _raster_from_input(value: Any, owner: Any, name: str) -> Any:
+    """Return a raster input or attach an owner's metadata to a raw array."""
+
+    # Reuse raster objects and accessors so their georeferencing stays authoritative
+    raster = value if hasattr(value, "ij2xy") else getattr(value, "rst", None)
+    if raster is not None:
+        return raster
+
+    # Require a raster owner before interpreting a raw array as gridded data
+    owner_raster = owner if hasattr(owner, "ij2xy") else getattr(owner, "rst", None)
+    if owner_raster is None:
+        raise ValueError(f"Two-dimensional value {name!r} must be tied to a raster input.")
+
+    # Unwrap Xarray and accept the common singleton band representation
+    array = value.data if isinstance(value, xr.DataArray) else value
+    array = array if hasattr(array, "ndim") else np.asarray(array)
+    if array.ndim == 3 and array.shape[0] == 1:
+        array = array[0]
+    if array.ndim != 2 or tuple(array.shape) != tuple(owner_raster.shape):
+        raise ValueError(f"Array {name!r} must match the shape of its native raster input.")
+
+    # Attach the owner's grid so later alignment follows the raster API
+    return owner_raster.from_array(
+        data=array if is_dask_array(array) else np.ma.masked_invalid(array),
+        transform=owner_raster.transform,
+        crs=owner_raster.crs,
+        nodata=owner_raster.nodata,
+        area_or_point=owner_raster.area_or_point,
+    )
+
+
+def _aligned_raster(value: Any, owner: Any, support: Any, name: str, align: str) -> Any:
+    """Return a raster aligned to raster or point support."""
+
+    # Normalize raw arrays before comparing their owner's spatial reference
+    raster = _raster_from_input(value, owner, name)
+    if hasattr(support, "georeferenced_grid_equal"):
+        if support.georeferenced_grid_equal(raster):
+            return raster
+
+        # Reproject grid inputs only when the caller permits spatial alignment
+        if align == "reproject":
+            return raster.reproject(ref=support, silent=True)
+        raise ValueError(f"Raster value {name!r} does not share the selected support grid.")
+
+    # Match a point support CRS without imposing a raster grid
+    if raster.crs != support.crs:
+        if align != "reproject":
+            raise ValueError(f"Raster value {name!r} does not share the point support CRS.")
+        raster = raster.reproject(crs=support.crs, silent=True)
+
+    # Normalize reprojection outputs that expose the raster API through an accessor
+    normalized = raster if hasattr(raster, "ij2xy") else getattr(raster, "rst", None)
+    if normalized is None:
+        raise TypeError(f"Raster value {name!r} could not be normalized after reprojection.")
+    return normalized
+
+
+def _mask_on_raster(mask: Any | None, support: Any, mask_mode: str, align: str) -> Any:
+    """Evaluate a user mask on raster support."""
+
+    # Keep every cell eligible when no additional mask was requested
+    if mask is None:
+        return np.ones(support.shape, dtype=bool)
+
+    # Normalize vector inputs only after excluding raster objects and accessors
+    mask_raster = mask if hasattr(mask, "ij2xy") else getattr(mask, "rst", None)
+    from geoutils.vector.base import _as_vector
+
+    vector = _as_vector(mask) if mask_raster is None else None
+    if vector is not None:
+        values = np.asarray(vector.create_mask(ref=support, as_array=True), dtype=bool)
+        return values if mask_mode == "inside" else ~values
+
+    # Align raster masks while accepting raw Boolean arrays on the support grid
+    if mask_raster is not None:
+        mask_raster = _aligned_raster(mask_raster, mask_raster, support, "mask", align)
+        values = _selected_raster_data(mask_raster, fill_value=False)
+    else:
+        values = mask if hasattr(mask, "ndim") else np.asarray(mask)
+        if np.ma.isMaskedArray(values):
+            values = np.ma.asarray(values).filled(False)
+
+    # Drop only a singleton band so one row or one column remains a spatial dimension
+    if values.ndim == 3 and values.shape[0] == 1:
+        values = values[0]
+
+    # Reject ambiguous numeric masks and arrays on a different grid shape
+    if tuple(values.shape) != tuple(support.shape) or not np.issubdtype(values.dtype, np.bool_):
+        raise ValueError("A raster support mask must be Boolean and match the support grid.")
+    return values
+
+
+#########################
+# 2/ POINT CLOUD TO RASTER
+#########################
 
 
 def _regular_pointcloud_to_raster(
@@ -118,6 +225,11 @@ def _regular_pointcloud_to_raster(
     raster_arr = np.ma.masked_array(data=arr, mask=mask)
 
     return raster_arr, out_transform, gdf_pc.crs, out_nodata, area_or_point
+
+
+#########################
+# 3/ RASTER TO POINT CLOUD
+#########################
 
 
 def _raster_to_pointcloud(
@@ -219,6 +331,8 @@ def _raster_to_pointcloud(
             valid_mask = np.ones(source_raster.data[0, :].shape, dtype=bool)
 
     # Get subsample on valid mask
+    from geoutils.sampling.subsampling import _subsample_numpy
+
     # Build a low memory boolean masked array with invalid values masked to pass to subsampling
     ma_valid = np.ma.masked_array(data=np.ones(np.shape(valid_mask), dtype=bool), mask=~valid_mask)
     # Take a subsample within the valid values

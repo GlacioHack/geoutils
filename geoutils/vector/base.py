@@ -74,6 +74,21 @@ def _as_geodataframe(obj: Any) -> gpd.GeoDataFrame:
     return ds
 
 
+def _as_vector(obj: Any) -> Any | None:
+    """Return a GeoUtils vector interface when the input is vector like."""
+
+    # Wrap GeoDataFrames so spatial operations follow the GeoUtils Vector API
+    if isinstance(obj, gpd.GeoDataFrame):
+        from geoutils.vector.vector import Vector
+
+        return Vector(obj)
+
+    # Reuse Vector objects directly and normalize dataframe accessors otherwise
+    if hasattr(obj, "create_mask") and not has_geo_attr(obj, "shape"):
+        return obj
+    return getattr(obj, "vct", None)
+
+
 class VectorBase(ABC):
     """
     Shared implementation for :class:`~geoutils.Vector` and the ``vct`` Pandas accessor.

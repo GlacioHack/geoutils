@@ -142,6 +142,10 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :template: raster_method.rst
 
     ~raster.base.RasterBase.get_stats
+    ~raster.base.RasterBase.grouped_stats
+    ~raster.base.RasterBase.cosample
+    ~raster.base.RasterBase.sample_pairs
+    ~raster.base.RasterBase.variogram
 ```
 
 ### Data manipulation
@@ -592,6 +596,10 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 
     PointCloud.get_stats
     PointCloud.subsample
+    PointCloud.grouped_stats
+    PointCloud.cosample
+    PointCloud.sample_pairs
+    PointCloud.variogram
 ```
 
 ### Testing methods
@@ -602,6 +610,29 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 
     PointCloud.pointcloud_equal
     PointCloud.georeferenced_coords_equal
+```
+
+## Grouped statistics
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    stats.grouped_stats
+    stats.plot_grouped_stats
+```
+
+## Cosampling and variograms
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    CoSampleResult
+    Variogram
+    VariogramModel
+    GSToolsVariogram
+    GPyTorchVariogram
 ```
 
 ## Multiprocessing configuration

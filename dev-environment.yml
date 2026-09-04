@@ -63,3 +63,7 @@ dependencies:
 
   - pip:
       - -e ./
+      - scikit-gstat>=1.0.23 # For variogram fitting
+      - gstools>=1.3 # For variogram conversion, kriging and random fields
+      - gpytorch>=1.11 # For Gaussian-process covariance conversion
+      - torch>=2 # GPyTorch backend
