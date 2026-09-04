@@ -25,6 +25,7 @@ import pathlib
 import struct
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -86,7 +87,7 @@ from geoutils.raster.referencing import (
 )
 from geoutils.raster.testing import _array_equal_or_close
 from geoutils.raster.transformation import _crop, _reproject, _translate
-from geoutils.stats.sampling import _subsample
+from geoutils.sampling.subsampling import _subsample
 from geoutils.stats.stats import _statistics
 
 # Input/output is a RasterType (= Raster or RasterAccessor subclass)
@@ -96,7 +97,11 @@ RasterLike = Union["RasterBase", xr.DataArray]
 _UNSET = object()
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.sampling.cosampling import CoSampleResult
+    from geoutils.stats.variography import Variogram
     from geoutils.vector.vector import Vector, VectorType
 
 
@@ -904,6 +909,78 @@ class RasterBase(ABC):
                 )
 
             return stats  # type: ignore
+
+    def grouped_stats(
+        self,
+        by: Mapping[str, Any],
+        *,
+        values: int | Iterable[int] | Mapping[str, int] | None = None,
+        bins: Mapping[str, Any] | None = None,
+        categories: Mapping[str, Iterable[Any]] | None = None,
+        statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] = ("median", "nmad"),
+        at: Literal["self"] | Any | None = None,
+        mask: Any | None = None,
+        mask_mode: Literal["inside", "outside"] = "inside",
+        subsample: int | float = 1,
+        random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "topk",
+        interpolation: str = "linear",
+        align: Literal["raise", "reproject"] = "raise",
+        observed: bool = True,
+        return_masks: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Any, Any]]:
+        """Calculate statistics for raster values grouped on a common spatial support.
+
+        Raster groupers may be passed directly, as raw arrays following this raster, or selected from a band with an
+        integer. Use ``(object, selector)`` to select a band, point column or vector feature column from another
+        object. A point cloud can provide ``at`` support, in which case raster values are interpolated at its points.
+
+        Returned dataframe rows preserve interval and categorical metadata. Each value has a finite ``count`` and the
+        requested statistics in a two level column index. When ``return_masks`` is true, the second result maps each
+        row key to a Boolean Raster or Xarray DataArray on the complete support.
+
+        :param by: Ordered mapping of names to raster, point cloud, vector or aligned array groupers.
+        :param values: Band selection, iterable of bands or mapping of output names to bands. Defaults to all bands.
+        :param bins: Continuous group definitions as bin counts, numeric edges or Pandas IntervalIndexes.
+        :param categories: Ordered categories for discrete groupers.
+        :param statistics: Statistic name, callable or iterable of either. Count is always included.
+        :param at: Spatial support, using this raster by default or ``"self"`` explicitly.
+        :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
+        :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
+        :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
+        :param random_state: Random generator or seed used to reproduce subsampling.
+        :param strategy: ``"topk"`` for chunk independent sampling or ``"sequential"`` for ordinary sampling.
+        :param interpolation: Raster interpolation method used on point support.
+        :param align: Whether mismatched grids or coordinate systems raise or are reprojected.
+        :param observed: Whether to omit declared group combinations with no eligible locations.
+        :param return_masks: Whether to also return complete support masks for the dataframe groups.
+        :param mp_config: Multiprocessing configuration forwarded to interpolation when point support is used.
+        :returns: Grouped dataframe, optionally followed by a mapping of support aligned masks.
+        """
+
+        # Keep spatial normalization in the grouped statistics module shared with point clouds
+        from geoutils.stats.grouped import _grouped_stats
+
+        return _grouped_stats(
+            self,
+            by,
+            values=values,
+            bins=bins,
+            categories=categories,
+            statistics=statistics,
+            at=at,
+            mask=mask,
+            mask_mode=mask_mode,
+            subsample=subsample,
+            random_state=random_state,
+            strategy=strategy,
+            interpolation=interpolation,
+            align=align,
+            observed=observed,
+            return_masks=return_masks,
+            mp_config=mp_config,
+        )
 
     def _raster_equal_allclose(
         self,
@@ -2206,4 +2283,206 @@ class RasterBase(ABC):
             random_state=random_state,
             strategy=strategy,
             mp_config=mp_config,
+        )
+
+    def cosample(
+        self,
+        other: Any,
+        *,
+        band: int = 1,
+        other_band: int = 1,
+        auxiliary: Mapping[str, Any] | None = None,
+        auxiliary_bands: Mapping[str, int] | None = None,
+        auxiliary_at: Literal["self", "other"] | Mapping[str, Literal["self", "other"]] | None = None,
+        at: Literal["self", "other"] | Any | None = None,
+        mask: Any | None = None,
+        mask_mode: Literal["inside", "outside"] = "inside",
+        subsample: int | float = 1,
+        random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "topk",
+        interpolation: str = "linear",
+        align: Literal["raise", "reproject"] = "raise",
+    ) -> CoSampleResult:
+        """Sample this raster and another dataset at common finite locations.
+
+        A point cloud is selected as support automatically when either primary input is one. Raw auxiliary arrays must
+        identify the primary input whose grid or point ordering they follow.
+
+        :param other: Other primary raster, point cloud or array aligned to this raster.
+        :param band: Band selected from this raster, counting from one.
+        :param other_band: Band selected from the other primary when it is a raster.
+        :param auxiliary: Named auxiliary rasters, point clouds or aligned arrays.
+        :param auxiliary_bands: Bands selected from auxiliary rasters, keyed by auxiliary name.
+        :param auxiliary_at: Native ``"self"`` or ``"other"`` support of raw auxiliaries, globally or by name.
+        :param at: Final support. Defaults to point support when present and this raster otherwise.
+        :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
+        :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
+        :param subsample: Fraction when at most one, otherwise the maximum number of locations.
+        :param random_state: Random generator or seed used to reproduce the sample.
+        :param strategy: ``"topk"`` for chunk-independent grid sampling or ``"sequential"`` for ordinary sampling.
+        :param interpolation: Raster interpolation method used on point support.
+        :param align: Whether mismatched raster grids or coordinate systems raise or are reprojected.
+        :returns: Two aligned primary arrays, auxiliary values, coordinates and support indexes.
+        """
+
+        from geoutils.sampling.cosampling import _cosample
+
+        return _cosample(
+            self,
+            other,
+            band=band,
+            other_band=other_band,
+            auxiliary=auxiliary,
+            auxiliary_bands=auxiliary_bands,
+            auxiliary_at=auxiliary_at,
+            at=at,
+            mask=mask,
+            mask_mode=mask_mode,
+            subsample=subsample,
+            random_state=random_state,
+            strategy=strategy,
+            interpolation=interpolation,
+            align=align,
+        )
+
+    def sample_pairs(
+        self,
+        *,
+        band: int = 1,
+        n_pairs: int = 1_000_000,
+        sampling: Literal["loglag", "random_xy"] = "loglag",
+        min_distance: float | None = None,
+        max_distance: float | None = None,
+        random_state: int | np.random.Generator | None = None,
+        mask: Any | None = None,
+        strategy: Literal["independent", "anchors", "chunk_anchors", "anchor_batched"] = "chunk_anchors",
+        deduplicate: Literal["none", "per_anchor", "global"] = "per_anchor",
+        batch_pairs: int = 2_000_000,
+        max_rounds: int = 50,
+        max_oversample: float = 8.0,
+        chunks_per_round: int = 8,
+        anchors_per_round: int = 20_000,
+        distances_per_anchor: int = 8,
+        angles_per_distance: int = 8,
+        hybrid_local_fraction: float = 0.0,
+        max_local_distance: float | None = None,
+        index_dtype: DTypeLike = np.int32,
+        distance_dtype: DTypeLike = np.float64,
+    ) -> xr.Dataset:
+        """Sample finite raster cell pairs for statistics by distance.
+
+        Logarithmic lag sampling draws isotropic distances across short and long ranges. Anchor strategies reuse
+        raster cells and can confine part of the sample to source chunks, which limits reads from Dask-backed rasters.
+
+        :param band: Raster band to sample, counting from 1.
+        :param n_pairs: Target number of finite pairs.
+        :param sampling: ``"loglag"`` for balanced lag coverage or ``"random_xy"`` for uniform endpoints.
+        :param min_distance: Smallest pair distance. Defaults to one pixel.
+        :param max_distance: Largest pair distance. Defaults to the raster diagonal.
+        :param random_state: Random generator or seed used to reproduce the sample.
+        :param mask: Boolean raster grid mask, aligned mask raster or vector defining eligible cells.
+        :param strategy: Regular grid strategy for logarithmic lags.
+        :param deduplicate: Whether repeated pairs are retained, removed per anchor or removed globally.
+        :param batch_pairs: Maximum candidate pairs generated in one top-up batch.
+        :param max_rounds: Maximum top-up rounds when invalid cells or grid edges reject candidates.
+        :param max_oversample: Maximum candidate multiplier used to compensate for invalid cells.
+        :param chunks_per_round: Number of source chunks used for anchors aligned with chunks in one round.
+        :param anchors_per_round: Maximum anchors reused in one round.
+        :param distances_per_anchor: Distinct radii drawn per anchor by ``"anchor_batched"``.
+        :param angles_per_distance: Directions drawn for each batched radius.
+        :param hybrid_local_fraction: Fraction of pairs constrained to the anchor's source chunk.
+        :param max_local_distance: Largest distance for pairs in one chunk. Defaults to the chunk diagonal.
+        :param index_dtype: Integer dtype used by returned endpoint indexes.
+        :param distance_dtype: Floating dtype used by returned distances.
+        :returns: Dataset indexed by pair and its two endpoints.
+        """
+
+        from geoutils.sampling.pairsampling import _sample_raster_pairs
+
+        return _sample_raster_pairs(
+            self,
+            band=band,
+            n_pairs=n_pairs,
+            sampling=sampling,
+            min_distance=min_distance,
+            max_distance=max_distance,
+            random_state=random_state,
+            mask=mask,
+            strategy=strategy,
+            deduplicate=deduplicate,
+            batch_pairs=batch_pairs,
+            max_rounds=max_rounds,
+            max_oversample=max_oversample,
+            chunks_per_round=chunks_per_round,
+            anchors_per_round=anchors_per_round,
+            distances_per_anchor=distances_per_anchor,
+            angles_per_distance=angles_per_distance,
+            hybrid_local_fraction=hybrid_local_fraction,
+            max_local_distance=max_local_distance,
+            index_dtype=index_dtype,
+            distance_dtype=distance_dtype,
+        )
+
+    def variogram(
+        self,
+        *,
+        band: int = 1,
+        n_pairs: int = 1_000_000,
+        sampling: Literal["loglag", "random_xy"] = "loglag",
+        estimator: str | Callable[[NDArrayNum], float] = "dowd",
+        bins: Literal["log", "uniform"] | Iterable[float] = "log",
+        n_lags: int = 24,
+        min_lag: float | None = None,
+        max_lag: float | None = None,
+        n_runs: int = 1,
+        n_jobs: int = 1,
+        model: str | Callable[..., Any] | list[str | Callable[..., Any]] | None = None,
+        fit_kwargs: dict[str, Any] | None = None,
+        random_state: int | np.random.Generator | None = None,
+        mask: Any | None = None,
+        **pair_sampling_kwargs: Any,
+    ) -> Variogram:
+        """Estimate a lightweight empirical variogram from raster pairs.
+
+        :param band: Raster band to sample, counting from 1.
+        :param n_pairs: Target number of finite pairs in each independent run.
+        :param sampling: Pair sampling scheme, either ``"loglag"`` or ``"random_xy"``.
+        :param estimator: SciKit-GStat estimator name or function applied in each lag class.
+        :param bins: Named or explicit lag boundaries.
+        :param n_lags: Number of classes used for named binning.
+        :param min_lag: Smallest sampled lag. Defaults to one pixel.
+        :param max_lag: Largest sampled lag. Defaults to the raster diagonal.
+        :param n_runs: Number of independent samples used to estimate empirical uncertainty.
+        :param n_jobs: Number of sampling runs evaluated concurrently.
+        :param model: Optional theoretical model or ordered list of summed models to fit.
+        :param fit_kwargs: Options passed to :meth:`geoutils.stats.Variogram.fit`.
+        :param random_state: Random generator or seed used to reproduce all runs.
+        :param mask: Boolean raster grid mask, aligned mask raster or vector defining eligible cells.
+        :param pair_sampling_kwargs: Advanced options accepted by :meth:`sample_pairs`.
+        :returns: Empirical lag statistics and optional fitted model metadata.
+        """
+
+        from geoutils.stats.variography import _estimate_variogram
+
+        return _estimate_variogram(
+            self,
+            n_runs=n_runs,
+            n_jobs=n_jobs,
+            estimator=estimator,
+            bins=bins,
+            n_lags=n_lags,
+            min_lag=min_lag,
+            max_lag=max_lag,
+            models=model,
+            fit_kwargs=fit_kwargs,
+            random_state=random_state,
+            pair_kwargs={
+                "band": band,
+                "n_pairs": n_pairs,
+                "sampling": sampling,
+                "min_distance": min_lag,
+                "max_distance": max_lag,
+                "mask": mask,
+                **pair_sampling_kwargs,
+            },
         )

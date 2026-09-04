@@ -17,6 +17,54 @@ from geoutils.multiproc import MultiprocConfig
 from geoutils.raster import get_array_and_mask
 
 
+class TestPatchFilters:
+    """Stacked convolution and finite counts used by empirical patch workflows."""
+
+    @pytest.mark.parametrize("shape", [(3, 3), (4, 4), (3, 4)])
+    def test_stacked_convolution_and_kernel_orientation(self, shape: tuple[int, int]) -> None:
+        """Checks that stacked convolution agrees with SciPy for odd, even and asymmetric kernels."""
+
+        # Use distinct image and kernel values so reversed or transposed kernels give different results
+        images = np.arange(2 * 8 * 9, dtype=float).reshape(2, 8, 9)
+        kernels = np.arange(2 * np.prod(shape), dtype=float).reshape(2, *shape)
+
+        # Compute the reference separately for every image and kernel using SciPy
+        expected = np.array(
+            [
+                [scipy.ndimage.convolve(image, kernel, mode="constant", cval=np.nan) for kernel in kernels]
+                for image in images
+            ]
+        )
+
+        # Check the stack implementation, including NaN padding at image edges
+        actual = gu.filters.convolution(images, kernels)
+        np.testing.assert_allclose(actual, expected, equal_nan=True)
+
+        # Check the optional compiled implementation against the same independent reference
+        if find_spec("numba") is not None:
+            accelerated = gu.filters.convolution(images, kernels, method="numba")
+            np.testing.assert_allclose(accelerated, expected, equal_nan=True)
+
+    @pytest.mark.parametrize("kernel_shape, expected_count", [("square", 25), ("circular", 9)])
+    def test_patch_mean_filter_valid_counts(self, kernel_shape: str, expected_count: int) -> None:
+        """Checks that patch filtering excludes missing values from the mean and reports finite and total counts."""
+
+        # Remove the center of a constant image so the finite window count decreases by exactly one
+        values = np.ones((11, 11), dtype=float)
+        values[5, 5] = np.nan
+
+        # Compute means and counts with each supported kernel shape
+        mean, counts, kernel_count = gu.filters.mean_filter_nan(values, 5, kernel_shape=kernel_shape)
+
+        # Check the full kernel area, remaining finite cells and unchanged mean of one
+        assert kernel_count == expected_count
+        assert counts[5, 5] == expected_count - 1
+        assert mean[5, 5] == 1
+
+        # Windows extending beyond the image retain the existing NaN edge convention
+        assert np.isnan(mean[0, 0])
+
+
 class TestGaussianFilter:
     """Tests for the Gaussian filter applied to raster data."""
 

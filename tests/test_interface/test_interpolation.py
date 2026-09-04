@@ -37,6 +37,48 @@ class TestInterpolate:
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
+    @pytest.mark.parametrize("method", ["nearest", "linear"])
+    @pytest.mark.parametrize("backend", ["numpy", "dask", "multiproc"])
+    def test_interp_points_outer_half_pixels(
+        self, tmp_path: Path, method: Literal["nearest", "linear"], backend: str
+    ) -> None:
+        """
+        Checks that interpolation retains outer half pixels consistently across array, Dask and multiprocessing
+        inputs.
+        """
+
+        # Locate points on all outer half pixels and just beyond the valid support
+        raster = gu.Raster.from_array(np.arange(30.0).reshape(5, 6), Affine(1, 0, 0, 0, -1, 5), 32632)
+        rows = np.array([-0.25, -0.25, 2, 4.25, -0.75, 4.75])
+        columns = np.array([0.25, -0.25, 5.25, 5.25, 0, 0])
+        x, y = raster.ij2xy(rows, columns)
+
+        # The first four points remain inside the pixel footprint; the last two fall outside it
+        expected = np.array([0 if method == "nearest" else 0.25, 0, 17, 29, np.nan, np.nan])
+
+        # Exercise the same boundary rule through eager, chunked and worker dispatch
+        if backend == "dask":
+            pytest.importorskip("dask.array")
+            path = tmp_path / "edge_pixels.tif"
+            raster.to_file(path)
+            lazy = open_raster(str(path), chunks={"x": 3, "y": 2})
+            result = lazy.rst.interp_points((x, y), method=method, as_array=True)
+
+            # Check numerical agreement after computing the result while the source remains lazy
+            assert hasattr(result, "compute")
+            np.testing.assert_allclose(result.compute(), expected, equal_nan=True)
+            assert lazy.data.chunks is not None
+        else:
+            config = MultiprocConfig(chunks=(2, 3)) if backend == "multiproc" else None
+            result = raster.interp_points((x, y), method=method, as_array=True, mp_config=config)
+            np.testing.assert_allclose(result, expected, equal_nan=True)
+
+        # Retain exactly the finite points when interpolation is used to define a common sample
+        points = gu.PointCloud.from_xyz(x, y, np.ones(len(x)), crs=raster.crs)
+        sample = raster.cosample(points, interpolation=method)
+        np.testing.assert_array_equal(sample.indices[0], np.arange(4))
+        np.testing.assert_allclose(sample.self_values, expected[:4])
+
     def test_dist_nodata_spread(self) -> None:
         """Test distance of nodata spreading computation based on interpolation order."""
 
@@ -314,16 +356,10 @@ class TestInterpolate:
             # Check the bilinear interpolation matches the mean value of those 4 points (equivalent as its the middle)
             assert raster_points_in[i] == np.mean([arr[xlow, ylow], arr[xupp, ylow], arr[xupp, yupp], arr[xlow, yupp]])
 
-        # Check bilinear extrapolation for points at 1 spacing outside from the input grid
-        points_out = (
-            [(-1, i) for i in np.arange(1, 4)]
-            + [(i, -1) for i in np.arange(1, 4)]
-            + [(4, i) for i in np.arange(1, 4)]
-            + [(i, 4) for i in np.arange(4, 1)]
-        )
-        points_out_xy = tuple(zip(*points_out))
+        # Select points beyond the outer half pixels for every pixel interpretation
+        points_out_xy = raster.ij2xy([-2, 1, 4, 1], [1, -2, 1, 4], shift_area_or_point=shift_aop)
         with pytest.warns(UserWarning, match="All provided points were outside of raster bounds"):
-            raster_points_out = raster.interp_points(points_out_xy, as_array=True)
+            raster_points_out = raster.interp_points(points_out_xy, shift_area_or_point=shift_aop, as_array=True)
         assert all(~np.isfinite(raster_points_out))
 
         # To use cubic or quintic, we need a larger grid (minimum 6x6, but let's aim bigger with 50x50)
@@ -358,7 +394,7 @@ class TestInterpolate:
             # see https://github.com/GlacioHack/geoutils/issues/533
             assert np.allclose(raster_points_mapcoords, raster_points_interpn)
 
-        # Check that, outside the edge, the interpolation fails and returns a NaN
+        # Nearest and linear include the outer half pixels; splines retain their stricter coordinate bounds
         index_x_edge_rand = [-0.5, -0.5, -0.5, 25, 25, 49.5, 49.5, 49.5]
         index_y_edge_rand = [-0.5, 25, 49.5, -0.5, 49.5, -0.5, 25, 49.5]
 
@@ -383,8 +419,13 @@ class TestInterpolate:
                 as_array=True,
             )
 
-            assert all(~np.isfinite(raster_points_mapcoords_edge))
-            assert all(~np.isfinite(raster_points_interpn_edge))
+            finite = (
+                [True, True, False, True, False, False, False, False]
+                if method in {"nearest", "linear"}
+                else [False] * 8
+            )
+            np.testing.assert_array_equal(np.isfinite(raster_points_mapcoords_edge), finite)
+            np.testing.assert_array_equal(np.isfinite(raster_points_interpn_edge), finite)
 
     @pytest.mark.parametrize("shape", [(3, 7), (7, 3)])  # landscape and portrait exercise different bounds axes
     def test_interp_points__nonsquare(self, shape: tuple[int, int]) -> None:

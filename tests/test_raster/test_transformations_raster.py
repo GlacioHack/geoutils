@@ -22,7 +22,7 @@ from geoutils.raster.raster import _default_nodata
 from geoutils.raster.transformation import (
     _resampling_method_from_str,
 )
-from geoutils.stats.sampling import _subsample_numpy
+from geoutils.sampling.subsampling import _subsample_numpy
 
 DO_PLOT = False
 

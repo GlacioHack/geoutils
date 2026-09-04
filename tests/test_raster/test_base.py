@@ -14,7 +14,15 @@ from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
-from geoutils import PointCloud, Raster, Vector, examples, open_raster
+from geoutils import (
+    CoSampleResult,
+    PointCloud,
+    Raster,
+    Variogram,
+    Vector,
+    examples,
+    open_raster,
+)
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
@@ -69,6 +77,27 @@ def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, 
         df1 = pd.DataFrame(index=[0], data=output1)
         df2 = pd.DataFrame(index=[0], data=output2)
         assert_frame_equal(df1, df2, check_dtype=False)
+
+    # For tabular statistics
+    elif isinstance(output1, pd.DataFrame):
+        assert_frame_equal(output1, output2)
+
+    # For lightweight variogram records
+    elif isinstance(output1, Variogram):
+        assert isinstance(output2, Variogram)
+        assert np.allclose(output1.lags, output2.lags)
+        assert np.allclose(output1.semivariance, output2.semivariance, equal_nan=True)
+        assert np.array_equal(output1.counts, output2.counts)
+        assert output1.model == output2.model
+    # For bounded cosampling results
+    elif isinstance(output1, CoSampleResult):
+        assert isinstance(output2, CoSampleResult)
+        assert np.array_equal(output1.self_values, output2.self_values)
+        assert np.array_equal(output1.other_values, output2.other_values)
+        assert np.array_equal(output1.indices, output2.indices)
+    # For labelled pair samples
+    elif isinstance(output1, xr.Dataset):
+        assert output1.identical(output2)
     # For any other object type
     else:
         assert output1 == output2
@@ -245,10 +274,14 @@ class TestClassVsAccessorConsistency:
         ("to_pointcloud", {"subsample": 1, "random_state": 42}),
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
+        ("cosample", {"other": "self", "subsample": 1_000, "random_state": 42}),
+        ("sample_pairs", {"n_pairs": 1_000, "random_state": 42}),
+        ("variogram", {"n_pairs": 1_000, "n_lags": 6, "random_state": 42}),
         ("filter", {"method": "median", "size": 7}),
         ("sieve", {"size": 7}),
         ("fill_nodata", {"max_search_distance": 3}),
         ("get_stats", {}),
+        ("grouped_stats", {"by": {"group": 1}, "bins": {"group": 2}, "statistics": "mean"}),
         # 2.2. In-place methods
         ("load", {}),
     ]
@@ -272,6 +305,8 @@ class TestClassVsAccessorConsistency:
         # Open both objects
         ds = open_raster(path_raster)
         raster = Raster(path_raster)
+        if method == "variogram":
+            pytest.importorskip("skgstat")
 
         # Sieve follows GDAL and accepts integer categories rather than continuous values
         if method == "sieve":
@@ -313,6 +348,8 @@ class TestClassVsAccessorConsistency:
             )
             args.update({"bbox": bbox})
         elif method in ["raster_equal", "raster_allclose", "georeferenced_grid_equal", "intersection"]:
+            args.update({"other": ds.copy(deep=False)})
+        elif method == "cosample":
             args.update({"other": ds.copy(deep=False)})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
