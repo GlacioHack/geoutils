@@ -206,6 +206,12 @@ class TestClassVsAccessorConsistency:
             assert horizontal.georeferenced_grid_equal(compound)
         with warnings.catch_warnings():
             warnings.simplefilter("error")
+            # Ignore the Affine 3.1 transition warning emitted inside Rioxarray
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Use `@` matmul instead of `\*` mul operator for matrix multiplication",
+                category=PendingDeprecationWarning,
+            )
             assert horizontal.georeferenced_grid_equal(compound, warn_3d_crs=False)
 
         # 3/ Check that missing CRS metadata compares safely
