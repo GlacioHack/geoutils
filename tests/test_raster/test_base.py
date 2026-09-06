@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import geopandas as gpd
@@ -13,6 +14,7 @@ import xarray as xr
 from packaging.version import Version
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
+from pyproj.crs import CompoundCRS
 
 from geoutils import PointCloud, Raster, Vector, examples, open_raster
 from geoutils.raster import MultiprocConfig
@@ -166,6 +168,58 @@ class TestClassVsAccessorConsistency:
     # List of methods that WILL NOT LOAD the output for certain arguments
     # copy(new_array=not None) will load
     methods_output_noload_allowed_args = {"copy": {"deep": [True, False], "new_array": [None]}}
+
+    def test_info__crs_name(self) -> None:
+        """Checks that info reports the CRS name for 2D, compound and missing CRS metadata."""
+
+        # 1/ Define the CRS cases and the small raster shared by both APIs
+        horizontal_crs = CRS.from_epsg(32610)
+        compound_crs = CompoundCRS("Horizontal and vertical test CRS", [horizontal_crs, CRS.from_epsg(5773)])
+        transform = rio.transform.from_origin(0, 2, 1, 1)
+        crs_cases = [
+            (horizontal_crs, "WGS 84 / UTM zone 10N"),
+            (compound_crs, "Horizontal and vertical test CRS"),
+            (None, None),
+        ]
+
+        # 2/ Check that Raster and the Xarray accessor report the same readable name
+        for crs, expected_name in crs_cases:
+            raster = Raster.from_array(np.ones((2, 2)), transform=transform, crs=crs)
+            ds = RasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=crs)
+            expected_line = f"Coordinate system:    {[expected_name]}"
+
+            assert expected_line in raster.info(verbose=False).split("\n")
+            assert expected_line in ds.rst.info(verbose=False).split("\n")
+
+    def test_georeferenced_grid_equal__vertical_and_missing_crs(self) -> None:
+        """Checks that grid equality ignores vertical CRS differences, warns optionally and accepts missing CRS."""
+
+        # 1/ Create matching rasters with horizontal-only and compound CRS metadata
+        horizontal_crs = CRS.from_epsg(32610)
+        compound_crs = CompoundCRS("Horizontal and vertical test CRS", [horizontal_crs, CRS.from_epsg(5773)])
+        transform = rio.transform.from_origin(0, 2, 1, 1)
+        horizontal = Raster.from_array(np.ones((2, 2)), transform=transform, crs=horizontal_crs)
+        compound = RasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=compound_crs)
+
+        # 2/ Check that the vertical difference warns but does not change horizontal grid equality
+        with pytest.warns(UserWarning, match="same 2D CRS but a different vertical CRS"):
+            assert horizontal.georeferenced_grid_equal(compound)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            # Ignore the Affine 3.1 transition warning emitted inside Rioxarray
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Use `@` matmul instead of `\*` mul operator for matrix multiplication",
+                category=PendingDeprecationWarning,
+            )
+            assert horizontal.georeferenced_grid_equal(compound, warn_3d_crs=False)
+
+        # 3/ Check that missing CRS metadata compares safely
+        without_crs = Raster.from_array(np.ones((2, 2)), transform=transform, crs=None)
+        other_without_crs = RasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=None)
+
+        assert without_crs.georeferenced_grid_equal(other_without_crs)
+        assert not horizontal.georeferenced_grid_equal(without_crs)
 
     @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("prop", properties)

@@ -42,7 +42,7 @@ import rasterio as rio
 import xarray as xr
 from affine import Affine
 from packaging.version import Version
-from rasterio.crs import CRS
+from pyproj import CRS
 from rasterio.enums import Resampling
 
 from geoutils import profiler
@@ -725,7 +725,7 @@ class RasterBase(ABC):
             f"Grid size:            {self.width}, {self.height}",
             f"Number of bands:      {self.count}",
             f"Data types:           {self.dtype}",
-            f"Coordinate system:    {[self.crs.to_string() if self.crs is not None else None]}",
+            f"Coordinate system:    {[CRS(self.crs).name if self.crs is not None else None]}",
             f"Nodata value:         {self.nodata}",
             f"Pixel interpretation: {self.area_or_point}",
             "Pixel size:           {}, {}".format(*self.res),
@@ -1055,11 +1055,12 @@ class RasterBase(ABC):
             rtol=rtol,
         )
 
-    def georeferenced_grid_equal(self: RasterType, other: RasterType) -> bool:
+    def georeferenced_grid_equal(self: RasterType, other: RasterType, warn_3d_crs: bool = True) -> bool:
         """
         Check that raster shape, geotransform and CRS are equal.
 
         :param other: Another raster.
+        :param warn_3d_crs: Whether to warn if 3D CRS differs.
 
         :return: Whether the two objects have the same georeferenced grid.
         """
@@ -1074,7 +1075,23 @@ class RasterBase(ABC):
             shape = other.shape
             crs = other.crs
 
-        return all([self.shape == shape, self.transform == transform, self.crs == crs])
+        # Compare horizontal CRS because vertical coordinates do not define the raster grid
+        self_crs = CRS(self.crs) if self.crs is not None else None
+        other_crs = CRS(crs) if crs is not None else None
+        self_crs2d = self_crs.to_2d() if self_crs is not None else None
+        other_crs2d = other_crs.to_2d() if other_crs is not None else None
+
+        same_grid = all([self.shape == shape, self.transform == transform, self_crs2d == other_crs2d])
+
+        # Report a vertical difference without treating it as a different horizontal grid
+        if same_grid and self_crs is not None and other_crs is not None and self_crs != other_crs and warn_3d_crs:
+            warnings.warn(
+                "The two rasters have the same 2D CRS but a different vertical CRS: "
+                f"{self_crs.name} and {other_crs.name}.",
+                category=UserWarning,
+            )
+
+        return same_grid
 
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
