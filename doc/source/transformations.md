@@ -10,7 +10,7 @@ kernelspec:
   language: python
   name: geoutils
 ---
-(geotransformations)=
+(transformations)=
 # Transformations
 
 In GeoUtils, **for all geospatial data objects, georeferenced transformations are exposed through the same functions**

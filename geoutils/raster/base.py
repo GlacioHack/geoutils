@@ -25,7 +25,6 @@ import pathlib
 import struct
 import warnings
 from abc import ABC, abstractmethod
-from functools import partial
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -34,6 +33,7 @@ from typing import (
     Literal,
     TypeVar,
     Union,
+    cast,
     overload,
 )
 
@@ -47,6 +47,7 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
+from geoutils._dispatch import _check_match_grid, is_dask_dataframe
 from geoutils._misc import deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -56,7 +57,9 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-from geoutils.filters import _filter
+from geoutils.filters import _filter, _sieve
+from geoutils.gapfill import _fill_nodata
+from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.interpolation import _interp_points, _reduce_points
 from geoutils.interface.raster_point import (
@@ -81,6 +84,7 @@ from geoutils.raster.referencing import (
     _res,
     _xy2ij,
 )
+from geoutils.raster.testing import _array_equal_or_close
 from geoutils.raster.transformation import _crop, _reproject, _translate
 from geoutils.stats.sampling import _subsample
 from geoutils.stats.stats import _statistics
@@ -89,6 +93,7 @@ from geoutils.stats.stats import _statistics
 RasterType = TypeVar("RasterType", bound="RasterBase")
 # For inputs, we also accept a xr.DataArray
 RasterLike = Union["RasterBase", xr.DataArray]
+_UNSET = object()
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -136,6 +141,44 @@ class RasterBase(ABC):
     def _is_xr(self) -> bool:
         """Whether the underlying object is a Xarray Dataset through accessor, or not."""
         return self._obj is not None
+
+    def _cast_vector_output(self, vector: Any) -> Any:
+        """Return an accessor-backed vector when this raster is accessor-backed."""
+
+        if self._is_xr:
+            return vector.ds
+        return vector
+
+    def _cast_raster_output(self, raster: Any) -> Any:
+        """Return an accessor-backed raster when this raster is accessor-backed."""
+
+        if not self._is_xr or hasattr(raster, "rst"):
+            return raster
+
+        from geoutils.raster.xr_accessor import RasterAccessor, open_raster
+
+        if raster.name is not None and not raster.is_loaded:
+            return open_raster(raster.name, is_mask=raster.is_mask)
+        return RasterAccessor.from_array(
+            data=raster.data,
+            transform=raster.transform,
+            crs=raster.crs,
+            nodata=raster.nodata,
+            area_or_point=raster.area_or_point,
+            tags=raster.tags,
+        )
+
+    def _cast_pointcloud_output(self, pointcloud: Any) -> Any:
+        """Return an accessor-backed point cloud when this raster is accessor-backed."""
+
+        if is_dask_dataframe(pointcloud):
+            return pointcloud
+
+        if self._is_xr:
+            ds = pointcloud.ds
+            ds.attrs["data_column"] = pointcloud.data_column
+            return ds
+        return pointcloud
 
     @property
     @abstractmethod
@@ -462,6 +505,52 @@ class RasterBase(ABC):
             # We perform the shift in place
             self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
 
+    def edit(
+        self: RasterType,
+        *,
+        crs: CRS | int | str | None | object = _UNSET,
+        transform: Affine | tuple[float, ...] | object = _UNSET,
+        nodata: int | float | None | object = _UNSET,
+        tags: dict[str, Any] | None | object = _UNSET,
+        area_or_point: Literal["Area", "Point"] | None | object = _UNSET,
+    ) -> RasterType:
+        """
+        Return a copy with selected raster metadata edited together.
+
+        This groups the core metadata changes provided by :program:`gdal_edit` without changing pixel values or the
+        source raster. Omitting an argument retains its existing value, while explicitly passing ``None`` clears CRS,
+        nodata, tags or pixel interpretation.
+
+        :param crs: New coordinate reference system.
+        :param transform: New affine geotransform.
+        :param nodata: New nodata metadata value without changing pixel values or their mask.
+        :param tags: Metadata tags to update, or ``None`` to clear all tags.
+        :param area_or_point: New pixel interpretation without shifting the geotransform.
+
+        :return: Raster copy with updated metadata.
+        """
+
+        # A shallow copy keeps the unchanged pixel storage unloaded and separates metadata edits
+        raster_copy = self.copy(deep=False)
+        edited = raster_copy.rst if isinstance(raster_copy, xr.DataArray) else raster_copy
+
+        if crs is not _UNSET:
+            edited.set_crs(cast(Any, crs))
+        if transform is not _UNSET:
+            edited.set_transform(cast(Any, transform))
+        if nodata is not _UNSET:
+            edited.set_nodata(cast(int | float | None, nodata), update_array=False, update_mask=False)
+        if tags is not _UNSET:
+            if tags is None:
+                edited.tags = None
+            else:
+                updated_tags = edited.tags.copy()
+                updated_tags.update(cast(dict[str, Any], tags))
+                edited.tags = updated_tags
+        if area_or_point is not _UNSET:
+            edited.set_area_or_point(cast(Literal["Area", "Point"] | None, area_or_point), shift_area_or_point=False)
+        return raster_copy
+
     @abstractmethod
     def _set_area_or_point(self, new_area_or_point: Literal["Area", "Point"] | None) -> None: ...
 
@@ -630,22 +719,22 @@ class RasterBase(ABC):
         :returns: Summary string or None.
         """
         as_str = [
-            f"Driver:               {self.driver} \n",
-            f"Filename:             {self.name} \n",
-            f"Loaded?               {self.is_loaded} \n",
-            f"Grid size:            {self.width}, {self.height}\n",
-            f"Number of bands:      {self.count:d}\n",
-            f"Data types:           {self.dtype}\n",
-            f"Coordinate system:    {[CRS(self.crs).name if self.crs is not None else None]}\n",
-            f"Nodata value:         {self.nodata}\n",
-            f"Pixel interpretation: {self.area_or_point}\n",
-            "Pixel size:           {}, {}\n".format(*self.res),
-            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}\n",
-            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}\n",
+            f"Driver:               {self.driver}",
+            f"Filename:             {self.name}",
+            f"Loaded?               {self.is_loaded}",
+            f"Grid size:            {self.width}, {self.height}",
+            f"Number of bands:      {self.count}",
+            f"Data types:           {self.dtype}",
+            f"Coordinate system:    {[CRS(self.crs).name if self.crs is not None else None]}",
+            f"Nodata value:         {self.nodata}",
+            f"Pixel interpretation: {self.area_or_point}",
+            "Pixel size:           {}, {}".format(*self.res),
+            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}",
+            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}",
         ]
 
         if stats:
-            as_str.append("\nStatistics:\n")
+            as_str.append("\nStatistics:")
             if not self.is_loaded:
                 self.load()
 
@@ -657,51 +746,51 @@ class RasterBase(ABC):
 
                 # Format the stats with aligned names
                 for name, value in statistics.items():
-                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
+                    as_str.append(f"{name.ljust(max_len)}: {value:.2f}")
             else:
                 for b in range(self.count):
                     # try to keep with rasterio convention.
-                    as_str.append(f"Band {b + 1}:\n")
-                    statistics = self.get_stats(band=b)
+                    as_str.append(f"Band {b + 1}:")
+                    statistics = self.get_stats(band=b + 1)
                     if isinstance(statistics, dict):
                         max_len = max(len(name) for name in statistics.keys())
                         for name, value in statistics.items():
-                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}\n")
+                            as_str.append(f"{name.ljust(max_len)}: {value:.2f}")
 
         if verbose:
-            print("".join(as_str))
+            print("\n".join(as_str))
             return None
         else:
-            return "".join(as_str)
+            return "\n".join(as_str)
 
     @overload
     def get_stats(
         self,
         stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any]: ...
+    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
 
     @overload
     def get_stats(
         self,
         stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> dict[str, np.floating[Any]]: ...
+    ) -> dict[str, np.floating[Any]] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
 
-    @profiler.profile("geoutils.raster.raster.get_stats", memprof=True)
+    @profiler.profile("geoutils.raster.base.get_stats", memprof=True)
     def get_stats(
         self,
         stats_name: (
             str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
         ) = None,
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = 1,
+        band: int = None,
         counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any]]:
+    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]:
         """
         Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
         to calculate custom stats.
@@ -727,7 +816,7 @@ class RasterBase(ABC):
         - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
         ignoring masked values.
         - Valid count: number of finite data points in the array. It counts the non-masked elements.
-        - Total count: total size of the raster.
+        - Total count: total size (width x height) of the raster.
         - Percentage valid points: ratio between Valid count and Total count.
 
         For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
@@ -749,12 +838,17 @@ class RasterBase(ABC):
 
         Callable functions are supported as well.
 
-        :param stats_name: Name or list of names of the statistics to retrieve. If None, all statistics are returned.
+        By default and without any specification, this function computes the following main statistics: minimum,
+        maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
+        To compute all available statistics, set `stats_name` to `all`.
+
+        :param stats_name: Name or list of names of the statistics to retrieve. If None, main statistics are returned.
             Accepted names include:
             `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
             `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
             `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
             Custom callables can also be provided.
+            To compute all available statistics, set `stats_name` to `all`.
         :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
         :param band: The index of the band for which to compute statistics. Default is 1.
         :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
@@ -762,38 +856,54 @@ class RasterBase(ABC):
         :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
         """
 
-        # Get data band
-        data = self.data[band - 1, :, :] if self.count > 1 else self.data
+        # Case mono-band
+        if self.count == 1 and band is None:
+            band = 1
 
-        # Derive inlier mask
-        if inlier_mask is not None:
-            valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
-            if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
-                mask = inlier_mask.data
+        if band is not None:
+            # Get data band
+            data = self.data[band - 1, :, :] if self.count > 1 else self.data
+
+            # Derive inlier mask
+            if inlier_mask is not None:
+                valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
+                if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
+                    mask = inlier_mask.data
+                else:
+                    mask = inlier_mask
+                inlier_points = np.count_nonzero(mask)
+
+                rast = self.copy()
+
+                # Mask pixels from the inlier_mask
+                if not np.ma.isMaskedArray(rast.data):
+                    rast[~mask] = np.nan  # type: ignore
+                else:
+                    rast.set_mask(~mask)  # type: ignore
+                return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
+
+            # Given list or all attributes to compute if None
+            if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
+                return _statistics(data, stats_name, counts)  # type: ignore
             else:
-                mask = inlier_mask
-            inlier_points = np.count_nonzero(mask)
-
-            rast = self.copy()
-
-            # Mask pixels from the inlier_mask
-            if not np.ma.isMaskedArray(rast.data):
-                rast[~mask] = np.nan  # type: ignore
-            else:
-                rast.set_mask(~mask)  # type: ignore
-            return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
-
-        # Given list or all attributes to compute if None
-        if isinstance(stats_name, list) or stats_name is None:
-            return _statistics(data, stats_name, counts)  # type: ignore
+                # Single attribute to compute
+                if isinstance(stats_name, str):
+                    return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
+                elif callable(stats_name):
+                    return stats_name(data)  # type: ignore
+                else:
+                    warnings.warn(
+                        "Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning
+                    )
         else:
-            # Single attribute to compute
-            if isinstance(stats_name, str):
-                return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
-            elif callable(stats_name):
-                return stats_name(data)  # type: ignore
-            else:
-                warnings.warn("Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning)
+            # Case multi-band
+            stats = {}
+            for band in range(1, self.count + 1):
+                stats["band " + str(band)] = self.get_stats(
+                    stats_name=stats_name, inlier_mask=inlier_mask, band=band, counts=counts
+                )
+
+            return stats  # type: ignore
 
     def _raster_equal_allclose(
         self,
@@ -852,19 +962,23 @@ class RasterBase(ABC):
             crs = other.rst.crs if isinstance(other, xr.DataArray) else other.crs
             nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
 
-            # Select function
-            if use_allclose:
-                func = partial(np.allclose, atol=atol, rtol=rtol)
-            else:
-                func = np.array_equal  # type: ignore
-
             # Three cases: masked/NaN, NaN/masked or NaN/NaN
             if np.ma.isMaskedArray(self.data):
-                array_eq = func(self.get_nanarray(), other.data, equal_nan=True)
+                left_data = self.get_nanarray()
+                right_data = other.data
             elif np.ma.isMaskedArray(other.data):
-                array_eq = func(self.data, other.get_nanarray(), equal_nan=True)
+                left_data = self.data
+                right_data = other.get_nanarray()
             else:
-                array_eq = func(self.data, other.data, equal_nan=True)
+                left_data = self.data
+                right_data = other.data
+            array_eq = _array_equal_or_close(
+                left_data,
+                right_data,
+                use_allclose=use_allclose,
+                rtol=rtol,
+                atol=atol,
+            )
 
             # Equalities
             names = ["data", "dtype", "transform", "crs", "nodata"]
@@ -880,7 +994,6 @@ class RasterBase(ABC):
 
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
-            print(f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
             warnings.warn(
                 category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
             )
@@ -956,26 +1069,29 @@ class RasterBase(ABC):
         if isinstance(other, xr.DataArray):
             transform = other.rst.transform
             shape = other.rst.shape
-            crs2d = CRS(other.rst.crs).to_2d()
             crs = other.rst.crs
         else:
             transform = other.transform
             shape = other.shape
-            crs2d = CRS(other.crs).to_2d()
             crs = other.crs
 
-        # 2D CRS for self
-        self_crs2d = CRS(self.crs).to_2d()
+        # Compare horizontal CRS because vertical coordinates do not define the raster grid
+        self_crs = CRS(self.crs) if self.crs is not None else None
+        other_crs = CRS(crs) if crs is not None else None
+        self_crs2d = self_crs.to_2d() if self_crs is not None else None
+        other_crs2d = other_crs.to_2d() if other_crs is not None else None
 
-        gge = all([self.shape == shape, self.transform == transform, self_crs2d == crs2d])
+        same_grid = all([self.shape == shape, self.transform == transform, self_crs2d == other_crs2d])
 
-        # The only way they differ is if the vertical CRS is different
-        if gge and crs != self.crs:
-            warnings.warn("The two rasters have the same 2D CRS but a different vertical CRS: "
-                          f"{CRS(self.crs).name} and {CRS(crs).name}.",
-                          category=UserWarning)
+        # Report a vertical difference without treating it as a different horizontal grid
+        if same_grid and self_crs is not None and other_crs is not None and self_crs != other_crs and warn_3d_crs:
+            warnings.warn(
+                "The two rasters have the same 2D CRS but a different vertical CRS: "
+                f"{self_crs.name} and {other_crs.name}.",
+                category=UserWarning,
+            )
 
-        return gge
+        return same_grid
 
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
@@ -1011,11 +1127,12 @@ class RasterBase(ABC):
         # Runtime import for circular safety
         from geoutils.vector import Vector
 
-        return Vector(
-            _get_footprint_projected(
-                bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
-            )
+        footprint = _get_footprint_projected(
+            bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
         )
+        if self._is_xr:
+            return footprint  # type: ignore[return-value]
+        return Vector(footprint)
 
     def get_metric_crs(
         self,
@@ -1034,7 +1151,9 @@ class RasterBase(ABC):
 
         # For universal CRS (UTM or UPS)
         if local_crs_type == "universal":
-            return _get_utm_ups_crs(self.get_footprint_projected(out_crs=self.crs).ds, method=method)
+            footprint = self.get_footprint_projected(out_crs=self.crs)
+            footprint_ds = getattr(footprint, "ds", footprint)
+            return _get_utm_ups_crs(footprint_ds, method=method)
         # For a custom CRS
         else:
             raise NotImplementedError("This is not implemented yet.")
@@ -1116,7 +1235,7 @@ class RasterBase(ABC):
         else:
             return nanarray
 
-    @profiler.profile("geoutils.raster.raster.crop", memprof=True)
+    @profiler.profile("geoutils.raster.base.crop", memprof=True)
     def crop(
         self: RasterType,
         bbox: RasterType | VectorType | list[float] | tuple[float, ...],
@@ -1158,12 +1277,10 @@ class RasterBase(ABC):
 
         # Not in-place
         if self._is_xr:
-            newraster = cropped_arr
-        else:
-            newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
-        return newraster
+            return cast(RasterType, cropped_arr)
+        return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
 
-    @profiler.profile("geoutils.raster.raster.icrop", memprof=True)
+    @profiler.profile("geoutils.raster.base.icrop", memprof=True)
     def icrop(
         self: RasterType,
         bbox: list[int] | tuple[int, ...],
@@ -1198,13 +1315,10 @@ class RasterBase(ABC):
 
         # Not in-place
         if self._is_xr:
-            newraster = cropped_arr
-        else:
-            newraster = self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
+            return cast(RasterType, cropped_arr)
+        return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
 
-        return newraster
-
-    @profiler.profile("geoutils.raster.raster.reproject", memprof=True)
+    @profiler.profile("geoutils.raster.base.reproject", memprof=True)
     def reproject(
         self: RasterType,
         ref: RasterType | str | None = None,
@@ -1214,7 +1328,7 @@ class RasterBase(ABC):
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
-        resampling: Resampling | str = "bilinear",
+        resampling: Resampling | str = None,
         force_source_nodata: int | float | None = None,
         silent: bool = False,
         inplace: bool = False,
@@ -1246,7 +1360,8 @@ class RasterBase(ABC):
         :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
-        :param resampling: A Rasterio resampling method, can be passed as a string.
+        :param resampling: A Rasterio resampling method, can be passed as a string. Defaults to bilinear.
+            Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
@@ -1257,14 +1372,18 @@ class RasterBase(ABC):
         :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
 
         :returns: Reprojected raster.
-
         """
+
+        # If resampling method undefined, default to the global system config
+        if resampling is None:
+            resampling = config["reprojection_method"]
+
         # Reproject
         return_copy, data, transformed, crs, nodata = _reproject(
             source_raster=self,
             ref=ref,
             crs=crs,
-            res=res,
+            res=cast(float | tuple[float, float] | None, res),
             grid_size=grid_size,
             bounds=bounds,
             nodata=nodata,
@@ -1279,12 +1398,10 @@ class RasterBase(ABC):
 
         # If return copy is True (target georeferenced grid was the same as input)
         if return_copy:
-            return self
-
-        # To make MyPy happy without overload for _reproject (as it might re-structured soon anyway)
-        # assert data is not None
-        # assert transformed is not None
-        # assert crs is not None
+            if self._is_xr:
+                return self._obj
+            else:
+                return self
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
@@ -1300,6 +1417,8 @@ class RasterBase(ABC):
                     "accessor or Multiproc config."
                 )
             else:
+                if data is None or transformed is None or crs is None:
+                    raise RuntimeError("Reprojection did not return the expected in-memory output.")
                 # Order is important here, because calling self.data will use nodata to mask the array properly
                 self._crs = crs
                 self._nodata = nodata
@@ -1312,10 +1431,17 @@ class RasterBase(ABC):
 
         # If multiprocessing -> results on disk -> load metadata
         if mp_config:
-            result_raster = self.__class__(mp_config.outfile)
-            return result_raster  # type: ignore
+            if self._is_xr:
+                from geoutils.raster.xr_accessor import open_raster
+
+                result_raster = open_raster(mp_config.outfile, is_mask=self.is_mask)
+            else:
+                result_raster = self.__class__(mp_config.outfile)
+            return self._cast_raster_output(result_raster)  # type: ignore
 
         # Not in-place
+        if data is None or transformed is None or crs is None:
+            raise RuntimeError("Reprojection did not return the expected in-memory output.")
         return self.from_array(
             data=data, transform=transformed, crs=crs, nodata=nodata, area_or_point=self.area_or_point, tags=self.tags
         )
@@ -1457,7 +1583,11 @@ class RasterBase(ABC):
         )
 
     def coords(
-        self, grid: bool = True, shift_area_or_point: bool | None = None, force_offset: str | None = None
+        self,
+        grid: bool = True,
+        shift_area_or_point: bool | None = None,
+        force_offset: str | None = None,
+        crs: CRS | int | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of all pixels in the raster.
@@ -1468,12 +1598,19 @@ class RasterBase(ABC):
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
             any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
+        :param crs: Coordinate reference system in which the coordinates are provided. Defaults to CRS of
+            the input raster.
 
         :returns x,y: Arrays of the (x,y) coordinates.
         """
+        dst_transform = self.transform
+        if crs:
+            _, dst_transform, _ = _check_match_grid(
+                src=self, crs=crs, ref=None, res=None, shape=None, bounds=None, coords=None
+            )
 
         return _coords(
-            transform=self.transform,
+            transform=dst_transform,
             shape=self.shape,
             area_or_point=self.area_or_point,
             grid=grid,
@@ -1500,14 +1637,15 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
         as_array: Literal[False] = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> PointCloud: ...
 
@@ -1515,14 +1653,15 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
         as_array: Literal[True],
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> NDArrayNum: ...
 
@@ -1530,28 +1669,30 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
-    @profiler.profile("geoutils.raster.raster.interp_points", memprof=True)
+    @profiler.profile("geoutils.raster.base.interp_points", memprof=True)
     def interp_points(
         self,
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = "linear",
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int = "half_order_up",
+        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation = "gdal",
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud:
         """
@@ -1572,10 +1713,10 @@ class RasterBase(ABC):
             If points fall outside of image, value returned is nan.
         :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
-            Default is linear.
-        :param dist_nodata_spread: Distance of nodata spreading during interpolation, either half-interpolation order
-            rounded up (default; equivalent to 0 for nearest, 1 for linear methods, 2 for cubic methods and 3 for
-            quintic method), or rounded down, or a fixed integer.
+            Default is linear. Can be configured with the global setting geoutils.config["interpolation_method"].
+        :param dist_nodata_spread: Optional extra distance of nodata spreading, either half-interpolation order rounded
+            up or down, or a fixed integer. Higher-order methods default to
+            geoutils.config["interpolation_dist_nodata_spread"].
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
@@ -1584,11 +1725,18 @@ class RasterBase(ABC):
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+        :param nodata_propagation: How invalid values affect nearest and linear interpolation. ``gdal`` uses finite
+            neighbors but keeps a cell invalid when its nearest source value is invalid, ``ignore`` uses every
+            available finite neighbor and ``propagate`` rejects values influenced by an invalid neighbor.
 
         :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
 
-        return _interp_points(
+        # If interpolation method undefined, default to the global system config
+        if method is None:
+            method = config["interpolation_method"]
+
+        output = _interp_points(
             self,
             points=points,
             method=method,
@@ -1598,8 +1746,12 @@ class RasterBase(ABC):
             shift_area_or_point=shift_area_or_point,
             dist_nodata_spread=dist_nodata_spread,
             mp_config=mp_config,
+            nodata_propagation=nodata_propagation,
             **kwargs,
         )
+        if not as_array and not kwargs.get("return_interpolator", False):
+            return self._cast_pointcloud_output(output)
+        return output
 
     def reduce_points(
         self,
@@ -1638,7 +1790,7 @@ class RasterBase(ABC):
             In addition, if return_window=True, return tuple of (values, arrays).
         """
 
-        return _reduce_points(
+        output = _reduce_points(
             self,
             points=points,
             reducer_function=reducer_function,
@@ -1650,7 +1802,14 @@ class RasterBase(ABC):
             as_array=as_array,
             boundless=boundless,
         )
+        if as_array:
+            return output
+        if return_window:
+            pointcloud, output_window = output
+            return self._cast_pointcloud_output(pointcloud), output_window
+        return self._cast_pointcloud_output(output)
 
+    @profiler.profile("geoutils.raster.base.filter", memprof=True)
     def filter(
         self: RasterType,
         method: str | Callable[..., NDArrayNum],
@@ -1685,7 +1844,7 @@ class RasterBase(ABC):
         if "inplace" in kwargs:
             raise DeprecationWarning("Argument 'inplace' is deprecated, use rst = rst.filter() instead.")
 
-        return _filter(
+        output = _filter(
             source_raster=self,
             method=method,
             size=size,
@@ -1695,6 +1854,61 @@ class RasterBase(ABC):
             outlier_threshold=outlier_threshold,
             **kwargs,
         )
+        return self._cast_raster_output(output)
+
+    @profiler.profile("geoutils.raster.base.sieve", memprof=True)
+    def sieve(
+        self: RasterType,
+        size: int,
+        connectivity: Literal[4, 8] = 4,
+        mask: RasterLike | NDArrayBool | None = None,
+    ) -> RasterType:
+        """
+        Remove connected integer regions smaller than a number of pixels.
+
+        This mirrors :program:`gdal_sieve` for each band. The complete array is processed eagerly because connected
+        regions can cross arbitrary chunk boundaries.
+
+        :param size: Minimum connected-region size in pixels.
+        :param connectivity: Pixel connectivity, either 4 or 8 (defaults to 4).
+        :param mask: Optional Boolean raster or array where ``True`` values can participate in regions.
+
+        :return: Raster copy with small regions replaced by their largest neighboring value.
+        """
+
+        output = _sieve(source_raster=self, size=size, connectivity=connectivity, mask=mask)
+        return self.copy(new_array=output)
+
+    @profiler.profile("geoutils.raster.base.fill_nodata", memprof=True)
+    def fill_nodata(
+        self: RasterType,
+        max_search_distance: float = 100.0,
+        smoothing_iterations: int = 0,
+        interpolation: Literal["inv_dist", "nearest"] = "inv_dist",
+        mask: RasterLike | NDArrayBool | None = None,
+    ) -> RasterType:
+        """
+        Fill nodata cells from nearby finite values.
+
+        This mirrors :program:`gdal_fillnodata` for each band. Cells beyond the search distance remain nodata, and the
+        complete array is processed eagerly so interpolation can reach across chunk boundaries.
+
+        :param max_search_distance: Maximum search distance in pixels (defaults to 100).
+        :param smoothing_iterations: Number of 3 by 3 smoothing passes after filling (defaults to 0).
+        :param interpolation: ``inv_dist`` for inverse-distance weighting or ``nearest`` (defaults to ``inv_dist``).
+        :param mask: Optional Boolean raster or array where ``True`` values can provide interpolation values.
+
+        :return: Raster copy with reachable nodata cells filled.
+        """
+
+        output = _fill_nodata(
+            source_raster=self,
+            max_search_distance=max_search_distance,
+            smoothing_iterations=smoothing_iterations,
+            interpolation=interpolation,
+            mask=mask,
+        )
+        return self.copy(new_array=output)
 
     @deprecate(
         Version("0.3.0"),
@@ -1807,7 +2021,7 @@ class RasterBase(ABC):
         :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
-        return _raster_to_pointcloud(
+        output = _raster_to_pointcloud(
             source_raster=self,
             data_column_name=data_column_name,
             data_band=data_band,
@@ -1819,6 +2033,9 @@ class RasterBase(ABC):
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
         )
+        if as_array:
+            return output
+        return self._cast_pointcloud_output(output)
 
     @classmethod
     def from_pointcloud_regular(
@@ -1860,6 +2077,7 @@ class RasterBase(ABC):
 
         return cls.from_array(data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point)
 
+    @profiler.profile("geoutils.raster.base.polygonize", memprof=True)
     def polygonize(
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
@@ -1880,7 +2098,7 @@ class RasterBase(ABC):
         :returns: Vector containing the polygonized geometries associated to target values.
         """
 
-        return _polygonize(
+        vector = _polygonize(
             source_raster=self,
             target_values=target_values,
             connectivity=connectivity,
@@ -1889,6 +2107,7 @@ class RasterBase(ABC):
             strategy=strategy,
             mp_config=mp_config,
         )
+        return self._cast_vector_output(vector)
 
     def proximity(
         self,
@@ -1973,7 +2192,7 @@ class RasterBase(ABC):
         mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
-    @profiler.profile("geoutils.raster.raster.subsample", memprof=True)
+    @profiler.profile("geoutils.raster.base.subsample", memprof=True)
     def subsample(
         self,
         subsample: float | int,

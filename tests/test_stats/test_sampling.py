@@ -149,7 +149,7 @@ class TestSubsampleChunked:
 
         # 2/ Run subsample across backends (fixed seed for determinism)
         seed = 42
-        mp_config = MultiprocConfig(chunk_size=10)
+        mp_config = MultiprocConfig(chunks=(10, 7))
 
         # NumPy backend via Raster
         out_raster = raster_base.subsample(

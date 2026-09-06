@@ -31,7 +31,6 @@ from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
 from geoutils.raster.array import get_array_and_mask
 from geoutils.raster.raster import Raster, _default_nodata
-from geoutils.raster.transformation import _resampling_method_from_str
 
 
 def load_multiple_rasters(
@@ -128,7 +127,7 @@ def load_multiple_rasters(
 def stack_rasters(
     rasters: list[Raster],
     reference: int | Raster = 0,
-    resampling_method: str | rio.enums.Resampling = "bilinear",
+    resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
     diff: bool = False,
     progress: bool = True,
@@ -157,9 +156,6 @@ def stack_rasters(
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
-    # Check resampling method
-    if isinstance(resampling_method, str):
-        resampling_method = _resampling_method_from_str(resampling_method)
 
     # Check raster has a single band
     if any(r.count > 1 for r in rasters):
@@ -252,7 +248,7 @@ def merge_rasters(
     rasters: list[Raster],
     reference: int | Raster = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
-    resampling_method: str | rio.enums.Resampling = "bilinear",
+    resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
     progress: bool = True,
 ) -> Raster:

@@ -10,7 +10,7 @@ kernelspec:
   language: python
   name: geoutils
 ---
-(georeferencing)=
+(referencing)=
 # Referencing
 
 Below, a summary of the **georeferencing attributes** of geospatial data objects and the **methods to manipulate these

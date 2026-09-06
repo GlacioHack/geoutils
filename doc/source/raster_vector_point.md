@@ -279,7 +279,7 @@ plt.tight_layout()
 ### Point gridding
 
 Gridding of a point cloud **consists in estimating the values at 2D regular gridded coordinates based on an irregular point cloud** using Delauney triangular
-interpolation (default), inverse-distance weighting or kriging.
+interpolation (default), inverse-distance weighting or circular statistics.
 
 ```{note}
 For gridding, GeoUtils introduces nodata values in distances surrounding initial point coordinates, defaulting to a distance of 1 pixel.

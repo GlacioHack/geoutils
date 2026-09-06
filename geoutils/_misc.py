@@ -81,6 +81,45 @@ def import_optional(import_name: str, package_name: str | None = None, extra_nam
         ) from e
 
 
+def _prepare_benchmark_process(cachemax_mb: int) -> None:
+    """Load scalable operation modules and configure GDAL in one benchmark worker."""
+
+    # Import the operation modules outside measured calls for a repeatable memory baseline
+    import rasterio as rio
+
+    from geoutils import filters
+    from geoutils.interface import gridding, interpolation, rasterization, vectorization
+    from geoutils.raster import xr_accessor
+
+    # Keep references explicit so static checks recognize the intentional warm-up imports
+    _ = filters, gridding, interpolation, rasterization, vectorization, xr_accessor
+    rio.env.set_gdal_config("GDAL_CACHEMAX", cachemax_mb)
+    _trim_process_memory()
+
+
+def _get_process_mem_mb() -> float:
+    """Return resident memory for the process executing this worker callback."""
+
+    # Import psutil only for profiling and benchmark environments that request it
+    psutil = import_optional("psutil")
+    return float(psutil.Process().memory_info().rss / 1_000_000)
+
+
+def _trim_process_memory() -> None:
+    """Release unused Python and native allocations when the platform supports it."""
+
+    # Keep platform-specific modules local because this helper can run in remote workers
+    import ctypes
+    import gc
+
+    gc.collect()
+    try:
+        malloc_trim = ctypes.CDLL(None).malloc_trim
+    except (AttributeError, OSError):
+        return
+    malloc_trim(0)
+
+
 def deprecate(removal_version: Version | None = None, details: str | None = None):  # type: ignore
     """
     Trigger a DeprecationWarning for the decorated function.

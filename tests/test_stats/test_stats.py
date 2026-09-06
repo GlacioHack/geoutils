@@ -11,46 +11,25 @@ import rasterio as rio
 import geoutils as gu
 from geoutils import examples
 from geoutils._typing import NDArrayNum
-
-expected_stats = [
-    "Mean",
-    "Median",
-    "Max",
-    "Min",
-    "Sum",
-    "Sum of squares",
-    "90th percentile",
-    "IQR",
-    "LE90",
-    "NMAD",
-    "RMSE",
-    "Standard deviation",
-]
-
-expected_stats_count = [
-    "Valid count",
-    "Total count",
-    "Percentage valid points",
-]
-
-expected_stats_mask = [
-    "Valid inlier count",
-    "Total inlier count",
-    "Percentage inlier points",
-    "Percentage valid inlier points",
-]
+from geoutils.stats.stats import (
+    _STATS_ALIAS_ALL,
+    _STATS_ALIAS_CALLABLE,
+    _STATS_ALIAS_GEN,
+    _STATS_ALIAS_MASK,
+    _STATS_LIST_MIN,
+)
 
 stat_types = (int, float, np.integer, np.floating)
 
 
 def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
-    assert len(dict1.keys()) == len(dict1.keys())
+    assert dict1.keys() == dict2.keys()
     for key in dict1.keys():
         assert key in dict2
         if dict1[key] is not np.nan:
             assert dict2[key] == pytest.approx(dict1[key], abs=1e-10)
         else:
-            assert dict2[key] is np.nan
+            assert isnan(dict2[key])
 
 
 class TestStats:
@@ -58,42 +37,84 @@ class TestStats:
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
-    def test_get_stats_raster(self, example: str) -> None:
+    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
+    def test_get_stats_raster_one_band(self, example: str) -> None:
         """
         Verify get_stats() method for a raster, especially output stats for different inputs
         parameters and some stats.
         """
         raster = gu.Raster(example)
 
-        # Full stats
+        # Default stats
         stats = raster.get_stats()
-        assert len(stats) == len(expected_stats + expected_stats_count)
-        for name in expected_stats + expected_stats_count:
+        assert len(stats) == len(_STATS_LIST_MIN)
+        assert list(stats.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_LIST_MIN]
+        for name in _STATS_LIST_MIN:
+            assert _STATS_ALIAS_ALL[name] in stats
+            assert isinstance(stats.get(_STATS_ALIAS_ALL[name]), stat_types)
+
+        # Full stats
+        stats = raster.get_stats("all")
+        assert len(stats) == len(_STATS_ALIAS_GEN)
+        for name in _STATS_ALIAS_GEN.values():
             assert name in stats
             assert isinstance(stats.get(name), stat_types)
 
         # With mask (inlier=True)
         inlier_mask = ~raster.get_mask()
-        stats_masked = raster.get_stats(inlier_mask=inlier_mask)
-        assert len(stats_masked) == len(expected_stats + expected_stats_count + expected_stats_mask)
-        for name in expected_stats_mask:
+        stats_masked = raster.get_stats("all", inlier_mask=inlier_mask)
+        assert len(stats_masked) == len(_STATS_ALIAS_ALL)
+        assert list(stats_masked.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_ALIAS_ALL]
+        for name in _STATS_ALIAS_MASK.values():
             assert name in stats_masked
             stats_masked.pop(name)
         assert stats_masked == stats
+
+        # Print of the values
+        stats = raster.get_stats("all", inlier_mask=inlier_mask)
+        for stat in stats:
+            assert not isinstance(stat, np.generic)
+        for stat in _STATS_ALIAS_ALL:
+            assert not isinstance(raster.get_stats(stat, inlier_mask=inlier_mask), np.generic)
+
+        # With mask (inlier=True) and default list
+        stats_masked = raster.get_stats(inlier_mask=inlier_mask)
+        assert len(stats_masked) == len(_STATS_LIST_MIN)
+        assert list(stats_masked.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_LIST_MIN]
+        for name in _STATS_LIST_MIN:
+            assert _STATS_ALIAS_ALL[name] in stats_masked
+
+        # Test case sensitive + space/underscore possibilities
+        stats_masked = raster.get_stats(inlier_mask=inlier_mask)
+        name = "Standard deviation"
+        assert stats_masked["Standard deviation"] == raster.get_stats(
+            stats_name="standard deviation", inlier_mask=inlier_mask
+        )
+        assert stats_masked["Standard deviation"] == raster.get_stats(
+            stats_name="standarddeviation", inlier_mask=inlier_mask
+        )
+        assert stats_masked["Standard deviation"] == raster.get_stats(
+            stats_name="standard_deviation", inlier_mask=inlier_mask
+        )
+        assert stats_masked[name] == raster.get_stats(stats_name="standard_deviation", inlier_mask=inlier_mask)
 
         # Empty mask (=False)
         empty_mask = np.zeros_like(inlier_mask)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
-            stats_masked = raster.get_stats(inlier_mask=empty_mask)
-        assert len(stats_masked) == len(expected_stats + expected_stats_count + expected_stats_mask)
-        for name in expected_stats:
+            stats_masked = raster.get_stats("all", inlier_mask=empty_mask)
+        assert len(stats_masked) == len(_STATS_ALIAS_ALL)
+        for name in _STATS_ALIAS_CALLABLE.values():
             assert np.isnan(stats_masked.get(name))
 
         assert stats_masked.get("Valid count") == stats.get("Valid count")
         assert stats_masked.get("Total count") == stats.get("Total count")
         assert stats_masked.get("Percentage valid points") == stats.get("Percentage valid points")
+
+        for stat in _STATS_ALIAS_ALL:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
+                stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name=stat)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
@@ -109,8 +130,10 @@ class TestStats:
         assert stats_masked == 0
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
-            stats_masked = raster.get_stats(inlier_mask=empty_mask, stats_name="validinliercount")
-        assert stats_masked == 0
+            stats_masked = raster.get_stats("all", inlier_mask=inlier_mask)
+            for name in stats_masked:
+                assert stats_masked[name] == raster.get_stats(stats_name=name.lower(), inlier_mask=inlier_mask)
+                assert stats_masked[name] == raster.get_stats(stats_name="".join(name.split()), inlier_mask=inlier_mask)
 
         # Empty DEM
         dem_empty = gu.Raster.from_array(
@@ -120,18 +143,21 @@ class TestStats:
         )
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
-            stats_empty = dem_empty.get_stats()
-        assert len(stats_empty) == len(expected_stats + expected_stats_count)
-        for name in expected_stats:
+            stats_empty = dem_empty.get_stats("all")
+        assert len(stats_empty) == len(_STATS_ALIAS_GEN)
+        for name in _STATS_ALIAS_CALLABLE.values():
             assert np.isnan(stats_empty.get(name))
         assert stats_empty.get("Valid count") == 0
         assert stats_empty.get("Total count") == 0
         assert isnan(stats_empty.get("Percentage valid points"))
 
         # Single stat
-        for name in expected_stats + expected_stats_count:
+        for name in _STATS_ALIAS_GEN:
             stat = raster.get_stats(stats_name=name)
             assert np.isfinite(stat)
+        for name in _STATS_ALIAS_MASK:
+            stat = raster.get_stats(stats_name=name)
+            assert np.isnan(stat)
 
         # Alias stat
         assert raster.get_stats(stats_name="Valid count") == raster.get_stats(stats_name="valid_count")
@@ -174,6 +200,19 @@ class TestStats:
             np.nanpercentile(nan_arr, 75) - np.nanpercentile(nan_arr, 25)
         )
 
+    @pytest.mark.parametrize("example", [landsat_rgb_path])
+    def test_get_stats_multi_bands(self, example: str) -> None:
+        raster = gu.Raster(example)
+        stats = raster.get_stats()
+        assert list(stats.keys()) == ["band 1", "band 2", "band 3"]
+        data = raster.get_nanarray()
+        for band in range(1, raster.count + 1):
+            assert stats["band " + str(band)]["Mean"] == pytest.approx(np.nanmean(data[band - 1]))
+
+        stats = raster.get_stats("mean")
+        for band in range(1, raster.count + 1):
+            assert stats["band " + str(band)] == pytest.approx(np.nanmean(data[band - 1]))
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_get_stats_raster_pointcloud(self, example: str) -> None:
         """
@@ -181,18 +220,38 @@ class TestStats:
         parameters.
         """
         raster = gu.Raster(example)
+        pointcloud = raster.to_pointcloud()
+
+        # Default stats
+        stats = pointcloud.get_stats()
+        assert len(stats) == len(_STATS_LIST_MIN)
+        assert list(stats.keys()) == [_STATS_ALIAS_ALL[key] for key in _STATS_LIST_MIN]
+        for name in _STATS_LIST_MIN:
+            assert _STATS_ALIAS_ALL[name] in stats
+            assert isinstance(stats.get(_STATS_ALIAS_GEN[name]), stat_types)
 
         # Full stats
-        stats = raster.to_pointcloud().get_stats()
-        assert len(stats) == len(expected_stats + expected_stats_count)
-        for name in expected_stats + expected_stats_count:
+        stats = pointcloud.get_stats("all")
+        assert len(stats) == len(_STATS_ALIAS_GEN)
+        assert list(stats.keys()) == [_STATS_ALIAS_GEN[key] for key in _STATS_ALIAS_GEN]
+        for name in _STATS_ALIAS_GEN.values():
             assert name in stats
             assert isinstance(stats.get(name), stat_types)
 
         # Single stat
-        for name in expected_stats + expected_stats_count:
-            stat = raster.to_pointcloud().get_stats(stats_name=name)
+        for name in _STATS_ALIAS_GEN:
+            stat = pointcloud.get_stats(stats_name=name)
             assert np.isfinite(stat)
+        for name in _STATS_ALIAS_MASK:
+            stat = pointcloud.get_stats(stats_name=name)
+            assert np.isnan(stat)
+
+        # Print of the values
+        stats = pointcloud.get_stats("all")
+        for stat in stats:
+            assert not isinstance(stat, np.generic)
+        for stat in _STATS_ALIAS_ALL:
+            assert not isinstance(pointcloud.get_stats(stat), np.generic)
 
         # Callable
         def percentile_95(data: NDArrayNum) -> np.floating[Any]:
@@ -202,7 +261,7 @@ class TestStats:
 
         # Selected stats and callable
         stats_name = ["mean", "max", "std", "percentile_95"]
-        stats = raster.to_pointcloud().get_stats(stats_name=["mean", "max", "std", percentile_95])
+        stats = pointcloud.get_stats(stats_name=["mean", "max", "std", percentile_95])
         assert len(stats) == len(stats_name)
         for name in stats_name:
             assert name in stats
@@ -211,23 +270,26 @@ class TestStats:
         # Non-existing stats
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Statistic name 80 percentile is not recognized")
-            stat = raster.get_stats(stats_name="80 percentile")
-            assert isnan(stat)
+            stat = pointcloud.get_stats(stats_name="80 percentile")
+        assert isnan(stat)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Statistic name 42 is a not recognized string")
-            stat = raster.get_stats(stats_name=42)
-            assert stat is None
+            stat = pointcloud.get_stats(stats_name=42)
+        assert stat is None
 
         # Empty mask (=False)
         inlier_mask = ~raster.get_mask()
+        inlier_mask = ~raster.get_mask()
         empty_mask = np.zeros_like(inlier_mask)
         raster.set_mask(~empty_mask)
+        pointcloud = raster.to_pointcloud()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Empty raster")
-            stats_masked = raster.to_pointcloud().get_stats()
-        assert len(stats_masked) == len(expected_stats + expected_stats_count)
-        for name in expected_stats:
+            stats_masked = pointcloud.get_stats("all")
+        assert len(stats_masked) == len(_STATS_ALIAS_GEN)
+        for name in _STATS_ALIAS_CALLABLE.values():
+
             assert np.isnan(stats_masked.get(name))
         assert stats_masked.get("Valid count") == 0
         assert stats_masked.get("Total count") == 0
@@ -261,7 +323,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(100.0),
         }
-        compare_dict(res_stats, rast.get_stats())
+        compare_dict(res_stats, rast.get_stats("all"))
 
         # Verify raster stats with a mask
         res_stats_mask = {
@@ -285,7 +347,7 @@ class TestStats:
             "Percentage inlier points": np.float64(46.03015267175572),
             "Percentage valid inlier points": np.float64(100.0),
         }
-        compare_dict(res_stats_mask, rast.get_stats(inlier_mask=inlier_mask))
+        compare_dict(res_stats_mask, rast.get_stats("all", inlier_mask=inlier_mask))
 
         # Verify cropped raster
         nrows, ncols = rast.shape
@@ -307,7 +369,7 @@ class TestStats:
             "Total count": 273000,
             "Percentage valid points": np.float64(100.0),
         }
-        compare_dict(res_stats_crop, rast_crop.get_stats())
+        compare_dict(res_stats_crop, rast_crop.get_stats("all"))
 
         # Verify reprojected raster
         with warnings.catch_warnings():
@@ -331,7 +393,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(40.36774809160305),
         }
-        compare_dict(res_stats_crop_proj, rast_crop_proj.get_stats())
+        compare_dict(res_stats_crop_proj, rast_crop_proj.get_stats("all"))
 
         # Verify stats of a masked raster
         rast.set_mask(inlier_mask)
@@ -352,7 +414,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(53.96984732824428),
         }
-        compare_dict(stats_masked_rast, rast.get_stats())
+        compare_dict(stats_masked_rast, rast.get_stats("all"))
 
         # Verify stats of a masked raster with the other part covered by the inler_mask (=> empty raster)
         stats_masked_rast_masked = {
@@ -378,7 +440,7 @@ class TestStats:
         }
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
-            compare_dict(stats_masked_rast_masked, rast.get_stats(inlier_mask=inlier_mask))
+            compare_dict(stats_masked_rast_masked, rast.get_stats("all", inlier_mask=inlier_mask))
 
     def test_pointcloud_get_stats_values(self) -> None:
         """
@@ -407,7 +469,7 @@ class TestStats:
             "Total count": 524000,
             "Percentage valid points": np.float64(100.0),
         }
-        compare_dict(rast_stats_pc, rast_pc.get_stats())
+        compare_dict(rast_stats_pc, rast_pc.get_stats("all"))
 
         # Verify cropped raster pc
         nrows, ncols = rast.shape
@@ -431,18 +493,13 @@ class TestStats:
             "Total count": 273000,
             "Percentage valid points": np.float64(100.0),
         }
-        compare_dict(rast_stats_crop_pc, rast_crop_pc.get_stats())
+        compare_dict(rast_stats_crop_pc, rast_crop_pc.get_stats("all"))
 
         # Verify reprojected raster pc
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, message="New nodata.*")
             rast_crop.set_nodata(255)  # Needs to be defined for reprojection
         rast_crop_proj = rast_crop.reproject(rast, resampling=rio.warp.Resampling.nearest)
-        for data in [rast_crop_proj, rast_crop, rast]:
-            print(
-                "# data shape:", data.shape, data.shape[0] * rast_crop.shape[1], "->", len(data.to_pointcloud()["b1"])
-            )
-            print("    ", data.to_pointcloud()["b1"].min(), "to", data.to_pointcloud()["b1"].max())
         rast_crop_proj_pc = rast_crop_proj.to_pointcloud()
 
         rast_stats_crop_proj_pc = {
@@ -462,4 +519,4 @@ class TestStats:
             "Total count": 211527,
             "Percentage valid points": np.float64(100.0),
         }
-        compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.get_stats())
+        compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.get_stats("all"))

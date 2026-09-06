@@ -1,0 +1,100 @@
+# This workflow runs the full benchmark on the latest main branch commit, then pushes the raw ASV results
+# on an "asv-results" branch
+# This roughly follows the workflow used by pandas:
+# https://github.com/pandas-dev/asv-runner/blob/main/.github/workflows/run_asvs_2026_01_04.yaml
+# ASV command reference: https://asv.readthedocs.io/en/stable/commands.html
+
+name: benchmark-asv
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Only one run may update the shared result history at a time
+  group: benchmark-asv-results
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      # Scheduled and manual runs use trusted code from main and update only the result branch
+      contents: write
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # ASV reads Git history to associate measurements with commits
+          ref: main
+          fetch-depth: 0
+
+      - name: Initiate empty environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          use-mamba: true
+          channel-priority: strict
+          activate-environment: geoutils-dev
+
+      - name: Install benchmark environment
+        run: |
+          mamba install pyyaml python=3.12
+          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3" environment.yml
+          mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
+          pip install -e .[benchmark]
+
+      # ASV keeps results from different processor models in separate histories
+      - name: Configure comparable CI machine metadata
+        run: |
+          cpu_model="$(awk -F ': ' '/model name/{print $2; exit}' /proc/cpuinfo)"
+          cpu_key="$(printf '%s' "$cpu_model" | sha256sum | cut -c1-8)"
+          echo "ASV_MACHINE_NAME=github-actions-${RUNNER_ARCH,,}-$cpu_key" >> "$GITHUB_ENV"
+          echo "ASV_COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          asv machine --yes --machine "github-actions-${RUNNER_ARCH,,}-$cpu_key"
+
+      - name: Restore saved ASV history
+        run: |
+          # Raw measurements stay outside main but remain durable between CI runs
+          mkdir -p benchmarks/results/asv/results
+          if git fetch origin refs/heads/asv-results:refs/remotes/origin/asv-results; then
+            git archive refs/remotes/origin/asv-results | tar -x -C benchmarks/results/asv/results
+          fi
+
+      - name: Run repeatable ASV benchmarks
+        run: |
+          asv run --show-stderr --record-samples -E existing \
+            --machine "$ASV_MACHINE_NAME" --set-commit-hash "$ASV_COMMIT_SHA"
+
+      - name: Store ASV history on its own data branch
+        env:
+          HISTORY_DIRECTORY: ${{ runner.temp }}/asv-history
+          RESULTS_DIRECTORY: benchmarks/results/asv/results
+        run: |
+          # Reuse the data branch when it exists, or initialize it without files from main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin refs/heads/asv-results:refs/remotes/origin/asv-results; then
+            git worktree add --detach "$HISTORY_DIRECTORY" refs/remotes/origin/asv-results
+          else
+            git worktree add --detach "$HISTORY_DIRECTORY"
+            git -C "$HISTORY_DIRECTORY" switch --orphan asv-results
+          fi
+
+          # Replace the stored files with the restored history plus this run
+          git -C "$HISTORY_DIRECTORY" rm -r --ignore-unmatch .
+          cp -a "$RESULTS_DIRECTORY"/. "$HISTORY_DIRECTORY"/
+          git -C "$HISTORY_DIRECTORY" add -A
+          if git -C "$HISTORY_DIRECTORY" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "$HISTORY_DIRECTORY" commit -m "BENCH: Store ASV results for $ASV_COMMIT_SHA"
+          git -C "$HISTORY_DIRECTORY" push origin HEAD:asv-results

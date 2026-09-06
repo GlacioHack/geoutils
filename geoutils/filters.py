@@ -31,13 +31,15 @@ import numpy as np
 import scipy
 import scipy.ndimage
 from packaging.version import Version
+from rasterio.features import sieve as rio_sieve
 
 from geoutils._misc import import_optional
-from geoutils._typing import NDArrayNum
-from geoutils.multiproc import MultiprocConfig, map_overlap_multiproc_save
+from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.multiproc import MultiprocConfig, map_overlap
+from geoutils.raster.array import _as_bands, _masked_raster_data, _processing_mask
 
 if TYPE_CHECKING:
-    from geoutils.raster.base import RasterBase
+    from geoutils.raster.base import RasterBase, RasterLike
     from geoutils.raster.raster import Raster
 
 if Version(scipy.__version__) > Version("1.16.0"):
@@ -69,6 +71,42 @@ try:
     import dask.array as da
 except Exception:  # keep optional at import time
     da = None  # type: ignore
+
+
+def _sieve(
+    source_raster: RasterLike,
+    size: int,
+    connectivity: Literal[4, 8] = 4,
+    mask: RasterLike | NDArrayBool | None = None,
+) -> NDArrayNum | MArrayNum:
+    """Remove connected integer regions smaller than a pixel count from every band."""
+
+    if isinstance(size, bool) or not isinstance(size, (int, np.integer)) or size < 1:
+        raise ValueError("Argument 'size' must be a strictly positive integer.")
+    if connectivity not in (4, 8):
+        raise ValueError("Argument 'connectivity' must be 4 or 8.")
+
+    # Rasterio delegates connected-region filtering to GDAL and accepts integer values only
+    source = _masked_raster_data(source_raster)
+    if not (np.issubdtype(source.dtype, np.integer) or np.issubdtype(source.dtype, np.bool_)):
+        raise ValueError("Sieve requires an integer or Boolean raster.")
+    bands, squeeze = _as_bands(source)
+    requested_mask = _processing_mask(mask, source.shape)
+    output = np.ma.empty(bands.shape, dtype=source.dtype)
+
+    # Each band retains its own nodata mask while using the same optional spatial mask
+    for band_index, band in enumerate(bands):
+        source_valid = ~np.ma.getmaskarray(band)
+        valid = source_valid & requested_mask
+        values = np.asarray(band.data)
+        sieved = rio_sieve(values, size=int(size), mask=valid.astype(np.uint8), connectivity=connectivity)
+        output[band_index] = np.ma.array(sieved, mask=~source_valid)
+
+    result = output[0] if squeeze else output
+    if np.ma.getmaskarray(result).any():
+        # NaN keeps masked integer output consistent between Raster and Xarray representations
+        return result.astype(np.result_type(result.dtype, np.float32)).filled(np.nan)
+    return np.asarray(result)
 
 
 def _overlap_depth_for_filter(method: str | Callable[..., NDArrayNum], size: int, **kwargs: Any) -> int:
@@ -208,15 +246,22 @@ def _multiproc_filter(
     # Get depth of overlap
     depth = _overlap_depth_for_filter(method, size=size, **kwargs)
 
-    # Block function to pass
-    def filter_block(block: Raster) -> Raster:
-        """Block function for multiprocessing."""
-        nan_block = block.get_nanarray()
-        filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
-        return block.copy(new_array=filtered_block)
-
     # Call Multiprocessing map_overlap
-    return map_overlap_multiproc_save(filter_block, rst, mp_config, depth=depth)
+    return map_overlap(_multiproc_filter_block, rst, mp_config, method, size, kwargs, depth=depth)
+
+
+def _multiproc_filter_block(
+    block: Raster,
+    method: str | Callable[..., NDArrayNum],
+    size: int,
+    kwargs: dict[str, Any],
+) -> Raster:
+    """Filter one raster block in a serializable multiprocessing task."""
+
+    # Convert masked values to NaNs before applying the common filter implementation
+    nan_block = block.get_nanarray()
+    filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
+    return block.copy(new_array=filtered_block)
 
 
 def _filter(

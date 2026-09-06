@@ -1,0 +1,78 @@
+# This workflow runs large data tests checking out-of-core Dask/MP behaviour on a single OS/python version to limit computing cost
+
+name: large-data-pytest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer commit makes an unfinished large data run for the same branch unnecessary
+  group: test-large-data-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  GEOUTILS_LARGE_DATA_SHAPE: "12288"
+  GEOUTILS_LARGE_DATA_CHUNKS: "1024"
+  GEOUTILS_LARGE_DATA_MEMORY_LIMIT: "512MB"
+
+jobs:
+  test:
+    name: ubuntu, python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Use the same Conda setup and monthly cache as the regular Pytest workflow
+      - name: Initiate empty environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          use-mamba: true
+          channel-priority: strict
+          activate-environment: geoutils-dev
+
+      - name: Get month for resetting cache
+        run: echo "cache_date=$(/bin/date -u '+%Y%m')" >> "$GITHUB_ENV"
+
+      - name: Cache Conda environment
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CONDA }}/envs
+          key: conda-${{ runner.os }}-${{ env.PYTHON_VERSION }}-large-data-${{ env.cache_date }}-${{ hashFiles('environment.yml', 'setup.cfg') }}-${{ env.CACHE_NUMBER }}
+        env:
+          # Increase this value to replace the cache without changing dependencies
+          CACHE_NUMBER: 0
+
+      - name: Install base environment with a fixed Python version
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mamba install pyyaml python=${{ env.PYTHON_VERSION }}
+          python .github/scripts/generate_yml_env_fixed_py.py \
+            --pyv ${{ env.PYTHON_VERSION }} --add "gdal<3.13.3" environment.yml
+          mamba env update -n geoutils-dev -f environment-ci-py${{ env.PYTHON_VERSION }}.yml
+
+      - name: Install GeoUtils and test dependencies
+        run: pip install -e .[test,benchmark]
+
+      - name: Run large data tests
+        # Keep benchmarks importable without collecting unrelated test modules in this memory-intensive job
+        env:
+          # Each Pytest worker owns one single-threaded backend case
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: python -m pytest benchmarks/test_large_data.py --large-data -m large_data -n 4 --dist load --durations=20 -ra

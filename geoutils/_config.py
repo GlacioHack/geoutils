@@ -24,6 +24,8 @@ import configparser
 import os
 from typing import Any
 
+from rasterio.enums import Resampling
+
 # The setup is inspired by that of Matplotlib and Geowombat
 # https://github.com/matplotlib/matplotlib/blob/main/lib/matplotlib/rcsetup.py
 # https://github.com/jgrss/geowombat/blob/main/src/geowombat/config.py
@@ -45,10 +47,49 @@ def validate_bool(b: bool | str | int) -> bool:
         raise ValueError(f"Cannot convert {b!r} to bool")
 
 
+def validate_reprojection_method(reprojection_method: bool | str | int) -> str:
+    """Test reprojection_method"""
+    if isinstance(reprojection_method, str):
+        if reprojection_method.lower() in [method.name for method in Resampling]:
+            return reprojection_method.lower()
+    raise ValueError(
+        f"'{reprojection_method}' is not a valid rasterio.enums.Resampling method"
+        f"Valid methods: {[method.name for method in Resampling]}"
+    )
+
+
+def validate_interpolation_method(interpolation_method: bool | str | int) -> str:
+    """Test interpolation_method"""
+    valid_methods = ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+    if isinstance(interpolation_method, str) and interpolation_method.lower() in valid_methods:
+        return interpolation_method.lower()
+    else:
+        raise ValueError(
+            f"'{interpolation_method}' is not a valid interpolation method" f"Valid methods: {valid_methods}"
+        )
+
+
+def validate_dist_nodata_spread(dist_nodata_spread: bool | str | int) -> str | int:
+    """Test interpolation_method"""
+    valid_spreads = ["half_order_up", "half_order_down"]
+    if isinstance(dist_nodata_spread, str) and dist_nodata_spread.lower() in valid_spreads:
+        return dist_nodata_spread.lower()
+    elif isinstance(dist_nodata_spread, int):
+        return dist_nodata_spread
+    else:
+        raise ValueError(
+            f"'{dist_nodata_spread}' is not a valid dist_nodata_spread parameter"
+            f"Valid value: {valid_spreads} or integer"
+        )
+
+
 # Map the parameter names with a validating function to check user input
 _validators = {
     "shift_area_or_point": validate_bool,
     "warn_area_or_point": validate_bool,
+    "reprojection_method": validate_reprojection_method,
+    "interpolation_method": validate_interpolation_method,
+    "interpolation_dist_nodata_spread": validate_dist_nodata_spread,
 }
 
 

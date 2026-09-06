@@ -1,0 +1,82 @@
+# This workflow checks ASV benchmark definitions on every PR without running full performance measurements (using asv -quick)
+# References:
+# https://github.com/airspeed-velocity/asv_samples/blob/main/.github/workflows/build_test.yml
+# https://github.com/pydata/xarray/blob/main/.github/workflows/benchmarks.yml
+
+name: benchmark-asv-check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "geoutils/**"
+      - "benchmarks/asv_suite/**"
+      - "benchmarks/gdal_comparison/**"
+      - "benchmarks/workflows/**"
+      - "asv.conf.json"
+      - "environment.yml"
+      - "setup.cfg"
+      - ".github/scripts/generate_yml_env_fixed_py.py"
+      - ".github/workflows/benchmark-asv-check.yml"
+      - ".github/workflows/benchmark-asv.yml"
+      - ".github/workflows/benchmark-publish.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A complete checkout matches ASV's normal view of the repository
+          fetch-depth: 0
+
+      - name: Initiate empty environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          use-mamba: true
+          channel-priority: strict
+          activate-environment: geoutils-dev
+
+      - name: Get month for resetting cache
+        run: echo "cache_date=$(/bin/date -u '+%Y%m')" >> "$GITHUB_ENV"
+
+      - name: Cache Conda environment
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CONDA }}/envs
+          key: conda-${{ runner.os }}-3.12-asv-check-${{ env.cache_date }}-${{ hashFiles('environment.yml', 'setup.cfg') }}-${{ env.CACHE_NUMBER }}
+        env:
+          # Increase this value to replace the cache without changing dependencies
+          CACHE_NUMBER: 0
+
+      - name: Install base environment with Python 3.12
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mamba install pyyaml python=3.12
+          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3" environment.yml
+          mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
+
+      - name: Install GeoUtils and benchmark dependencies
+        run: pip install -e .[benchmark]
+
+      # `asv check` imports every benchmark and reports invalid definitions
+      - name: Check ASV benchmarks
+        run: asv check -E existing
+
+      # Quick mode executes each case once and does not add measurements to ASV history
+      - name: Run ASV quick benchmark pass
+        env:
+          GEOUTILS_ASV_PR_CHECK: "1"
+        run: |
+          asv machine --yes --machine github-actions-check
+          asv run --quick --show-stderr --durations all -E existing --machine github-actions-check

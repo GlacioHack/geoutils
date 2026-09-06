@@ -1,4 +1,4 @@
-# This workflow checks that pip installation works to import the package (tests are in python-tests.yml)
+# This workflow checks that pip installation works to import the package (while tests are in python-tests.yml)
 
 name: pip-install
 
@@ -19,9 +19,9 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 

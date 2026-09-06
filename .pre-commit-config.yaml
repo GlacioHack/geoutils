@@ -59,6 +59,7 @@ repos:
                   --strict,
                   --implicit-optional,
                   --ignore-missing-imports,  # Don't warn about stubs since pre-commit runs in a limited env
+                  --explicit-package-bases,
                   --allow-untyped-calls,  # Dynamic function/method calls are okay. Untyped function definitions are not okay.
                   --show-error-codes,
                   --no-warn-unused-ignores,  # Ignore 'type: ignore' comments that are not used.
