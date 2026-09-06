@@ -56,8 +56,8 @@ if TYPE_CHECKING:
     import xarray as xr
 
     from geoutils.multiproc import MultiprocConfig
+    from geoutils.pointcloud.pointcloud import PointCloud
     from geoutils.raster.base import RasterLike
-    from geoutils.sampling.cosampling import CoSampleResult
     from geoutils.stats.variography import Variogram
 
 
@@ -154,6 +154,11 @@ class PointCloudBase(VectorBase):
         Can be None if point geometries are 3D.
         """
 
+        if self._is_pd:
+            # Multiple accessors can share a dataframe, so its metadata owns the selected column
+            attrs = _get_dataframe_attrs(self.ds)
+            if "data_column" in attrs:
+                return attrs["data_column"]
         return getattr(self, "_data_column", None)
 
     @data_column.setter
@@ -169,9 +174,16 @@ class PointCloudBase(VectorBase):
         :param new_data_column: Column to use, or None to use Z coordinates stored in 3D point geometry.
         """
 
-        if self.is_loaded and not self._is_dask and self._has_z:
+        # Recognize 3D file geometry from metadata without loading points just to select their Z coordinates
+        geometry_type = getattr(self, "_geometry_type", None)
+        has_z = self._has_z if self.is_loaded else geometry_type in ("Point Z", "3D Point")
+        if not self._is_dask and has_z:
             if new_data_column is None:
                 self._data_column = None
+                if self._is_pd or self.is_loaded:
+                    attrs = _get_dataframe_attrs(self.ds)
+                    attrs["data_column"] = None
+                    _set_dataframe_attrs(self.ds, attrs)
                 return
             warnings.warn(
                 f"Overriding 3D points with with data column '{new_data_column}'. Set data_column "
@@ -226,7 +238,8 @@ class PointCloudBase(VectorBase):
     def _cast_pointcloud_output(self, new_ds: Any) -> Any:
         """Cast a GeoDataFrame-like point cloud output to the proper public type."""
 
-        attrs = _get_dataframe_attrs(self.ds)
+        # Copy metadata before adapting the output so reprojection does not alter the source's cached CRS
+        attrs = _get_dataframe_attrs(self.ds).copy()
         new_crs = getattr(new_ds, "crs", None)
         if new_crs is not None and new_crs != attrs.get("crs"):
             attrs["crs"] = new_crs
@@ -502,7 +515,7 @@ class PointCloudBase(VectorBase):
         self,
         by: Mapping[str, Any],
         *,
-        values: str | Iterable[str] | Mapping[str, str] | None = None,
+        values: str | Iterable[str] | Mapping[str, Any] | None = None,
         bins: Mapping[str, Any] | None = None,
         categories: Mapping[str, Iterable[Any]] | None = None,
         statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] = ("median", "nmad"),
@@ -511,6 +524,8 @@ class PointCloudBase(VectorBase):
         mask_mode: Literal["inside", "outside"] = "inside",
         subsample: int | float = 1,
         random_state: int | np.random.Generator | None = None,
+        strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
+        subsampling_strategy: Literal["sequential", "topk"] = "sequential",
         interpolation: str = "linear",
         align: Literal["raise", "reproject"] = "raise",
         observed: bool = True,
@@ -522,12 +537,17 @@ class PointCloudBase(VectorBase):
         Point groupers may be passed directly, selected from this point cloud with a column name, or paired with an
         external selector as ``(object, selector)``. Raster groupers are interpolated at the ordered support points.
 
+        Zonal statistics use vector features as bins: pass ``by={"zone": (zones, "id")}`` to group by a vector
+        attribute. Unique IDs give one group per feature; repeated IDs combine features. A vector without a
+        selected column instead defines Boolean inside/outside groups for the union of its features.
+
         Returned dataframe rows preserve interval and categorical metadata. Each value has a finite ``count`` and the
         requested statistics in a two level column index. When ``return_masks`` is true, the second result maps each
         row key to a Boolean point cloud or GeoDataFrame on the complete support.
 
         :param by: Ordered mapping of names to raster, point cloud, vector or aligned array groupers.
-        :param values: Column selection, iterable of columns or mapping of output names to columns.
+        :param values: Columns or mapping of names to columns, external objects or ``(object, selector)`` pairs.
+            Defaults to the active point value column or geometry elevations.
         :param bins: Continuous group definitions as bin counts, numeric edges or Pandas IntervalIndexes.
         :param categories: Ordered categories for discrete groupers.
         :param statistics: Statistic name, callable or iterable of either. Count is always included.
@@ -536,11 +556,13 @@ class PointCloudBase(VectorBase):
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
         :param random_state: Random generator or seed used to reproduce subsampling.
+        :param strategy: Dense or sparse summaries, complete group gathering (groupwise), or automatic selection.
+        :param subsampling_strategy: Topk or sequential sampling of eligible locations.
         :param interpolation: Raster interpolation method used on point support.
         :param align: Whether mismatched grids or coordinate systems raise or are reprojected.
         :param observed: Whether to omit declared group combinations with no eligible locations.
         :param return_masks: Whether to also return complete support masks for the dataframe groups.
-        :param mp_config: Multiprocessing configuration forwarded to raster interpolation.
+        :param mp_config: Multiprocessing configuration for preparation and grouped reductions.
         :returns: Grouped dataframe, optionally followed by a mapping of support aligned masks.
         """
 
@@ -559,7 +581,8 @@ class PointCloudBase(VectorBase):
             mask_mode=mask_mode,
             subsample=subsample,
             random_state=random_state,
-            strategy="sequential",
+            strategy=strategy,
+            subsampling_strategy=subsampling_strategy,
             interpolation=interpolation,
             align=align,
             observed=observed,
@@ -629,27 +652,49 @@ class PointCloudBase(VectorBase):
         mask_mode: Literal["inside", "outside"] = "inside",
         subsample: int | float = 1,
         random_state: int | np.random.Generator | None = None,
-        interpolation: str = "linear",
+        strategy: Literal["sequential", "topk"] = "topk",
+        raster_point_mode: Literal["grid_points", "resample_raster"] | None = None,
+        grid_method: GriddingMethod = "linear",
+        resample_method: str = "linear",
+        grid_kwargs: Mapping[str, Any] | None = None,
+        resample_kwargs: Mapping[str, Any] | None = None,
         align: Literal["raise", "reproject"] = "raise",
-    ) -> CoSampleResult:
+    ) -> RasterLike | PointCloud | gpd.GeoDataFrame:
         """Sample this point cloud and another dataset at common finite locations.
 
-        This point cloud provides the default spatial support. Raw auxiliary arrays must identify the primary input
-        whose grid or point ordering they follow.
+        This point cloud provides the default spatial support. Use ``raster_point_mode="grid_points"`` to grid
+        point values onto a raster input instead. An explicit ``at`` chooses the exact output locations and must
+        agree with any explicit mode. Raw auxiliary arrays must identify their primary input's grid or point ordering.
 
         :param other: Other primary point cloud, raster or array aligned to this point cloud.
         :param other_band: Band selected from the other primary when it is a raster.
         :param auxiliary: Named auxiliary rasters, point clouds or aligned arrays.
         :param auxiliary_bands: Bands selected from auxiliary rasters, keyed by auxiliary name.
         :param auxiliary_at: Native ``"self"`` or ``"other"`` support of raw auxiliaries, globally or by name.
-        :param at: Final support. Defaults to point support when present.
+        :param at: Output support: "self", "other" or a raster or point cloud. Defaults to this point cloud unless
+            ``raster_point_mode="grid_points"`` selects a raster input. Point inputs on point support must share
+            the selected ordered coordinates.
         :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum number of locations.
         :param random_state: Random generator or seed used to reproduce the sample.
-        :param interpolation: Raster interpolation method used on point support.
+        :param strategy: Topk or sequential subsampling when the output uses a raster grid.
+        :param raster_point_mode: ``"grid_points"`` for raster output or ``"resample_raster"`` for point output.
+            If omitted, infer the direction from ``at`` or use this point cloud. With no explicit ``at``, a mode
+            requires one input of the requested spatial type.
+        :param grid_method: Method passed to :meth:`grid`, such as ``"linear"`` or ``"mean"``.
+        :param resample_method: Method passed to :meth:`geoutils.Raster.interp_points`.
+            ``"reduce"`` raises NotImplementedError pending revision of the :meth:`geoutils.Raster.reduce_points`
+            integration.
+        :param grid_kwargs: Additional gridding options, such as ``dist_nodata_pixel`` and ``min_points``.
+            Select target locations and method through ``at`` and ``grid_method``.
+        :param resample_kwargs: Additional interpolation options, such as ``nodata_propagation``.
+            Select target locations, band and method through the corresponding co-sampling arguments.
         :param align: Whether mismatched raster grids or coordinate systems raise or are reprojected.
-        :returns: Two aligned primary arrays, auxiliary values, coordinates and support indexes.
+        :returns: Raster or point cloud on the selected support; Xarray DataArray or GeoPandas GeoDataFrame for
+            accessor calls. Bands or columns contain "self", "other", then auxiliaries in mapping order.
+            Raster outputs retain the target grid with a common mask; point outputs retain selected geometries
+            and index labels, with "self" as the active data column.
         """
 
         from geoutils.sampling.cosampling import _cosample
@@ -667,12 +712,16 @@ class PointCloudBase(VectorBase):
             mask_mode=mask_mode,
             subsample=subsample,
             random_state=random_state,
-            strategy="sequential",
-            interpolation=interpolation,
+            strategy=strategy,
+            raster_point_mode=raster_point_mode,
+            grid_method=grid_method,
+            resample_method=resample_method,
+            grid_kwargs=grid_kwargs,
+            resample_kwargs=resample_kwargs,
             align=align,
         )
 
-    def sample_pairs(
+    def pairsample(
         self,
         *,
         n_pairs: int = 1_000_000,
@@ -755,7 +804,6 @@ class PointCloudBase(VectorBase):
         min_lag: float | None = None,
         max_lag: float | None = None,
         n_runs: int = 1,
-        n_jobs: int = 1,
         model: str | Callable[..., Any] | list[str | Callable[..., Any]] | None = None,
         fit_kwargs: dict[str, Any] | None = None,
         random_state: int | np.random.Generator | None = None,
@@ -771,13 +819,12 @@ class PointCloudBase(VectorBase):
         :param n_lags: Number of classes used for named binning.
         :param min_lag: Smallest sampled lag. Defaults to half the average point spacing.
         :param max_lag: Largest sampled lag. Defaults to the point cloud diagonal.
-        :param n_runs: Number of independent samples used to estimate empirical uncertainty.
-        :param n_jobs: Number of sampling runs evaluated concurrently.
+        :param n_runs: Advanced option to repeat sampling and estimate the standard error of the mean variogram.
         :param model: Optional theoretical model or ordered list of summed models to fit.
         :param fit_kwargs: Options passed to :meth:`geoutils.stats.Variogram.fit`.
         :param random_state: Random generator or seed used to reproduce all runs.
         :param mask: Boolean array or vector defining eligible points.
-        :param pair_sampling_kwargs: Advanced options accepted by :meth:`sample_pairs`.
+        :param pair_sampling_kwargs: Advanced options accepted by :meth:`pairsample`.
         :returns: Empirical lag statistics and optional fitted model metadata.
         """
 
@@ -786,7 +833,6 @@ class PointCloudBase(VectorBase):
         return _estimate_variogram(
             self,
             n_runs=n_runs,
-            n_jobs=n_jobs,
             estimator=estimator,
             bins=bins,
             n_lags=n_lags,

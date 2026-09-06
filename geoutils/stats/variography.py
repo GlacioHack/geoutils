@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
@@ -36,9 +35,9 @@ from geoutils._typing import NDArrayNum
 __all__ = ["GPyTorchVariogram", "GSToolsVariogram", "Variogram", "VariogramModel"]
 
 
-###########################
-# 1/ PORTABLE MODEL METADATA
-###########################
+#############################
+# 1/ VARIOGRAM MODEL METADATA
+#############################
 
 _BASE_MODELS = {"spherical", "exponential", "gaussian", "cubic", "stable", "matern"}
 _COMPOSITE_MODELS = {"sum", "product"}
@@ -48,9 +47,10 @@ _COMPOSITE_MODELS = {"sum", "product"}
 class VariogramModel:
     """Parameters of a fitted theoretical variogram independent of backend.
 
-    ``effective_range`` follows SciKit-GStat's convention. ``partial_sill`` excludes the nugget, making the conversion
-    to covariance kernels unambiguous. A composite model holds its independent structures in ``components`` and
-    keeps their shared nugget on the parent model.
+    The ``effective_range`` follows SciKit-GStat's convention, ``partial_sill`` excludes the nugget, making the
+    conversion to covariance kernels unambiguous.
+    A composite model holds its independent structures in ``components`` and keeps their shared nugget on the parent
+    model.
 
     :param model_name: Base model name or ``"sum"``/``"product"`` for a composition.
     :param effective_range: Distance at which a base model effectively reaches its sill.
@@ -284,7 +284,7 @@ class VariogramModel:
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any]) -> VariogramModel:
-        """Restore a model from :meth:`to_dict` output.
+        """Restore a model from :meth:`~geoutils.VariogramModel.to_dict` output.
 
         :param values: Serialized model fields.
         :returns: Restored fitted model.
@@ -567,7 +567,7 @@ class Variogram:
         This method only reads the pair distances and endpoint values. The pair dataset can therefore be discarded as
         soon as the empirical lag statistics have been computed.
 
-        :param pairs: Dataset returned by ``Raster.sample_pairs()`` or ``PointCloud.sample_pairs()``.
+        :param pairs: Dataset returned by ``Raster.pairsample()`` or ``PointCloud.pairsample()``.
         :param estimator: SciKit-GStat estimator name or a function accepting absolute pair differences.
         :param bins: ``"log"``, ``"uniform"`` or explicit lag boundaries.
         :param n_lags: Number of lag classes used for named binning.
@@ -942,7 +942,7 @@ class Variogram:
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any]) -> Variogram:
-        """Restore a lightweight variogram from :meth:`to_dict` output."""
+        """Restore a lightweight variogram from :meth:`~geoutils.Variogram.to_dict` output."""
 
         # Restore the optional model before normalizing all aggregate arrays
         model_values = values.get("model")
@@ -1106,7 +1106,6 @@ def _estimate_variogram(
     source: Any,
     *,
     n_runs: int,
-    n_jobs: int,
     estimator: str | Callable[[NDArrayNum], float],
     bins: Literal["log", "uniform"] | Iterable[float],
     n_lags: int,
@@ -1120,14 +1119,14 @@ def _estimate_variogram(
     """Sample independent pair sets and reduce them to one lightweight result."""
 
     # Validate execution controls before deriving independent random seeds
-    if n_runs < 1 or n_jobs < 1:
-        raise ValueError("n_runs and n_jobs must be positive integers.")
+    if not isinstance(n_runs, (int, np.integer)) or isinstance(n_runs, bool) or n_runs < 1:
+        raise ValueError("n_runs must be a positive integer.")
     rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
     seeds = rng.integers(0, np.iinfo(np.int32).max, n_runs)
 
     def run(seed: np.integer[Any], bin_spec: Literal["log", "uniform"] | Iterable[float]) -> Variogram:
         # Discard each pair dataset immediately after reducing it to lag statistics
-        pairs = source.sample_pairs(random_state=int(seed), **pair_kwargs)
+        pairs = source.pairsample(random_state=int(seed), **pair_kwargs)
         return Variogram.from_pairs(
             pairs,
             estimator=estimator,
@@ -1139,25 +1138,17 @@ def _estimate_variogram(
 
     # Establish bins once so every independent run describes the same lag classes
     first = run(seeds[0], bins)
+    if n_runs == 1:
+        result = replace(first, attrs={**first.attrs, "n_runs": 1})
+        return result if models is None else result.fit(models, **dict(fit_kwargs or {}))
+
+    # Repeat sampling only when requested, leaving chunk scheduling to the sampler's backend
     shared_bins: Literal["log", "uniform"] | Iterable[float] = bins
     if isinstance(bins, str):
         assert first.bin_lower_edges is not None and first.bin_edges is not None
         shared_bins = np.r_[first.bin_lower_edges[0], first.bin_edges]
 
-    # Evaluate remaining runs sequentially or with bounded worker threads
-    if n_runs == 1:
-        runs = [first]
-    elif n_jobs == 1:
-        runs = [first, *[run(seed, shared_bins) for seed in seeds[1:]]]
-    else:
-        with ThreadPoolExecutor(max_workers=min(n_jobs, n_runs - 1)) as executor:
-            remaining = list(executor.map(lambda seed: run(seed, shared_bins), seeds[1:]))
-        runs = [first, *remaining]
-
-    # Return the single run directly while preserving execution metadata
-    if n_runs == 1:
-        result = replace(first, attrs={**first.attrs, "n_runs": 1, "n_jobs": 1})
-        return result if models is None else result.fit(models, **dict(fit_kwargs or {}))
+    runs = [first, *[run(seed, shared_bins) for seed in seeds[1:]]]
 
     # Stack compact lag arrays to aggregate independent estimates by class
     semivariances = np.vstack([run_result.semivariance for run_result in runs])
@@ -1185,7 +1176,7 @@ def _estimate_variogram(
         semivariance=mean_semivariance,
         semivariance_error=errors,
         counts=counts,
-        attrs={**first.attrs, "n_runs": n_runs, "n_jobs": n_jobs},
+        attrs={**first.attrs, "n_runs": n_runs, "pair_count": int(np.sum(counts))},
     )
     return result if models is None else result.fit(models, **dict(fit_kwargs or {}))
 

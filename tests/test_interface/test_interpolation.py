@@ -37,6 +37,46 @@ class TestInterpolate:
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
+    @pytest.mark.parametrize("area_or_point", ["Area", "Point"])
+    @pytest.mark.parametrize("method", ["nearest", "linear"])
+    @pytest.mark.parametrize("chunks", [(13, 17), (19, 11)])
+    def test_interp_points__fractional_projected_coordinates_exact_backends(
+        self, tmp_path: Path, area_or_point: str, method: str, chunks: tuple[int, int]
+    ) -> None:
+        """Checks that fractional projected coordinates give exact interpolation values regardless of raster tiling."""
+
+        da = pytest.importorskip("dask.array")
+        from dask.callbacks import Callback
+
+        # 1/ Large world coordinates and fractional pixels expose rounding from recalculating a tile's local transform
+        rows, cols = np.indices((35, 43))
+        values = (900 + rows * 1.3 + cols * 1.7 + 5 * np.sin(rows / 3)).astype(np.float32)
+        values[10:13, 14:17] = np.nan
+        transform = Affine(20, 0, 500000, 0, -20, 8600000)
+        raster = gu.Raster.from_array(values, transform, 32633, nodata=-9999, area_or_point=area_or_point)
+        path = tmp_path / "interpolation.tif"
+        raster.to_file(path)
+        xx, yy = raster.coords(grid=True)
+        points = (xx.ravel()[::7] + 3, yy.ravel()[::7] - 4)
+        options = {"points": points, "method": method, "as_array": True}
+
+        # 2/ Each backend starts from the same stored values but uses a different rectangular block layout
+        expected = gu.Raster(path).interp_points(**options)
+        lazy = gu.open_raster(str(path), chunks={"y": chunks[0], "x": chunks[1]})
+        parallel_source = gu.Raster(path)
+        graph = lazy.data
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(args[0])):
+            actual = lazy.rst.interp_points(**options)
+        parallel = parallel_source.interp_points(**options, mp_config=MultiprocConfig(chunks=(11, 15)))
+
+        # 3/ Pixel weights and missing values must be identical, with no implicit loading of either source
+        assert tasks == [] and isinstance(actual, da.Array)
+        np.testing.assert_array_equal(expected, actual.compute())
+        np.testing.assert_array_equal(expected, parallel)
+        assert lazy.data is graph and not lazy._in_memory
+        assert not parallel_source.is_loaded
+
     @pytest.mark.parametrize("method", ["nearest", "linear"])
     @pytest.mark.parametrize("backend", ["numpy", "dask", "multiproc"])
     def test_interp_points_outer_half_pixels(
@@ -75,9 +115,9 @@ class TestInterpolate:
 
         # Retain exactly the finite points when interpolation is used to define a common sample
         points = gu.PointCloud.from_xyz(x, y, np.ones(len(x)), crs=raster.crs)
-        sample = raster.cosample(points, interpolation=method)
-        np.testing.assert_array_equal(sample.indices[0], np.arange(4))
-        np.testing.assert_allclose(sample.self_values, expected[:4])
+        sample = raster.cosample(points, resample_method=method)
+        np.testing.assert_array_equal(sample.ds.index, np.arange(4))
+        np.testing.assert_allclose(sample.ds["self"], expected[:4])
 
     def test_dist_nodata_spread(self) -> None:
         """Test distance of nodata spreading computation based on interpolation order."""

@@ -288,7 +288,8 @@ def _load_laspy_data_slice(
     # Seek directly to the requested row range instead of reading earlier points
     with laspy.open(filename) as reader:
         crs = reader.header.parse_crs(prefer_wkt=False)
-        reader.seek(start)
+        if count > 0:
+            reader.seek(start)
         points = reader.read_points(count)
 
     return _laspy_points_to_geodataframe(points=points, crs=crs, columns=columns)

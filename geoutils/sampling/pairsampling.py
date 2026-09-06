@@ -851,7 +851,7 @@ def _sample_raster_pairs(
     index_dtype: Any,
     distance_dtype: Any,
 ) -> xr.Dataset:
-    """Implementation for :meth:`Raster.sample_pairs`."""
+    """Implementation for :meth:`Raster.pairsample`."""
 
     # Select the requested band and validate compact output dtypes before sampling
     array = _selected_raster_data(raster, band)
@@ -977,7 +977,7 @@ def _sample_point_pairs(
     index_dtype: Any,
     distance_dtype: Any,
 ) -> xr.Dataset:
-    """Implementation for :meth:`PointCloud.sample_pairs`."""
+    """Implementation for :meth:`PointCloud.pairsample`."""
 
     # Materialize the point table because bounded pair sampling needs global coordinates
     dataframe = pointcloud.ds.compute() if is_dask_dataframe(pointcloud.ds) else pointcloud.ds

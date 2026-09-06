@@ -8,9 +8,9 @@ As many of our numerical operations rely on **NumPy, SciPy or Numba**, those are
 The **{ref}`summary tables<tables-overview>` directly below** lists the core features of GeoUtils, their scalability and available backends.
 
 ```{seealso}
-If you are interested in porting from GDAL/OGR, see our {ref}`cheatsheet-osgeo` page.
-While tables below provide a scalability summary, the detailed **input/output behaviour of all operations** is available on the {ref}`scalability-support` page.
-For measured backend comparisons and guidance on interpreting performance, see {ref}`benchmarking-performance`.
+If you are interested in **porting from GDAL/OGR**, see our {ref}`cheatsheet-osgeo` page.
+While tables below provide a scalability summary, the detailed **scalable execution behaviour of all operations** is available on the {ref}`scalability-support` page.
+For **performance comparisons**, see the {ref}`benchmarking-performance` page.
 ```
 
 ## Summary
@@ -90,14 +90,29 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - NumPy / SciPy
 
 * - {meth}`~geoutils.Raster.grouped_stats()`
-  - Compute statistics grouped by continuous bins or discrete categories.
+  - Compute statistics by continuous bins, discrete categories or vector zones (zonal statistics).
   - ✅
   - Pandas / NumPy / Dask
 
 * - {meth}`~geoutils.Raster.subsample()`
-  - Randomly sample valid values. Chunk-invariant seed ensures reproducibility.
+  - Randomly sample valid values. Choose `strategy="topk"` for the same cells across chunk layouts.
   - ✅
   - NumPy
+
+* - {meth}`~geoutils.Raster.cosample()`
+  - Select matching finite values from two datasets. Returns a raster or point cloud on the chosen support.
+  - ✅ (rasters)
+  - NumPy / Dask
+
+* - {meth}`~geoutils.Raster.pairsample()`
+  - Select finite pairs across spatial distances. Returns a compact pair dataset.
+  - ✅ (rasters)
+  - NumPy / SciPy / Dask
+
+* - {meth}`~geoutils.Raster.variogram()`
+  - Estimate and fit semivariance by distance from sampled pairs. Returns lag statistics and a model.
+  - ✅ (rasters)
+  - NumPy / SciKit-GStat
 
 * - {meth}`~geoutils.Raster.filter()`
   - Filter over window. Fast vectorized logic with NaN support.

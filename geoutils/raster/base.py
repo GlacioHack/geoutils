@@ -97,10 +97,12 @@ RasterLike = Union["RasterBase", xr.DataArray]
 _UNSET = object()
 
 if TYPE_CHECKING:
+    import geopandas as gpd
     import pandas as pd
 
+    import geoutils as gu
+    from geoutils.interface.gridding import GriddingMethod
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
-    from geoutils.sampling.cosampling import CoSampleResult
     from geoutils.stats.variography import Variogram
     from geoutils.vector.vector import Vector, VectorType
 
@@ -914,7 +916,7 @@ class RasterBase(ABC):
         self,
         by: Mapping[str, Any],
         *,
-        values: int | Iterable[int] | Mapping[str, int] | None = None,
+        values: int | Iterable[int] | Mapping[str, Any] | None = None,
         bins: Mapping[str, Any] | None = None,
         categories: Mapping[str, Iterable[Any]] | None = None,
         statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] = ("median", "nmad"),
@@ -923,7 +925,8 @@ class RasterBase(ABC):
         mask_mode: Literal["inside", "outside"] = "inside",
         subsample: int | float = 1,
         random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "topk",
+        strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
+        subsampling_strategy: Literal["sequential", "topk"] = "topk",
         interpolation: str = "linear",
         align: Literal["raise", "reproject"] = "raise",
         observed: bool = True,
@@ -934,28 +937,35 @@ class RasterBase(ABC):
 
         Raster groupers may be passed directly, as raw arrays following this raster, or selected from a band with an
         integer. Use ``(object, selector)`` to select a band, point column or vector feature column from another
-        object. A point cloud can provide ``at`` support, in which case raster values are interpolated at its points.
+        object. Mixed raster and point inputs use the first point dataset's locations by default, sharing spatial
+        preparation with co-sampling. Set ``at`` explicitly to choose another support.
+
+        Zonal statistics use vector features as bins: pass ``by={"zone": (zones, "id")}`` to group by a vector
+        attribute. Unique IDs give one group per feature; repeated IDs combine features. A vector without a
+        selected column instead defines Boolean inside/outside groups for the union of its features.
 
         Returned dataframe rows preserve interval and categorical metadata. Each value has a finite ``count`` and the
         requested statistics in a two level column index. When ``return_masks`` is true, the second result maps each
-        row key to a Boolean Raster or Xarray DataArray on the complete support.
+        row key to a Boolean object on the complete raster or point support.
 
         :param by: Ordered mapping of names to raster, point cloud, vector or aligned array groupers.
-        :param values: Band selection, iterable of bands or mapping of output names to bands. Defaults to all bands.
+        :param values: Band selection or mapping of names to bands, external objects or ``(object, selector)`` pairs.
+            Defaults to all bands of this raster.
         :param bins: Continuous group definitions as bin counts, numeric edges or Pandas IntervalIndexes.
         :param categories: Ordered categories for discrete groupers.
         :param statistics: Statistic name, callable or iterable of either. Count is always included.
-        :param at: Spatial support, using this raster by default or ``"self"`` explicitly.
+        :param at: Spatial support, defaulting to the first point dataset if present, otherwise this raster.
         :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
         :param random_state: Random generator or seed used to reproduce subsampling.
-        :param strategy: ``"topk"`` for chunk independent sampling or ``"sequential"`` for ordinary sampling.
+        :param strategy: Dense or sparse summaries, complete group gathering (groupwise), or automatic selection.
+        :param subsampling_strategy: Topk or sequential sampling of eligible locations.
         :param interpolation: Raster interpolation method used on point support.
         :param align: Whether mismatched grids or coordinate systems raise or are reprojected.
         :param observed: Whether to omit declared group combinations with no eligible locations.
         :param return_masks: Whether to also return complete support masks for the dataframe groups.
-        :param mp_config: Multiprocessing configuration forwarded to interpolation when point support is used.
+        :param mp_config: Multiprocessing configuration for preparation and grouped reductions.
         :returns: Grouped dataframe, optionally followed by a mapping of support aligned masks.
         """
 
@@ -975,6 +985,7 @@ class RasterBase(ABC):
             subsample=subsample,
             random_state=random_state,
             strategy=strategy,
+            subsampling_strategy=subsampling_strategy,
             interpolation=interpolation,
             align=align,
             observed=observed,
@@ -1025,11 +1036,10 @@ class RasterBase(ABC):
 
             names = names + ["fill_value", "dtype", "transform", "crs", "nodata"]
             equalities = equalities_data + [
-                self.data.fill_value == other.data.fill_value,
+                np.array_equal(self.data.fill_value, other.data.fill_value, equal_nan=True),
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
                 self.crs == other.crs,
-                self.nodata == other.nodata,
             ]
         # For Raster or DataArray
         else:
@@ -1037,7 +1047,6 @@ class RasterBase(ABC):
             dtype = other.rst.dtype if isinstance(other, xr.DataArray) else other.dtype
             transform = other.rst.transform if isinstance(other, xr.DataArray) else other.transform
             crs = other.rst.crs if isinstance(other, xr.DataArray) else other.crs
-            nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
 
             # Three cases: masked/NaN, NaN/masked or NaN/NaN
             if np.ma.isMaskedArray(self.data):
@@ -1064,8 +1073,14 @@ class RasterBase(ABC):
                 self.dtype == dtype,
                 self.transform == transform,
                 self.crs == crs,
-                self.nodata == nodata,
             ]
+
+        # Compare nodata after data access, which can update metadata when a file is loaded as a Boolean mask
+        other_nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
+        nodata_equal = self.nodata == other_nodata
+        if self.nodata is not None and other_nodata is not None:
+            nodata_equal = nodata_equal or bool(np.isnan(self.nodata) and np.isnan(other_nodata))
+        equalities.append(nodata_equal)
 
         complete_equality = all(equalities)
 
@@ -2300,12 +2315,18 @@ class RasterBase(ABC):
         subsample: int | float = 1,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "topk",
-        interpolation: str = "linear",
+        raster_point_mode: Literal["grid_points", "resample_raster"] | None = None,
+        grid_method: GriddingMethod = "linear",
+        resample_method: str = "linear",
+        grid_kwargs: Mapping[str, Any] | None = None,
+        resample_kwargs: Mapping[str, Any] | None = None,
         align: Literal["raise", "reproject"] = "raise",
-    ) -> CoSampleResult:
+    ) -> gu.Raster | PointCloud | xr.DataArray | gpd.GeoDataFrame:
         """Sample this raster and another dataset at common finite locations.
 
-        A point cloud is selected as support automatically when either primary input is one. Raw auxiliary arrays must
+        By default, raster values are resampled at point locations when either primary input is a point cloud.
+        Use ``raster_point_mode="grid_points"`` to grid point values onto the raster instead. An explicit ``at``
+        chooses the exact output locations and must agree with any explicit mode. Raw auxiliary arrays must
         identify the primary input whose grid or point ordering they follow.
 
         :param other: Other primary raster, point cloud or array aligned to this raster.
@@ -2314,15 +2335,28 @@ class RasterBase(ABC):
         :param auxiliary: Named auxiliary rasters, point clouds or aligned arrays.
         :param auxiliary_bands: Bands selected from auxiliary rasters, keyed by auxiliary name.
         :param auxiliary_at: Native ``"self"`` or ``"other"`` support of raw auxiliaries, globally or by name.
-        :param at: Final support. Defaults to point support when present and this raster otherwise.
+        :param at: Output support: "self", "other" or a raster or point cloud. Defaults to point support when
+            present and this raster otherwise. Raster outputs retain the grid, with unsampled cells masked.
         :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum number of locations.
         :param random_state: Random generator or seed used to reproduce the sample.
         :param strategy: ``"topk"`` for chunk-independent grid sampling or ``"sequential"`` for ordinary sampling.
-        :param interpolation: Raster interpolation method used on point support.
+        :param raster_point_mode: ``"grid_points"`` for raster output or ``"resample_raster"`` for point output.
+            If omitted, infer the direction from ``at`` or use point locations when present. With no explicit
+            ``at``, a mode requires one input of the requested spatial type.
+        :param grid_method: Method passed to :meth:`geoutils.PointCloud.grid`, such as ``"linear"`` or ``"mean"``.
+        :param resample_method: Method passed to :meth:`interp_points`, such as ``"nearest"`` or ``"linear"``.
+            ``"reduce"`` raises NotImplementedError pending revision of the :meth:`reduce_points` integration.
+        :param grid_kwargs: Additional gridding options, such as ``dist_nodata_pixel`` and ``min_points``.
+            Select target locations and method through ``at`` and ``grid_method``.
+        :param resample_kwargs: Additional interpolation options, such as ``nodata_propagation``.
+            Select target locations, band and method through the corresponding co-sampling arguments.
         :param align: Whether mismatched raster grids or coordinate systems raise or are reprojected.
-        :returns: Two aligned primary arrays, auxiliary values, coordinates and support indexes.
+        :returns: Raster or point cloud on the selected support; Xarray DataArray or GeoPandas GeoDataFrame for
+            accessor calls. Bands or columns contain "self", "other", then auxiliaries in mapping order. Raster
+            band names are stored in ``tags["long_name"]`` (Xarray ``attrs["long_name"]``). Point outputs use
+            "self" as their active data column and preserve the support index and order.
         """
 
         from geoutils.sampling.cosampling import _cosample
@@ -2341,11 +2375,15 @@ class RasterBase(ABC):
             subsample=subsample,
             random_state=random_state,
             strategy=strategy,
-            interpolation=interpolation,
+            raster_point_mode=raster_point_mode,
+            grid_method=grid_method,
+            resample_method=resample_method,
+            grid_kwargs=grid_kwargs,
+            resample_kwargs=resample_kwargs,
             align=align,
         )
 
-    def sample_pairs(
+    def pairsample(
         self,
         *,
         band: int = 1,
@@ -2435,7 +2473,6 @@ class RasterBase(ABC):
         min_lag: float | None = None,
         max_lag: float | None = None,
         n_runs: int = 1,
-        n_jobs: int = 1,
         model: str | Callable[..., Any] | list[str | Callable[..., Any]] | None = None,
         fit_kwargs: dict[str, Any] | None = None,
         random_state: int | np.random.Generator | None = None,
@@ -2452,13 +2489,12 @@ class RasterBase(ABC):
         :param n_lags: Number of classes used for named binning.
         :param min_lag: Smallest sampled lag. Defaults to one pixel.
         :param max_lag: Largest sampled lag. Defaults to the raster diagonal.
-        :param n_runs: Number of independent samples used to estimate empirical uncertainty.
-        :param n_jobs: Number of sampling runs evaluated concurrently.
+        :param n_runs: Advanced option to repeat sampling and estimate the standard error of the mean variogram.
         :param model: Optional theoretical model or ordered list of summed models to fit.
         :param fit_kwargs: Options passed to :meth:`geoutils.stats.Variogram.fit`.
         :param random_state: Random generator or seed used to reproduce all runs.
         :param mask: Boolean raster grid mask, aligned mask raster or vector defining eligible cells.
-        :param pair_sampling_kwargs: Advanced options accepted by :meth:`sample_pairs`.
+        :param pair_sampling_kwargs: Advanced options accepted by :meth:`pairsample`.
         :returns: Empirical lag statistics and optional fitted model metadata.
         """
 
@@ -2467,7 +2503,6 @@ class RasterBase(ABC):
         return _estimate_variogram(
             self,
             n_runs=n_runs,
-            n_jobs=n_jobs,
             estimator=estimator,
             bins=bins,
             n_lags=n_lags,

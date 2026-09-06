@@ -425,6 +425,7 @@ def _interp_points_base(
     nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: Literal[False] = False,
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
     **kwargs: Any,
 ) -> NDArrayNum: ...
 
@@ -442,6 +443,7 @@ def _interp_points_base(
     nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: Literal[True],
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
     **kwargs: Any,
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
@@ -459,6 +461,7 @@ def _interp_points_base(
     nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: bool = False,
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
@@ -474,8 +477,11 @@ def _interp_points_base(
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "gdal",
     return_interpolator: bool = False,
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
+    """Interpolate a raster, optionally reusing global pixel indices translated to a worker block."""
+
     # If interpolation method undefined, default to the global system config
     if method is None:
         method = config["interpolation_method"]
@@ -496,13 +502,16 @@ def _interp_points_base(
             """Interpolate point coordinates with the shared nearest or linear policy."""
 
             # Convert georeferenced coordinates to array indices before applying the common numeric kernel
-            i, j = _xy2ij(
-                x,
-                y,
-                transform=transform,
-                area_or_point=area_or_point,
-                shift_area_or_point=shift_area_or_point,
-            )
+            if array_indices is None:
+                i, j = _xy2ij(
+                    x,
+                    y,
+                    transform=transform,
+                    area_or_point=area_or_point,
+                    shift_area_or_point=shift_area_or_point,
+                )
+            else:
+                i, j = array_indices
             return _interpolate_array_band(
                 array=array,
                 src_rows=i,
@@ -695,6 +704,13 @@ def _dask_interp_points(
 
     # Convert input to 2D array
     points_arr = np.vstack((points[0], points[1]))
+    src_rows, src_cols = _xy2ij(
+        points[0],
+        points[1],
+        transform=transform,
+        area_or_point=kwargs["area_or_point"],
+        shift_area_or_point=kwargs["shift_area_or_point"],
+    )
 
     # Map depth of overlap required for each interpolation method
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
@@ -739,9 +755,20 @@ def _dask_interp_points(
 
     # Compute values delayed
     used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
-    list_interp = [
-        _delayed_interp_points_block(blocks[i], block_ids[i], points_arr[:, ind_per_block[i]], **kwargs) for i in used
-    ]
+    list_interp = []
+    for i in used:
+        # Translate global indices by integer offsets to keep interpolation weights identical across chunks
+        block_kwargs = kwargs.copy()
+        if kwargs["method"] in ("nearest", "linear"):
+            row_offset = starts[0][indexes_yi[i]] - depth
+            col_offset = starts[1][indexes_xi[i]] - depth
+            block_kwargs["array_indices"] = (
+                src_rows[ind_per_block[i]] - row_offset,
+                src_cols[ind_per_block[i]] - col_offset,
+            )
+        list_interp.append(
+            _delayed_interp_points_block(blocks[i], block_ids[i], points_arr[:, ind_per_block[i]], **block_kwargs)
+        )
 
     # We concatenate and re-order in a delayed manner
     def _concat_reorder(list_vals, list_inds):  # type: ignore
@@ -767,13 +794,6 @@ def _dask_interp_points(
     interp_points = da.from_delayed(joined, shape=(len(points[0]),), dtype=output_dtype)
 
     # Padded edge chunks repeat their outer cells, so restore the bounds of the complete source raster
-    src_rows, src_cols = _xy2ij(
-        points[0],
-        points[1],
-        transform=transform,
-        area_or_point=kwargs["area_or_point"],
-        shift_area_or_point=kwargs["shift_area_or_point"],
-    )
     inside = (src_rows >= -0.5) & (src_rows < darr.shape[0] - 0.5)
     inside &= (src_cols >= -0.5) & (src_cols < darr.shape[1] - 0.5)
     interp_points = da.where(inside, interp_points, np.nan)
@@ -962,6 +982,13 @@ def _multiproc_interp_points(
 
     # Convert input to 2D array
     points_arr = np.vstack((points[0], points[1]))
+    src_rows, src_cols = _xy2ij(
+        points[0],
+        points[1],
+        transform=rst.transform,
+        area_or_point=kwargs["area_or_point"],
+        shift_area_or_point=kwargs["shift_area_or_point"],
+    )
 
     # Map depth of overlap required for each interpolation method
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
@@ -1001,6 +1028,15 @@ def _multiproc_interp_points(
     # Create tasks for multiprocessing
     tasks = []
     for i in range(len(block_ids)):
+        # Reuse the full raster's fractional indices instead of recalculating from each tile's world coordinates
+        block_kwargs = kwargs.copy()
+        if kwargs["method"] in ("nearest", "linear"):
+            row_offset, _, col_offset, _ = block_ids[i]["tile_idx"]
+            block_kwargs["array_indices"] = (
+                src_rows[ind_per_block[i]] - row_offset,
+                src_cols[ind_per_block[i]] - col_offset,
+            )
+
         # Launch the task on the cluster to process each tile
         tasks.append(
             config.cluster.submit(
@@ -1008,7 +1044,7 @@ def _multiproc_interp_points(
                 rst,
                 block_ids[i],
                 points_arr[:, ind_per_block[i]],
-                **kwargs,
+                **block_kwargs,
             )
         )
 

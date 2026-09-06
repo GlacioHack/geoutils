@@ -7,7 +7,3 @@
 # you may not use this file except in compliance with the License.
 
 """Sampling operations shared by GeoUtils raster and point cloud objects."""
-
-from geoutils.sampling.cosampling import CoSampleResult
-
-__all__ = ["CoSampleResult"]

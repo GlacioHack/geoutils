@@ -43,6 +43,36 @@ class TestAccessor:
         assert ds.rst.crs == ds_copy.rst.crs
         assert ds.rst.nodata == ds_copy.rst.nodata
 
+    @pytest.mark.parametrize("lazy", [False, True])
+    def test_to_geoutils__loading_laziness(self, tmp_path: Path, lazy: bool) -> None:
+        """Checks that native conversion loads ordinary DataArrays and preserves Dask source graphs and exact data."""
+
+        # 1/ Include a gap and Point metadata so conversion must preserve more than the elevation values
+        values = np.arange(35, dtype=np.float32).reshape(5, 7)
+        values[2, 3] = np.nan
+        reference = gu.Raster.from_array(
+            values, from_origin(500000, 8600000, 20, 20), 32633, nodata=-9999, area_or_point="Point"
+        )
+        path = tmp_path / "conversion.tif"
+        reference.to_file(path)
+        if lazy:
+            pytest.importorskip("dask.array")
+        source = open_raster(str(path), chunks={"y": 3, "x": 4} if lazy else None)
+        graph = source.data if lazy else None
+        assert not source._in_memory
+
+        # 2/ Converting explicitly materializes the native result while retaining a lazy caller's array
+        result = source.rst.to_geoutils()
+        assert isinstance(result, gu.Raster) and result.is_loaded
+        assert source._in_memory is not lazy
+        if lazy:
+            assert source.data is graph
+
+        # 3/ Compare values, missing pixels and the complete spatial reference after checking loading behavior
+        assert reference.raster_equal(result, strict_masked=False, warn_failure_reason=True)
+        if lazy:
+            assert source.data is graph and not source._in_memory
+
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])
     def test_open__loaded(self, path_raster: str) -> None:
         """

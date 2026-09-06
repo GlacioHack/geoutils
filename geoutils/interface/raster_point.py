@@ -300,6 +300,12 @@ def _raster_to_pointcloud(
         all_bands = [data_band]
         all_column_names = [data_column_name]
 
+    # Point sampling returns a compact eager result, so compute a separate copy of a Dask source
+    # Loading the caller's DataArray here would replace its lazy graph with an in-memory array
+    if source_raster._chunks is not None:
+        source_raster = source_raster.copy(deep=False).rst
+        source_raster.load()
+
     # If subsample is the entire array, load it to optimize speed
     if subsample == 1 and not source_raster.is_loaded:
         source_raster.load()

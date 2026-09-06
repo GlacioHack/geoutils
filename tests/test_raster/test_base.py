@@ -15,7 +15,6 @@ from pandas.testing import assert_frame_equal
 from pyproj import CRS
 
 from geoutils import (
-    CoSampleResult,
     PointCloud,
     Raster,
     Variogram,
@@ -89,12 +88,6 @@ def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, 
         assert np.allclose(output1.semivariance, output2.semivariance, equal_nan=True)
         assert np.array_equal(output1.counts, output2.counts)
         assert output1.model == output2.model
-    # For bounded cosampling results
-    elif isinstance(output1, CoSampleResult):
-        assert isinstance(output2, CoSampleResult)
-        assert np.array_equal(output1.self_values, output2.self_values)
-        assert np.array_equal(output1.other_values, output2.other_values)
-        assert np.array_equal(output1.indices, output2.indices)
     # For labelled pair samples
     elif isinstance(output1, xr.Dataset):
         assert output1.identical(output2)
@@ -275,7 +268,7 @@ class TestClassVsAccessorConsistency:
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
         ("cosample", {"other": "self", "subsample": 1_000, "random_state": 42}),
-        ("sample_pairs", {"n_pairs": 1_000, "random_state": 42}),
+        ("pairsample", {"n_pairs": 1_000, "random_state": 42}),
         ("variogram", {"n_pairs": 1_000, "n_lags": 6, "random_state": 42}),
         ("filter", {"method": "median", "size": 7}),
         ("sieve", {"size": 7}),

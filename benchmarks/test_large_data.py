@@ -36,6 +36,7 @@ import pytest
 from benchmarks.workflows.registry import (
     OPERATION_BENCHMARK_CASES,
     OPERATION_BY_NAME,
+    OperationStrategyName,
     split_operation_case,
 )
 from benchmarks.workflows.runner import (
@@ -254,3 +255,24 @@ class TestLargeData:
 
         # IDW has its own reduction, while mean represents the shared circular-statistic neighborhood path
         self._check_case(case_name=case_name, large_data_config=config)
+
+    @pytest.mark.parametrize("strategy", ["dense", "sparse", "groupwise"])
+    @pytest.mark.parametrize("chunk_scale", [1, 2])
+    def test_grouped_stats_stays_out_of_core(
+        self, strategy: OperationStrategyName, chunk_scale: int, large_data_config: BenchmarkConfig
+    ) -> None:
+        """Checks that grouped summaries and exact local medians finish below full-raster worker memory."""
+
+        # Keep regions fixed when changing chunks so group boundaries cross at least one tested partition layout
+        # Sixty-four regions per axis bound each complete group needed for exact median and NMAD
+        chunks = tuple(max(16, size // chunk_scale) for size in large_data_config.chunks)
+        config = replace(
+            large_data_config,
+            chunks=chunks,
+            grouped_regions_per_axis=64,
+            operation_strategy=strategy,
+            operation_method="robust" if strategy == "groupwise" else "moments",
+        )
+
+        # Reuse the isolated-process contract for finite counts, worker health and measured memory growth
+        self._check_case(case_name="dask-grouped_stats", large_data_config=config)

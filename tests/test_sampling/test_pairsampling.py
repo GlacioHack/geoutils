@@ -25,7 +25,7 @@ def raster() -> gu.Raster:
 def test_raster_loglag_strategies_return_pair_dataset(raster: gu.Raster, strategy: str) -> None:
     """Every regular grid strategy should return finite endpoints in the distance range."""
 
-    pairs = raster.sample_pairs(
+    pairs = raster.pairsample(
         n_pairs=200,
         min_distance=2,
         max_distance=40,
@@ -46,8 +46,8 @@ def test_raster_loglag_strategies_return_pair_dataset(raster: gu.Raster, strateg
 def test_raster_pair_sample_is_reproducible_and_globally_unique(raster: gu.Raster) -> None:
     """A fixed seed and global deduplication should provide stable unique undirected pairs."""
 
-    first = raster.sample_pairs(n_pairs=300, deduplicate="global", random_state=4)
-    second = raster.sample_pairs(n_pairs=300, deduplicate="global", random_state=4)
+    first = raster.pairsample(n_pairs=300, deduplicate="global", random_state=4)
+    second = raster.pairsample(n_pairs=300, deduplicate="global", random_state=4)
     indexes = np.sort(first["index"].values, axis=1)
 
     assert first.identical(second)
@@ -59,7 +59,7 @@ def test_raster_random_xy_and_mask(raster: gu.Raster) -> None:
 
     mask = np.zeros(raster.shape, dtype=bool)
     mask[:15] = True
-    pairs = raster.sample_pairs(n_pairs=100, sampling="random_xy", mask=mask, random_state=8)
+    pairs = raster.pairsample(n_pairs=100, sampling="random_xy", mask=mask, random_state=8)
 
     assert np.all(pairs["row"] < 15)
     assert pairs.attrs["sampling"] == "random_xy"
@@ -74,7 +74,7 @@ def test_dask_raster_pair_sampling_keeps_source_lazy() -> None:
         da.from_array(array, chunks=(6, 5)), from_origin(0, 24, 2, 2), 32633, nodata=None
     )
 
-    pairs = raster.rst.sample_pairs(n_pairs=250, random_state=42)
+    pairs = raster.rst.pairsample(n_pairs=250, random_state=42)
 
     assert pairs.sizes["pair"] == 250
     assert isinstance(raster.data, da.Array)
@@ -89,7 +89,7 @@ def test_raster_pair_sampling_honors_local_chunks_and_dtypes() -> None:
     raster = gu.RasterAccessor.from_array(
         da.from_array(array, chunks=(6, 8)), from_origin(0, 24, 1, 1), 32633, nodata=None
     )
-    pairs = raster.rst.sample_pairs(
+    pairs = raster.rst.pairsample(
         n_pairs=200,
         min_distance=1,
         max_distance=6,
@@ -110,7 +110,7 @@ def test_raster_pair_sampling_accepts_geodataframe_mask(raster: gu.Raster) -> No
     """Vector-like masks should restrict both endpoints before pair values are read."""
 
     mask = gpd.GeoDataFrame(geometry=[box(0, -15, 30, 30)], crs=raster.crs)
-    pairs = raster.sample_pairs(n_pairs=80, mask=mask, max_distance=20, random_state=2)
+    pairs = raster.pairsample(n_pairs=80, mask=mask, max_distance=20, random_state=2)
 
     assert np.all(pairs.x < 30)
     assert np.all(pairs.y > -15)
@@ -123,7 +123,7 @@ def test_pointcloud_loglag_strategies(strategy: str) -> None:
     y, x = np.mgrid[:20, :20]
     values = np.sin(x.ravel() / 3) + np.cos(y.ravel() / 4)
     points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633)
-    pairs = points.sample_pairs(
+    pairs = points.pairsample(
         n_pairs=150,
         min_distance=1,
         max_distance=15,
@@ -148,7 +148,7 @@ def test_pointcloud_random_pairs_honor_mask_indexes_and_dtypes() -> None:
     points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633)
     mask = x.ravel() < 6
 
-    pairs = points.sample_pairs(
+    pairs = points.pairsample(
         n_pairs=100,
         sampling="random_xy",
         min_distance=1,
@@ -170,7 +170,7 @@ def test_pointcloud_exact_sampling_reuses_more_anchors_than_points() -> None:
 
     y, x = np.mgrid[:5, :5]
     points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), crs=32633)
-    pairs = points.sample_pairs(
+    pairs = points.pairsample(
         n_pairs=50,
         min_distance=1,
         max_distance=5,
@@ -197,7 +197,7 @@ def test_raster_pairs_exclude_masked_integer_values_and_mask_cells(raster_mask: 
     raster = gu.Raster.from_array(data, from_origin(0, 10, 1, 1), 32633, nodata=-9999)
     selected_mask = raster.from_array(mask, raster.transform, raster.crs) if raster_mask else mask
 
-    pairs = raster.sample_pairs(n_pairs=200, mask=selected_mask, random_state=3)
+    pairs = raster.pairsample(n_pairs=200, mask=selected_mask, random_state=3)
 
     eligible = ~data.mask & mask.filled(False)
     indexes = pairs["index"].values

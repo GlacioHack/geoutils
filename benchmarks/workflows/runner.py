@@ -65,6 +65,8 @@ class BenchmarkConfig:
     polygon_regions_per_axis: int = 1
     vector_features_per_axis: int = 1
     point_features_per_axis: int = 5
+    grouped_regions_per_axis: int = 8
+    grouped_layout: Literal["local", "interleaved"] = "local"
     operation_method: str | None = None
     calculation_engine: CalculationEngine | None = None
     operation_strategy: OperationStrategyName | None = None
@@ -659,6 +661,66 @@ class BenchmarkRunner:
         y = rng.uniform(45.01, 45.99, size=self.config.ninterp)
         return x, y
 
+    def _grouped_statistics(self, raster: Any, method: str, strategy: str | None) -> float:
+        """Compute grouped moments or exact robust estimates on deterministic values with independent gaps.
+
+        Local groups occupy rectangular regions; interleaved groups span the entire input. Dask builds all value
+        and membership arrays lazily. Multiprocessing benchmarks the current array interface, which loads values
+        in the client before tiling them for workers. The returned fingerprint checks complete finite counts.
+        """
+
+        # Generate coordinates with the same execution backend as the input raster
+        height, width = self.config.shape
+        if self.backend == "dask":
+            import_optional("dask", extra_name="benchmark")
+            import dask.array as da
+
+            rows = da.arange(height, chunks=self.config.chunks[0])[:, None]
+            columns = da.arange(width, chunks=self.config.chunks[1])[None, :]
+        else:
+            rows = np.arange(height)[:, None]
+            columns = np.arange(width)[None, :]
+        regions = self.config.grouped_regions_per_axis
+        if regions < 1 or regions > min(height, width):
+            raise ValueError("Grouped regions per axis must fit within the raster dimensions.")
+
+        # Separate localized membership from groups repeated through every chunk
+        if self.config.grouped_layout == "local":
+            groups = (rows * regions // height) * regions + columns * regions // width
+        else:
+            groups = (rows % regions) * regions + columns % regions
+        positions = rows * width + columns
+        base = raster.data.squeeze()
+        signal = base + (rows % 97) * 0.125 + (columns % 53) * 0.25
+        values = {
+            "signal": np.where(positions % 17 != 0, signal, np.nan),
+            "offset": np.where(positions % 29 != 0, 2 * signal + 10, np.nan),
+        }
+
+        # Measure the complete public calculation, including exact group gathering when requested
+        from geoutils.stats.grouped import GroupingStrategy, grouped_stats
+
+        statistics = ["mean", "std", "min", "max"] if method == "moments" else ["median", "nmad"]
+        config = self._multiproc_config("grouped_stats") if self.backend == "multiprocessing" else None
+        result = grouped_stats(
+            values,
+            {"zone": groups},
+            categories={"zone": range(regions**2)},
+            statistics=statistics,
+            strategy=cast(GroupingStrategy, strategy or "auto"),
+            mp_config=config,
+        )
+
+        # Every pixel belongs to a group; missing values follow independent, analytically known periods
+        count = height * width
+        for name, period in (("signal", 17), ("offset", 29)):
+            expected = count - (count + period - 1) // period
+            if result[(name, "count")].sum() != expected:
+                raise AssertionError(f"Grouped benchmark lost finite observations in {name!r}.")
+            if not np.isfinite(result[name].to_numpy()).all():
+                raise AssertionError(f"Grouped benchmark returned invalid estimates in {name!r}.")
+        return 1.0
+
     def _execute(self, operation: OperationName) -> float:
         """Build and fully compute one named benchmark operation."""
 
@@ -745,6 +807,10 @@ class BenchmarkRunner:
             statistics = raster.rst.get_stats(["mean", "std", "valid count"])
             mean, _, _ = dask.compute(*statistics.values())
             return float(mean)
+
+        if operation == "grouped_stats":
+            assert operation_method is not None
+            return self._grouped_statistics(raster, operation_method, operation_strategy)
 
         if operation == "subsample":
             # Return only a fixed-size selection from the much larger raster

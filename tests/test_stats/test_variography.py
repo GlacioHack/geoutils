@@ -120,6 +120,47 @@ def test_object_variogram_aggregates_runs_and_fits_summed_model() -> None:
     assert result.attrs["n_runs"] == 3
 
 
+@pytest.mark.parametrize("n_runs", [1, 3])
+def test_variogram_repetitions_match_independent_samples(n_runs: int) -> None:
+    """Checks that optional repetitions combine independent samples and their standard errors correctly."""
+
+    # Define reproducible pair samples with fixed lag edges, avoiding fitting in this comparison
+    y, x = np.mgrid[:20, :20]
+    raster = gu.Raster.from_array(np.sin(x / 4) + np.cos(y / 5), from_origin(0, 20, 1, 1), 32633)
+    edges = np.linspace(0, 25, 6)
+    seeds = np.random.default_rng(42).integers(0, np.iinfo(np.int32).max, n_runs)
+    samples = [
+        gu.Variogram.from_pairs(raster.pairsample(n_pairs=500, random_state=int(seed)), bins=edges) for seed in seeds
+    ]
+
+    # Compare the public workflow with independently sampled empirical variograms
+    result = raster.variogram(n_pairs=500, bins=edges, n_runs=n_runs, random_state=42)
+    empirical = np.stack([sample.semivariance for sample in samples])
+    np.testing.assert_allclose(result.semivariance, np.nanmean(empirical, axis=0), equal_nan=True)
+    np.testing.assert_array_equal(result.counts, np.sum([sample.counts for sample in samples], axis=0))
+    assert result.attrs["n_runs"] == n_runs
+
+    # Leave sampling error absent by default and estimate it only from repeated samples
+    if n_runs == 1:
+        assert np.all(np.isnan(result.semivariance_error))
+    else:
+        expected = np.nanstd(empirical, ddof=1, axis=0) / np.sqrt(np.isfinite(empirical).sum(axis=0))
+        np.testing.assert_allclose(result.semivariance_error, expected, equal_nan=True)
+        assert result.attrs["pair_count"] == int(result.counts.sum())
+
+
+@pytest.mark.parametrize("n_runs", [0, -1, 1.5, True])
+def test_variogram_rejects_invalid_repetitions(n_runs: int | float) -> None:
+    """Checks that invalid repetition counts are rejected before sampling correctly."""
+
+    # Use a small raster because validation must not depend on sampled values
+    raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), from_origin(0, 4, 1, 1), 32633)
+
+    # Require a positive integer rather than silently truncating the requested run count
+    with pytest.raises(ValueError, match="n_runs must be a positive integer"):
+        raster.variogram(n_runs=n_runs)
+
+
 def test_fit_accepts_short_names_and_skgstat_model_functions() -> None:
     """The lightweight fit should retain xDEM's accepted model name forms."""
 
@@ -143,7 +184,7 @@ def test_pointcloud_variogram_and_advanced_pairs_share_api() -> None:
     y, x = np.mgrid[:18, :18]
     pointcloud = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (np.sin(x / 3) + np.cos(y / 5)).ravel(), crs=32633)
 
-    pairs = pointcloud.sample_pairs(n_pairs=300, min_distance=1, max_distance=15, random_state=2)
+    pairs = pointcloud.pairsample(n_pairs=300, min_distance=1, max_distance=15, random_state=2)
     result = pointcloud.variogram(n_pairs=300, min_lag=1, max_lag=15, n_lags=6, random_state=2)
 
     assert pairs.sizes == {"pair": 300, "endpoint": 2}

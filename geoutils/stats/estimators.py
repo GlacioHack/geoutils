@@ -46,17 +46,17 @@ def nmad(data: NDArrayNum, nfact: float = 1.4826) -> np.floating[Any]:
 
 def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:
     """
-    Compute the linear error (LE) for a given dataset, representing the range of differences between the upper and
-    lower percentiles of the data. By default, this calculates the 90% confidence interval (LE90).
+    Compute the linear error (LE), the difference between two percentiles bounding a central interval of the data.
+    By default, the interval contains the middle 90% of values (LE90).
 
     :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
-    another quantity.
-    :param interval: The confidence interval to compute, specified as a percentage. For example, an interval of 90 will
-    compute the range between the 5th and 95th percentiles (LE90). This value must be between 0 and 100.
+        another quantity.
+    :param interval: Central interval as a percentage greater than 0 and at most 100. For example, 90 computes the
+        difference between the 5th and 95th percentiles (LE90).
 
-    return: The computed linear error, which is the difference between the upper and lower percentiles.
+    :returns: Difference between the upper and lower percentiles, in the same units as the data.
 
-    raises: ValueError if the `interval` is not between 0 and 100.
+    :raises ValueError: If the interval is not greater than 0 and at most 100.
     """
     # Validate the interval
     if not (0 < interval <= 100):
@@ -77,8 +77,9 @@ def sum_square(data: NDArrayNum) -> np.floating[Any]:
     Calculate the sum of the square of a data array.
 
     :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
-    another quantity.
-    :return: sum square
+        another quantity.
+
+    :returns: Sum of squared values.
     """
     if np.ma.isMaskedArray(data):
         return np.ma.sum(np.square(data))
@@ -91,8 +92,9 @@ def rmse(data: NDArrayNum) -> np.floating[Any]:
     Calculate the RMSE of a data array.
 
     :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
-    another quantity.
-    :return: rmse
+        another quantity.
+
+    :returns: Root mean square of the values.
     """
     if np.ma.isMaskedArray(data):
         return np.sqrt(np.ma.mean(np.square(data)))

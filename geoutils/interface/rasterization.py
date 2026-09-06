@@ -527,6 +527,9 @@ def _rasterize(
     mp_backend = mp_config is not None
     # A Dask reference keeps its chunked representation unless Multiprocessing is requested
     ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
+    if ref_chunks is not None:
+        # Match only spatial chunks when the reference also has a band dimension
+        ref_chunks = ref_chunks[-2:]
     dask_backend = bool(dask) or (da is not None and ref_chunks is not None)
 
     if mp_backend and dask_backend:

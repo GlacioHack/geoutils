@@ -35,6 +35,7 @@ CALCULATION_ENGINE_LABELS: dict[CalculationEngine, str] = {
     "scipy": "SciPy",
     "numba": "Numba",
     "rasterio": "Rasterio/GDAL",
+    "numpy": "NumPy",
 }
 METHOD_LABELS = {
     "nearest": "Nearest",
@@ -48,6 +49,10 @@ STRATEGY_LABELS: dict[OperationStrategyName, str] = {
     "label_union": "Label union",
     "label_stitch": "Label stitch",
     "geometry_stitch": "Geometry stitch",
+    "auto": "Automatic",
+    "dense": "Dense summaries",
+    "sparse": "Sparse summaries",
+    "groupwise": "Complete groups",
 }
 
 
@@ -261,6 +266,50 @@ _POLYGONIZATION_STRATEGIES = _strategy_cases(
 _RASTERIZATION_MODES = _execution_cases("rasterization-raster-size", "rasterize", None, "rasterio")
 _SUBSAMPLE_STRATEGIES = _strategy_cases("subsample-size", "subsample", None, None, execution_mode="dask")
 
+# Isolate input size, chunk size, membership layout and group count for shared grouped-statistic kernels
+_GROUPED_MODES = _execution_cases(
+    "grouped-stats-raster-size",
+    "grouped_stats",
+    "moments",
+    "numpy",
+    strategy="dense",
+    pr_modes=("eager", "dask", "multiprocessing"),
+)
+_GROUPED_STRATEGIES = {
+    scenario: _strategy_cases(scenario, "grouped_stats", "moments", "numpy", execution_mode="dask")
+    for scenario in (
+        "grouped-stats-raster-size",
+        "grouped-stats-chunk-size",
+        "grouped-stats-interleaved-chunks",
+        "grouped-stats-group-count",
+    )
+}
+_GROUPED_ROBUST_MODES = _execution_cases(
+    "grouped-stats-robust-size",
+    "grouped_stats",
+    "robust",
+    "numpy",
+    strategy="groupwise",
+    pr_modes=("dask", "multiprocessing"),
+)
+
+# Check each distinct layout and the automatic sparse threshold with a bounded pull-request workload
+for _scenario, _strategies in _GROUPED_STRATEGIES.items():
+    _GROUPED_STRATEGIES[_scenario] = tuple(
+        (
+            replace(case, pr_check=True)
+            if (_scenario, case.strategy)
+            in {
+                ("grouped-stats-chunk-size", "dense"),
+                ("grouped-stats-interleaved-chunks", "groupwise"),
+                ("grouped-stats-group-count", "sparse"),
+                ("grouped-stats-group-count", "auto"),
+            }
+            else case
+        )
+        for case in _strategies
+    )
+
 # Compare all four gridding methods across execution modes while keeping SciPy as the calculation engine
 _GRID_METHODS = ("nearest", "linear", "idw", "mean")
 _GRID_MODE_CASES = {
@@ -310,6 +359,9 @@ _NUMBA_WORKER_CASES = tuple(
 
 # Combine every GeoUtils case and remove duplicates when the same combination appears in several comparisons
 BENCHMARK_CASES = _merge_cases(
+    _GROUPED_MODES,
+    *tuple(_GROUPED_STRATEGIES.values()),
+    _GROUPED_ROBUST_MODES,
     _INTERPOLATION_MODES,
     _REPROJECTION_MODES,
     _FILTER_MODES,
@@ -413,6 +465,84 @@ _GRID_POINTS_PER_AXIS = {"nearest": 17, "linear": 17, "idw": 17, "mean": 17}
 
 # Define the report plots, including their displayed series and the operation settings held fixed
 COMPARISONS: tuple[Comparison, ...] = (
+    Comparison(
+        slug="grouped-stats-execution-size",
+        title="Grouped moments by raster size and execution mode",
+        description=(
+            "Computes count, mean, standard deviation and extrema for two values with independent missing data "
+            "in 64 rectangular groups. Dask reads chunks lazily; multiprocessing loads the input in the client."
+        ),
+        parameter_label="Size of raster (pixels per side)",
+        series=_comparison_series(_GROUPED_MODES, "execution_mode"),
+        operation="grouped_stats",
+        method="moments",
+        calculation_engine="numpy",
+        strategy="dense",
+        workload_template="{parameter} × {parameter} raster; 256 × 256 chunks; 64 local groups; two values",
+        documentation=False,
+    ),
+    *tuple(
+        Comparison(
+            slug=scenario,
+            title=title,
+            description=(
+                "Computes count, mean, standard deviation and extrema for two values with independent gaps. "
+                "Dense summaries allocate every declared group per chunk; sparse summaries retain encountered "
+                "groups; groupwise gathers complete observations. Automatic uses the declared group count."
+            ),
+            parameter_label=parameter_label,
+            series=_comparison_series(_GROUPED_STRATEGIES[scenario], "strategy"),
+            operation="grouped_stats",
+            method="moments",
+            calculation_engine="numpy",
+            execution_mode="dask",
+            series_dimension="strategy",
+            documentation=False,
+            workload_template=workload,
+        )
+        for scenario, title, parameter_label, workload in (
+            (
+                "grouped-stats-raster-size",
+                "Grouped reduction strategies by raster size",
+                "Size of raster (pixels per side)",
+                "{parameter} × {parameter} raster; 256 × 256 chunks; 64 local groups; two values",
+            ),
+            (
+                "grouped-stats-chunk-size",
+                "Grouped reduction strategies by chunk size (local groups)",
+                "Size of chunks (pixels per side)",
+                "1,024 × 1,024 raster; {parameter} × {parameter} chunks; 64 local groups; two values",
+            ),
+            (
+                "grouped-stats-interleaved-chunks",
+                "Grouped reduction strategies by chunk size (interleaved groups)",
+                "Size of chunks (pixels per side)",
+                "1,024 × 1,024 raster; {parameter} × {parameter} chunks; 64 interleaved groups; two values",
+            ),
+            (
+                "grouped-stats-group-count",
+                "Grouped reduction strategies by declared group count",
+                "Number of groups per axis",
+                "1,024 × 1,024 raster; 128 × 128 chunks; {parameter} × {parameter} local groups; two values",
+            ),
+        )
+    ),
+    Comparison(
+        slug="grouped-stats-robust-size",
+        title="Exact grouped median and NMAD by raster size",
+        description=(
+            "Gathers complete observations in 64 rectangular groups to calculate exact medians and NMAD for "
+            "two values with independent missing data. Memory depends on the largest complete group."
+        ),
+        parameter_label="Size of raster (pixels per side)",
+        series=_comparison_series(_GROUPED_ROBUST_MODES, "execution_mode"),
+        operation="grouped_stats",
+        method="robust",
+        calculation_engine="numpy",
+        strategy="groupwise",
+        workload_template="{parameter} × {parameter} raster; 256 × 256 chunks; 64 local groups; two values",
+        documentation=False,
+    ),
     Comparison(
         slug="interpolation-point-count",
         title="Linear interpolation by number of points (SciPy engine)",
@@ -822,6 +952,53 @@ class _NearestGriddingPointCount(_ComparisonBenchmark):
         )
 
 
+class _GroupedStatsRasterSize(_ComparisonBenchmark):
+    """Vary raster size around fixed chunks and localized groups."""
+
+    param_names = ["raster_size"]
+    params = [asv_parameter_values([512, 1024, 2048], pr_check_value=256)]
+
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Prepare two values and 64 spatial groups on the selected raster size."""
+
+        return BenchmarkConfig(shape=(parameter, parameter), chunks=(256, 256))
+
+
+class _GroupedStatsChunkSize(_ComparisonBenchmark):
+    """Vary chunk size while keeping the raster and group boundaries fixed."""
+
+    param_names = ["chunk_size"]
+    params = [asv_parameter_values([64, 193, 512], pr_check_value=97)]
+
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Include uneven edge chunks and groups crossing partition boundaries."""
+
+        size = 256 if asv_pr_check_enabled() else 1024
+        return BenchmarkConfig(shape=(size, size), chunks=(parameter, parameter))
+
+
+class _GroupedStatsInterleavedChunks(_GroupedStatsChunkSize):
+    """Repeat every group throughout the raster while varying chunk size."""
+
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Keep observations interleaved across all chunks for each tested partition size."""
+
+        return replace(super().make_config(parameter), grouped_layout="interleaved")
+
+
+class _GroupedStatsGroupCount(_ComparisonBenchmark):
+    """Vary declared groups across the automatic dense-to-sparse selection threshold."""
+
+    param_names = ["groups_per_axis"]
+    params = [asv_parameter_values([4, 16, 65], pr_check_value=65)]
+
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Include 4225 groups so automatic reduction exercises its sparse branch."""
+
+        size = 256 if asv_pr_check_enabled() else 1024
+        return BenchmarkConfig(shape=(size, size), chunks=(128, 128), grouped_regions_per_axis=parameter)
+
+
 class _NumbaWorkerIntegration(_GriddingRasterSize):
     """Exercise each Numba kernel once in Dask and multiprocessing workers."""
 
@@ -830,6 +1007,11 @@ class _NumbaWorkerIntegration(_GriddingRasterSize):
 
 # Select the input axis and fixture configuration used by each named comparison group
 _SCENARIO_BASES: dict[str, type[_ComparisonBenchmark]] = {
+    "grouped-stats-raster-size": _GroupedStatsRasterSize,
+    "grouped-stats-chunk-size": _GroupedStatsChunkSize,
+    "grouped-stats-interleaved-chunks": _GroupedStatsInterleavedChunks,
+    "grouped-stats-group-count": _GroupedStatsGroupCount,
+    "grouped-stats-robust-size": _GroupedStatsRasterSize,
     "interpolation-point-count": _InterpolationPointCount,
     "reprojection-raster-size": _ReprojectionRasterSize,
     "filter-chunk-size": _FilterChunkSize,

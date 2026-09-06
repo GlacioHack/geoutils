@@ -94,6 +94,7 @@ class TestComparisonReport:
             "Number of interpolated points",
             "Number of source points per axis",
             "Number of sampled values",
+            "Number of groups per axis",
         }
         method_by_key = {
             (specification.operation, specification.method): specification for specification in OPERATION_METHODS
@@ -224,7 +225,7 @@ class TestComparisonReport:
         assert "GeoUtils calculation engine" in root_page
         assert "GeoUtils execution mode" in root_page
         assert "External reference" in root_page
-        for option in ("Rasterio/GDAL", "SciPy", "Numba", "GDAL CLI", "Eager", "Dask", "Multiprocessing"):
+        for option in ("Rasterio/GDAL", "SciPy", "Numba", "NumPy", "GDAL CLI", "Eager", "Dask", "Multiprocessing"):
             assert f">{option}</th>" in root_page
         assert '<span class="metric-label">Fastest</span>' not in root_page
         assert "MB" in root_page
@@ -246,7 +247,7 @@ class TestComparisonReport:
         assert "Prepared inputs through completed output" in root_page
         assert "data larger than memory" in root_page
         assert "Ratios" not in root_page
-        assert '<th class="group-heading" colspan="3" scope="colgroup">GeoUtils calculation engine</th>' in root_page
+        assert '<th class="group-heading" colspan="4" scope="colgroup">GeoUtils calculation engine</th>' in root_page
         assert '<th class="group-heading" colspan="3" scope="colgroup">GeoUtils execution mode</th>' in root_page
         operation_groups = (
             "Raster ⟶ Raster",
@@ -291,7 +292,7 @@ class TestComparisonReport:
         assert '<span class="metric-label">Memory</span>' in comparison_page
         assert "Ratios" in comparison_page
         assert comparison_page.count('class="operation-group"') >= len(operation_groups)
-        assert 'class="group-heading" colspan="3" scope="colgroup">GeoUtils calculation engine' in comparison_page
+        assert 'class="group-heading" colspan="4" scope="colgroup">GeoUtils calculation engine' in comparison_page
         assert 'class="group-heading" colspan="3" scope="colgroup">GeoUtils execution mode' in comparison_page
         assert 'class="choice-table"' in comparison_page
         assert comparison_page.count('class="workload-heading"') == 2
@@ -307,6 +308,7 @@ class TestComparisonReport:
             "Scaling with the number of interpolated points",
             "Scaling with the number of source points",
             "Scaling with the number of sampled values",
+            "Scaling with the number of groups",
         ):
             assert heading in scaling_page
         assert 'class="plot-toc"' in scaling_page

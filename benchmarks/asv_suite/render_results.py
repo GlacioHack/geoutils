@@ -96,6 +96,10 @@ SCALING_SECTION_DETAILS = {
         "Scaling with the number of sampled values",
         "The returned sample size varies while the source raster remains fixed.",
     ),
+    "Number of groups per axis": (
+        "Scaling with the number of groups",
+        "The number of rectangular groups varies while raster and chunk dimensions remain fixed.",
+    ),
 }
 
 OPERATION_LABELS: dict[OperationName, str] = {
@@ -105,6 +109,7 @@ OPERATION_LABELS: dict[OperationName, str] = {
     "filter": "Filtering",
     "reproject": "Reprojection",
     "statistics": "Statistics",
+    "grouped_stats": "Grouped statistics",
     "subsample": "Subsampling",
     "interp_points": "Point interpolation",
     "polygonize": "Polygonization",
@@ -137,6 +142,7 @@ OPERATION_GROUPS: dict[OperationName, str] = {
     "rasterize": "Vector ⟶ Raster",
     "create_mask": "Vector ⟶ Raster",
     "statistics": "Raster ⟶ Other",
+    "grouped_stats": "Raster ⟶ Other",
     "write": "Raster ⟶ Other",
 }
 
@@ -183,9 +189,11 @@ class _PreviewResult:
                 parameter_values = (3, 9, 33)
             elif comparison.parameter_label == "Number of sampled values":
                 parameter_values = (256, 2048, 16384)
+            elif comparison.parameter_label == "Number of groups per axis":
+                parameter_values = (4, 16, 65)
             elif comparison.parameter_label == "Size of chunks (pixels per side)":
-                parameter_values = (256, 512, 1024)
-            elif comparison.operation == "grid":
+                parameter_values = (64, 193, 512) if comparison.operation == "grouped_stats" else (256, 512, 1024)
+            elif comparison.operation in {"grid", "grouped_stats"}:
                 parameter_values = (512, 1024, 2048)
             else:
                 parameter_values = (1024, 2048, 4096)
@@ -991,7 +999,7 @@ def _engine_summary_table(records: list[ComparisonMeasurement]) -> str:
     """Compare eager GeoUtils calculation engines with the external GDAL CLI."""
 
     rows: list[tuple[Comparison, str]] = []
-    columns: tuple[CalculationEngine | ExternalReference, ...] = ("rasterio", "scipy", "numba", "gdal_cli")
+    columns: tuple[CalculationEngine | ExternalReference, ...] = ("rasterio", "scipy", "numba", "numpy", "gdal_cli")
     for comparison in _engine_summary_comparisons():
         parameter = _summary_reference_parameter(comparison, records)
         _, by_implementation = _eager_implementation_measurements(comparison, records, parameter)
@@ -1023,11 +1031,12 @@ def _engine_summary_table(records: list[ComparisonMeasurement]) -> str:
             '<div class="table-wrap"><table><thead>',
             '<tr><th class="row-heading" rowspan="2" scope="col">Operation and method</th>',
             '<th class="workload-heading" rowspan="2" scope="col">Reference workload</th>',
-            '<th class="group-heading" colspan="3" scope="colgroup">GeoUtils calculation engine</th>',
+            '<th class="group-heading" colspan="4" scope="colgroup">GeoUtils calculation engine</th>',
             '<th class="external-heading group-heading" scope="colgroup">External reference</th></tr>',
             '<tr><th scope="col">Rasterio/GDAL</th><th scope="col">SciPy</th><th scope="col">Numba</th>',
+            '<th scope="col">NumPy</th>',
             '<th class="external-heading" scope="col">GDAL CLI</th></tr></thead>',
-            _group_operation_rows(rows, column_count=6),
+            _group_operation_rows(rows, column_count=7),
             "</table></div>",
         ]
     )
@@ -1108,7 +1117,7 @@ def _summary_reference_parameter(comparison: Comparison, records: list[Compariso
 def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
     """List engines and execution modes in separate columns beside the external GDAL CLI."""
 
-    engine_order: tuple[CalculationEngine, ...] = ("rasterio", "scipy", "numba")
+    engine_order: tuple[CalculationEngine, ...] = ("rasterio", "scipy", "numba", "numpy")
     mode_order: tuple[ExecutionMode, ...] = ("eager", "dask", "multiprocessing")
     engine_comparisons = {
         (comparison.operation, comparison.method): comparison for comparison in _engine_summary_comparisons()
@@ -1186,13 +1195,14 @@ def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
             '<div class="table-wrap"><table class="summary-table"><thead>',
             '<tr><th class="row-heading" rowspan="2" scope="col">Operation and method</th>',
             '<th class="workload-heading" rowspan="2" scope="col">Reference workload</th>',
-            '<th class="group-heading" colspan="3" scope="colgroup">GeoUtils calculation engine</th>',
+            '<th class="group-heading" colspan="4" scope="colgroup">GeoUtils calculation engine</th>',
             '<th class="group-heading" colspan="3" scope="colgroup">GeoUtils execution mode</th>',
             '<th class="external-heading group-heading" scope="colgroup">External reference</th></tr>',
             '<tr><th scope="col">Rasterio/GDAL</th><th scope="col">SciPy</th><th scope="col">Numba</th>',
+            '<th scope="col">NumPy</th>',
             '<th scope="col">Eager</th><th scope="col">Dask</th><th scope="col">Multiprocessing</th>',
             '<th class="external-heading" scope="col">GDAL CLI</th></tr></thead>',
-            _group_operation_rows(rows, column_count=9),
+            _group_operation_rows(rows, column_count=10),
             "</table></div>",
         ]
     )
@@ -1513,7 +1523,7 @@ def _concept_map() -> str:
             '<span class="chip">Reprojection — Bilinear</span></div></div>',
             '<div class="concept-card engine"><strong>Calculation engine</strong><span>The library GeoUtils uses to '
             'carry out the calculation.</span><div class="chips"><span class="chip">Rasterio / GDAL</span>'
-            '<span class="chip">SciPy</span><span class="chip">Numba</span></div></div>',
+            '<span class="chip">SciPy</span><span class="chip">Numba</span><span class="chip">NumPy</span></div></div>',
             '<div class="concept-card mode"><strong>Execution mode</strong><span>How an operation runs: '
             "in-memory or chunked out-of-memory.</span>"
             '<div class="chips"><span class="chip">Eager</span><span class="chip">Dask</span>'
@@ -1521,7 +1531,8 @@ def _concept_map() -> str:
             '<div class="concept-card"><strong>Chunk strategy</strong><span>How a chunked operation reconciles '
             'separate partial results.</span><div class="chips"><span class="chip">Subsampling — Sequential</span>'
             '<span class="chip">Subsampling — Top-k</span>'
-            '<span class="chip">Polygonization — Label stitch</span></div></div>',
+            '<span class="chip">Polygonization — Label stitch</span>'
+            '<span class="chip">Grouped statistics — Dense / Sparse / Complete groups</span></div></div>',
             "</div>",
             '<div class="external-card"><strong>External reference: GDAL CLI</strong>',
             "<span>Standalone GDAL file-to-file command run outside GeoUtils. It is distinct from Rasterio/GDAL, "

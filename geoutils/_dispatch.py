@@ -661,7 +661,8 @@ def _check_match_grid(
             and has_geo_attr(ref, "crs")
             and isinstance(get_geo_attr(ref, "transform"), rio.Affine)
         ):
-            dst_shape = get_geo_attr(ref, "shape")
+            # Match the spatial grid even when a native Xarray reference includes a band dimension
+            dst_shape = get_geo_attr(ref, "shape")[-2:]
             dst_transform = get_geo_attr(ref, "transform")
             dst_crs = get_geo_attr(ref, "crs")
 
