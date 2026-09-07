@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Variography module to manipulate a lightweight variogram object across backends (SciKit-GStat, GSTools, GPyTorch)."""
+"""Estimate, fit, and convert variograms."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ _COMPOSITE_MODELS = {"sum", "product"}
 
 @dataclass(frozen=True)
 class VariogramModel:
-    """Parameters of a fitted theoretical variogram independent of backend.
+    """Parameters of a fitted theoretical variogram in a form shared by all supported packages.
 
     The ``effective_range`` follows SciKit-GStat's convention, ``partial_sill`` excludes the nugget, making the
     conversion to covariance kernels unambiguous.
@@ -76,7 +76,7 @@ class VariogramModel:
     #####################
 
     def __post_init__(self) -> None:
-        # Normalize accepted aliases so every conversion uses canonical model names
+        # Replace accepted short names with the one standard name used by every conversion
         aliases = {
             "cub": "cubic",
             "exp": "exponential",
@@ -90,7 +90,7 @@ class VariogramModel:
         object.__setattr__(self, "model_name", model_name)
         object.__setattr__(self, "components", tuple(self.components))
 
-        # Convert numeric metadata once so serialized and fitted models behave alike
+        # Convert numeric fields once so loaded and newly fitted models behave alike
         for name in ("effective_range", "partial_sill", "nugget", "smoothness", "shape"):
             value = getattr(self, name)
             if value is not None:
@@ -100,7 +100,7 @@ class VariogramModel:
         if self.partial_sill is not None and (not np.isfinite(self.partial_sill) or self.partial_sill < 0):
             raise ValueError("Variogram partial sill must be a finite, non-negative number.")
 
-        # Validate composite structures and derive their combined structured sill
+        # Check combined models and calculate their sill from their component models
         if model_name in _COMPOSITE_MODELS:
             if len(self.components) < 2:
                 raise ValueError("A composite variogram requires at least two components.")
@@ -115,7 +115,7 @@ class VariogramModel:
         elif model_name not in _BASE_MODELS:
             raise ValueError(f"Unsupported variogram model {model_name!r}.")
         else:
-            # Require the parameters used by each supported base model
+            # Require the range, variance, and optional shape values needed by this model type
             if self.components:
                 raise ValueError("Only a composite variogram can contain components.")
             if self.effective_range is None or not np.isfinite(self.effective_range) or self.effective_range <= 0:
@@ -127,7 +127,7 @@ class VariogramModel:
             if model_name == "stable" and self.shape is None:
                 raise ValueError("A stable variogram requires a shape parameter.")
 
-        # Validate shared scalar metadata after model-specific normalization
+        # Check the shared numeric fields after model-specific defaults are applied
         if not np.isfinite(self.nugget) or self.nugget < 0:
             raise ValueError("Variogram nugget must be a finite, non-negative number.")
         if self.smoothness is not None and (not np.isfinite(self.smoothness) or self.smoothness <= 0):
@@ -158,17 +158,17 @@ class VariogramModel:
         :returns: Semivariance at each distance.
         """
 
-        # Preserve scalar return behavior while evaluating through one array path
+        # Use one array calculation, then return a scalar when the input was scalar
         scalar_input = np.ndim(distance) == 0
         distances = np.atleast_1d(np.asarray(distance, dtype=float))
 
-        # Add independent semivariances before applying the shared nugget
+        # Add component semivariances, then add the shared nugget once
         if self.model_name == "sum":
             values = sum((component.variogram(distances) for component in self.components), np.zeros_like(distances))
             output = values + np.where(distances > 0, self.nugget, 0.0)
             return output[0] if scalar_input else output
 
-        # Multiply component covariances to define product model semivariance
+        # Multiply component covariances, then convert the result back to semivariance
         if self.model_name == "product":
             if self.partial_sill is None:
                 raise AssertionError("A product variogram model must define its partial sill.")
@@ -178,11 +178,11 @@ class VariogramModel:
             output = (float(self.partial_sill) - covariance) + np.where(distances > 0, self.nugget, 0.0)
             return output[0] if scalar_input else output
 
-        # Guard normalized base parameters before calling backend model functions
+        # Confirm that validation supplied the numeric fields required by SciKit-GStat
         if self.effective_range is None or self.partial_sill is None:
             raise AssertionError("A base variogram model must define its range and partial sill.")
 
-        # Build arguments in SciKit-GStat coefficient order for the selected model
+        # Pass parameters in the order expected by the selected SciKit-GStat model function
         skgstat = import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
         model_function = getattr(skgstat.models, self.model_name)
         arguments: list[float] = [self.effective_range, self.partial_sill]
@@ -195,7 +195,7 @@ class VariogramModel:
                 raise AssertionError("A stable variogram model must define its shape.")
             arguments.append(float(self.shape))
 
-        # Evaluate structured semivariance and add nugget only at positive distances
+        # Calculate the distance-dependent part and add the nugget above zero distance
         values = np.asarray(model_function(distances.ravel(), *arguments), dtype=float).reshape(distances.shape)
         output = values + np.where(distances > 0, self.nugget, 0.0)
         return output[0] if scalar_input else output
@@ -254,7 +254,7 @@ class VariogramModel:
         if combination not in _COMPOSITE_MODELS:
             raise ValueError("combination must be 'sum' or 'product'.")
 
-        # Flatten like compositions and move every component nugget to the parent
+        # Flatten nested combinations of the same kind and store all nuggets once on the parent
         flattened: list[VariogramModel] = []
         for component in components:
             if component.model_name == combination:
@@ -270,7 +270,7 @@ class VariogramModel:
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible model description."""
 
-        # Serialize components recursively so compositions remain portable
+        # Convert nested components too so the complete model contains only plain Python data
         return {
             "model_name": self.model_name,
             "effective_range": self.effective_range,
@@ -284,13 +284,13 @@ class VariogramModel:
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any]) -> VariogramModel:
-        """Restore a model from :meth:`~geoutils.VariogramModel.to_dict` output.
+        """Restore a model from VariogramModel.to_dict() output.
 
         :param values: Serialized model fields.
         :returns: Restored fitted model.
         """
 
-        # Restore nested components before validating the parent model fields
+        # Restore nested components before the dataclass checks the complete parent model
         components = tuple(cls.from_dict(component) for component in values.get("components", ()))
         return cls(
             model_name=str(values["model_name"]),
@@ -306,14 +306,14 @@ class VariogramModel:
         )
 
 
-###############################
-# 2/ BACKEND RESULT CONTAINERS
-###############################
+################################
+# 2/ RESULTS FROM OTHER PACKAGES
+################################
 
 
 @dataclass(frozen=True)
 class GPyTorchVariogram:
-    """A native GPyTorch covariance kernel and its separate observation noise nugget.
+    """A GPyTorch covariance kernel and its separate observation noise nugget.
 
     :param kernel: Converted GPyTorch covariance kernel.
     :param noise: Nugget variance for the observation likelihood.
@@ -325,7 +325,7 @@ class GPyTorchVariogram:
 
 @dataclass(frozen=True)
 class GSToolsVariogram:
-    """A native GSTools covariance model and its source feature dimensions.
+    """A GSTools covariance model and the source coordinate columns it uses.
 
     :param model: Converted GSTools covariance model.
     :param active_dims: Feature columns to select before passing coordinates to GSTools.
@@ -335,33 +335,33 @@ class GSToolsVariogram:
     active_dims: tuple[int, ...] | None
 
 
-##############################
-# 3/ EMPIRICAL VARIOGRAM RESULT
-##############################
+############################
+# 3/ MEASURED VARIOGRAM RESULT
+############################
 
 
 @dataclass(frozen=True)
 class Variogram:
-    """Small, serializable empirical and fitted variogram result.
+    """Measured and fitted variogram values that can be saved without a fitting package object.
 
-    The arrays have one value per lag class. ``backend_object`` is absent by default because a SciKit-GStat Variogram
+    The arrays have one value per distance bin. ``backend_object`` is absent by default because a SciKit-GStat Variogram
     retains sampled coordinates, pairwise distances and pairwise differences. Pass ``keep_backend=True`` during
-    estimation or conversion only when those advanced backend operations are worth the additional memory.
+    estimation or conversion only when its extra methods are worth the additional memory.
 
-    :param lags: Mean sampled distance in each lag class.
-    :param semivariance: Empirical semivariance in each lag class.
-    :param counts: Number of sampled pairs in each lag class.
+    :param lags: Mean sampled distance in each distance bin.
+    :param semivariance: Measured semivariance in each distance bin.
+    :param counts: Number of sampled pairs in each distance bin.
     :param semivariance_error: Sampling error estimated across independent runs.
-    :param bin_lower_edges: Inclusive lower boundaries of lag classes.
-    :param bin_edges: Upper boundaries of lag classes.
+    :param bin_lower_edges: Inclusive lower boundaries of distance bins.
+    :param bin_edges: Upper boundaries of distance bins.
     :param fitted_semivariance: Fitted values evaluated at ``lags``.
     :param model: Portable fitted model parameters.
-    :param estimator: Empirical estimator name.
+    :param estimator: Name of the formula used to estimate semivariance.
     :param distance: Distance measure name.
-    :param binning: Lag binning method.
-    :param backend: Backend used for fitting or import.
-    :param backend_object: Optional retained backend object.
-    :param fit_result: Small optimizer diagnostics.
+    :param binning: Method used to build distance bins.
+    :param backend: Package used for fitting or import.
+    :param backend_object: Optional retained object from that package.
+    :param fit_result: Small details returned by the fit.
     :param attrs: Additional serializable metadata.
     """
 
@@ -386,7 +386,7 @@ class Variogram:
     ###################
 
     def __post_init__(self) -> None:
-        # Copy required lag arrays so the result owns compact independent storage
+        # Copy required distance bin arrays so the result owns its small stored data
         lags = np.asarray(self.lags, dtype=float).copy()
         semivariance = np.asarray(self.semivariance, dtype=float).copy()
         counts = np.asarray(self.counts, dtype=np.int64).copy()
@@ -397,7 +397,7 @@ class Variogram:
         if np.any(counts < 0):
             raise ValueError("Variogram pair counts cannot be negative.")
 
-        # Normalize optional arrays through the same lag alignment checks
+        # Check optional arrays against the same number of distance bins
         optional_arrays: dict[str, NDArrayNum | None] = {
             "semivariance_error": self.semivariance_error,
             "bin_lower_edges": self.bin_lower_edges,
@@ -414,7 +414,7 @@ class Variogram:
                 raise ValueError(f"Variogram {name} must be one-dimensional and aligned with lags.")
             normalized[name] = array
 
-        # Freeze result arrays to prevent mutation from invalidating fitted metadata
+        # Make result arrays read-only so later edits cannot disagree with the fitted model
         for array in (lags, semivariance, counts, *[value for value in normalized.values() if value is not None]):
             array.setflags(write=False)
         object.__setattr__(self, "lags", lags)
@@ -442,7 +442,7 @@ class Variogram:
         keep_backend: bool = False,
         **kwargs: Any,
     ) -> Variogram:
-        """Estimate a variogram from finite point coordinates using SciKit-GStat.
+        """Estimate a variogram from available point coordinates using SciKit-GStat.
 
         :param coordinates: Observation coordinates arranged by row.
         :param values: One value per observation.
@@ -450,13 +450,13 @@ class Variogram:
         :param active_dims: Feature columns used by later covariance conversion.
         :param keep_backend: Whether to retain the SciKit-GStat object, which can use substantial memory.
         :param kwargs: Additional SciKit-GStat Variogram options.
-        :returns: Lightweight empirical statistics and fitted parameters.
+        :returns: Per-distance measurements and fitted parameters without the source object by default.
         """
 
-        # Import SciKit-GStat only when direct coordinate fitting is requested
+        # Import SciKit-GStat only for this direct coordinate-based estimate
         skgstat = import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
 
-        # Normalize one-dimensional coordinates and reject incompatible shapes
+        # Put coordinates into one row per observation and check value length
         coordinates_array = np.asarray(coordinates, dtype=float)
         values_array = np.asarray(values, dtype=float).squeeze()
         if coordinates_array.ndim == 1:
@@ -466,13 +466,13 @@ class Variogram:
         if len(coordinates_array) != len(values_array):
             raise ValueError("Coordinates and values must contain the same number of observations.")
 
-        # Remove invalid observations before constructing the temporary backend object
+        # Remove rows with missing coordinates or values before creating the SciKit-GStat object
         valid = np.isfinite(values_array) & np.all(np.isfinite(coordinates_array), axis=1)
         if np.count_nonzero(valid) < 2:
             raise ValueError("At least two finite observations are required to estimate a variogram.")
         backend_variogram = skgstat.Variogram(coordinates_array[valid], values_array[valid], model=model, **kwargs)
 
-        # Extract compact lag and fit metadata while discarding backend state by default
+        # Copy the small distance bin result and discard the larger SciKit-GStat object by default
         return cls.from_skgstat(
             backend_variogram,
             active_dims=active_dims,
@@ -491,7 +491,7 @@ class Variogram:
         shape: float | None = None,
         active_dims: tuple[int, ...] | None = None,
     ) -> Variogram:
-        """Create a lightweight variogram from known fitted parameters.
+        """Create a variogram from known fitted parameters without measured values.
 
         :param model_name: Supported theoretical model name.
         :param effective_range: Distance at which the model effectively reaches its sill.
@@ -500,14 +500,14 @@ class Variogram:
         :param smoothness: Matérn smoothness parameter.
         :param shape: Stable model shape parameter.
         :param active_dims: Feature columns used by later covariance conversion.
-        :returns: Lightweight variogram containing only fitted parameters.
+        :returns: Variogram containing only fitted parameters.
         """
 
-        # Supply the conventional Matérn default when only portable parameters are given
+        # Use the standard Matérn smoothness when the caller supplies no value
         if model_name.lower() == "matern" and smoothness is None:
             smoothness = 1.5
 
-        # Represent model-only results with empty empirical arrays
+        # Use empty measured arrays because this result contains only a supplied model
         return cls(
             lags=np.empty(0),
             semivariance=np.empty(0),
@@ -538,11 +538,11 @@ class Variogram:
         :returns: Lightweight variogram containing the composite model.
         """
 
-        # Require fitted inputs because empirical bins alone cannot define covariance
+        # Require fitted models because measured distance bins alone do not define covariance at every distance
         if len(variograms) < 2 or any(variogram.model is None for variogram in variograms):
             raise ValueError("At least two variograms with fitted models are required.")
 
-        # Combine only portable model metadata and omit unrelated empirical bins
+        # Combine only fitted model parameters and leave out unrelated measured bins
         models = tuple(variogram.model for variogram in variograms if variogram.model is not None)
         return cls(
             lags=np.empty(0),
@@ -562,28 +562,28 @@ class Variogram:
         min_lag: float | None = None,
         max_lag: float | None = None,
     ) -> Variogram:
-        """Calculate an empirical variogram from a pair dataset.
+        """Calculate measured variogram values from a pair dataset.
 
         This method only reads the pair distances and endpoint values. The pair dataset can therefore be discarded as
-        soon as the empirical lag statistics have been computed.
+        soon as the per-distance statistics have been computed.
 
-        :param pairs: Dataset returned by ``Raster.pairsample()`` or ``PointCloud.pairsample()``.
+        :param pairs: Dataset returned by Raster.pairsample() or PointCloud.pairsample().
         :param estimator: SciKit-GStat estimator name or a function accepting absolute pair differences.
-        :param bins: ``"log"``, ``"uniform"`` or explicit lag boundaries.
-        :param n_lags: Number of lag classes used for named binning.
-        :param min_lag: Lower lag boundary. Defaults to the smallest positive pair distance.
-        :param max_lag: Upper lag boundary. Defaults to the largest pair distance.
-        :returns: Lightweight empirical variogram with no retained pair data.
+        :param bins: ``"log"``, ``"uniform"`` or explicit distance boundaries.
+        :param n_lags: Number of distance bins used for named binning.
+        :param min_lag: Lower distance boundary. Defaults to the smallest positive pair distance.
+        :param max_lag: Upper distance boundary. Defaults to the largest pair distance.
+        :returns: Per-distance variogram values with no retained pair data.
         """
 
-        # Validate the labelled pair schema before reading endpoint arrays
+        # Check the expected Xarray pair layout before reading endpoint values
         required = {"distance", "value"}
         if not isinstance(pairs, xr.Dataset) or not required.issubset(pairs.data_vars):
             raise TypeError("pairs must be an Xarray Dataset containing 'distance' and 'value'.")
         if pairs["value"].dims != ("pair", "endpoint") or pairs.sizes.get("endpoint") != 2:
             raise ValueError("pairs['value'] must have dimensions ('pair', 'endpoint') of length two.")
 
-        # Compute absolute endpoint differences and discard invalid pair observations
+        # Calculate the absolute value difference in each pair and remove missing pairs
         distances = np.asarray(pairs["distance"], dtype=float)
         endpoint_values = np.asarray(pairs["value"], dtype=float)
         differences = np.abs(endpoint_values[:, 0] - endpoint_values[:, 1])
@@ -592,13 +592,13 @@ class Variogram:
         if distances.size == 0:
             raise ValueError("pairs contains no finite observations with positive distance.")
 
-        # Prefer sampling bounds from metadata so repeated runs share stable bin limits
+        # Use the requested sampling limits when available so repeated runs share the same bins
         minimum = float(pairs.attrs.get("min_distance", np.min(distances))) if min_lag is None else float(min_lag)
         maximum = float(pairs.attrs.get("max_distance", np.max(distances))) if max_lag is None else float(max_lag)
         if not 0 < minimum < maximum:
             raise ValueError("Require 0 < min_lag < max_lag.")
 
-        # Build named bins or validate explicit boundaries supplied by the caller
+        # Build log-spaced or equal-width bins, or check the caller's exact bin edges
         binning: str
         if isinstance(bins, str):
             if n_lags < 1 or bins not in {"log", "uniform"}:
@@ -615,7 +615,7 @@ class Variogram:
                 raise ValueError("Explicit bins must contain at least two increasing lag boundaries.")
             binning = "explicit"
 
-        # Resolve named estimators lazily while accepting custom reduction functions
+        # Choose the named semivariance formula or use the caller's function
         if callable(estimator):
             estimator_function = estimator
             estimator_name = getattr(estimator, "__name__", "callable")
@@ -626,7 +626,7 @@ class Variogram:
             estimator_function = getattr(skgstat.estimators, estimator)
             estimator_name = estimator
 
-        # Digitize once to reduce every lag class without retaining pair membership
+        # Assign each pair to one distance bin, calculate each bin, then discard individual assignments
         membership = np.digitize(distances, edges, right=True) - 1
         membership[distances == edges[0]] = 0
         experimental = np.full(len(edges) - 1, np.nan, dtype=float)
@@ -639,7 +639,7 @@ class Variogram:
                 experimental[index] = float(estimator_function(differences[selected]))
                 lag_centers[index] = float(np.mean(distances[selected]))
 
-        # Return only compact aggregate arrays and serializable source metadata
+        # Return only per-bin arrays and plain source details that can be saved
         return cls(
             lags=lag_centers,
             semivariance=experimental,
@@ -662,7 +662,7 @@ class Variogram:
         p0: Sequence[float] | None = None,
         maxfev: int | None = None,
     ) -> Variogram:
-        """Fit one or more summed theoretical models to the empirical bins.
+        """Fit one or more summed theoretical models to the measured bins.
 
         Finite, positive sampling errors are used as weights. The returned copy retains only fitted parameters and
         the small covariance matrix produced by the optimizer.
@@ -672,10 +672,10 @@ class Variogram:
         :param bounds: Lower and upper bound for every fitted parameter.
         :param p0: Initial parameter values in range/sill order, followed by optional model shape and nugget.
         :param maxfev: Maximum number of model evaluations.
-        :returns: New variogram containing normalized fitted model metadata.
+        :returns: New variogram containing fitted model parameters in the shared form.
         """
 
-        # Normalize strings, callables and sequences to canonical model names
+        # Turn short names, model functions, or a sequence into standard model names
         requested_models: list[str | Callable[..., Any]] = []
         if isinstance(models, str):
             requested_models.extend(models.split("+"))
@@ -698,7 +698,7 @@ class Variogram:
         if not model_names or any(name not in _BASE_MODELS for name in model_names):
             raise ValueError(f"models must contain names from {sorted(_BASE_MODELS)}.")
 
-        # Fit only finite empirical lag classes and require enough points to constrain a curve
+        # Fit only bins with measured values and require more bins than fitted parameters
         valid = np.isfinite(self.lags) & np.isfinite(self.semivariance)
         if np.count_nonzero(valid) < 2:
             raise ValueError("At least two finite empirical lag classes are required for fitting.")
@@ -707,7 +707,7 @@ class Variogram:
         parameter_counts = [3 if name in {"stable", "matern"} else 2 for name in model_names]
 
         def summed_model(distance: NDArrayNum, *parameters: float) -> NDArrayNum:
-            # Accumulate each component in the same parameter order used by the optimizer
+            # Add each component's parameters in the order expected by SciPy's curve fit
             values = np.zeros_like(np.asarray(distance, dtype=float))
             position = 0
             for name, count in zip(model_names, parameter_counts):
@@ -717,7 +717,7 @@ class Variogram:
                 values += np.where(np.asarray(distance) > 0, parameters[position], 0.0)
             return values
 
-        # Derive scale aware initial values from observed lags and semivariance
+        # Choose starting range and variance values from the measured distances and semivariances
         maximum_lag = float(np.nanmax(self.lags[valid]))
         maximum_variance = float(np.nanmax(self.semivariance[valid]))
         if maximum_variance <= 0:
@@ -732,12 +732,12 @@ class Variogram:
                 guesses.append(maximum_variance * 0.05)
             p0 = guesses
 
-        # Check parameter counts before sending arrays to SciPy
+        # Check optional starting values and limits against the number of fitted parameters
         expected = sum(parameter_counts) + int(use_nugget)
         if len(p0) != expected:
             raise ValueError(f"p0 must contain {expected} parameters for the selected models.")
 
-        # Build positive default bounds while honoring explicitly supplied limits
+        # Keep fitted parameters nonnegative unless the caller supplies other limits
         if bounds is None:
             model_bounds: list[tuple[float, float]] = []
             for count in parameter_counts:
@@ -751,7 +751,7 @@ class Variogram:
             raise ValueError(f"bounds must contain {expected} lower/upper pairs for the selected models.")
         lower, upper = np.asarray(bounds, dtype=float).T
 
-        # Use empirical sampling errors as weights when at least one is informative
+        # Give bins with smaller measured errors more influence when usable errors exist
         errors = None
         if self.semivariance_error is not None:
             candidate_errors = self.semivariance_error[valid]
@@ -760,7 +760,7 @@ class Variogram:
                 replacement = float(np.nanmedian(candidate_errors[positive]))
                 errors = np.where(positive, candidate_errors, replacement)
 
-        # Fit the complete summed model once to preserve covariance among parameters
+        # Fit all summed components together so their parameters can adjust to one another
         coefficients, covariance = curve_fit(
             summed_model,
             self.lags[valid],
@@ -773,7 +773,7 @@ class Variogram:
             maxfev=maxfev,
         )
 
-        # Split fitted coefficients back into portable component models
+        # Split SciPy's fitted numbers back into the shared component model objects
         components: list[VariogramModel] = []
         position = 0
         for name, count in zip(model_names, parameter_counts):
@@ -789,7 +789,7 @@ class Variogram:
                 )
             )
 
-        # Store a shared nugget on either the base model or composite parent
+        # Store the shared nugget on the single model or the combined parent model
         nugget = float(coefficients[position]) if use_nugget else 0.0
         fitted_model = (
             replace(components[0], nugget=nugget)
@@ -797,7 +797,7 @@ class Variogram:
             else VariogramModel.sum(components, nugget=nugget)
         )
 
-        # Return a new immutable result with predictions and small fit diagnostics
+        # Return a new read-only result with fitted values and small fit details
         return replace(
             self,
             fitted_semivariance=fitted_model.variogram(self.lags),
@@ -814,19 +814,19 @@ class Variogram:
         active_dims: tuple[int, ...] | None = None,
         keep_backend: bool = False,
     ) -> Variogram:
-        """Extract a lightweight result from a fitted SciKit-GStat Variogram.
+        """Copy a small result from a fitted SciKit-GStat Variogram.
 
         :param variogram: Fitted SciKit-GStat Variogram object.
         :param active_dims: Feature columns used by later covariance conversion.
         :param keep_backend: Whether to retain the input object.
-        :returns: Lightweight empirical statistics and fitted parameters.
+        :returns: Per-distance measurements and fitted parameters.
         """
 
-        # Read the backend description once because it normalizes fitted model metadata
+        # Read SciKit-GStat's description once to get its standard model names and settings
         description = variogram.describe()
         configured_model = str(description.get("params", {}).get("model", description["model"])).lower()
 
-        # Convert fitted coefficients to the portable model representation
+        # Copy fitted numbers into the shared `VariogramModel` form
         model = _model_from_skgstat(
             variogram,
             configured_model,
@@ -834,7 +834,7 @@ class Variogram:
             active_dims=active_dims,
         )
 
-        # Extract only aggregate lag arrays and fitted predictions from the backend
+        # Copy per-bin measurements and fitted values from SciKit-GStat
         lag_centers, experimental = variogram.get_empirical(bin_center=True)
         lag_centers = np.asarray(lag_centers, dtype=float)
         fitted = np.asarray(variogram.fitted_model(lag_centers), dtype=float)
@@ -844,7 +844,7 @@ class Variogram:
             if key in description
         }
 
-        # Retain the heavy backend only when explicitly requested by the caller
+        # Keep the full SciKit-GStat object only when the caller requests it
         return cls(
             lags=lag_centers,
             semivariance=np.asarray(experimental, dtype=float),
@@ -867,14 +867,14 @@ class Variogram:
     ################################
 
     def without_backend(self) -> Variogram:
-        """Return a copy that releases any retained backend object."""
+        """Return a copy that releases any retained fitting package object."""
 
         return replace(self, backend_object=None)
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Return one row per lag class in a Pandas DataFrame."""
+        """Return one row per distance bin in a Pandas DataFrame."""
 
-        # Start with required lag statistics before adding available optional columns
+        # Add required distance bin columns first, then optional error, edge, and fitted columns
         data: dict[str, Any] = {
             "lag": self.lags,
             "semivariance": self.semivariance,
@@ -893,7 +893,7 @@ class Variogram:
     def to_xarray(self) -> xr.Dataset:
         """Return labelled lag statistics in an Xarray Dataset."""
 
-        # Store empirical arrays on one shared labelled lag dimension
+        # Store all measured arrays on one labelled distance bin dimension
         data_vars: dict[str, Any] = {
             "semivariance": ("lag", self.semivariance),
             "count": ("lag", self.counts),
@@ -907,7 +907,7 @@ class Variogram:
         if self.fitted_semivariance is not None:
             data_vars["fitted_semivariance"] = ("lag", self.fitted_semivariance)
 
-        # Keep scalar descriptions as attributes for portable Xarray round trips
+        # Store model and method descriptions as plain attributes that survive Xarray save and load
         attrs = {
             **self.attrs,
             "estimator": self.estimator or "",
@@ -922,7 +922,7 @@ class Variogram:
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible representation without backend state."""
 
-        # Convert arrays and nested models to standard Python containers
+        # Convert arrays and nested models to lists and dictionaries accepted by JSON
         return {
             "lags": self.lags.tolist(),
             "semivariance": self.semivariance.tolist(),
@@ -942,9 +942,9 @@ class Variogram:
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any]) -> Variogram:
-        """Restore a lightweight variogram from :meth:`~geoutils.Variogram.to_dict` output."""
+        """Restore a lightweight variogram from Variogram.to_dict() output."""
 
-        # Restore the optional model before normalizing all aggregate arrays
+        # Restore the optional model before the dataclass checks all per-bin arrays
         model_values = values.get("model")
         return cls(
             lags=np.asarray(values["lags"], dtype=float),
@@ -1013,20 +1013,20 @@ class Variogram:
         return self.model.correlation(distance)
 
     def plot(self, ax: Any | None = None, *, show_error: bool = True, **kwargs: Any) -> Any:
-        """Plot empirical bins and the fitted model when present.
+        """Plot measured bins and the fitted model when present.
 
         :param ax: Existing Matplotlib axes. A new figure and axes are created by default.
-        :param show_error: Whether to draw finite empirical sampling errors.
-        :param kwargs: Keyword arguments passed to the empirical point plot.
+        :param show_error: Whether to draw available sampling errors.
+        :param kwargs: Keyword arguments passed to the measured point plot.
         :returns: Matplotlib axes containing the variogram.
         """
 
-        # Import plotting only for callers that request visualization
+        # Import Matplotlib only when the caller requests a plot
         pyplot = import_optional("matplotlib.pyplot", package_name="matplotlib")
         if ax is None:
             _, ax = pyplot.subplots()
 
-        # Draw empirical bins with optional uncertainty before the fitted curve
+        # Draw measured bins and optional error bars, then add the fitted curve
         error = self.semivariance_error if show_error else None
         ax.errorbar(self.lags, self.semivariance, yerr=error, fmt="o", **kwargs)
         if self.model is not None and np.any(np.isfinite(self.lags)):
@@ -1035,9 +1035,9 @@ class Variogram:
         ax.set(xlabel="Lag distance", ylabel="Semivariance")
         return ax
 
-    #######################
-    # BACKEND CONVERSIONS
-    #######################
+    ############################
+    # CONVERSIONS TO OTHER PACKAGES
+    ############################
 
     def to_gstools(self, *, dim: int = 2) -> GSToolsVariogram:
         """Convert the fitted model to GSTools with its source feature dimensions.
@@ -1046,19 +1046,19 @@ class Variogram:
         :returns: Native covariance model and dimensions selected by the source model.
         """
 
-        # Import GSTools lazily and require fitted metadata before conversion
+        # Import GSTools only for this conversion and require a fitted model
         gstools = import_optional("gstools", extra_name="geostat")
         if self.model is None:
             raise ValueError("A fitted variogram model is required for conversion.")
         if dim <= 0:
             raise ValueError("GSTools model dimension must be strictly positive.")
 
-        # Require shared dimensions because GSTools receives preselected coordinates
+        # Require all components to use the same coordinate columns expected by one GSTools model
         active_dims = {component.active_dims for component in self.model.components} if self.model.components else set()
         if len(active_dims) > 1:
             raise NotImplementedError("GSTools cannot combine variogram components that select different dimensions.")
 
-        # Return selected dimensions separately because GSTools does not store them
+        # Return coordinate-column choices separately because GSTools does not store them
         selected_dims = next(iter(active_dims)) if active_dims else self.model.active_dims
         return GSToolsVariogram(
             model=_model_to_gstools(self.model, gstools=gstools, dim=dim),
@@ -1066,7 +1066,7 @@ class Variogram:
         )
 
     def gpytorch_parameters(self) -> dict[str, Any]:
-        """Return parameters independent of backend for the GPyTorch adapter."""
+        """Describe the fitted model with plain parameters used by the GPyTorch conversion."""
 
         if self.model is None:
             raise ValueError("A fitted variogram model is required for conversion.")
@@ -1080,7 +1080,7 @@ class Variogram:
         :returns: Native covariance kernel and separate likelihood noise.
         """
 
-        # Import GPyTorch lazily and require fitted metadata before conversion
+        # Import GPyTorch only for this conversion and require a fitted model
         gpytorch = import_optional("gpytorch", extra_name="gp")
         if self.model is None:
             raise ValueError("A fitted variogram model is required for conversion.")
@@ -1090,7 +1090,7 @@ class Variogram:
             active_dims=active_dims,
         )
 
-        # Freeze kernel parameters when the conversion is intended only for prediction
+        # Make kernel parameters fixed when the caller will use the model only for prediction
         if not trainable:
             for parameter in kernel.parameters():
                 parameter.requires_grad_(False)
@@ -1116,16 +1116,20 @@ def _estimate_variogram(
     random_state: int | np.random.Generator | None,
     pair_kwargs: Mapping[str, Any],
 ) -> Variogram:
-    """Sample independent pair sets and reduce them to one lightweight result."""
+    """Sample one or more pair sets and combine their per-distance variogram values.
 
-    # Validate execution controls before deriving independent random seeds
+    Each run calls the source pairsample() method, then Variogram.from_pairs() groups value differences by distance.
+    Repeated runs share the first run's bins and are combined before Variogram.fit() fits any requested model.
+    """
+
+    # Check the repeat count before creating one random seed per run
     if not isinstance(n_runs, (int, np.integer)) or isinstance(n_runs, bool) or n_runs < 1:
         raise ValueError("n_runs must be a positive integer.")
     rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
     seeds = rng.integers(0, np.iinfo(np.int32).max, n_runs)
 
     def run(seed: np.integer[Any], bin_spec: Literal["log", "uniform"] | Iterable[float]) -> Variogram:
-        # Discard each pair dataset immediately after reducing it to lag statistics
+        # Convert one pair sample to per-distance values and then release the pairs
         pairs = source.pairsample(random_state=int(seed), **pair_kwargs)
         return Variogram.from_pairs(
             pairs,
@@ -1136,13 +1140,13 @@ def _estimate_variogram(
             max_lag=max_lag,
         )
 
-    # Establish bins once so every independent run describes the same lag classes
+    # Build distance bins from the first run so all later runs use the same edges
     first = run(seeds[0], bins)
     if n_runs == 1:
         result = replace(first, attrs={**first.attrs, "n_runs": 1})
         return result if models is None else result.fit(models, **dict(fit_kwargs or {}))
 
-    # Repeat sampling only when requested, leaving chunk scheduling to the sampler's backend
+    # Draw each remaining sample through the object's own raster or point implementation
     shared_bins: Literal["log", "uniform"] | Iterable[float] = bins
     if isinstance(bins, str):
         assert first.bin_lower_edges is not None and first.bin_edges is not None
@@ -1150,7 +1154,7 @@ def _estimate_variogram(
 
     runs = [first, *[run(seed, shared_bins) for seed in seeds[1:]]]
 
-    # Stack compact lag arrays to aggregate independent estimates by class
+    # Stack the small per-distance arrays from all runs
     semivariances = np.vstack([run_result.semivariance for run_result in runs])
     lag_centers = np.vstack([run_result.lags for run_result in runs])
     counts = np.sum(np.vstack([run_result.counts for run_result in runs]), axis=0)
@@ -1158,7 +1162,7 @@ def _estimate_variogram(
     mean_lags = np.full(semivariances.shape[1], np.nan)
     errors = np.full(semivariances.shape[1], np.nan)
 
-    # Average available bins and estimate standard errors only from repeated values
+    # Average each distance bin and calculate sampling error only when runs are repeated
     for index in range(semivariances.shape[1]):
         finite_semivariance = semivariances[np.isfinite(semivariances[:, index]), index]
         finite_lags = lag_centers[np.isfinite(lag_centers[:, index]), index]
@@ -1169,7 +1173,7 @@ def _estimate_variogram(
         if finite_lags.size:
             mean_lags[index] = np.mean(finite_lags)
 
-    # Replace the first result arrays while retaining shared bin metadata
+    # Reuse the first run's bin details with the combined values and counts
     result = replace(
         first,
         lags=mean_lags,
@@ -1181,9 +1185,9 @@ def _estimate_variogram(
     return result if models is None else result.fit(models, **dict(fit_kwargs or {}))
 
 
-########################
-# 5/ BACKEND MODEL ADAPTERS
-########################
+################################
+# 5/ HELPERS FOR OTHER PACKAGES
+################################
 
 
 def _model_from_skgstat(
@@ -1193,9 +1197,9 @@ def _model_from_skgstat(
     *,
     active_dims: tuple[int, ...] | None,
 ) -> VariogramModel:
-    """Normalize SciKit-GStat's fitted coefficient ordering."""
+    """Copy SciKit-GStat fitted numbers into the shared `VariogramModel` form."""
 
-    # Read simple model fields directly from the normalized backend description
+    # Read a single model's range, sill, shape, and nugget from SciKit-GStat's description
     if "+" not in configured_model:
         return VariogramModel(
             model_name=configured_model,
@@ -1207,7 +1211,7 @@ def _model_from_skgstat(
             active_dims=active_dims,
         )
 
-    # Separate a shared nugget from coefficients of summed model components
+    # Read one shared nugget after all summed component parameters
     names = [name.strip() for name in configured_model.split("+")]
     coefficients = list(np.asarray(variogram.cof, dtype=float))
     use_nugget = bool(description.get("params", {}).get("use_nugget", False))
@@ -1215,7 +1219,7 @@ def _model_from_skgstat(
     components: list[VariogramModel] = []
     position = 0
     for name in names:
-        # Consume common range and sill parameters before optional shape values
+        # Read each component's range and sill before its optional shape value
         effective_range, partial_sill = coefficients[position : position + 2]
         position += 2
         smoothness = shape = None
@@ -1236,14 +1240,14 @@ def _model_from_skgstat(
             )
         )
 
-    # Rebuild the summed portable model with one parent nugget
+    # Build the shared summed model with one nugget on its parent
     return VariogramModel.sum(components, nugget=nugget)
 
 
 def _model_to_gstools(model: VariogramModel, *, gstools: Any, dim: int) -> Any:
-    """Convert one normalized model, including summed structures, to GSTools."""
+    """Build the equivalent GSTools model from one shared `VariogramModel`."""
 
-    # Convert summed components recursively before applying their shared nugget
+    # Convert each summed component, then apply the shared nugget once
     if model.model_name == "sum":
         components = [_model_to_gstools(component, gstools=gstools, dim=dim) for component in model.components]
         return gstools.SumModel(*components, nugget=model.nugget)
@@ -1252,7 +1256,7 @@ def _model_to_gstools(model: VariogramModel, *, gstools: Any, dim: int) -> Any:
     if model.effective_range is None or model.partial_sill is None:
         raise AssertionError("A base variogram model must define its range and partial sill.")
 
-    # Share normalized variance and range parameters across GSTools constructors
+    # Pass the shared model's variance and effective range to the matching GSTools class
     common = {"dim": dim, "var": model.partial_sill, "nugget": model.nugget, "len_scale": model.effective_range}
     if model.model_name == "spherical":
         return gstools.Spherical(**common)
@@ -1267,7 +1271,7 @@ def _model_to_gstools(model: VariogramModel, *, gstools: Any, dim: int) -> Any:
             raise AssertionError("A stable variogram model must define its shape.")
         return gstools.Stable(alpha=model.shape, rescale=float(3 ** (1 / model.shape)), **common)
 
-    # Apply the fitted Matérn smoothness through the corresponding GSTools parameter
+    # Pass Matérn smoothness through GSTools' matching parameter name
     if model.model_name == "matern":
         return gstools.Matern(nu=model.smoothness, rescale=4.0, **common)
     raise NotImplementedError(f"Variogram model {model.model_name!r} has no GSTools adapter.")
@@ -1276,9 +1280,9 @@ def _model_to_gstools(model: VariogramModel, *, gstools: Any, dim: int) -> Any:
 def _model_to_gpytorch(
     model: VariogramModel, *, gpytorch: Any, active_dims: tuple[int, ...] | None
 ) -> tuple[Any, float]:
-    """Convert exact common covariance structures to native GPyTorch kernels."""
+    """Build an equivalent GPyTorch kernel for models both packages represent exactly."""
 
-    # Combine recursively converted kernels according to the portable composition
+    # Convert nested components and join them by the model's sum or product rule
     if model.model_name == "sum":
         converted = [
             _model_to_gpytorch(component, gpytorch=gpytorch, active_dims=active_dims) for component in model.components
@@ -1297,7 +1301,7 @@ def _model_to_gpytorch(
             kernel = kernel * component_kernel
         return kernel, model.nugget
 
-    # Derive exact kernel parameters before constructing a native base kernel
+    # Convert effective range to the matching GPyTorch kernel length scale
     parameters = _model_to_gpytorch_parameters(model, active_dims=active_dims)
     resolved_active_dims = parameters["active_dims"]
     if model.partial_sill is None:
@@ -1312,7 +1316,7 @@ def _model_to_gpytorch(
     else:
         raise NotImplementedError(f"Variogram model {model.model_name!r} has no exact GPyTorch adapter.")
 
-    # Apply structured variance outside the normalized base correlation kernel
+    # Apply the model variance around GPyTorch's base correlation kernel
     kernel = gpytorch.kernels.ScaleKernel(base_kernel)
     kernel.base_kernel.lengthscale = parameters["lengthscale"]
     kernel.outputscale = float(model.partial_sill)
@@ -1324,9 +1328,9 @@ def _model_to_gpytorch_parameters(
     *,
     active_dims: tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
-    """Describe an exact conversion without importing GPyTorch."""
+    """Describe the GPyTorch conversion with plain data without importing GPyTorch."""
 
-    # Describe composite models recursively so inspection needs no optional backend
+    # Describe nested models recursively so callers can inspect them without GPyTorch
     if model.model_name in _COMPOSITE_MODELS:
         return {
             "combination": model.model_name,
@@ -1338,7 +1342,7 @@ def _model_to_gpytorch_parameters(
     if model.effective_range is None or model.partial_sill is None:
         raise AssertionError("A base variogram model must define its range and partial sill.")
 
-    # Translate effective range conventions to native kernel length scales
+    # Convert effective range to the matching GPyTorch kernel length scale
     if model.model_name == "gaussian":
         kernel_name = "RBF"
         lengthscale = float(model.effective_range) / (2 * np.sqrt(2))
@@ -1356,7 +1360,7 @@ def _model_to_gpytorch_parameters(
     else:
         raise NotImplementedError(f"Variogram model {model.model_name!r} has no exact GPyTorch adapter.")
 
-    # Return observation noise separately because it belongs to the likelihood
+    # Keep observation noise separate because GPyTorch applies it in the likelihood
     return {
         "kernel_name": kernel_name,
         "lengthscale": lengthscale,

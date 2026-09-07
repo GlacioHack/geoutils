@@ -6,14 +6,7 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""Pair sampling with bounded memory for regular rasters and irregular point clouds.
-
-The public raster and point cloud methods return an :class:`xarray.Dataset`. Pair construction stays internal so the
-same algorithms can feed variography and other statistics based on pairs without exposing a stateful sampler object.
-
-The module starts with operations shared by all pair outputs, then separates regular raster and irregular point
-sampling. The final section validates object method inputs and assembles their common labelled result.
-"""
+"""Sample pairs of raster cells or point cloud rows."""
 
 from __future__ import annotations
 
@@ -35,24 +28,18 @@ from geoutils.interface.raster_point import _mask_on_raster
 from geoutils.raster.array import _selected_raster_data
 from geoutils.vector.base import _as_vector
 
-PairSampling = Literal["loglag", "random_xy"]
-RegularPairStrategy = Literal["independent", "anchors", "chunk_anchors", "anchor_batched"]
-IrregularPairStrategy = Literal["kdtree", "hashgrid", "nn_logvector"]
-Deduplication = Literal["none", "per_anchor", "global"]
-
-
 #############################
 # 1/ SHARED PAIR OPERATIONS
 #############################
 
 
 def _take_raster_values(array: Any, indices: NDArrayNum) -> NDArrayNum:
-    """Read selected raster cells through one vectorized indexing operation."""
+    """Read selected raster cells with one array indexing call."""
 
     # Convert flat pair indexes back to their raster row and column positions
     rows, columns = np.divmod(np.asarray(indices, dtype=np.int64), int(array.shape[1]))
 
-    # Materialize only requested cells to keep Dask reads bounded by pair count
+    # Load only the requested cells so Dask reads grow with the sample size
     values = array.vindex[rows, columns].compute() if is_dask_array(array) else array[rows, columns]
     if np.ma.isMaskedArray(values):
         values = values.filled(np.nan)
@@ -60,9 +47,9 @@ def _take_raster_values(array: Any, indices: NDArrayNum) -> NDArrayNum:
 
 
 def _deduplicate_pairs(first: NDArrayNum, second: NDArrayNum, *, n_observations: int) -> tuple[NDArrayNum, NDArrayNum]:
-    """Remove repeated undirected pairs while retaining their first occurrence."""
+    """Remove repeated pairs while treating A-B and B-A as the same pair."""
 
-    # Sort endpoints within each pair so both orientations share one key
+    # Put the smaller row number first so A-B and B-A have the same key
     low = np.minimum(first, second).astype(np.int64, copy=False)
     high = np.maximum(first, second).astype(np.int64, copy=False)
     keys = low * np.int64(n_observations) + high
@@ -79,7 +66,7 @@ def _deduplicate_pairs(first: NDArrayNum, second: NDArrayNum, *, n_observations:
 
 
 class _RegularPairSampler:
-    """Sample finite pairs from a regular grid with bounded intermediate arrays."""
+    """Draw pairs of available raster cells while limiting temporary array sizes."""
 
     #################
     # CONFIGURATION
@@ -94,8 +81,8 @@ class _RegularPairSampler:
         n_pairs: int,
         min_distance: float,
         max_distance: float,
-        strategy: RegularPairStrategy,
-        deduplicate: Deduplication,
+        strategy: Literal["independent", "anchors", "chunk_anchors", "anchor_batched"],
+        deduplicate: Literal["none", "per_anchor", "global"],
         random_state: int | np.random.Generator | None,
         batch_pairs: int,
         max_rounds: int,
@@ -109,7 +96,7 @@ class _RegularPairSampler:
         index_dtype: Any,
         distance_dtype: Any,
     ) -> None:
-        # Store grid geometry and output targets in normalized numeric forms
+        # Store the grid and sampling options with consistent numeric types
         self.array = array
         self.shape = (int(array.shape[0]), int(array.shape[1]))
         self.size = int(np.prod(self.shape))
@@ -127,7 +114,7 @@ class _RegularPairSampler:
         self.hybrid_local_fraction = float(hybrid_local_fraction)
         self.index_dtype, self.distance_dtype = np.dtype(index_dtype), np.dtype(distance_dtype)
 
-        # Validate strategy controls before allocating candidate arrays
+        # Check sampling options before creating any temporary arrays
         if self.n_pairs < 1:
             raise ValueError("n_pairs must be a positive integer.")
         if not 0 < self.min_distance < self.max_distance:
@@ -139,7 +126,7 @@ class _RegularPairSampler:
         if not 0 <= self.hybrid_local_fraction <= 1:
             raise ValueError("hybrid_local_fraction must be between 0 and 1.")
 
-        # Derive local neighborhoods from Dask chunks or a bounded virtual eager chunk
+        # Use Dask chunks as local areas, or split an in-memory raster into similarly sized areas
         if is_dask_array(array):
             self.chunk_shape = (int(array.chunks[0][0]), int(array.chunks[1][0]))
         else:
@@ -151,25 +138,25 @@ class _RegularPairSampler:
             else float(max_local_distance)
         )
 
-    ########################
-    # CANDIDATE CONSTRUCTION
-    ########################
+    ###################
+    # POSSIBLE PAIRS
+    ###################
 
     def _offsets(self, count: int, maximum: float) -> tuple[NDArrayNum, NDArrayNum]:
-        """Draw isotropic offsets with log-uniform physical distances."""
+        """Draw random directions with distance ranges represented evenly on a log scale."""
 
-        # Limit local draws while retaining the global interval as a safe fallback
+        # Limit local distances to the configured nearby area
         upper = min(self.max_distance, maximum)
         if upper <= self.min_distance:
             upper = self.max_distance
 
-        # Draw continuous polar offsets before snapping them to raster cells
+        # Draw distances and directions, then round them to row and column offsets
         radius = np.exp(self.rng.uniform(np.log(self.min_distance), np.log(upper), count))
         angle = self.rng.uniform(0, 2 * np.pi, count)
         column_offset = np.rint(radius * np.cos(angle) / self.dx).astype(np.int64)
         row_offset = np.rint(radius * np.sin(angle) / self.dy).astype(np.int64)
 
-        # Filter snapped offsets by their exact grid distance to honor requested bounds
+        # Remove rounded offsets whose exact grid distance falls outside the requested range
         exact_distance = np.hypot(column_offset * self.dx, row_offset * self.dy)
         in_range = (
             ((row_offset != 0) | (column_offset != 0))
@@ -179,23 +166,23 @@ class _RegularPairSampler:
         return row_offset[in_range], column_offset[in_range]
 
     def _sample_anchors(self, count: int, *, chunk_aligned: bool) -> NDArrayNum:
-        """Draw anchors globally or from a small group of chunks."""
+        """Draw first endpoints across the grid or from a small set of chunks."""
 
-        # Draw directly from the full grid when chunk alignment is not requested
+        # Draw directly from the full grid when pairs do not need to stay near selected chunks
         if not chunk_aligned:
             return self.rng.integers(0, self.size, count, dtype=np.int64)
 
-        # Select a bounded set of source chunks before generating cell indexes
+        # Select only a few source chunks before drawing cell numbers
         n_chunk_rows = int(np.ceil(self.shape[0] / self.chunk_shape[0]))
         n_chunk_columns = int(np.ceil(self.shape[1] / self.chunk_shape[1]))
         chunk_count = min(self.chunks_per_round, n_chunk_rows * n_chunk_columns)
         chosen = self.rng.choice(n_chunk_rows * n_chunk_columns, chunk_count, replace=False)
 
-        # Split anchors between selected chunks to limit the number of lazy array reads
+        # Split first endpoints between those chunks to limit Dask reads
         anchors: list[NDArrayNum] = []
         per_chunk = int(np.ceil(count / chunk_count))
         for flat_chunk in chosen:
-            # Draw within actual edge chunk bounds so every anchor remains valid
+            # Use each edge chunk's true size so every drawn cell exists
             chunk_row, chunk_column = divmod(int(flat_chunk), n_chunk_columns)
             row_start, column_start = chunk_row * self.chunk_shape[0], chunk_column * self.chunk_shape[1]
             row_stop = min(row_start + self.chunk_shape[0], self.shape[0])
@@ -207,17 +194,17 @@ class _RegularPairSampler:
             if sum(part.size for part in anchors) == count:
                 break
 
-        # Concatenate once after collecting the requested count from all chunks
+        # Join the first endpoints after all selected chunks have contributed
         return np.concatenate(anchors) if anchors else np.empty(0, dtype=np.int64)
 
     def _from_anchors(self, anchors: NDArrayNum, count: int, *, local: bool) -> tuple[NDArrayNum, NDArrayNum]:
-        """Pair repeated anchors with independently drawn offsets."""
+        """Reuse first endpoints and draw a separate offset for each pair."""
 
-        # Return typed empty outputs before resize can repeat an empty array
+        # Return empty integer arrays before NumPy can try to repeat an empty input
         if anchors.size == 0 or count == 0:
             return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
 
-        # Repeat anchors and pair them with distances from the requested extent
+        # Repeat first endpoints and draw an offset for every requested pair
         repeated = np.resize(anchors, count)
         rows, columns = np.divmod(repeated, self.shape[1])
         row_offset, column_offset = self._offsets(count, self.max_local_distance if local else self.max_distance)
@@ -225,7 +212,7 @@ class _RegularPairSampler:
         repeated, rows, columns = repeated[:length], rows[:length], columns[:length]
         target_rows, target_columns = rows + row_offset[:length], columns + column_offset[:length]
 
-        # Discard offsets that leave the raster before creating flat target indexes
+        # Remove offsets that leave the raster before converting endpoints to flat cell numbers
         inside = (
             (target_rows >= 0)
             & (target_rows < self.shape[0])
@@ -233,14 +220,14 @@ class _RegularPairSampler:
             & (target_columns < self.shape[1])
         )
         if local:
-            # Keep local endpoints in the anchor chunk to constrain lazy reads
+            # Keep nearby pairs in the first endpoint's chunk to limit Dask reads
             inside &= (rows // self.chunk_shape[0] == target_rows // self.chunk_shape[0]) & (
                 columns // self.chunk_shape[1] == target_columns // self.chunk_shape[1]
             )
         first = repeated[inside]
         second = target_rows[inside] * self.shape[1] + target_columns[inside]
 
-        # Remove repeated targets independently for each reused anchor when requested
+        # Optionally keep each second endpoint only once for a given first endpoint
         if self.deduplicate == "per_anchor" and first.size:
             order = np.argsort(first, kind="stable")
             keys = first[order].astype(np.int64) * np.int64(self.size) + second[order]
@@ -250,13 +237,13 @@ class _RegularPairSampler:
         return first, second
 
     def _anchor_batched(self, anchors: NDArrayNum, *, local: bool) -> tuple[NDArrayNum, NDArrayNum]:
-        """Draw several radii and angles for every anchor."""
+        """Draw several distances and directions from every first endpoint."""
 
-        # Return typed empty outputs when no anchors survived earlier selection
+        # Return empty integer arrays when no first endpoint was supplied
         if anchors.size == 0:
             return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
 
-        # Draw a shared radius and several directions to reuse every anchor efficiently
+        # Draw several directions for each distance so one first endpoint yields many pairs
         upper = min(self.max_distance, self.max_local_distance) if local else self.max_distance
         radii = np.exp(
             self.rng.uniform(np.log(self.min_distance), np.log(upper), (anchors.size, self.distances_per_anchor))
@@ -270,7 +257,7 @@ class _RegularPairSampler:
         row_offset = np.rint(radii[:, :, None] * np.sin(angles) / self.dy).astype(np.int64).ravel()
         repeated = np.repeat(anchors, self.distances_per_anchor * self.angles_per_distance)
 
-        # Remove zero and out of range offsets after snapping to grid cells
+        # Remove zero and out-of-range offsets after rounding them to grid cells
         exact_distance = np.hypot(column_offset * self.dx, row_offset * self.dy)
         in_range = (
             ((row_offset != 0) | (column_offset != 0))
@@ -281,7 +268,7 @@ class _RegularPairSampler:
         rows, columns = np.divmod(repeated, self.shape[1])
         target_rows, target_columns = rows + row_offset, columns + column_offset
 
-        # Exclude targets outside the raster and optionally outside the anchor chunk
+        # Exclude second endpoints outside the raster or, for nearby pairs, outside the selected chunk
         inside = (
             (target_rows >= 0)
             & (target_rows < self.shape[0])
@@ -295,7 +282,7 @@ class _RegularPairSampler:
         first = repeated[inside]
         second = target_rows[inside] * self.shape[1] + target_columns[inside]
 
-        # Apply anchor level uniqueness after all angles have been proposed
+        # Optionally remove repeated second endpoints for each first endpoint
         if self.deduplicate == "per_anchor" and first.size:
             order = np.argsort(first, kind="stable")
             keys = first[order].astype(np.int64) * np.int64(self.size) + second[order]
@@ -305,15 +292,15 @@ class _RegularPairSampler:
         return first, second
 
     def _independent(self, count: int) -> tuple[NDArrayNum, NDArrayNum]:
-        """Draw unrelated origins and offsets across the complete grid."""
+        """Draw each first endpoint and offset independently across the full grid."""
 
-        # Draw each origin independently to avoid intentionally reused anchors
+        # Draw every first endpoint independently
         row_offset, column_offset = self._offsets(count, self.max_distance)
         rows = self.rng.integers(0, self.shape[0], row_offset.size, dtype=np.int64)
         columns = self.rng.integers(0, self.shape[1], column_offset.size, dtype=np.int64)
         target_rows, target_columns = rows + row_offset, columns + column_offset
 
-        # Keep only targets that remain inside the raster after applying offsets
+        # Keep only second endpoints that remain inside the raster after applying offsets
         inside = (
             (target_rows >= 0)
             & (target_rows < self.shape[0])
@@ -324,20 +311,20 @@ class _RegularPairSampler:
             target_rows[inside] * self.shape[1] + target_columns[inside]
         )
 
-    #####################
-    # STRATEGY DISPATCH
-    #####################
+    ####################
+    # STRATEGY CHOICE
+    ####################
 
     def _candidates(self, count: int) -> tuple[NDArrayNum, NDArrayNum]:
-        """Dispatch one bounded candidate batch to the selected strategy."""
+        """Draw one limited batch of possible pairs with the selected strategy."""
 
-        # Split the requested batch so local and global distances retain their target proportions
+        # Split the batch between nearby and full-range pairs in the requested proportion
         local_count = int(round(count * self.hybrid_local_fraction))
         global_count = count - local_count
         first_parts: list[NDArrayNum] = []
         second_parts: list[NDArrayNum] = []
 
-        # Draw unrelated origins globally while using anchors for the local fraction
+        # Draw full-range pairs independently and reuse first endpoints only for nearby pairs
         if self.strategy == "independent":
             if local_count:
                 anchors = self._sample_anchors(min(self.anchors_per_round, local_count), chunk_aligned=True)
@@ -349,7 +336,7 @@ class _RegularPairSampler:
                 first_parts.append(first)
                 second_parts.append(second)
 
-        # Reuse one anchor set for both local and global offset proposals
+        # Reuse one set of first endpoints for both nearby and full-range pairs
         elif self.strategy in {"anchors", "chunk_anchors"}:
             anchors = self._sample_anchors(
                 min(self.anchors_per_round, count), chunk_aligned=self.strategy == "chunk_anchors"
@@ -360,7 +347,7 @@ class _RegularPairSampler:
                     first_parts.append(first)
                     second_parts.append(second)
 
-        # Draw structured radius and angle batches for each requested extent
+        # Draw several distances and directions from each first endpoint
         else:
             pairs_per_anchor = self.distances_per_anchor * self.angles_per_distance
             for part_count, local in ((local_count, True), (global_count, False)):
@@ -370,7 +357,7 @@ class _RegularPairSampler:
                     first_parts.append(first[:part_count])
                     second_parts.append(second[:part_count])
 
-        # Preserve typed empty results when every strategy branch receives zero pairs
+        # Return empty integer arrays when neither part requested a pair
         if not first_parts:
             return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
         return np.concatenate(first_parts)[:count], np.concatenate(second_parts)[:count]
@@ -380,9 +367,9 @@ class _RegularPairSampler:
     #################
 
     def sample(self) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
-        """Collect finite pairs with oversampling while detecting stalled rounds."""
+        """Collect the requested number of pairs whose two raster values are available."""
 
-        # Count finite cells without collecting a complete lazy validity mask
+        # Count available cells without loading a complete Dask mask
         if is_dask_array(self.array):
             dask_array = __import__("dask.array", fromlist=["array"])
             n_valid = int(dask_array.count_nonzero(dask_array.isfinite(self.array)).compute())
@@ -390,7 +377,7 @@ class _RegularPairSampler:
             n_valid = int(np.count_nonzero(np.isfinite(self.array)))
         finite_fraction = max(n_valid / max(self.size, 1), 1e-12)
 
-        # Cap globally unique requests at the finite pair population
+        # Limit a unique sample to the number of different pairs that can exist
         maximum_unique = n_valid * (n_valid - 1) // 2
         target = min(self.n_pairs, maximum_unique)
         if target < self.n_pairs:
@@ -400,7 +387,7 @@ class _RegularPairSampler:
         if target == 0:
             raise ValueError("At least two finite raster cells are required to sample pairs.")
 
-        # Estimate pair acceptance from finite coverage to size bounded candidate rounds
+        # Use the share of available cells to estimate how many possible pairs each round needs
         pair_acceptance = max(finite_fraction**2, 1e-12)
         first_parts: list[NDArrayNum] = []
         second_parts: list[NDArrayNum] = []
@@ -409,20 +396,20 @@ class _RegularPairSampler:
             if remaining == 0:
                 break
 
-            # Bound oversampling so sparse rasters cannot allocate unbounded candidates
+            # Limit each round so a raster with little data cannot create a very large temporary array
             estimated = int(np.ceil(remaining / pair_acceptance))
             maximum_batch = max(1, int(np.ceil(target * self.max_oversample)))
             count = min(max(estimated, min(self.batch_pairs, maximum_batch)), maximum_batch)
             first, second = self._candidates(count)
 
-            # Read only proposed endpoints before retaining finite candidate pairs
+            # Read only proposed endpoints, then keep pairs where both values are available
             if first.size:
                 finite = np.isfinite(_take_raster_values(self.array, first)) & np.isfinite(
                     _take_raster_values(self.array, second)
                 )
                 first, second = first[finite], second[finite]
 
-            # Retain at most the remaining target and detect repeated empty rounds
+            # Keep only the remaining number of pairs and detect rounds that find nothing
             if first.size:
                 take = min(remaining, first.size)
                 first_parts.append(first[:take])
@@ -434,11 +421,11 @@ class _RegularPairSampler:
             if stalled >= 5:
                 break
 
-        # Fail clearly when no strategy round found one usable finite pair
+        # Fail clearly when no round found one pair with two available values
         if not first_parts:
             raise ValueError("No finite raster pairs could be sampled.")
 
-        # Apply global uniqueness after collecting rounds so duplicates across them are removed
+        # Remove duplicates across rounds when the caller requests global uniqueness
         first, second = np.concatenate(first_parts), np.concatenate(second_parts)
         if self.deduplicate == "global":
             first, second = _deduplicate_pairs(first, second, n_observations=self.size)
@@ -448,7 +435,7 @@ class _RegularPairSampler:
                 UserWarning,
             )
 
-        # Cast endpoint indexes and derive exact physical distances for the public output
+        # Use the requested integer type and calculate exact map distances for the result
         first, second = first.astype(self.index_dtype, copy=False), second.astype(self.index_dtype, copy=False)
         first_rows, first_columns = np.divmod(first.astype(np.int64), self.shape[1])
         second_rows, second_columns = np.divmod(second.astype(np.int64), self.shape[1])
@@ -466,7 +453,7 @@ class _RegularPairSampler:
 
 @dataclass(frozen=True)
 class _GridSpec:
-    """Layout of the sparse point hash grid."""
+    """Grid cells used to find nearby point rows without comparing every point."""
 
     cell_size: float
     x_min: float
@@ -476,7 +463,7 @@ class _GridSpec:
 
 
 class _IrregularPairSampler:
-    """Sample pairs from irregular coordinates using exact or nearest-neighbor searches."""
+    """Draw pairs from point locations using exact ring searches or nearby matches."""
 
     #################
     # CONFIGURATION
@@ -490,7 +477,7 @@ class _IrregularPairSampler:
         min_distance: float,
         max_distance: float,
         n_bins: int,
-        strategy: IrregularPairStrategy,
+        strategy: Literal["kdtree", "hashgrid", "nn_logvector"],
         anchors_per_round: int,
         attempts_per_anchor: int,
         max_rounds: int,
@@ -503,7 +490,7 @@ class _IrregularPairSampler:
         index_dtype: Any,
         distance_dtype: Any,
     ) -> None:
-        # Normalize coordinate geometry and numeric controls before validation
+        # Store coordinates and sampling options with consistent numeric types
         self.coordinates = np.asarray(coordinates, dtype=np.float64)
         self.size = len(self.coordinates)
         self.n_pairs = int(n_pairs)
@@ -519,13 +506,13 @@ class _IrregularPairSampler:
         )
         self.index_dtype, self.distance_dtype = np.dtype(index_dtype), np.dtype(distance_dtype)
 
-        # Precompute logarithmic rings while leaving expensive search indexes lazy
+        # Prepare distance rings now and build search helpers only if the chosen strategy needs them
         self.edges = np.geomspace(self.min_distance, self.max_distance, self.n_bins + 1)
         self._tree: cKDTree | None = None
         self.grid: dict[tuple[int, int], NDArrayNum] | None = None
         self.grid_spec: _GridSpec | None = None
 
-        # Validate geometry and batch controls before starting iterative searches
+        # Check coordinates and batch options before starting repeated searches
         if self.coordinates.ndim != 2 or self.coordinates.shape[1] != 2 or self.size < 2:
             raise ValueError("coordinates must contain at least two X/Y points.")
         if self.n_pairs < 1 or self.n_bins < 1:
@@ -541,12 +528,12 @@ class _IrregularPairSampler:
         if self.nn_batch_size < 1 or self.nn_oversample <= 0 or self.nn_max_batches < 1:
             raise ValueError("Nearest-neighbor batch controls must be strictly positive.")
 
-    ###################
-    # SPATIAL INDEXES
-    ###################
+    ########################
+    # NEARBY POINT SEARCH
+    ########################
 
     def _build_grid(self) -> None:
-        """Group point indexes by regular hash grid cell."""
+        """Group point rows into grid cells used for nearby searches."""
 
         # Convert coordinates to integer cells relative to the point cloud origin
         x, y = self.coordinates.T
@@ -556,7 +543,7 @@ class _IrregularPairSampler:
         n_columns, n_rows = int(columns.max()) + 1, int(rows.max()) + 1
         keys = columns.astype(np.int64) * np.int64(n_rows) + rows
 
-        # Sort once so indexes from each occupied cell form one contiguous slice
+        # Sort once so all point rows from one occupied cell sit together
         order = np.argsort(keys, kind="stable")
         boundaries = np.r_[0, np.flatnonzero(np.diff(keys[order])) + 1, self.size]
         self.grid = {}
@@ -564,22 +551,22 @@ class _IrregularPairSampler:
             column, row = divmod(int(keys[order[start]]), n_rows)
             self.grid[(column, row)] = order[start:stop].astype(np.int32, copy=False)
 
-        # Retain grid geometry for bounded distance ring queries
+        # Keep the grid details needed to find cells around a distance ring
         self.grid_spec = _GridSpec(self.cell_size, x_min, y_min, n_columns, n_rows)
 
     @property
     def tree(self) -> cKDTree:
-        """Build the point search tree only when its strategy needs it."""
+        """Build SciPy's nearby point search tree only when a strategy needs it."""
 
-        # Delay the index cost for hash grid strategies that never use the tree
+        # Avoid building the tree for grid-based strategies that never use it
         if self._tree is None:
             self._tree = cKDTree(self.coordinates)
         return self._tree
 
     def _hash_candidates(self, anchor: int, inner: float, outer: float) -> NDArrayNum:
-        """Collect hash grid cells that can intersect one distance ring."""
+        """Collect point rows from grid cells that may cross one distance ring."""
 
-        # Build the sparse grid on first use so other strategies avoid its memory cost
+        # Build the search grid on first use so other strategies do not store it
         if self.grid is None or self.grid_spec is None:
             self._build_grid()
         assert self.grid is not None and self.grid_spec is not None
@@ -588,11 +575,11 @@ class _IrregularPairSampler:
         center_row = int(np.floor((y - self.grid_spec.y_min) / self.cell_size))
         radius = int(np.ceil(outer / self.cell_size))
 
-        # Visit only cells within the outer ring bounding square
+        # Visit only grid cells inside the square around the outer distance
         parts: list[NDArrayNum] = []
         for column in range(max(0, center_column - radius), min(self.grid_spec.n_columns, center_column + radius + 1)):
             for row in range(max(0, center_row - radius), min(self.grid_spec.n_rows, center_row + radius + 1)):
-                # Compare cell bounds with the ring before retrieving point indexes
+                # Skip cells that cannot touch the requested distance ring
                 cell_x_min = self.grid_spec.x_min + column * self.cell_size
                 cell_y_min = self.grid_spec.y_min + row * self.cell_size
                 cell_x_max, cell_y_max = cell_x_min + self.cell_size, cell_y_min + self.cell_size
@@ -606,13 +593,13 @@ class _IrregularPairSampler:
                 if indexes is not None:
                     parts.append(indexes)
 
-        # Join occupied candidate cells for exact point distance filtering
+        # Join point rows from matching cells before checking their exact distances
         return np.concatenate(parts) if parts else np.empty(0, dtype=np.int32)
 
     def _one_in_ring(self, anchor: int, inner: float, outer: float) -> tuple[int, float] | None:
-        """Select one point from an exact distance ring."""
+        """Select one second point within an exact distance range of the first."""
 
-        # Query the selected spatial index for candidates inside the outer radius
+        # Ask the selected search helper for points inside the outer distance
         candidates = (
             np.asarray(self.tree.query_ball_point(self.coordinates[anchor], outer), dtype=np.int64)
             if self.strategy == "kdtree"
@@ -621,25 +608,25 @@ class _IrregularPairSampler:
         if candidates.size == 0:
             return None
 
-        # Apply exact distances because both search indexes return a superset
+        # Check exact distances because both helpers may also return points outside the inner distance
         differences = self.coordinates[candidates] - self.coordinates[anchor]
         squared = np.sum(differences**2, axis=1)
         in_ring = (squared >= inner**2) & (squared < outer**2) & (candidates != anchor)
         if not np.any(in_ring):
             return None
 
-        # Draw one valid endpoint uniformly to avoid favoring storage order
+        # Choose one matching endpoint at random so stored row order does not bias the sample
         chosen = int(self.rng.choice(candidates[in_ring]))
         return chosen, float(np.linalg.norm(self.coordinates[chosen] - self.coordinates[anchor]))
 
     ###################
-    # VECTOR SAMPLING
+    # OFFSET MATCHING
     ###################
 
     def _nearest_vector(self) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
-        """Propose log-spaced vectors and snap their endpoints to nearby observations."""
+        """Draw offsets across log-spaced distances and match them to nearby points."""
 
-        # Accumulate bounded accepted batches until reaching the requested count
+        # Collect limited batches until the requested number of pairs is reached
         first_parts: list[NDArrayNum] = []
         second_parts: list[NDArrayNum] = []
         distance_parts: list[NDArrayNum] = []
@@ -648,21 +635,21 @@ class _IrregularPairSampler:
             if remaining == 0:
                 break
 
-            # Propose isotropic logarithmic vectors from random observed anchors
+            # Draw random first points, log-spaced distances, and random directions
             count = min(self.nn_batch_size, int(np.ceil(self.nn_oversample * remaining)))
             anchors = self.rng.integers(0, self.size, count, dtype=np.int64)
             radii = np.exp(self.rng.uniform(np.log(self.min_distance), np.log(self.max_distance), count))
             angles = self.rng.uniform(0, 2 * np.pi, count)
             proposals = self.coordinates[anchors] + np.column_stack((radii * np.cos(angles), radii * np.sin(angles)))
 
-            # Snap proposals to their nearest observation within relative tolerance
+            # Match each proposed endpoint to the nearest observed point within the allowed error
             proposal_distance, neighbors = self.tree.query(proposals, k=1)
             accepted = (neighbors != anchors) & (proposal_distance <= self.nn_tolerance * radii)
             first, second = anchors[accepted], neighbors[accepted].astype(np.int64, copy=False)
             distance = np.linalg.norm(self.coordinates[second] - self.coordinates[first], axis=1)
             in_range = (distance >= self.min_distance) & (distance <= self.max_distance)
 
-            # Retain only the remaining number of endpoints after exact distance checks
+            # Check exact distances and keep only the number of pairs still needed
             take = min(remaining, int(np.count_nonzero(in_range)))
             if take:
                 first_parts.append(first[in_range][:take])
@@ -670,7 +657,7 @@ class _IrregularPairSampler:
                 distance_parts.append(distance[in_range][:take])
                 remaining -= take
 
-        # Report complete failure distinctly from a partial sample warning
+        # Distinguish finding no pair from finding fewer pairs than requested
         if not first_parts:
             raise ValueError("No point pairs could be sampled within the requested distances.")
         return np.concatenate(first_parts), np.concatenate(second_parts), np.concatenate(distance_parts)
@@ -680,13 +667,13 @@ class _IrregularPairSampler:
     #################
 
     def sample(self) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
-        """Collect pairs with the configured irregular sampling strategy."""
+        """Collect point pairs with the selected search strategy."""
 
-        # Use vector proposals directly for the approximate nearest neighbor strategy
+        # Use proposed offsets directly for the nearest-point strategy
         if self.strategy == "nn_logvector":
             first, second, distances = self._nearest_vector()
         else:
-            # Draw exact ring matches one anchor at a time for tree and hash strategies
+            # Search one first point and distance range at a time for the exact strategies
             first_values: list[int] = []
             second_values: list[int] = []
             distance_values: list[float] = []
@@ -694,12 +681,12 @@ class _IrregularPairSampler:
                 if len(first_values) >= self.n_pairs:
                     break
 
-                # Allow replacement when a round requests more anchors than observations
+                # Reuse first points when one round requests more pairs than there are points
                 replace = self.anchors_per_round > self.size
                 anchors = self.rng.choice(self.size, self.anchors_per_round, replace=replace)
                 for anchor in anchors:
                     for _ in range(self.attempts_per_anchor):
-                        # Draw rings uniformly so logarithmic lag classes receive similar effort
+                        # Choose each log-spaced distance range equally often
                         bin_index = int(self.rng.integers(0, self.n_bins))
                         selected = self._one_in_ring(int(anchor), self.edges[bin_index], self.edges[bin_index + 1])
                         if selected is not None:
@@ -712,14 +699,14 @@ class _IrregularPairSampler:
                     if len(first_values) == self.n_pairs:
                         break
 
-            # Convert successful Python accumulation to compact numeric arrays
+            # Convert the collected Python lists to numeric arrays
             if not first_values:
                 raise ValueError("No point pairs could be sampled within the requested distances.")
             first = np.asarray(first_values)
             second = np.asarray(second_values)
             distances = np.asarray(distance_values)
 
-        # Warn about partial results while preserving every successfully sampled pair
+        # Warn when fewer pairs were found, but return every successful pair
         if first.size < self.n_pairs:
             warnings.warn(f"Sampled {first.size} point pairs out of {self.n_pairs} requested.", UserWarning)
         return (
@@ -746,9 +733,9 @@ def _random_raster_pairs(
     max_rounds: int,
     batch_pairs: int,
 ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
-    """Draw uniformly random raster endpoints and retain the requested distance range."""
+    """Draw independent raster endpoints and keep pairs in the requested distance range."""
 
-    # Initialize compact accumulators because each round replaces them after deduplication
+    # Start empty result arrays that each round extends after removing duplicates
     rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
     size, n_columns = int(np.prod(array.shape)), int(array.shape[1])
     first: NDArrayNum = np.empty(0, dtype=np.int64)
@@ -758,7 +745,7 @@ def _random_raster_pairs(
         if remaining <= 0:
             break
 
-        # Draw bounded independent endpoint batches to top up the unique sample
+        # Draw a limited batch of independent endpoints to fill the remaining sample
         count = min(batch_pairs, max(10_000, remaining * 3))
         first_candidate = rng.integers(0, size, count, dtype=np.int64)
         second_candidate = rng.integers(0, size, count, dtype=np.int64)
@@ -766,7 +753,7 @@ def _random_raster_pairs(
         second_rows, second_columns = np.divmod(second_candidate, n_columns)
         distances = np.hypot((second_columns - first_columns) * dx, (second_rows - first_rows) * dy)
 
-        # Filter self pairs, distance bounds and nonfinite endpoint values together
+        # Remove self-pairs, wrong distances, and pairs with a missing value
         keep = (
             (first_candidate != second_candidate)
             & (distances >= min_distance)
@@ -775,7 +762,7 @@ def _random_raster_pairs(
             & np.isfinite(_take_raster_values(array, second_candidate))
         )
         if np.any(keep):
-            # Deduplicate across previous rounds before truncating to the requested count
+            # Remove duplicates across all rounds before keeping the requested count
             first, second = _deduplicate_pairs(
                 np.concatenate((first, first_candidate[keep])),
                 np.concatenate((second, second_candidate[keep])),
@@ -783,13 +770,13 @@ def _random_raster_pairs(
             )
             first, second = first[:n_pairs], second[:n_pairs]
 
-    # Distinguish complete failure from a usable but incomplete unique sample
+    # Distinguish finding no pair from finding fewer unique pairs than requested
     if first.size == 0:
         raise ValueError("No finite raster pairs could be sampled.")
     if first.size < n_pairs:
         warnings.warn(f"Sampled {first.size} unique raster pairs out of {n_pairs} requested.", UserWarning)
 
-    # Recompute exact distances for the final deduplicated endpoint order
+    # Calculate exact map distances after the final pair order is known
     first_rows, first_columns = np.divmod(first, n_columns)
     second_rows, second_columns = np.divmod(second, n_columns)
     distances = np.hypot((second_columns - first_columns) * dx, (second_rows - first_rows) * dy)
@@ -805,9 +792,9 @@ def _pair_dataset(
     pair_coordinates: dict[str, NDArrayNum],
     attrs: dict[str, Any],
 ) -> xr.Dataset:
-    """Create the shared labelled representation returned by object methods."""
+    """Build the Xarray Dataset returned by raster and point cloud pairsample() methods."""
 
-    # Stack endpoints on a labelled dimension shared by indexes and values
+    # Store the two endpoints along one labelled dimension shared by row numbers and values
     indexes = np.column_stack((first, second))
     data_vars: dict[str, Any] = {
         "index": (("pair", "endpoint"), indexes),
@@ -815,11 +802,11 @@ def _pair_dataset(
         "distance": ("pair", distances),
     }
 
-    # Add support specific coordinates without changing the common pair schema
+    # Add raster or point coordinates while keeping the same core dataset layout
     for name, coordinate in pair_coordinates.items():
         data_vars[name] = (("pair", "endpoint"), coordinate)
 
-    # Label endpoint order explicitly so downstream consumers avoid positional guesses
+    # Name the first and second endpoints so later code need not guess from array positions
     return xr.Dataset(
         data_vars=data_vars,
         coords={"pair": np.arange(len(first)), "endpoint": ["first", "second"]},
@@ -832,13 +819,13 @@ def _sample_raster_pairs(
     *,
     band: int,
     n_pairs: int,
-    sampling: PairSampling,
+    sampling: Literal["loglag", "random_xy"],
     min_distance: float | None,
     max_distance: float | None,
     random_state: int | np.random.Generator | None,
     mask: Any | None,
-    strategy: RegularPairStrategy,
-    deduplicate: Deduplication,
+    strategy: Literal["independent", "anchors", "chunk_anchors", "anchor_batched"],
+    deduplicate: Literal["none", "per_anchor", "global"],
     batch_pairs: int,
     max_rounds: int,
     max_oversample: float,
@@ -851,9 +838,13 @@ def _sample_raster_pairs(
     index_dtype: Any,
     distance_dtype: Any,
 ) -> xr.Dataset:
-    """Implementation for :meth:`Raster.pairsample`."""
+    """Check raster pairsample() inputs, draw pairs, and build its Xarray result.
 
-    # Select the requested band and validate compact output dtypes before sampling
+    _RegularPairSampler.sample() draws log-spaced pairs, while _random_raster_pairs() draws independent endpoints.
+    _pair_dataset() gives either result the shared labelled layout.
+    """
+
+    # Select the raster band and check the requested output number types
     array = _selected_raster_data(raster, band)
     index_type, distance_type = np.dtype(index_dtype), np.dtype(distance_dtype)
     if not np.issubdtype(index_type, np.integer) or not np.issubdtype(distance_type, np.floating):
@@ -861,18 +852,18 @@ def _sample_raster_pairs(
     if int(np.prod(array.shape)) - 1 > np.iinfo(index_type).max:
         raise ValueError("index_dtype cannot represent every cell in this raster.")
 
-    # Convert every supported mask representation to one Boolean raster grid
+    # Convert an array, raster, or vector mask to one Boolean grid
     if mask is not None:
         mask_array = _mask_on_raster(mask, raster, "inside", "raise")
 
-        # Apply masks lazily when the source remains a Dask array
+        # Apply the mask without loading a Dask source array
         if is_dask_array(array):
             dask_array = __import__("dask.array", fromlist=["array"])
             array = dask_array.where(mask_array, array, np.nan)
         else:
             array = np.where(mask_array, array, np.nan)
 
-    # Derive physical distance defaults from raster resolution and extent
+    # Choose default map distances from the cell size and raster extent
     dx, dy = (float(abs(value)) for value in get_geo_attr(raster, "res"))
     diagonal = float(np.hypot((array.shape[1] - 1) * dx, (array.shape[0] - 1) * dy))
     minimum = min(dx, dy) if min_distance is None else float(min_distance)
@@ -880,7 +871,7 @@ def _sample_raster_pairs(
     if not 0 < minimum < maximum:
         raise ValueError("Require 0 < min_distance < max_distance.")
 
-    # Dispatch logarithmic and uniform endpoint sampling to their separate workflows
+    # Call the log-spaced or independent endpoint sampling workflow
     if sampling == "loglag":
         first, second, distances = _RegularPairSampler(
             array,
@@ -919,7 +910,7 @@ def _sample_raster_pairs(
     else:
         raise ValueError("sampling must be 'loglag' or 'random_xy'.")
 
-    # Normalize final dtypes and recover raster coordinates for both endpoints
+    # Use the requested number types and recover map coordinates for both endpoints
     first = first.astype(index_type, copy=False)
     second = second.astype(index_type, copy=False)
     distances = distances.astype(distance_type, copy=False)
@@ -928,7 +919,7 @@ def _sample_raster_pairs(
     first_x, first_y = raster.ij2xy(first_rows, first_columns)
     second_x, second_y = raster.ij2xy(second_rows, second_columns)
 
-    # Materialize selected values only when assembling the labelled result
+    # Load only the selected raster values when building the Xarray result
     return _pair_dataset(
         first=first,
         second=second,
@@ -959,12 +950,12 @@ def _sample_point_pairs(
     pointcloud: Any,
     *,
     n_pairs: int,
-    sampling: PairSampling,
+    sampling: Literal["loglag", "random_xy"],
     min_distance: float | None,
     max_distance: float | None,
     random_state: int | np.random.Generator | None,
     mask: Any | None,
-    strategy: IrregularPairStrategy,
+    strategy: Literal["kdtree", "hashgrid", "nn_logvector"],
     n_bins: int,
     anchors_per_round: int,
     attempts_per_anchor: int,
@@ -977,19 +968,23 @@ def _sample_point_pairs(
     index_dtype: Any,
     distance_dtype: Any,
 ) -> xr.Dataset:
-    """Implementation for :meth:`PointCloud.pairsample`."""
+    """Check point cloud pairsample() inputs, draw pairs, and build its Xarray result.
 
-    # Materialize the point table because bounded pair sampling needs global coordinates
+    _IrregularPairSampler.sample() searches for log-spaced pairs; the independent path draws and filters endpoints
+    directly. _pair_dataset() gives either result the shared labelled layout.
+    """
+
+    # Load the point table because pair searches need all coordinates
     dataframe = pointcloud.ds.compute() if is_dask_dataframe(pointcloud.ds) else pointcloud.ds
     values = np.asarray(
         dataframe[pointcloud.data_column] if pointcloud.data_column is not None else dataframe.geometry.z
     )
     coordinates = np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
 
-    # Combine finite coordinates and values before applying an optional spatial mask
+    # Keep rows with available coordinates and values, then apply the optional mask
     valid = np.isfinite(values) & np.all(np.isfinite(coordinates), axis=1)
     if mask is not None:
-        # Normalize vector masks next to point filtering so accepted representations remain visible
+        # Accept vector objects and GeoDataFrames through the same mask path
         vector = _as_vector(mask)
         if vector is not None:
             valid &= np.asarray(vector.create_mask(ref=pointcloud, as_array=True), dtype=bool).squeeze()
@@ -999,20 +994,20 @@ def _sample_point_pairs(
                 raise ValueError("mask must be Boolean with one value per point.")
             valid &= mask_array
 
-    # Retain source indexes so the result refers to the original point ordering
+    # Keep source row numbers so the result refers back to the original point table
     original_indexes = np.flatnonzero(valid)
     coordinates_valid, values_valid = coordinates[valid], values[valid]
     if len(values_valid) < 2:
         raise ValueError("At least two finite points are required to sample pairs.")
 
-    # Validate output dtypes against the original point population
+    # Check that the requested integer type can hold every original row number
     index_type, distance_type = np.dtype(index_dtype), np.dtype(distance_dtype)
     if not np.issubdtype(index_type, np.integer) or not np.issubdtype(distance_type, np.floating):
         raise TypeError("index_dtype must be integer and distance_dtype must be floating.")
     if len(values) - 1 > np.iinfo(index_type).max:
         raise ValueError("index_dtype cannot represent every point in this point cloud.")
 
-    # Derive distance defaults from point extent and approximate density
+    # Choose default distances from the point extent and typical point spacing
     bounds = np.ptp(coordinates_valid, axis=0)
     diagonal = float(np.hypot(*bounds))
     density_spacing = float(np.sqrt(max(bounds[0] * bounds[1], 0) / len(values_valid)))
@@ -1023,7 +1018,7 @@ def _sample_point_pairs(
     if n_pairs < 1 or max_rounds < 1:
         raise ValueError("n_pairs and max_rounds must be positive integers.")
 
-    # Dispatch logarithmic sampling to the configured irregular coordinate strategy
+    # Use the selected point search for log-spaced distances
     if sampling == "loglag":
         first, second, distances = _IrregularPairSampler(
             coordinates_valid,
@@ -1045,7 +1040,7 @@ def _sample_point_pairs(
             distance_dtype=distance_dtype,
         ).sample()
     elif sampling == "random_xy":
-        # Draw independent endpoints in bounded rounds for uniform random sampling
+        # Draw independent endpoints in limited rounds for uniform random sampling
         rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
         first = np.empty(0, dtype=np.int64)
         second = np.empty(0, dtype=np.int64)
@@ -1054,7 +1049,7 @@ def _sample_point_pairs(
             if remaining <= 0:
                 break
 
-            # Oversample candidates before exact distance filtering and deduplication
+            # Draw extra possible pairs before checking exact distances and removing duplicates
             count = min(nn_batch_size, max(10_000, remaining * 3))
             first_candidate = rng.integers(0, len(values_valid), count, dtype=np.int64)
             second_candidate = rng.integers(0, len(values_valid), count, dtype=np.int64)
@@ -1067,7 +1062,7 @@ def _sample_point_pairs(
                 & (candidate_distances <= maximum)
             )
             if np.any(keep):
-                # Deduplicate against earlier rounds before capping the sample
+                # Remove duplicates across rounds before keeping the requested number
                 first, second = _deduplicate_pairs(
                     np.concatenate((first, first_candidate[keep])),
                     np.concatenate((second, second_candidate[keep])),
@@ -1075,7 +1070,7 @@ def _sample_point_pairs(
                 )
                 first, second = first[:n_pairs], second[:n_pairs]
 
-        # Preserve partial samples but fail when no requested pair exists
+        # Return a smaller sample with a warning, but fail when no matching pair exists
         if first.size == 0:
             raise ValueError("No point pairs could be sampled within the requested distances.")
         if first.size < n_pairs:
@@ -1084,12 +1079,12 @@ def _sample_point_pairs(
     else:
         raise ValueError("sampling must be 'loglag' or 'random_xy'.")
 
-    # Map filtered indexes back to the original point table and requested dtypes
+    # Map kept row numbers back to the original point table and requested number types
     original_first = original_indexes[first].astype(index_type, copy=False)
     original_second = original_indexes[second].astype(index_type, copy=False)
     distances = distances.astype(distance_type, copy=False)
 
-    # Assemble values and coordinates on the shared labelled pair schema
+    # Build the same labelled Xarray layout used for raster pairs
     return _pair_dataset(
         first=original_first,
         second=original_second,

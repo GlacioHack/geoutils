@@ -6,22 +6,13 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""Statistics grouped by continuous bins or discrete categories.
-
-The public array function returns an ordinary Pandas dataframe whose index preserves interval and categorical
-metadata. Raster and point cloud methods prepare values on a common spatial support before using the same engine.
-Optional group masks are exposed through a lightweight mapping backed by one integer group layer.
-
-The module first defines masks and prepares group membership, then implements eager aggregation and shared chunk
-kernels. Dask and multiprocessing execute those kernels before the array API assembles the result. Spatial wrappers
-reuse co-sampling preparation, and plotting helpers complete the module.
-"""
+"""Calculate statistics for values split into bins or categories."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import geopandas as gpd
 import numpy as np
@@ -52,21 +43,16 @@ if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
 
 
-Statistic: TypeAlias = str | Callable[[Any], Any]
-BinSpec: TypeAlias = int | Iterable[float] | pd.IntervalIndex
-GroupingStrategy: TypeAlias = Literal["auto", "dense", "sparse", "groupwise"]
-GroupedStatsResult: TypeAlias = pd.DataFrame | tuple[pd.DataFrame, Mapping[Hashable, Any]]
-
 __all__ = ["grouped_stats", "plot_grouped_stats"]
 
 
-#########################
-# 1/ LAZY GROUP MASK VIEW
-#########################
+###################################
+# 1/ GROUP MASKS CREATED ON REQUEST
+###################################
 
 
 class _GroupMasks(Mapping[Hashable, Any]):
-    """Create support aligned Boolean masks from one shared group code layer."""
+    """Create Boolean masks on the result grid or points from one shared group number array."""
 
     def __init__(
         self,
@@ -75,23 +61,23 @@ class _GroupMasks(Mapping[Hashable, Any]):
         shape: tuple[int, ...],
         support: Any | None,
     ) -> None:
-        # Retain only one group layer while preserving the dataframe index order
+        # Keep one group number array and follow the result table's row order
         self._group_ids = group_ids
         self._key_ids = dict(key_ids)
         self._shape = shape
         self._support = support
 
     def __getitem__(self, key: Hashable) -> Any:
-        # Raise the standard mapping error before allocating the requested mask
+        # Raise the usual dictionary error before creating a mask
         if key not in self._key_ids:
             raise KeyError(key)
         mask = (self._group_ids == self._key_ids[key]).reshape(self._shape)
 
-        # Return a plain Boolean array when no spatial support was supplied
+        # Return a plain Boolean array when the input had no raster or point locations
         if self._support is None:
             return mask
 
-        # Rebuild raster outputs through their native constructor to retain georeferencing
+        # Build a raster mask with the same grid and coordinate system as the input
         if hasattr(self._support, "ij2xy"):
             return self._support.from_array(
                 data=mask,
@@ -102,19 +88,19 @@ class _GroupMasks(Mapping[Hashable, Any]):
                 tags=self._support.tags.copy(),
             )
 
-        # Preserve point geometry and auxiliary columns while replacing the main data values
+        # Keep point geometry and other columns while replacing the selected value with the mask
         if hasattr(self._support, "georeferenced_coords_equal") and hasattr(self._support, "data_column"):
             if self._support.data_column is not None:
                 return self._support.copy(new_array=mask)
 
-            # Add a Boolean data column when the source stores values as numeric geometry elevations
+            # Add a Boolean column when the point values were stored in geometry Z coordinates
             dataframe = self._support.ds.copy()
             column = "group_mask"
             while column in dataframe.columns:
                 column = f"_{column}"
             dataframe[column] = np.asarray(mask, dtype=bool)
 
-            # Move values out of three dimensional geometry so the Boolean column is authoritative
+            # Drop geometry Z values so the new Boolean column is the selected data
             dataframe.geometry = gpd.points_from_xy(
                 self._support.geometry.x,
                 self._support.geometry.y,
@@ -124,7 +110,7 @@ class _GroupMasks(Mapping[Hashable, Any]):
             if getattr(self._support, "_ACCESSOR_OUTPUT", False):
                 return dataframe
 
-            # Rebuild a GeoUtils object so its selected value column is recognized as a mask
+            # Rebuild the GeoUtils point object with the Boolean column selected
             from geoutils.pointcloud.pointcloud import PointCloud
 
             return PointCloud(dataframe, data_column=column)
@@ -142,27 +128,29 @@ class _GroupMasks(Mapping[Hashable, Any]):
 ################################
 
 
-def _normalize_statistics(statistics: Statistic | Iterable[Statistic]) -> tuple[list[Statistic], list[str]]:
-    """Validate requested statistics and derive stable dataframe labels."""
+def _normalize_statistics(
+    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]]
+) -> tuple[list[str | Callable[[Any], Any]], list[str]]:
+    """Check requested statistics and choose names for their result columns."""
 
-    # Treat a single name or callable as one statistic rather than an iterable
+    # Treat one name or function as a single statistic
     if isinstance(statistics, str) or callable(statistics):
         requested = [statistics]
     else:
         requested = list(statistics)
 
-    # Expand the established complete selection without duplicating the mandatory count
+    # Expand `all` to the standard list while keeping one count column
     if requested == ["all"]:
         requested = [*_STATS_ALIAS_CALLABLE, "totalcount", "percentagevalidpoints"]
     elif "all" in requested:
         raise ValueError("Statistic 'all' cannot be combined with other statistics.")
 
-    # Reject invalid entries before deriving callable names
+    # Reject entries that are neither a known name nor a function
     requested = [statistic for statistic in requested if statistic != "count"]
     if any(not isinstance(statistic, str) and not callable(statistic) for statistic in requested):
         raise TypeError("statistics must contain names or callable functions.")
 
-    # Keep count first and ignore a duplicate explicitly requested by the caller
+    # Put count first and remove a repeated count request
     names = [statistic if isinstance(statistic, str) else statistic.__name__ for statistic in requested]
     if len(set(names)) != len(names):
         raise ValueError("Statistic names must be unique.")
@@ -170,9 +158,9 @@ def _normalize_statistics(statistics: Statistic | Iterable[Statistic]) -> tuple[
 
 
 def _encode_grouper(values: NDArray[Any], *, groups: pd.Index, edges: NDArray[Any] | None = None) -> NDArray[Any]:
-    """Encode categories or intervals once per block while preserving the declared boundary rules."""
+    """Replace categories or intervals with their integer group numbers in one array block."""
 
-    # Match histogram conventions, including the final upper edge, without scanning each bin
+    # Follow histogram edge rules and include values equal to the final upper edge
     array = np.asarray(values)
     if edges is not None:
         codes = np.searchsorted(edges, array, side="right") - 1
@@ -180,7 +168,7 @@ def _encode_grouper(values: NDArray[Any], *, groups: pd.Index, edges: NDArray[An
         invalid = ~np.isfinite(array) | (codes < 0) | (codes >= len(edges) - 1)
         return np.where(invalid, -1, codes).astype(np.int64)
 
-    # Delegate interval closure and categorical lookup to the established Pandas index implementations
+    # Let Pandas apply explicit interval boundaries or match category labels
     if isinstance(groups, pd.IntervalIndex):
         codes = groups.get_indexer(array.ravel())
     else:
@@ -191,16 +179,16 @@ def _encode_grouper(values: NDArray[Any], *, groups: pd.Index, edges: NDArray[An
 def _prepare_groupers(
     by: Mapping[str, Any],
     *,
-    bins: Mapping[str, BinSpec],
+    bins: Mapping[str, int | Iterable[float] | pd.IntervalIndex],
     categories: Mapping[str, Iterable[Hashable]],
     mask: Any | None,
     shape: tuple[int, ...],
     use_dask: bool,
     chunks: Any | None,
 ) -> tuple[Any, list[pd.Index], int]:
-    """Encode every grouper and combine its codes into one integer layer."""
+    """Turn all grouping values into one array of combined integer group numbers."""
 
-    # Validate declarations before deriving categories or scanning continuous values
+    # Check bin and category declarations before reading grouping values
     if not by:
         raise ValueError("by must contain at least one named grouper.")
     if any(not isinstance(name, str) or not name for name in by):
@@ -212,12 +200,12 @@ def _prepare_groupers(
     if overlap:
         raise ValueError(f"A grouper cannot define both bins and categories: {sorted(overlap)!r}.")
 
-    # Use one backend for membership so mixed NumPy and Dask inputs remain aligned
+    # Convert all grouping arrays to Dask when any one of them uses Dask
     if use_dask:
         import_optional("dask")
         import dask.array as da
 
-    # Start from the user mask because it limits every group consistently
+    # Start with the user mask because it applies to every group
     eligible: Any
     if mask is None:
         eligible = da.ones(shape, chunks=chunks, dtype=bool) if use_dask else np.ones(shape, dtype=bool)
@@ -233,7 +221,7 @@ def _prepare_groupers(
             eligible = eligible.rechunk(chunks)
     user_eligible = eligible
 
-    # Encode groupers separately so their declared order defines result ordering
+    # Number each grouping variable separately in the caller's order
     encoded: list[Any] = []
     levels: list[pd.Index] = []
     for name, raw_values in by.items():
@@ -247,7 +235,7 @@ def _prepare_groupers(
         elif isinstance(raw_values, pd.Categorical):
             raw_values = np.asarray(raw_values)
 
-        # Preserve missing values and keep eager category labels available for Pandas encoding
+        # Keep missing labels and make in-memory category values available to Pandas
         boolean_values = hasattr(raw_values, "dtype") and np.issubdtype(raw_values.dtype, np.bool_)
         if np.ma.isMaskedArray(raw_values):
             masked = np.ma.asarray(raw_values)
@@ -261,7 +249,7 @@ def _prepare_groupers(
         if use_dask:
             values = values.rechunk(chunks) if is_dask_array(values) else da.from_array(values, chunks=chunks)
 
-        # Use declared categories, native Pandas categories or the unambiguous Boolean categories
+        # Use declared categories, Pandas categories, or the two Boolean values
         declared_categories: Iterable[Hashable] | None = categories.get(name)
         if declared_categories is None and categorical_values is not None:
             declared_categories = categorical_values.categories
@@ -278,20 +266,20 @@ def _prepare_groupers(
                 name=name,
             )
 
-            # Encode each lazy block through the same categorical lookup as eager arrays
+            # Match categories in each Dask block with the same helper used for NumPy
             if is_dask_array(values):
                 codes = values.map_blocks(_encode_grouper, groups=category_index, dtype=np.int64)
             else:
                 codes = _encode_grouper(values, groups=category_index)
                 if use_dask:
-                    # Wrap integer codes in Dask because object labels cannot be automatically chunked
+                    # Wrap integer codes in Dask when object labels cannot be split into Dask blocks directly
                     codes = da.asarray(codes)
             encoded.append(codes)
             levels.append(level)
             eligible = eligible & (codes >= 0)
             continue
 
-        # Require an explicit bin definition for every remaining grouper
+        # Require bins when values are not categorical
         if name not in bins:
             raise ValueError(f"Grouper {name!r} requires an entry in bins or categories.")
         if not np.issubdtype(values.dtype, np.number):
@@ -299,7 +287,7 @@ def _prepare_groupers(
         values = da.asarray(values) if use_dask else values
         specification = bins[name]
 
-        # Derive equal width edges from finite values retained by the user mask
+        # Build equal-width bins from available numeric group values allowed by the user mask
         if isinstance(specification, (int, np.integer)):
             if specification < 1:
                 raise ValueError(f"The bin count for {name!r} must be positive.")
@@ -325,7 +313,7 @@ def _prepare_groupers(
             edges = np.linspace(float(lower), float(upper), int(specification) + 1)
             intervals = pd.IntervalIndex.from_breaks(edges, closed="left", name=name)
 
-        # Respect an IntervalIndex exactly, including its chosen edge closure
+        # Keep an IntervalIndex's exact edges and open or closed sides
         elif isinstance(specification, pd.IntervalIndex):
             intervals = specification.rename(name)
             if intervals.empty or not intervals.is_non_overlapping_monotonic:
@@ -334,14 +322,14 @@ def _prepare_groupers(
                 raise ValueError(f"Intervals for {name!r} must have finite bounds.")
             edges = None
 
-        # Interpret numeric sequences as histogram edges with the final edge included
+        # Treat a numeric sequence as histogram edges and include the final upper edge
         else:
             edges = np.asarray(list(specification), dtype=float)
             if edges.ndim != 1 or len(edges) < 2 or not np.all(np.isfinite(edges)) or not np.all(np.diff(edges) > 0):
                 raise ValueError(f"Bin edges for {name!r} must be finite and strictly increasing.")
             intervals = pd.IntervalIndex.from_breaks(edges, closed="left", name=name)
 
-        # Digitize once per block, using Pandas only when explicit interval closure requires it
+        # Number intervals in each array block and use Pandas only for custom open or closed sides
         if use_dask:
             codes = values.map_blocks(_encode_grouper, groups=intervals, edges=edges, dtype=np.int64)
         else:
@@ -350,7 +338,7 @@ def _prepare_groupers(
         levels.append(intervals)
         eligible = eligible & (codes >= 0)
 
-    # Combine ordered codes without storing a Boolean layer for every group
+    # Combine all group numbers into one array instead of storing one Boolean mask per group
     total_groups = math.prod(len(level) for level in levels)
     if total_groups > np.iinfo(np.int64).max:
         raise ValueError("The product of group counts exceeds the supported integer range.")
@@ -359,7 +347,7 @@ def _prepare_groupers(
         group_ids = group_ids * len(level) + codes
     group_ids = da.where(eligible, group_ids, -1) if use_dask else np.where(eligible, group_ids, -1)
 
-    # Retain the smallest signed integer layer that can represent every group and invalid membership
+    # Use the smallest signed integer type that can hold all groups plus the missing marker
     for dtype in (np.int8, np.int16, np.int32, np.int64):
         if total_groups - 1 <= np.iinfo(dtype).max:
             group_ids = group_ids.astype(dtype)
@@ -367,12 +355,12 @@ def _prepare_groupers(
     return group_ids, levels, total_groups
 
 
-############################
-# 3/ EAGER GROUPED STATISTICS
-############################
+#################################
+# 3/ IN-MEMORY GROUPED STATISTICS
+#################################
 
 
-# These statistics can be calculated from compact summaries of independent blocks
+# These statistics need only counts, sums, means, and ranges from each array block
 _MERGEABLE_STATISTICS = {
     "count",
     "validcount",
@@ -389,18 +377,18 @@ _MERGEABLE_STATISTICS = {
 
 
 def _aggregate_eager(
-    values: Sequence[NDArray[Any]], group_ids: NDArray[Any], statistics: Sequence[Statistic]
+    values: Sequence[NDArray[Any]], group_ids: NDArray[Any], statistics: Sequence[str | Callable[[Any], Any]]
 ) -> pd.DataFrame:
-    """Sort group membership once and evaluate exact statistics on contiguous group values."""
+    """Sort in-memory values by group once and calculate every requested statistic."""
 
-    # Exclude undefined membership before sorting so no full array is scanned for each group
+    # Remove values outside every group, then sort once instead of scanning the full array per group
     ids = np.asarray(group_ids).ravel()
     selected = np.flatnonzero(ids >= 0)
     order = selected[np.argsort(ids[selected], kind="stable")]
     labels, starts, sizes = np.unique(ids[order], return_index=True, return_counts=True)
     requested, names = _normalize_statistics(statistics)
 
-    # Resolve count aliases once, outside the loop over groups and value arrays
+    # Resolve count names once before looping over groups and value arrays
     aliases = [_get_stat_common_alias(stat, _STATS_ALIAS_ALL) if isinstance(stat, str) else None for stat in requested]
     ordinary = [stat for stat, alias in zip(requested, aliases) if alias not in _STATS_ALIAS_COUNTS]
     columns: dict[tuple[int, str], Any] = {}
@@ -409,7 +397,7 @@ def _aggregate_eager(
         ordered = np.where(np.isfinite(ordered), ordered, np.nan)
         results: dict[str, list[Any]] = {name: [] for name in names}
 
-        # Pass only each group's members to robust estimators and arbitrary user functions
+        # Pass complete group values to statistics such as median and user functions
         for start, size in zip(starts, sizes):
             group = ordered[start : start + size]
             count = int(np.count_nonzero(np.isfinite(group)))
@@ -427,15 +415,15 @@ def _aggregate_eager(
                     result = computed.get(name, np.nan)
                 results[name].append(result)
 
-        # Retain numeric column types while keeping the internal index as integer group IDs
+        # Keep numeric result columns and use integer group numbers as temporary row labels
         for name, result_values in results.items():
             columns[(value_index, name)] = np.asarray(result_values, dtype=np.int64 if name == "count" else float)
     return pd.DataFrame(columns, index=labels)
 
 
-###########################################
-# 4/ SHARED CHUNK REDUCTION AND COMBINATION
-###########################################
+#########################################
+# 4/ BLOCK STATISTICS AND COMBINATION
+#########################################
 
 
 def _reduce_grouped_block(
@@ -445,13 +433,13 @@ def _reduce_grouped_block(
     dense: bool,
     statistics: set[str],
 ) -> tuple[NDArray[Any], NDArray[Any], dict[str, NDArray[Any]]]:
-    """Summarize all groups in a block with dense or locally observed accumulators.
+    """Summarize groups in one array block so summaries from many blocks can be combined.
 
-    Counts describe finite values independently for each selected array. Membership sizes also include missing
-    values. Variance retains the mean and squared deviations, allowing stable combination across blocks.
+    We count available values separately for every input. Group sizes also include missing values. For standard
+    deviation, we keep the local mean and squared spread so large values do not hide small variation.
     """
 
-    # Encode observed membership locally when a block contains only a small fraction of all groups
+    # Store only groups found in this block when the full result has many groups
     ids = np.asarray(group_ids).ravel()
     eligible = ids >= 0
     if dense:
@@ -463,7 +451,7 @@ def _reduce_grouped_block(
     shape = (len(values), len(labels))
     state = {"count": np.zeros(shape, dtype=np.int64)}
 
-    # Allocate only quantities needed by the requested statistics
+    # Create only the summary arrays needed by the requested statistics
     needs_mean = bool(statistics & {"mean", "std"})
     if needs_mean:
         state["mean"] = np.zeros(shape, dtype=float)
@@ -474,7 +462,7 @@ def _reduce_grouped_block(
         fill = np.inf if name == "min" else -np.inf if name == "max" else 0.0
         state[key] = np.full(shape, fill, dtype=float)
 
-    # Reuse group codes across value arrays while excluding their nodata independently
+    # Reuse group numbers while handling missing data separately for each value array
     for index, array in enumerate(values):
         data = np.asarray(array).ravel()[eligible]
         finite = np.isfinite(data)
@@ -483,7 +471,7 @@ def _reduce_grouped_block(
         count = np.bincount(valid_codes, minlength=len(labels))
         state["count"][index] = count
 
-        # Calculate centered deviations locally instead of subtracting large raw second moments
+        # Measure spread around each local mean to keep small variation accurate beside large values
         if needs_mean or "sum" in state:
             sums = np.bincount(valid_codes, weights=data, minlength=len(labels))
             if "sum" in state:
@@ -495,7 +483,7 @@ def _reduce_grouped_block(
                 deviations = data - mean[valid_codes]
                 state["m2"][index] = np.bincount(valid_codes, weights=deviations**2, minlength=len(labels))
 
-        # Use vectorized accumulations for the remaining independent summaries
+        # Add counts, sums, and ranges by group with NumPy array operations
         if "sumofsquares" in state:
             state["sumofsquares"][index] = np.bincount(valid_codes, weights=data**2, minlength=len(labels))
         if "min" in state:
@@ -508,9 +496,9 @@ def _reduce_grouped_block(
 def _merge_grouped_blocks(
     summaries: Sequence[tuple[NDArray[Any], NDArray[Any], dict[str, NDArray[Any]]]],
 ) -> tuple[NDArray[Any], NDArray[Any], dict[str, NDArray[Any]]]:
-    """Merge compact group summaries, preserving stable means and squared deviations."""
+    """Combine group summaries from many array blocks without losing small differences."""
 
-    # Align locally observed IDs while avoiding repeated index construction for dense summaries
+    # Align group numbers when each block stored only the groups it contained
     first_labels, _, first_state = summaries[0]
     same_labels = all(np.array_equal(summary[0], first_labels) for summary in summaries[1:])
     labels = first_labels if same_labels else np.unique(np.concatenate([summary[0] for summary in summaries]))
@@ -521,7 +509,7 @@ def _merge_grouped_blocks(
         fill = np.inf if name == "min" else -np.inf if name == "max" else 0
         combined[name] = np.full(shape, fill, dtype=np.int64 if name == "count" else float)
 
-    # Combine each value's finite counts before updating its mean and variance
+    # Combine finite value counts before updating each mean and spread
     for block_labels, block_size, state in summaries:
         positions = slice(None) if same_labels else np.searchsorted(labels, block_labels)
         size[positions] += block_size
@@ -537,7 +525,7 @@ def _merge_grouped_blocks(
                 combined["m2"][:, positions] += state["m2"] + correction
         combined["count"][:, positions] = new_count
 
-        # Combine additive statistics and extrema without retaining individual observations
+        # Combine sums and ranges without keeping the original values
         for name in state.keys() - {"count", "mean", "m2"}:
             current = combined[name][:, positions]
             if name == "min":
@@ -552,11 +540,11 @@ def _merge_grouped_blocks(
 
 def _finalize_grouped_blocks(
     summary: tuple[NDArray[Any], NDArray[Any], dict[str, NDArray[Any]]],
-    statistics: Sequence[Statistic],
+    statistics: Sequence[str | Callable[[Any], Any]],
 ) -> pd.DataFrame:
-    """Convert compact block summaries to the same exact table as eager aggregation."""
+    """Turn combined block summaries into the same result columns as the in-memory path."""
 
-    # Keep groups with membership even when every selected observation is missing
+    # Keep groups that contain locations even when every selected value is missing
     labels, size, state = summary
     observed = size > 0
     requested, names = _normalize_statistics(statistics)
@@ -587,20 +575,20 @@ def _finalize_grouped_blocks(
 def _collect_grouped_block(
     values: Sequence[NDArray[Any]], group_ids: NDArray[Any], labels: Sequence[int]
 ) -> tuple[NDArray[Any], list[NDArray[Any]]]:
-    """Extract complete group members from one block for exact non-mergeable statistics."""
+    """Collect full group values from one block for statistics such as median or a user function."""
 
-    # Transfer only actual group members, including missing values needed for membership counts
+    # Return only group members, including missing values needed for total counts
     ids = np.asarray(group_ids).ravel()
     selected = ids == labels[0] if len(labels) == 1 else np.isin(ids, labels)
     return ids[selected], [np.asarray(array).ravel()[selected] for array in values]
 
 
 def _aggregate_collected_groups(
-    blocks: Sequence[tuple[NDArray[Any], list[NDArray[Any]]]], statistics: Sequence[Statistic]
+    blocks: Sequence[tuple[NDArray[Any], list[NDArray[Any]]]], statistics: Sequence[str | Callable[[Any], Any]]
 ) -> pd.DataFrame:
-    """Evaluate complete groups after gathering their members from intersecting blocks."""
+    """Calculate exact statistics after joining a group's values from every block it crosses."""
 
-    # Assemble actual group values independently of the spatial extent of the source dataset
+    # Join each group's values without padding it to the full input shape
     ids = np.concatenate([block[0] for block in blocks])
     arrays = [np.concatenate([block[1][index] for block in blocks]) for index in range(len(blocks[0][1]))]
     return _aggregate_eager(arrays, ids, statistics)
@@ -614,22 +602,22 @@ def _aggregate_collected_groups(
 def _aggregate_chunked(
     values: Sequence[Any],
     group_ids: Any,
-    statistics: Sequence[Statistic],
+    statistics: Sequence[str | Callable[[Any], Any]],
     total_groups: int,
     strategy: str,
     mp_config: MultiprocConfig | None,
 ) -> pd.DataFrame:
-    """Run shared grouping kernels on Dask blocks or multiprocessing array tiles.
+    """Calculate grouped statistics from Dask chunks or raster tiles handled by worker processes.
 
-    Dense and sparse strategies combine compact summaries in bounded trees. Groupwise execution reads membership
-    first and gathers only intersecting blocks, allowing exact medians and custom functions on complete groups.
+    `dense` stores every declared group in each summary. `sparse` stores only groups found in that block. `groupwise`
+    joins a group's full values when a statistic such as median cannot be calculated from smaller summaries.
     """
 
-    # Return the ordinary empty table without submitting worker tasks for an empty array
+    # Return an empty table without starting tasks when the input is empty
     if group_ids.size == 0:
         return _aggregate_eager([np.empty(0) for _ in values], np.empty(0, dtype=int), statistics)
 
-    # Expose matching array blocks through the chosen scheduler
+    # Split values and group numbers into matching Dask chunks or NumPy tiles
     use_dask = is_dask_array(group_ids)
     if use_dask:
         import_optional("dask")
@@ -643,7 +631,7 @@ def _aggregate_chunked(
         submit = dask.delayed
         block_size = math.prod(max(lengths) for lengths in chunks)
     else:
-        # Follow MultiprocConfig tiling for rasters and use its first axis for point arrays
+        # Follow the requested worker tile size in every array dimension
         if mp_config is None:
             raise ValueError("Chunked NumPy aggregation requires mp_config.")
         from itertools import product
@@ -658,7 +646,7 @@ def _aggregate_chunked(
         value_blocks = [[array[tile] for tile in tiles] for array in values]
         block_size = math.prod(lengths[axis % 2] for axis in range(group_ids.ndim))
 
-    # Gather exact group members only when reduction cannot use compact sufficient statistics
+    # Join full group values only for statistics such as median and user functions
     if strategy == "groupwise":
         if use_dask:
             memberships = list(
@@ -673,7 +661,7 @@ def _aggregate_chunked(
                 locations.setdefault(int(label), []).append(block_index)
                 sizes[int(label)] = sizes.get(int(label), 0) + int(count)
 
-        # Batch small groups sharing the same blocks to avoid rereading every small polygon separately
+        # Read several small groups together when they cross the same blocks
         cohorts: dict[tuple[int, ...], list[int]] = {}
         for label, block_indexes in locations.items():
             cohorts.setdefault(tuple(block_indexes), []).append(label)
@@ -690,7 +678,7 @@ def _aggregate_chunked(
             if batch:
                 batches.append((batch, cohort_blocks))
 
-        # Keep batches within one input block's membership, except when a single complete group is larger
+        # Keep each batch near one block's size unless one group is larger by itself
         tables = []
         for labels, cohort_blocks in batches:
             if use_dask:
@@ -718,7 +706,7 @@ def _aggregate_chunked(
             else _aggregate_eager([np.empty(0) for _ in values], np.empty(0, dtype=int), statistics)
         )
 
-    # Share the requested reduction quantities across every block task
+    # Ask each block for only the counts, sums, means, or ranges needed by the request
     aliases = {_get_stat_common_alias(stat, _STATS_ALIAS_ALL) for stat in statistics if isinstance(stat, str)}
     reduction_statistics = {alias for alias in aliases if alias is not None}
     dense = strategy == "dense"
@@ -734,7 +722,7 @@ def _aggregate_chunked(
         summary = tasks[0].compute()
     else:
         assert mp_config is not None
-        # Merge bounded batches so completed worker summaries do not accumulate indefinitely
+        # Combine worker results in small groups so finished summaries do not keep piling up in memory
         levels: list[Any] = []
         for start in range(0, len(id_blocks), 8):
             handles = [
@@ -770,9 +758,9 @@ def _aggregate_chunked(
 def _group_index(
     levels: Sequence[pd.Index], names: Sequence[str], group_numbers: Sequence[int] | NDArray[Any]
 ) -> tuple[pd.Index, dict[Hashable, int]]:
-    """Construct an ordered Pandas index and its corresponding group code lookup."""
+    """Build the ordered Pandas row index and map each row label to its integer group number."""
 
-    # Decode combined group numbers back to one code per declared grouper
+    # Split each combined number back into one number per grouping variable
     level_codes = [[] for _ in levels]
     for group_number in group_numbers:
         remainder = int(group_number)
@@ -783,7 +771,7 @@ def _group_index(
         for position, code in enumerate(decoded):
             level_codes[position].append(code)
 
-    # Preserve a direct IntervalIndex or CategoricalIndex for one dimensional results
+    # Use a direct interval or category index when there is only one grouping variable
     if len(levels) == 1:
         selected = levels[0].take(level_codes[0])
         index = selected.rename(names[0])
@@ -798,22 +786,27 @@ def _compute_grouped_stats(
     values: Any | Mapping[str, Any],
     by: Mapping[str, Any],
     *,
-    bins: Mapping[str, BinSpec] | None,
+    bins: Mapping[str, int | Iterable[float] | pd.IntervalIndex] | None,
     categories: Mapping[str, Iterable[Hashable]] | None,
-    statistics: Statistic | Iterable[Statistic],
+    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]],
     mask: Any | None,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
-    strategy: GroupingStrategy,
+    strategy: Literal["auto", "dense", "sparse", "groupwise"],
     subsampling_strategy: Literal["sequential", "topk"],
     observed: bool,
     return_masks: bool,
     support: Any | None,
     mp_config: MultiprocConfig | None,
-) -> GroupedStatsResult:
-    """Prepare common arrays, aggregate groups and assemble the public result."""
+) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Hashable, Any]]:
+    """Prepare arrays, calculate each group, and build the public Pandas result.
 
-    # Normalize named values while retaining their lazy array backends
+    _prepare_groupers() assigns every input to bins or categories. _aggregate_eager() or _aggregate_chunked() then
+    calculates the requested statistics for the available storage backend. _group_index() restores the public row
+    labels, and _GroupMasks creates each membership mask only if the caller reads it.
+    """
+
+    # Give a single value array its default name and keep any Dask arrays lazy
     named_values = dict(values) if isinstance(values, Mapping) else {"value": values}
     if not named_values or any(not isinstance(name, str) or not name for name in named_values):
         raise ValueError("values must contain at least one non-empty name.")
@@ -825,7 +818,7 @@ def _compute_grouped_stats(
         raise ValueError("subsample must be a positive number.")
     requested_statistics, statistic_names = _normalize_statistics(statistics)
 
-    # Derive the common shape before flattening spatial dimensions for aggregation
+    # Check that all inputs share one shape and one Dask chunk layout for the calculation
     first_value = next(iter(named_values.values()))
     first_value = first_value.data if isinstance(first_value, xr.DataArray) else first_value
     first_value = first_value if hasattr(first_value, "shape") else np.asarray(first_value)
@@ -843,7 +836,7 @@ def _compute_grouped_stats(
         import_optional("dask")
         import dask.array as da
 
-    # Convert masked values to NaN and validate every selected value against the support
+    # Replace masked values with NaN and check each value array against the shared shape
     arrays: dict[str, Any] = {}
     for name, raw_values in named_values.items():
         raw_values = raw_values.data if isinstance(raw_values, xr.DataArray) else raw_values
@@ -858,7 +851,7 @@ def _compute_grouped_stats(
         if use_dask:
             arrays[name] = arrays[name].rechunk(chunks)
 
-    # Encode full group membership before drawing any optional statistic subsample
+    # Assign every allowed input location to its combined group number
     group_ids, levels, total_groups = _prepare_groupers(
         by,
         bins={} if bins is None else dict(bins),
@@ -870,7 +863,7 @@ def _compute_grouped_stats(
     )
     full_group_ids = group_ids
 
-    # Bound eager aggregation by selecting common group valid locations when requested
+    # Select a smaller set of grouped locations before calculating statistics when requested
     if subsample != 1:
         if use_dask and len(shape) == 2:
             sampled_indices = _dask_subsample(
@@ -910,7 +903,7 @@ def _compute_grouped_stats(
     else:
         use_dask_for_aggregation = use_dask
 
-    # Select a reduction strategy from the requested statistics and declared group count
+    # Choose how blocks store or gather groups from the requested statistics and group count
     aliases = [
         _get_stat_common_alias(stat, _STATS_ALIAS_ALL) if isinstance(stat, str) else None
         for stat in requested_statistics
@@ -918,7 +911,7 @@ def _compute_grouped_stats(
     mergeable = all(alias in _MERGEABLE_STATISTICS for alias in aliases)
     resolved_strategy = strategy
     if strategy == "auto":
-        # Favor the faster dense reducer for moderate group counts, and bound larger intermediate summaries
+        # Store all groups for moderate counts, only seen groups for large counts, or full values when required
         if not mergeable:
             resolved_strategy = "groupwise"
         else:
@@ -927,7 +920,7 @@ def _compute_grouped_stats(
     if chunked and not mergeable and resolved_strategy != "groupwise":
         raise ValueError("Exact quantiles and custom statistics require strategy='groupwise' or 'auto'.")
 
-    # Share eager block kernels between direct, Dask and multiprocessing calculations
+    # Use the same block calculations for in-memory arrays, Dask, and worker processes
     if chunked:
         table = _aggregate_chunked(
             list(arrays.values()), group_ids, requested_statistics, total_groups, resolved_strategy, mp_config
@@ -944,7 +937,7 @@ def _compute_grouped_stats(
     else:
         table = _aggregate_eager(list(arrays.values()), group_ids, requested_statistics)
 
-    # Keep complete observed membership even when sampling omits all members of a group
+    # Keep every declared group, or every group present before optional subsampling
     if not observed:
         group_numbers = np.arange(total_groups)
     elif subsample != 1:
@@ -959,7 +952,7 @@ def _compute_grouped_stats(
         group_numbers = table.index.to_numpy()
     table = table.reindex(group_numbers)
 
-    # Restore public value names and fill only absent counts, leaving undefined estimates as NaN
+    # Restore public column and row labels; fill empty counts with zero and leave estimates as NaN
     columns = pd.MultiIndex.from_product([list(arrays), statistic_names], names=["value", "statistic"])
     table.columns = columns
     for name in arrays:
@@ -977,7 +970,7 @@ def _compute_grouped_stats(
         "mask_membership": "groupers",
     }
 
-    # Materialize no Boolean group layers until the caller accesses a mapping key
+    # Delay each Boolean group mask until the caller reads it from the returned mapping
     if return_masks:
         masks = _GroupMasks(full_group_ids, key_ids=key_ids, shape=shape, support=support)
         return table, masks
@@ -989,13 +982,13 @@ def grouped_stats(
     values: Any | Mapping[str, Any],
     by: Mapping[str, Any],
     *,
-    bins: Mapping[str, BinSpec] | None = None,
+    bins: Mapping[str, int | Iterable[float] | pd.IntervalIndex] | None = None,
     categories: Mapping[str, Iterable[Hashable]] | None = None,
-    statistics: Statistic | Iterable[Statistic] = ("median", "nmad"),
+    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] = ("median", "nmad"),
     mask: Any | None = None,
     subsample: int | float = 1,
     random_state: int | np.random.Generator | None = None,
-    strategy: GroupingStrategy = "auto",
+    strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
     subsampling_strategy: Literal["sequential", "topk"] = "topk",
     observed: bool = True,
     return_masks: Literal[False] = False,
@@ -1008,13 +1001,13 @@ def grouped_stats(
     values: Any | Mapping[str, Any],
     by: Mapping[str, Any],
     *,
-    bins: Mapping[str, BinSpec] | None = None,
+    bins: Mapping[str, int | Iterable[float] | pd.IntervalIndex] | None = None,
     categories: Mapping[str, Iterable[Hashable]] | None = None,
-    statistics: Statistic | Iterable[Statistic] = ("median", "nmad"),
+    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] = ("median", "nmad"),
     mask: Any | None = None,
     subsample: int | float = 1,
     random_state: int | np.random.Generator | None = None,
-    strategy: GroupingStrategy = "auto",
+    strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
     subsampling_strategy: Literal["sequential", "topk"] = "topk",
     observed: bool = True,
     return_masks: Literal[True] = True,
@@ -1026,18 +1019,18 @@ def grouped_stats(
     values: Any | Mapping[str, Any],
     by: Mapping[str, Any],
     *,
-    bins: Mapping[str, BinSpec] | None = None,
+    bins: Mapping[str, int | Iterable[float] | pd.IntervalIndex] | None = None,
     categories: Mapping[str, Iterable[Hashable]] | None = None,
-    statistics: Statistic | Iterable[Statistic] = ("median", "nmad"),
+    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] = ("median", "nmad"),
     mask: Any | None = None,
     subsample: int | float = 1,
     random_state: int | np.random.Generator | None = None,
-    strategy: GroupingStrategy = "auto",
+    strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
     subsampling_strategy: Literal["sequential", "topk"] = "topk",
     observed: bool = True,
     return_masks: bool = False,
     mp_config: MultiprocConfig | None = None,
-) -> GroupedStatsResult:
+) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Hashable, Any]]:
     """Calculate statistics for values grouped by continuous bins or discrete categories.
 
     Every grouper must have an entry in ``bins`` or ``categories`` unless it has a Boolean or Pandas categorical
@@ -1049,20 +1042,18 @@ def grouped_stats(
     array. Its masks describe complete eligible group membership after ``mask`` and valid groupers, before random
     subsampling and independently of missing selected values.
 
-    Dense stores a summary for every declared group combination per chunk; sparse stores only encountered groups
-    and their IDs. Both merge counts, means, standard deviations, sums and extrema without retaining observations.
-    Groupwise execution gathers complete groups for exact quantiles and custom functions, batching
-    small groups that share chunks. Auto selects groupwise for those exact statistics, otherwise dense up to 4096
-    declared group combinations and sparse above that. This threshold does not estimate occupancy or free memory.
-    Dask and multiprocessing use the same NumPy kernels; multiprocessing tiles arrays already loaded in the client.
-    Exact groupwise memory grows with the largest complete group. These strategies are independent of output
-    sparsity (``observed``) and location selection (``subsampling_strategy``).
+    ``dense`` stores every declared group in each chunk summary. ``sparse`` stores only groups found in that chunk.
+    Both combine common statistics without keeping the original values. ``groupwise`` joins complete groups for
+    statistics such as quantiles and user functions. ``auto`` selects ``groupwise`` for those cases. Otherwise it
+    selects ``dense`` for up to 4096 group combinations and ``sparse`` above that. Dask and multiprocessing use the
+    same NumPy calculations. ``observed`` controls which groups appear in the result. ``subsampling_strategy``
+    controls which input locations are selected.
 
     :param values: Numeric array, or mapping of output names to arrays with matching shapes.
     :param by: Ordered mapping of grouper names to arrays with one value per input location.
     :param bins: Continuous group definitions as bin counts, numeric edges or IntervalIndexes.
     :param categories: Ordered categories for discrete groupers.
-    :param statistics: Statistic name, callable or iterable accepted by :func:`geoutils.stats.get_stats` internals.
+    :param statistics: Statistic name, callable or iterable accepted by geoutils.stats.get_stats() internals.
     :param mask: Boolean array defining locations eligible for grouping.
     :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
     :param random_state: Random generator or seed used to reproduce subsampling.
@@ -1092,15 +1083,15 @@ def grouped_stats(
     )
 
 
-####################################
-# 7/ SPATIAL INPUT AND SUPPORT SETUP
-####################################
+#####################################
+# 7/ SPATIAL INPUT AND OUTPUT LOCATIONS
+#####################################
 
 
 def _vector_category_labels(codes: NDArray[Any], *, categories: Sequence[Hashable]) -> NDArray[Any]:
-    """Restore feature labels within one lazy block before ordinary categorical grouping."""
+    """Restore vector feature labels from integer codes in one Dask block."""
 
-    # Keep locations outside all features missing when translating numeric rasterization values
+    # Keep locations outside every feature marked as missing
     numeric = np.where(np.isfinite(codes), codes, -1).astype(np.int64)
     labels = pd.Categorical.from_codes(numeric.ravel(), categories=categories, ordered=True)
     return np.asarray(labels).reshape(codes.shape)
@@ -1114,15 +1105,15 @@ def _vector_group_values(
     support_dataframe: gpd.GeoDataFrame | None,
     declared_categories: Iterable[Hashable] | None,
 ) -> tuple[Any, list[Hashable] | None]:
-    """Evaluate a vector union or feature category on raster or point support."""
+    """Place vector coverage or one feature column on the chosen grid or point locations."""
 
-    # A vector without a selected column is one Boolean inside/outside category variable
+    # Treat a vector without a selected column as a grouping variable for inside and outside
     if selector is None:
         count = len(vector.ds)
         values = _sample_vector_values(vector, np.ones(count), support, support_dataframe)
         return np.isfinite(values), None
 
-    # Read feature values once and preserve caller ordering when categories were declared
+    # Read feature labels once and keep the caller's declared category order
     dataframe = vector.ds
     dataframe = dataframe.compute() if is_dask_dataframe(dataframe) else dataframe
     if selector not in dataframe.columns:
@@ -1135,7 +1126,7 @@ def _vector_group_values(
         raise ValueError(f"Vector column {selector!r} has no categories.")
     feature_codes = pd.Categorical(dataframe[selector], categories=category_values, ordered=True).codes
 
-    # Share vector evaluation with co-sampling preparation while preserving lazy raster or point partitions
+    # Use the same vector sampling as cosample() and keep Dask results lazy
     codes = _sample_vector_values(vector, feature_codes, support, support_dataframe)
     if is_dask_array(codes):
         categorical = codes.map_blocks(_vector_category_labels, categories=category_values, dtype=object)
@@ -1145,9 +1136,9 @@ def _vector_group_values(
     return categorical, category_values
 
 
-###########################
-# 8/ OBJECT METHOD DISPATCH
-###########################
+##########################
+# 8/ PUBLIC METHOD ROUTING
+##########################
 
 
 def _grouped_stats(
@@ -1155,39 +1146,43 @@ def _grouped_stats(
     by: Mapping[str, Any],
     *,
     values: int | str | Iterable[int | str] | Mapping[str, Any] | None,
-    bins: Mapping[str, BinSpec] | None,
+    bins: Mapping[str, int | Iterable[float] | pd.IntervalIndex] | None,
     categories: Mapping[str, Iterable[Hashable]] | None,
-    statistics: Statistic | Iterable[Statistic],
+    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]],
     at: Literal["self"] | Any | None,
     mask: Any | None,
     mask_mode: Literal["inside", "outside"],
     subsample: int | float,
     random_state: int | np.random.Generator | None,
-    strategy: GroupingStrategy,
+    strategy: Literal["auto", "dense", "sparse", "groupwise"],
     subsampling_strategy: Literal["sequential", "topk"],
     interpolation: str,
     align: Literal["raise", "reproject"],
     observed: bool,
     return_masks: bool,
     mp_config: MultiprocConfig | None,
-) -> GroupedStatsResult:
-    """Align object selections and groupers before calling the array engine."""
+) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Hashable, Any]]:
+    """Place object values and groups at common locations before calling _compute_grouped_stats().
 
-    # Validate spatial controls without accessing potentially lazy data
+    _sampling_support() chooses the output grid or points, while _values_at_support() places each selected value on
+    those locations. Vector groups use _vector_group_values() before the shared array calculation.
+    """
+
+    # Check spatial options before reading any possibly lazy data
     if mask_mode not in {"inside", "outside"}:
         raise ValueError("mask_mode must be 'inside' or 'outside'.")
     if align not in {"raise", "reproject"}:
         raise ValueError("align must be 'raise' or 'reproject'.")
     if isinstance(at, str) and at != "self":
         raise ValueError("at must be 'self' or a raster or point cloud support object.")
-    # Choose the same natural support as co-sampling, including external point datasets
+    # Choose the same output grid or point locations as cosample()
     inputs = [source, *by.values(), *(values.values() if isinstance(values, Mapping) else [])]
     support = _sampling_support(inputs, source if isinstance(at, str) else at)
     raster_support = support if hasattr(support, "ij2xy") else None
     point_support = None if raster_support is not None else support
     support_dataframe = None if point_support is None else point_support.ds
 
-    # Normalize selected caller values into output names and source selectors
+    # Turn requested raster bands or point columns into named output values
     source_raster = source if hasattr(source, "ij2xy") else getattr(source, "rst", None)
     source_pointcloud = (
         source
@@ -1225,7 +1220,7 @@ def _grouped_stats(
     else:
         raise TypeError("grouped_stats is only available on raster and point cloud objects.")
 
-    # Evaluate every selected value on the same support without imposing common finite validity
+    # Read every selected value at the chosen locations and keep each value's missing data separate
     selected_values: dict[str, Any] = {}
     for name, value_selector in value_specs.items():
         if not isinstance(name, str) or not name:
@@ -1244,13 +1239,13 @@ def _grouped_stats(
             preserve_lazy=True,
         )
 
-    # Resolve caller selectors, external objects and explicit source and selector pairs
+    # Turn every grouping request into values at the chosen locations
     selected_groupers: dict[str, Any] = {}
     resolved_categories = {} if categories is None else dict(categories)
     for name, specification in by.items():
         group_source, group_selector = _sampling_specification(source, specification)
 
-        # Distinguish point clouds from their Vector parent before testing ordinary vectors
+        # Detect a PointCloud before its shared Vector behavior
         group_raster = group_source if hasattr(group_source, "ij2xy") else getattr(group_source, "rst", None)
         group_pointcloud = (
             group_source
@@ -1286,7 +1281,7 @@ def _grouped_stats(
             preserve_lazy=True,
         )
 
-    # Evaluate the global mask without treating selected value gaps as group exclusions
+    # Read the user mask without removing a group merely because one selected value is missing
     if raster_support is not None:
         support_mask = _mask_on_raster(mask, support, mask_mode, align)
     elif mask is None:
@@ -1328,7 +1323,7 @@ def _grouped_stats(
             if support_mask.dtype != bool or len(support_mask) != len(support_dataframe):
                 raise ValueError("A point support mask must be Boolean with one value per point.")
 
-    # Delegate binning and aggregation while retaining native support for returned masks
+    # Calculate the table and keep the grid or points available for returned group masks
     return _compute_grouped_stats(
         selected_values,
         selected_groupers,
@@ -1353,16 +1348,16 @@ def _grouped_stats(
 
 
 def _plot_axis(index: pd.Index) -> tuple[NDArray[Any], NDArray[Any], list[str] | None]:
-    """Return plot edges, centers and optional categorical labels for one group level."""
+    """Return plot positions and optional text labels for one grouping variable."""
 
-    # Preserve numeric interval widths when adjacent bins form a regular boundary sequence
+    # Draw adjoining numeric intervals with their true widths
     if isinstance(index, pd.IntervalIndex) and len(index) > 0:
         adjacent = len(index) == 1 or np.all(np.asarray(index.right[:-1]) == np.asarray(index.left[1:]))
         if adjacent:
             edges = np.asarray([index[0].left, *index.right], dtype=float)
             return edges, np.asarray(index.mid, dtype=float), None
 
-    # Fall back to equal visual widths for categories and disjoint intervals
+    # Give categories and separated intervals equal widths
     edges = np.arange(len(index) + 1, dtype=float)
     centers = edges[:-1] + 0.5
     return edges, centers, [str(value) for value in index]
@@ -1380,25 +1375,25 @@ def plot_grouped_stats(
     ax: Any | None = None,
     savefig_fname: str | None = None,
 ) -> Mapping[str, Any]:
-    """Plot one- or two-dimensional grouped statistics with marginal sample counts.
+    """Plot grouped statistics for one or two grouping variables with their sample counts.
 
-    One-dimensional groups are drawn as a statistic curve below their counts. Two-dimensional groups use a colored
-    grid with counts above and to the right. Interval widths are retained when their boundaries are contiguous;
-    categorical groups use equal visual widths.
+    One grouping variable produces a statistic curve below its counts. Two grouping variables produce a colored
+    grid, with counts above and to the right. Adjoining intervals keep their numeric widths. Categories use equal
+    widths.
 
-    :param table: Dataframe returned by :func:`grouped_stats` or an object ``grouped_stats`` method.
+    :param table: Dataframe returned by grouped_stats() or an object grouped_stats() method.
     :param value: Selected value column. It may be omitted when the table contains one value.
     :param statistic: Statistic column to display.
     :param min_count: Hide statistic cells with fewer finite observations.
     :param cmap: Matplotlib colormap used for a two-dimensional statistic grid.
     :param vmin: Lower color limit for a two-dimensional statistic grid.
     :param vmax: Upper color limit for a two-dimensional statistic grid.
-    :param ax: Optional Matplotlib axes whose area is divided into the diagnostic panels.
+    :param ax: Optional Matplotlib axes whose area is divided into the plot panels.
     :param savefig_fname: Optional path used to save the completed figure.
     :returns: Mapping naming the Matplotlib axes created for each panel.
     """
 
-    # Import plotting only when a caller requests the optional visualization
+    # Import Matplotlib only when the caller requests a plot
     matplotlib = import_optional("matplotlib")
     import matplotlib.pyplot as plt
 
@@ -1418,7 +1413,7 @@ def plot_grouped_stats(
     if min_count < 0:
         raise ValueError("min_count cannot be negative.")
 
-    # Use an existing axes as a panel frame or create a clean figure frame
+    # Use the supplied axes as the plot area or create a new figure
     if ax is None:
         figure = plt.figure(figsize=(7, 6))
         frame = figure.add_axes((0.1, 0.1, 0.8, 0.8))
@@ -1429,7 +1424,7 @@ def plot_grouped_stats(
         raise TypeError("ax must be a Matplotlib Axes or None.")
     frame.set_axis_off()
 
-    # Draw the compact one-dimensional count and statistic layout
+    # Draw counts above the statistic for one grouping variable
     if table.index.nlevels == 1:
         count_axis = frame.inset_axes((0.0, 0.72, 1.0, 0.28))
         statistic_axis = frame.inset_axes((0.0, 0.0, 1.0, 0.64))
@@ -1437,7 +1432,7 @@ def plot_grouped_stats(
         counts = table[(value, "count")].to_numpy(dtype=float)
         values = table[(value, statistic)].where(table[(value, "count")] >= min_count).to_numpy(dtype=float)
 
-        # Align count bars with interval widths or equal categorical slots
+        # Match count-bar widths to the numeric intervals or category positions
         count_axis.bar(edges[:-1], counts, width=np.diff(edges), align="edge", color="0.7", edgecolor="white")
         count_axis.set_xlim(edges[0], edges[-1])
         count_axis.set_ylabel("Count")
@@ -1448,7 +1443,7 @@ def plot_grouped_stats(
             statistic_axis.set_xticks(centers, labels, rotation=45, ha="right")
         axes = {"count": count_axis, "statistic": statistic_axis}
 
-    # Draw a two-dimensional grid and counts marginalized from the same exact grouping
+    # Draw a two-dimensional statistic grid with totals for each row and column
     else:
         statistic_axis = frame.inset_axes((0.0, 0.0, 0.68, 0.66))
         count_x_axis = frame.inset_axes((0.0, 0.72, 0.68, 0.28))
@@ -1457,7 +1452,7 @@ def plot_grouped_stats(
         edges_x, centers_x, labels_x = _plot_axis(level_x)
         edges_y, centers_y, labels_y = _plot_axis(level_y)
 
-        # Restore the complete declared grid so unobserved combinations remain visible as gaps
+        # Add every declared group combination so groups with no data appear as gaps
         full_index = pd.MultiIndex.from_product([level_x, level_y], names=table.index.names)
         counts = table[(value, "count")].reindex(full_index).unstack(level=1)
         plotted = table[(value, statistic)].where(table[(value, "count")] >= min_count)
@@ -1472,7 +1467,7 @@ def plot_grouped_stats(
             shading="flat",
         )
 
-        # Add marginal counts using the same physical or categorical widths as the statistic grid
+        # Draw row and column totals with the same widths as the statistic grid
         counts_x = counts.sum(axis=1, skipna=True).to_numpy(dtype=float)
         counts_y = counts.sum(axis=0, skipna=True).to_numpy(dtype=float)
         count_x_axis.bar(edges_x[:-1], counts_x, width=np.diff(edges_x), align="edge", color="0.7", edgecolor="white")
@@ -1499,7 +1494,7 @@ def plot_grouped_stats(
             "colorbar": colorbar.ax,
         }
 
-    # Save only after every inset axes and label has been added
+    # Save after every panel and label has been added
     if savefig_fname is not None:
         figure.savefig(savefig_fname, bbox_inches="tight")
     return axes
