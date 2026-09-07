@@ -81,6 +81,9 @@ jobs:
         conda list
 
     - name: Test with pytest
+      env:
+        # Render plots without a GUI backend (avoid Tcl/Tk issues on Windows)
+        MPLBACKEND: Agg
       # Module execution also collects tests from the repository-only benchmarks package
       run: python -m pytest -ra --cov=geoutils/ --cov-report=lcov
 
