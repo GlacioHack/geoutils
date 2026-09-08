@@ -20,10 +20,10 @@ import pandas as pd
 import xarray as xr
 from numpy.typing import NDArray
 
-from geoutils._dispatch import is_dask_array, is_dask_dataframe
+from geoutils._dispatch import has_geo_attr, is_dask_array, is_dask_dataframe
 from geoutils._misc import import_optional
-from geoutils.interface.raster_point import _mask_on_raster
 from geoutils.sampling.cosampling import (
+    _mask_on_raster,
     _sample_vector_values,
     _sampling_specification,
     _sampling_support,
@@ -37,7 +37,7 @@ from geoutils.stats.stats import (
     _get_stat_common_alias,
     _statistics,
 )
-from geoutils.vector.base import _as_vector
+from geoutils.vector.base import _as_geodataframe
 
 if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
@@ -52,7 +52,7 @@ __all__ = ["grouped_stats", "plot_grouped_stats"]
 
 
 class _GroupMasks(Mapping[Hashable, Any]):
-    """Create Boolean masks on the result grid or points from one shared group number array."""
+    """Create boolean masks on the result grid or points from one shared group number array."""
 
     def __init__(
         self,
@@ -73,7 +73,7 @@ class _GroupMasks(Mapping[Hashable, Any]):
             raise KeyError(key)
         mask = (self._group_ids == self._key_ids[key]).reshape(self._shape)
 
-        # Return a plain Boolean array when the input had no raster or point locations
+        # Return a plain boolean array when the input had no raster or point locations
         if self._support is None:
             return mask
 
@@ -93,14 +93,14 @@ class _GroupMasks(Mapping[Hashable, Any]):
             if self._support.data_column is not None:
                 return self._support.copy(new_array=mask)
 
-            # Add a Boolean column when the point values were stored in geometry Z coordinates
+            # Add a boolean column when the point values were stored in geometry Z coordinates
             dataframe = self._support.ds.copy()
             column = "group_mask"
             while column in dataframe.columns:
                 column = f"_{column}"
             dataframe[column] = np.asarray(mask, dtype=bool)
 
-            # Drop geometry Z values so the new Boolean column is the selected data
+            # Drop geometry Z values so the new boolean column is the selected data
             dataframe.geometry = gpd.points_from_xy(
                 self._support.geometry.x,
                 self._support.geometry.y,
@@ -110,7 +110,7 @@ class _GroupMasks(Mapping[Hashable, Any]):
             if getattr(self._support, "_ACCESSOR_OUTPUT", False):
                 return dataframe
 
-            # Rebuild the GeoUtils point object with the Boolean column selected
+            # Rebuild the GeoUtils point object with the boolean column selected
             from geoutils.pointcloud.pointcloud import PointCloud
 
             return PointCloud(dataframe, data_column=column)
@@ -215,7 +215,7 @@ def _prepare_groupers(
             raw_mask = np.ma.asarray(raw_mask).filled(False)
         raw_mask = da.asarray(raw_mask) if use_dask else np.asarray(raw_mask)
         if raw_mask.size != math.prod(shape) or not np.issubdtype(raw_mask.dtype, np.bool_):
-            raise ValueError("mask must be Boolean and contain one value per input location.")
+            raise ValueError("mask must be boolean and contain one value per input location.")
         eligible = raw_mask.reshape(shape)
         if use_dask:
             eligible = eligible.rechunk(chunks)
@@ -249,7 +249,7 @@ def _prepare_groupers(
         if use_dask:
             values = values.rechunk(chunks) if is_dask_array(values) else da.from_array(values, chunks=chunks)
 
-        # Use declared categories, Pandas categories, or the two Boolean values
+        # Use declared categories, Pandas categories, or the two boolean values
         declared_categories: Iterable[Hashable] | None = categories.get(name)
         if declared_categories is None and categorical_values is not None:
             declared_categories = categorical_values.categories
@@ -338,7 +338,7 @@ def _prepare_groupers(
         levels.append(intervals)
         eligible = eligible & (codes >= 0)
 
-    # Combine all group numbers into one array instead of storing one Boolean mask per group
+    # Combine all group numbers into one array instead of storing one boolean mask per group
     total_groups = math.prod(len(level) for level in levels)
     if total_groups > np.iinfo(np.int64).max:
         raise ValueError("The product of group counts exceeds the supported integer range.")
@@ -970,7 +970,7 @@ def _compute_grouped_stats(
         "mask_membership": "groupers",
     }
 
-    # Delay each Boolean group mask until the caller reads it from the returned mapping
+    # Delay each boolean group mask until the caller reads it from the returned mapping
     if return_masks:
         masks = _GroupMasks(full_group_ids, key_ids=key_ids, shape=shape, support=support)
         return table, masks
@@ -1033,12 +1033,12 @@ def grouped_stats(
 ) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Hashable, Any]]:
     """Calculate statistics for values grouped by continuous bins or discrete categories.
 
-    Every grouper must have an entry in ``bins`` or ``categories`` unless it has a Boolean or Pandas categorical
+    Every grouper must have an entry in ``bins`` or ``categories`` unless it has a boolean or Pandas categorical
     dtype. Numeric edge sequences use left-closed intervals and include the final right edge. Pass an
     :class:`pandas.IntervalIndex` to control edge closure explicitly. The result index follows the order of ``by``;
     columns have ``value`` and ``statistic`` levels, and a finite ``count`` is always included for each value.
 
-    When ``return_masks`` is true, the second result behaves as a mapping from each dataframe index key to a Boolean
+    When ``return_masks`` is true, the second result behaves as a mapping from each dataframe index key to a boolean
     array. Its masks describe complete eligible group membership after ``mask`` and valid groupers, before random
     subsampling and independently of missing selected values.
 
@@ -1054,7 +1054,7 @@ def grouped_stats(
     :param bins: Continuous group definitions as bin counts, numeric edges or IntervalIndexes.
     :param categories: Ordered categories for discrete groupers.
     :param statistics: Statistic name, callable or iterable accepted by geoutils.stats.get_stats() internals.
-    :param mask: Boolean array defining locations eligible for grouping.
+    :param mask: boolean array defining locations eligible for grouping.
     :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
     :param random_state: Random generator or seed used to reproduce subsampling.
     :param strategy: Group reduction strategy: ``"auto"``, ``"dense"``, ``"sparse"`` or ``"groupwise"``.
@@ -1107,15 +1107,14 @@ def _vector_group_values(
 ) -> tuple[Any, list[Hashable] | None]:
     """Place vector coverage or one feature column on the chosen grid or point locations."""
 
+    dataframe = _as_geodataframe(vector)
+
     # Treat a vector without a selected column as a grouping variable for inside and outside
     if selector is None:
-        count = len(vector.ds)
-        values = _sample_vector_values(vector, np.ones(count), support, support_dataframe)
+        values = _sample_vector_values(dataframe, np.ones(len(dataframe)), support, support_dataframe)
         return np.isfinite(values), None
 
     # Read feature labels once and keep the caller's declared category order
-    dataframe = vector.ds
-    dataframe = dataframe.compute() if is_dask_dataframe(dataframe) else dataframe
     if selector not in dataframe.columns:
         raise ValueError(f"Vector column {selector!r} does not exist.")
     if declared_categories is None:
@@ -1127,7 +1126,7 @@ def _vector_group_values(
     feature_codes = pd.Categorical(dataframe[selector], categories=category_values, ordered=True).codes
 
     # Use the same vector sampling as cosample() and keep Dask results lazy
-    codes = _sample_vector_values(vector, feature_codes, support, support_dataframe)
+    codes = _sample_vector_values(dataframe, feature_codes, support, support_dataframe)
     if is_dask_array(codes):
         categorical = codes.map_blocks(_vector_category_labels, categories=category_values, dtype=object)
     else:
@@ -1252,12 +1251,14 @@ def _grouped_stats(
             if hasattr(group_source, "georeferenced_coords_equal") and hasattr(group_source, "data_column")
             else getattr(group_source, "pc", None)
         )
-        vector = _as_vector(group_source) if group_raster is None and group_pointcloud is None else None
-        if vector is not None and name not in (bins or {}):
+        is_vector = group_raster is None and group_pointcloud is None and has_geo_attr(
+            group_source, "rasterize", accessors=("vct",)
+        )
+        if is_vector and name not in (bins or {}):
             if group_selector is not None and not isinstance(group_selector, str):
                 raise TypeError(f"Vector selector for {name!r} must be a column name.")
             grouped_values, inferred_categories = _vector_group_values(
-                vector,
+                group_source,
                 group_selector,
                 support=support,
                 support_dataframe=support_dataframe,
@@ -1293,10 +1294,13 @@ def _grouped_stats(
             if hasattr(mask, "georeferenced_coords_equal") and hasattr(mask, "data_column")
             else getattr(mask, "pc", None)
         )
-        vector = _as_vector(mask) if mask_raster is None and mask_pointcloud is None else None
-        if vector is not None:
+        is_vector = mask_raster is None and mask_pointcloud is None and has_geo_attr(
+            mask, "rasterize", accessors=("vct",)
+        )
+        if is_vector:
+            dataframe = _as_geodataframe(mask)
             support_mask = np.isfinite(
-                _sample_vector_values(vector, np.ones(len(vector.ds)), support, support_dataframe)
+                _sample_vector_values(dataframe, np.ones(len(dataframe)), support, support_dataframe)
             )
             if mask_mode == "outside":
                 support_mask = ~support_mask
@@ -1321,7 +1325,7 @@ def _grouped_stats(
             if support_dataframe is None:
                 raise RuntimeError("Point support coordinates were not prepared.")
             if support_mask.dtype != bool or len(support_mask) != len(support_dataframe):
-                raise ValueError("A point support mask must be Boolean with one value per point.")
+                raise ValueError("A point support mask must be boolean with one value per point.")
 
     # Calculate the table and keep the grid or points available for returned group masks
     return _compute_grouped_stats(

@@ -480,7 +480,11 @@ def _interp_points_base(
     array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
-    """Interpolate a raster, optionally reusing global pixel indices translated to a worker block."""
+    """
+    Interpolate a raster at point coordinates.
+
+    This internal function can optionally reuse global pixel indices to work on chunks.
+    """
 
     # If interpolation method undefined, default to the global system config
     if method is None:
@@ -982,13 +986,17 @@ def _multiproc_interp_points(
 
     # Convert input to 2D array
     points_arr = np.vstack((points[0], points[1]))
-    src_rows, src_cols = _xy2ij(
-        points[0],
-        points[1],
-        transform=rst.transform,
-        area_or_point=kwargs["area_or_point"],
-        shift_area_or_point=kwargs["shift_area_or_point"],
-    )
+
+    # Compute global indices only for methods that pass them directly to blocks
+    src_indices = None
+    if kwargs["method"] in ("nearest", "linear"):
+        src_indices = _xy2ij(
+            points[0],
+            points[1],
+            transform=rst.transform,
+            area_or_point=kwargs["area_or_point"],
+            shift_area_or_point=kwargs["shift_area_or_point"],
+        )
 
     # Map depth of overlap required for each interpolation method
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
@@ -1028,9 +1036,10 @@ def _multiproc_interp_points(
     # Create tasks for multiprocessing
     tasks = []
     for i in range(len(block_ids)):
-        # Reuse the full raster's fractional indices instead of recalculating from each tile's world coordinates
+        # Reuse the full raster fractional indices instead of recalculating from each tile transform
         block_kwargs = kwargs.copy()
-        if kwargs["method"] in ("nearest", "linear"):
+        if src_indices is not None:
+            src_rows, src_cols = src_indices
             row_offset, _, col_offset, _ = block_ids[i]["tile_idx"]
             block_kwargs["array_indices"] = (
                 src_rows[ind_per_block[i]] - row_offset,

@@ -171,7 +171,7 @@ class TestChunkStrategies:
     def test_empty_selection(self, strategy: str) -> None:
         """Checks that fully masked chunks return an empty table and mask mapping."""
 
-        # 1/ Mask every location while keeping the two declared Boolean groups
+        # 1/ Mask every location while keeping the two declared boolean groups
         da = pytest.importorskip("dask.array")
         values = da.ones((5, 6), chunks=2)
         table, masks = gu.stats.grouped_stats(
@@ -546,7 +546,7 @@ class TestGroupedStatsResults:
         assert int(first_mask.sum().compute()) == 4
 
     def test_raster_grouped_stats_returns_writable_raster_masks(self, tmp_path: Path) -> None:
-        """Checks that raster group masks keep their grid and Boolean type when written and reopened."""
+        """Checks that raster group masks keep their grid and boolean type when written and reopened."""
 
         # 1/ Create a georeferenced raster and split its cells into two numeric intervals
         transform = Affine(10, 0, 100, 0, -10, 200)
@@ -559,7 +559,7 @@ class TestGroupedStatsResults:
             return_masks=True,
         )
 
-        # 2/ Check that the first returned mask is a Boolean Raster on the source grid
+        # 2/ Check that the first returned mask is a boolean Raster on the source grid
         first_mask = masks[table.index[0]]
         assert isinstance(first_mask, gu.Raster)
         assert first_mask.is_mask
@@ -583,7 +583,7 @@ class TestGroupedStatsResults:
             statistics="mean",
             return_masks=True,
         )
-        # 2/ Check that the raster mask stays an Xarray object with a Boolean georeferenced grid
+        # 2/ Check that the raster mask stays an Xarray object with a boolean georeferenced grid
         raster_mask = raster_masks[raster_table.index[0]]
         assert raster_mask.dtype == bool
         assert raster_mask.rst.is_mask
@@ -623,7 +623,7 @@ class TestGroupedStatsResults:
             statistics="mean",
             return_masks=True,
         )
-        # 6/ Check that the mask adds and selects a Boolean column while keeping point coordinates
+        # 6/ Check that the mask adds and selects a boolean column while keeping point coordinates
         elevation_mask = elevation_masks[elevation_table.index[0]]
         assert isinstance(elevation_mask, gu.PointCloud)
         assert elevation_mask.is_mask
@@ -874,9 +874,9 @@ class TestGroupedStatsOutputs:
         assert [int(np.count_nonzero(masks[key])) for key in masks] == [2, 3]
 
     def test_raster_grouped_stats_excludes_masked_integer_data_and_boolean_mask(self) -> None:
-        """Checks that raster value masks and Boolean user masks affect counts and group masks separately."""
+        """Checks that raster value masks and boolean user masks affect counts and group masks separately."""
 
-        # 1/ Mask one integer value and exclude two different cells through a Boolean Raster mask
+        # 1/ Mask one integer value and exclude two different cells through a boolean Raster mask
         data = np.ma.array([[1, 2, 3], [4, 5, 6]], mask=[[False, True, False], [False, False, False]])
         raster = gu.Raster.from_array(data, Affine(1, 0, 0, 0, -1, 2), 32631, nodata=-9999)
         mask = raster.from_array(

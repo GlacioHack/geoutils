@@ -20,13 +20,13 @@ from scipy.spatial import cKDTree
 
 from geoutils._dispatch import (
     get_geo_attr,
+    has_geo_attr,
     is_dask_array,
     is_dask_dataframe,
 )
 from geoutils._typing import NDArrayNum
-from geoutils.interface.raster_point import _mask_on_raster
 from geoutils.raster.array import _selected_raster_data
-from geoutils.vector.base import _as_vector
+from geoutils.sampling.cosampling import _mask_on_raster
 
 #############################
 # 1/ SHARED PAIR OPERATIONS
@@ -852,7 +852,7 @@ def _sample_raster_pairs(
     if int(np.prod(array.shape)) - 1 > np.iinfo(index_type).max:
         raise ValueError("index_dtype cannot represent every cell in this raster.")
 
-    # Convert an array, raster, or vector mask to one Boolean grid
+    # Convert an array, raster, or vector mask to one boolean grid
     if mask is not None:
         mask_array = _mask_on_raster(mask, raster, "inside", "raise")
 
@@ -985,13 +985,13 @@ def _sample_point_pairs(
     valid = np.isfinite(values) & np.all(np.isfinite(coordinates), axis=1)
     if mask is not None:
         # Accept vector objects and GeoDataFrames through the same mask path
-        vector = _as_vector(mask)
-        if vector is not None:
-            valid &= np.asarray(vector.create_mask(ref=pointcloud, as_array=True), dtype=bool).squeeze()
+        if has_geo_attr(mask, "create_mask", accessors=("vct",)):
+            create_mask = get_geo_attr(mask, "create_mask", accessors=("vct",))
+            valid &= np.asarray(create_mask(ref=pointcloud, as_array=True), dtype=bool).squeeze()
         else:
             mask_array = np.asarray(mask).squeeze()
             if mask_array.ndim != 1 or len(mask_array) != len(values) or mask_array.dtype != bool:
-                raise ValueError("mask must be Boolean with one value per point.")
+                raise ValueError("mask must be boolean with one value per point.")
             valid &= mask_array
 
     # Keep source row numbers so the result refers back to the original point table

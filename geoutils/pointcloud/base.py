@@ -103,10 +103,12 @@ class PointCloudBase(VectorBase):
 
     @property
     def _has_z(self) -> bool:
-        """Whether the point geometries all have a Z coordinate or not."""
+        """Whether all point geometries have a Z coordinate."""
 
         if self._is_dask:
             return False
+        if not self.is_loaded:
+            return getattr(self, "_geometry_type", None) in ("Point Z", "3D Point")
         return all(p.has_z for p in self.ds.geometry) if len(self.ds.geometry) > 0 else False
 
     @property
@@ -174,10 +176,7 @@ class PointCloudBase(VectorBase):
         :param new_data_column: Column to use, or None to use Z coordinates stored in 3D point geometry.
         """
 
-        # Recognize 3D file geometry from metadata without loading points just to select their Z coordinates
-        geometry_type = getattr(self, "_geometry_type", None)
-        has_z = self._has_z if self.is_loaded else geometry_type in ("Point Z", "3D Point")
-        if not self._is_dask and has_z:
+        if self._has_z:
             if new_data_column is None:
                 self._data_column = None
                 if self._is_pd or self.is_loaded:
@@ -252,9 +251,9 @@ class PointCloudBase(VectorBase):
         if self._is_pd or self._is_dask:
             return new_ds
 
-        # Reconstruct through the runtime class so specialized point clouds retain their public behavior
-        pointcloud_class: Any = self.__class__
-        return pointcloud_class(new_ds, data_column=self.data_column)
+        from geoutils.pointcloud.pointcloud import PointCloud
+
+        return PointCloud(new_ds, data_column=self.data_column)
 
     def _override_gdf_output(self, other: Any) -> Any:
         """Keep point-preserving GeoDataFrame outputs as point clouds."""
@@ -539,11 +538,11 @@ class PointCloudBase(VectorBase):
 
         Zonal statistics use vector features as bins: pass ``by={"zone": (zones, "id")}`` to group by a vector
         attribute. Unique IDs give one group per feature; repeated IDs combine features. A vector without a
-        selected column instead defines Boolean inside/outside groups for the union of its features.
+        selected column instead defines boolean inside/outside groups for the union of its features.
 
         Returned dataframe rows preserve interval and categorical metadata. Each value has a finite ``count`` and the
         requested statistics in a two level column index. When ``return_masks`` is true, the second result maps each
-        row key to a Boolean point cloud or GeoDataFrame on the complete support.
+        row key to a boolean point cloud or GeoDataFrame on the complete support.
 
         :param by: Ordered mapping of names to raster, point cloud, vector or aligned array groupers.
         :param values: Columns or mapping of names to columns, external objects or ``(object, selector)`` pairs.
@@ -552,7 +551,7 @@ class PointCloudBase(VectorBase):
         :param categories: Ordered categories for discrete groupers.
         :param statistics: Statistic name, callable or iterable of either. Count is always included.
         :param at: Point support, using this point cloud by default or ``"self"`` explicitly.
-        :param mask: Boolean aligned mask, point mask, raster mask or vector defining eligible locations.
+        :param mask: boolean aligned mask, point mask, raster mask or vector defining eligible locations.
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
         :param random_state: Random generator or seed used to reproduce subsampling.
@@ -674,7 +673,7 @@ class PointCloudBase(VectorBase):
         :param at: Output support: "self", "other" or a raster or point cloud. Defaults to this point cloud unless
             ``raster_point_mode="grid_points"`` selects a raster input. Point inputs on point support must share
             the selected ordered coordinates.
-        :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
+        :param mask: boolean aligned mask, raster mask or vector defining eligible locations.
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum number of locations.
         :param random_state: Random generator or seed used to reproduce the sample.
@@ -753,7 +752,7 @@ class PointCloudBase(VectorBase):
         :param min_distance: Smallest pair distance. Defaults to half the average point spacing.
         :param max_distance: Largest pair distance. Defaults to the point cloud diagonal.
         :param random_state: Random generator or seed used to reproduce the sample.
-        :param mask: Boolean array or vector defining eligible points.
+        :param mask: boolean array or vector defining eligible points.
         :param strategy: Irregular point strategy for logarithmic lags.
         :param n_bins: Number of distance rings used by exact strategies.
         :param anchors_per_round: Maximum anchor points tested in one exact search round.
@@ -823,7 +822,7 @@ class PointCloudBase(VectorBase):
         :param model: Optional theoretical model or ordered list of summed models to fit.
         :param fit_kwargs: Options passed to :meth:`geoutils.stats.Variogram.fit`.
         :param random_state: Random generator or seed used to reproduce all runs.
-        :param mask: Boolean array or vector defining eligible points.
+        :param mask: boolean array or vector defining eligible points.
         :param pair_sampling_kwargs: Advanced options accepted by :meth:`pairsample`.
         :returns: Empirical lag statistics and optional fitted model metadata.
         """

@@ -203,7 +203,7 @@ rast.grouped_stats(by={"elevation": 1}, bins={"elevation": right_closed})
 
 ### Discrete categories
 
-Use `categories` to define **discrete classes and their order**. A Boolean glacier mask, for example, separates terrain
+Use `categories` to define **discrete classes and their order**. A boolean glacier mask, for example, separates terrain
 inside and outside the outlines:
 
 ```{code-cell} ipython3
@@ -454,8 +454,8 @@ stores bin statistics and model parameters, so the pair arrays can be discarded.
 
 ### Reusing models
 
-{class}`~geoutils.VariogramModel` stores model parameters and evaluates **semivariance, covariance and correlation**.
-Export a variogram to a dataframe, Xarray dataset or dictionary to retain its bins, counts and fitted model:
+A {class}`~geoutils.Variogram` stores model parameters and evaluates **semivariance, covariance and correlation**.
+Export it to a dataframe, Xarray dataset or dictionary to retain its bins, counts and fitted model:
 
 ```{code-cell} ipython3
 # Keep a portable result and evaluate correlation at selected distances

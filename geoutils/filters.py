@@ -17,12 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Filters to remove outliers and reduce noise in rasters.
-
-Raster backend dispatch precedes the individual filters. Stacked convolution and NaN-aware patch filtering
-provide shared kernels and valid counts for terrain and uncertainty calculations in xDEM.
-"""
+"""Filters to remove outliers and reduce noise in rasters."""
 
 from __future__ import annotations
 

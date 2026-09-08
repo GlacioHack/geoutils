@@ -300,7 +300,7 @@ def _delayed_topk_candidates_block(
     if k <= 0:
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=np.int64)
 
-    # Treat finite numbers and true Boolean cells as available values
+    # Treat finite numbers and true boolean cells as available values
     if np.issubdtype(arr_chunk.dtype, np.bool_):
         valid = arr_chunk
     else:
@@ -606,7 +606,7 @@ def _wrapper_multiproc_subsample_values_block(
     rst_block = rst.icrop((tile_idx[2], tile_idx[0], tile_idx[3], tile_idx[1]))
     arr = rst_block.data
 
-    # Return finite numbers or true Boolean cells at the selected positions
+    # Return finite numbers or true boolean cells at the selected positions
     if np.issubdtype(arr.dtype, np.bool_):
         return arr[arr].ravel()[subsample_indices_rel]
     return arr[np.isfinite(arr)].ravel()[subsample_indices_rel]
@@ -627,7 +627,7 @@ def _wrapper_multiproc_subsample_indices_block(
     row0 = int(tile_idx[0])
     col0 = int(tile_idx[2])
 
-    # Find finite numbers or true Boolean cells inside the tile
+    # Find finite numbers or true boolean cells inside the tile
     if np.issubdtype(arr.dtype, np.bool_):
         flat_valid = np.flatnonzero(arr.ravel())
     else:
@@ -667,7 +667,7 @@ def _wrapper_multiproc_topk_candidates_block(
     row0 = int(tile_idx[0])
     col0 = int(tile_idx[2])
 
-    # Find finite numbers or true Boolean cells inside the tile
+    # Find finite numbers or true boolean cells inside the tile
     if np.issubdtype(arr.dtype, np.bool_):
         valid = arr
     else:

@@ -680,7 +680,6 @@ feature ID. See {ref}`stats-zonal` for examples. The array function below handle
     :toctree: gen_modules/
 
     Variogram
-    VariogramModel
 ```
 
 ```{eval-rst}
@@ -696,8 +695,6 @@ feature ID. See {ref}`stats-zonal` for examples. The array function below handle
     Variogram.covariance
     Variogram.correlation
     Variogram.combine
-    VariogramModel.sum
-    VariogramModel.combine
 ```
 
 ### Export and backend conversion
@@ -710,14 +707,10 @@ feature ID. See {ref}`stats-zonal` for examples. The array function below handle
     Variogram.to_xarray
     Variogram.to_dict
     Variogram.from_dict
-    VariogramModel.to_dict
-    VariogramModel.from_dict
     Variogram.from_skgstat
     Variogram.without_backend
     Variogram.to_gstools
     Variogram.to_gpytorch
-    GSToolsVariogram
-    GPyTorchVariogram
 ```
 
 (api-sampling)=

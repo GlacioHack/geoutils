@@ -13,6 +13,7 @@ import xarray as xr
 from rasterio.transform import from_origin
 
 import geoutils as gu
+from geoutils.stats.variography import VariogramModel
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +53,7 @@ class TestVariogramStorage:
             bin_lower_edges=np.array([0.5, 1.5]),
             bin_edges=np.array([1.5, 2.5]),
             fitted_semivariance=np.array([0.25, 0.45]),
-            model=gu.VariogramModel("gaussian", effective_range=4, partial_sill=0.8, nugget=0.1),
+            model=VariogramModel("gaussian", effective_range=4, partial_sill=0.8, nugget=0.1),
             estimator="matheron",
         )
 
@@ -182,7 +183,7 @@ class TestVariogramEstimation:
         # 1/ Create a small valid raster because this option should fail before pair sampling
         raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), from_origin(0, 4, 1, 1), 32633)
 
-        # 2/ Reject zero, negative, fractional, and Boolean run counts
+        # 2/ Reject zero, negative, fractional, and boolean run counts
         with pytest.raises(ValueError, match="n_runs must be a positive integer"):
             raster.variogram(n_runs=n_runs)
 

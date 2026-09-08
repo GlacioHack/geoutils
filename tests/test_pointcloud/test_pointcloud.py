@@ -82,19 +82,6 @@ class TestPointCloud:
         assert pc.data_column is None
         assert_geodataframe_equal(pc.ds, self.gdf3)
 
-    def test_copy_preserves_subclass(self) -> None:
-        """Copying should retain specialized point cloud classes."""
-
-        class SpecializedPointCloud(PointCloud):
-            pass
-
-        # Reconstruct through the runtime class so downstream methods remain available
-        point_cloud = SpecializedPointCloud(self.gdf1, data_column="b1")
-        copied = point_cloud.copy()
-
-        assert isinstance(copied, SpecializedPointCloud)
-        assert copied.pointcloud_equal(point_cloud)
-
     def test_init_from_file__lazy(self) -> None:
         """Check that non-LAS file-backed point clouds load data only when requested."""
 
@@ -118,6 +105,17 @@ class TestPointCloud:
         # Accessing point values triggers the first complete data load
         assert np.array_equal(pc.data, self.gdf1["b1"].values)
         assert pc.is_loaded
+
+    def test_has_z__unloaded_3d_file(self) -> None:
+        """Checks that _has_z detects 3D file metadata without loading point geometries."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filename = os.path.join(temp_dir, "points_3d.gpkg")
+            self.gdf3.to_file(filename)
+            point_cloud = PointCloud(filename)
+
+            assert point_cloud._has_z
+            assert not point_cloud.is_loaded
 
     def test_init_las(self) -> None:
         # Import optional laspy or skip test

@@ -19,14 +19,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from geoutils._dispatch import is_dask_array, is_dask_dataframe
+from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.interface.gridding import GriddingMethod
-from geoutils.interface.raster_point import _aligned_raster, _mask_on_raster
 from geoutils.raster.array import _selected_raster_data
 from geoutils.sampling.subsampling import _dask_subsample, _subsample_numpy
-from geoutils.vector.base import _as_vector
+from geoutils.vector.base import _as_geodataframe
 
 if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
@@ -34,9 +33,100 @@ if TYPE_CHECKING:
     from geoutils.raster.raster import Raster
 
 
-######################################
-# 1/ SHARED OUTPUT LOCATIONS AND VALUES
-######################################
+#################################
+# 1/ SHARED SUPPORT AND VALUES
+#################################
+
+
+def _raster_from_input(value: Any, owner: Any, name: str) -> Any:
+    """Return a raster input or attach an owner's metadata to a raw array."""
+
+    # Reuse raster objects and accessors so their georeferencing stays authoritative
+    raster = value if hasattr(value, "ij2xy") else getattr(value, "rst", None)
+    if raster is not None:
+        return raster
+
+    # Require a raster owner before interpreting a raw array as gridded data
+    owner_raster = owner if hasattr(owner, "ij2xy") else getattr(owner, "rst", None)
+    if owner_raster is None:
+        raise ValueError(f"Two-dimensional value {name!r} must be tied to a raster input.")
+
+    # Unwrap Xarray and accept the common singleton band representation
+    array = value.data if isinstance(value, xr.DataArray) else value
+    array = array if hasattr(array, "ndim") else np.asarray(array)
+    if array.ndim == 3 and array.shape[0] == 1:
+        array = array[0]
+    if array.ndim != 2 or tuple(array.shape) != tuple(owner_raster.shape):
+        raise ValueError(f"Array {name!r} must match the shape of its native raster input.")
+
+    # Attach the owner's grid so later alignment follows the raster API
+    return owner_raster.from_array(
+        data=array if is_dask_array(array) else np.ma.masked_invalid(array),
+        transform=owner_raster.transform,
+        crs=owner_raster.crs,
+        nodata=owner_raster.nodata,
+        area_or_point=owner_raster.area_or_point,
+    )
+
+
+def _aligned_raster(value: Any, owner: Any, support: Any, name: str, align: str) -> Any:
+    """Return a raster aligned to raster or point support."""
+
+    # Normalize raw arrays before comparing their owner's spatial reference
+    raster = _raster_from_input(value, owner, name)
+    if hasattr(support, "georeferenced_grid_equal"):
+        if support.georeferenced_grid_equal(raster):
+            return raster
+
+        # Reproject grid inputs only when the caller permits spatial alignment
+        if align == "reproject":
+            return raster.reproject(ref=support, silent=True)
+        raise ValueError(f"Raster value {name!r} does not share the selected support grid.")
+
+    # Match a point support CRS without imposing a raster grid
+    if raster.crs != support.crs:
+        if align != "reproject":
+            raise ValueError(f"Raster value {name!r} does not share the point support CRS.")
+        raster = raster.reproject(crs=support.crs, silent=True)
+
+    # Normalize reprojection outputs that expose the raster API through an accessor
+    normalized = raster if hasattr(raster, "ij2xy") else getattr(raster, "rst", None)
+    if normalized is None:
+        raise TypeError(f"Raster value {name!r} could not be normalized after reprojection.")
+    return normalized
+
+
+def _mask_on_raster(mask: Any | None, support: Any, mask_mode: str, align: str) -> Any:
+    """Evaluate a user mask on raster support."""
+
+    # Keep every cell eligible when no additional mask was requested
+    if mask is None:
+        return np.ones(support.shape, dtype=bool)
+
+    # Apply vector masks only after excluding raster objects and accessors
+    mask_raster = mask if hasattr(mask, "ij2xy") else getattr(mask, "rst", None)
+    if mask_raster is None and has_geo_attr(mask, "create_mask", accessors=("vct",)):
+        create_mask = get_geo_attr(mask, "create_mask", accessors=("vct",))
+        values = np.asarray(create_mask(ref=support, as_array=True), dtype=bool)
+        return values if mask_mode == "inside" else ~values
+
+    # Align raster masks while accepting raw boolean arrays on the support grid
+    if mask_raster is not None:
+        mask_raster = _aligned_raster(mask_raster, mask_raster, support, "mask", align)
+        values = _selected_raster_data(mask_raster, fill_value=False)
+    else:
+        values = mask if hasattr(mask, "ndim") else np.asarray(mask)
+        if np.ma.isMaskedArray(values):
+            values = np.ma.asarray(values).filled(False)
+
+    # Drop only a singleton band so one row or one column remains a spatial dimension
+    if values.ndim == 3 and values.shape[0] == 1:
+        values = values[0]
+
+    # Reject ambiguous numeric masks and arrays on a different grid shape
+    if tuple(values.shape) != tuple(support.shape) or not np.issubdtype(values.dtype, np.bool_):
+        raise ValueError("A raster support mask must be boolean and match the support grid.")
+    return values
 
 
 def _sampling_support(inputs: Iterable[Any], at: Any | None) -> Any:
@@ -75,7 +165,7 @@ def _sampling_specification(source: Any, specification: Any) -> tuple[Any, Any]:
             or hasattr(value, "georeferenced_coords_equal")
             or getattr(value, "rst", None) is not None
             or getattr(value, "pc", None) is not None
-            or _as_vector(value) is not None
+            or has_geo_attr(value, "rasterize", accessors=("vct",))
         ):
             return specification
     return specification, None
@@ -97,26 +187,28 @@ def _vector_values_at_points(points: gpd.GeoDataFrame, features: gpd.GeoDataFram
     return pd.Series(output, index=points.index, name="value")
 
 
-def _sample_vector_values(vector: Any, values: NDArrayNum, support: Any, support_dataframe: Any | None) -> Any:
-    """Place one numeric vector column on the chosen grid or point locations."""
+def _sample_vector_values(
+    dataframe: gpd.GeoDataFrame, values: NDArrayNum, support: Any, support_dataframe: Any | None
+) -> Any:
+    """Place numeric feature values on the chosen grid or point locations."""
 
     # Rasterize feature numbers first so zero always means that no feature covers the cell
     if hasattr(support, "ij2xy"):
         indexes = np.arange(1, len(values) + 1)
-        raster = vector.rasterize(ref=support, in_value=indexes.tolist(), out_value=0, out_dtype=np.int32)
+        rasterize = get_geo_attr(dataframe, "rasterize", accessors=("vct",))
+        raster = rasterize(ref=support, in_value=indexes.tolist(), out_value=0, out_dtype=np.int32)
         codes = _selected_raster_data(raster).astype(np.int64)
         return np.take(np.concatenate(([np.nan], values)), codes)
 
     # Apply the same GeoPandas join to every Dask dataframe part
     if support_dataframe is None:
         raise RuntimeError("Point support coordinates were not prepared.")
-    features = vector.ds.compute() if is_dask_dataframe(vector.ds) else vector.ds
     if is_dask_dataframe(support_dataframe):
         sampled = support_dataframe.map_partitions(
-            _vector_values_at_points, features, values, meta=pd.Series([], dtype=float, name="value")
+            _vector_values_at_points, dataframe, values, meta=pd.Series([], dtype=float, name="value")
         )
         return sampled.to_dask_array(lengths=True)
-    return _vector_values_at_points(support_dataframe, features, values).to_numpy()
+    return _vector_values_at_points(support_dataframe, dataframe, values).to_numpy()
 
 
 def _values_at_support(
@@ -145,14 +237,16 @@ def _values_at_support(
     support_is_raster = hasattr(support, "ij2xy")
 
     # Place vector values now; the parent workflow decides later how to handle missing values
-    vector = _as_vector(source) if source_raster is None and source_pointcloud is None else None
-    if vector is not None:
-        dataframe = vector.ds.compute() if is_dask_dataframe(vector.ds) else vector.ds
+    is_vector = source_raster is None and source_pointcloud is None and has_geo_attr(
+        source, "rasterize", accessors=("vct",)
+    )
+    if is_vector:
+        dataframe = _as_geodataframe(source)
         if selector is None or selector not in dataframe.columns:
             raise ValueError("Vector values require an explicit feature column.")
         if not pd.api.types.is_numeric_dtype(dataframe[selector]):
             raise TypeError("Selected vector values must be numeric.")
-        return _sample_vector_values(vector, np.asarray(dataframe[selector], dtype=float), support, support_dataframe)
+        return _sample_vector_values(dataframe, np.asarray(dataframe[selector], dtype=float), support, support_dataframe)
 
     # Use a plain grid directly when its shape and coordinates already match the output grid
     raw_values = source.data if isinstance(source, xr.DataArray) else source
@@ -505,23 +599,23 @@ def _cosample_on_points(
     # Read vector and raster masks at the chosen point locations
     if mask is not None:
         mask_raster = mask if hasattr(mask, "ij2xy") else getattr(mask, "rst", None)
-        vector = _as_vector(mask) if mask_raster is None else None
 
         # Use the mask's own geometry, grid, or point order
-        if vector is not None:
-            mask_values = np.asarray(vector.create_mask(ref=support, as_array=True), dtype=bool).squeeze()
+        if mask_raster is None and has_geo_attr(mask, "create_mask", accessors=("vct",)):
+            create_mask = get_geo_attr(mask, "create_mask", accessors=("vct",))
+            mask_values = np.asarray(create_mask(ref=support, as_array=True), dtype=bool).squeeze()
             valid &= mask_values if mask_mode == "inside" else ~mask_values
         elif mask_raster is not None:
             mask_raster = _aligned_raster(mask, mask, support, "mask", align)
             mask_values = mask_raster.interp_points(points=points, method="nearest", as_array=True)
             valid &= np.isfinite(mask_values).squeeze() & (np.asarray(mask_values).squeeze() != 0)
         else:
-            # Require a plain mask to contain one Boolean value per output point
+            # Require a plain mask to contain one boolean value per output point
             mask_values = np.atleast_1d(np.asanyarray(mask).squeeze())
             if np.ma.isMaskedArray(mask_values):
                 mask_values = mask_values.filled(False)
             if mask_values.ndim != 1 or len(mask_values) != len(valid) or mask_values.dtype != bool:
-                raise ValueError("A point support mask must be Boolean with one value per point.")
+                raise ValueError("A point support mask must be boolean with one value per point.")
             valid &= mask_values
 
     # Stop before sampling when no point has every requested value

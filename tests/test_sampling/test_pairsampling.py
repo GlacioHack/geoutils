@@ -63,7 +63,7 @@ class TestRasterPairSampling:
         assert len(np.unique(indexes, axis=0)) == first.sizes["pair"]
 
     def test_raster_random_xy_and_mask(self, raster: gu.Raster) -> None:
-        """Checks that independent raster endpoints stay inside an aligned Boolean mask."""
+        """Checks that independent raster endpoints stay inside an aligned boolean mask."""
 
         # 1/ Allow pairs only in the upper half of the raster
         mask = np.zeros(raster.shape, dtype=bool)
@@ -215,12 +215,12 @@ class TestPointPairSampling:
 class TestRasterPairMasking:
     """Checks that raster pair sampling honors every source and user mask.
 
-    The method covers masked integer data and Boolean masks supplied as arrays or rasters.
+    The method covers masked integer data and boolean masks supplied as arrays or rasters.
     """
 
     @pytest.mark.parametrize("raster_mask", [False, True])
     def test_raster_pairs_exclude_masked_integer_values_and_mask_cells(self, raster_mask: bool) -> None:
-        """Checks that masked integer values and masked Boolean cells never enter raster pairs."""
+        """Checks that masked integer values and masked boolean cells never enter raster pairs."""
 
         # 1/ Exclude different cells through the integer data, the mask's own mask, and a false mask value
         data = np.ma.array(np.arange(100, dtype=np.int32).reshape(10, 10), mask=False)
@@ -231,7 +231,7 @@ class TestRasterPairMasking:
         raster = gu.Raster.from_array(data, from_origin(0, 10, 1, 1), 32633, nodata=-9999)
         selected_mask = raster.from_array(mask, raster.transform, raster.crs) if raster_mask else mask
 
-        # 2/ Draw pairs with either the Boolean array or its Raster form
+        # 2/ Draw pairs with either the boolean array or its Raster form
         pairs = raster.pairsample(n_pairs=200, mask=selected_mask, random_state=3)
 
         # 3/ Check each endpoint against the combined mask and original integer values

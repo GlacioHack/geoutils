@@ -263,35 +263,6 @@ class TestClassVsAccessorConsistency:
         assert close_ds.pc.pointcloud_allclose(pointcloud, atol=1e-8)
         assert not pointcloud.pointcloud_allclose(close_ds, rtol=0, atol=1e-10)
 
-    @pytest.mark.parametrize(
-        "method, kwargs",
-        [
-            ("copy", {}),
-            ("crop", {"bbox": (-1, -1, 0.5, 2)}),
-            ("reproject", {"crs": 4326}),
-            ("translate", {"xoff": 1, "yoff": 2}),
-        ],
-    )
-    def test_methods__preserve_subclass(self, method: str, kwargs: dict[str, Any]) -> None:
-        """Checks that point operations retain native subclasses and return equivalent accessor dataframes."""
-
-        class SpecializedPointCloud(PointCloud):
-            """Represent a downstream point cloud class without overriding GeoUtils operations."""
-
-        # 1/ Use the existing indexed frame and two value columns to check more than point coordinates
-        source = SpecializedPointCloud(self.ds, data_column="b1")
-        frame = self.ds.copy()
-        frame.pc.set_data_column("b1")
-
-        # 2/ The same inherited method must preserve the native class or expose the accessor's dataframe
-        result = getattr(source, method)(**kwargs)
-        expected = getattr(frame.pc, method)(**kwargs)
-        assert isinstance(result, SpecializedPointCloud)
-        assert isinstance(expected, gpd.GeoDataFrame)
-        assert result.data_column == expected.pc.data_column
-        assert_geodataframe_equal(result.ds, expected)
-        assert_frame_equal(result.ds, expected, check_exact=True)
-
     def test_copy__preserves_dataframe_and_pointcloud_type(self) -> None:
         """Check that copying retains auxiliary columns, indexes and PointCloud outputs."""
 

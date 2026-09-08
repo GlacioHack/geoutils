@@ -16,11 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Array normalization and coordinate tools used by raster operations.
-
-Private normalization utilities prepare raster data, masks and band dimensions without changing spatial metadata.
-Public mask and extent helpers follow, with coordinate rotation kept in the final section.
-"""
+"""Array tools related to rasters."""
 
 from __future__ import annotations
 
@@ -117,9 +113,9 @@ def _as_bands(array: MArrayNum) -> tuple[MArrayNum, bool]:
     raise ValueError("Raster processing expects a two-dimensional or multiband array.")
 
 
-###################################
-# 2/ PUBLIC MASK AND EXTENT HELPERS
-###################################
+##############################
+# 2/ MASK AND EXTENT FUNCTIONS
+##############################
 
 
 def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
@@ -158,7 +154,7 @@ def get_array_and_mask(
                 f"Invalid array shape given: {array.shape}." "Expected 2D array or 3D array where arr.shape[0] == 1"
             )
 
-    # Warn when an occupied mask prevents the requested view
+    # If an occupied mask exists and a view was requested, trigger a warning.
     if not copy and np.any(getattr(array, "mask", False)):
         warnings.warn("Copying is required to respect the mask. Returning copy. Set 'copy=True' to hide this message.")
         copy = True
@@ -170,7 +166,7 @@ def get_array_and_mask(
     # Convert into a regular ndarray (a view or copy depending on the 'copy' argument)
     array_data = np.array(array).squeeze() if copy else np.asarray(array).squeeze()
 
-    # Set invalid pixels to NaN while retaining the separate mask
+    # Get the mask of invalid pixels and set nans if it is occupied.
     invalid_mask = get_mask_from_array(array)
     if np.any(invalid_mask):
         array_data[invalid_mask] = np.nan

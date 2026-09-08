@@ -942,11 +942,11 @@ class RasterBase(ABC):
 
         Zonal statistics use vector features as bins: pass ``by={"zone": (zones, "id")}`` to group by a vector
         attribute. Unique IDs give one group per feature; repeated IDs combine features. A vector without a
-        selected column instead defines Boolean inside/outside groups for the union of its features.
+        selected column instead defines boolean inside/outside groups for the union of its features.
 
         Returned dataframe rows preserve interval and categorical metadata. Each value has a finite ``count`` and the
         requested statistics in a two level column index. When ``return_masks`` is true, the second result maps each
-        row key to a Boolean object on the complete raster or point support.
+        row key to a boolean object on the complete raster or point support.
 
         :param by: Ordered mapping of names to raster, point cloud, vector or aligned array groupers.
         :param values: Band selection or mapping of names to bands, external objects or ``(object, selector)`` pairs.
@@ -955,7 +955,7 @@ class RasterBase(ABC):
         :param categories: Ordered categories for discrete groupers.
         :param statistics: Statistic name, callable or iterable of either. Count is always included.
         :param at: Spatial support, defaulting to the first point dataset if present, otherwise this raster.
-        :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
+        :param mask: boolean aligned mask, raster mask or vector defining eligible locations.
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
         :param random_state: Random generator or seed used to reproduce subsampling.
@@ -1075,7 +1075,7 @@ class RasterBase(ABC):
                 self.crs == crs,
             ]
 
-        # Compare nodata after data access, which can update metadata when a file is loaded as a Boolean mask
+        # Compare nodata after data access, which can update metadata when a file is loaded as a boolean mask
         other_nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
         nodata_equal = self.nodata == other_nodata
         if self.nodata is not None and other_nodata is not None:
@@ -2337,7 +2337,7 @@ class RasterBase(ABC):
         :param auxiliary_at: Native ``"self"`` or ``"other"`` support of raw auxiliaries, globally or by name.
         :param at: Output support: "self", "other" or a raster or point cloud. Defaults to point support when
             present and this raster otherwise. Raster outputs retain the grid, with unsampled cells masked.
-        :param mask: Boolean aligned mask, raster mask or vector defining eligible locations.
+        :param mask: boolean aligned mask, raster mask or vector defining eligible locations.
         :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
         :param subsample: Fraction when at most one, otherwise the maximum number of locations.
         :param random_state: Random generator or seed used to reproduce the sample.
@@ -2418,7 +2418,7 @@ class RasterBase(ABC):
         :param min_distance: Smallest pair distance. Defaults to one pixel.
         :param max_distance: Largest pair distance. Defaults to the raster diagonal.
         :param random_state: Random generator or seed used to reproduce the sample.
-        :param mask: Boolean raster grid mask, aligned mask raster or vector defining eligible cells.
+        :param mask: boolean raster grid mask, aligned mask raster or vector defining eligible cells.
         :param strategy: Regular grid strategy for logarithmic lags.
         :param deduplicate: Whether repeated pairs are retained, removed per anchor or removed globally.
         :param batch_pairs: Maximum candidate pairs generated in one top-up batch.
@@ -2493,7 +2493,7 @@ class RasterBase(ABC):
         :param model: Optional theoretical model or ordered list of summed models to fit.
         :param fit_kwargs: Options passed to :meth:`geoutils.stats.Variogram.fit`.
         :param random_state: Random generator or seed used to reproduce all runs.
-        :param mask: Boolean raster grid mask, aligned mask raster or vector defining eligible cells.
+        :param mask: boolean raster grid mask, aligned mask raster or vector defining eligible cells.
         :param pair_sampling_kwargs: Advanced options accepted by :meth:`pairsample`.
         :returns: Empirical lag statistics and optional fitted model metadata.
         """

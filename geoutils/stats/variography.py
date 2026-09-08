@@ -32,7 +32,7 @@ from scipy.optimize import curve_fit
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 
-__all__ = ["GPyTorchVariogram", "GSToolsVariogram", "Variogram", "VariogramModel"]
+__all__ = ["Variogram"]
 
 
 #############################
