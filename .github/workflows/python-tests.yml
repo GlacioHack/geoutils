@@ -16,13 +16,14 @@ jobs:
 
     strategy:
       matrix:
-        os: ["ubuntu-latest", "macos-latest"]
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         dep-level: ["base", "opt"]
 
     defaults:
       run:
-        shell: bash -l {0}
+        # Use PowerShell on Windows to better work with setup-miniconda
+        shell: ${{ startsWith(matrix.os, 'windows') && 'pwsh' || 'bash -el {0}' }}
 
     steps:
     - uses: actions/checkout@v7
@@ -80,6 +81,9 @@ jobs:
         conda list
 
     - name: Test with pytest
+      env:
+        # Render plots without a GUI backend (avoid Tcl/Tk issues on Windows)
+        MPLBACKEND: Agg
       # Module execution also collects tests from the repository-only benchmarks package
       run: python -m pytest -ra --cov=geoutils/ --cov-report=lcov
 
