@@ -10,6 +10,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
+from geoutils._misc import import_optional
 
 
 class TestRasterPointInterface:
@@ -238,22 +239,23 @@ class TestRasterPointInterface:
             gu.Raster.from_pointcloud_regular(pc1)
 
 
-class TestLazyRasterPointSampling:
+class TestToPointcloudChunked:
     """
-    Test point sampling from a Dask raster through its Xarray accessor.
+    Compare to_pointcloud() outputs from eager and Dask rasters.
 
-    The cases below compare exact values and output types with eager Raster sampling for complete and subsampled
-    outputs. They also verify that requesting the eager point result does not load or replace the source Dask array.
+    These tests cover the currently eager point outputs and keep the source Dask array. Expand them to cover lazy
+    outputs when to_pointcloud() returns lazy point data.
     """
 
     @pytest.mark.parametrize("subsample", [1, 11])
     @pytest.mark.parametrize("as_array", [False, True])
-    def test_to_pointcloud__eager_samples_preserve_lazy_source(self, subsample: int, as_array: bool) -> None:
+    def test_to_pointcloud__eager_samples_keep_lazy_source(self, subsample: int, as_array: bool) -> None:
         """Checks that point sampling returns exact eager values without loading or replacing the Dask source."""
 
-        da = pytest.importorskip("dask.array")
+        import_optional("dask")
+        import dask.array as da
 
-        # 1/ Include a missing cell and uneven chunks to verify the mask and deterministic sample order
+        # Include a missing cell and uneven chunks to check the mask and deterministic sample order
         values = np.arange(63, dtype=np.float32).reshape((7, 9))
         values[2, 3] = np.nan
         transform = rio.transform.from_origin(500000, 8600000, 20, 20)
@@ -262,7 +264,7 @@ class TestLazyRasterPointSampling:
         source_array = source.data
         options = {"subsample": subsample, "as_array": as_array, "random_state": 42}
 
-        # 2/ Point sampling is intentionally eager, while its input array must remain available for lazy operations
+        # Sample eager point values while keeping the input array available for lazy operations
         expected = eager.to_pointcloud(**options)
         actual = source.rst.to_pointcloud(**options)
         if as_array:

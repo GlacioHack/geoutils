@@ -45,10 +45,12 @@ _COMPOSITE_MODELS = {"sum", "product"}
 
 @dataclass(frozen=True)
 class VariogramModel:
-    """Parameters of a fitted theoretical variogram in a form shared by all supported packages.
+    """
+    Parameters of a fitted theoretical variogram in a form shared by all supported packages: GSTools, GPyTorch, and
+    SciKit-GStat.
 
-    The ``effective_range`` follows SciKit-GStat's convention, ``partial_sill`` excludes the nugget, making the
-    conversion to covariance kernels unambiguous.
+    The ``effective_range`` follows SciKit-GStat's convention (as numerical ranges are defined differently between
+    pakcages), and ``partial_sill`` excludes the nugget, making the conversion to covariance kernels unambiguous.
     A composite model holds its independent structures in ``components`` and keeps their shared nugget on the parent
     model.
 

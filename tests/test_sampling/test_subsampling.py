@@ -44,36 +44,36 @@ class TestSampling:
 
         warnings.filterwarnings("ignore", message=".*larger than the number of valid pixels.*", category=UserWarning)
 
-        # 1/ Check every requested count below the input size
+        # Check every requested count below the input size
         for npts in np.arange(2, np.size(array)):
             random_values = _subsample_numpy(array, subsample=npts)
             assert np.ndim(random_values) == 1
             assert np.size(random_values) == npts
             assert np.count_nonzero(random_values.mask) == 0
 
-        # 2/ Check that a count above the available values returns every available value
+        # Check that a count above the available values returns every available value
         random_values = _subsample_numpy(array, subsample=np.size(array) + 3)
         assert np.all(np.sort(random_values) == array[~array.mask])
 
-        # 3/ Check that one returns every available value in the original order
+        # Check that one returns every available value in the original order
         random_values = _subsample_numpy(array, subsample=1)
         assert np.all(np.sort(random_values) == array[~array.mask])
 
         random_values_2 = _subsample_numpy(array, subsample=1)
         assert np.array_equal(random_values, random_values_2)
 
-        # 4/ Check that a fraction returns that share of the available values
+        # Check that a fraction returns that share of the available values
         random_values = _subsample_numpy(array, subsample=0.5)
         assert np.size(random_values) == int(np.count_nonzero(~array.mask) * 0.5)
 
-        # 5/ Check returned indexes against the input dimensions and requested fraction
+        # Check returned indexes against the input dimensions and requested fraction
         indices = _subsample_numpy(array, subsample=0.3, return_indices=True)
         assert np.ndim(indices) == 2
         assert len(indices) == np.ndim(array)
         assert np.ndim(array[indices]) == 1
         assert np.size(array[indices]) == int(np.count_nonzero(~array.mask) * 0.3)
 
-        # 6/ Check that an integer seed and the matching NumPy generator select the same values
+        # Check that an integer seed and the matching NumPy generator select the same values
         sub42 = _subsample_numpy(array, subsample=10, random_state=42)
         rng = np.random.default_rng(42)
         sub42_gen = _subsample_numpy(array, subsample=10, random_state=rng)

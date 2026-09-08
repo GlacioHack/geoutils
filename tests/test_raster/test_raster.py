@@ -386,12 +386,12 @@ class TestRaster:
     @pytest.mark.parametrize("method", ["to_rio_dataset", "to_xarray"])
     @pytest.mark.parametrize("loaded", [False, True])
     @pytest.mark.parametrize("area_or_point", ["Area", "Point"])
-    def test_methods__conversion_loading_metadata(
+    def test_to_rio_dataset_to_xarray__loading_metadata(
         self, tmp_path: pathlib.Path, method: str, loaded: bool, area_or_point: str
     ) -> None:
-        """Checks that native exports load the source and retain exact values, custom tags and pixel interpretation."""
+        """Checks that exports load the source and maintain exact values, custom tags and pixel interpretation."""
 
-        # 1/ Include a missing pixel and custom metadata to exercise both array and file metadata conversion
+        # Write test file with missing pixel and custom metadata to test conversion
         values = np.arange(35, dtype=np.float32).reshape(5, 7)
         values[2, 3] = np.nan
         reference = gu.Raster.from_array(
@@ -407,12 +407,12 @@ class TestRaster:
         source = gu.Raster(path, load_data=loaded)
         assert source.is_loaded is loaded
 
-        # 2/ Both exports use an in-memory Rasterio dataset and therefore load native raster values
+        # Both to_rio_dataset and to_xarray use an in-memory Rasterio dataset and therefore load raster values
         result = getattr(source, method)()
         assert source.is_loaded
         converted = gu.Raster(result) if method == "to_rio_dataset" else result.rst.to_geoutils()
 
-        # 3/ Xarray may add encoding attributes, but every original tag and georeferenced value must survive
+        # Every original tag and georeferenced value must survive (even though Xarray adds encoding attributes)
         assert source.raster_equal(converted, strict_masked=False, warn_failure_reason=True)
         for name, value in source.tags.items():
             assert converted.tags[name] == value

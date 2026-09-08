@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -12,6 +12,7 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils import examples
+from geoutils._misc import import_optional
 from geoutils.exceptions import InvalidGridError
 from geoutils.interface import rasterization
 from geoutils.multiproc import MultiprocConfig
@@ -57,28 +58,45 @@ class TestRasterVectorInterface:
     aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
     aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
-    @pytest.mark.parametrize("bands", [1, 2])
     @pytest.mark.parametrize("method", ["rasterize", "create_mask"])
-    def test_methods__dask_reference_band_axis(self, bands: int, method: str) -> None:
-        """Checks that vector rasterization follows spatial chunks when the reference has a band axis."""
+    @pytest.mark.parametrize("input_type", ["raster", "xarray", "dask"])
+    def test_rasterize_create_mask__multi_band(
+        self,
+        method: Literal["rasterize", "create_mask"],
+        input_type: Literal["raster", "xarray", "dask"],
+    ) -> None:
+        """Checks that vector rasterization returns one spatial layer from every multi-band reference type."""
 
-        # 1/ Include an explicit band dimension, as native Xarray rasters opened from files do
-        da = pytest.importorskip("dask.array")
-        raster = gu.Raster.from_array(np.zeros((bands, 4, 4)), (1, 0, 8, 0, -1, 12), 4326)
-        reference = raster.to_xarray().chunk({"band": 1, "y": 3, "x": 2})
+        import_optional("dask")
+        import dask.array as da
+
+        # Create equivalent native, Xarray and chunked Xarray references with two bands
+        raster = gu.Raster.from_array(np.zeros((2, 4, 4)), (1, 0, 8, 0, -1, 12), 4326)
+        if input_type == "raster":
+            reference = raster
+        else:
+            reference = raster.to_xarray()
+            if input_type == "dask":
+                reference = reference.chunk({"band": 1, "y": 3, "x": 2})
+        # Rasterize the vector or create a mask from the selected reference
         output = getattr(self.vector, method)(ref=reference)
 
-        # 2/ Rasterization produces one spatial layer and preserves the reference's row and column chunks
-        assert isinstance(output, xr.DataArray)
-        assert isinstance(output.data, da.Array)
+        # Check that the result has one spatial layer and keeps Dask chunk sizes when applicable
         assert output.shape == (4, 4)
-        assert output.data.chunks == reference.data.chunks[-2:]
+        if input_type == "dask":
+            assert isinstance(output, xr.DataArray)
+            assert isinstance(output.data, da.Array)
+            assert isinstance(reference, xr.DataArray)
+            assert isinstance(reference.data, da.Array)
+            assert output.data.chunks == reference.data.chunks[-2:]
+        else:
+            assert isinstance(output, gu.Raster)
 
-        # 3/ The unit polygon occupies exactly the cell centred on (10.5, 10.5)
+        # The unit polygon occupies exactly the cell centred on (10.5, 10.5)
         expected = np.zeros((4, 4))
         expected[1, 2] = 1
-        np.testing.assert_array_equal(output.to_numpy(), expected)
-        assert isinstance(reference.data, da.Array)
+        actual = output.to_numpy() if isinstance(output, xr.DataArray) else output.data
+        np.testing.assert_array_equal(actual, expected)
 
     def test_rasterize(self) -> None:
         """Test rasterizing an EPSG:3426 dataset into a projection."""

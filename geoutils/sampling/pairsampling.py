@@ -33,11 +33,11 @@ from geoutils.sampling.cosampling import _mask_on_raster
 #############################
 
 
-def _take_raster_values(array: Any, indices: NDArrayNum) -> NDArrayNum:
-    """Read selected raster cells with one array indexing call."""
+def _read_raster_values_at_flat_indices(array: Any, flat_indices: NDArrayNum) -> NDArrayNum:
+    """Read raster values at flat cell indices with one array indexing call."""
 
     # Convert flat pair indexes back to their raster row and column positions
-    rows, columns = np.divmod(np.asarray(indices, dtype=np.int64), int(array.shape[1]))
+    rows, columns = np.divmod(np.asarray(flat_indices, dtype=np.int64), int(array.shape[1]))
 
     # Load only the requested cells so Dask reads grow with the sample size
     values = array.vindex[rows, columns].compute() if is_dask_array(array) else array[rows, columns]
@@ -66,7 +66,106 @@ def _deduplicate_pairs(first: NDArrayNum, second: NDArrayNum, *, n_observations:
 
 
 class _RegularPairSampler:
-    """Draw pairs of available raster cells while limiting temporary array sizes."""
+    """
+    Pair sampler for isotropic log-lag Monte Carlo sampling of a regular 2D grid.
+
+    This method deals efficiently with large datasets by supporting Dask arrays for out-of-memory subsampling, and by
+    anticipating the probability of nodata occurring in pairs (with iterative top-up). To sample short to long lags
+    efficiently for variography, pairs are sampled by drawing separation vectors with log-uniform magnitude and
+    uniformly distributed orientation, corresponding to an isotropic Monte Carlo sampling of logarithmic spatial lags.
+
+    References
+    ----------
+    Sampling method is inspired from the log-lag sampling developed in Hugonnet et al. (2022), Section V-C and
+    Supplementary Section II-C.
+
+    Few literature references exist that describe this algorithm specifically. However, it was
+    conceptualized fairly early, such as in Cressie (1993):
+    "In isotropic settings, all directions are equivalent, and lag distances may be grouped on a
+    logarithmic scale to ensure adequate sampling across short and long ranges."
+
+    Or in fluid mechanics and turbulence, following Monin and Yaglom (1971):
+    "For isotropic turbulence, ensemble averages over separation vectors are replaced by averages over
+    uniformly distributed directions and logarithmically spaced magnitudes."
+
+    Hugonnet et al. (2022): http://dx.doi.org/10.1109/JSTARS.2022.3188922
+    Cressie (1993): http://dx.doi.org/10.1002/9781119115151
+    Monin and Yaglom (1971). Statistical Fluid Mechanics: Mechanics of Turbulence (Vol. I). The MIT Press.
+
+    The code expands an early version written in SciKit-GStat (as "RasterEquidistantMetricSpace").
+
+    Use in GeoUtils
+    ---------------
+
+    sample() returns the first and second endpoint indices and their distances. _sample_raster_pairs() reads the
+    selected raster values and builds the labelled Xarray result; all other methods are internal.
+
+    Summary of algo
+    ---------------
+    We want to sample a large number of point pairs from a regular 2D grid such that separation distances cover
+    short and long lags efficiently (approximately log-uniform in distance). We cannot enumerate all pairs due to
+    the size of the grid, so we also subsample.
+
+    The core log-lag sampling is to:
+      1) Subsample a distance r ~ Uniform(log(min_distance), log(max_distance))  (log-uniform in r)
+      2) Subsample an angle  θ ~ Uniform(0, 2π)                                  (isotropic)
+      3) Convert (r, θ) to integer pixel offsets (ix, iy) by rounding
+      4) Choose origins and compute targets using the offsets
+      5) Reject out-of-bounds pairs and (optionally) reject NaN endpoints
+      6) Avoid pair duplication during sampling to circumvent costly duplicate removal
+
+    Dask specifics
+    -------------
+    - We never load the full array in memory.
+    - We perform one global reduction at the start to estimate overall finite (not NaN/inf/nodata) fraction (f_valid),
+      used to set the oversampling factor.
+    - Then, iterating until top-up of valid values, for each candidate batch we read valid (finite) values at
+      sampled indices using `vindex` (out-of-memory).
+
+    Strategies (strategy)
+    ---------------------
+    - "independent":
+        Each pair is generated independently (origin + offset). This is the basic method that is moderately efficient.
+        For 1M pairs, we have to sample 1M + 1M points (heavy graph with Dask.vindex).
+
+    - "anchors":
+        We reuse a set of random anchor points for one endpoint of each pair. Targets are generated relative to these
+        anchors, so that anchor values (and their chunks) are reused across many pairs. For instance, for 1M pairs,
+        we index 1000 anchors points that each match 1000 random points, so in the end we index 1k + 1M points
+        (we thus use half the sample size of "independent").
+
+    - "chunk_anchors":
+        Like "anchors" but anchors are sampled from a small set of chunks per round to reduce chunk fan-out and
+        task overhead for Dask. This method seems to perform the best overall in both speed and memory (default).
+
+    - "anchor_batched":
+        Structured generation: for each anchor sample multiple distances (log-uniform) and for each distance
+        sample multiple angles. This produces blocks of pairs with shared anchors and controlled lag coverage.
+        There might be some room for improvement in this method... which could make it more efficient to sample less
+        chunks for one vindex (mostly affects speed, while batch size limits temporary memory).
+
+    Hybrid local/global (hybrid_local_fraction)
+    -------------------------------------------
+    Optionally, one can require that a fraction (or all) of pairs remains within the same origin chunk.
+    This is situational (mostly for short-range variograms), but can massively reduce I/O overhead (both
+    endpoints are always in the same chunk). The other pairs are sampled "globally" to preserve long-range lag coverage.
+
+    NaN handling
+    ------------
+    To deal with NaNs without knowing their distribution ahead (Dask array), the following steps are applied:
+    1. We estimate the global finite fraction f_valid by a single reduction (counting chunk per chunk), and deduce the
+       probability of a random pair containing at least 1 NaN: p_pair_valid ≈ f_valid^2. For instance, 10% of NaNs
+       in the array gives us an 81% chance of selecting a valid pair at random.
+    2. We oversample so that random pairs will roughly match requested samples, then filter out pairs where
+       either endpoint is not finite (NaN/inf).
+    3. We iterate (top-up) sampling until target count of valid pairs is reached. This is typically not
+       critical for variography (it rarely matters if sample count is slightly larger or smaller).
+
+    Notes on scalability
+    --------------------
+    Storing more than 1e8 endpoint pairs and distances is RAM-heavy regardless of strategy.
+    We use int32 indices when possible to reduce memory footprint.
+    """
 
     #################
     # CONFIGURATION
@@ -76,26 +175,72 @@ class _RegularPairSampler:
         self,
         array: Any,
         *,
+        # Raster geometry and target sample size
         dx: float,
         dy: float,
         n_pairs: int,
+        # Distance range
         min_distance: float,
         max_distance: float,
+        # Log-lag sampling strategies with various chunk-compatibility
         strategy: Literal["independent", "anchors", "chunk_anchors", "anchor_batched"],
+        # Deduplication
         deduplicate: Literal["none", "per_anchor", "global"],
+        # Random seed
         random_state: int | np.random.Generator | None,
+        # Batching / Termination
         batch_pairs: int,
         max_rounds: int,
         max_oversample: float,
+        # Chunk / Locality
         chunks_per_round: int,
         anchors_per_round: int,
+        # Parameters for anchor_batched
         distances_per_anchor: int,
         angles_per_distance: int,
+        # Hybrid local/global
         hybrid_local_fraction: float,
         max_local_distance: float | None,
+        # Dtypes to optimize memory usage
         index_dtype: Any,
         distance_dtype: Any,
     ) -> None:
+        """
+        Pair sampling on a regular raster grid.
+
+        :param array: 2D NumPy or Dask array of shape (ny, nx). Values may include NaNs. For Dask arrays, value access
+            stays lazy until small vectors are computed internally for finiteness checks.
+        :param dx: Horizontal pixel spacing in coordinate units, such as meters.
+        :param dy: Vertical pixel spacing in coordinate units, such as meters.
+        :param n_pairs: Target number of valid pairs with two finite endpoints.
+        :param min_distance: Smallest distance included in log-distance sampling.
+        :param max_distance: Largest distance included in log-distance sampling.
+        :param strategy: Pair generation strategy: "independent", "anchors", "chunk_anchors", or "anchor_batched".
+            See the class docstring for details and performance trade-offs.
+        :param deduplicate: Duplicate handling: "global" sorts pairs at the end, "per_anchor" avoids duplicate targets
+            for each anchor, and "none" skips removal. Duplicate pairs should be avoided for variography because they
+            bias the distance distribution.
+        :param random_state: Seed or NumPy Generator used for reproducible random sampling.
+        :param batch_pairs: Number of candidate pairs generated per round before NaN filtering. Larger batches reduce
+            Python and Dask scheduling overhead but require more memory for temporary arrays.
+        :param max_rounds: Maximum number of top-up rounds used to reach ``n_pairs`` valid pairs. Extra rounds help
+            when NaNs are clustered or local constraints lower the acceptance rate.
+        :param max_oversample: Maximum candidate multiplier relative to ``n_pairs``. This prevents very large temporary
+            arrays when the finite fraction is small.
+        :param chunks_per_round: Number of chunks selected for anchors in chunk-aligned strategies. Smaller values
+            improve I/O locality but reduce spatial coverage per round.
+        :param anchors_per_round: Number of first endpoints drawn per round by anchor-based strategies.
+        :param distances_per_anchor: Number of log-uniform radii drawn per anchor by "anchor_batched".
+        :param angles_per_distance: Number of directions drawn for each radius by "anchor_batched".
+        :param hybrid_local_fraction: Fraction of candidate pairs forced to remain in the first endpoint's chunk. Zero
+            gives a fully global sample; one keeps every pair local.
+        :param max_local_distance: Largest distance used for local pairs. Defaults to the chunk diagonal when omitted.
+            Larger values allow longer local lags but increase rejection at chunk boundaries.
+        :param index_dtype: Integer dtype for returned endpoint indices. int32 reduces memory when it can represent all
+            raster cells.
+        :param distance_dtype: Floating dtype for returned distances. float32 uses half the memory of float64.
+        """
+
         # Store the grid and sampling options with consistent numeric types
         self.array = array
         self.shape = (int(array.shape[0]), int(array.shape[1]))
@@ -404,8 +549,8 @@ class _RegularPairSampler:
 
             # Read only proposed endpoints, then keep pairs where both values are available
             if first.size:
-                finite = np.isfinite(_take_raster_values(self.array, first)) & np.isfinite(
-                    _take_raster_values(self.array, second)
+                finite = np.isfinite(_read_raster_values_at_flat_indices(self.array, first)) & np.isfinite(
+                    _read_raster_values_at_flat_indices(self.array, second)
                 )
                 first, second = first[finite], second[finite]
 
@@ -463,7 +608,21 @@ class _GridSpec:
 
 
 class _IrregularPairSampler:
-    """Draw pairs from point locations using exact ring searches or nearby matches."""
+    """
+    Irregular 2D coordinate sampler returning endpoint indices and distances.
+
+    Unlike regular grid sampling, irregular coordinates have no fixed row and column offsets, which makes it less
+    computationally efficient yet simplifies the approach a lot. The exact methods below ("kdtree" and "hashgrid") both
+    choose logarithmically spaced distance rings and sample observed point pairs within them. The approximate
+    "nn_logvector" method instead draws a log-uniform distance and random direction, then uses the observed point
+    nearest the proposed endpoint.
+
+    Strategies:
+      - "kdtree"      : exact annulus sampling via KDTree query_ball_point(r_out) + annulus filter
+      - "hashgrid"    : exact annulus sampling via hash-grid + AABB culling + annulus filter
+      - "nn_logvector": approximate log-distance + random angle with vectorized KDTree NN queries
+                        (no distance-bias correction; accepts that long distances may appear more often)
+    """
 
     #################
     # CONFIGURATION
@@ -473,23 +632,54 @@ class _IrregularPairSampler:
         self,
         coordinates: NDArrayNum,
         *,
+        # Target sample size and distance range
         n_pairs: int,
         min_distance: float,
         max_distance: float,
         n_bins: int,
+        # Search strategy
         strategy: Literal["kdtree", "hashgrid", "nn_logvector"],
+        # Exact annulus controls
         anchors_per_round: int,
         attempts_per_anchor: int,
         max_rounds: int,
+        # Hash-grid tuning
         cell_size: float | None,
+        # nn_logvector tuning (vectorized)
         nn_tolerance: float,
         nn_batch_size: int,
         nn_oversample: float,
         nn_max_batches: int,
+        # Random seed
         random_state: int | np.random.Generator | None,
+        # Dtypes to optimize memory usage
         index_dtype: Any,
         distance_dtype: Any,
     ) -> None:
+        """
+        Pair sampling on irregular point coordinates.
+
+        :param coordinates: Finite X/Y coordinates with shape (n_points, 2).
+        :param n_pairs: Target number of point pairs.
+        :param min_distance: Smallest allowed pair distance.
+        :param max_distance: Largest allowed pair distance.
+        :param n_bins: Number of logarithmically spaced distance rings used by the exact strategies.
+        :param strategy: Pair search strategy: "kdtree", "hashgrid", or "nn_logvector". See the class docstring for
+            details.
+        :param anchors_per_round: Number of first points tested in each round by the exact strategies.
+        :param attempts_per_anchor: Number of distance rings tested for each first point by the exact strategies.
+        :param max_rounds: Maximum number of sampling rounds used by the exact strategies.
+        :param cell_size: Square cell width used by "hashgrid". Defaults to one eighth of ``max_distance``.
+        :param nn_tolerance: Largest nearest-point error accepted by "nn_logvector", as a fraction of the proposed
+            distance.
+        :param nn_batch_size: Maximum number of proposed endpoints checked together by "nn_logvector".
+        :param nn_oversample: Number of endpoints proposed by "nn_logvector" relative to the pairs still needed.
+        :param nn_max_batches: Maximum number of proposal batches used by "nn_logvector".
+        :param random_state: Seed or NumPy Generator used for reproducible random sampling.
+        :param index_dtype: Integer dtype for returned point indices.
+        :param distance_dtype: Floating dtype for returned distances.
+        """
+
         # Store coordinates and sampling options with consistent numeric types
         self.coordinates = np.asarray(coordinates, dtype=np.float64)
         self.size = len(self.coordinates)
@@ -758,8 +948,8 @@ def _random_raster_pairs(
             (first_candidate != second_candidate)
             & (distances >= min_distance)
             & (distances <= max_distance)
-            & np.isfinite(_take_raster_values(array, first_candidate))
-            & np.isfinite(_take_raster_values(array, second_candidate))
+            & np.isfinite(_read_raster_values_at_flat_indices(array, first_candidate))
+            & np.isfinite(_read_raster_values_at_flat_indices(array, second_candidate))
         )
         if np.any(keep):
             # Remove duplicates across all rounds before keeping the requested count
@@ -840,8 +1030,8 @@ def _sample_raster_pairs(
 ) -> xr.Dataset:
     """Check raster pairsample() inputs, draw pairs, and build its Xarray result.
 
-    _RegularPairSampler.sample() draws log-spaced pairs, while _random_raster_pairs() draws independent endpoints.
-    _pair_dataset() gives either result the shared labelled layout.
+    _RegularPairSampler.sample() draws log-spaced pairs, while _random_raster_pairs() draws independent
+    endpoint pairs. Then _pair_dataset() produces the Xarray labelled layout containing the pairs.
     """
 
     # Select the raster band and check the requested output number types
@@ -923,7 +1113,12 @@ def _sample_raster_pairs(
     return _pair_dataset(
         first=first,
         second=second,
-        pair_values=np.column_stack((_take_raster_values(array, first), _take_raster_values(array, second))),
+        pair_values=np.column_stack(
+            (
+                _read_raster_values_at_flat_indices(array, first),
+                _read_raster_values_at_flat_indices(array, second),
+            )
+        ),
         distances=distances,
         pair_coordinates={
             "row": np.column_stack((first_rows, second_rows)),
@@ -971,7 +1166,7 @@ def _sample_point_pairs(
     """Check point cloud pairsample() inputs, draw pairs, and build its Xarray result.
 
     _IrregularPairSampler.sample() searches for log-spaced pairs; the independent path draws and filters endpoints
-    directly. _pair_dataset() gives either result the shared labelled layout.
+    directly. Then _pair_dataset() produces the Xarray labelled layout containing the pairs.
     """
 
     # Load the point table because pair searches need all coordinates

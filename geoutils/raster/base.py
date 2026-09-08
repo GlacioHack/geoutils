@@ -1905,7 +1905,7 @@ class RasterBase(ABC):
         :param sigma: Optional standard deviation for Gaussian filtering.
             Only used when `method="gaussian"`.
         :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
-            Only used when `method="median"`.
+            Only used with built-in filters.
         :param outlier_threshold:  The minimum difference abs(array - mean) for a pixel to be considered an outlier.
             Only used when `method="distance"`.
         :param kwargs : Additional keyword arguments passed to the underlying filter implementation.

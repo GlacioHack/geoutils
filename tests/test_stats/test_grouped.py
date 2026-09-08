@@ -32,7 +32,7 @@ class TestChunkStrategies:
     def test_reductions(self, strategy: str, backend: str, shape: tuple[int, ...]) -> None:
         """Checks that each strategy combines groups while handling each value's missing data separately."""
 
-        # 1/ Spread groups across uneven chunks and declare one group that contains no value
+        # Spread groups across uneven chunks and declare one group that contains no value
         rng = np.random.default_rng(42)
         groups = (np.arange(90) % 3).reshape(shape)
         first = rng.normal(size=shape)
@@ -41,7 +41,7 @@ class TestChunkStrategies:
         second.flat[::11] = np.inf
         keep = np.arange(90).reshape(shape) % 13 != 0
 
-        # 2/ Store values and group labels with different chunk layouts
+        # Store values and group labels with different chunk layouts
         values = {"first": first, "second": second}
         by = {"zone": groups}
         config = None
@@ -52,7 +52,7 @@ class TestChunkStrategies:
         elif backend == "multiproc":
             config = MultiprocConfig(chunks=4)
 
-        # 3/ Calculate statistics that can be combined from separate chunks
+        # Calculate statistics that can be combined from separate chunks
         statistics = ["mean", "standarddeviation", "sum", "minimum", "maximum", "rmse", "totalcount"]
         table = gu.stats.grouped_stats(
             values,
@@ -65,7 +65,7 @@ class TestChunkStrategies:
             mp_config=config,
         )
 
-        # 4/ Check every populated group with NumPy while handling each value's missing data separately
+        # Check every populated group with NumPy while handling each value's missing data separately
         for name, array in {"first": first, "second": second}.items():
             for label in range(3):
                 members = array[(groups == label) & keep]
@@ -89,14 +89,14 @@ class TestChunkStrategies:
     def test_worker_processes(self, strategy: str, shape: tuple[int, int], chunks: tuple[int, int]) -> None:
         """Checks that worker processes return the same grouped table as the in-memory calculation."""
 
-        # 1/ Split values into uneven tiles so every group crosses worker tasks
+        # Split values into uneven tiles so every group crosses worker tasks
         from geoutils.multiproc.cluster import MpCluster
 
         values = np.arange(np.prod(shape), dtype=float).reshape(shape)
         groups = np.indices(values.shape).sum(axis=0) % 3
         expected = gu.stats.grouped_stats(values, {"zone": groups}, categories={"zone": range(3)}, statistics="mean")
 
-        # 2/ Calculate group means with real worker processes
+        # Calculate group means with real worker processes
         with MpCluster({"nb_workers": 2}) as cluster:
             result = gu.stats.grouped_stats(
                 values,
@@ -107,14 +107,14 @@ class TestChunkStrategies:
                 mp_config=MultiprocConfig(chunks=chunks, cluster=cluster),
             )
 
-        # 3/ Check the complete public table against the in-memory result
+        # Check the complete public table against the in-memory result
         pd.testing.assert_frame_equal(result, expected)
 
     @pytest.mark.parametrize("backend", ["dask", "multiproc"])
     def test_exact_statistics(self, backend: str) -> None:
         """Checks that medians, NMAD, and custom functions receive every value from each group."""
 
-        # 1/ Spread groups and missing values across several chunks
+        # Spread groups and missing values across several chunks
         values = np.arange(35, dtype=float)
         values[::6] = np.nan
         groups = np.arange(35) % 4
@@ -124,7 +124,7 @@ class TestChunkStrategies:
             da = pytest.importorskip("dask.array")
             data = da.from_array(values, chunks=6)
 
-        # 2/ Request median and NMAD, plus a size function that counts missing group members too
+        # Request median and NMAD, plus a size function that counts missing group members too
         table = gu.stats.grouped_stats(
             data,
             {"zone": groups},
@@ -134,7 +134,7 @@ class TestChunkStrategies:
             mp_config=config,
         )
 
-        # 3/ Check every result from the complete original values in each group
+        # Check every result from the complete original values in each group
         assert table.attrs["grouped_stats"]["strategy"] == "groupwise"
         for label in range(4):
             members = values[groups == label]
@@ -149,9 +149,9 @@ class TestChunkStrategies:
 
     @pytest.mark.parametrize("strategy", ["dense", "sparse"])
     def test_variance_with_large_offset(self, strategy: str) -> None:
-        """Checks that combining chunks preserves small variation around a large base value."""
+        """Checks that combining chunks keeps small variation around a large base value."""
 
-        # 1/ Use values near 1e8 whose small spread would be lost by subtracting two squared totals
+        # Use values near 1e8 whose small spread would be lost by subtracting two squared totals
         da = pytest.importorskip("dask.array")
         values = 1e8 + np.random.default_rng(42).normal(scale=0.1, size=3000)
         groups = np.arange(values.size) % 3
@@ -163,7 +163,7 @@ class TestChunkStrategies:
             strategy=strategy,
         )
 
-        # 2/ Check each group directly with NumPy's population standard deviation
+        # Check each group directly with NumPy's population standard deviation
         expected = [np.std(values[groups == label]) for label in range(3)]
         np.testing.assert_allclose(result[("value", "std")], expected, rtol=1e-7)
 
@@ -171,7 +171,7 @@ class TestChunkStrategies:
     def test_empty_selection(self, strategy: str) -> None:
         """Checks that fully masked chunks return an empty table and mask mapping."""
 
-        # 1/ Mask every location while keeping the two declared boolean groups
+        # Mask every location while keeping the two declared boolean groups
         da = pytest.importorskip("dask.array")
         values = da.ones((5, 6), chunks=2)
         table, masks = gu.stats.grouped_stats(
@@ -183,7 +183,7 @@ class TestChunkStrategies:
             return_masks=True,
         )
 
-        # 2/ Check the empty table columns and mask mapping
+        # Check the empty table columns and mask mapping
         assert table.empty
         assert list(table.columns) == [("value", "count"), ("value", "mean")]
         assert len(masks) == 0
@@ -191,12 +191,12 @@ class TestChunkStrategies:
     def test_strategy_validation(self) -> None:
         """Checks that incompatible calculation strategies and storage paths are rejected."""
 
-        # 1/ Create one Dask array so option checks run on the chunked path
+        # Create one Dask array so option checks run on the chunked path
         da = pytest.importorskip("dask.array")
         values = da.arange(12, chunks=4)
         by = {"zone": np.arange(12) % 2 == 0}
 
-        # 2/ Reject a chunk summary for median, an unknown strategy, and Dask combined with multiprocessing
+        # Reject a chunk summary for median, an unknown strategy, and Dask combined with multiprocessing
         with pytest.raises(ValueError, match="require strategy='groupwise'"):
             gu.stats.grouped_stats(values, by, statistics="median", strategy="dense")
         with pytest.raises(ValueError, match="strategy must"):
@@ -207,7 +207,7 @@ class TestChunkStrategies:
     def test_groupwise_reads_only_intersecting_blocks(self) -> None:
         """Checks that calculations requiring full groups share needed block reads and skip unused blocks."""
 
-        # 1/ Record which delayed value blocks are read after group locations are known
+        # Record which delayed value blocks are read after group locations are known
         dask = pytest.importorskip("dask")
         da = pytest.importorskip("dask.array")
         reads = []
@@ -224,7 +224,7 @@ class TestChunkStrategies:
         values = da.concatenate(blocks)
         labels = np.array([0, 1, 0, 1, 2, 2, 2, 2, -1, -1, -1, -1])
 
-        # 2/ Calculate medians for groups that use only the first two blocks
+        # Calculate medians for groups that use only the first two blocks
         with dask.config.set(scheduler="synchronous"):
             result = gu.stats.grouped_stats(
                 values,
@@ -234,15 +234,15 @@ class TestChunkStrategies:
                 strategy="groupwise",
             )
 
-        # 3/ Check that each needed block is read once and every median uses the full group
+        # Check that each needed block is read once and every median uses the full group
         assert sorted(reads) == [0, 1]
         np.testing.assert_allclose(result[("value", "median")], [1.0, 2.0, 5.5])
 
     @pytest.mark.parametrize("backend", ["numpy", "dask", "multiproc"])
     def test_empty_arrays(self, backend: str) -> None:
-        """Checks that empty inputs preserve declared groups and zero counts."""
+        """Checks that empty inputs keep declared groups and zero counts."""
 
-        # 1/ Calculate a declared group from an empty NumPy, Dask, or worker input
+        # Calculate a declared group from an empty NumPy, Dask, or worker input
         values = np.empty(0)
         config = MultiprocConfig(chunks=4) if backend == "multiproc" else None
         if backend == "dask":
@@ -257,7 +257,7 @@ class TestChunkStrategies:
             mp_config=config,
         )
 
-        # 2/ Check zero counts and a missing mean for the empty group
+        # Check zero counts and a missing mean for the empty group
         assert result.loc[0, ("value", "count")] == 0
         assert result.loc[0, ("value", "totalcount")] == 0
         assert result.loc[0, ("value", "validcount")] == 0
@@ -267,7 +267,7 @@ class TestChunkStrategies:
     def test_separate_subsampling_strategy(self, subsampling_strategy: str) -> None:
         """Checks that the sampling option stays separate from the grouped calculation strategy."""
 
-        # 1/ Sample ten values while requesting masks for both complete groups
+        # Sample ten values while requesting masks for both complete groups
         values = np.arange(100, dtype=float)
         result, masks = gu.stats.grouped_stats(
             values,
@@ -280,7 +280,7 @@ class TestChunkStrategies:
             return_masks=True,
         )
 
-        # 2/ Check the sampled count, full masks, and recorded sampling option
+        # Check the sampled count, full masks, and recorded sampling option
         assert result[("value", "count")].sum() == 10
         assert sum(np.count_nonzero(mask) for mask in masks.values()) == 100
         assert result.attrs["grouped_stats"]["subsampling_strategy"] == subsampling_strategy
@@ -301,9 +301,9 @@ class TestInputAndChunkSizes:
     def test_reductions_across_sizes(
         self, shape: tuple[int, int], chunks: tuple[int, int], layout: str, strategy: str
     ) -> None:
-        """Checks that all reduction modes preserve independent counts and estimates across input and chunk sizes."""
+        """Checks that all reduction modes keep separate counts and estimates across input and chunk sizes."""
 
-        # 1/ Create exact quarter-step values with a different missing data pattern in each input
+        # Create exact quarter-step values with a different missing data pattern in each input
         da = pytest.importorskip("dask.array")
         rows, columns = np.indices(shape)
         positions = rows * shape[1] + columns
@@ -312,7 +312,7 @@ class TestInputAndChunkSizes:
         first[positions % 17 == 0] = np.nan
         second[positions % 29 == 0] = np.inf
 
-        # 2/ Place groups in separate areas or spread them across the array, then exclude areas and single cells
+        # Place groups in separate areas or spread them across the array, then exclude areas and single cells
         groups = positions % 8
         if layout == "local":
             groups = (rows * 2 // shape[0]) * 4 + columns * 4 // shape[1]
@@ -320,7 +320,7 @@ class TestInputAndChunkSizes:
         keep = (rows + columns) % 19 != 0
         keep[: shape[0] // 4, : shape[1] // 4] = False
 
-        # 3/ Give values, group labels, and the mask different chunks, including a chunk larger than the array
+        # Give values, group labels, and the mask different chunks, including a chunk larger than the array
         values = {"first": da.from_array(first, chunks=chunks), "second": da.from_array(second, chunks=chunks[::-1])}
         by = {"zone": da.from_array(groups, chunks=(chunks[0] + 3, chunks[1] + 5))}
         result = gu.stats.grouped_stats(
@@ -333,7 +333,7 @@ class TestInputAndChunkSizes:
             observed=False,
         )
 
-        # 4/ Check each group and value directly from the original NumPy arrays
+        # Check each group and value directly from the original NumPy arrays
         for name, array in {"first": first, "second": second}.items():
             for label in range(8):
                 members = array[(groups == label) & keep]
@@ -353,14 +353,14 @@ class TestInputAndChunkSizes:
     def test_auto_and_sparse_membership(self, declared_groups: int, expected_strategy: str) -> None:
         """Checks that automatic selection follows group count and the sparse path keeps widely separated groups."""
 
-        # 1/ Use three widely separated group numbers and leave the first chunks outside every group
+        # Use three widely separated group numbers and leave the first chunks outside every group
         da = pytest.importorskip("dask.array")
         values = np.arange(257 * 263, dtype=float).reshape(257, 263) % 101
         labels = np.array([0, declared_groups // 2, declared_groups - 1])
         groups = labels[np.indices(values.shape).sum(axis=0) % 3]
         groups[:64, :] = -1
 
-        # 2/ Compare the automatic, dense, and sparse paths with different chunk layouts
+        # Compare the automatic, dense, and sparse paths with different chunk layouts
         for strategy in ("auto", "dense", "sparse"):
             result = gu.stats.grouped_stats(
                 da.from_array(values, chunks=(31, 47)),
@@ -370,7 +370,7 @@ class TestInputAndChunkSizes:
                 strategy=strategy,
             )
 
-            # 3/ Check the three observed groups and the path chosen from the full declared group count
+            # Check the three observed groups and the path chosen from the full declared group count
             assert list(result.index) == list(labels)
             resolved = expected_strategy if strategy == "auto" else strategy
             assert result.attrs["grouped_stats"]["strategy"] == resolved
@@ -383,7 +383,7 @@ class TestInputAndChunkSizes:
     def test_exact_statistics_across_chunks(self, chunks: tuple[int, int], strategy: str) -> None:
         """Checks that medians, NMAD, and custom functions use every group value across chunk layouts."""
 
-        # 1/ Create one large and two small groups whose correct medians require all original values
+        # Create one large and two small groups whose correct medians require all original values
         da = pytest.importorskip("dask.array")
         rng = np.random.default_rng(42)
         values = rng.lognormal(size=(513, 769))
@@ -392,7 +392,7 @@ class TestInputAndChunkSizes:
         groups[-3:, -5:] = 2
         values[::11, ::13] = np.nan
 
-        # 2/ Request median, NMAD, and a size function that also counts missing group members
+        # Request median, NMAD, and a size function that also counts missing group members
         result = gu.stats.grouped_stats(
             da.from_array(values, chunks=chunks),
             {"zone": da.from_array(groups, chunks=chunks[::-1])},
@@ -401,7 +401,7 @@ class TestInputAndChunkSizes:
             strategy=strategy,
         )
 
-        # 3/ Check every statistic directly from the complete original group
+        # Check every statistic directly from the complete original group
         for label in range(3):
             members = values[groups == label]
             median = np.nanmedian(members)
@@ -415,10 +415,10 @@ class TestGroupedStatsResults:
     The methods cover bins, categories, missing values, subsampling, Dask arrays, rasters, and point clouds.
     """
 
-    def test_grouped_stats_preserves_intervals_counts_and_masks(self) -> None:
+    def test_grouped_stats_keeps_intervals_counts_and_masks(self) -> None:
         """Checks that interval masks keep full groups while value counts exclude missing data."""
 
-        # 1/ Give two values different missing data patterns and exclude one location with the user mask
+        # Give two values different missing data patterns and exclude one location with the user mask
         values = {
             "first": np.array([1.0, 2.0, np.nan, 4.0, 5.0, 6.0]),
             "second": np.arange(6, dtype=float),
@@ -426,7 +426,7 @@ class TestGroupedStatsResults:
         grouper = np.arange(6, dtype=float)
         user_mask = np.array([True, False, True, True, True, True])
 
-        # 2/ Group values into two explicit intervals and request their masks
+        # Group values into two explicit intervals and request their masks
         table, masks = gu.stats.grouped_stats(
             values,
             {"slope": grouper},
@@ -436,7 +436,7 @@ class TestGroupedStatsResults:
             return_masks=True,
         )
 
-        # 3/ Check interval labels, separate value counts, and returned mask keys
+        # Check interval labels, separate value counts, and returned mask keys
         assert isinstance(table.index, pd.IntervalIndex)
         assert list(table.columns.names) == ["value", "statistic"]
         assert table[("first", "count")].tolist() == [1, 3]
@@ -444,7 +444,7 @@ class TestGroupedStatsResults:
         assert isinstance(masks, Mapping)
         assert list(masks) == list(table.index)
 
-        # 4/ Check that masks split locations allowed by the user mask without removing missing selected values
+        # Check that masks split locations allowed by the user mask without removing missing selected values
         group_masks = [np.asarray(masks[key]) for key in masks]
         assert [int(np.count_nonzero(group_mask)) for group_mask in group_masks] == [2, 3]
         assert np.array_equal(np.logical_or.reduce(group_masks), user_mask)
@@ -453,12 +453,12 @@ class TestGroupedStatsResults:
     def test_grouped_stats_combines_categories_and_empty_groups(self) -> None:
         """Checks that two grouping variables keep ordered labels and empty combinations."""
 
-        # 1/ Create numeric bins and named categories with one combination absent
+        # Create numeric bins and named categories with one combination absent
         values = np.arange(6, dtype=float)
         continuous = np.array([0, 0, 1, 1, 2, 2], dtype=float)
         categorical = np.array(["forest", "forest", "forest", "ice", "ice", "ice"])
 
-        # 2/ Request every declared combination, including the empty one
+        # Request every declared combination, including the empty one
         table = gu.stats.grouped_stats(
             values,
             {"elevation": continuous, "surface": categorical},
@@ -468,7 +468,7 @@ class TestGroupedStatsResults:
             observed=False,
         )
 
-        # 3/ Check index types, order, and the empty group's zero count and missing mean
+        # Check index types, order, and the empty group's zero count and missing mean
         assert isinstance(table.index, pd.MultiIndex)
         assert isinstance(table.index.levels[0], pd.IntervalIndex)
         assert isinstance(table.index.levels[1], pd.CategoricalIndex)
@@ -480,10 +480,10 @@ class TestGroupedStatsResults:
     def test_grouped_stats_respects_interval_closure_and_nonfinite_values(self) -> None:
         """Checks that right-closed intervals and missing selected values affect groups and counts separately."""
 
-        # 1/ Define right-closed intervals with one value below all intervals and one infinite selected value
+        # Define right-closed intervals with one value below all intervals and one infinite selected value
         intervals = pd.IntervalIndex.from_breaks([0, 1, 2], closed="right", name="distance")
 
-        # 2/ Calculate all statistics and return the complete interval masks
+        # Calculate all statistics and return the complete interval masks
         table, masks = gu.stats.grouped_stats(
             np.array([100.0, 1.0, np.inf]),
             {"distance": np.array([0.0, 1.0, 2.0])},
@@ -492,7 +492,7 @@ class TestGroupedStatsResults:
             return_masks=True,
         )
 
-        # 3/ Check the interval edge rules, finite counts, total counts, means, and mask membership
+        # Check the interval edge rules, finite counts, total counts, means, and mask membership
         assert table.index.equals(intervals)
         assert table[("value", "count")].tolist() == [1, 0]
         assert table[("value", "totalcount")].tolist() == [1, 1]
@@ -503,10 +503,10 @@ class TestGroupedStatsResults:
     def test_grouped_stats_subsampling_does_not_change_masks(self) -> None:
         """Checks that subsampling limits statistic counts without shrinking returned group masks."""
 
-        # 1/ Split twenty values into two intervals
+        # Split twenty values into two intervals
         values = np.arange(20, dtype=float)
         groups = np.arange(20, dtype=float)
-        # 2/ Calculate statistics from six sampled locations and request complete masks
+        # Calculate statistics from six sampled locations and request complete masks
         table, masks = gu.stats.grouped_stats(
             values,
             {"distance": groups},
@@ -517,20 +517,20 @@ class TestGroupedStatsResults:
             return_masks=True,
         )
 
-        # 3/ Check the sampled statistic count and the full twenty-location mask count
+        # Check the sampled statistic count and the full twenty-location mask count
         assert int(table[("value", "count")].sum()) == 6
         assert sum(int(np.count_nonzero(masks[key])) for key in masks) == 20
 
     def test_grouped_stats_dask_matches_numpy_and_keeps_masks_lazy(self) -> None:
         """Checks that Dask matches NumPy and creates group masks only when requested."""
 
-        # 1/ Calculate an in-memory reference from three numeric intervals
+        # Calculate an in-memory reference from three numeric intervals
         da = pytest.importorskip("dask.array")
         values = np.arange(12, dtype=float).reshape(3, 4)
         grouper = np.arange(12, dtype=float).reshape(3, 4)
         expected = gu.stats.grouped_stats(values, {"x": grouper}, bins={"x": [0, 4, 8, 12]}, statistics="mean")
 
-        # 2/ Repeat with different Dask chunks for values and group labels
+        # Repeat with different Dask chunks for values and group labels
         table, masks = gu.stats.grouped_stats(
             da.from_array(values, chunks=(2, 2)),
             {"x": da.from_array(grouper, chunks=(1, 4))},
@@ -539,7 +539,7 @@ class TestGroupedStatsResults:
             return_masks=True,
         )
 
-        # 3/ Check the complete table and load only the first returned mask
+        # Check the complete table and load only the first returned mask
         pd.testing.assert_frame_equal(table, expected)
         first_mask = masks[next(iter(masks))]
         assert isinstance(first_mask, da.Array)
@@ -548,7 +548,7 @@ class TestGroupedStatsResults:
     def test_raster_grouped_stats_returns_writable_raster_masks(self, tmp_path: Path) -> None:
         """Checks that raster group masks keep their grid and boolean type when written and reopened."""
 
-        # 1/ Create a georeferenced raster and split its cells into two numeric intervals
+        # Create a georeferenced raster and split its cells into two numeric intervals
         transform = Affine(10, 0, 100, 0, -10, 200)
         raster = gu.Raster.from_array(np.arange(1, 7, dtype=float).reshape(2, 3), transform, 32631)
         grouper = np.arange(6, dtype=float).reshape(2, 3)
@@ -559,22 +559,22 @@ class TestGroupedStatsResults:
             return_masks=True,
         )
 
-        # 2/ Check that the first returned mask is a boolean Raster on the source grid
+        # Check that the first returned mask is a boolean Raster on the source grid
         first_mask = masks[table.index[0]]
         assert isinstance(first_mask, gu.Raster)
         assert first_mask.is_mask
         assert first_mask.georeferenced_grid_equal(raster)
-        # 3/ Write and reopen the mask, then compare its type and values
+        # Write and reopen the mask, then compare its type and values
         output_path = tmp_path / "group_mask.tif"
         first_mask.to_file(output_path)
         reopened = gu.Raster(output_path, is_mask=True, load_data=True)
         assert reopened.is_mask
         assert np.array_equal(reopened.data, first_mask.data)
 
-    def test_xarray_and_pointcloud_grouped_stats_preserve_support_types(self) -> None:
+    def test_xarray_and_pointcloud_grouped_stats_keep_output_types(self) -> None:
         """Checks that Xarray and PointCloud calls return masks in their own spatial object types."""
 
-        # 1/ Request masks through an Xarray raster accessor
+        # Request masks through an Xarray raster accessor
         transform = Affine(1, 0, 0, 0, -1, 2)
         raster = RasterAccessor.from_array(np.arange(6, dtype=float).reshape(2, 3), transform, 32631)
         raster_table, raster_masks = raster.rst.grouped_stats(
@@ -583,13 +583,13 @@ class TestGroupedStatsResults:
             statistics="mean",
             return_masks=True,
         )
-        # 2/ Check that the raster mask stays an Xarray object with a boolean georeferenced grid
+        # Check that the raster mask stays an Xarray object with a boolean georeferenced grid
         raster_mask = raster_masks[raster_table.index[0]]
         assert raster_mask.dtype == bool
         assert raster_mask.rst.is_mask
         assert raster_mask.rst.georeferenced_grid_equal(raster)
 
-        # 3/ Group PointCloud values with one of their own category columns
+        # Group PointCloud values with one of their own category columns
         pointcloud = gu.PointCloud.from_xyz(
             x=np.arange(6),
             y=np.zeros(6),
@@ -603,13 +603,13 @@ class TestGroupedStatsResults:
             statistics="mean",
             return_masks=True,
         )
-        # 4/ Check that the mask is a PointCloud at the original coordinates
+        # Check that the mask is a PointCloud at the original coordinates
         point_mask = point_masks[point_table.index[0]]
         assert isinstance(point_mask, gu.PointCloud)
         assert point_mask.is_mask
         assert point_mask.georeferenced_coords_equal(pointcloud)
 
-        # 5/ Request a mask when source values come from the points' Z coordinates
+        # Request a mask when source values come from the points' Z coordinates
         elevation_pointcloud = gu.PointCloud.from_xyz(
             x=np.arange(4),
             y=np.zeros(4),
@@ -623,7 +623,7 @@ class TestGroupedStatsResults:
             statistics="mean",
             return_masks=True,
         )
-        # 6/ Check that the mask adds and selects a boolean column while keeping point coordinates
+        # Check that the mask adds and selects a boolean column while keeping point coordinates
         elevation_mask = elevation_masks[elevation_table.index[0]]
         assert isinstance(elevation_mask, gu.PointCloud)
         assert elevation_mask.is_mask
@@ -643,7 +643,7 @@ class TestZonalStatistics:
     def test_feature_zones(self, backend: str, vector_object: bool) -> None:
         """Checks that vector feature names define zones with separate missing data counts and complete masks."""
 
-        # 1/ Build repeated named zones, a gap between features, and one zone outside the data
+        # Build repeated named zones, a gap between features, and one zone outside the data
         elevation = np.arange(1, 17, dtype=float).reshape(4, 4)
         other = elevation + 100
         elevation[0, 0], other[2, 3] = np.nan, np.nan
@@ -654,7 +654,7 @@ class TestZonalStatistics:
         )
         vector = gu.Vector(zones) if vector_object else zones
 
-        # 2/ Store the same two value arrays as raster bands, Xarray data, or point columns
+        # Store the same two value arrays as raster bands, Xarray data, or point columns
         selected_values: dict[str, int] | dict[str, str]
         if backend in {"raster", "xarray", "dask"}:
             source = gu.Raster.from_array(np.stack((elevation, other)), Affine(1, 0, 0, 0, -1, 4), 32631, nodata=np.nan)
@@ -677,7 +677,7 @@ class TestZonalStatistics:
             if backend == "geopandas":
                 source = source.ds.pc
 
-        # 3/ Group by the vector names, keep the outside zone, and request group masks
+        # Group by the vector names, keep the outside zone, and request group masks
         table, masks = source.grouped_stats(
             by={"zone": (vector, "id")},
             values=selected_values,
@@ -688,14 +688,14 @@ class TestZonalStatistics:
         assert isinstance(table.index, pd.CategoricalIndex)
         assert table.index.tolist() == ["west", "east", "empty"]
 
-        # 4/ Check each value's missing data separately and leave the gap outside every group
+        # Check each value's missing data separately and leave the gap outside every group
         assert table[("elevation", "count")].tolist() == [3, 4, 0]
         assert table[("other", "count")].tolist() == [4, 3, 0]
         np.testing.assert_allclose(table[("elevation", "mean")], [9, 10, np.nan], equal_nan=True)
         np.testing.assert_allclose(table[("elevation", "min")], [5, 4, np.nan], equal_nan=True)
         np.testing.assert_allclose(table[("elevation", "max")], [13, 16, np.nan], equal_nan=True)
 
-        # 5/ Check the full western zone mask, including its location with a missing selected value
+        # Check the full western zone mask, including its location with a missing selected value
         expected = np.zeros((4, 4), dtype=bool)
         expected[:, 0] = True
         west_mask = masks["west"]
@@ -708,17 +708,17 @@ class TestZonalStatistics:
     def test_vector_union_and_feature_ids(self) -> None:
         """Checks that a bare vector groups inside and outside while feature IDs keep separate zones."""
 
-        # 1/ Create two one-cell vector features separated by uncovered raster cells
+        # Create two one-cell vector features separated by uncovered raster cells
         raster = gu.Raster.from_array(np.arange(1, 9, dtype=float).reshape(2, 4), Affine(1, 0, 0, 0, -1, 2), 32631)
         zones = gu.Vector(
             gpd.GeoDataFrame({"id": ["first", "second"]}, geometry=[box(0, 1, 1, 2), box(3, 0, 4, 1)], crs=32631)
         )
 
-        # 2/ Group once by all vector coverage and once by each feature name
+        # Group once by all vector coverage and once by each feature name
         union = raster.grouped_stats(by={"inside": zones}, statistics="mean")
         features = raster.grouped_stats(by={"zone": (zones, "id")}, statistics="mean")
 
-        # 3/ Check that coverage includes outside cells while named features include only their own cells
+        # Check that coverage includes outside cells while named features include only their own cells
         assert union[("band_1", "count")].tolist() == [6, 2]
         assert features[("band_1", "count")].tolist() == [1, 1]
         assert features[("band_1", "mean")].tolist() == [1, 8]
@@ -735,7 +735,7 @@ class TestSharedSampling:
     def test_external_objects(self, lazy: bool, tmp_path: Path) -> None:
         """Checks that external raster, point, and vector values automatically use the same point locations."""
 
-        # 1/ Place points at known raster cells and give two polygons different numeric values
+        # Place points at known raster cells and give two polygons different numeric values
         raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), Affine(1, 0, 0, 0, -1, 4), 32631)
         x, y = raster.ij2xy([0, 1, 2, 3], [0, 0, 3, 3])
         frame = gpd.GeoDataFrame(
@@ -753,11 +753,13 @@ class TestSharedSampling:
         )
         if lazy:
             pytest.importorskip("dask_geopandas")
+
+            # Write the points and reopen them as lazy partitions
             filename = tmp_path / "points.gpkg"
             points.ds.to_file(filename)
             points = gu.open_pointcloud(str(filename), chunks=2, data_column="height").pc
 
-        # 2/ Let the external point data choose output locations for all selected values and groups
+        # Let the external point data choose output locations for all selected values and groups
         table, masks = raster.grouped_stats(
             by={"zone": (points, "zone")},
             categories={"zone": ["west", "east"]},
@@ -767,7 +769,7 @@ class TestSharedSampling:
             return_masks=True,
         )
 
-        # 3/ Check each mean and count separately, then check the complete western point mask
+        # Check each mean and count separately, then check the complete western point mask
         np.testing.assert_allclose(table[("raster", "mean")], [2.0, 13.0])
         np.testing.assert_allclose(table[("points", "mean")], [100.0, 102.5])
         np.testing.assert_allclose(table[("weight", "mean")], [2.0, 4.0])
@@ -784,7 +786,7 @@ class TestSharedSampling:
     def test_vector_numeric_bins_and_values(self, lazy: bool) -> None:
         """Checks that a numeric vector column can define bins and also appear as a selected value."""
 
-        # 1/ Give two separated polygons numeric values and leave one raster column uncovered
+        # Give two separated polygons numeric values and leave one raster column uncovered
         raster = gu.Raster.from_array(np.arange(12, dtype=float).reshape(3, 4), Affine(1, 0, 0, 0, -1, 3), 32631)
         features = gu.Vector(
             gpd.GeoDataFrame(
@@ -796,7 +798,7 @@ class TestSharedSampling:
         if lazy:
             raster = raster.to_xarray().chunk({"x": 2, "y": 2}).rst
 
-        # 2/ Use the vector column as numeric bins and as a selected output value
+        # Use the vector column as numeric bins and as a selected output value
         table = raster.grouped_stats(
             by={"slope": (features, "slope")},
             bins={"slope": [0, 10, 20]},
@@ -804,14 +806,14 @@ class TestSharedSampling:
             statistics="mean",
         )
 
-        # 3/ Check group counts and both means only where a polygon covers the raster
+        # Check group counts and both means only where a polygon covers the raster
         assert table[("raster", "count")].tolist() == [3, 6]
         np.testing.assert_allclose(table[("raster", "mean")], [4.0, 6.5])
         np.testing.assert_allclose(table[("slope", "mean")], [5.0, 15.0])
 
 
 class TestGroupedStatsOutputs:
-    """Checks plotting and masked inputs at the public grouped_stats() boundary.
+    """Checks grouped_stats() plots and masked inputs.
 
     The methods cover one- and two-dimensional plots, masked values, categories, and raster masks.
     """
@@ -819,11 +821,11 @@ class TestGroupedStatsOutputs:
     def test_plot_grouped_stats_supports_one_and_two_dimensions(self) -> None:
         """Checks that plotting one or two grouping variables creates the expected panels."""
 
-        # 1/ Load the optional plotting package only for this plotting test
+        # Load the optional plotting package only for this plotting test
         pytest.importorskip("matplotlib")
         import matplotlib.pyplot as plt
 
-        # 2/ Plot one grouping variable and check its count and statistic panels
+        # Plot one grouping variable and check its count and statistic panels
         one_dimensional = gu.stats.grouped_stats(
             np.arange(6, dtype=float),
             {"x": np.arange(6, dtype=float)},
@@ -833,7 +835,7 @@ class TestGroupedStatsOutputs:
         axes_1d = gu.stats.plot_grouped_stats(one_dimensional, statistic="mean")
         assert set(axes_1d) == {"count", "statistic"}
 
-        # 3/ Plot two grouping variables and check row counts, column counts, statistic, and color scale
+        # Plot two grouping variables and check row counts, column counts, statistic, and color scale
         two_dimensional = gu.stats.grouped_stats(
             np.arange(6, dtype=float),
             {"x": np.array([0, 0, 1, 1, 2, 2]), "surface": np.array(["a", "b", "a", "b", "a", "b"])},
@@ -846,10 +848,10 @@ class TestGroupedStatsOutputs:
         plt.close("all")
 
     @pytest.mark.parametrize("kind", ["integer", "boolean", "string"])
-    def test_grouped_stats_preserves_masked_values_and_categories(self, kind: str) -> None:
+    def test_grouped_stats_keeps_masked_values_and_categories(self, kind: str) -> None:
         """Checks that masked values and masked category labels are excluded independently."""
 
-        # 1/ Mask one selected value and a different group label for three category types
+        # Mask one selected value and a different group label for three category types
         values = np.ma.array([1, 2, 3, 4, 5, 6], mask=[False, True, False, False, False, False])
         group_values = {
             "integer": [0, 0, 0, 1, 1, 1],
@@ -859,7 +861,7 @@ class TestGroupedStatsOutputs:
         groups = np.ma.array(group_values[kind], mask=[False, False, True, False, False, False])
         categories = {"integer": {"group": [0, 1]}, "boolean": None, "string": {"group": ["a", "b", "N/A"]}}
 
-        # 2/ Calculate group means and request masks for the remaining category locations
+        # Calculate group means and request masks for the remaining category locations
         table, masks = gu.stats.grouped_stats(
             values,
             {"group": groups},
@@ -868,7 +870,7 @@ class TestGroupedStatsOutputs:
             return_masks=True,
         )
 
-        # 3/ Check value counts, means, and the sizes of complete group masks separately
+        # Check value counts, means, and the sizes of complete group masks separately
         assert table[("value", "count")].tolist() == [1, 3]
         assert table[("value", "mean")].tolist() == [1, 5]
         assert [int(np.count_nonzero(masks[key])) for key in masks] == [2, 3]
@@ -876,7 +878,7 @@ class TestGroupedStatsOutputs:
     def test_raster_grouped_stats_excludes_masked_integer_data_and_boolean_mask(self) -> None:
         """Checks that raster value masks and boolean user masks affect counts and group masks separately."""
 
-        # 1/ Mask one integer value and exclude two different cells through a boolean Raster mask
+        # Mask one integer value and exclude two different cells through a boolean Raster mask
         data = np.ma.array([[1, 2, 3], [4, 5, 6]], mask=[[False, True, False], [False, False, False]])
         raster = gu.Raster.from_array(data, Affine(1, 0, 0, 0, -1, 2), 32631, nodata=-9999)
         mask = raster.from_array(
@@ -885,7 +887,7 @@ class TestGroupedStatsOutputs:
             raster.crs,
         )
 
-        # 2/ Calculate one group mean and request all locations allowed by the user mask
+        # Calculate one group mean and request all locations allowed by the user mask
         table, masks = raster.grouped_stats(
             {"group": np.zeros(data.shape, dtype=int)},
             categories={"group": [0]},
@@ -894,7 +896,7 @@ class TestGroupedStatsOutputs:
             return_masks=True,
         )
 
-        # 3/ Check three available values in four group locations
+        # Check three available values in four group locations
         assert table[("band_1", "count")].tolist() == [3]
         assert table[("band_1", "mean")].tolist() == [pytest.approx(11 / 3)]
         assert int(np.count_nonzero(masks[0].data)) == 4

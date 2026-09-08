@@ -46,7 +46,7 @@ class TestPointCloudAccessor:
         dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
 
-        # 1/ Write a valid LAS header without any point records
+        # Write a valid LAS header without any point records
         # LasPy provides an independent fixture for the GeoUtils reader, including optional LAZ compression
         path = tmp_path / ("empty" + suffix)
         header = laspy.LasHeader(point_format=6, version="1.4")
@@ -54,7 +54,7 @@ class TestPointCloudAccessor:
         laspy.LasData(header).write(path)
         expected = gu.open_pointcloud(str(path), columns=columns)
 
-        # 2/ Build a lazy collection and inspect metadata without executing a partition
+        # Build a lazy collection and inspect metadata without executing a partition
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             source = gu.open_pointcloud(str(path), columns=columns, chunks=3)
@@ -64,7 +64,7 @@ class TestPointCloudAccessor:
         assert tasks == []
         graph = source.expr
 
-        # 3/ An empty computed result must preserve the requested schema and its lazy source
+        # Compute the empty collection and check its columns, types and unchanged lazy source
         assert_geodataframe_equal(source.compute(), expected)
         assert source.expr is graph and not source.pc.is_loaded
 
@@ -348,10 +348,10 @@ class TestPointCloudAccessor:
 
 class TestPointCloudElevationMetadata:
     """
-    Test elevation-column and CRS metadata owned by the Pandas point cloud accessor.
+    Checks elevation column and CRS metadata owned by the Pandas point cloud accessor.
 
     The tests cover direct Dask GeoDataFrames with empty and populated partitions, independent CRS metadata after
-    reprojection, and explicit use of 3D geometry when auxiliary numeric columns are present. Dask checks also preserve
+    reprojection, and explicit use of 3D geometry when auxiliary numeric columns are present. Dask checks also keep
     the original source graph and avoid computing partitions for metadata-only operations.
     """
 
@@ -364,7 +364,7 @@ class TestPointCloudElevationMetadata:
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
-        # 1/ Build a Dask GeoDataFrame directly, including empty and single-point collections
+        # Build a Dask GeoDataFrame directly, including empty and single-point collections
         coordinates = np.arange(point_count, dtype=float)
         frame = gu.PointCloudAccessor.from_xyz(
             500000 + coordinates * 20,
@@ -378,7 +378,7 @@ class TestPointCloudElevationMetadata:
         source = dgpd.from_geopandas(frame, chunksize=2)
         graph = source.expr
 
-        # 2/ Read CRS and select elevations using metadata alone
+        # Read CRS and select elevations using metadata alone
         # File readers populate a GeoUtils CRS cache, but direct dataframe construction must also work
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
@@ -386,16 +386,16 @@ class TestPointCloudElevationMetadata:
             source.pc.set_data_column("height")
             assert source.pc.crs == frame.crs
 
-        # 3/ Preserve the original CRS and source graph without loading any partitions
+        # Check that metadata reads keep the original CRS and source graph without loading any partitions
         assert tasks == []
         assert source.expr is graph and not source.pc.is_loaded
         assert source.crs == frame.crs
 
     @pytest.mark.parametrize("lazy", [False, True])
     def test_reproject__metadata_is_independent(self, lazy: bool) -> None:
-        """Checks that point cloud reprojection changes only the result CRS and preserves the source metadata."""
+        """Checks that point cloud reprojection changes only the result CRS and keeps the source metadata."""
 
-        # 1/ A small projected point cloud makes both the reference coordinates and metadata deterministic
+        # A small projected point cloud makes both the reference coordinates and metadata deterministic
         frame = gu.PointCloudAccessor.from_xyz([500000.0, 500020.0], [8600000.0, 8600020.0], [10.0, 20.0], crs=32633)
         source = frame
         if lazy:
@@ -409,7 +409,7 @@ class TestPointCloudElevationMetadata:
         original_crs = source.pc.crs
         assert original_crs == frame.crs
 
-        # 2/ Reprojection must not reuse a mutable CRS cache belonging to the source accessor
+        # Reprojection must not reuse a mutable CRS cache belonging to the source accessor
         result = source.pc.reproject(crs=32632)
         computed = result.compute() if lazy else result
         assert_geodataframe_equal(computed, frame.to_crs(32632))
@@ -419,15 +419,15 @@ class TestPointCloudElevationMetadata:
             assert not source.pc.is_loaded and not result.pc.is_loaded
 
     def test_data_column__explicit_geometry_elevations(self) -> None:
-        """Checks that an explicit geometry elevation choice survives auxiliary columns and accessor copies."""
+        """Checks that 3D geometry stays selected for elevations when auxiliary columns are present."""
 
-        # 1/ Keep elevations in 3D geometry and a distinct auxiliary column that must not become the main data
+        # Keep elevations in 3D geometry and a distinct auxiliary column that must not become the main data
         frame = gu.PointCloudAccessor.from_xyz([1.0, 2.0], [3.0, 4.0], [10.0, 20.0], crs=32633, use_z=True)
         frame["intensity"] = np.array([2, 4], dtype=np.uint16)
         assert frame.pc.data_column is None
         np.testing.assert_array_equal(frame.pc.data, [10.0, 20.0])
 
-        # 2/ Two accessors over the same dataframe must observe the same current elevation selection
+        # Two accessors over the same dataframe must observe the same current elevation selection
         other = gu.PointCloudAccessor(frame)
         with pytest.warns(UserWarning, match="Overriding 3D points"):
             other.set_data_column("intensity")

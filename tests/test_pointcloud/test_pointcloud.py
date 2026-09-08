@@ -109,9 +109,12 @@ class TestPointCloud:
     def test_has_z__unloaded_3d_file(self) -> None:
         """Checks that _has_z detects 3D file metadata without loading point geometries."""
 
+        # Write a point file with 3D geometry
         with tempfile.TemporaryDirectory() as temp_dir:
             filename = os.path.join(temp_dir, "points_3d.gpkg")
             self.gdf3.to_file(filename)
+
+            # Read the geometry type from file metadata without loading the points
             point_cloud = PointCloud(filename)
 
             assert point_cloud._has_z

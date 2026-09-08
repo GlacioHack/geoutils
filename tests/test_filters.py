@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from importlib.util import find_spec
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pytest
@@ -18,7 +18,7 @@ from geoutils.raster import get_array_and_mask
 
 
 class TestPatchFilters:
-    """Stacked convolution and finite counts used by empirical patch workflows."""
+    """Checks convolution and mean filtering for stacks of raster patches."""
 
     @pytest.mark.parametrize("shape", [(3, 3), (4, 4), (3, 4)])
     def test_stacked_convolution_and_kernel_orientation(self, shape: tuple[int, int]) -> None:
@@ -42,27 +42,51 @@ class TestPatchFilters:
 
         # Check the optional compiled implementation against the same independent reference
         if find_spec("numba") is not None:
-            accelerated = gu.filters.convolution(images, kernels, method="numba")
+            accelerated = gu.filters.convolution(images, kernels, engine="numba")
             np.testing.assert_allclose(accelerated, expected, equal_nan=True)
 
     @pytest.mark.parametrize("kernel_shape, expected_count", [("square", 25), ("circular", 9)])
-    def test_patch_mean_filter_valid_counts(self, kernel_shape: str, expected_count: int) -> None:
+    def test_patch_mean_filter_valid_counts(
+        self, kernel_shape: Literal["square", "circular"], expected_count: int
+    ) -> None:
         """Checks that patch filtering excludes missing values from the mean and reports finite and total counts."""
 
         # Remove the center of a constant image so the finite window count decreases by exactly one
         values = np.ones((11, 11), dtype=float)
         values[5, 5] = np.nan
 
-        # Compute means and counts with each supported kernel shape
-        mean, counts, kernel_count = gu.filters.mean_filter_nan(values, 5, kernel_shape=kernel_shape)
+        # Compute complete patch means and counts without keeping the missing center
+        mean, counts, kernel_count = gu.filters.mean_filter(
+            values,
+            5,
+            kernel_shape=kernel_shape,
+            preserve_nodata=False,
+            boundless=False,
+            return_counts=True,
+        )
 
         # Check the full kernel area, remaining finite cells and unchanged mean of one
         assert kernel_count == expected_count
         assert counts[5, 5] == expected_count - 1
         assert mean[5, 5] == 1
 
-        # Windows extending beyond the image retain the existing NaN edge convention
+        # Windows extending beyond the image keep the existing NaN edge convention
         assert np.isnan(mean[0, 0])
+
+        # Check that the compiled engine produces the same means and counts
+        if find_spec("numba") is not None:
+            accelerated_mean, accelerated_counts, accelerated_kernel_count = gu.filters.mean_filter(
+                values,
+                5,
+                kernel_shape=kernel_shape,
+                engine="numba",
+                preserve_nodata=False,
+                boundless=False,
+                return_counts=True,
+            )
+            np.testing.assert_allclose(accelerated_mean, mean, equal_nan=True)
+            np.testing.assert_allclose(accelerated_counts, counts, equal_nan=True)
+            assert accelerated_kernel_count == kernel_count
 
 
 class TestGaussianFilter:
@@ -91,9 +115,10 @@ class TestGaussianFilter:
         assert np.nanmax(raster_with_nans) >= np.nanmax(raster_sm)
 
         # 3D arrays
-        array_3d = np.vstack((raster_array[np.newaxis, :], raster_array[np.newaxis, :]))
+        array_3d = np.stack((raster_array, raster_array + 100))
         raster_sm = gu.filters.gaussian_filter(array_3d, sigma=5)
-        assert array_3d.shape == raster_sm.shape
+        expected = np.stack([gu.filters.gaussian_filter(band, sigma=5) for band in array_3d])
+        np.testing.assert_allclose(raster_sm, expected)
 
         # 1D array should raise
         data = raster_array[:, 0]
@@ -101,7 +126,7 @@ class TestGaussianFilter:
 
 
 class TestStatisticalFilters:
-    """Tests for statistical filters: mean, median, min, max."""
+    """Checks statistical filters and SciPy/Numba consistency across all built-in filters."""
 
     landsat_data = gu.Raster(gu.examples.get_path("everest_landsat_b4")).astype(np.float32)
 
@@ -159,24 +184,45 @@ class TestStatisticalFilters:
             assert np.max(raster_filtered) == np.nanmax(raster_with_nans_filtered)
 
         if name != "mean":
-            array_3d = np.vstack((raster_array[np.newaxis, :], raster_array[np.newaxis, :]))
+            array_3d = np.stack((raster_array, raster_array + 100))
             raster_filtered = filter_func(array_3d)
-            assert array_3d.shape == raster_filtered.shape
+            expected = np.stack([filter_func(band) for band in array_3d])
+            np.testing.assert_allclose(raster_filtered, expected)
             data = raster_array[:, 0]
             pytest.raises(ValueError, filter_func, data)
 
-    def test_median_filter_nan_consistency(self) -> None:
-        """Test that different median filter engines return consistent results with NaNs."""
+    @pytest.mark.parametrize(
+        "filter_func, kwargs",
+        [
+            (gu.filters.gaussian_filter, {"sigma": 1}),
+            (gu.filters.median_filter, {"size": 3}),
+            (gu.filters.mean_filter, {"size": 3}),
+            (gu.filters.min_filter, {"size": 3}),
+            (gu.filters.max_filter, {"size": 3}),
+            (gu.filters.distance_filter, {"sigma": 1, "outlier_threshold": 2}),
+        ],
+    )
+    def test_filter_engines_consistent(self, filter_func: Callable[..., NDArrayNum], kwargs: dict[str, Any]) -> None:
+        """Checks that the SciPy and Numba engines return consistent results with missing values."""
 
         pytest.importorskip("numba")
 
+        # Filter the same array with SciPy and Numba
         arr = np.array([[1, 2, np.nan], [4, np.nan, 6], [7, 8, 9]], dtype=np.float32)
-        filtered_scipy = gu.filters.median_filter(arr, size=3, engine="scipy")
-        filtered_numba = gu.filters.median_filter(arr, size=3, engine="numba")
+        filtered_scipy = filter_func(arr, engine="scipy", **kwargs)
+        filtered_numba = filter_func(arr, engine="numba", **kwargs)
 
+        # Check equal shapes, values and missing pixels
         assert filtered_scipy.shape == arr.shape
         assert filtered_numba.shape == arr.shape
-        assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
+        np.testing.assert_allclose(filtered_scipy, filtered_numba, equal_nan=True, rtol=1e-6, atol=1e-6)
+
+        # Filters that support stacks must also agree while keeping bands independent
+        if filter_func is not gu.filters.mean_filter:
+            array_3d = np.stack((arr, arr + 10))
+            filtered_scipy = filter_func(array_3d, engine="scipy", **kwargs)
+            filtered_numba = filter_func(array_3d, engine="numba", **kwargs)
+            np.testing.assert_allclose(filtered_scipy, filtered_numba, equal_nan=True, rtol=1e-6, atol=1e-6)
 
     @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")
     def test_filter_numba__missing_dep(self) -> None:

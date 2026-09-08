@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Subsampling tools shared by raster and point cloud data."""
+"""Module for array sampling statistics."""
 
 from __future__ import annotations
 
@@ -55,23 +55,25 @@ except ImportError:
         return decorator
 
 
-####################################
-# 1/ SHARED SIZE AND NUMPY SAMPLING
-####################################
+###################################################
+# 1/ SUBSAMPLING AT FINITE RANDOM POINT COORDINATES
+###################################################
+
+# Common input check
 
 
 def _get_subsample_size_from_user_input(
     subsample: int | float,
     total_nb_valids: int,
 ) -> int:
-    """Turn a requested count or fraction into the number of available values to sample."""
+    """Get subsample size based on a user input of either integer size or fraction of the number of valid points."""
 
-    # Use values up to one as a fraction of all available values
+    # If value is between 0 and 1, use a fraction
     if (subsample <= 1) & (subsample > 0):
         npoints = int(subsample * total_nb_valids)
-    # Use larger values as a requested count
+    # Otherwise use the value directly
     elif subsample > 1:
-        # Return every available value when the requested count is larger
+        # Use the number of valid points if larger than subsample asked by user
         npoints = min(int(subsample), total_nb_valids)
         if subsample > total_nb_valids:
             warnings.warn(
@@ -91,10 +93,13 @@ def _get_subsample_size_from_user_input(
 
 
 def _splitmix64(x: np.typing.NDArray[np.uint64]) -> NDArrayNum:
-    """Give each unsigned integer a repeatable, well distributed sampling score.
+    """
+    Vectorized SplitMix64 mixer from uint64 to uint64.
 
-    The `topk` strategy scores global cell numbers with this function. It therefore selects the same cells for any
-    Dask chunk layout. We keep the small algorithm here because NumPy does not expose the equivalent internal step.
+    This function performs a fast deterministic mapping from integer IDs to "random-looking" 64-bit keys,
+    that we use further below for reproducible subsampling based on global linear indices (the chunk-independent method
+    "topk").
+    We cannot use NumPy directly here because they don't expose their mixers used under-the-hood.
 
     References
     ----------
@@ -103,23 +108,26 @@ def _splitmix64(x: np.typing.NDArray[np.uint64]) -> NDArrayNum:
     - Sebastiano Vigna, SplitMix64 reference implementation, https://prng.di.unimi.it/splitmix64.c
     """
 
-    # Use unsigned 64-bit arithmetic required by the published algorithm
+    # Force input to uint64 to avoid accidental casting
     x = np.asarray(x, dtype=np.uint64)
     mask = np.uint64(0xFFFFFFFFFFFFFFFF)
 
-    # Shift consecutive cell numbers before mixing their bits
+    # Add a large odd constant derived from the golden ratio
+    # This ensures that consecutive inputs do not map to related outputs
     x = (x + np.uint64(0x9E3779B97F4A7C15)) & mask
 
-    # Mix high and low bits so nearby cell numbers receive unrelated scores
+    # First mixing step: XOR-shift to spread high bits into low bits, then multiply by a chosen odd constant
     z = x
     z = (z ^ (z >> 30)) * np.uint64(0xBF58476D1CE4E5B9)  # type: ignore[assignment]
     z &= mask
 
-    # Mix a second time so every input bit can affect the final score
+    # Second mixing step: Another XOR-shift followed by multiplication with a different constant
+    # The constants were empirically chosen to achieve strong avalanche properties (each input bit affects
+    # many output bits)
     z = (z ^ (z >> 27)) * np.uint64(0x94D049BB133111EB)  # type: ignore[assignment]
     z &= mask
 
-    # Apply the final bit shift from the reference implementation
+    # Final XOR-shift to finish diffusion
     z = z ^ (z >> 31)  # type: ignore[assignment]
 
     return z.astype(np.uint64, copy=False)
@@ -170,45 +178,45 @@ def _subsample_numpy(
     :returns: The subsampled array (1D) or the indices to extract (same shape as input array).
     """
 
-    # Find available values and number their positions across the flattened array
+    # Determine valid pixels and their global linear indices (row * nx + col)
     mask = get_mask_from_array(array)
     valids = np.flatnonzero(~mask.ravel())  # Robust 1D index list (global linear indices)
     total_nb_valids = int(valids.size)
 
-    # Return the requested empty result when the array has no available value
+    # If no valid values, early return
     if total_nb_valids == 0:
         if return_indices:
             return tuple(np.array([], dtype=int) for _ in range(array.ndim))
         return np.array([], dtype=array.dtype)
 
-    # Turn the caller's count or fraction into the final sample size
+    # Get subsample size (depending on user input) using the helper
     subsample_size = _get_subsample_size_from_user_input(subsample=subsample, total_nb_valids=total_nb_valids)
 
-    # Preserve the established meaning of one: return every available value
+    # If subsample is exactly 1, we don't subsample: return all valid values/indices
     if subsample == 1:
         unraveled = np.unravel_index(valids, array.shape)
         return unraveled if return_indices else array[unraveled]
 
-    # Return an empty result when a small fraction rounds down to zero
+    # If requested size is 0, we return empty
     if subsample_size <= 0:
         if return_indices:
             return tuple(np.array([], dtype=int) for _ in range(array.ndim))
         return np.array([], dtype=array.dtype)
 
-    # Draw directly from the available positions for the faster `sequential` strategy
+    # STRATEGY 1: "sequential", we use a random order for the index of valid values
     if strategy == "sequential":
 
         rng = np.random.default_rng(random_state)
-        # Choose positions without replacement
+        # Choose random indexes among all valids
         chosen = rng.choice(valids, subsample_size, replace=False)
 
-        # Convert flat positions back to array indexes when requested
+        # Unravel indexes, and return values or indexes
         unraveled = np.unravel_index(chosen, array.shape)
         return unraveled if return_indices else array[unraveled]
 
-    # Score global positions for the `topk` strategy so chunk layout does not change the sample
+    # STRATEGY 2: "topk", deterministic by global linear index (gaves the same result with Dask/Multiprocessing)
     elif strategy == "topk":
-        # Convert either random-state form to one integer seed
+        # Convert random_state into a stable integer seed used in key generation
         if isinstance(random_state, np.random.Generator):
             seed = int(random_state.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
         elif random_state is None:
@@ -216,16 +224,16 @@ def _subsample_numpy(
         else:
             seed = int(random_state)
 
-        # Give every available position a repeatable random score
+        # Get global indexes and their keys
         gids = valids.astype(np.uint64)
         keys = _splitmix64(np.uint64(seed) ^ gids)
 
-        # Keep the positions with the smallest scores in a stable order
+        # Global linear indices of chosen valid pixels
         sel = np.argpartition(keys, subsample_size - 1)[:subsample_size]
         sel = sel[np.lexsort((gids[sel], keys[sel]))]  # Stable: key then gid
         chosen = valids[sel]
 
-        # Convert flat positions back to array indexes when requested
+        # Unravel indexes, and return values or indexes
         unraveled = np.unravel_index(chosen, array.shape)
         return unraveled if return_indices else array[unraveled]
 
@@ -233,18 +241,29 @@ def _subsample_numpy(
         raise ValueError(f"Unknown strategy {strategy!r}. Choose 'sequential' or 'topk'.")
 
 
-######################
-# 2/ DASK SAMPLING
-######################
+#####################
+# Dask implementation
+#####################
 
-# Dask cannot know how many available values each chunk will return before running it. We therefore use delayed
-# tasks for results with different lengths: https://blog.dask.org/2021/07/02/ragged-output
+# At the date of April 2024:
+# Getting an exact subsample size out-of-memory only for valid values is not supported directly by Dask/Xarray
+
+# It is not trivial because we don't know where valid values will be in advance, and because of ragged output (varying
+# output length considerations), which prevents from using high-level functions with good efficiency
+# We thus follow https://blog.dask.org/2021/07/02/ragged-output (the dask.array.map_blocks solution has a larger RAM
+# usage by having to drop an axis and re-chunk along 1D of the 2D array, so we use the delayed solution instead)
 
 
 def _get_indices_block_per_subsample(
     indices_1d: NDArrayNum, num_chunks: tuple[int, int], nb_valids_per_block: list[int]
 ) -> list[list[int]]:
-    """Map selected positions in the full list of available values to positions within each Dask chunk.
+    """
+    Get list of 1D valid subsample indices relative to the block for each block.
+
+    The 1D valid subsample indices correspond to the subsample index to apply for a flattened array of valid values.
+    Relative to the block means converted so that the block indexes for valid values starts at 0 up to the number of
+    valid values in that block (while the input indices go from zero to the total number of valid values in the full
+    array).
 
     :param indices_1d: Subsample 1D indexes among a total number of valid values.
     :param num_chunks: Number of chunks in X and Y.
@@ -253,22 +272,22 @@ def _get_indices_block_per_subsample(
     :returns: Relative 1D valid subsample index per block.
     """
 
-    # Find where each chunk ends in the full list of available values
+    # Apply a cumulative sum to get the first 1D total index of each block
     valids_cumsum = np.cumsum(nb_valids_per_block)
 
-    # Sort once so we can walk through chunks in order
+    # We can write a faster algorithm by sorting
     indices_1d = np.sort(indices_1d)
 
-    # Create one list of selected positions for each chunk
+    # We define a list of indices per block
     relative_index_per_block = [[] for _ in range(num_chunks[0] * num_chunks[1])]
     k = 0  # K is the block number
     for i in indices_1d:
 
-        # Move to the chunk that contains this position in the full list
+        # Move to the next block K where current 1D subsample index is, if not in this one
         while i >= valids_cumsum[k]:
             k += 1
 
-        # Store the position relative to the start of that chunk's list of available values
+        # Add 1D subsample index  relative to first subsample index of this block
         first_index_block = valids_cumsum[k - 1] if k >= 1 else 0  # The first 1D valid subsample index of the block
         relative_index = i - first_index_block
         relative_index_per_block[k].append(relative_index)
@@ -278,7 +297,7 @@ def _get_indices_block_per_subsample(
 
 @delayed
 def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool) -> NDArrayNum:
-    """Count available values in one Dask chunk."""
+    """Count number of valid values per block."""
     if arr_chunk.dtype == np.bool_:
         return np.array([np.count_nonzero(arr_chunk)]).reshape((1, 1))
     return np.array([np.count_nonzero(np.isfinite(arr_chunk))]).reshape((1, 1))
@@ -294,51 +313,59 @@ def _delayed_topk_candidates_block(
     nx_full: int,  # Width of full array
     return_indices_local: bool,
 ) -> tuple[NDArrayNum, NDArrayNum | NDArrayBool]:
-    """Return up to `k` available values or cell numbers with their sampling scores from one chunk."""
+    """
+    Return up to k valid samples from one block as (keys, payload).
 
-    # Return empty arrays when this task does not need a sample
+    Those are:
+    - keys: uint64 keys for selected valid pixels in this block
+    - payload:
+        * if return_indices_local=True: global linear indices (gid) of selected pixels (int64)
+        * else: selected values from the array (dtype of arr_chunk, but typically float)
+    """
+
+    # If no samples, return empty
     if k <= 0:
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=np.int64)
 
-    # Treat finite numbers and true boolean cells as available values
+    # Only valid values are sampled (finite for numerical arrays, True for boolean arrays)
     if np.issubdtype(arr_chunk.dtype, np.bool_):
         valid = arr_chunk
     else:
         valid = np.isfinite(arr_chunk)
 
-    # Find available positions in the flattened chunk
+    # Get nonzero indices for flattened array, and number of valid values
     flat = np.flatnonzero(valid.ravel())
     nvalid = int(flat.size)
 
-    # Return empty arrays when the chunk has no available value
+    # If no valid
     if nvalid == 0:
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=np.int64)
 
-    # Convert flat chunk positions to rows and columns within the chunk
+    # Convert flat relative indices to local (row, col) within the chunk
     ncols = int(arr_chunk.shape[1])
     r = flat // ncols
     c = flat - r * ncols
 
-    # Add the chunk start to recover full array cell numbers
+    # Get absolute indices by adding  metadata passed to this chunk
     row0 = int(block_id["row_start"])
     col0 = int(block_id["col_start"])
     gid = (row0 + r) * nx_full + (col0 + c)
 
-    # Score each cell from only the seed and its full array position
+    # Get deterministic key per pixel based only on (seed, gid)
     key = _splitmix64(np.uint64(seed) ^ gid.astype(np.uint64))
 
-    # Keep the smallest scores needed from this chunk
+    # Keep only the smallest m keys in this block (m <= k)
     m = min(int(k), nvalid)
     sel = np.argpartition(key, m - 1)[:m]
     key_sel = key[sel]
 
-    # Return full array cell numbers when requested
+    # If return indices
     if return_indices_local:
         gid_sel = gid[sel]
         return key_sel, gid_sel
-    # Otherwise return the selected values
+    # Otherwise, returning values
     else:
-        # Boolean samples contain true values by definition
+        # Extract values for selected valid pixels
         if np.issubdtype(arr_chunk.dtype, np.bool_):
             vals = np.ones(m, dtype=np.bool_)
         else:
@@ -353,37 +380,44 @@ def _delayed_merge_topk(
     *,
     k: int,
 ) -> tuple[NDArrayNum, NDArrayNum]:
-    """Combine chunk results and keep the `k` smallest scores across the full array."""
+    """
+    Merge per-block candidates and return the global top-k by key.
 
-    # Return empty arrays when there are no chunk results
+    This global reduction steps allows to make the strategy chunk-invariant.
+    """
+
+    # If list of all keys is empty, return empty results
     if len(keys_list) == 0:
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=np.int64)
 
-    # Join the scores and matching values or cell numbers from every chunk
+    # Flatten and concatenate all per-block candidate outputs into one global list
     keys = np.concatenate([np.asarray(x, dtype=np.uint64).ravel() for x in keys_list], axis=0)
     payload = np.concatenate([np.asarray(x).ravel() for x in payload_list], axis=0)
 
-    # Return the joined empty arrays when no chunk found an available value
+    # Handle the case of no valid pixels anywhere
     n = int(keys.size)
     if n == 0:
         return keys, payload
 
-    # Keep at most the requested number of scores
+    # We only need the global top-k smallest keys (k may exceed n if there are fewer candidates than requested)
     m = min(int(k), n)
 
-    # Find the smallest scores without sorting values that will be discarded
+    # Select indices of the m smallest keys efficiently
+    #  (np.argpartition is O(n) average and avoids sorting the full array which would be O(n log n))
     sel = np.argpartition(keys, m - 1)[:m]
 
-    # Sort the kept scores so repeated calls return the same order
+    # Sort the selected indices by their key values to produce a stable, deterministic ordering
     sel = sel[np.argsort(keys[sel])]
 
-    # Return the kept scores with their matching values or cell numbers
+    # Return the m smallest keys and their associated payload entries
     return keys[sel], payload[sel]
 
 
 @delayed
 def _delayed_gid_to_rc(gid: NDArrayNum, nx_full: int) -> tuple[NDArrayNum, NDArrayNum]:
-    """Convert flattened full array positions back to row and column numbers."""
+    """
+    Convert global linear indices back to (row, col) indices.
+    """
     gid = np.asarray(gid, dtype=np.int64).ravel()
     r = gid // np.int64(nx_full)
     c = gid - r * np.int64(nx_full)
@@ -394,7 +428,7 @@ def _delayed_gid_to_rc(gid: NDArrayNum, nx_full: int) -> tuple[NDArrayNum, NDArr
 def _delayed_subsample_block(
     arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum
 ) -> NDArrayNum | NDArrayBool:
-    """Read selected positions from one chunk's list of available values."""
+    """Subsample the valid values at the corresponding 1D valid indices per block."""
 
     if arr_chunk.dtype == np.bool_:
         return arr_chunk[arr_chunk][subsample_indices]
@@ -405,17 +439,17 @@ def _delayed_subsample_block(
 def _delayed_subsample_indices_block(
     arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum, block_id: dict[str, Any]
 ) -> NDArrayNum:
-    """Convert selected positions in one chunk's available values to full array rows and columns."""
+    """Return 2D indices from the subsampled 1D valid indices per block."""
 
     if arr_chunk.dtype == np.bool_:
         ix, iy = np.unravel_index(np.argwhere(arr_chunk.flatten())[subsample_indices], shape=arr_chunk.shape)
     else:
-        # Convert selected flat positions to rows and columns within the chunk
+        #  Unravel indices of valid data to the shape of the block
         ix, iy = np.unravel_index(
             np.argwhere(np.isfinite(arr_chunk.flatten()))[subsample_indices], shape=arr_chunk.shape
         )
 
-    # Add the chunk start to recover full array rows and columns
+    # Convert to full-array indexes by adding the row and column starting indexes for this block
     ix += block_id["row_start"]
     iy += block_id["col_start"]
 
@@ -429,86 +463,92 @@ def _dask_subsample(
     random_state: int | np.random.Generator | None = None,
     strategy: Literal["sequential", "topk"] = "sequential",
 ) -> da.Array | tuple[da.Array, da.Array]:
-    """Sample available values from a 2D Dask array without loading the full array.
+    """
+    Subsample valid values out-of-memory from a 2D Dask array.
 
-    `topk` matches NumPy for any chunk layout. `sequential` is slightly faster, but changing chunks can change its
-    sample. The result stays lazy and contains either values or row and column numbers.
+    Strategy "topk" is chunk-invariant (same sample no matter chunk size, and same as the NumPy implementation), while
+    "sequential" is chunk-dependent but slightly faster.
+
+    Returns a delayed subsampled Dask array of the output (either values or indices).
     """
 
-    # Raise the standard optional package error before building Dask tasks
+    # To raise appropriate error on missing optional dependency
     import_optional("dask")
 
-    # Prepare the random generator used by the faster sequential strategy
+    # Get random state
+    # For method="sequential", we use the RNG stream based on valid orders (chunk-dependent)
+    # For method="topk", we convert random_state into an integer seed used in the deterministic key function
     rng = np.random.default_rng(random_state)
 
-    # Get one delayed object per chunk in row-major order
+    # Create a delayed object for each block, and flatten the blocks into a 1d shape
     blocks = darr.to_delayed().ravel()
 
-    # Count available values in each chunk without loading the full array
+    # Compute number of valid points for each block out-of-memory
     list_delayed_valids = [
         da.from_delayed(_delayed_nb_valids(b), shape=(1, 1), dtype=np.dtype("int32")) for b in blocks
     ]
-    # Run all count tasks once and store one count per chunk
+    # Compute once, then flatten
     nb_valids_per_block = np.concatenate([x.ravel() for x in dask.compute(*list_delayed_valids)], axis=0).astype(
         np.int64
     )
 
-    # Add chunk counts to get the full number of available values
+    # Sum to get total number of valid points
     total_nb_valids = int(np.sum(nb_valids_per_block))
 
-    # Turn the caller's count or fraction into the final sample size
+    # Get subsample size (depending on user input)
     subsample_size = _get_subsample_size_from_user_input(subsample=subsample, total_nb_valids=total_nb_valids)
 
-    # Return the requested empty result when no value can be sampled
+    # Quick exit if there are no valid pixels or subsample_size is 0
     if subsample_size <= 0 or total_nb_valids <= 0:
         if return_indices:
             return np.empty((0,), dtype=np.int64), np.empty((0,), dtype=np.int64)
         else:
             return np.empty((0,), dtype=darr.dtype)
 
-    # 1/ Find the first full array row and column of every chunk
-    # This follows the chunk-location data passed by dask.array.map_blocks():
+    # 1/ Build block IDs (starting indices for each block in the full array)
+
+    # We get starting 2D index for each chunk of the full array (mirroring what is done in dask.array.map_blocks)
     # https://github.com/dask/dask/blob/24493f58660cb933855ba7629848881a6e2458c1/dask/array/core.py#L908
-    # cached_cumsum() also returns the unused array end after the final chunk
+    # This list also includes the last index as well (not used here)
     starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
     num_chunks = darr.numblocks
 
-    # Match each flattened delayed chunk with its row and column in the chunk grid
+    # Get the starts per 1D block ID by unravelling starting indexes for each block
     indexes_yb, indexes_xb = np.unravel_index(np.arange(len(blocks)), shape=(num_chunks[0], num_chunks[1]))
 
     block_ids = [
         {"row_start": starts[0][indexes_yb[i]], "col_start": starts[1][indexes_xb[i]]} for i in range(len(blocks))
     ]
 
-    # 2a/ Draw positions from the combined list of available values for `sequential`
+    # STRATEGY 1: "sequential" (chunk-dependent)
     if strategy == "sequential":
 
-        # Draw positions without replacement
+        # Get random 1D indexes for the subsample size
         indices_1d = rng.choice(total_nb_valids, subsample_size, replace=False)
 
-        # Map each selected position to its chunk and its position within that chunk
+        # Sort which indexes belong to which chunk
         ind_per_block = _get_indices_block_per_subsample(
             indices_1d, num_chunks=darr.numblocks, nb_valids_per_block=nb_valids_per_block.tolist()
         )
 
-        # Read selected values when the caller does not request their locations
+        # To just get the subsample without indices
         if not return_indices:
-            # Create tasks only for chunks that contain a selected value
+            # Task a delayed subsample to be computed for each block, skipping blocks with no values to sample
             used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
             list_subsamples = [
                 _delayed_subsample_block(blocks[i], np.asarray(ind_per_block[i], dtype=np.int64)) for i in used
             ]
 
-            # Give Dask each task's known size and join the lazy results
+            # Cast output to the right expected dtype and length, then compute and concatenate
             list_subsamples_da = [
                 da.from_delayed(s, shape=(len(ind_per_block[i]),), dtype=darr.dtype)
                 for s, i in zip(list_subsamples, used)
             ]
             return da.concatenate(list_subsamples_da, axis=0)
 
-        # Convert selected positions to full array rows and columns when requested
+        # To return indices
         else:
-            # Create tasks only for chunks that contain a selected position
+            # Task delayed subsample indices to be computed for each block, skipping blocks with no values to sample
             used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
             list_subsample_indices = [
                 _delayed_subsample_indices_block(
@@ -517,7 +557,7 @@ def _dask_subsample(
                 for i in used
             ]
 
-            # Give Dask each task's known size and join the lazy row and column pairs
+            # Cast output to the right expected dtype and length, then compute and concatenate
             list_indices_da = [
                 da.from_delayed(s, shape=(len(ind_per_block[i]), 2), dtype=np.int32)
                 for s, i in zip(list_subsample_indices, used)
@@ -525,10 +565,10 @@ def _dask_subsample(
             indices = da.concatenate(list_indices_da, axis=0)
             return indices[:, 0], indices[:, 1]
 
-    # 2b/ Score full array cell numbers for `topk` so chunk layout does not change the sample
+    # STRATEGY 2: "topk" (chunk-invariant; deterministic by (seed, global linear index))
     elif strategy == "topk":
 
-        # Convert either random-state form to one integer seed
+        # Convert random_state to an integer seed for deterministic key generation
         if isinstance(random_state, np.random.Generator):
             seed = int(random_state.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
         elif random_state is None:
@@ -536,10 +576,10 @@ def _dask_subsample(
         else:
             seed = int(random_state)
 
-        # Keep the full array width needed to flatten row and column numbers
+        # Full-array width for global linear indexing
         nx_full = int(darr.shape[1])
 
-        # Ask each chunk for up to the requested number of smallest scores
+        # One candidate extraction task per block: Each block returns up to subsample_size candidates (keys + payload)
         cands = [
             _delayed_topk_candidates_block(
                 blocks[i],
@@ -552,22 +592,23 @@ def _dask_subsample(
             for i in range(len(blocks))
         ]
 
-        # Separate scores from their matching values or cell numbers
+        # Separate keys and payload lists (payload are either values or global linear indices)
         keys_list = [c[0] for c in cands]
         payload_list = [c[1] for c in cands]
 
-        # Keep the smallest scores across all chunks
+        # Global merge to get the top-k across all blocks
         merged = _delayed_merge_topk(keys_list, payload_list, k=subsample_size)
 
-        # Keep the merged values or cell numbers as a delayed result
+        # Lazily extract tuple elements
         payload_delayed = dask.delayed(operator.getitem)(merged, 1)
 
         if not return_indices:
-            # Tell Dask the final value count, which was fixed after counting available cells
+            # The payload is a Delayed object that returns a 1D numpy array of length smaller than subsample_size
+            # We know the final size is exactly subsample_size
             return da.from_delayed(payload_delayed, shape=(subsample_size,), dtype=darr.dtype)
 
         else:
-            # Convert flattened full array positions to lazy row and column arrays
+            # The payload is global linear indices (gid) that we convert lazily to (row, col)
             rr_cc = _delayed_gid_to_rc(payload_delayed, nx_full)
             rr_delayed = dask.delayed(operator.getitem)(rr_cc, 0)
             cc_delayed = dask.delayed(operator.getitem)(rr_cc, 1)
@@ -580,13 +621,13 @@ def _dask_subsample(
         raise ValueError(f"Unknown strategy {strategy!r}, available strategies are 'sequential' or 'topk'.")
 
 
-###############################
-# 3/ MULTIPROCESSING SAMPLING
-###############################
+################################
+# Multiprocessing implementation
+################################
 
 
 def _wrapper_multiproc_nb_valids_per_block(rst: Raster, tile_idx: NDArrayNum) -> int:
-    """Read one raster tile and count its available values."""
+    """Count valid values in one tile out-of-memory."""
     rst_block = rst.icrop((tile_idx[2], tile_idx[0], tile_idx[3], tile_idx[1]))
     arr = rst_block.data
 
@@ -600,13 +641,15 @@ def _wrapper_multiproc_subsample_values_block(
     tile_idx: NDArrayNum,
     subsample_indices_rel: NDArrayNum,
 ) -> NDArrayNum:
-    """Read selected positions from one tile's list of available values."""
+    """
+    Subsample values in one tile using 1D indices relative to the tile's valid-value list.
+    """
 
-    # Read only this tile from the raster
+    # Get tile out-of-memory
     rst_block = rst.icrop((tile_idx[2], tile_idx[0], tile_idx[3], tile_idx[1]))
     arr = rst_block.data
 
-    # Return finite numbers or true boolean cells at the selected positions
+    # Return subsample of finite values (or True values for boolean input)
     if np.issubdtype(arr.dtype, np.bool_):
         return arr[arr].ravel()[subsample_indices_rel]
     return arr[np.isfinite(arr)].ravel()[subsample_indices_rel]
@@ -617,26 +660,30 @@ def _wrapper_multiproc_subsample_indices_block(
     tile_idx: NDArrayNum,
     subsample_indices_rel: NDArrayNum,
 ) -> NDArrayNum:
-    """Return full raster rows and columns for selected available values in one tile."""
+    """
+    Return indices of the sampled valid pixels in one tile.
 
-    # Read only this tile from the raster
+    Output shape: (n, 2) with columns [row, col] in full-array coordinates.
+    """
+
+    # Get tile out-of-memory
     rst_block = rst.icrop((tile_idx[2], tile_idx[0], tile_idx[3], tile_idx[1]))
     arr = rst_block.data
 
-    # Record where this tile starts in the full raster
+    # Get starting row/col of the tile
     row0 = int(tile_idx[0])
     col0 = int(tile_idx[2])
 
-    # Find finite numbers or true boolean cells inside the tile
+    # Get relative indices of finite values (or True for boolean)
     if np.issubdtype(arr.dtype, np.bool_):
         flat_valid = np.flatnonzero(arr.ravel())
     else:
         flat_valid = np.flatnonzero(np.isfinite(arr).ravel())
 
-    # Select the requested positions in the tile's list of available values
+    # Use input to draw them
     flat_sel = flat_valid[subsample_indices_rel.astype(np.int64)]
 
-    # Convert tile positions to full raster rows and columns
+    # Transform back into absolute indices
     ncols = int(arr.shape[1])
     r = (flat_sel // ncols).astype(np.int64) + row0
     c = (flat_sel - (flat_sel // ncols) * ncols).astype(np.int64) + col0
@@ -653,21 +700,27 @@ def _wrapper_multiproc_topk_candidates_block(
     nx_full: int,
     return_indices: bool,
 ) -> tuple[NDArrayNum, NDArrayNum | NDArrayBool]:
-    """Return up to `k` available values or cell numbers with their sampling scores from one raster tile."""
+    """
+    Return up to k candidates from one tile as (keys, payload).
 
-    # Return empty arrays when this task does not need a sample
+    keys: uint64 keys for selected valid pixels in this tile.
+    payload:
+      - if return_indices=True: global linear indices (gid = row*nx_full + col) (int64)
+      - else: sampled values (array dtype)
+    """
+    # If no subsample, early return
     if k <= 0:
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=np.int64)
 
-    # Read only this tile from the raster
+    # Get tile out-of-memory
     rst_block = rst.icrop((tile_idx[2], tile_idx[0], tile_idx[3], tile_idx[1]))
     arr = rst_block.data
 
-    # Record where this tile starts in the full raster
+    # Tile offsets in full-array indices
     row0 = int(tile_idx[0])
     col0 = int(tile_idx[2])
 
-    # Find finite numbers or true boolean cells inside the tile
+    # Get valids indices
     if np.issubdtype(arr.dtype, np.bool_):
         valid = arr
     else:
@@ -675,30 +728,30 @@ def _wrapper_multiproc_topk_candidates_block(
     flat = np.flatnonzero(valid.ravel())
     nvalid = int(flat.size)
 
-    # Return empty arrays when the tile has no available value
+    # If no valid, early return
     if nvalid == 0:
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=np.int64)
 
-    # Convert flat tile positions to rows and columns within the tile
+    # Get relative row and columns
     ncols = int(arr.shape[1])
     r = flat // ncols
     c = flat - r * ncols
 
-    # Convert full raster rows and columns to one flat cell number
+    # Global linear index from absolute row and columns: gid = (row0 + r) * nx_full + (col0 + c)
     gid = (np.int64(row0) + r.astype(np.int64)) * np.int64(nx_full) + (np.int64(col0) + c.astype(np.int64))
-    # Score each cell from only the seed and its full raster position
+    # Derive key from gid
     key = _splitmix64(np.uint64(seed) ^ gid.astype(np.uint64))
 
-    # Keep the smallest scores needed from this tile
+    # Select the appropriate number of keys
     m = min(int(k), nvalid)
     sel = np.argpartition(key, m - 1)[:m]
     key_sel = key[sel]
 
-    # Return full raster cell numbers when requested
+    # If we return indices
     if return_indices:
         return key_sel, gid[sel]
 
-    # Otherwise return the selected values
+    # If we return values
     if np.issubdtype(arr.dtype, np.bool_):
         vals = np.ones(m, dtype=np.bool_)
     else:
@@ -714,24 +767,27 @@ def _multiproc_subsample(
     random_state: int | np.random.Generator | None = None,
     strategy: Literal["sequential", "topk"] = "sequential",
 ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
-    """Sample available raster values by reading separate tiles in worker processes.
+    """
+    Subsample valid values out-of-memory from a 2D raster array using Multiprocessing tasks.
 
-    `topk` matches NumPy for any tile size. `sequential` is slightly faster, but changing tile sizes can change its
-    sample. The function joins worker results into values or full raster row and column numbers.
+    Strategy "topk" is chunk-invariant (same sample no matter chunk size, and same as the NumPy implementation), while
+    "sequential" is chunk-dependent but slightly faster.
+
+    Returns a concatenated subsampled NumPy array collected from all tasks (either values or indices).
     """
 
-    # Split the raster into the requested worker tiles
+    # Get tiling
     tiling = compute_tiling(tile_size=config.chunks, raster_shape=rst.shape, overlap=0)
 
-    # Count tiles along each raster direction
+    # Get number of chunks and blocks
     num_chunks = (tiling.shape[0], tiling.shape[1])
     num_blocks = int(np.prod(num_chunks))
 
-    # List tiles from left to right and top to bottom
+    # Flatten tile_idx list in row-major block order
     indexes_row, indexes_col = np.unravel_index(np.arange(num_blocks), shape=num_chunks)
     tile_ids = [tiling[indexes_row[i], indexes_col[i], :] for i in range(num_blocks)]
 
-    # Count available values in every tile using worker tasks
+    # Count valid values per tile in parallel
     tasks = [config.cluster.submit(_wrapper_multiproc_nb_valids_per_block, rst, tile_ids[i]) for i in range(num_blocks)]
     try:
         nb_valids_per_block = np.array(config.cluster.gather(tasks), dtype=np.int64)
@@ -740,23 +796,23 @@ def _multiproc_subsample(
 
     total_nb_valids = int(nb_valids_per_block.sum())
 
-    # Turn the caller's count or fraction into the final sample size
+    # Get subsample size (depending on user input)
     subsample_size = _get_subsample_size_from_user_input(subsample=subsample, total_nb_valids=total_nb_valids)
 
-    # Return the requested empty result when no value can be sampled
+    # Early exit if too few samples or valids
     if subsample_size <= 0 or total_nb_valids <= 0:
         if return_indices:
             return np.empty((0,), dtype=np.int64), np.empty((0,), dtype=np.int64)
         return np.empty((0,), dtype=rst.dtype)
 
-    # Draw positions from the combined list of available values for `sequential`
+    # METHOD 1: sequential (chunk-dependent)
     if strategy == "sequential":
         rng = np.random.default_rng(random_state)
 
-        # Draw positions without replacement
+        # Sample indices among the valids
         indices_1d = rng.choice(total_nb_valids, subsample_size, replace=False)
 
-        # Map each selected position to its tile and its position within that tile
+        # Map the sampled indices to per-tile relative indices
         ind_per_block = _get_indices_block_per_subsample(
             indices_1d=indices_1d,
             num_chunks=num_chunks,
@@ -765,7 +821,7 @@ def _multiproc_subsample(
 
         used = [i for i in range(num_blocks) if len(ind_per_block[i]) > 0]
 
-        # Read selected values in worker processes when locations are not requested
+        # Sample them through multiprocessing, either for indices or values
         if not return_indices:
             tasks = [
                 config.cluster.submit(
@@ -782,7 +838,7 @@ def _multiproc_subsample(
             except Exception as e:
                 raise RuntimeError(f"Error retrieving subsampled values from multiprocessing tasks: {e}")
 
-            # Join results in tile order so the same tile layout returns the same order
+            # Concatenate in tile order (this yields deterministic order given tiling; not random order)
             return np.concatenate(list_vals, axis=0)
 
         else:
@@ -806,10 +862,10 @@ def _multiproc_subsample(
             cols = rc[:, 1].astype(np.int64)
             return rows, cols
 
-    # Score full raster cell numbers for `topk` so tile size does not change the sample
+    # METHOD 2: topk (chunk-invariant)
     elif strategy == "topk":
 
-        # Convert either random-state form to one integer seed
+        # Convert random_state to an integer seed used in deterministic keys
         if isinstance(random_state, np.random.Generator):
             seed = int(random_state.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
         elif random_state is None:
@@ -817,7 +873,7 @@ def _multiproc_subsample(
         else:
             seed = int(random_state)
 
-        # Keep the raster width needed to flatten row and column numbers
+        # Get full-array width
         nx_full = int(rst.shape[1])
 
         tasks = [
@@ -858,7 +914,7 @@ def _multiproc_subsample(
         if not return_indices:
             return payload_sel
 
-        # Convert flattened full raster positions back to rows and columns
+        # payload is gid -> (row, col)
         gid = payload_sel.astype(np.int64)
         rows = gid // np.int64(nx_full)
         cols = gid - rows * np.int64(nx_full)
@@ -868,9 +924,9 @@ def _multiproc_subsample(
         raise ValueError(f"Unknown strategy {strategy!r}. Choose 'sequential' or 'topk'.")
 
 
-##########################
-# 4/ PUBLIC METHOD ROUTING
-##########################
+######################################################
+# Wrapper dispatching to NumPy or Dask/Multiprocessing
+######################################################
 
 
 def _subsample(
@@ -883,26 +939,25 @@ def _subsample(
     strategy: Literal["sequential", "topk"] = "sequential",
     mp_config: MultiprocConfig | None = None,
 ) -> Any:
-    """Run a raster's NumPy, Dask, or multiprocessing sampling path.
-
-    _multiproc_subsample() reads separate raster tiles in workers. _dask_subsample() keeps chunked input lazy, and
-    _subsample_numpy() handles data already held in memory.
+    """
+    Subsample an array at valid values, dispatching automatically to NumPy, Dask or Multiprocessing implementation.
 
     :param source_raster: Input array (NumPy/masked or Dask).
     :param subsample: Subsample size or fraction.
     :param band: Band to subsample.
     :param return_indices: If True, return (rows, cols) indices instead of values.
     :param random_state: Seed or Generator.
-    :param strategy: Either "sequential" (depends on chunk order) or "topk" (same for every chunk layout).
+    :param strategy: Either "sequential" (chunk/order dependent) or "topk" (chunk-invariant).
 
     :returns:
       - values: 1D array of sampled values
       - indices: (rows, cols) (axis order)
-      - for Dask input: lazy `da.Array` values or indexes
+      - for Dask input: returns lazy `da.Array` unless compute=True
     """
 
-    # Detect the one storage path that should perform the sample
+    # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
+    # The check below can only run on Xarray
     dask_backend = da is not None and source_raster._chunks is not None
 
     if mp_backend and dask_backend:
@@ -924,10 +979,10 @@ def _subsample(
         "strategy": strategy,
     }
 
-    # Read raster tiles in worker processes when requested
+    # Multiprocessing (out-of-memory)
     if mp_backend:
         assert mp_config is not None
-        # Expose only the selected band while worker tasks read raster tiles
+        # Temporary switch bands
         orig_bands = source_raster.bands
         source_raster._bands = (band,)
         try:
@@ -939,10 +994,10 @@ def _subsample(
             arr = source_raster.data[band - 1, :, :]
         else:
             arr = source_raster.data
-        # Keep Dask input lazy through the Dask sampling path
+        # Dask (out-of-memory)
         if dask_backend:
             return _dask_subsample(arr, **subsample_kwargs)
-        # Sample an in-memory array directly with NumPy
+        # NumPy
         else:
             return _subsample_numpy(arr, **subsample_kwargs)  # type: ignore
 
@@ -953,7 +1008,7 @@ def _subsample_pointcloud(
     return_indices: bool = False,
     random_state: int | np.random.Generator | None = None,
 ) -> NDArrayNum | tuple[NDArrayNum, ...]:
-    """Load one point cloud value column and sample it with the shared NumPy path."""
+    """Subsample point-cloud values after materializing any lazy data column."""
 
     data = source_pointcloud.data.compute().values if source_pointcloud._is_dask else np.asarray(source_pointcloud.data)
     if return_indices:

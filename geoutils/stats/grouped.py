@@ -6,7 +6,7 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""Calculate statistics for values split into bins or categories."""
+"""Grouped statistics for values split into bins or categories, including zonal statistics."""
 
 from __future__ import annotations
 

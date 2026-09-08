@@ -45,9 +45,9 @@ class TestAccessor:
 
     @pytest.mark.parametrize("lazy", [False, True])
     def test_to_geoutils__loading_laziness(self, tmp_path: Path, lazy: bool) -> None:
-        """Checks that native conversion loads ordinary DataArrays and preserves Dask source graphs and exact data."""
+        """Checks that native conversion loads exact values while keeping a Dask source lazy."""
 
-        # 1/ Include a gap and Point metadata so conversion must preserve more than the elevation values
+        # Write a test file with a missing pixel and Point metadata
         values = np.arange(35, dtype=np.float32).reshape(5, 7)
         values[2, 3] = np.nan
         reference = gu.Raster.from_array(
@@ -61,14 +61,14 @@ class TestAccessor:
         graph = source.data if lazy else None
         assert not source._in_memory
 
-        # 2/ Converting explicitly materializes the native result while retaining a lazy caller's array
+        # Convert to a loaded Raster while keeping the caller's Dask array lazy
         result = source.rst.to_geoutils()
         assert isinstance(result, gu.Raster) and result.is_loaded
         assert source._in_memory is not lazy
         if lazy:
             assert source.data is graph
 
-        # 3/ Compare values, missing pixels and the complete spatial reference after checking loading behavior
+        # Check exact values, missing pixels and the complete spatial reference
         assert reference.raster_equal(result, strict_masked=False, warn_failure_reason=True)
         if lazy:
             assert source.data is graph and not source._in_memory

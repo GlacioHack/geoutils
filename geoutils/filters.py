@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numpy as np
 import scipy
@@ -160,40 +160,22 @@ def _filter_base(
     if np.ma.isMaskedArray(array):
         array = array.filled(np.nan)
 
-    # With new SciPy, just use vectorized version
-    filter_map: dict[str, Callable[..., NDArrayNum]]
-    if Version(scipy.__version__) > Version("1.16.0"):
-        filter_map = {
-            "gaussian": gaussian_filter,
-            "median": lambda arr, size=size, **_: generic_filter_scipy(
-                arr, np.nanmedian, size=size, mode="constant", cval=np.nan
-            ),
-            "mean": lambda arr, size=size, **_: generic_filter_scipy(
-                arr, np.nanmean, size=size, mode="constant", cval=np.nan
-            ),
-            "max": lambda arr, size=size, **_: generic_filter_scipy(
-                arr, np.nanmax, size=size, mode="constant", cval=np.nan
-            ),
-            "min": lambda arr, size=size, **_: generic_filter_scipy(
-                arr, np.nanmin, size=size, mode="constant", cval=np.nan
-            ),
-            "distance": distance_filter,
-        }
-    # With old SciPy, maintain speed with tricks from older custom filters
-    else:
-        filter_map = {
-            "gaussian": gaussian_filter,
-            "median": lambda arr, size=size, **_: median_filter(arr, size=size),
-            "mean": lambda arr, size=size, **_: mean_filter(arr, size=size),
-            "max": lambda arr, size=size, **_: max_filter(arr, size=size),
-            "min": lambda arr, size=size, **_: min_filter(arr, size=size),
-            "distance": distance_filter,
-        }
+    # Use the named implementations so optimized filters and their engines remain available on every SciPy version
+    filter_map: dict[str, Callable[..., Any]] = {
+        "gaussian": gaussian_filter,
+        "median": median_filter,
+        "mean": mean_filter,
+        "max": max_filter,
+        "min": min_filter,
+        "distance": distance_filter,
+    }
 
     if isinstance(method, str):
         if method not in filter_map:
             raise ValueError(f"Unsupported filter method '{method}'. Available: {list(filter_map)}")
         func = filter_map[method]
+        if method in {"median", "mean", "max", "min"}:
+            kwargs["size"] = size
     elif callable(method):
         func = method
     else:
@@ -287,7 +269,7 @@ def _filter(
         kwargs = {}
     if method == "gaussian":
         kwargs.update({"sigma": sigma})
-    if method == "median":
+    if isinstance(method, str) and method in {"gaussian", "median", "mean", "max", "min", "distance"}:
         kwargs.update({"engine": engine})
     if method == "distance":
         kwargs.update({"outlier_threshold": outlier_threshold})
@@ -303,30 +285,80 @@ def _filter(
     return source_raster.copy(new_array=array)
 
 
-def gaussian_filter(array: NDArrayNum, sigma: float = 1, **kwargs: Any) -> NDArrayNum:
+def _validate_filter_engine(engine: str) -> None:
+    """Check that a filter engine is supported and load Numba only when requested."""
+
+    if engine not in {"scipy", "numba"}:
+        raise ValueError('Engine must be "scipy" or "numba".')
+    if engine == "numba":
+        import_optional("numba")
+
+
+def gaussian_filter(
+    array: NDArrayNum, sigma: float = 1, engine: Literal["scipy", "numba"] = "scipy", **kwargs: Any
+) -> NDArrayNum:
     """
     Apply a Gaussian filter to a raster that may contain NaNs.
     N.B: kernel_size is set automatically based on sigma.
 
+    For 3D arrays, each 2D band is filtered independently.
+
     :param array: The input array to be filtered.
     :param sigma: The sigma of the Gaussian kernel
+    :param engine: Filtering engine to use, either "scipy" or "numba".
 
     :returns: The filtered array (same shape as input)
     """
 
-    if array.ndim == 1:
+    if array.ndim not in [2, 3]:
         raise ValueError("Gaussian filter can't be applied to 1D arrays.")
+    _validate_filter_engine(engine)
+    if sigma < 0:
+        raise ValueError("Sigma must be non-negative.")
+
+    # Add a band dimension to 2D inputs so both shapes follow the same filtering path
+    squeeze = array.ndim == 2
+    bands = array[np.newaxis] if squeeze else array
 
     # Boolean mask: True where NaN
-    mask = np.isnan(array)
+    mask = np.isnan(bands)
     mask_f = (~mask).astype(float)
 
     # Replace NaNs with 0
-    arr_filled = np.where(mask, 0, array)
+    arr_filled = np.where(mask, 0, bands)
 
     # Apply gaussian filter to values and mask
-    filtered = scipy.ndimage.gaussian_filter(arr_filled, sigma, mode="constant", cval=0, **kwargs)
-    normalization = scipy.ndimage.gaussian_filter(mask_f, sigma, mode="constant", cval=0, **kwargs)
+    if engine == "scipy":
+        if squeeze:
+            filtered = scipy.ndimage.gaussian_filter(arr_filled[0], sigma, mode="constant", cval=0, **kwargs)[
+                np.newaxis
+            ]
+            normalization = scipy.ndimage.gaussian_filter(mask_f[0], sigma, mode="constant", cval=0, **kwargs)[
+                np.newaxis
+            ]
+        else:
+            filtered = np.stack(
+                [scipy.ndimage.gaussian_filter(band, sigma, mode="constant", cval=0, **kwargs) for band in arr_filled]
+            )
+            normalization = np.stack(
+                [scipy.ndimage.gaussian_filter(band, sigma, mode="constant", cval=0, **kwargs) for band in mask_f]
+            )
+    else:
+        truncate = float(kwargs.pop("truncate", 4.0))
+        if kwargs:
+            raise ValueError("The Numba engine only supports the 'truncate' Gaussian filter option.")
+
+        # Build SciPy's one-dimensional Gaussian kernel and convolve along each spatial axis
+        radius = int(truncate * sigma + 0.5)
+        coordinates = np.arange(-radius, radius + 1, dtype=float)
+        kernel_1d = np.exp(-0.5 / sigma**2 * coordinates**2) if sigma > 0 else np.ones(1)
+        kernel_1d /= kernel_1d.sum()
+        horizontal_kernel = kernel_1d.reshape(1, 1, -1)
+        vertical_kernel = kernel_1d.reshape(1, -1, 1)
+        filtered = convolution(arr_filled, horizontal_kernel, engine="numba", cval=0)[:, 0]
+        filtered = convolution(filtered, vertical_kernel, engine="numba", cval=0)[:, 0]
+        normalization = convolution(mask_f, horizontal_kernel, engine="numba", cval=0)[:, 0]
+        normalization = convolution(normalization, vertical_kernel, engine="numba", cval=0)[:, 0]
 
     # Avoid division by zero
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -335,7 +367,7 @@ def gaussian_filter(array: NDArrayNum, sigma: float = 1, **kwargs: Any) -> NDArr
     # Where normalization is zero, set result to NaN
     filtered[normalization == 0] = np.nan
 
-    return filtered
+    return filtered[0] if squeeze else filtered
 
 
 @jit(nopython=True, parallel=True)
@@ -390,6 +422,7 @@ def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"
 
     if size % 2 == 0:
         raise ValueError("`size` must be odd.")
+    _validate_filter_engine(engine)
 
     if array.ndim == 2:
         return _apply_median_filter_2d(array, size, engine)
@@ -417,87 +450,246 @@ def _apply_median_filter_2d(
         return np.where(nans, array, median_vals)
 
     else:
-        import_optional("numba")
         median_vals = median_filter_numba(array, size)
         return np.where(nans, array, median_vals)
 
 
-def mean_filter(array: NDArrayNum, size: int = 5) -> NDArrayNum:
+@overload
+def mean_filter(
+    array: NDArrayNum,
+    size: int = 5,
+    *,
+    kernel_shape: Literal["square", "circular"] = "square",
+    engine: Literal["scipy", "numba"] = "scipy",
+    preserve_nodata: bool = True,
+    boundless: bool = True,
+    return_counts: Literal[False] = False,
+) -> NDArrayNum: ...
+
+
+@overload
+def mean_filter(
+    array: NDArrayNum,
+    size: int = 5,
+    *,
+    kernel_shape: Literal["square", "circular"] = "square",
+    engine: Literal["scipy", "numba"] = "scipy",
+    preserve_nodata: bool = True,
+    boundless: bool = True,
+    return_counts: Literal[True],
+) -> tuple[NDArrayNum, NDArrayNum, int]: ...
+
+
+def mean_filter(
+    array: NDArrayNum,
+    size: int = 5,
+    *,
+    kernel_shape: Literal["square", "circular"] = "square",
+    engine: Literal["scipy", "numba"] = "scipy",
+    preserve_nodata: bool = True,
+    boundless: bool = True,
+    return_counts: bool = False,
+) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum, int]:
     """
     Apply a mean filter to a 2D array that may contain NaNs.
 
-    :param array: 2D input array
-    :param size: size of the square kernel
-    :no_data: no data value
-    :return: filtered array with same shape
+    :param array: 2D input array.
+    :param size: Size of the square or circular kernel.
+    :param kernel_shape: Shape of the kernel, either "square" or "circular".
+    :param engine: Filtering engine to use, either "scipy" or "numba".
+    :param preserve_nodata: Whether missing input cells remain missing in the output.
+    :param boundless: Whether to compute partial windows along array edges.
+    :param return_counts: Whether to also return finite cell counts and the total kernel cell count.
+    :returns: Filtered array, optionally with the finite counts and total kernel cell count.
     """
     if array.ndim != 2:
         raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
+    _validate_filter_engine(engine)
 
     # Mask nodata values
-    nans = np.isnan(array)
-    mask = ~np.isnan(array)
-    array_filled = np.where(mask, array, 0)
-    # Compute sum over the kernel
-    sum_vals = scipy.ndimage.uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
-    # Count of valid (non-nodata) pixels in the kernel
-    count_vals = scipy.ndimage.uniform_filter(mask.astype(float), size=size, mode="constant", cval=0.0)
+    valid = np.isfinite(array)
+    array_filled = np.where(valid, array, 0)
+
+    # Define the cells included in the requested kernel
+    if kernel_shape == "square":
+        kernel = None
+        kernel_count = size**2
+    elif kernel_shape == "circular":
+        kernel = _create_circular_mask((size, size)).astype(float)
+        kernel_count = int(np.count_nonzero(kernel))
+    else:
+        raise ValueError('Kernel shape should be "square" or "circular".')
+
+    # Keep the optimized SciPy implementation used by the existing square mean filter
+    if engine == "scipy" and kernel_shape == "square":
+        sum_vals = scipy.ndimage.uniform_filter(array_filled, size=size, mode="constant", cval=0.0)
+        count_vals = scipy.ndimage.uniform_filter(valid.astype(float), size=size, mode="constant", cval=0.0)
+        finite_counts = np.rint(count_vals * kernel_count) if return_counts else None
+    else:
+        if kernel is None:
+            kernel = np.ones((size, size), dtype=float)
+        sum_vals = convolution(array_filled[np.newaxis], kernel[np.newaxis], engine=engine, cval=0)[0, 0]
+        finite_counts = convolution(valid.astype(float)[np.newaxis], kernel[np.newaxis], engine=engine, cval=0)[0, 0]
+        count_vals = finite_counts
 
     with np.errstate(invalid="ignore", divide="ignore"):
         mean_vals = sum_vals / count_vals
 
-    return np.where(nans, array, mean_vals)
+    # Exclude windows that extend beyond the image when complete patches are required
+    if not boundless:
+        before = (size - 1) // 2
+        after = size // 2
+        if before > 0:
+            mean_vals[:before, :] = np.nan
+            mean_vals[:, :before] = np.nan
+            if finite_counts is not None:
+                finite_counts[:before, :] = np.nan
+                finite_counts[:, :before] = np.nan
+        if after > 0:
+            mean_vals[-after:, :] = np.nan
+            mean_vals[:, -after:] = np.nan
+            if finite_counts is not None:
+                finite_counts[-after:, :] = np.nan
+                finite_counts[:, -after:] = np.nan
+
+    if preserve_nodata:
+        mean_vals = np.where(valid, mean_vals, array)
+
+    if return_counts:
+        assert finite_counts is not None
+        return mean_vals, finite_counts, kernel_count
+    return mean_vals
 
 
-def min_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
+@jit(nopython=True, parallel=True, cache=True)
+def _minmax_filter_numba(array: NDArrayNum, size: int, fill_value: float, find_maximum: bool) -> NDArrayNum:
+    """Apply a compiled minimum or maximum filter independently to stacked 2D arrays."""
+
+    before = size // 2
+    padded = np.full(
+        (array.shape[0], array.shape[1] + size - 1, array.shape[2] + size - 1),
+        fill_value,
+        dtype=array.dtype,
+    )
+    padded[
+        :,
+        before : before + array.shape[1],
+        before : before + array.shape[2],
+    ] = array
+    output = np.empty_like(array)
+
+    for band in prange(array.shape[0]):
+        for row in range(array.shape[1]):
+            for col in range(array.shape[2]):
+                result = fill_value
+                for window_row in range(size):
+                    for window_col in range(size):
+                        value = padded[band, row + window_row, col + window_col]
+                        if (find_maximum and value > result) or (not find_maximum and value < result):
+                            result = value
+                output[band, row, col] = result
+
+    return output
+
+
+def min_filter(
+    array: NDArrayNum, size: int = 5, engine: Literal["scipy", "numba"] = "scipy", **kwargs: Any
+) -> NDArrayNum:
     """
-    Apply a minimum filter to a raster that may contain NaNs, using scipy's implementation.
+    Apply a minimum filter to a raster that may contain NaNs.
+
+    For 3D arrays, each 2D band is filtered independently.
 
     :param array: The input array to be filtered.
     :param size:  the shape that is taken from the input array, at every element position,
     to define the input to the filter function
+    :param engine: Filtering engine to use, either "scipy" or "numba".
 
     :returns: The filtered array (same shape as input).
     """
     # Check that array dimension is 2 or 3
     if array.ndim not in [2, 3]:
         raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
+    _validate_filter_engine(engine)
 
     nans = np.isnan(array)
     # We replace temporarily NaNs by infinite values during filtering to avoid spreading NaNs
     array_nans_replaced = np.where(nans, np.inf, array)
-    array_nans_replaced_f = scipy.ndimage.minimum_filter(
-        array_nans_replaced, size=size, mode="constant", cval=np.inf, **kwargs
-    )
+    if engine == "scipy":
+        if array.ndim == 2:
+            array_nans_replaced_f = scipy.ndimage.minimum_filter(
+                array_nans_replaced, size=size, mode="constant", cval=np.inf, **kwargs
+            )
+        else:
+            array_nans_replaced_f = np.stack(
+                [
+                    scipy.ndimage.minimum_filter(band, size=size, mode="constant", cval=np.inf, **kwargs)
+                    for band in array_nans_replaced
+                ]
+            )
+    else:
+        if kwargs:
+            raise ValueError("The Numba engine does not support additional minimum filter options.")
+        bands = array_nans_replaced[np.newaxis] if array.ndim == 2 else array_nans_replaced
+        array_nans_replaced_f = _minmax_filter_numba(bands, size, np.inf, False)
+        if array.ndim == 2:
+            array_nans_replaced_f = array_nans_replaced_f[0]
     # In the end, we want the filtered array without infinite values, so we put back NaNs
     return np.where(nans, array, array_nans_replaced_f)
 
 
-def max_filter(array: NDArrayNum, size: int = 5, **kwargs: Any) -> NDArrayNum:
+def max_filter(
+    array: NDArrayNum, size: int = 5, engine: Literal["scipy", "numba"] = "scipy", **kwargs: Any
+) -> NDArrayNum:
     """
-    Apply a maximum filter to a raster that may contain NaNs, using scipy's implementation.
+    Apply a maximum filter to a raster that may contain NaNs.
+
+    For 3D arrays, each 2D band is filtered independently.
 
     :param array: the input array to be filtered.
     :param size:  the shape that is taken from the input array, at every element position,
     to define the input to the filter function
+    :param engine: Filtering engine to use, either "scipy" or "numba".
 
     :returns: the filtered array (same shape as input).
     """
     # Check that array dimension is 2 or 3
     if array.ndim not in [2, 3]:
         raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
+    _validate_filter_engine(engine)
 
     nans = np.isnan(array)
     # We replace temporarily NaNs by negative infinite values during filtering to avoid spreading NaNs
     array_nans_replaced = np.where(nans, -np.inf, array)
-    array_nans_replaced_f = scipy.ndimage.maximum_filter(
-        array_nans_replaced, size=size, mode="constant", cval=-np.inf, **kwargs
-    )
+    if engine == "scipy":
+        if array.ndim == 2:
+            array_nans_replaced_f = scipy.ndimage.maximum_filter(
+                array_nans_replaced, size=size, mode="constant", cval=-np.inf, **kwargs
+            )
+        else:
+            array_nans_replaced_f = np.stack(
+                [
+                    scipy.ndimage.maximum_filter(band, size=size, mode="constant", cval=-np.inf, **kwargs)
+                    for band in array_nans_replaced
+                ]
+            )
+    else:
+        if kwargs:
+            raise ValueError("The Numba engine does not support additional maximum filter options.")
+        bands = array_nans_replaced[np.newaxis] if array.ndim == 2 else array_nans_replaced
+        array_nans_replaced_f = _minmax_filter_numba(bands, size, -np.inf, True)
+        if array.ndim == 2:
+            array_nans_replaced_f = array_nans_replaced_f[0]
     # In the end we want the filtered array without negative infinite values, so we put back NaNs
     return np.where(nans, array, array_nans_replaced_f)
 
 
-def distance_filter(array: NDArrayNum, sigma: float = 5, outlier_threshold: float = 2) -> NDArrayNum:
+def distance_filter(
+    array: NDArrayNum,
+    sigma: float = 5,
+    outlier_threshold: float = 2,
+    engine: Literal["scipy", "numba"] = "scipy",
+) -> NDArrayNum:
     """
     Filter out pixels whose value is distant more than a set threshold from the average value of all neighbor \
     pixels within a given radius.
@@ -507,6 +699,7 @@ def distance_filter(array: NDArrayNum, sigma: float = 5, outlier_threshold: floa
     :param array: Input array to be filtered.
     :param sigma: Radius in which the average value is calculated (for Gaussian filter, this is sigma).
     :param outlier_threshold: the minimum difference abs(array - mean) for a pixel to be considered an outlier.
+    :param engine: Filtering engine to use, either "scipy" or "numba".
 
     :returns: the filtered array (same shape as input)
     """
@@ -514,8 +707,8 @@ def distance_filter(array: NDArrayNum, sigma: float = 5, outlier_threshold: floa
     valid_mask = np.isfinite(array)
 
     # Smooth both the data and the valid mask
-    smoothed = gaussian_filter(np.nan_to_num(array, nan=0.0), sigma=sigma)
-    normalization = gaussian_filter(valid_mask.astype(float), sigma=sigma)
+    smoothed = gaussian_filter(np.nan_to_num(array, nan=0.0), sigma=sigma, engine=engine)
+    normalization = gaussian_filter(valid_mask.astype(float), sigma=sigma, engine=engine)
 
     # Avoid division by zero
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -552,7 +745,7 @@ def generic_filter(
 
 
 #########################################
-# STACKED CONVOLUTION AND PATCH FILTERS
+# STACKED CONVOLUTION
 #########################################
 
 
@@ -577,7 +770,40 @@ def _create_circular_mask(
     return mask
 
 
-def convolution(imgs: NDArrayNum, filters: NDArrayNum, method: str = "scipy") -> NDArrayNum:
+@jit(nopython=True, parallel=True, cache=True)
+def _convolution_numba(imgs: NDArrayNum, filters: NDArrayNum, output: NDArrayNum) -> NDArrayNum:
+    """Accumulate convolution over image and kernel stacks using compiled loops."""
+
+    # Read image and kernel dimensions for the output loops
+    n_N, N1, N2 = imgs.shape
+    n_M, M1, M2 = filters.shape
+
+    # Restrict windows to complete footprints within the padded input
+    row_range = N1 - M1 + 1
+    col_range = N2 - M2 + 1
+
+    # Accumulate each output pixel from its complete input window
+    for ii in range(n_N):
+        for rr in prange(row_range):
+            for cc in range(col_range):
+                for m1 in range(M1):
+                    for m2 in range(M2):
+                        for ff in range(n_M):
+                            imgval = imgs[ii, rr + m1, cc + m2]
+
+                            # Reverse both kernel axes to compute convolution
+                            filterval = filters[ff, M1 - 1 - m1, M2 - 1 - m2]
+                            output[ii, ff, rr, cc] += imgval * filterval
+
+    return output
+
+
+def convolution(
+    imgs: NDArrayNum,
+    filters: NDArrayNum,
+    engine: Literal["scipy", "numba"] = "scipy",
+    cval: float = np.nan,
+) -> NDArrayNum:
     """
     Convolution on a number n_N of 2D images of size N1 x N2 using a number of kernels n_M of sizes M1 x M2, using
     either scipy.ndimage.convolve or accelerated numba loops.
@@ -586,7 +812,8 @@ def convolution(imgs: NDArrayNum, filters: NDArrayNum, method: str = "scipy") ->
 
     :param imgs: Input array of size (n_N, N1, N2) with n_N images of size N1 x N2
     :param filters: Input array of filters of size (n_M, M1, M2) with n_M filters of size M1 x M2
-    :param method: Method to perform the convolution: "scipy" or "numba"
+    :param engine: Filtering engine to use, either "scipy" or "numba".
+    :param cval: Value used outside the image boundaries.
 
     :return: Filled array of outputs of size (n_N, n_M, N1, N2)
     """
@@ -596,6 +823,7 @@ def convolution(imgs: NDArrayNum, filters: NDArrayNum, method: str = "scipy") ->
     filters = np.asarray(filters, dtype=float)
     if imgs.ndim != 3 or filters.ndim != 3 or any(size < 1 for size in filters.shape):
         raise ValueError("Images and filters must be 3D stacks with non-empty kernels.")
+    _validate_filter_engine(engine)
 
     # Initialize output array according to input shapes
     n_N, N1, N2 = imgs.shape
@@ -603,112 +831,25 @@ def convolution(imgs: NDArrayNum, filters: NDArrayNum, method: str = "scipy") ->
     output = np.zeros((n_N, n_M, N1, N2))
 
     # Apply each kernel to each image, preserving the existing NaN padding outside the image
-    if method.lower() == "scipy":
+    if engine == "scipy":
         for image_index in range(n_N):
             for filter_index in range(n_M):
                 output[image_index, filter_index] = scipy.ndimage.convolve(
-                    imgs[image_index], filters[filter_index], mode="constant", cval=np.nan
+                    imgs[image_index], filters[filter_index], mode="constant", cval=cval
                 )
-    elif "numba" in method.lower():
-        # Load compilation support only when the caller selects the optional Numba implementation
-        numba = import_optional("numba")
-
-        @numba.njit(parallel=True)
-        def _numba_convolution(imgs: NDArrayNum, filters: NDArrayNum, output: NDArrayNum) -> NDArrayNum:
-            """Accumulate convolution over image and kernel stacks using compiled loops."""
-            # Read image and kernel dimensions for the output loops
-            n_N, N1, N2 = imgs.shape
-            n_M, M1, M2 = filters.shape
-
-            # Restrict windows to complete footprints within the padded input
-            row_range = N1 - M1 + 1
-            col_range = N2 - M2 + 1
-
-            # Accumulate each output pixel from its complete input window
-            for ii in range(n_N):
-                for rr in numba.prange(row_range):
-                    for cc in numba.prange(col_range):
-                        for m1 in range(M1):
-                            for m2 in range(M2):
-                                for ff in range(n_M):
-                                    imgval = imgs[ii, rr + m1, cc + m2]
-
-                                    # Reverse both kernel axes to compute convolution rather than correlation
-                                    filterval = filters[ff, M1 - 1 - m1, M2 - 1 - m2]
-                                    output[ii, ff, rr, cc] += imgval * filterval
-
-            return output
-
+    else:
         # Pad asymmetrically for even kernel widths so compiled loops match SciPy's kernel origin
         half_M1 = int((M1 - 1) / 2)
         half_M2 = int((M2 - 1) / 2)
-        imgs_pad = np.pad(imgs, pad_width=((0, 0), (half_M1, M1 // 2), (half_M2, M2 // 2)), constant_values=np.nan)
-        output = _numba_convolution(
+        imgs_pad = np.pad(
+            imgs,
+            pad_width=((0, 0), (half_M1, M1 // 2), (half_M2, M2 // 2)),
+            constant_values=cval,
+        )
+        output = _convolution_numba(
             imgs=imgs_pad,
             filters=filters,
             output=output,
         )
-    else:
-        raise ValueError('Method must be "scipy" or "numba".')
 
     return output
-
-
-def mean_filter_nan(
-    img: NDArrayNum, kernel_size: int, kernel_shape: str = "circular", method: str = "scipy"
-) -> tuple[NDArrayNum, NDArrayNum, int]:
-    """
-    Apply a mean filter to an image with a square or circular kernel of size p and with NaN values ignored.
-
-    :param img: Input array of size (N1, N2)
-    :param kernel_size: Size M of kernel, which will be a symmetrical (M, M) kernel
-    :param kernel_shape: Shape of kernel, either "square" or "circular"
-    :param method: Method to perform the convolution: "scipy" or "numba"
-
-    :return: Array of size (N1, N2) with mean values, Array of size (N1, N2) with number of valid pixels, Number of
-        pixels in the kernel
-    """
-
-    # Use one width for both axes of the square or circular kernel
-    p = kernel_size
-
-    # Copy the array and replace NaNs by zeros before summing them in the convolution
-    img_zeroed = img.copy()
-    img_zeroed[~np.isfinite(img_zeroed)] = 0
-
-    # Define the cells belonging to the requested kernel shape
-    if kernel_shape.lower() == "square":
-        kernel = np.ones((p, p), dtype="uint8")
-
-    # Use the same circle boundary convention as the empirical patch method
-    elif kernel_shape.lower() == "circular":
-        kernel = _create_circular_mask((p, p)).astype("uint8")
-    else:
-        raise ValueError('Kernel shape should be "square" or "circular".')
-
-    # Run convolution to compute the sum of img values
-    summed_img = convolution(
-        imgs=img_zeroed.reshape((1, img_zeroed.shape[0], img_zeroed.shape[1])),
-        filters=kernel.reshape((1, kernel.shape[0], kernel.shape[1])),
-        method=method,
-    ).squeeze()
-
-    # Count only finite observations when normalizing each window sum
-    nodata_img = np.ones(np.shape(img), dtype=np.int8)
-    nodata_img[~np.isfinite(img)] = 0
-
-    # Count the number of valid pixels in the kernel with a convolution
-    nb_valid_img = convolution(
-        imgs=nodata_img.reshape((1, nodata_img.shape[0], nodata_img.shape[1])),  # type: ignore
-        filters=kernel.reshape((1, kernel.shape[0], kernel.shape[1])),
-        method=method,
-    ).squeeze()
-
-    # Divide by finite counts and leave windows without valid data undefined
-    with np.errstate(divide="ignore", invalid="ignore"):
-        mean_img = summed_img / nb_valid_img
-
-    # Retain the full kernel count so callers can reject incompletely observed windows
-    nb_pixel_per_kernel = np.count_nonzero(kernel)
-
-    return mean_img, nb_valid_img, nb_pixel_per_kernel
