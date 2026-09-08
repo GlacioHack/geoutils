@@ -19,8 +19,8 @@
 
 """This module defines the cluster configurations."""
 
-import sys
 import multiprocessing
+import sys
 from multiprocessing.pool import Pool
 from typing import Any, Callable, Dict, Optional
 
