@@ -169,32 +169,18 @@ class TestMultiRaster:
         warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
         warnings.filterwarnings("ignore", category=UserWarning, message="Unmasked values equal to*")
 
-        # Merge the two overlapping DEMs and check that output bounds and shape is correct
-        if rasters.img1.count > 1:
-            # Check warning is raised once
-            with pytest.warns(
-                expected_warning=UserWarning,
-                match="Some input Rasters have multiple bands, only their first band will be used.",
-            ):
-                stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2])
-            # Then ignore the other ones
-            warnings.filterwarnings(
-                "ignore",
-                category=UserWarning,
-                message="Some input Rasters have multiple bands, only their first band will be used.",
-            )
+        ########
+        # Check when use_ref_bounds is False (so dst_bounds is merge of all inputs)
+        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2])
 
-        else:
-            stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2])
-
-        assert stacked_img.count == 2
+        assert isinstance(stacked_img, gu.Raster)  # Check output object is always Raster, whatever input was given
+        assert stacked_img.count == rasters.img1.count + rasters.img2.count
         # If the rasters were in a different projection, the final shape can vary by 1 pixel
         if not all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
             assert rasters.img.height == pytest.approx(stacked_img.height, abs=1)
             assert rasters.img.width == pytest.approx(stacked_img.width, abs=1)
         else:
             assert rasters.img.shape == stacked_img.shape
-        assert isinstance(stacked_img, gu.Raster)  # Check output object is always Raster, whatever input was given
         assert np.count_nonzero(np.isnan(stacked_img.data)) == 0  # Check no NaNs introduced
 
         merged_bounds = gu.projtools.merge_bounds(
@@ -202,10 +188,77 @@ class TestMultiRaster:
         )
         assert merged_bounds == stacked_img.bounds
 
-        nodata_ref = rasters.img1.nodata
-        # Check that reference works with input Raster
+        img1_proj_img1 = rasters.img1.reproject(
+            bounds=merged_bounds,
+            res=rasters.img1.res,
+            crs=rasters.img1.crs,
+            dtype=rasters.img1.data.dtype,
+            nodata=rasters.img1.nodata,
+            resampling=None,
+            silent=True,
+        )
+        if rasters.img1.count == 1:
+            assert np.array_equal(img1_proj_img1.data, stacked_img.data[0])
+        else:
+            assert all(np.array_equal(img1_proj_img1.data[b], stacked_img.data[b]) for b in range(rasters.img1.count))
+
+        img2_proj_img1 = rasters.img2.reproject(
+            bounds=merged_bounds,
+            res=rasters.img1.res,
+            crs=rasters.img1.crs,
+            dtype=rasters.img1.data.dtype,
+            nodata=rasters.img1.nodata,
+            resampling=None,
+            silent=True,
+        )
+        if rasters.img2.count == 1:
+            assert np.array_equal(img2_proj_img1.data, stacked_img.data[rasters.img1.count])
+        else:
+            assert all(
+                np.array_equal(img2_proj_img1.data[b], stacked_img.data[rasters.img1.count + b])
+                for b in range(rasters.img1.count)
+            )
+
+        ########
+        # Check when use_ref_bounds with the first image
+        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], use_ref_bounds=True)
+        assert stacked_img.count == rasters.img1.count + rasters.img2.count
+        assert rasters.img1.bounds == stacked_img.bounds
+
+        if rasters.img1.count == 1:
+            assert np.array_equal(rasters.img1.data, stacked_img.data[0])
+        else:
+            assert all(np.array_equal(rasters.img1.data[b], stacked_img.data[b]) for b in range(rasters.img1.count))
+
+        img2_proj_img1 = rasters.img2.reproject(ref=rasters.img1)
+        if rasters.img2.count == 1:
+            assert np.array_equal(img2_proj_img1.data, stacked_img.data[rasters.img1.count])
+        else:
+            assert all(
+                np.array_equal(img2_proj_img1.data[b], stacked_img.data[rasters.img1.count + b])
+                for b in range(rasters.img2.count)
+            )
+
+        ########
+        # Check when use_ref_bounds with another image
         stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
+        assert stacked_img.count == rasters.img1.count + rasters.img2.count
         assert rasters.img.bounds == stacked_img.bounds
+
+        img1_proj_img = rasters.img1.reproject(ref=rasters.img)
+        if rasters.img1.count == 1:
+            assert np.array_equal(img1_proj_img.data, stacked_img.data[0])
+        else:
+            assert all(np.array_equal(img1_proj_img.data[b], stacked_img.data[b]) for b in range(rasters.img1.count))
+
+        img2_proj_img = rasters.img2.reproject(ref=rasters.img)
+        if rasters.img2.count == 1:
+            assert np.array_equal(img2_proj_img.data, stacked_img.data[rasters.img1.count])
+        else:
+            assert all(
+                np.array_equal(img2_proj_img.data[b], stacked_img.data[rasters.img1.count + b])
+                for b in range(rasters.img2.count)
+            )
 
         # Others than int or gu.Raster should raise a ValueError
         with pytest.raises(ValueError, match="reference should be .*"):
@@ -222,6 +275,7 @@ class TestMultiRaster:
         assert stacked_img2.bounds == rasters.img.bounds
 
         # This case should preserve unique data values through "nearest" resampling
+        nodata_ref = rasters.img1.nodata
         rasters.img1[:] = 5
         rasters.img1[0:5, 0:5] = 1
         rasters.img2 = rasters.img1.translate(0.5, 0.5, distance_unit="pixel")
@@ -288,12 +342,6 @@ class TestMultiRaster:
         # Check that only works if CRS were the same
         if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
             assert merged_img2 == merged_img
-
-        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
-        def custom_func(x: NDArrayNum) -> NDArrayNum:
-            return np.logical_and(*x)
-
-        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
 
     @pytest.mark.parametrize(
         "rasters",
@@ -420,3 +468,34 @@ class TestMultiRaster:
             # Logically, the non overlapping raster should have only masked values
             if k != 0:
                 assert np.count_nonzero(~rst.data.mask) == 0
+
+    @pytest.mark.skip(reason="to check when merge will be change")
+    @pytest.mark.parametrize(
+        "rasters",
+        [
+            lazy_fixtures("images_1d"),
+            lazy_fixtures("images_3d"),
+            lazy_fixtures("images_different_crs"),
+        ],
+    )  # type: ignore
+    def test_merge_rasters_with_function_not_working(self, rasters: Any) -> None:  # type: ignore
+        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and(*x)
+
+        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
+
+    @pytest.mark.parametrize(
+        "rasters",
+        [
+            lazy_fixtures("images_1d"),
+            lazy_fixtures("images_3d"),
+            lazy_fixtures("images_different_crs"),
+        ],
+    )  # type: ignore
+    def test_merge_rasters_with_function(self, rasters: Any) -> None:  # type: ignore
+        # Test with a simple custom_func
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and.reduce(x)
+
+        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)

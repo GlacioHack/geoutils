@@ -2064,6 +2064,33 @@ class TestRaster:
         img = gu.Raster(self.landsat_rgb_path)
         assert img._is_bigtiff() is False
 
+    def test_merge_raster(self) -> None:
+        """Test Raster.merge_rasters using gu.raster.merge_rasters"""
+
+        r1 = gu.Raster(self.landsat_b4_path)
+        r2 = gu.Raster(self.landsat_rgb_path)
+        r1.set_nodata(0)
+        r2.set_nodata(0)
+
+        assert r1.merge_rasters(r2).raster_equal(gu.raster.merge_rasters([r1, r2]))
+        assert r2.merge_rasters(r1).raster_equal(gu.raster.merge_rasters([r2, r1]))
+
+        assert r1.merge_rasters([r2, r1]).raster_equal(gu.raster.merge_rasters([r1, r2, r1]))
+        assert r2.merge_rasters([r1, r1]).raster_equal(gu.raster.merge_rasters([r2, r1, r1]))
+
+        assert r1.merge_rasters(r2, resampling_method="nearest", use_ref_bounds=True).raster_equal(
+            gu.raster.merge_rasters([r1, r2], resampling_method="nearest", use_ref_bounds=True)
+        )
+        assert r2.merge_rasters(r1, reference=1).raster_equal(gu.raster.merge_rasters([r1, r2]))
+        assert r2.merge_rasters(r1, reference=1).raster_equal(gu.raster.merge_rasters([r1, r2]))
+
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and(*x)
+
+        assert r1.merge_rasters(r1, merge_algorithm=custom_func).raster_equal(
+            gu.raster.merge_rasters([r1, r1], merge_algorithm=custom_func)
+        )
+
 
 class TestMask:
     """A mask is a boolean Raster, defined on file opening with is_mask=True."""

@@ -39,6 +39,7 @@ from affine import Affine
 from packaging.version import Version
 from rasterio.crs import CRS
 
+import geoutils as gu
 from geoutils import profiler
 from geoutils._misc import deprecate, import_optional
 from geoutils._typing import (
@@ -2281,6 +2282,22 @@ class Raster(RasterBase):
                 raster_bands.append(rast_band)
 
         return raster_bands
+
+    def merge_rasters(
+        self,
+        rasters: Raster | list[Raster],
+        reference: int | Raster = 0,
+        merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
+        resampling_method: str | rio.enums.Resampling = None,
+        use_ref_bounds: bool = False,
+    ) -> Raster:
+
+        if isinstance(rasters, Raster):
+            raster_list: list[Raster] = [self, rasters]
+        else:
+            raster_list = [self] + rasters  # type: ignore
+
+        return gu.raster.merge_rasters(raster_list, reference, merge_algorithm, resampling_method, use_ref_bounds)
 
 
 class Mask(Raster):
