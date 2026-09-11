@@ -15,6 +15,7 @@ import pytest
 from geopandas.testing import assert_geodataframe_equal
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
+from pyproj.crs import CompoundCRS
 
 import geoutils as gu
 from geoutils import PointCloud, Raster
@@ -226,6 +227,52 @@ class TestClassVsAccessorConsistency:
         assert pointcloud.pointcloud_allclose(close_ds, atol=1e-8)
         assert close_ds.pc.pointcloud_allclose(pointcloud, atol=1e-8)
         assert not pointcloud.pointcloud_allclose(close_ds, rtol=0, atol=1e-10)
+
+    def test_georeferenced_coords_equal__vertical_and_missing_crs(self) -> None:
+        """Checks that coordinate equality ignores vertical CRS differences, warns optionally and accepts no CRS."""
+
+        # 1/ Create matching point clouds with horizontal-only and compound CRS metadata
+        horizontal_crs = CRS.from_epsg(32610)
+        compound_crs = CompoundCRS("Horizontal and vertical test CRS", [horizontal_crs, CRS.from_epsg(5773)])
+        pointcloud = PointCloud(self.ds, data_column="b1")
+        compound_ds = self.ds.set_crs(compound_crs, allow_override=True)
+        compound_ds.pc.set_data_column("b1")
+
+        # 2/ Check that the vertical difference warns but does not change horizontal coordinate equality
+        with pytest.warns(UserWarning, match="same 2D CRS but a different vertical CRS"):
+            assert pointcloud.georeferenced_coords_equal(compound_ds.pc)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert pointcloud.georeferenced_coords_equal(compound_ds.pc, warn_3d_crs=False)
+
+        # 3/ Check that missing CRS metadata compares safely
+        without_crs = self.ds.set_crs(None, allow_override=True)
+        other_without_crs = without_crs.copy()
+
+        assert without_crs.pc.georeferenced_coords_equal(other_without_crs)
+        assert not pointcloud.georeferenced_coords_equal(without_crs.pc)
+
+    def test_info__crs_name(self) -> None:
+        """Checks that point-cloud info reports the CRS name through both class and accessor APIs."""
+
+        # 1/ Define the CRS cases to apply to the same point cloud data
+        horizontal_crs = CRS.from_epsg(32610)
+        compound_crs = CompoundCRS("Horizontal and vertical test CRS", [horizontal_crs, CRS.from_epsg(5773)])
+        crs_cases = [
+            (horizontal_crs, "WGS 84 / UTM zone 10N"),
+            (compound_crs, "Horizontal and vertical test CRS"),
+            (None, None),
+        ]
+
+        # 2/ Check that PointCloud and the Pandas accessor report the same readable name
+        for crs, expected_name in crs_cases:
+            ds = self.ds.set_crs(crs, allow_override=True)
+            ds.pc.set_data_column("b1")
+            pointcloud = PointCloud(ds, data_column="b1")
+            expected_line = f"Coordinate system:  {[expected_name]}"
+
+            assert expected_line in pointcloud.info(verbose=False).split("\n")
+            assert expected_line in ds.pc.info(verbose=False).split("\n")
 
     def test_copy__preserves_dataframe_and_pointcloud_type(self) -> None:
         """Check that copying retains auxiliary columns, indexes and PointCloud outputs."""

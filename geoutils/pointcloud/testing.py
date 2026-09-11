@@ -19,10 +19,12 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import geopandas as gpd
 import numpy as np
+from pyproj import CRS
 
 from geoutils._dispatch import get_geo_attr
 from geoutils.vector.testing import (
@@ -42,8 +44,8 @@ def _point_coords_equal_eager(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -
     )
 
 
-def _georeferenced_coords_equal(left_obj: Any, right_obj: Any) -> bool:
-    """Compare point-cloud coordinates and CRS without collecting Dask dataframes."""
+def _georeferenced_coords_equal(left_obj: Any, right_obj: Any, warn_3d_crs: bool = True) -> bool:
+    """Compare point-cloud horizontal coordinates and CRS without collecting Dask dataframes."""
 
     try:
         left_crs = get_geo_attr(left_obj, "crs")
@@ -53,6 +55,22 @@ def _georeferenced_coords_equal(left_obj: Any, right_obj: Any) -> bool:
     except (AttributeError, TypeError):
         return False
 
-    if left_crs != right_crs:
+    # Compare horizontal CRS because vertical coordinates do not define point locations in the XY plane
+    left_crs = CRS(left_crs) if left_crs is not None else None
+    right_crs = CRS(right_crs) if right_crs is not None else None
+    left_crs2d = left_crs.to_2d() if left_crs is not None else None
+    right_crs2d = right_crs.to_2d() if right_crs is not None else None
+    if left_crs2d != right_crs2d:
         return False
-    return _compare_dataframes_partitionwise(left, right, comparator=_point_coords_equal_eager)
+
+    same_coordinates = _compare_dataframes_partitionwise(left, right, comparator=_point_coords_equal_eager)
+
+    # Report a vertical difference without treating it as different horizontal coordinates
+    if same_coordinates and left_crs is not None and right_crs is not None and left_crs != right_crs and warn_3d_crs:
+        warnings.warn(
+            "The two point clouds have the same 2D CRS but a different vertical CRS: "
+            f"{left_crs.name} and {right_crs.name}.",
+            category=UserWarning,
+        )
+
+    return same_coordinates
