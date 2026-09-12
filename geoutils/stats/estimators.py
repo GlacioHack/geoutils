@@ -52,7 +52,7 @@ def linear_error(data: NDArrayNum, interval: float = 90) -> np.floating[Any]:
     :param data: A numpy array or masked array of data, typically representing the differences (errors) in elevation or
         another quantity.
     :param interval: The central interval to compute, specified as a percentage. For example, an interval of 90 will
-        compute the range between the 5th and 95th percentiles (LE90). This value must be greater than 0 and at most 100.
+        compute the range between the 5th and 95th percentiles (LE90).
 
     :returns: The computed linear error, which is the difference between the upper and lower percentiles.
 

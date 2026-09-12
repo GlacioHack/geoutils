@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Estimate, fit, and convert variograms across Python packages for inter-operability."""
+"""Estimate, fit, and convert variograms across Python packages for interoperability."""
 
 from __future__ import annotations
 
