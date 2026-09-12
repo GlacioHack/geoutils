@@ -151,6 +151,7 @@ release_notes
 :caption: Project information
 :maxdepth: 2
 
+contributing
 credits
 ```
 
