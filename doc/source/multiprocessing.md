@@ -119,6 +119,33 @@ To include block location in the results, set `return_block_info=True`.
 
 ---
 
+## Reprojecting point clouds
+
+{meth}`~geoutils.PointCloud.reproject` accepts `mp_config` to read, transform and write point rows in chunks.
+LAS, LAZ and GeoPackage files can remain unloaded throughout processing. For this operation, `chunks` is an integer
+number of points per task, rather than raster dimensions.
+
+```python
+import geoutils as gu
+from geoutils.multiproc import ClusterGenerator, MultiprocConfig
+
+points = gu.PointCloud("observations.laz")
+
+with ClusterGenerator("multi", nb_workers=4) as cluster:
+    config = MultiprocConfig(chunks=100_000, outfile="projected.gpkg", cluster=cluster)
+    projected = points.reproject(crs=32633, mp_config=config)
+
+assert not points.is_loaded
+assert not projected.is_loaded
+```
+
+The output format follows the filename extension, or an explicit `driver="GPKG"`, `"LAS"` or `"LAZ"`.
+GeoPackage is the default when no extension is supplied. Point order and value columns are preserved; LAS/LAZ
+coordinates use the file's stored precision. Dataframe accessor calls return an eager GeoDataFrame. Dask point
+clouds keep using the lazy `reproject()` path without `mp_config`.
+
+---
+
 ## Choosing the right function
 
 | Use case                                      | Function                                                                     |
