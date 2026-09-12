@@ -114,7 +114,6 @@ transformations
 raster_vector_point
 distance_ops
 stats
-sampling
 filters
 ```
 

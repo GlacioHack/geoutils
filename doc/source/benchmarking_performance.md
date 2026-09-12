@@ -1,7 +1,7 @@
 (benchmarking-performance)=
 # Performance
 
-GeoUtils benchmarks its functionalities to measure **execution time and memory usage**, check **lazy and out-of-core behaviour** with
+GeoUtils benchmarks its functionalities to measure **RAM and wall time**, check **lazy and out-of-core behaviour** with
 Dask and Multiprocessing, track **improvements or regressions over time**, and compare different **execution modes** and
 **calculation engines** against the [**GDAL CLI**](https://gdal.org/en/stable/programs/index.html). Chunked operations
 also compare strategies used to coordinate selections or reconcile results across chunks.
@@ -11,7 +11,7 @@ The benchmarks use GeoUtils' profiling tool described in {ref}`profiling`, which
 ## Improvements or regressions over time
 
 The [**GeoUtils benchmark webpage**](https://glaciohack.github.io/geoutils/) provides performance of core functionalities and their changes with commit history.
-It relies on [Airspeed Velocity (ASV)](https://asv.readthedocs.io/) to record reproducible performance measurements for each commit and publish them.
+It relies on [Airspeed Velocity (ASV)](https://asv.readthedocs.io/) to record fixed performance measurements for each commit and publish them.
 
 ## Comparison across execution modes, engines and GDAL CLI
 
@@ -25,19 +25,19 @@ GeoUtils remains distinct from the external GDAL CLI reference.
 
 Two reference graphics summarize the core results:
 
-- **Execution time relative to GDAL** for each comparable operation (using end-to-end time with file reading/writing for comparison),
-- **Peak memory usage as raster size increases**, including the full process and its workers.
+- **End-to-end time relative to GDAL** for each comparable operation
+- **Peak RAM as raster size increases**, including the full process and its workers
 
 :::{figure} https://glaciohack.github.io/geoutils/documentation/time_relative_to_gdal.svg
-:alt: GeoUtils execution mode time relative to GDAL for four raster operations
+:alt: End-to-end GeoUtils execution-mode time relative to GDAL for four raster operations
 
-Execution time on the largest raster size shared by every execution mode and the GDAL CLI. GDAL is the reference.
+End-to-end time on the largest raster size shared by every execution mode and the GDAL CLI. GDAL is the reference at one.
 :::
 
 :::{figure} https://glaciohack.github.io/geoutils/documentation/peak_ram_by_raster_size.svg
-:alt: Peak memory usage by raster size for GeoUtils execution modes and GDAL
+:alt: Peak process-tree RAM by raster size for GeoUtils execution modes and GDAL
 
-Peak memory usage for the benchmark process and all execution-mode workers as raster dimensions increase.
+Peak RAM for the benchmark process and all execution-mode workers as raster dimensions increase.
 :::
 
 These graphics show the latest complete CI benchmark and may be newer than this documentation version.
@@ -45,9 +45,9 @@ These graphics show the latest complete CI benchmark and may be newer than this 
 
 ## Test suite for scalable execution and large datasets
 
-Every GeoUtils operation listed as {ref}`chunked or lazy <scalability-support>` is tested
-on all supported Python versions and operating systems to ensure its respect of Dask laziness, deferred I/O, and loading behaviour,
+Every GeoUtils operation advertised as {ref}`chunked or lazy <scalability-support>` is tested
+on all supported Python versions and operating systems for its respect of Dask laziness, deferred I/O, and loading behaviour,
 while yielding **exactly** the same output as in-memory operations.
 
-In addition, GeoUtils also includes large data tests running on latest Python and Ubuntu releases,
+In addition, GeoUtils also includes large data tests running on the latest Python and Ubuntu,
 verifying that these operations use less memory than loading the full raster would require, while yielding a correct result.
