@@ -6,7 +6,7 @@ import os
 import warnings
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 import pytest
@@ -202,8 +202,14 @@ class TestMultiproc:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
-    num_workers = min(2, cpu_count())  # Safer limit for CI
-    cluster = ClusterGenerator("test", nb_workers=num_workers)
+    @pytest.fixture(scope="class", params=[None, "test"])
+    def cluster(self, request: pytest.FixtureRequest) -> Iterator[AbstractCluster | None]:
+        # This is for tests to work with spawn (Windows, requires this fixture) or Fork (ubuntu, macos)
+        if request.param is None:
+            yield None
+        else:
+            with ClusterGenerator("test", nb_workers=min(2, cpu_count())) as cluster:
+                yield cluster
 
     def test_multiproc_config_rectangular_chunks(self) -> None:
         """Accept positive rectangular chunks and reject invalid dimensions."""
@@ -324,7 +330,6 @@ class TestMultiproc:
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     @pytest.mark.parametrize("tile_size", [100, 200])
-    @pytest.mark.parametrize("cluster", [None, cluster])
     def test_map_overlap(self, example: str, tile_size: int, cluster: None | AbstractCluster) -> None:
         """
         Test the multiprocessing map function with a simple operation returning a raster.
@@ -383,7 +388,6 @@ class TestMultiproc:
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     @pytest.mark.parametrize("tile_size", [10, 20])
-    @pytest.mark.parametrize("cluster", [None, cluster])
     @pytest.mark.parametrize("return_block_info", [False, True])
     def test_map_blocks(
         self, example: str, tile_size: int, cluster: None | AbstractCluster, return_block_info: bool

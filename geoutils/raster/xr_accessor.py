@@ -305,7 +305,8 @@ class RasterAccessor(RasterBase):
 
         # Set other attributes
         out_ds.rio.write_transform(transform, inplace=True)
-        out_ds.rio.write_crs(crs, inplace=True)
+        if crs is not None:
+            out_ds.rio.write_crs(crs, inplace=True)
         out_ds.rio.write_nodata(nodata, inplace=True)
 
         return out_ds

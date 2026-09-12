@@ -12,6 +12,7 @@ import rasterio as rio
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 from pandas.testing import assert_series_equal
 from pyproj import CRS
+from pyproj.crs import CompoundCRS
 from shapely import Polygon
 
 from geoutils import Raster, Vector
@@ -183,6 +184,27 @@ class TestClassVsAccessorConsistency:
         for text in ["Coordinate system", "Extent", "Number of features", "Attributes"]:
             assert text in output_vector
             assert text in output_ds
+
+    def test_info__crs_name(self) -> None:
+        """Checks that info reports the CRS name for 2D, compound and missing CRS metadata."""
+
+        # 1/ Define the CRS cases to apply to the same vector data
+        horizontal_crs = CRS.from_epsg(32610)
+        compound_crs = CompoundCRS("Horizontal and vertical test CRS", [horizontal_crs, CRS.from_epsg(5773)])
+        crs_cases = [
+            (horizontal_crs, "WGS 84 / UTM zone 10N"),
+            (compound_crs, "Horizontal and vertical test CRS"),
+            (None, None),
+        ]
+
+        # 2/ Check that Vector and the Pandas accessor report the same readable name
+        for crs, expected_name in crs_cases:
+            ds = self.ds.set_crs(crs, allow_override=True)
+            vector = Vector(ds)
+            expected_line = f"Coordinate system:  {[expected_name]}"
+
+            assert expected_line in vector.info(verbose=False).split("\n")
+            assert expected_line in ds.vct.info(verbose=False).split("\n")
 
     def test_equality__cross_type_and_tolerance(self) -> None:
         """Check that equality accepts both APIs while allclose tolerates small coordinate differences."""

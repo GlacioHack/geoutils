@@ -2850,6 +2850,12 @@ class TestArithmetic:
     def test_numpy_functions(self, dtype: str) -> None:
         """Test how rasters can be used as/with numpy arrays."""
         warnings.simplefilter("error")
+        # Ignore the Affine 3.1 transition warning emitted inside Rasterio
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Use `@` matmul instead of `\*` mul operator for matrix multiplication",
+            category=PendingDeprecationWarning,
+        )
 
         # Create an array of unique values starting at 0 and ending at 24
         array = np.arange(25, dtype=dtype).reshape((1, 5, 5))

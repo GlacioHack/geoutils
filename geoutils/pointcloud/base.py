@@ -438,15 +438,16 @@ class PointCloudBase(VectorBase):
             return False
         return vector_close and data_column_close
 
-    def georeferenced_coords_equal(self: PointCloudBaseType, pc: Any) -> bool:
+    def georeferenced_coords_equal(self: PointCloudBaseType, pc: Any, warn_3d_crs: bool = True) -> bool:
         """
         Check that point-cloud X/Y coordinates and CRS are equal.
 
         :param pc: PointCloud, point-cloud accessor or GeoDataFrame to compare.
+        :param warn_3d_crs: Whether to warn if the vertical CRS differs.
         :returns: True if the point coordinates and CRS are equal.
         """
 
-        return _georeferenced_coords_equal(self, pc)
+        return _georeferenced_coords_equal(self, pc, warn_3d_crs=warn_3d_crs)
 
     def to_geoutils(self) -> Any:
         """Convert to an eager GeoUtils PointCloud object."""

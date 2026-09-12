@@ -20,6 +20,7 @@
 """This module defines the cluster configurations."""
 
 import multiprocessing
+import sys
 from collections.abc import Iterable, Iterator
 from multiprocessing.pool import Pool
 from typing import Any, Callable, Dict, Optional
@@ -161,7 +162,8 @@ class MpCluster(AbstractCluster):
             nb_workers = conf.get("nb_workers", 1)
             max_tasks_per_child = conf.get("max_tasks_per_child", 10)
         # Using the 'forkserver' context for more controlled process handling
-        ctx_in_main = multiprocessing.get_context("fork")
+        # Windows requires spawn, preserve existing fork behavior elsewhere
+        ctx_in_main = multiprocessing.get_context("spawn" if sys.platform == "win32" else "fork")
         # Recycling stays configurable so memory tests can distinguish it from a crash
         self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=max_tasks_per_child)
 
