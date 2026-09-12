@@ -202,40 +202,54 @@ class TestAccessor:
         footprint = ds.rst.get_footprint_projected(ds.rst.crs)
         assert isinstance(footprint, gpd.GeoDataFrame)
 
-    def test_get_stats__dask_global_quantile_stats(self) -> None:
-        """Regression test for Dask-backed xarray stats that require global quantiles."""
+    def test_stats__dask_global_quantile_stats(self) -> None:
+        """Checks that global quantile statistics match eager results without loading the Dask raster."""
 
         pytest.importorskip("dask")
         import dask.array as da
 
+        # Open the same raster eagerly and in chunks so both calculations use the same pixel values
         base = open_raster(self.aster_dem_path)
         ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
 
+        # Check that the chunked raster starts with lazy data
         assert isinstance(ds.data, da.Array)
         assert not ds._in_memory
 
+        # Compare statistics that need values from all chunks (median, percentiles and related measures)
         for stat in ["median", "90th percentile", "le90", "nmad", "iqr"]:
-            expected = float(base.rst.get_stats(stat))
-            actual = ds.rst.get_stats(stat)
+            expected = base.rst.stats(stat)
+            actual = ds.rst.stats(stat)
 
-            assert isinstance(actual, da.Array)
-            assert float(actual.compute()) == pytest.approx(expected, rel=1e-5)
+            # stats() computes its small summary result, but it must not replace the source with loaded data
+            assert np.isscalar(actual)
+            assert actual == pytest.approx(expected, rel=1e-5)
+            assert isinstance(ds.data, da.Array)
             assert not ds._in_memory
 
     def test_reproject__dask_keeps_dimension_order_for_stats(self) -> None:
-        """Regression test for Dask xarray reprojection outputs with valid rioxarray dimension order."""
+        """Checks that reprojected Dask rasters keep valid dimensions and support global statistics."""
 
         pytest.importorskip("dask")
+        import dask.array as da
 
+        # Open one raster in chunks, then reproject its CRS and pixel size along the two affected code paths
         ds = open_raster(self.aster_dem_path, chunks={"band": 1, "x": 100, "y": 100})
-
         reprojected_crs = ds.rst.reproject(crs=4326)
         reprojected_res = ds.rst.reproject(res=(ds.rst.res[0] * 2, ds.rst.res[1] / 2), resampling="bilinear")
 
+        # Check that both outputs use rioxarray's y/x order and stay lazy after calculating their mean
         for reprojected in [reprojected_crs, reprojected_res]:
+            expected = reprojected.compute().rst.stats("mean")
+            actual = reprojected.rst.stats("mean")
+
             assert reprojected.dims == ("y", "x")
-            assert hasattr(reprojected.rst.get_stats("mean"), "compute")
-            assert np.isfinite(float(reprojected.rst.get_stats("mean").compute()))
+            assert isinstance(reprojected.data, da.Array)
+            assert not reprojected._in_memory
+            assert np.isscalar(actual)
+            # Partial sums are combined in a different order across chunks, so allow their small rounding difference
+            assert actual == pytest.approx(expected, rel=1e-7)
+            assert np.isfinite(actual)
 
     def test_chunked_rasterize_paths_accept_dask_chunk_tuples(self) -> None:
         """Regression test for xarray/Dask rasterization paths receiving normalized chunk tuples."""
