@@ -439,7 +439,7 @@ class TestMultiproc:
 
 
 class TestMapOverlapChunked:
-    """Checks map_overlap() loading behavior and exact equality with eager raster calculations."""
+    """Test module for map_overlap() loading behavior and exact equality with eager raster calculations."""
 
     @pytest.mark.parametrize("source_bands, output_bands", [(1, 3), (3, 1)])
     @pytest.mark.parametrize("execution_mode", ["basic", "multiprocessing"])

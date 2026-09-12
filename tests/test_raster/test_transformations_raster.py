@@ -732,10 +732,10 @@ class TestMaskGeotransformations:
     @pytest.mark.parametrize("method", ["crop", "icrop"])
     def test_crop__unloaded_mask_boolean_values(self, tmp_path: Any, method: str) -> None:
         """
-        Checks that crop() and icrop() return exact boolean values and nodata cells without loading the source mask.
+        Checks that crop() and icrop() return exact boolean values and nodata pixels without loading the source mask.
         """
 
-        # Write integer mask values with one nodata cell inside the window being cropped
+        # Write integer mask values with one nodata pixel inside the window being cropped
         values = (np.arange(30).reshape(5, 6) % 2).astype("uint8")
         values[2, 2] = 255
         masked_values = np.ma.masked_equal(values, 255)
@@ -753,7 +753,7 @@ class TestMaskGeotransformations:
             output = unloaded.icrop((1, 1, 5, 4))
             expected = loaded.icrop((1, 1, 5, 4))
 
-        # Match the full-load path and verify logical values and nodata cells independently
+        # Match the full-load path and verify logical values and nodata pixels independently
         assert not unloaded.is_loaded
         assert output.is_mask
         assert output.data.dtype == bool
@@ -834,10 +834,10 @@ class TestReprojectChunked:
     @pytest.mark.parametrize("load_source", [False, True])
     def test_reproject__multiprocessing_logical_mask(self, tmp_path: Any, load_source: bool) -> None:
         """
-        Checks that multiprocessing reprojection returns exact mask values and nodata cells on a shifted grid.
+        Checks that multiprocessing reprojection returns exact mask values and nodata pixels on a shifted grid.
         """
 
-        # Write both boolean states and one nodata cell, then shift the target to leave an uncovered column
+        # Write both boolean states and one nodata pixel, then shift the target to leave an uncovered column
         rows, columns = np.indices((6, 7))
         values = ((rows + columns) % 2).astype("uint8")
         values[2, 3] = 255

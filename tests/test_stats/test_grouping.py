@@ -55,7 +55,7 @@ class TestGroupedStats:
             return_masks=True,
         )
 
-        # Check interval labels, separate value counts, and returned mask keys
+        # Verify the interval labels, value counts, and returned mask keys
         assert isinstance(table.index, pd.IntervalIndex)
         assert list(table.columns.names) == ["value", "statistic"]
         assert table[("first", "count")].tolist() == [1, 3]
@@ -63,7 +63,7 @@ class TestGroupedStats:
         assert isinstance(masks, Mapping)
         assert list(masks) == list(table.index)
 
-        # Check that masks split locations allowed by the user mask without removing selected nodata values
+        # Check that masks are dividing locations allowed by the user mask without removing selected nodata values
         group_masks = [np.asarray(masks[key]) for key in masks]
         assert [int(np.count_nonzero(group_mask)) for group_mask in group_masks] == [2, 3]
         assert np.array_equal(np.logical_or.reduce(group_masks), user_mask)
@@ -143,7 +143,7 @@ class TestGroupedStats:
     def test_stats__raster_mask_type(self, tmp_path: Path) -> None:
         """Checks that raster group masks have the same grid and boolean type when written and reopened."""
 
-        # Create a georeferenced raster and split its cells into two numeric intervals
+        # Create a georeferenced raster and split its pixels into two numeric intervals
         transform = Affine(10, 0, 100, 0, -10, 200)
         raster = gu.Raster.from_array(np.arange(1, 7, dtype=float).reshape(2, 3), transform, 32631)
         grouper = np.arange(6, dtype=float).reshape(2, 3)
@@ -170,7 +170,7 @@ class TestGroupedStats:
     def test_stats__mask_types(self, source_type: str) -> None:
         """Checks that every eager spatial input returns a boolean mask on its common support."""
 
-        # Create the same six values and two groups as either raster cells or points
+        # Create the same six values and two groups as either raster pixels or points
         values = np.arange(1, 7, dtype=float)
         groups = np.arange(6) % 2
         if source_type in {"raster", "xarray"}:
@@ -203,38 +203,6 @@ class TestGroupedStats:
             assert interface.georeferenced_coords_equal(pointcloud)
             mask_values = interface.data
         assert np.array_equal(np.asarray(mask_values).reshape(groups.shape), groups == 0)
-
-    @pytest.mark.parametrize(
-        "by,bins,categories,message",
-        [
-            ({}, None, None, "at least one named grouper"),
-            ({"zone": np.zeros((2, 2))}, {"missing": 2}, None, "do not match"),
-            ({"zone": np.zeros((2, 2))}, {"zone": 2}, {"zone": [0]}, "cannot define both"),
-            ({"zone": np.zeros((2, 2))}, {"zone": [0, 0, 1]}, None, "strictly increasing"),
-            ({"zone": np.zeros((2, 2))}, None, {"zone": [0, 0]}, "unique"),
-        ],
-    )
-    def test_stats__error_invalid_group_definitions(
-        self, by: Any, bins: Any, categories: Any, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Checks that invalid group definitions fail before an unloaded raster reads any data."""
-
-        # Write a raster file to disk with four valid cells, then make any attempt to load all cells fail
-        raster = gu.Raster.from_array(np.ones((2, 2)), Affine(1, 0, 0, 0, -1, 2), 32631)
-        path = tmp_path / "group_validation.tif"
-        raster.to_file(path)
-        source = gu.Raster(path)
-
-        def fail_load(*args: Any, **kwargs: Any) -> None:
-            """Reject data access before group definition validation finishes."""
-            raise AssertionError("Group definitions must be checked before reading values.")
-
-        monkeypatch.setattr(source, "load", fail_load)
-
-        # Raise the group definition error without consulting the source's values
-        with pytest.raises(ValueError, match=message):
-            source.stats("mean", by=by, bins=bins, categories=categories)
-        assert not source.is_loaded
 
     @pytest.mark.parametrize("source_type", ["raster", "xarray", "pointcloud", "geopandas"])
     def test_stats__subsample_per_group_spatial(self, source_type: str) -> None:
@@ -293,7 +261,7 @@ class TestGroupedStats:
     def test_stats__vector_union_and_feature_ids(self) -> None:
         """Checks that a vector alone creates inside/outside groups while feature IDs create separate zones."""
 
-        # Create two one-cell vector features separated by uncovered raster cells
+        # Create two one-pixel vector features separated by uncovered raster pixels
         raster = gu.Raster.from_array(np.arange(1, 9, dtype=float).reshape(2, 4), Affine(1, 0, 0, 0, -1, 2), 32631)
         zones = gu.Vector(
             gpd.GeoDataFrame({"id": ["first", "second"]}, geometry=[box(0, 1, 1, 2), box(3, 0, 4, 1)], crs=32631)
@@ -303,7 +271,7 @@ class TestGroupedStats:
         union = raster.stats("mean", by={"inside": zones})
         features = raster.stats("mean", by={"zone": (zones, "id")})
 
-        # Check that coverage includes outside cells while named features include only their own cells
+        # Check that coverage includes outside pixels while named features include only their own pixels
         assert union[("band_1", "count")].tolist() == [6, 2]
         assert features[("band_1", "count")].tolist() == [1, 1]
         assert features[("band_1", "mean")].tolist() == [1, 8]
@@ -390,7 +358,7 @@ class TestGroupedStats:
     def test_raster_stats__masked_integer_data_and_boolean_mask(self) -> None:
         """Checks that raster value masks and boolean user masks affect counts and group masks separately."""
 
-        # Mask one integer value and exclude two different cells through a boolean Raster mask
+        # Mask one integer value and exclude two different pixels through a boolean Raster mask
         data = np.ma.array([[1, 2, 3], [4, 5, 6]], mask=[[False, True, False], [False, False, False]])
         raster = gu.Raster.from_array(data, Affine(1, 0, 0, 0, -1, 2), 32631, nodata=-9999)
         mask = raster.from_array(
@@ -463,48 +431,15 @@ class TestGroupedStats:
         result = gu.stats.stats(values, backend="flox", **options)
         pd.testing.assert_frame_equal(result, expected)
 
-    def test_stats__error_flox_options(self) -> None:
-        """Checks that Flox rejects options and statistics that its grouped path cannot reproduce."""
-
-        # Use one ordinary category input so each call reaches Flox-specific validation
-        pytest.importorskip("flox")
-        values = np.arange(6, dtype=float)
-        grouping = {"by": {"zone": np.arange(6) % 2}, "categories": {"zone": [0, 1]}}
-
-        # Reject global statistics, group masks, sampling within groups, multiprocessing and GeoUtils strategies
-        with pytest.raises(ValueError, match="requires grouped statistics"):
-            gu.stats.stats(values, "mean", backend="flox")
-        for options in (
-            {"return_masks": True},
-            {"subsample_per_group": True},
-            {"mp_config": MultiprocConfig(chunks=2)},
-            {"strategy": "dense"},
-        ):
-            with pytest.raises(ValueError, match="Flox backend requires"):
-                gu.stats.stats(values, "mean", backend="flox", **grouping, **options)
-        with pytest.raises(ValueError, match="does not support"):
-            gu.stats.stats(values, "nmad", backend="flox", **grouping)
-
-    def test_raster_stats__flox_loading_warning(self) -> None:
-        """Checks that a Raster input warns that the Flox backend loads its values."""
-
-        # Create a small Raster whose cells belong to two boolean categories
-        pytest.importorskip("flox")
-        raster = gu.Raster.from_array(np.arange(6, dtype=float).reshape(2, 3), Affine.identity(), 32631)
-        groups = np.arange(6).reshape(2, 3) % 2 == 0
-
-        # Calculate the grouped mean and check the warning is raised before spatial values are selected
-        with pytest.warns(UserWarning, match="loads Raster and PointCloud inputs"):
-            result = raster.stats("mean", by={"zone": groups}, backend="flox")
-        assert result[("band_1", "count")].tolist() == [3, 3]
-
 
 class TestGroupedStatsChunked:
     """
     Tests grouped statistics from stats(by=) with Dask and Multiproc inputs.
 
+    Reduction strategies are instead covered in test_reduction.py.
+
     The tests compare group definitions, common support, sampling, vector zones, returned masks, and the optional Flox
-    backend with eager results. Numerical reduction strategies are covered in test_reduction.py.
+    backend with eager results.
     """
 
     @pytest.mark.parametrize("strategy", ["dense", "sparse", "groupwise"])
@@ -800,7 +735,7 @@ class TestGroupedStatsChunked:
     def test_stats__external_values_on_common_support(self, tmp_path: Path) -> None:
         """Checks that Dask point inputs use the same common support and return the same result as eager points."""
 
-        # Place points at known raster cells and give two polygons different numeric values
+        # Place points at known raster pixels and give two polygons different numeric values
         raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), Affine(1, 0, 0, 0, -1, 4), 32631)
         x, y = raster.ij2xy([0, 1, 2, 3], [0, 0, 3, 3])
         frame = gpd.GeoDataFrame(
@@ -1042,7 +977,7 @@ class TestGroupedStatsChunked:
     @pytest.mark.parametrize("backend", ["dask", "multiproc"])
     @pytest.mark.parametrize("rows", [1, 2])
     def test_stats__vector_integer_labels_outside_coverage(self, backend: str, rows: int) -> None:
-        """Checks that adjacent large vector labels remain distinct when some cells fall outside every feature."""
+        """Checks that adjacent large vector labels remain distinct when some pixels fall outside every feature."""
 
         # Use integer labels that cannot both be represented as floats and leave the final raster column uncovered
         labels = [2**53, 2**53 + 1]
@@ -1057,7 +992,7 @@ class TestGroupedStatsChunked:
 
             source = source.to_xarray().chunk({"y": 1, "x": 2}).rst
 
-        # Infer ordered feature categories and check that uncovered cells contribute to neither group
+        # Infer ordered feature categories and check that uncovered pixels contribute to neither group
         table, masks = source.stats("sum", by={"zone": (zones, "label")}, return_masks=True, mp_config=config)
         pd.testing.assert_frame_equal(table, expected_table, check_exact=True)
         assert table.index.tolist() == labels
@@ -1208,6 +1143,7 @@ class TestGroupedStatsChunked:
             assert isinstance(source.data, da.Array)
             assert isinstance(mask_data, da.Array)
 
+    @pytest.mark.filterwarnings("ignore:Overriding 3D points:UserWarning")
     @pytest.mark.parametrize("source_type", ["pointcloud", "dataframe", "dask"])
     @pytest.mark.parametrize("size", [1, 3])
     def test_stats__point_mask_rows_and_geometry(self, source_type: str, size: int) -> None:
@@ -1222,8 +1158,7 @@ class TestGroupedStatsChunked:
         )
         dataframe.attrs["data_column"] = "height"
         if source_type == "pointcloud":
-            with pytest.warns(UserWarning, match="Overriding 3D points"):
-                points: Any = gu.PointCloud(dataframe, data_column="height")
+            points: Any = gu.PointCloud(dataframe, data_column="height")
         elif source_type == "dataframe":
             points = dataframe.pc
         else:
@@ -1295,3 +1230,84 @@ class TestGroupedStatsChunked:
         assert all(isinstance(grouper, da.Array) for grouper in lazy_groups.values())
         assert isinstance(result, pd.DataFrame)
         pd.testing.assert_frame_equal(result, expected)
+
+
+class TestGroupedStatsErrors:
+    """Test module for validation errors and warnings raised by grouped statistics."""
+
+    @pytest.mark.parametrize(
+        "by,bins,categories,message",
+        [
+            ({}, None, None, "at least one named grouper"),
+            ({"zone": np.zeros((2, 2))}, {"missing": 2}, None, "do not match"),
+            ({"zone": np.zeros((2, 2))}, {"zone": 2}, {"zone": [0]}, "cannot define both"),
+            ({"zone": np.zeros((2, 2))}, {"zone": [0, 0, 1]}, None, "strictly increasing"),
+            ({"zone": np.zeros((2, 2))}, None, {"zone": [0, 0]}, "unique"),
+        ],
+    )
+    def test_stats__error_invalid_group_definitions(
+        self, by: Any, bins: Any, categories: Any, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that invalid group definitions fail before an unloaded raster reads any data."""
+
+        # Write a raster file to disk with four valid pixels, then make any attempt to load all pixels fail
+        raster = gu.Raster.from_array(np.ones((2, 2)), Affine(1, 0, 0, 0, -1, 2), 32631)
+        path = tmp_path / "group_validation.tif"
+        raster.to_file(path)
+        source = gu.Raster(path)
+
+        def fail_load(*args: Any, **kwargs: Any) -> None:
+            """Reject data access before group definition validation finishes."""
+            raise AssertionError("Group definitions must be checked before reading values.")
+
+        monkeypatch.setattr(source, "load", fail_load)
+
+        # Raise the group definition error without consulting the source's values
+        with pytest.raises(ValueError, match=message):
+            source.stats("mean", by=by, bins=bins, categories=categories)
+        assert not source.is_loaded
+
+    def test_stats__error_flox_options(self) -> None:
+        """Checks that Flox rejects options and statistics that its grouped path cannot reproduce."""
+
+        # Use one ordinary category input so each call reaches Flox-specific validation
+        pytest.importorskip("flox")
+        values = np.arange(6, dtype=float)
+        grouping = {"by": {"zone": np.arange(6) % 2}, "categories": {"zone": [0, 1]}}
+
+        # Reject global statistics, group masks, sampling within groups, multiprocessing and GeoUtils strategies
+        with pytest.raises(ValueError, match="requires grouped statistics"):
+            gu.stats.stats(values, "mean", backend="flox")
+        for options in (
+            {"return_masks": True},
+            {"subsample_per_group": True},
+            {"mp_config": MultiprocConfig(chunks=2)},
+            {"strategy": "dense"},
+        ):
+            with pytest.raises(ValueError, match="Flox backend requires"):
+                gu.stats.stats(values, "mean", backend="flox", **grouping, **options)
+        with pytest.raises(ValueError, match="does not support"):
+            gu.stats.stats(values, "nmad", backend="flox", **grouping)
+
+    def test_raster_stats__flox_loading_warning(self) -> None:
+        """Checks that a Raster input warns that the Flox backend loads its values."""
+
+        # Create a small Raster whose pixels belong to two boolean categories
+        pytest.importorskip("flox")
+        raster = gu.Raster.from_array(np.arange(6, dtype=float).reshape(2, 3), Affine.identity(), 32631)
+        groups = np.arange(6).reshape(2, 3) % 2 == 0
+
+        # Calculate the grouped mean and check the warning is raised before spatial values are selected
+        with pytest.warns(UserWarning, match="loads Raster and PointCloud inputs"):
+            result = raster.stats("mean", by={"zone": groups}, backend="flox")
+        assert result[("band_1", "count")].tolist() == [3, 3]
+
+    def test_stats__pointcloud_data_column_warning(self) -> None:
+        """Checks that selecting a column warns before replacing three-dimensional point heights."""
+
+        # Give one point distinct geometry height and active column values
+        dataframe = gpd.GeoDataFrame({"height": [1]}, geometry=gpd.points_from_xy([0], [0], [100]), crs=32631)
+
+        # Constructing a point cloud warns that the selected values replace its geometry heights
+        with pytest.warns(UserWarning, match="Overriding 3D points"):
+            gu.PointCloud(dataframe, data_column="height")

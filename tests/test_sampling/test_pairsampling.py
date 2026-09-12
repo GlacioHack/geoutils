@@ -1,4 +1,4 @@
-"""Tests for sampling raster cell and point row pairs without loading unnecessary data."""
+"""Tests for sampling raster pixel and point row pairs without loading unnecessary data."""
 
 from __future__ import annotations
 
@@ -32,9 +32,9 @@ class TestRasterPairSampling:
 
     Dask behavior is covered in TestPairSampleChunked further below.
 
-    This module is checking the following:
+    This module is checking that:
     - All sampling "strategies" return the correct shape of outputs.
-    - Behaviour of user masks, min/max sampling distance and duplicate pairs is respected.
+    - User masks, min/max sampling distance and duplicate pairs are all respected.
     """
 
     @pytest.mark.parametrize("strategy", ["independent", "anchors", "chunk_anchors", "anchor_batched"])
@@ -79,20 +79,13 @@ class TestRasterPairSampling:
         # During this test, send every call to _candidates() through the recording function above
         monkeypatch.setattr(_RegularPairSampler, "_candidates", candidates)
 
-        # Request 200 pairs while allowing at most 37 candidates at once, which forces several generator calls
+        # Request 200 pairs while allowing only 37 at once: this forces several calls
         pairs = raster.pairsample(n_pairs=200, batch_pairs=37, strategy="independent", random_state=8)
 
         # Check that all requested pairs are returned and every candidate batch stays within the limit
         assert pairs.sizes["pair"] == 200
         assert len(candidate_counts) > 1
         assert max(candidate_counts) <= 37
-
-    @pytest.mark.parametrize("option", ["batch_pairs", "max_rounds", "chunks_per_round", "angles_per_distance"])
-    def test_pairsample__error_raster_invalid_batch_controls(self, raster: gu.Raster, option: str) -> None:
-        """Checks that zero sampling controls fail before creating batches or indexing empty anchors."""
-
-        with pytest.raises(ValueError, match="controls must be"):
-            raster.pairsample(n_pairs=20, **{option: 0})
 
     def test_pairsample__raster_reproducible_and_globally_unique(self, raster: gu.Raster) -> None:
         """Checks that a fixed seed returns the same unique raster pairs in the same order."""
@@ -130,10 +123,10 @@ class TestRasterPairSampling:
         assert np.all(pairs.y > -15)
 
     @pytest.mark.parametrize("raster_mask", [False, True])
-    def test_pairsample__raster_masked_integers_and_mask_cells(self, raster_mask: bool) -> None:
-        """Checks that masked integer values and masked boolean cells never enter raster pairs."""
+    def test_pairsample__raster_masked_integers_and_mask_pixels(self, raster_mask: bool) -> None:
+        """Checks that masked integer values and masked boolean pixels never enter raster pairs."""
 
-        # Exclude different cells through the integer data, the mask's own mask, and a false mask value
+        # Exclude different pixels through the integer data, the mask's own mask, and a false mask value
         data = np.ma.array(np.arange(100, dtype=np.int32).reshape(10, 10), mask=False)
         data.mask[0, 0] = True
         mask = np.ma.array(np.ones(data.shape, dtype=bool), mask=False)
@@ -253,30 +246,6 @@ class TestPointPairSampling:
         result = points.pairsample(mask=mask, **options)
         assert result.identical(expected)
 
-    @pytest.mark.parametrize("mask_form", ["wrong_count", "numeric", "numeric_pointcloud", "different_coordinates"])
-    def test_pairsample__error_point_invalid_masks(self, mask_form: str) -> None:
-        """Checks that point masks require boolean values at the same number of ordered source locations."""
-
-        # Use only finite source values so the invalid mask is the sole reason pair sampling fails
-        y, x = np.mgrid[:5, :5]
-        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), crs=32633)
-        mask: Any = np.ones(25, dtype=bool)
-        error = "Argument ``mask`` must be boolean and contain one value per input location"
-        if mask_form == "wrong_count":
-            mask = mask[:-1]
-        elif mask_form == "numeric":
-            mask = mask.astype(float)
-        elif mask_form == "numeric_pointcloud":
-            mask = points
-            error = "point support mask must contain boolean values"
-        else:
-            mask = gu.PointCloud.from_xyz(x.ravel() + 1, y.ravel(), mask, crs=points.crs)
-            error = "does not share the ordered support coordinates"
-
-        # Report the mask problem before choosing any pair endpoints
-        with pytest.raises(ValueError, match=error):
-            points.pairsample(n_pairs=10, mask=mask, random_state=9)
-
     def test_pairsample__point_exact_sampling_reuses_anchors(self) -> None:
         """Checks that exact point searches can reuse first endpoints when one round requests more than exist."""
 
@@ -386,7 +355,7 @@ class TestPairSampleChunked:
         assert np.array_equal(pairs.value, np.asarray(pairs["index"], dtype=float))
 
     def test_pairsample__raster_dask_source_is_lazy(self) -> None:
-        """Checks that raster pair sampling reads selected Dask cells without loading the source."""
+        """Checks that raster pair sampling reads selected Dask pixels without loading the source."""
 
         # Create one lazy raster chunk so sampling order also has an exact eager reference
         da = pytest.importorskip("dask.array")
@@ -478,3 +447,38 @@ class TestPairSampleChunked:
         xr.testing.assert_equal(pairs, expected)
         assert pairs.sizes["pair"] == 100
         assert np.all(pairs.x < 6)
+
+
+class TestPairSampleErrors:
+    """Test module for validation errors raised by raster and point pair sampling."""
+
+    @pytest.mark.parametrize("option", ["batch_pairs", "max_rounds", "chunks_per_round", "angles_per_distance"])
+    def test_pairsample__error_raster_invalid_batch_controls(self, raster: gu.Raster, option: str) -> None:
+        """Checks that zero sampling controls fail before creating batches or indexing empty anchors."""
+
+        with pytest.raises(ValueError, match="controls must be"):
+            raster.pairsample(n_pairs=20, **{option: 0})
+
+    @pytest.mark.parametrize("mask_form", ["wrong_count", "numeric", "numeric_pointcloud", "different_coordinates"])
+    def test_pairsample__error_point_invalid_masks(self, mask_form: str) -> None:
+        """Checks that point masks require boolean values at the same number of ordered source locations."""
+
+        # Use only finite source values so the invalid mask is the sole reason pair sampling fails
+        y, x = np.mgrid[:5, :5]
+        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), crs=32633)
+        mask: Any = np.ones(25, dtype=bool)
+        error = "Argument ``mask`` must be boolean and contain one value per input location"
+        if mask_form == "wrong_count":
+            mask = mask[:-1]
+        elif mask_form == "numeric":
+            mask = mask.astype(float)
+        elif mask_form == "numeric_pointcloud":
+            mask = points
+            error = "point support mask must contain boolean values"
+        else:
+            mask = gu.PointCloud.from_xyz(x.ravel() + 1, y.ravel(), mask, crs=points.crs)
+            error = "does not share the ordered support coordinates"
+
+        # Report the mask problem before choosing any pair endpoints
+        with pytest.raises(ValueError, match=error):
+            points.pairsample(n_pairs=10, mask=mask, random_state=9)

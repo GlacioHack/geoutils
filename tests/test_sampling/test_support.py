@@ -37,15 +37,15 @@ class TestSupport:
     test_cosampling.py.
 
     Here, we specifically test:
-    - _sampling_support() chooses point locations by default, or an explicitly requested raster grid.
+    - _sampling_support() chooses point locations by default, or a requested raster grid.
     - _values_at_support() aligns rasters and reads raster bands, arrays, or point columns at that support.
-    - _mask_at_support() places vector, raster, or array masks on raster grids and point locations.
+    - _mask_at_support() properly aligns vector, raster, or array masks on raster grids and point locations.
     """
 
     def test_sampling_support__default_and_explicit(self) -> None:
         """Checks that points take precedence by default and an explicit raster takes precedence when requested."""
 
-        # Create a raster and points on three of its cells
+        # Create a raster and points on three of its pixels
         raster = _raster(np.arange(20, dtype=float).reshape(4, 5))
         x, y = raster.ij2xy(np.array([0, 1, 2]), np.array([1, 2, 3]))
         points = gu.PointCloud.from_xyz(x, y, np.arange(3, dtype=float), crs=raster.crs)
@@ -58,37 +58,15 @@ class TestSupport:
         assert point_support is points
         assert raster_support is raster
 
-    def test_sampling_support__error_array(self) -> None:
-        """Checks that an array cannot define spatial locations by itself."""
-
-        # Pass an array without a raster grid or point coordinates
-        values = np.arange(6).reshape(2, 3)
-
-        # Using it as support should raise an error
-        with pytest.raises(TypeError, match="must select raster or point cloud support"):
-            _sampling_support((values,), None)
-
     def test_values_at_support__raster_grid_alignment(self) -> None:
         """Checks that a shifted raster requires alignment and then returns values on the selected grid."""
 
-        # Shift the value raster by one cell from the selected raster grid
+        # Shift the value raster by one pixel from the selected raster grid
         support = _raster(np.zeros((3, 4), dtype=float))
         source_values = np.arange(12, dtype=float).reshape(3, 4)
         source = _raster(source_values, x_origin=1)
 
-        # Require explicit permission before moving values to the selected grid
-        with pytest.raises(ValueError, match="does not share"):
-            _values_at_support(
-                source,
-                None,
-                input_support=source,
-                support=support,
-                support_dataframe=None,
-                name="source",
-                interpolation="nearest",
-                align="raise",
-                mp_config=None,
-            )
+        # Move values to the selected grid after the caller explicitly requests alignment
         result = _values_at_support(
             source,
             None,
@@ -131,7 +109,7 @@ class TestSupport:
 
     @pytest.mark.parametrize("input_type", ["numpy", "xarray"])
     def test_values_at_support__raster_array(self, input_type: str) -> None:
-        """Checks that an array uses its raster input grid and preserves masked cells."""
+        """Checks that an array uses its raster input grid and preserves masked pixels."""
 
         # Create an independent array on the raster grid with one nodata value
         raster = _raster(np.ones((4, 5), dtype=float))
@@ -160,7 +138,7 @@ class TestSupport:
     def test_values_at_support__raster_at_points(self) -> None:
         """Checks that raster values are read at the selected point locations."""
 
-        # Choose point locations at three known raster cells
+        # Choose point locations at three known raster pixels
         raster = _raster(np.arange(30, dtype=float).reshape(5, 6))
         rows, columns = np.array([1, 2, 3]), np.array([1, 2, 3])
         x, y = raster.ij2xy(rows, columns)
@@ -179,7 +157,7 @@ class TestSupport:
             mp_config=None,
         )
 
-        # Extract the same cells directly from the raster to verify the interpolated values
+        # Extract the same pixels directly from the raster to verify the interpolated values
         expected = raster.data.filled(np.nan)[rows, columns]
         assert np.array_equal(result, expected)
 
@@ -220,7 +198,7 @@ class TestSupport:
         result = _mask_at_support(geometry, raster)
         assert result is not None
 
-        # Check that only cells inside the polygon are masked
+        # Check that only pixels inside the polygon are masked
         expected = np.zeros(raster.shape, dtype=bool)
         expected[:, :2] = True
         assert np.array_equal(result, expected)
@@ -247,7 +225,7 @@ class TestSupport:
         assert np.array_equal(result, expected)
 
     def test_mask_at_support__raster_on_points(self) -> None:
-        """Checks that a raster mask selects points in true cells and excludes points outside its grid."""
+        """Checks that a raster mask selects points in true pixels and excludes points outside its grid."""
 
         # Set the first three raster columns to true and add one point beyond the raster
         raster = _raster(np.arange(30, dtype=float).reshape(5, 6))
@@ -262,7 +240,7 @@ class TestSupport:
         result = _mask_at_support(mask, points, support_dataframe=points.ds)
         assert result is not None
 
-        # Check true cells, false cells, and the point outside the raster
+        # Check true pixels, false pixels, and the point outside the raster
         assert np.array_equal(result, [True, True, False, False, False])
 
     def test_mask_at_support__masked_point_array(self) -> None:
@@ -293,7 +271,7 @@ class TestSupportChunked:
         import_optional("dask")
         import dask.array as da
 
-        # Create a two-band raster with one nodata cell, and shift the selected support by one column
+        # Create a two-band raster with one nodata pixel, and shift the selected support by one column
         values = np.arange(30, dtype=float).reshape(5, 6)
         source = _raster(np.stack((values + 100, values)))
         source.data[1, 2, 3] = np.ma.masked
@@ -390,3 +368,38 @@ class TestSupportChunked:
         assert np.array_equal(multiproc_result, expected)
         assert isinstance(lazy_support.data, da.Array)
         assert not multiproc_support.is_loaded
+
+
+class TestSupportErrors:
+    """Test module for validation errors raised while choosing and aligning sampling support."""
+
+    def test_sampling_support__error_array(self) -> None:
+        """Checks that an array cannot define spatial locations by itself."""
+
+        # Pass an array without a raster grid or point coordinates
+        values = np.arange(6).reshape(2, 3)
+
+        # Using it as support should raise an error
+        with pytest.raises(TypeError, match="must select raster or point cloud support"):
+            _sampling_support((values,), None)
+
+    def test_values_at_support__error_raster_grid_alignment(self) -> None:
+        """Checks that a shifted raster requires an explicit request for alignment."""
+
+        # Shift the value raster by one pixel from the selected raster grid
+        support = _raster(np.zeros((3, 4), dtype=float))
+        source = _raster(np.arange(12, dtype=float).reshape(3, 4), x_origin=1)
+
+        # Reject mismatched grids while alignment is disabled
+        with pytest.raises(ValueError, match="does not share"):
+            _values_at_support(
+                source,
+                None,
+                input_support=source,
+                support=support,
+                support_dataframe=None,
+                name="source",
+                interpolation="nearest",
+                align="raise",
+                mp_config=None,
+            )

@@ -421,7 +421,7 @@ class TestComparisonReport:
 
 
 class TestGroupedReferenceChunked:
-    """Checks equivalent GeoUtils/Flox results and real multiprocessing worker reuse for prepared arrays."""
+    """Test module for equivalent GeoUtils/Flox results and multiprocessing worker reuse with prepared arrays."""
 
     @pytest.mark.parametrize("execution_mode", ["eager", "dask"])
     def test_grouped_reference__matching_statistics(self, execution_mode: Literal["eager", "dask"]) -> None:
@@ -489,7 +489,7 @@ class TestGroupedReferenceChunked:
 
 
 class TestVariographyWorkflows:
-    """Checks prepared variography fixtures against independent distance and semivariance calculations.
+    """Test module for prepared variography fixtures and independent distance and semivariance calculations.
 
     ASV covers execution and scaling of the benchmark classes; these tests check their inputs and full public outputs.
     """
@@ -530,10 +530,10 @@ class TestVariographyWorkflows:
 
 
 class TestPairRasterChunked:
-    """Checks prepared Dask raster pairs against the same eager pair sample."""
+    """Test module for prepared Dask raster pairs and the matching eager pair sample."""
 
     def test_pair_raster__finite_values_and_distances(self) -> None:
-        """Checks that Dask raster pairs match eager and exclude the deliberate nodata cells."""
+        """Checks that Dask raster pairs match eager and exclude the deliberate nodata pixels."""
 
         # Draw the same public pair sample from eager and one-chunk Dask fixtures
         import dask.array as da

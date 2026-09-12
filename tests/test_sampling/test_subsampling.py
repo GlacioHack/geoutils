@@ -144,19 +144,6 @@ class TestPointSubsample:
         assert actual_rng.integers(100000) == expected_rng.integers(100000)
         assert points.ds.equals(original)
 
-    @pytest.mark.parametrize("wrong_count", [False, True])
-    def test_subsample__error_invalid_point_mask(self, wrong_count: bool) -> None:
-        """Checks that point subsampling rejects non-boolean masks, or masks with a different shape."""
-
-        # We raise an error for non-boolean masks, or array masks with a wrong shape
-        values = np.arange(6)
-        points = gu.PointCloud.from_xyz(values, np.zeros(6), values, crs=32633)
-        mask = np.ones(5, dtype=bool) if wrong_count else np.ones(6, dtype=int)
-        with pytest.raises(
-            ValueError, match="Argument ``mask`` must be boolean and contain one value per input location"
-        ):
-            points.subsample(1, mask=mask)
-
 
 class TestRasterSubsample:
     """Checks subsample() on raster values and masks.
@@ -169,7 +156,7 @@ class TestRasterSubsample:
     def test_subsample__raster_masks(self, mask_form: str) -> None:
         """Checks that masks restrict the sampled band and return its exact values and original grid indices."""
 
-        # Use distinct integer bands and a nodata second-band cell to expose band selection or mask mistakes
+        # Use distinct integer bands and a nodata second-band pixel to expose band selection or mask mistakes
         values = np.arange(36, dtype=np.int16).reshape(6, 6)
         data = np.ma.array(np.stack([values + 100, values]), mask=False)
         data.mask[1, 1, 1] = True
@@ -206,28 +193,6 @@ class TestRasterSubsample:
         assert actual_rng.integers(100000) == expected_rng.integers(100000)
         np.testing.assert_array_equal(raster.data.data, original.data)
         np.testing.assert_array_equal(raster.data.mask, original.mask)
-
-    @pytest.mark.parametrize("mask_form", ["numeric", "different_shape", "flat", "different_grid"])
-    def test_subsample__error_invalid_raster_mask(self, mask_form: str) -> None:
-        """Checks that raster masks must contain booleans on the same two-dimensional grid as the source."""
-
-        # Arrays with the same cell count still need the source shape; spatial masks also need matching coordinates
-        raster = gu.Raster.from_array(np.ones((3, 4)), from_origin(0, 3, 1, 1), crs=32633)
-        mask: Any = np.ones(raster.shape, dtype=int)
-        message = "Argument ``mask`` must be boolean"
-        if mask_form == "different_shape":
-            mask = np.ones((2, 6), dtype=bool)
-            message = "match the support grid"
-        elif mask_form == "flat":
-            mask = np.ones(12, dtype=bool)
-            message = "match the support grid"
-        elif mask_form == "different_grid":
-            mask = gu.Raster.from_array(np.ones(raster.shape, dtype=bool), from_origin(1, 3, 1, 1), raster.crs)
-            message = "does not share the selected support grid"
-
-        # Fail during mask validation instead of sampling a silently coerced or reshaped population
-        with pytest.raises(ValueError, match=message):
-            raster.subsample(1, mask=mask)
 
 
 class TestSubsampleChunked:
@@ -379,7 +344,7 @@ class TestSubsampleChunked:
                 # Returned rows and columns must lie inside the raster
                 assert np.all((0 <= rr) & (rr < arr.shape[0]))
                 assert np.all((0 <= cc) & (cc < arr.shape[1]))
-                # Every returned cell must be available according to the shared raster mask
+                # Every returned pixel must be available according to the shared raster mask
                 assert np.all(~mask[rr, cc])
             else:
                 assert out_np.ndim == 1
@@ -565,7 +530,7 @@ class TestSubsampleChunked:
     ) -> None:
         """Checks that empty raster samples have the source value dtype and expected index dimensions."""
 
-        # Select no cells or one cell whose half-sample rounds to zero, crossing several worker tiles
+        # Select no pixels or one pixel whose half-sample rounds to zero, crossing several worker tiles
         values = np.arange(24, dtype=np.int16).reshape(4, 6)
         raster = gu.Raster.from_array(values, from_origin(0, 4, 1, 1), crs=32633)
         mask = np.zeros(raster.shape, dtype=bool)
@@ -628,7 +593,7 @@ class TestSubsampleChunked:
         eligible = mask & ~data.mask[1]
         config = MultiprocConfig(chunks=(2, 3))
 
-        # Select all eligible cells so the expected population is independent of random draws and worker tile order
+        # Select all eligible pixels so the expected population is independent of random draws and worker tile order
         indices = source.subsample(1, band=selected_band, return_indices=True, mask=mask, mp_config=config)
         sampled = source.subsample(1, band=selected_band, mask=mask, mp_config=config)
         assert len(indices[0]) == eligible.sum()
@@ -683,7 +648,7 @@ class TestSubsampleChunked:
         lazy_mask = da.from_array(mask, chunks=(5, 8)) if mask_form == "masked" else mask
         worker_mask = mask
 
-        # Leave the boolean mask file unloaded so workers also read its cells by tile
+        # Leave the boolean mask file unloaded so workers also read its pixels by tile
         if mask_form == "raster":
             mask_path = tmp_path / "sampling_mask.tif"
             mask.to_file(mask_path)
@@ -724,3 +689,42 @@ class TestSubsampleChunked:
         if strategy == "topk":
             np.testing.assert_array_equal(results[0], results[1])
             np.testing.assert_array_equal(results[0], results[2])
+
+
+class TestSubsampleErrors:
+    """Test module for validation errors raised by point and raster subsampling."""
+
+    @pytest.mark.parametrize("wrong_count", [False, True])
+    def test_subsample__error_invalid_point_mask(self, wrong_count: bool) -> None:
+        """Checks that point subsampling rejects non-boolean masks, or masks with a different shape."""
+
+        # We raise an error for non-boolean masks, or array masks with a wrong shape
+        values = np.arange(6)
+        points = gu.PointCloud.from_xyz(values, np.zeros(6), values, crs=32633)
+        mask = np.ones(5, dtype=bool) if wrong_count else np.ones(6, dtype=int)
+        with pytest.raises(
+            ValueError, match="Argument ``mask`` must be boolean and contain one value per input location"
+        ):
+            points.subsample(1, mask=mask)
+
+    @pytest.mark.parametrize("mask_form", ["numeric", "different_shape", "flat", "different_grid"])
+    def test_subsample__error_invalid_raster_mask(self, mask_form: str) -> None:
+        """Checks that raster masks must contain booleans on the same two-dimensional grid as the source."""
+
+        # Arrays with the same pixel count still need the source shape; spatial masks also need matching coordinates
+        raster = gu.Raster.from_array(np.ones((3, 4)), from_origin(0, 3, 1, 1), crs=32633)
+        mask: Any = np.ones(raster.shape, dtype=int)
+        message = "Argument ``mask`` must be boolean"
+        if mask_form == "different_shape":
+            mask = np.ones((2, 6), dtype=bool)
+            message = "match the support grid"
+        elif mask_form == "flat":
+            mask = np.ones(12, dtype=bool)
+            message = "match the support grid"
+        elif mask_form == "different_grid":
+            mask = gu.Raster.from_array(np.ones(raster.shape, dtype=bool), from_origin(1, 3, 1, 1), raster.crs)
+            message = "does not share the selected support grid"
+
+        # Fail during mask validation instead of sampling a silently coerced or reshaped population
+        with pytest.raises(ValueError, match=message):
+            raster.subsample(1, mask=mask)

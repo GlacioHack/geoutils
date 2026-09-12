@@ -696,7 +696,7 @@ class TestInterpolate:
     def test_methods__point_output_coordinates(self, method: str, point_input_type: str, all_outside: bool) -> None:
         """Checks that interpolation and window reduction return points in the raster CRS, including outside points."""
 
-        # Place the first point inside cell (1, 1) for both sampling methods and the second beyond the grid
+        # Place the first point inside pixel (1, 1) for both sampling methods and the second beyond the grid
         values = np.arange(36, dtype=float).reshape(6, 6)
         raster = gu.Raster.from_array(values, rio.transform.from_origin(500_000, 4_100_000, 10, 10), crs=32610)
         expected_x = np.array([500_012.5, 501_042.5])
@@ -895,8 +895,8 @@ class TestInterpPointsChunked:
         Checks that validity interpolation matches an explicit one/NaN raster with each backend and nodata rule.
         """
 
-        # 1/ Prepare two bands with nodata in different cells and a separate validity reference
-        # Integer masks and floating NaNs must both describe unavailable cells in the selected second band
+        # 1/ Prepare two bands with nodata in different pixels and a separate validity reference
+        # Integer masks and floating NaNs must both describe unavailable pixels in the selected second band
         data = np.arange(2 * 20 * 24).reshape(2, 20, 24).astype(dtype)
         invalid = np.zeros(data.shape, dtype=bool)
         invalid[0, 3, 4] = True
@@ -997,7 +997,7 @@ class TestInterpPointsChunked:
         # Synthetic Dask point tables bypass open_pointcloud(), which normally registers the optional accessor
         _register_dask_pointcloud_accessor()
 
-        # Use duplicate labels and a nodata cell so row order and optional validity conversion are both visible
+        # Use duplicate labels and a nodata pixel so row order and optional validity conversion are both visible
         data = np.arange(30, dtype=np.float64).reshape(5, 6)
         data[2, 3] = np.nan
         raster = gu.Raster.from_array(data, Affine(1, 0, 0, 0, -1, 5), 32632, nodata=-9999)

@@ -44,9 +44,9 @@ class TestCosample:
     @pytest.mark.parametrize("accessor", [False, True])
     @pytest.mark.parametrize("explicit_at", [False, True])
     def test_cosample__grid_points(self, caller: str, accessor: bool, explicit_at: bool) -> None:
-        """Checks that gridding points to a common raster support behaves as expected."""
+        """Checks that gridding some points on a common raster support behaves as expected."""
 
-        # Place two points around each grid cell so their circular mean is known
+        # Place two points around each grid pixel so their circular mean is known
         expected = np.arange(20, dtype=float).reshape(4, 5)
         raster = _raster(expected + 100)
         rows, columns = np.indices(raster.shape)
@@ -106,7 +106,7 @@ class TestCosample:
         first, second = (raster, points) if caller == "raster" else (points, raster)
         result = first.cosample(second, raster_point_mode="resample_raster", resample_method=method)
 
-        # Check linear values on the slope and nearest values from the closest cells
+        # Check linear values on the slope and nearest values from the closest pixels
         expected = 10 * target_rows + 2 * target_columns
         if method == "nearest":
             expected = 10 * np.rint(target_rows) + 2 * np.rint(target_columns)
@@ -115,9 +115,9 @@ class TestCosample:
         assert result.ds.geometry.equals(points.ds.geometry)
 
     def test_cosample__single_point_auxiliary_on_raster(self) -> None:
-        """Checks edge case of a single point auxiliary input, and that it stays an array when gridded onto a raster."""
+        """Checks edge case of a single point auxiliary input."""
 
-        # Place one observation at the only cell center so every output band has one known value
+        # Place one observation at the only pixel center so every output band has one known value
         raster = _raster(np.array([[10.0]]))
         x, y = raster.ij2xy(np.array([0]), np.array([0]))
         points = gu.PointCloud.from_xyz(x, y, np.array([2.0]), crs=raster.crs)
@@ -134,18 +134,13 @@ class TestCosample:
         np.testing.assert_array_equal(points.data, [2.0])
 
     def test_cosample__grid_crs_alignment(self) -> None:
-        """
-        Checks that gridding works with different CRS when 'align' user argument is 'reproject',
-        otherwise raises an error (for default option 'raises').
-        """
+        """Checks that gridding reprojects points from a different CRS when explicitly requested."""
 
-        # Repoject points from raster into a different CRS
+        # Reproject points from the raster into a different CRS
         raster = _raster(np.arange(20, dtype=float).reshape(4, 5))
         points = raster.to_pointcloud().reproject(crs=4326)
 
-        # Test with/without 'align' argument allowing reprojection
-        with pytest.raises(ValueError, match="support CRS"):
-            raster.cosample(points, raster_point_mode="grid_points", grid_method="nearest")
+        # Allow the points to move back onto the raster grid
         result = raster.cosample(points, raster_point_mode="grid_points", grid_method="nearest", align="reproject")
 
         # Check exact equality after cosample reprojection back to original CRS
@@ -174,14 +169,14 @@ class TestCosample:
         result = source.cosample(other, at=support, grid_method="nearest")
 
         # Check all values are almost equal, as the small coordinate offset makes each observation nearest to its
-        # original grid cell
+        # original grid pixel
         output = result.values if accessor else result.data.filled(np.nan)
         np.testing.assert_allclose(output, np.stack((values, 2 * values)))
 
     def test_cosample__resampling_nodata_options(self) -> None:
         """Checks nodata options passed through resampling kwargs."""
 
-        # Put one missing cell beside a point whose other interpolation neighbors equal one
+        # Put one missing pixel beside a point whose other interpolation neighbors equal one
         values = np.ones((5, 6), dtype=float)
         values[2, 2] = np.nan
         raster = _raster(values)
@@ -192,7 +187,7 @@ class TestCosample:
         ignored = raster.cosample(points, resample_kwargs={"nodata_propagation": "ignore"})
         propagated = raster.cosample(points, resample_kwargs={"nodata_propagation": "propagate"})
 
-        # Check that only the strict setting drops the point beside the missing cell
+        # Check that only the strict setting drops the point beside the missing pixel
         assert list(ignored.ds.index) == [0, 1]
         assert list(propagated.ds.index) == [1]
         np.testing.assert_allclose(ignored.ds["self"], 1)
@@ -200,15 +195,19 @@ class TestCosample:
 
 
 class TestRasterCosampleSupport:
-    """Checks common validity, masks, bands and output shapes when cosample() returns a raster."""
+    """
+    Test module for common validity when cosample() returns a raster.
+
+    Specifically, we test behaviour for input masks, selected bands and output shapes.
+    """
 
     @pytest.mark.parametrize("accessor", [False, True])
     @pytest.mark.parametrize("input_type", ["raster", "numpy", "xarray"])
     @pytest.mark.parametrize("auxiliary_at", ["self", "other"])
     def test_cosample__common_validity_and_auxiliary(self, accessor: bool, input_type: str, auxiliary_at: str) -> None:
-        """Checks that all values and the user mask determine the valid output cells."""
+        """Checks that input values and the user mask properly determines the valid output pixels."""
 
-        # Give each input and the user mask a different cell to exclude
+        # Create inputs and the user mask with different pixels to exclude
         first = np.arange(20, dtype=float).reshape(4, 5)
         second, auxiliary = 10 * first, 100 * first
         first[0, 0], second[1, 1], auxiliary[2, 2] = np.nan, np.nan, np.nan
@@ -235,7 +234,7 @@ class TestRasterCosampleSupport:
         output = result.rst if accessor else result
         data = result.to_numpy() if accessor else result.data.filled(np.nan)
 
-        # Check the common support grid, validity mask, and documented band order
+        # Check the common support grid, validity mask, and band order
         assert output.shape == raster.shape
         assert output.transform == raster.transform
         assert output.crs == raster.crs
@@ -250,20 +249,18 @@ class TestRasterCosampleSupport:
 
     @pytest.mark.parametrize("at", ["self", "other", "explicit"])
     def test_cosample__raster_support_and_alignment(self, at: str) -> None:
-        """Checks that cosample() uses the selected raster grid and requires permission to reproject."""
+        """Checks that cosample() uses the selected raster grid and reprojects only when allowed by user input."""
 
-        # Shift the second raster by one cell so the grids overlap but do not match
+        # Shift the second raster by one pixel so the grids overlap but do not match
         first = _raster(np.arange(12, dtype=float).reshape(3, 4))
         second = _raster(np.arange(12, dtype=float).reshape(3, 4), x_origin=1)
         common_support = first if at == "self" else second
         selected_at = second if at == "explicit" else at
 
-        # Require the caller to allow reprojection onto the selected grid
-        with pytest.raises(ValueError, match="does not share"):
-            first.cosample(second, at=selected_at)
+        # Allow reprojection onto the selected grid
         result = first.cosample(second, at=selected_at, align="reproject")
 
-        # Check the chosen grid and the cells outside the overlap
+        # Check the chosen grid and the pixels outside the overlap
         assert isinstance(result, gu.Raster)
         assert result.transform == common_support.transform
         assert result.shape == common_support.shape
@@ -299,7 +296,7 @@ class TestRasterCosampleSupport:
     def test_cosample__singleton_spatial_dimensions(self, shape: tuple[int, int], accessor: bool) -> None:
         """Checks that one row or column remains a spatial dimension in a combined multiband raster."""
 
-        # Select a few cells from a grid with only one row or one column
+        # Select a few pixels from a grid with only one row or one column
         values = np.arange(np.prod(shape), dtype=float).reshape(shape)
         raster = _raster(values)
         source = gu.RasterAccessor.from_array(values, raster.transform, raster.crs).rst if accessor else raster
@@ -314,7 +311,11 @@ class TestRasterCosampleSupport:
 
 
 class TestPointCosampleSupport:
-    """Checks mixed inputs, masks, labels and sampling when cosample() returns points."""
+    """
+    This test module checks common support when cosample() returns points.
+
+    It verifies various user inputs, masks, labels and sampling.
+    """
 
     @pytest.mark.parametrize("caller", ["raster", "pointcloud"])
     @pytest.mark.parametrize("accessor", [False, True])
@@ -362,7 +363,7 @@ class TestPointCosampleSupport:
     def test_cosample__point_auxiliaries_and_labels(self, at: str | None, auxiliary_type: str) -> None:
         """Checks that point labels, geometry and auxiliary columns are unchanged in the result."""
 
-        # Create three-dimensional points with duplicate row labels
+        # Create 3D points with duplicate row labels
         positions = np.arange(8, dtype=float)
         first = gu.PointCloud.from_xyz(positions, positions**2, positions, crs=32633, use_z=True)
         second = gu.PointCloud.from_xyz(positions, positions**2, 2 * positions, crs=32633, use_z=True)
@@ -396,7 +397,7 @@ class TestPointCosampleSupport:
     def test_cosample__auxiliary_point_column(self, accessor: bool, common_support: str) -> None:
         """Checks that a named point column can supply auxiliary values for raster or point output."""
 
-        # Give each point an active data column and a separate auxiliary column at a known raster cell
+        # Give each point an active data column and a separate auxiliary column at a known raster pixel
         values = np.arange(20, dtype=float).reshape(4, 5)
         raster = _raster(values)
         rows, columns = np.indices(raster.shape)
@@ -527,7 +528,7 @@ class TestPointCosampleSupport:
     def test_cosample__raster_auxiliary_interpolation_options(self, singleton_band: bool) -> None:
         """Checks that a plain raster auxiliary uses the requested interpolation options."""
 
-        # Place points around a nodata auxiliary cell while leaving both primary inputs fully valid
+        # Place points around a nodata auxiliary pixel while leaving both primary inputs fully valid
         raster = _raster(np.arange(99, dtype=float).reshape(9, 11))
         auxiliary = raster.data.filled(np.nan) + 1000
         auxiliary[4, 5] = np.nan
@@ -537,7 +538,7 @@ class TestPointCosampleSupport:
         x, y = raster.ij2xy(1 + positions % 7, 1 + positions % 9)
         points = gu.PointCloud.from_xyz(x, y, positions.astype(float), crs=raster.crs)
 
-        # Use Raster.interp_points() to identify which points remain valid around the nodata auxiliary cell
+        # Use Raster.interp_points() to identify which points remain valid around the nodata auxiliary pixel
         auxiliary_raster = gu.Raster.from_array(
             np.ma.masked_invalid(auxiliary), raster.transform, raster.crs, nodata=None
         )
@@ -560,9 +561,9 @@ class TestPointCosampleSupport:
 
     @pytest.mark.parametrize("accessor", [False, True])
     def test_cosample__selected_band_validity(self, accessor: bool) -> None:
-        """Checks that only nodata cells in the requested raster band remove points."""
+        """Checks that only nodata pixels in the requested raster band remove points."""
 
-        # Put nodata cells at different point locations in the two raster bands
+        # Put nodata pixels at different point locations in the two raster bands
         data = np.arange(30, dtype=float).reshape(5, 6)
         bands = np.stack((data, data + 100))
         bands[0, 1, 1], bands[1, 3, 3] = np.nan, np.nan
@@ -603,11 +604,11 @@ class TestPointCosampleSupport:
 
 
 class TestCosampleChunked:
-    """Checks cosample() loading behavior and exact results with Dask and Multiproc inputs."""
+    """Test module for cosample() with Dask and Multiproc backends: loading behavior and exact equality with eager."""
 
     @pytest.mark.parametrize("auxiliary_type", ["numpy", "dask", "column"])
     def test_cosample__dask_point_auxiliaries_on_raster(self, auxiliary_type: str) -> None:
-        """Checks that lazy point gridding assigns array or column auxiliaries to the correct raster cells."""
+        """Checks that lazy point gridding assigns array or column auxiliaries to the correct raster pixels."""
 
         import_optional("dask")
         import dask.array as da
@@ -615,7 +616,7 @@ class TestCosampleChunked:
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
-        # Give every cell one point and a distinct auxiliary value, using duplicate labels to expose index alignment
+        # Give every pixel one point and a distinct auxiliary value, using duplicate labels to expose index alignment
         _register_dask_pointcloud_accessor()
         values = np.arange(12, dtype=float).reshape(3, 4)
         raster = _raster(values + 100)
@@ -661,7 +662,7 @@ class TestCosampleChunked:
     def test_cosample__dask_gridding_chunks(self, chunks: tuple[int, int], caller: str, tmp_path: Path) -> None:
         """Checks that Dask point gridding returns the same seeded sample as eager gridding for each chunk size."""
 
-        # Place one point at each grid cell so the nearest-neighbor gridding is exact
+        # Place one point at each grid pixel so the nearest-neighbor gridding is exact
         pytest.importorskip("dask.array")
         pytest.importorskip("dask_geopandas")
         values = np.arange(65 * 97, dtype=float).reshape(65, 97)
@@ -687,7 +688,7 @@ class TestCosampleChunked:
         )
         expected = raster.cosample(raster, subsample=200, random_state=42, strategy="topk")
 
-        # Check that all runs stay lazy and select the same cells and values as the eager call
+        # Check that all runs stay lazy and select the same pixels and values as the eager call
         assert result.data.chunks is not None
         assert not lazy_points.pc.is_loaded
         assert np.array_equal(result.compute().values, expected.data.filled(np.nan), equal_nan=True)
@@ -837,7 +838,7 @@ class TestCosampleChunked:
     def test_cosample__masked_integers_and_boolean_masks(self, lazy: bool, raster_mask: bool) -> None:
         """Checks that nodata and boolean masks do not convert valid integers."""
 
-        # Place source nodata, masked auxiliary data, a masked user-mask cell, and a false mask cell separately
+        # Place source nodata, masked auxiliary data, a masked user-mask pixel, and a false mask pixel separately
         data = np.ma.array(np.arange(30, dtype=np.int32).reshape(5, 6), mask=False)
         data.mask[0, 0] = True
         auxiliary = np.ma.array(2 * data.data, mask=False)
@@ -858,7 +859,7 @@ class TestCosampleChunked:
                 da.from_array(data.astype(float).filled(np.nan), chunks=(2, 3)), first.transform, first.crs
             ).rst
             if raster_mask:
-                # Convert the raster mask to Xarray with its masked cell excluded and its values still boolean
+                # Convert the raster mask to Xarray with its masked pixel excluded and its values still boolean
                 selected_mask = gu.RasterAccessor.from_array(
                     selected_mask.data.filled(False), selected_mask.transform, selected_mask.crs
                 )
@@ -894,7 +895,7 @@ class TestCosampleChunked:
         assert isinstance(result.data, da.Array)
         assert isinstance(first.data, da.Array)
 
-        # Check that the result remains Dask-backed and matches eager selected cells and values
+        # Check that the result remains Dask-backed and matches eager selected pixels and values
         eager = _raster(array).cosample(_raster(2 * array), subsample=subsample, random_state=42, strategy="topk")
         output = result.compute().to_numpy()
         assert np.array_equal(output, changed.to_numpy(), equal_nan=True)
@@ -1008,7 +1009,7 @@ class TestCosampleChunked:
     def test_cosample__no_replacement_after_interpolation(self, lazy: bool) -> None:
         """Checks that points rejected during interpolation are not replaced in the sample."""
 
-        # Place points around one raster nodata cell, including neighbors rejected by slinear's default nodata spread
+        # Place points around one raster nodata pixel, including neighbors rejected by slinear's default nodata spread
         raster = _raster(np.ones((11, 11), dtype=float))
         raster.data[5, 5] = np.ma.masked
         rows, columns = np.meshgrid(np.arange(3, 8), np.arange(3, 8), indexing="ij")
@@ -1115,7 +1116,7 @@ class TestCosampleChunked:
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
-        # 1/ Prepare point columns and independent geometry elevations on known raster cells
+        # 1/ Prepare point columns and independent geometry elevations on known raster pixels
         # Give geometry Z coordinates and data-column values different numbers so both can be checked independently
         _register_dask_pointcloud_accessor()
         positions = np.arange(40, dtype=float)
@@ -1192,7 +1193,7 @@ class TestCosampleChunked:
         import geoutils.interface.interpolation as interpolation
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
-        # 1/ Prepare duplicate point labels and one raster nodata cell to check validity and row order
+        # 1/ Prepare duplicate point labels and one raster nodata pixel to check validity and row order
         _register_dask_pointcloud_accessor()
         positions = np.arange(24, dtype=float)
         raster = _raster(np.arange(120, dtype=float).reshape(10, 12))
@@ -1246,7 +1247,7 @@ class TestCosampleChunked:
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
-        # Place observations on known raster cells so interpolation and point values have exact references
+        # Place observations on known raster pixels so interpolation and point values have exact references
         _register_dask_pointcloud_accessor()
         raster = _raster(np.arange(30, dtype=float).reshape(5, 6))
         rows, columns = np.array([1, 2, 3]), np.array([1, 2, 3])
@@ -1285,7 +1286,7 @@ class TestCosampleChunked:
 
 class TestCosampleErrors:
     """
-    Checks cosample() raise proper errors for inputs that cannot produce a clear result.
+    Test module for errors raised by cosample() when inputs cannot produce a clear result.
 
     We test the following cases:
     - Invalid band indexes or columns names raise an error, without loading objects,
@@ -1381,7 +1382,7 @@ class TestCosampleErrors:
     ) -> None:
         """Checks that raw arrays match their native grid or point shape before any conversion to output locations."""
 
-        # Use twelve grid cells and twelve corresponding points (so that equal counts cannot hide the wrong shape)
+        # Use twelve grid pixels and twelve corresponding points (so that equal counts cannot hide the wrong shape)
         raster = _raster(np.arange(12, dtype=float).reshape(3, 4))
         points = raster.to_pointcloud()
         source = raster if native_support == "raster" else points
@@ -1530,10 +1531,34 @@ class TestCosampleErrors:
     def test_cosample__error_empty_common_support(self) -> None:
         """Checks that an empty common sample raises before creating an unusable spatial output."""
 
-        # Remove every available raster cell or point through the user mask
+        # Remove every available raster pixel or point through the user mask
         raster = _raster(np.arange(12, dtype=float).reshape(3, 4))
         points = raster.to_pointcloud()
         with pytest.raises(ValueError, match="no finite data common"):
             raster.cosample(raster, mask=np.zeros(raster.shape, dtype=bool))
         with pytest.raises(ValueError, match="no finite data common"):
             points.cosample(points, mask=np.zeros(len(points.ds), dtype=bool))
+
+    def test_cosample__error_grid_crs_alignment(self) -> None:
+        """Checks that gridding rejects points in another CRS while alignment is disabled."""
+
+        # Reproject points away from the raster CRS
+        raster = _raster(np.arange(20, dtype=float).reshape(4, 5))
+        points = raster.to_pointcloud().reproject(crs=4326)
+
+        # Require an explicit request before moving the points back onto the raster grid
+        with pytest.raises(ValueError, match="support CRS"):
+            raster.cosample(points, raster_point_mode="grid_points", grid_method="nearest")
+
+    @pytest.mark.parametrize("at", ["self", "other", "explicit"])
+    def test_cosample__error_raster_grid_alignment(self, at: str) -> None:
+        """Checks that mismatched raster grids require an explicit request for alignment."""
+
+        # Shift the second raster by one pixel and select each available support form
+        first = _raster(np.arange(12, dtype=float).reshape(3, 4))
+        second = _raster(np.arange(12, dtype=float).reshape(3, 4), x_origin=1)
+        selected_at = second if at == "explicit" else at
+
+        # Reject the mismatched grids while alignment is disabled
+        with pytest.raises(ValueError, match="does not share"):
+            first.cosample(second, at=selected_at)

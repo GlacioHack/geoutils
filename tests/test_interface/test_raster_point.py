@@ -241,7 +241,7 @@ class TestRasterPointInterface:
 
 class TestToPointcloudChunked:
     """
-    Compare to_pointcloud() outputs from eager and Dask rasters.
+    Test module for comparing to_pointcloud() outputs from eager and Dask rasters.
 
     These tests cover the currently eager point outputs and keep the source Dask array. Expand them to cover lazy
     outputs when to_pointcloud() returns lazy point data.
@@ -255,7 +255,7 @@ class TestToPointcloudChunked:
         import_optional("dask")
         import dask.array as da
 
-        # Include a missing cell and uneven chunks to check the mask and deterministic sample order
+        # Include a missing pixel and uneven chunks to check the mask and deterministic sample order
         values = np.arange(63, dtype=np.float32).reshape((7, 9))
         values[2, 3] = np.nan
         transform = rio.transform.from_origin(500000, 8600000, 20, 20)

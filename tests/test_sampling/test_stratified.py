@@ -21,13 +21,12 @@ class TestStratifiedSubsample:
 
     Tests covering Dask/Multiprocessing backends are located further below in TestStratifiedSubsampleChunked.
     Tests using the parent function stats(by=, subsample_per_group=True) which uses stratified sampling are in
-    test_grouping.py, here we test the subfunctions instead.
+    test_grouping.py, here we test the subfunctions instead. Warning behavior and invalid sample sizes are covered in
+    TestStratifiedSubsampleErrors.
 
     For eager arrays, we check that:
     - Each group receives the requested number or fraction of samples, while negative group IDs are properly excluded.
     - A fixed seed selects the same samples when group IDs or the array shape change.
-    - Groups smaller than the requested sample size contribute all their samples without warnings.
-    - Zero, negative, infinite and NaN sample sizes raise an error.
     """
 
     def test_stratified_subsample_indices__sample_size_per_group(self) -> None:
@@ -89,29 +88,6 @@ class TestStratifiedSubsample:
         selected = _stratified_subsample_indices(groups, 3, random_state=actual_rng)
         assert np.array_equal(selected, _stratified_subsample_indices(groups, 3, random_state=seed))
         assert actual_rng.integers(100000) == reference_rng.integers(100000)
-
-    def test_stratified_subsample_indices__per_group_selection(self) -> None:
-        """
-        Checks that partial selection sorts groups and includes every position from smaller groups without warnings.
-        """
-
-        # Use groups of very different sizes so each partial sort reveals exactly which group slice it received
-        groups = np.repeat([10, 20, 30], [2, 20, 200])
-        with warnings.catch_warnings(record=True) as recorded:
-            with patch("numpy.argpartition", wraps=np.argpartition) as partition:
-                selected = _stratified_subsample_indices(groups, 5, random_state=42)
-
-        # The two larger groups are partially selected; the first group already fits within its sample size
-        assert [call.args[0].size for call in partition.call_args_list] == [20, 200]
-        assert np.array_equal(np.unique(groups[selected], return_counts=True)[1], [2, 5, 5])
-        assert not recorded
-
-    @pytest.mark.parametrize("subsample", [0, -1, np.inf, np.nan])
-    def test_stratified_subsample_indices__error_invalid_subsample(self, subsample: int | float) -> None:
-        """Checks that invalid sampling amounts fail even when all locations are excluded."""
-
-        with pytest.raises(ValueError, match="positive finite"):
-            _stratified_subsample_indices(np.full(5, -1), subsample)
 
 
 class TestStratifiedSubsampleChunked:
@@ -226,3 +202,30 @@ class TestStratifiedSubsampleChunked:
         selected = _stratified_subsample_indices(lazy, 2, random_state=42, strategy=strategy)
         assert np.array_equal(selected, expected)
         assert np.array_equal(selected, [23])
+
+
+class TestStratifiedSubsampleErrors:
+    """Test module for validation errors and warning behavior in stratified subsampling."""
+
+    def test_stratified_subsample_indices__per_group_selection(self) -> None:
+        """
+        Checks that partial selection sorts groups and includes every position from smaller groups without warnings.
+        """
+
+        # Use groups of very different sizes so each partial sort reveals exactly which group slice it received
+        groups = np.repeat([10, 20, 30], [2, 20, 200])
+        with warnings.catch_warnings(record=True) as recorded:
+            with patch("numpy.argpartition", wraps=np.argpartition) as partition:
+                selected = _stratified_subsample_indices(groups, 5, random_state=42)
+
+        # The two larger groups are partially selected; the first group already fits within its sample size
+        assert [call.args[0].size for call in partition.call_args_list] == [20, 200]
+        assert np.array_equal(np.unique(groups[selected], return_counts=True)[1], [2, 5, 5])
+        assert not recorded
+
+    @pytest.mark.parametrize("subsample", [0, -1, np.inf, np.nan])
+    def test_stratified_subsample_indices__error_invalid_subsample(self, subsample: int | float) -> None:
+        """Checks that invalid sampling amounts fail even when all locations are excluded."""
+
+        with pytest.raises(ValueError, match="positive finite"):
+            _stratified_subsample_indices(np.full(5, -1), subsample)

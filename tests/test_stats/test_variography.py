@@ -27,7 +27,7 @@ def _writable_matplotlib_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 class TestVariogramStorage:
     """Checks the compact Variogram result and its stored distance bins.
 
-    The methods cover optional imports, immutable arrays, serialization, pair release, and stable bin limits.
+    The methods cover optional imports, serialization, pair release, and stable bin limits.
     """
 
     def test_importing_geoutils_does_not_load_variogram_backends(self) -> None:
@@ -57,10 +57,6 @@ class TestVariogramStorage:
             model=VariogramModel("gaussian", effective_range=4, partial_sill=0.8, nugget=0.1),
             estimator="matheron",
         )
-
-        # Check that callers cannot change stored distance values in place
-        with pytest.raises(ValueError, match="read-only"):
-            result.lags[0] = 3
 
         # Convert through JSON and check the restored model and optional error values
         restored = gu.Variogram.from_dict(json.loads(json.dumps(result.to_dict())))
@@ -167,21 +163,11 @@ class TestVariogramStorage:
         np.testing.assert_allclose(result.semivariance, [2, np.nan], equal_nan=True)
         np.testing.assert_allclose(result.lags, [2, np.nan], equal_nan=True)
 
-    def test_from_pairs__distance_dimensions(self) -> None:
-        """Checks that from_pairs() rejects distances that do not provide one value per pair."""
-
-        # Give distances an extra dimension that would otherwise broadcast against endpoint differences
-        pairs = xr.Dataset(
-            {"value": (("pair", "endpoint"), np.zeros((3, 2))), "distance": (("pair", "extra"), np.ones((3, 1)))}
-        )
-        with pytest.raises(ValueError, match="Variable 'distance' in argument ``pairs`` must have dimensions"):
-            gu.Variogram.from_pairs(pairs)
-
 
 class TestVariogramEstimation:
     """Checks variogram estimation and fitting through raster and point cloud methods.
 
-    The methods cover repeated samples, validation, model names, functions, and the shared pair API.
+    The methods cover repeated samples, model names, functions, and the shared pair API.
     """
 
     def test_object_variogram_aggregates_runs_and_fits_summed_model(self) -> None:
@@ -251,17 +237,6 @@ class TestVariogramEstimation:
         result = raster.variogram(bins=(edge for edge in edges), **options)
         np.testing.assert_array_equal(result.counts, expected.counts)
         np.testing.assert_allclose(result.semivariance, expected.semivariance, equal_nan=True)
-
-    @pytest.mark.parametrize("n_runs", [0, -1, 1.5, True])
-    def test_variogram_rejects_invalid_repetitions(self, n_runs: int | float) -> None:
-        """Checks that invalid repetition counts are rejected before sampling."""
-
-        # Create a small valid raster because this option should fail before pair sampling
-        raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), from_origin(0, 4, 1, 1), 32633)
-
-        # Reject zero, negative, fractional, and boolean run counts
-        with pytest.raises(ValueError, match="Argument ``n_runs`` must be a positive integer"):
-            raster.variogram(n_runs=n_runs)
 
     def test_fit_accepts_short_names_and_skgstat_model_functions(self) -> None:
         """Checks that fit() accepts SciKit-GStat functions and the short model names used by xDEM."""
@@ -390,7 +365,48 @@ class TestVariogramConversion:
         assert converted.model.var == pytest.approx(5)
         assert converted.model.nugget == pytest.approx(0.1)
 
-    def test_gstools_rejects_component_specific_dimensions(self) -> None:
+
+class TestVariogramErrors:
+    """Test module for validation errors raised by variogram storage, estimation, and conversion."""
+
+    def test_variogram__error_read_only_arrays(self) -> None:
+        """Checks that callers cannot modify arrays stored by a Variogram."""
+
+        # Create a result through the ordinary validation and array-copying path
+        result = gu.Variogram(
+            lags=np.array([1.0, 2.0]),
+            semivariance=np.array([0.2, 0.5]),
+            counts=np.array([10, 8]),
+        )
+
+        # Stored distance values remain read-only after construction
+        with pytest.raises(ValueError, match="read-only"):
+            result.lags[0] = 3
+
+    def test_from_pairs__error_distance_dimensions(self) -> None:
+        """Checks that from_pairs() rejects distances that do not provide one value per pair."""
+
+        # Give distances an extra dimension that would otherwise broadcast against endpoint differences
+        pairs = xr.Dataset(
+            {"value": (("pair", "endpoint"), np.zeros((3, 2))), "distance": (("pair", "extra"), np.ones((3, 1)))}
+        )
+
+        # Reject the incompatible dimensions before estimating semivariance
+        with pytest.raises(ValueError, match="Variable 'distance' in argument ``pairs`` must have dimensions"):
+            gu.Variogram.from_pairs(pairs)
+
+    @pytest.mark.parametrize("n_runs", [0, -1, 1.5, True])
+    def test_variogram__error_invalid_repetitions(self, n_runs: int | float) -> None:
+        """Checks that invalid repetition counts are rejected before sampling."""
+
+        # Create a small valid raster because this option should fail before pair sampling
+        raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), from_origin(0, 4, 1, 1), 32633)
+
+        # Reject zero, negative, fractional, and boolean run counts
+        with pytest.raises(ValueError, match="Argument ``n_runs`` must be a positive integer"):
+            raster.variogram(n_runs=n_runs)
+
+    def test_gstools_conversion__error_component_specific_dimensions(self) -> None:
         """Checks that GSTools conversion rejects components that use different coordinate columns."""
 
         # Combine spatial and temporal models that select different columns

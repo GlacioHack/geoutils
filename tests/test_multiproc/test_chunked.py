@@ -16,7 +16,7 @@ from geoutils.multiproc.chunked import (
 
 class TestArrayChunks:
     """
-    Tests for manipulating array chunks: accepted chunk sizes, edge chunks and the order of the resulting slices.
+    Test module for manipulating array chunks: accepted sizes, edge chunks and the order of the resulting slices.
     """
 
     @pytest.mark.parametrize(
@@ -37,22 +37,6 @@ class TestArrayChunks:
         # Try square, rectangular and fully specified chunks on the same array
         normalized = normalize_chunks(chunks, shape=(7, 5))
         assert normalized == expected
-
-    @pytest.mark.parametrize(
-        "chunks,error",
-        [
-            (0, ValueError),
-            ((3, 0), ValueError),
-            (((2, 5), (2, 2)), ValueError),
-            ((2, (2, 3)), TypeError),
-            ((2, 3, 4), ValueError),
-        ],
-    )
-    def test_normalize_chunks__error_invalid_forms(self, chunks: Any, error: type[Exception]) -> None:
-        """Checks that zero sizes, incorrect totals and extra axes all raise an error."""
-
-        with pytest.raises(error):
-            normalize_chunks(chunks, shape=(7, 5))
 
     def test_iter_chunk_slices__row_order_and_clipped_edges(self) -> None:
         """Checks that array slices follow row order and stop at the array edges."""
@@ -77,7 +61,7 @@ class TestArrayChunks:
 
 
 class TestChunkedGeoGrid:
-    """Checks how a georeferenced grid is split into spatial blocks."""
+    """Test module for splitting a georeferenced grid into spatial blocks."""
 
     def test_chunked_geogrid__block_shapes_and_locations(self) -> None:
         """Checks that uneven blocks have the full grid's resolution and occupy their matching locations."""
@@ -101,6 +85,33 @@ class TestChunkedGeoGrid:
         assert all(block.res == grid.res and block.crs == grid.crs for block in blocks)
         assert chunked.flat_block_index((1, 2)) == 5
 
-        # Check the class raises an error for a row or column block positions outside this grid
+
+class TestChunkedErrors:
+    """Test module for validation errors raised by array chunk and georeferenced grid helpers."""
+
+    @pytest.mark.parametrize(
+        "chunks,error",
+        [
+            (0, ValueError),
+            ((3, 0), ValueError),
+            (((2, 5), (2, 2)), ValueError),
+            ((2, (2, 3)), TypeError),
+            ((2, 3, 4), ValueError),
+        ],
+    )
+    def test_normalize_chunks__error_invalid_forms(self, chunks: Any, error: type[Exception]) -> None:
+        """Checks that zero sizes, incorrect totals and extra axes all raise an error."""
+
+        with pytest.raises(error):
+            normalize_chunks(chunks, shape=(7, 5))
+
+    def test_chunked_geogrid__error_invalid_block_position(self) -> None:
+        """Checks that block positions outside a georeferenced grid raise an error."""
+
+        # Create a grid with two row blocks and three column blocks
+        grid = GeoGrid(transform=from_origin(100, 200, 10, 20), shape=(5, 7), crs=CRS.from_epsg(32633))
+        chunked = ChunkedGeoGrid(grid, chunks=((2, 3), (3, 3, 1)))
+
+        # Reject the first row position beyond the grid
         with pytest.raises(IndexError):
             chunked.flat_block_index((2, 0))

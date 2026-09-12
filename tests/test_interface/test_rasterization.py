@@ -92,7 +92,7 @@ class TestRasterVectorInterface:
         else:
             assert isinstance(output, gu.Raster)
 
-        # The unit polygon occupies exactly the cell centred on (10.5, 10.5)
+        # The unit polygon occupies exactly the pixel centred on (10.5, 10.5)
         expected = np.zeros((4, 4))
         expected[1, 2] = 1
         actual = output.to_numpy() if isinstance(output, xr.DataArray) else output.data

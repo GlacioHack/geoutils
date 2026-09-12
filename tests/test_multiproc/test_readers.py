@@ -25,10 +25,11 @@ from geoutils.multiproc.readers import (
 
 class TestValueReaderChunked:
     """
-    Checks values read from raster and point cloud files without loading the source objects.
+    Test module for reading values from raster and point cloud files without loading the full objects.
 
-    - Raster tests cover the reading of bands, downsampling, nodata and masks.
-    - Point cloud tests cover the reading of GeoPackage columns, geometry heights and LAS attributes.
+    In the module below, we test:
+    - For rasters, the reading of bands, of downsampled rasters, and of nodata and masks.
+    - For point clouds, the reading of vector file columns, of geometry heights (Z axis) and of LAS attributes.
     """
 
     @pytest.mark.parametrize(
@@ -40,7 +41,7 @@ class TestValueReaderChunked:
     ) -> None:
         """Checks that Multiproc readers load only the requested raster band and window, and compares with eager."""
 
-        # Write a raster file to disk with three distinct bands, one nodata cell, and values preserved by downsampling
+        # Write a raster file to disk with three distinct bands, one nodata pixel, and values preserved by downsampling
         base = np.arange(80, dtype=np.int16).reshape(8, 10)
         values = np.ma.array(np.stack((base, base + 100, base + 200)), mask=False)
         values.mask[:, 2, 3] = True
@@ -71,9 +72,9 @@ class TestValueReaderChunked:
 
     @pytest.mark.parametrize("file_mask", [False, True])
     def test_value_reader__raster_nodata_and_mask(self, file_mask: bool, tmp_path: Path) -> None:
-        """Checks that a raster nodata cell and an array or raster mask are applied to one column."""
+        """Checks that a raster nodata pixel and an array or raster mask are applied to one column."""
 
-        # Write an integer raster file to disk with one nodata cell
+        # Write an integer raster file to disk with one nodata pixel
         values = np.ma.array(np.arange(24, dtype=np.int16).reshape(4, 6), mask=False)
         values.mask[1, 2] = True
         transform = from_origin(0, 4, 1, 1)
@@ -83,7 +84,7 @@ class TestValueReaderChunked:
         keep = np.ones(values.shape, dtype=bool)
         keep[2, 2] = False
         mask: NDArray[Any] | _ValueReader = keep
-        # Write a boolean raster mask to disk with a different excluded cell
+        # Write a boolean raster mask to disk with a different excluded pixel
         if file_mask:
             mask_filename = tmp_path / "mask.tif"
             gu.Raster.from_array(keep, transform, 32633).to_file(mask_filename)
@@ -95,7 +96,7 @@ class TestValueReaderChunked:
         tile = (slice(1, 4), slice(2, 3))
         result = _read_values(reader.block(tile))
 
-        # Nodata and the user mask exclude different cells, so the remaining integer stays unchanged
+        # Nodata and the user mask exclude different pixels, so the remaining integer stays unchanged
         assert result.shape == (3, 1) and result.dtype == values.dtype
         assert np.array_equal(np.ma.getmaskarray(result), [[True], [True], [False]])
         assert result[2, 0] == values[3, 2]

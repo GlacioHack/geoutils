@@ -376,7 +376,7 @@ class TestPointCloudAccessor:
 
 class TestPointCloudElevationMetadata:
     """
-    Checks elevation column and CRS metadata owned by the Pandas point cloud accessor.
+    Test module for elevation column and CRS metadata owned by the Pandas point cloud accessor.
 
     The tests cover direct Dask GeoDataFrames with empty and populated partitions, independent CRS metadata after
     reprojection, and explicit use of 3D geometry when auxiliary numeric columns are present. Dask checks also keep

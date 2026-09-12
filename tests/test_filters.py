@@ -18,7 +18,7 @@ from geoutils.raster import get_array_and_mask
 
 
 class TestPatchFilters:
-    """Checks convolution and mean filtering for stacks of raster patches."""
+    """Test module for convolution and mean filtering with stacks of raster patches."""
 
     @pytest.mark.parametrize("shape", [(3, 3), (4, 4), (3, 4)])
     def test_stacked_convolution_and_kernel_orientation(self, shape: tuple[int, int]) -> None:
@@ -65,7 +65,7 @@ class TestPatchFilters:
             return_counts=True,
         )
 
-        # Check the full kernel area, remaining finite cells and unchanged mean of one
+        # Check the full kernel area, remaining finite pixels and unchanged mean of one
         assert kernel_count == expected_count
         assert counts[5, 5] == expected_count - 1
         assert mean[5, 5] == 1

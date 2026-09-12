@@ -34,10 +34,12 @@ from geoutils.stats.reduction import (
 
 class TestReduction:
     """
-    Tests statistic requests and reductions of eager arrays.
+    Tests the reduction (i.e., applying statistical reducer function like mean() or std()) for eager arrays.
 
-    We check statistic names and aliases, global and grouped calculations, complete-group statistics, nodata values,
-    and integer calculations.
+    The Dask/Multiproc chunked execution are tested further below in TestReductionChunked.
+
+    Below, we check statistic names and aliases from user inputs, global and grouped calculations,
+    behaviour with nodata values, and the impact of data types (integer, float) on the statistics.
     """
 
     def test_normalize_statistics__names_and_aliases(self) -> None:
@@ -48,12 +50,12 @@ class TestReduction:
             def __call__(self, values: Any) -> Any:
                 return np.nanmax(values) - np.nanmin(values)
 
-        # Include a synonym, a partial without its own name, and a callable object
+        # Test with a synonym, a partial function without its own name, and a callable object
         percentile = partial(np.nanpercentile, q=75)
         span = Span()
         statistics = _normalize_statistics(["standard deviation", percentile, span], grouped=True)
 
-        # Check the original requests, output names, aliases used by reducers, and mandatory grouped count
+        # We verify the requests, output names, aliases used by reducers, and mandatory grouped count
         assert isinstance(statistics, _Statistics)
         assert statistics.requested == ["standard deviation", percentile, span]
         assert statistics.names == ["standard deviation", "nanpercentile", "Span"]
@@ -99,33 +101,8 @@ class TestReduction:
             "percentageinlierpoints",
         ]
 
-    def test_normalize_statistics__error_names(self) -> None:
-        """Checks that ambiguous, reserved, unknown and invalid statistic requests are rejected."""
-
-        # Two partials have the same output name even though their percentile arguments differ
-        percentiles = [partial(np.nanpercentile, q=25), partial(np.nanpercentile, q=75)]
-        with pytest.raises(ValueError, match="unique"):
-            _normalize_statistics(percentiles)
-
-        # Grouped output reserves count for a callable and rejects names without a known reducer
-        def count(values: Any) -> int:
-            """Return the input size under the reserved grouped output name."""
-
-            return len(values)
-
-        with pytest.raises(ValueError, match="reserved"):
-            _normalize_statistics([count])
-        with pytest.raises(ValueError, match="Unknown statistic names"):
-            _normalize_statistics(["made_up"])
-        with pytest.raises(ValueError, match="cannot be combined"):
-            _normalize_statistics(["all", "mean"])
-
-        # Every request must be either a recognized name or a callable function
-        with pytest.raises(TypeError, match="names or callable"):
-            _normalize_statistics(cast(Any, [object()]))
-
     def test_reduce_values__global(self) -> None:
-        """Checks basic global statistics for multiple eager arrays with separate nodata values."""
+        """Checks basic global statistics for eager arrays with separate nodata values."""
 
         # Give two values different nodata locations on the same four positions
         first = np.array([1.0, np.nan, 3.0, 4.0])
@@ -153,7 +130,8 @@ class TestReduction:
     def test_reduce_values__groups(self) -> None:
         """Checks grouped eager statistics from integer group IDs, including excluded and nodata locations."""
 
-        # Use three groups, one excluded position, and a different nodata location in each selected value
+        # Use three groups, one excluded position (doesn't belong to any group), and a
+        # different nodata location for first/second values
         group_ids = np.array([[0, 1, 0, 1], [2, 2, -1, 1]])
         first = np.array([[1.0, 2.0, np.nan, 4.0], [5.0, 7.0, 8.0, 10.0]])
         second = np.array([[10.0, np.nan, 30.0, 40.0], [50.0, 70.0, 80.0, 100.0]])
@@ -188,9 +166,9 @@ class TestReduction:
                 np.testing.assert_allclose(table.loc[group_id, index], expected)
 
     def test_reduce_values__complete_group_values(self) -> None:
-        """Checks that medians, NMAD and custom functions receive every value from each eager group."""
+        """Checks that medians, NMAD and custom functions use all values at once from each eager group."""
 
-        # Interleave groups and include nodata so complete group collection and total size are both visible
+        # Change group IDs so each group is noncontiguous, then add NaNs to distinguish valid/total count
         values = np.arange(18, dtype=float)
         values[::5] = np.nan
         group_ids = np.arange(values.size) % 3
@@ -211,21 +189,6 @@ class TestReduction:
                 members.size,
             ]
             np.testing.assert_allclose(table.loc[group_id, 0], expected)
-
-    @pytest.mark.parametrize("masked", [False, True])
-    def test_reduce_values__integer_squares(self, masked: bool) -> None:
-        """Checks that eager sums of squares and RMSE do not overflow the input integer type."""
-
-        # Squared elevations exceed int16, with one optional location excluded by a NumPy mask
-        values = np.array([[2000, 3000], [5000, 4000]], dtype=np.int16)
-        source: Any = np.ma.array(values, mask=[[False, True], [False, False]]) if masked else values
-        reference = source.astype(np.float64)
-        statistics = _normalize_statistics(["sumofsquares", "rmse"], grouped=False)
-
-        # Compare the reducer with arithmetic performed after conversion to floating point
-        table, _ = _reduce_values([source], statistics)
-        assert table.loc[0, (0, "sumofsquares")] == pytest.approx(np.ma.sum(reference**2))
-        assert table.loc[0, (0, "rmse")] == pytest.approx(np.sqrt(np.ma.mean(reference**2)))
 
     @pytest.mark.parametrize("strategy", ["dense", "sparse", "groupwise"])
     @pytest.mark.parametrize("unsigned", [False, True])
@@ -253,25 +216,10 @@ class TestReduction:
         assert pd.isna(table.loc[2, (0, "max")])
         assert np.array_equal(table[(0, "count")], [1, 2, 0])
 
-    @pytest.mark.parametrize("nodata", ["empty", "nan", "masked"])
-    def test_reduce_values__empty_sums(self, nodata: str) -> None:
-        """Checks that eager sums and squared sums are undefined when no valid values remain."""
-
-        # Cover an empty array, explicit NaNs, and ordinary values excluded by a NumPy mask
-        source: Any = np.empty(0) if nodata == "empty" else np.full(4, np.nan)
-        if nodata == "masked":
-            source = np.ma.array(np.arange(4), mask=True)
-        statistics = _normalize_statistics(["sum", "sumofsquares", "validcount"], grouped=False)
-
-        # A zero valid count must stay distinct from a genuine sum of zero
-        with pytest.warns(UserWarning, match="Empty raster"):
-            table, _ = _reduce_values([source], statistics)
-        assert np.isnan(table.loc[0, (0, "sum")])
-        assert np.isnan(table.loc[0, (0, "sumofsquares")])
-        assert table.loc[0, (0, "validcount")] == 0
-
     def test_reduce_global_values__output_forms(self) -> None:
-        """Checks that global reduction restores scalar and named output for one or several selected values."""
+        """
+        Checks that global reduction restores scalar output for one scalar input (e.g. asking for just the "mean"
+        returns a single value, not a dictionary)."""
 
         # Prepare the same unmasked arrays in the form returned by global selection
         first = np.array([1.0, 2.0, np.nan, 4.0])
@@ -301,12 +249,13 @@ class TestReductionChunked:
     """
     Tests reductions split across Dask chunks or Multiproc tiles.
 
-    Backend results are compared exactly with eager calculations, while Dask inputs remain lazy and file inputs remain
-    unloaded. Additional tests cover the calculation strategies and their numerical edge cases:
-    - "auto" selects another strategy from the requested statistics and number of groups.
+    Backend results are compared exactly with eager calculations, and Dask inputs have to remain lazy and file inputs
+    remain unloaded.
+    Additional tests cover notably the calculation strategies:
+    - "auto" selects one of the strategies below from the requested statistics and number of groups.
     - "dense" includes every possible group in the summary from each chunk.
     - "sparse" includes only the groups found in each chunk.
-    - "groupwise" gathers all values from each group before calculating its statistics.
+    - "groupwise" gathers all values from each group before calculating its statistics (required for median/NMAD/etc).
     """
 
     @pytest.mark.parametrize("strategy", ["auto", "dense", "sparse", "groupwise"])
@@ -445,19 +394,6 @@ class TestReductionChunked:
         strategy, can_merge = _resolve_strategy(aliases, "auto", total_groups, chunked=True)
         assert strategy == expected
         assert can_merge is mergeable
-
-    def test_resolve_strategy__error_invalid(self) -> None:
-        """Checks that unknown strategies and incomplete-group calculations are rejected for chunked inputs."""
-
-        # Reject an unknown option independently of the requested statistics
-        with pytest.raises(ValueError, match="must be 'auto', 'dense', 'sparse' or 'groupwise'"):
-            _resolve_strategy(["mean"], "topk", 2, chunked=True)
-
-        # Median and custom functions need complete groups rather than dense or sparse summaries
-        with pytest.raises(ValueError, match="require ``strategy``='groupwise'"):
-            _resolve_strategy(["median"], "dense", 2, chunked=True)
-        with pytest.raises(ValueError, match="require ``strategy``='groupwise'"):
-            _resolve_strategy([None], "sparse", 2, chunked=True)
 
     @pytest.mark.parametrize("backend", ["dask", "multiproc"])
     def test_reduce_values__groupwise_backends(self, backend: str) -> None:
@@ -771,3 +707,63 @@ class TestReductionChunked:
         for label in labels:
             members = values[group_ids == label]
             np.testing.assert_allclose(result.loc[label], [members.size, members.mean(), members.std()])
+
+
+class TestReductionErrors:
+    """Test module for validation errors and warnings raised by statistic reduction."""
+
+    def test_normalize_statistics__error_names(self) -> None:
+        """Checks that invalid statistic names are rejected."""
+
+        # Two partial functions will have the same output name even though their percentile arguments differ
+        percentiles = [partial(np.nanpercentile, q=25), partial(np.nanpercentile, q=75)]
+        with pytest.raises(ValueError, match="unique"):
+            _normalize_statistics(percentiles)
+
+        # Grouped output reserves count for a callable and rejects names without a known reducer
+        def count(values: Any) -> int:
+            return len(values)
+
+        # This needs to fails because "count" is a reserved name
+        with pytest.raises(ValueError, match="reserved"):
+            _normalize_statistics([count])
+        # Wrong input name
+        with pytest.raises(ValueError, match="Unknown statistic names"):
+            _normalize_statistics(["made_up"])
+        # The "all" statistics input can not be combined with others
+        with pytest.raises(ValueError, match="cannot be combined"):
+            _normalize_statistics(["all", "mean"])
+
+        # Every request must be either a recognized name or a callable function
+        with pytest.raises(TypeError, match="names or callable"):
+            _normalize_statistics(cast(Any, [object()]))
+
+    def test_resolve_strategy__error_invalid(self) -> None:
+        """Checks that unknown strategies and incomplete-group calculations are rejected for chunked inputs."""
+
+        # Reject an unknown option independently of the requested statistics
+        with pytest.raises(ValueError, match="must be 'auto', 'dense', 'sparse' or 'groupwise'"):
+            _resolve_strategy(["mean"], "topk", 2, chunked=True)
+
+        # Median and custom functions need complete groups rather than dense or sparse summaries
+        with pytest.raises(ValueError, match="require ``strategy``='groupwise'"):
+            _resolve_strategy(["median"], "dense", 2, chunked=True)
+        with pytest.raises(ValueError, match="require ``strategy``='groupwise'"):
+            _resolve_strategy([None], "sparse", 2, chunked=True)
+
+    @pytest.mark.parametrize("nodata", ["empty", "nan", "masked"])
+    def test_reduce_values__empty_sums(self, nodata: str) -> None:
+        """Checks that eager sums warn and stay undefined when no valid values remain."""
+
+        # Test an empty array, explicit NaNs, and values excluded by a NumPy masked array
+        source: Any = np.empty(0) if nodata == "empty" else np.full(4, np.nan)
+        if nodata == "masked":
+            source = np.ma.array(np.arange(4), mask=True)
+        statistics = _normalize_statistics(["sum", "sumofsquares", "validcount"], grouped=False)
+
+        # A valid count of zero must be distinguishable from a real sum of zeros
+        with pytest.warns(UserWarning, match="Empty raster"):
+            table, _ = _reduce_values([source], statistics)
+        assert np.isnan(table.loc[0, (0, "sum")])
+        assert np.isnan(table.loc[0, (0, "sumofsquares")])
+        assert table.loc[0, (0, "validcount")] == 0

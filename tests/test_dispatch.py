@@ -40,7 +40,7 @@ from geoutils.exceptions import (
 
 
 class TestGeoInterface:
-    """Checks that spatial metadata come from the same object or accessor as its geospatial operations."""
+    """Test module for spatial metadata shared by an object or accessor and its geospatial operations."""
 
     @pytest.mark.parametrize("representation", ["raster", "accessor", "dataarray"])
     def test_get_geo_interface__raster_metadata(self, representation: str) -> None:

@@ -20,7 +20,7 @@ from geoutils.multiproc.cluster import MpCluster
 @pytest.mark.filterwarnings("ignore:Overriding 3D points with with data column 'intensity':UserWarning")
 class TestReprojectChunked:
     """
-    Checks reproject() for point clouds.
+    Test module for reproject() for point clouds.
 
     - Eager, Dask and Multiproc outputs have the same coordinates and attributes, with file results not loaded.
     - LAS, LAZ and GeoPackage outputs preserve the values their formats can represent.
@@ -212,26 +212,6 @@ class TestReprojectChunked:
         assert_geodataframe_equal(result.ds, expected, check_dtype=False)
         assert source.is_loaded == loaded
 
-    def test_reproject__error_inplace_with_chunked_execution(self, tmp_path: Path) -> None:
-        """Checks that multiprocessing rejects in-place replacement while eager reprojection still supports it."""
-
-        # Use an unloaded MP source so rejection happens before its data or the output file are touched
-        filename = tmp_path / "source.gpkg"
-        self.points.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="intensity")
-        outfile = tmp_path / "projected.gpkg"
-        configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
-        with pytest.raises(ValueError, match="inplace|in place"):
-            source.reproject(crs=32632, inplace=True, mp_config=configuration)
-        assert not source.is_loaded and not outfile.exists()
-        assert source.crs == self.points.crs
-
-        # Without multiprocessing, the same public option updates the source and returns None
-        eager = gu.PointCloud(self.points.copy(), data_column="intensity")
-        expected = self.points.to_crs(32632)
-        assert eager.reproject(crs=32632, inplace=True) is None
-        assert_geodataframe_equal(eager.ds, expected)
-
     def test_reproject__multiprocessing_accessor_dataframe_output(self, tmp_path: Path) -> None:
         """Checks that multiprocessing through a GeoDataFrame accessor returns the same dataframe family."""
 
@@ -277,6 +257,63 @@ class TestReprojectChunked:
         np.testing.assert_allclose(result["Z"], self.heights, rtol=0, atol=tolerance)
         np.testing.assert_allclose(result.pc.data, expected_values, rtol=0, atol=tolerance)
         assert source.pc.data_column == data_column
+
+    @pytest.mark.parametrize("attribute_kind", ["nullable_integer", "millisecond_datetime"])
+    def test_reproject__gpkg_representable_attributes(self, attribute_kind: str, tmp_path: Path) -> None:
+        """Checks that GeoPackage output contains exact small integers and millisecond datetime values."""
+
+        # Use values representable by the file format so precision checks do not reject valid point attributes
+        frame = self.points.iloc[:3].copy()
+        if attribute_kind == "nullable_integer":
+            column = "identifier"
+            frame[column] = pd.Series([1, pd.NA, 3], dtype="Int64")
+        else:
+            column = "observed_at"
+            frame[column] = pd.date_range("2024-01-01T00:00:00.123", periods=3, freq="ms")
+        source = gu.PointCloud(frame, data_column="intensity")
+        configuration = MultiprocConfig(chunks=1, outfile=str(tmp_path / "projected.gpkg"))
+
+        # Use single-row chunks and place a nodata value in the middle chunk to check schema consistency
+        result = source.reproject(crs=32632, mp_config=configuration)
+        assert not result.is_loaded
+        actual = result.ds[column]
+        expected = frame[column]
+
+        # Compare value precision independently of the reader's integer-null or datetime dtype representation
+        if attribute_kind == "nullable_integer":
+            actual_values = actual.to_numpy(dtype=float, na_value=np.nan)
+            expected_values = expected.to_numpy(dtype=float, na_value=np.nan)
+            np.testing.assert_array_equal(actual_values, expected_values)
+        else:
+            np.testing.assert_array_equal(actual.to_numpy(dtype="datetime64[ns]"), expected.to_numpy())
+
+
+@pytest.mark.filterwarnings("ignore:Overriding 3D points with with data column 'intensity':UserWarning")
+class TestReprojectErrors:
+    """Test module for validation errors raised by eager, Dask, and multiprocessing reprojection."""
+
+    points = TestReprojectChunked.points
+    heights = TestReprojectChunked.heights
+
+    def test_reproject__error_inplace_with_chunked_execution(self, tmp_path: Path) -> None:
+        """Checks that multiprocessing rejects in-place replacement while eager reprojection still supports it."""
+
+        # Use an unloaded MP source so rejection happens before its data or the output file are touched
+        filename = tmp_path / "source.gpkg"
+        self.points.to_file(filename, index=False)
+        source = gu.PointCloud(filename, data_column="intensity")
+        outfile = tmp_path / "projected.gpkg"
+        configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
+        with pytest.raises(ValueError, match="inplace|in place"):
+            source.reproject(crs=32632, inplace=True, mp_config=configuration)
+        assert not source.is_loaded and not outfile.exists()
+        assert source.crs == self.points.crs
+
+        # Without multiprocessing, the same public option updates the source and returns None
+        eager = gu.PointCloud(self.points.copy(), data_column="intensity")
+        expected = self.points.to_crs(32632)
+        assert eager.reproject(crs=32632, inplace=True) is None
+        assert_geodataframe_equal(eager.ds, expected)
 
     def test_reproject__error_dask_with_multiprocessing(self, tmp_path: Path) -> None:
         """Checks that Dask and multiprocessing cannot be combined or execute partitions before rejection."""
@@ -389,32 +426,3 @@ class TestReprojectChunked:
             source.reproject(crs=32632, mp_config=configuration)
         assert outfile.read_bytes() == original_output
         pd.testing.assert_series_equal(source.ds[column], original_values)
-
-    @pytest.mark.parametrize("attribute_kind", ["nullable_integer", "millisecond_datetime"])
-    def test_reproject__gpkg_representable_attributes(self, attribute_kind: str, tmp_path: Path) -> None:
-        """Checks that GeoPackage output contains exact small integers and millisecond datetime values."""
-
-        # Use values representable by the file format so precision checks do not reject valid point attributes
-        frame = self.points.iloc[:3].copy()
-        if attribute_kind == "nullable_integer":
-            column = "identifier"
-            frame[column] = pd.Series([1, pd.NA, 3], dtype="Int64")
-        else:
-            column = "observed_at"
-            frame[column] = pd.date_range("2024-01-01T00:00:00.123", periods=3, freq="ms")
-        source = gu.PointCloud(frame, data_column="intensity")
-        configuration = MultiprocConfig(chunks=1, outfile=str(tmp_path / "projected.gpkg"))
-
-        # Use single-row chunks and place a nodata value in the middle chunk to check schema consistency
-        result = source.reproject(crs=32632, mp_config=configuration)
-        assert not result.is_loaded
-        actual = result.ds[column]
-        expected = frame[column]
-
-        # Compare value precision independently of the reader's integer-null or datetime dtype representation
-        if attribute_kind == "nullable_integer":
-            actual_values = actual.to_numpy(dtype=float, na_value=np.nan)
-            expected_values = expected.to_numpy(dtype=float, na_value=np.nan)
-            np.testing.assert_array_equal(actual_values, expected_values)
-        else:
-            np.testing.assert_array_equal(actual.to_numpy(dtype="datetime64[ns]"), expected.to_numpy())

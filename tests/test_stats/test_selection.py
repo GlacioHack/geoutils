@@ -70,11 +70,13 @@ def stats_file(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, Any
 
 class TestSelection:
     """
-    Checks the values and masks accepted by stats().
+    This test module checks the selection of values and masks accepted by stats().
 
-    - Rasters and point clouds can select bands, columns or plain Xarrays.
-    - NumPy and tabular masks use positions on the common support.
-    - Dask and Multiproc behavior is covered by TestSelectionChunked below.
+    Chunked tests with Dask/Multiproc are done further below in TestSelectionChunked.
+
+    Here we test that:
+    - Rasters and point clouds can properly select bands, columns or use Xarrays without proper X/Y coords.
+    - NumPy and array masks refer properly to the common support.
     """
 
     @pytest.mark.parametrize("grouped", [False, True])
@@ -259,35 +261,6 @@ class TestSelection:
         # The first group has one finite value in two selected locations; the second has two finite values
         np.testing.assert_allclose(grouped["value"], [[1, 1, 2], [2, 5, 2]])
 
-    @pytest.mark.parametrize("grouped", [False, True])
-    def test_stats__error_tabular_inputs(self, grouped: bool) -> None:
-        """Checks that tabular statistics reject invalid masks and mixed Dask and Multiproc backends."""
-
-        # A DataFrame is a two-dimensional value array, so each grouper must use that same shape
-        values = pd.DataFrame(np.arange(6, dtype=float).reshape(2, 3))
-        options: dict[str, Any] = (
-            {"by": {"zone": np.zeros(values.shape, dtype=int)}, "categories": {"zone": [0]}} if grouped else {}
-        )
-
-        # Reject a row-only mask and a numeric mask rather than broadcasting or treating nonzero values as True
-        with pytest.raises(
-            ValueError, match="Argument ``mask`` must be boolean and contain one value per input location"
-        ):
-            gu.stats.stats(values, "mean", mask=pd.Series([True, False]), **options)
-        with pytest.raises(
-            ValueError, match="Argument ``mask`` must be boolean and contain one value per input location"
-        ):
-            gu.stats.stats(values, "mean", mask=pd.DataFrame(np.ones(values.shape, dtype=int)), **options)
-
-        # Check that a Dask Series is rejected before the Multiproc backend starts any workers
-        import_optional("dask")
-        import dask.dataframe as dd
-
-        lazy_values = dd.from_pandas(pd.Series(np.arange(6, dtype=float)), npartitions=2)
-        options = {"by": {"zone": np.zeros(6, dtype=int)}, "categories": {"zone": [0]}} if grouped else {}
-        with pytest.raises(ValueError, match="Dask inputs cannot be combined with Multiprocessing"):
-            gu.stats.stats(lazy_values, "mean", mp_config=MultiprocConfig(chunks=2), **options)
-
 
 class TestSelectionChunked:
     """
@@ -453,7 +426,7 @@ class TestSelectionChunked:
     def test_stats__file_mask_summary_counts(self, workers: bool, tmp_path: Path) -> None:
         """Checks that unloaded boolean masks preserve original valid counts and selected inlier counts."""
 
-        # Write a value raster and boolean mask raster to disk, with one value nodata cell inside and outside the mask
+        # Write a value raster and boolean mask raster to disk, with one value nodata pixel inside and outside the mask
         values = np.arange(1, 25, dtype=float).reshape(4, 6)
         values[0, 0], values[3, 5] = np.nan, np.nan
         keep = np.ones(values.shape, dtype=bool)
@@ -471,7 +444,7 @@ class TestSelectionChunked:
             config = MultiprocConfig(chunks=(3, 5), cluster=cluster)
             result = source.stats(statistics, mask=mask_source, mp_config=config)
 
-        # The edge windows have one row or column, and all twenty selected cells include one nodata cell
+        # The edge windows have one row or column, and all twenty selected pixels include one nodata pixel
         assert result == pytest.approx(expected)
         assert result["validcount"] == 22 and result["totalcount"] == 24
         assert result["validinliercount"] == 19 and result["totalinliercount"] == 20
@@ -535,7 +508,7 @@ class TestSelectionChunked:
         source: Any
         reference: Any
         if kind == "raster":
-            # Write a raster file to disk with nodata cells inside and outside the polygon
+            # Write a raster file to disk with nodata pixels inside and outside the polygon
             path = tmp_path / "masked.tif"
             gu.Raster.from_array(values, from_origin(0, 3, 1, 1), 32631, nodata=np.nan).to_file(path)
             source = gu.Raster(path)
@@ -568,7 +541,7 @@ class TestSelectionChunked:
     def test_stats__raster_values_at_file_points(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Checks that Multiproc interpolates raster values at file point locations while both sources stay unloaded."""
 
-        # Create a raster and points on distant, exactly known raster cells
+        # Create a raster and points on distant, exactly known raster pixels
         values = np.arange(48, dtype=float).reshape(6, 8)
         rows, columns = np.array([1, 4, 2, 3, 1, 4]), np.array([1, 6, 4, 2, 5, 3])
         raster_filename, point_filename = tmp_path / "values.tif", tmp_path / "locations.gpkg"
@@ -604,11 +577,10 @@ class TestSelectionChunked:
         assert result == pytest.approx(values[rows, columns].mean())
         assert not source.is_loaded and not support.is_loaded
 
-    @pytest.mark.parametrize("reordered", [False, True])
-    def test_stats__point_files_on_common_support(self, reordered: bool, tmp_path: Path) -> None:
-        """Checks that distinct point files must have the same ordered coordinates before their values are reduced."""
+    def test_stats__point_files_on_common_support(self, tmp_path: Path) -> None:
+        """Checks that distinct point files with matching ordered coordinates are reduced together."""
 
-        # Create two point datasets with matching coordinates and optionally reorder the common support
+        # Create two point datasets with matching coordinates
         positions = np.arange(8)
         values = gpd.GeoDataFrame(
             {"height": positions + 10.0},
@@ -617,8 +589,6 @@ class TestSelectionChunked:
         )
         locations = values.copy()
         locations["height"] = 0.0
-        if reordered:
-            locations = locations.iloc[[0, 1, 3, 2, 4, 5, 6, 7]]
 
         # Write both point datasets to disk with unrelated values in their data columns
         value_filename, point_filename = tmp_path / "values.gpkg", tmp_path / "locations.gpkg"
@@ -630,12 +600,8 @@ class TestSelectionChunked:
         # Compare all ordered coordinates in Multiproc row blocks without loading either complete file
         with ClusterGenerator("multi", nb_workers=2) as cluster:
             config = MultiprocConfig(chunks=3, cluster=cluster)
-            if reordered:
-                with pytest.raises(ValueError, match="ordered support coordinates"):
-                    source.stats("mean", at=support, mp_config=config)
-            else:
-                result = source.stats("mean", at=support, mp_config=config)
-                assert result == pytest.approx(values.height.mean())
+            result = source.stats("mean", at=support, mp_config=config)
+            assert result == pytest.approx(values.height.mean())
         assert not source.is_loaded and not support.is_loaded
 
     def test_stats__file_raster_alignment(self, tmp_path: Path) -> None:
@@ -661,3 +627,63 @@ class TestSelectionChunked:
         assert result == pytest.approx(expected)
         assert not source.is_loaded and not support.is_loaded
         assert source_filename.exists() and reference_filename.exists()
+
+
+class TestSelectionErrors:
+    """Test module for validation errors raised while selecting values, masks, and support."""
+
+    @pytest.mark.parametrize("grouped", [False, True])
+    def test_stats__error_tabular_inputs(self, grouped: bool) -> None:
+        """Checks that tabular statistics reject invalid masks and mixed Dask and Multiproc backends."""
+
+        # A DataFrame is a two-dimensional value array, so each grouper must use that same shape
+        values = pd.DataFrame(np.arange(6, dtype=float).reshape(2, 3))
+        options: dict[str, Any] = (
+            {"by": {"zone": np.zeros(values.shape, dtype=int)}, "categories": {"zone": [0]}} if grouped else {}
+        )
+
+        # Reject a row-only mask and a numeric mask rather than broadcasting or treating nonzero values as True
+        with pytest.raises(
+            ValueError, match="Argument ``mask`` must be boolean and contain one value per input location"
+        ):
+            gu.stats.stats(values, "mean", mask=pd.Series([True, False]), **options)
+        with pytest.raises(
+            ValueError, match="Argument ``mask`` must be boolean and contain one value per input location"
+        ):
+            gu.stats.stats(values, "mean", mask=pd.DataFrame(np.ones(values.shape, dtype=int)), **options)
+
+        # Check that a Dask Series is rejected before the Multiproc backend starts any workers
+        import_optional("dask")
+        import dask.dataframe as dd
+
+        lazy_values = dd.from_pandas(pd.Series(np.arange(6, dtype=float)), npartitions=2)
+        options = {"by": {"zone": np.zeros(6, dtype=int)}, "categories": {"zone": [0]}} if grouped else {}
+        with pytest.raises(ValueError, match="Dask inputs cannot be combined with Multiprocessing"):
+            gu.stats.stats(lazy_values, "mean", mp_config=MultiprocConfig(chunks=2), **options)
+
+    def test_stats__error_point_files_on_reordered_support(self, tmp_path: Path) -> None:
+        """Checks that point files with different coordinate order cannot share support."""
+
+        # Create value and support point datasets with two coordinates in a different order
+        positions = np.arange(8)
+        values = gpd.GeoDataFrame(
+            {"height": positions + 10.0},
+            geometry=gpd.points_from_xy(500000 + positions, 5100000 + positions),
+            crs=32633,
+        )
+        locations = values.iloc[[0, 1, 3, 2, 4, 5, 6, 7]].copy()
+        locations["height"] = 0.0
+
+        # Write both sources so validation compares their coordinates in Multiproc row blocks
+        value_filename, point_filename = tmp_path / "values.gpkg", tmp_path / "locations.gpkg"
+        values.to_file(value_filename, index=False)
+        locations.to_file(point_filename, index=False)
+        source = gu.PointCloud(value_filename, data_column="height")
+        support = gu.PointCloud(point_filename, data_column="height")
+
+        # Reject reordered support without loading either complete point file
+        with ClusterGenerator("multi", nb_workers=2) as cluster:
+            config = MultiprocConfig(chunks=3, cluster=cluster)
+            with pytest.raises(ValueError, match="ordered support coordinates"):
+                source.stats("mean", at=support, mp_config=config)
+        assert not source.is_loaded and not support.is_loaded
